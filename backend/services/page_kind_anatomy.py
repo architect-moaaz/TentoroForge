@@ -128,35 +128,20 @@ _FAMILY = {
     "tool": "standalone",
 }
 
-# A surface that shows many records. Kanban and Calendar qualify — they are
-# lists with an opinion about layout, not a different job.
-# `CardGrid` was here and is in neither the engine registry nor the A2UI
-# catalog, so no page could ever satisfy this floor by carrying one. A floor
-# that names a component nothing can produce is not a lenient floor, it is a
-# misleading one — it reads as an offered alternative that is not on the menu.
-# `Repeat` stays: `a2ui_to_forge` MINTS it, so it is absent from the A2UI
-# catalog and present in the tree these floors actually judge.
-_LIST_TYPES = frozenset({
-    "Table", "TableSortable", "DataGrid", "List", "Kanban", "Calendar",
-    "CalendarWeek", "Timeline", "ResourceTimeline", "Repeat",
-    "SearchResults", "Tree",
-})
-
-# Anything that renders a single record's substance.
-_BODY_TYPES = frozenset({
-    "DescriptionList", "KeyValueList", "Table", "List", "Card", "Tabs",
-    "TabPanel", "Timeline", "ActivityFeed", "Form",
-})
-
-# A control that collects a value. `Form` counts on its own: it carries its
-# fields as a prop rather than as child nodes.
-_FIELD_TYPES = frozenset({
-    "Form", "Input", "Textarea", "Select", "MultiSelect", "Combobox",
-    "Checkbox", "RadioGroup", "Switch", "NumberInput", "MoneyInput",
-    "DatePicker", "DateRangePicker", "TimePicker", "FileUpload", "Slider",
-    "Rating", "KeyValueInput", "MaskedInput", "InputOTP", "RichTextEditor",
-    "ColorPicker", "SegmentedControl", "Cascader", "EditableLineGrid",
-})
+# THE TYPE SETS ARE THE FLOOR'S, AND THE FLOOR IS ONE TABLE NOW. These were
+# four frozensets here and the same four members in `dashboard_anatomy`,
+# maintained by hand in both. `page_demands` states each demand once — the
+# types that satisfy it beside the sentence the composer is told — so a
+# component added to one side cannot go missing from the other.
+#
+# Re-exported under their old names because `__all__` publishes them and the
+# floors' tests read them.
+from services.page_demands import (  # noqa: E402
+    ACTION_TYPES as _ACTION_TYPES,
+    BODY_TYPES as _BODY_TYPES,
+    FIELD_TYPES as _FIELD_TYPES,
+    LIST_TYPES as _LIST_TYPES,
+)
 
 # A page that only redirects is a routing artifact, not a screen. The route
 # reconciler (DEDUP-1) collapses duplicate routes into these, so `/staffs`
@@ -164,11 +149,6 @@ _FIELD_TYPES = frozenset({
 # collection floor reports a missing table on a page that was never meant to
 # have one — a false positive that would teach people to distrust the gate.
 _ROUTING_ONLY = frozenset({"Redirect"})
-
-_ACTION_TYPES = frozenset({
-    "Button", "IconButton", "DropdownMenu", "AddToCart", "StickyPrimaryCta",
-    "BulkActionBar", "Wizard", "Stepper",
-})
 
 
 #: A route the scaffold's own tree owns as a form. `[entity]/new/page.tsx` and
@@ -301,46 +281,22 @@ def page_kind_findings(kind: Any, route: str, doc: Any) -> list[dict]:
     if types & _ROUTING_ONLY:
         return []
 
-    out: list[dict] = []
+    # ONE TABLE, TWO RENDERINGS. Each family's demands are stated once in
+    # `page_demands`, where the sentence a composer is told sits beside the
+    # predicate it is judged by. They used to be written twice, in two files,
+    # and agreed only where somebody noticed: the dashboard job never
+    # mentioned a chart while this floor demanded one unconditionally.
+    from services.page_demands import findings as demand_findings
 
-    if family == "collection":
-        if not (types & _LIST_TYPES):
-            out.append(_finding(
-                "collection_no_list_surface", route, "list",
-                "a collection page shows many records and this one carries no "
-                "table, list, board or calendar — it is a title over nothing."))
-        if not (types & _ACTION_TYPES):
-            out.append(_finding(
-                "collection_no_action", route, "action",
-                "nothing on this collection can be clicked: no create, no row "
-                "action, no filter control. A reader arrives and leaves."))
+    out: list[dict] = list(demand_findings(family, route, doc))
 
-    elif family == "record":
-        if not (types & _BODY_TYPES):
-            out.append(_finding(
-                "record_no_body", route, "body",
-                "a record page shows one thing in detail and this one carries "
-                "no description list, card or table — a heading over whitespace."))
-        if not (types & _ACTION_TYPES):
-            out.append(_finding(
-                "record_no_action", route, "action",
-                "the reader can see this record and do nothing with it — no "
-                "edit, no delete, no advance, not even a way back."))
-
-    elif family == "standalone":
-        # WHAT A TOOL OWES IS NARROWER AND CHECKABLE. It has no records, so
-        # every branch above passes it silently — which is how a calculator
-        # whose keys did nothing cleared every floor there was. `tool_findings`
-        # asks the only two questions that mean anything here: does it keep
-        # values of its own, and do its controls change them.
-        from services.client_state_anatomy import tool_findings
-        out += tool_findings(route, doc)
-
-    elif family == "form":
-        if not (types & _FIELD_TYPES):
-            out.append(_finding(
-                "form_no_fields", route, "fields",
-                "a form with no field collects nothing."))
+    # A FORM'S SUBMIT IS NOT JUST A CONTROL. `_submits` reads whether one of
+    # them actually delivers — a Button that navigates away is an action and
+    # is not a submit — so this stays a predicate of its own rather than a
+    # count of types. Reported in place of the table's control demand, never
+    # beside it.
+    if family == "form":
+        out = [f for f in out if f["rule"] != "form_no_submit"]
         if not _submits(root):
             out.append(_finding(
                 "form_no_submit", route, "submit",

@@ -606,7 +606,19 @@ def build_requirement(root: Path, kind: str = "dashboard",
         # application's records.
         family = STANDALONE_FAMILY
 
+    # THE JOB SAYS WHAT THE SCREEN IS FOR; THE DEMANDS SAY WHAT IT WILL BE
+    # JUDGED ON, and the second is rendered from the objects the floor reads.
+    # They were two hand-written descriptions of one thing and agreed only
+    # where somebody noticed: the dashboard job never mentioned a chart while
+    # the floor demanded one unconditionally, so every dashboard was refused
+    # for `dashboard_no_chart` after 140 seconds of composition. A composer
+    # can no longer be refused for a rule it was never shown.
+    from services.page_demands import brief as demands_brief
+
     parts = [f"Compose the {route} screen of {app}.", "", _JOB[family]]
+    demanded = demands_brief(family)
+    if demanded:
+        parts.extend(["", demanded])
 
     # WHAT THIS ONE IS FOR, BEFORE ANYTHING GENERAL. The page's own purpose
     # and tasks, then the words that asked for it.
@@ -1422,9 +1434,8 @@ def _floor_findings(kind: str, route: str, schema: dict, registry: dict,
         client_state_findings, tool_findings,
     )
 
-    if _family_of(kind, route) == "dashboard" and _summarises_something(schema, contract):
-        findings = dashboard_findings(route, schema, registry)
-    elif _family_of(kind, route) == "dashboard":
+    family = _family_of(kind, route)
+    if family == "dashboard" and not _summarises_something(schema, contract):
         # A DASHBOARD FLOOR OVER NOTHING IS UNSATISFIABLE. The floor demands
         # three KPI tiles, a chart and a recent-activity surface; every one of
         # those counts, plots or lists RECORDS, and the composer is separately
@@ -1436,7 +1447,15 @@ def _floor_findings(kind: str, route: str, schema: dict, registry: dict,
         # `is_dashboard_route` says anything at "/" is a dashboard, and a
         # route says nothing about what a page is for. What the page is for is
         # in the page itself.
-        findings = page_kind_findings(kind, route, schema)
+        #
+        # NAMED RATHER THAN DISPATCHED ELSEWHERE. This used to call
+        # `page_kind_findings`, which happened to have no dashboard rules and
+        # so returned nothing — a floor skipped by accident of a table being
+        # incomplete. Now that the rules live in one place and cover every
+        # family, the skip has to be said out loud.
+        findings = []
+    elif family == "dashboard":
+        findings = dashboard_findings(route, schema, registry)
     else:
         findings = page_kind_findings(kind, route, schema)
 
@@ -1464,7 +1483,7 @@ def _floor_findings(kind: str, route: str, schema: dict, registry: dict,
     # above, which owns the question of what a kind owes. This covers the other
     # reading — a contract naming no pattern at all — without reporting the
     # same fault twice.
-    if _family_of(kind, route) != STANDALONE_FAMILY and is_standalone(kind, contract):
+    if family != STANDALONE_FAMILY and is_standalone(kind, contract):
         findings += tool_findings(route, schema)
 
     # THE MIRROR OF A DANGLING BINDING, FOR EVERY PAGE. `{{state.total}}` with
