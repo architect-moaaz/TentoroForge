@@ -41,6 +41,7 @@ export function WorkflowDispatchProvider({ children }: { children: ReactNode }) 
             log?: Array<unknown>;
             status?: string;
             output?: Record<string, unknown>;
+            notices?: string[];
           };
           const stepCount = Array.isArray(r.log) ? r.log.length : undefined;
           const output = r.output && typeof r.output === "object" ? r.output : {};
@@ -53,11 +54,31 @@ export function WorkflowDispatchProvider({ children }: { children: ReactNode }) 
           if (stepCount !== undefined) parts.push(`${stepCount} step${stepCount === 1 ? "" : "s"}`);
           if (r.status && r.status !== "completed") parts.push(r.status);
           const desc = parts.length ? parts.join(" · ") : undefined;
-          toast.success(`${name} complete`, {
-            id: `wf:${name}`,
-            description: desc,
-            duration: 4500,
-          });
+          // A RUN THAT DID HALF OF WHAT IT SAYS IS NOT A SUCCESS TOAST. The
+          // engine collects a `notice` from any step that could not do what
+          // its name claims — an email that became an in-app notification
+          // because no email service is connected — and this is the screen
+          // the person who pressed the button is already looking at. Showing
+          // "complete · 4 steps" over a message that was never sent is how
+          // "the confirmation email never came" became a mystery.
+          const notices = (r.notices ?? []).filter(
+            (n): n is string => typeof n === "string" && n.trim().length > 0,
+          );
+          if (notices.length) {
+            toast.warning(`${name} ran, but not everything happened`, {
+              id: `wf:${name}`,
+              description: notices.join(" "),
+              // Long enough to read a sentence that asks for an action, and
+              // dismissible — it is information, not an error to acknowledge.
+              duration: 12000,
+            });
+          } else {
+            toast.success(`${name} complete`, {
+              id: `wf:${name}`,
+              description: desc,
+              duration: 4500,
+            });
+          }
           void entityId; // reserved for a future "View" action once page routes are stable
           // Re-fetch server components so data the workflow changed shows up.
           // A delete of the record this page is standing on is a departure:

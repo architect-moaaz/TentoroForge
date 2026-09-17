@@ -20,11 +20,23 @@
 #              and this disagree — in either direction. A sentence newly
 #              answered and a verb that quietly stopped answering one both show
 #              up here as a one-line diff.
-#   source     `code` when the sentence is quoted in the code as an example of
-#              asking for something (`verbs.VERB_HELP` or the understanding
-#              prompt) — those are owner-voice by construction and they are
-#              what the chips offer; `phrasebook` when it comes from the
-#              document.
+#   source     where the sentence came from. `code` when it is quoted in the
+#              code as an example of asking for something (`verbs.VERB_HELP`
+#              or the understanding prompt) — those are owner-voice by
+#              construction and they are what the chips offer; `phrasebook`
+#              when it comes from the document; `routing` when it comes from
+#              `tests/routing/corpus.jsonl`, which collects the same sentences
+#              to measure which verb the MODEL picks for them.
+#
+# TWO CORPORA, ON PURPOSE. The routing corpus asks which verb the model should
+# pick; this one asks what the code does once it has. "get rid of the export
+# link" is `remove` AND a question about which screen, so one label cannot
+# carry both and neither file derives from the other.
+# `tests/services/test_corpora_agree.py` holds them to each other: a sentence
+# in both must ask for the same verb in both, every sentence routing measures
+# must be answered here, and every sentence here that declares a verb must be
+# measured there. Commands, gates and the sentences that reach nothing are
+# deliberately here alone — routing has no right answer for them.
 #   reaches    what the sentence is asking for, as one of:
 #                verb:    a verb in `verbs.REQUIRED_BY_VERB`
 #                command: a lifecycle word in `_LIFECYCLE_VERBS`
@@ -408,6 +420,35 @@ sentences:
 
   - id: integration-sendgrid
     say: "send email through SendGrid"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: connect_service, states: [integration]}
+
+  # The three the document marked amber — "declared, not connected: it needs a
+  # service and its key". The service is recorded, the app is projected to
+  # send through it, and the key is set once on the platform, so the sentence
+  # reaches a connection rather than a note. "Xero" is the same verb and an
+  # honest refusal: there is no adapter, and it says so with what works.
+  - id: integration-connect-outlook
+    say: "connect it to our Outlook"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: connect_service, states: [integration]}
+
+  - id: integration-own-account
+    say: "send the emails through our own account"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: connect_service, states: [integration]}
+
+  - id: integration-connect-xero
+    say: "connect it to Xero"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: connect_service, states: [integration]}
+
+  - id: integration-note-stripe
+    say: "make a note that we use Stripe for payments"
     checked: {colour: acts, via: handler}
     source: code
     reaches: {verb: add_integration, states: [integration]}
@@ -890,6 +931,818 @@ sentences:
     source: phrasebook
     reaches: {verb: explain_slowness, states: []}
 
+  # -- From the routing corpus ---------------------------------------------
+  #
+  # `backend/tests/routing/corpus.jsonl` collects the same owner sentences for
+  # the OTHER HALF of the question: it labels each with the verb the model
+  # should pick, and `run_corpus.py` calls a model once per sentence to measure
+  # whether it does. That is stage one. This file is stage two — what the code
+  # then does with the verb, which is where a slot the sentence never stated
+  # turns an edit into a question.
+  #
+  # The two are not the same claim and neither derives from the other: "get rid
+  # of the export link" routes to `remove` AND is answered with "which screen?".
+  # So the sentences live in both, and `test_phrasebook.py` asserts that a
+  # sentence in both carries the same verb in both.
+  #
+  # Imported 2026-09-18, with `states` authored per sentence — the one
+  # judgement this file holds, and the reason an import cannot be generated.
+
+  - id: add_api-our-rota-system-needs-to-pull
+    say: "our rota system needs to pull today's shifts automatically"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_api, states: [api]}
+
+  - id: add_api-my-it-guy-is-asking-for
+    say: "my IT guy is asking for an API for the nurse list"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_api, states: [api]}
+
+
+  - id: add_entity-add-a-ward-with-a-name
+    say: "add a Ward with a name and a number of beds"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_entity, states: [entity]}
+
+  - id: add_entity-we-also-need-to-keep-track
+    say: "we also need to keep track of shifts"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_entity, states: [entity]}
+
+  - id: add_entity-we-keep-a-record-of-every
+    say: "we keep a record of every training course a nurse does"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_entity, states: [entity]}
+
+  - id: add_entity-there-s-another-thing-the-agencies
+    say: "there's another thing: the agencies that supply nurses"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_entity, states: [entity]}
+
+  - id: add_entity-i-need-to-record-complaints
+    say: "I need to record complaints"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_entity, states: [entity]}
+
+
+  # asks which record
+  - id: add_field-add-phone
+    say: "add phone"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: routing
+    reaches: {verb: add_field, states: [field]}
+
+  - id: add_field-add-a-phone-number-to-nurses
+    say: "add a phone number to nurses"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_field, states: [entity, field]}
+
+  - id: add_field-nurses-need-a-phone-number
+    say: "nurses need a phone number"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_field, states: [entity, field]}
+
+  - id: add_field-give-nurses-a-phone-number
+    say: "give nurses a phone number"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_field, states: [entity, field]}
+
+  - id: add_field-there-s-nowhere-to-put-the
+    say: "there's nowhere to put the phone number"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: routing
+    reaches: {verb: add_field, states: [field]}
+
+  - id: add_field-i-need-to-store-a-mobile
+    say: "I need to store a mobile for each nurse"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_field, states: [entity, field]}
+
+  - id: add_field-can-u-add-phone
+    say: "can u add phone"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: routing
+    reaches: {verb: add_field, states: [field]}
+
+  - id: add_field-we-also-write-down-their-phone
+    say: "we also write down their phone"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: routing
+    reaches: {verb: add_field, states: [field]}
+
+  - id: add_field-add-the-father-s-name-to
+    say: "add the father's name to nurses"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_field, states: [entity, field]}
+
+  - id: add_field-nurses-need-a-registration-number
+    say: "nurses need a registration number"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_field, states: [entity, field]}
+
+  - id: add_field-add-years-of-experience
+    say: "add years of experience"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: routing
+    reaches: {verb: add_field, states: [field]}
+
+  - id: add_field-shifts-need-an-hourly-rate
+    say: "shifts need an hourly rate"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_field, states: [entity, field]}
+
+  - id: add_field-a-tick-box-for-has-a
+    say: "a tick box for has a driving licence"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: routing
+    reaches: {verb: add_field, states: [field]}
+
+  - id: add_field-every-nurse-has-a-start-date
+    say: "every nurse has a start date"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_field, states: [entity, field]}
+
+
+  - id: add_integration-send-the-emails-through-sendgrid
+    say: "send the emails through SendGrid"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: connect_service, states: [integration]}
+
+  - id: add_integration-text-people-through-twilio
+    say: "text people through Twilio"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: connect_service, states: [integration]}
+
+  - id: add_integration-connect-it-to-our-payroll-system
+    say: "connect it to our payroll system"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: connect_service, states: [integration]}
+
+
+  - id: add_login-set-up-logins-for-my-six
+    say: "set up logins for my six staff"
+    checked: {colour: asks, via: none, missing: [email]}
+    source: routing
+    reaches: {verb: add_login, states: []}
+
+  - id: add_login-add-a-login-for-dave-clinic
+    say: "add a login for dave@clinic.com"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_login, states: [email]}
+
+  - id: add_login-my-new-receptionist-needs-an-account
+    say: "my new receptionist needs an account, sarah@clinic.com"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_login, states: [email]}
+
+  - id: add_login-give-the-ward-manager-an-account
+    say: "give the ward manager an account - amina@clinic.com"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_login, states: [email]}
+
+
+  - id: add_requirement-note-for-later-nurses-should-be
+    say: "note for later: nurses should be able to mark themselves unavailable"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_requirement, states: [requirement]}
+
+  - id: add_requirement-we-ll-need-an-audit-trail
+    say: "we'll need an audit trail of who changed what"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_requirement, states: [requirement]}
+
+  - id: add_requirement-remember-that-agencies-will-eventually-need
+    say: "remember that agencies will eventually need their own login"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_requirement, states: [requirement]}
+
+
+  - id: add_rule-experience-can-t-be-more-than
+    say: "experience can't be more than 60 years"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_rule, states: [rule]}
+
+  - id: add_rule-a-nurse-must-have-at-least
+    say: "a nurse must have at least one speciality"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_rule, states: [rule]}
+
+  - id: add_rule-two-nurses-can-t-have-the
+    say: "two nurses can't have the same registration number"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_rule, states: [rule]}
+
+  - id: add_rule-the-phone-number-shouldn-t-be
+    say: "the phone number shouldn't be optional"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_rule, states: [rule]}
+
+  - id: add_rule-a-shift-can-t-end-before
+    say: "a shift can't end before it starts"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_rule, states: [rule]}
+
+  - id: add_rule-you-can-t-put-more-nurses
+    say: "you can't put more nurses on a ward than it has beds"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_rule, states: [rule]}
+
+
+  - id: add_widgets-put-today-s-shifts-on-the
+    say: "put today's shifts on the home page"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_widgets, states: [route, widgets]}
+
+  - id: add_widgets-the-dashboard-needs-a-count-of
+    say: "the dashboard needs a count of nurses on duty"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_widgets, states: [route, widgets]}
+
+  - id: add_widgets-add-a-chart-of-registrations-per
+    say: "add a chart of registrations per month"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: routing
+    reaches: {verb: add_widgets, states: [widgets]}
+
+  - id: add_widgets-i-want-a-search-box-on
+    say: "I want a search box on the nurses list"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_widgets, states: [route, widgets]}
+
+  - id: add_widgets-i-can-t-see-the-father
+    say: "I can't see the father's name on the registration page"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_widgets, states: [route, widgets]}
+
+  - id: add_widgets-where-s-the-phone-number-gone
+    say: "where's the phone number gone?"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: routing
+    reaches: {verb: add_widgets, states: [widgets]}
+
+  - id: add_widgets-the-ward-isn-t-in-the
+    say: "the ward isn't in the table"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: routing
+    reaches: {verb: add_widgets, states: [widgets]}
+
+  - id: add_widgets-add-the-phone-column-to-the
+    say: "add the phone column to the list"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: routing
+    reaches: {verb: add_widgets, states: [widgets]}
+
+
+  - id: add_workflow-email-the-ward-manager-whenever-a
+    say: "email the ward manager whenever a nurse is registered"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_workflow, states: [workflow]}
+
+  - id: add_workflow-when-a-shift-is-approved-tell
+    say: "when a shift is approved, tell the nurse"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_workflow, states: [workflow]}
+
+  - id: add_workflow-every-monday-morning-remind-anyone-with
+    say: "every Monday morning, remind anyone with no shifts booked"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_workflow, states: [workflow]}
+
+  - id: add_workflow-i-want-a-button-that-archives
+    say: "I want a button that archives a nurse instead of deleting them"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_workflow, states: [workflow]}
+
+  - id: add_workflow-a-month-after-someone-leaves-delete
+    say: "a month after someone leaves, delete their details"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: add_workflow, states: [workflow]}
+
+
+  - id: compose_route-the-wards-page-is-empty
+    say: "the wards page is empty"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: compose_route, states: [route]}
+
+  - id: compose_route-nothing-happens-when-i-click-wards
+    say: "nothing happens when I click Wards"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: compose_route, states: [route]}
+
+  - id: compose_route-nurses-just-shows-an-error
+    say: "/nurses just shows an error"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: compose_route, states: [route]}
+
+  - id: compose_route-i-need-a-page-for-reports
+    say: "I need a page for reports"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: compose_route, states: [route]}
+
+  - id: compose_route-can-we-have-a-wards-screen
+    say: "can we have a wards screen"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: compose_route, states: [route]}
+
+  - id: compose_route-build-a-dashboard
+    say: "build a dashboard"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: compose_route, states: [route]}
+
+  - id: compose_route-this-page-is-a-mess-do
+    say: "this page is a mess, do it again"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: routing
+    reaches: {verb: compose_route, states: []}
+
+  - id: compose_route-lay-the-registration-page-out-again
+    say: "lay the registration page out again from scratch"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: compose_route, states: [route]}
+
+
+  - id: connect_figma-use-this-design-https-figma-com
+    say: "use this design https://figma.com/design/abc/Nurse-Roster"
+    checked: {colour: asks, via: none, missing: [token_env]}
+    source: routing
+    reaches: {verb: connect_figma, states: [figma_url]}
+
+  - id: connect_figma-our-designer-sent-me-this-can
+    say: "our designer sent me this, can you use it"
+    checked: {colour: asks, via: none, missing: [figma_url, token_env]}
+    source: routing
+    reaches: {verb: connect_figma, states: []}
+
+
+  - id: connect_uxpilot-use-this-ux-pilot-page-https
+    say: "use this UX Pilot page https://uxpilot.ai/p/abc123"
+    checked: {colour: asks, via: none, missing: [key_env]}
+    source: routing
+    reaches: {verb: connect_uxpilot, states: [uxpilot_ref]}
+
+
+  - id: disconnect_design-forget-the-design-do-it-your
+    say: "forget the design, do it your way"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: disconnect_design, states: []}
+
+
+  - id: edit_access-there-are-three-kinds-of-user
+    say: "there are three kinds of user: admin, manager, nurse"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_access, states: [change]}
+
+  - id: edit_access-managers-can-approve-shifts-but-not
+    say: "managers can approve shifts but not add nurses"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_access, states: [change]}
+
+  - id: edit_access-anyone-should-be-able-to-open
+    say: "anyone should be able to open the registration page without logging in"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_access, states: [change]}
+
+  - id: edit_access-take-the-login-off-it-s
+    say: "take the login off, it's internal"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_access, states: [change]}
+
+
+  - id: edit_api-change-that-endpoint-to-take-a
+    say: "change that endpoint to take a date range"
+    checked: {colour: answers, via: limit}
+    source: routing
+    reaches: {verb: edit_api, states: [api]}
+
+
+  - id: edit_navigation-call-that-menu-item-nurse-directory
+    say: "call that menu item Nurse Directory"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_navigation, states: [change]}
+
+  - id: edit_navigation-group-nurses-wards-and-shifts-under
+    say: "group Nurses, Wards and Shifts under Admin"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_navigation, states: [change]}
+
+  - id: edit_navigation-take-the-registration-page-out-of
+    say: "take the registration page out of the menu"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_navigation, states: [change]}
+
+  - id: edit_navigation-it-should-open-on-master-data
+    say: "it should open on Master Data, not the dashboard"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_navigation, states: [change]}
+
+  - id: edit_navigation-the-thing-down-the-left-is
+    say: "the thing down the left is in a silly order"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_navigation, states: [change]}
+
+  - id: edit_navigation-move-reports-to-the-bottom-of
+    say: "move Reports to the bottom of the menu"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_navigation, states: [change]}
+
+
+  - id: edit_product-it-s-for-planning-shifts-on
+    say: "it's for planning shifts on one ward"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_product, states: [change]}
+
+  - id: edit_product-it-s-for-ward-managers-not
+    say: "it's for ward managers, not HR"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_product, states: [change]}
+
+  - id: edit_product-we-say-colleague-never-employee
+    say: "we say colleague, never employee"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_product, states: [change]}
+
+  - id: edit_product-the-whole-thing-should-be-in
+    say: "the whole thing should be in Arabic"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_product, states: [change]}
+
+
+  - id: edit_requirement-that-thing-i-said-about-approvals
+    say: "that thing I said about approvals — it's the manager who approves, not the admin"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_requirement, states: [requirement, change]}
+
+
+  - id: edit_rule-make-it-70-years-instead-of
+    say: "make it 70 years instead of 60"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_rule, states: [rule, change]}
+
+  - id: edit_rule-make-the-phone-optional-after-all
+    say: "make the phone optional after all"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_rule, states: [rule, change]}
+
+
+  - id: edit_workflow-when-a-nurse-is-registered-also
+    say: "when a nurse is registered, also tell the ward manager"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_workflow, states: [workflow, change]}
+
+  - id: edit_workflow-archiving-should-take-them-off-their
+    say: "archiving should take them off their ward too"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_workflow, states: [workflow, change]}
+
+  - id: edit_workflow-send-the-welcome-email-an-hour
+    say: "send the welcome email an hour later, not straight away"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: edit_workflow, states: [workflow, change]}
+
+
+  - id: rebuild-start-again
+    say: "start again"
+    checked: {colour: answers, via: dispatch-answer}
+    source: routing
+    reaches: {verb: rebuild, states: []}
+
+
+  - id: remove-remove-the-delete-button-from-the
+    say: "remove the Delete button from the nurses page"
+    checked: {colour: acts, via: move}
+    source: routing
+    reaches: {verb: remove, states: [target_file, element_label]}
+
+  - id: remove-take-the-add-nurse-button-off
+    say: "take the Add Nurse button off the dashboard"
+    checked: {colour: acts, via: move}
+    source: routing
+    reaches: {verb: remove, states: [target_file, element_label]}
+
+  - id: remove-we-don-t-want-a-cancel
+    say: "we don't want a Cancel button on this form"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: routing
+    reaches: {verb: remove, states: [element_label]}
+
+  - id: remove-too-many-buttons-drop-the-print
+    say: "too many buttons, drop the Print one"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: routing
+    reaches: {verb: remove, states: [element_label]}
+
+
+  - id: remove_entity-we-don-t-need-departments-any
+    say: "we don't need departments any more"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_entity, states: [entity]}
+
+  - id: remove_entity-remove-agencies-we-stopped-using-them
+    say: "remove agencies, we stopped using them"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_entity, states: [entity]}
+
+  - id: remove_entity-scrap-the-training-records
+    say: "scrap the training records"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_entity, states: [entity]}
+
+
+  - id: remove_field-nurses-don-t-need-a-fax
+    say: "nurses don't need a fax number"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_field, states: [entity, field]}
+
+  - id: remove_field-take-the-middle-name-off-nobody
+    say: "take the middle name off, nobody uses it"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: routing
+    reaches: {verb: remove_field, states: [field]}
+
+  - id: remove_field-remove-notes-from-wards
+    say: "remove notes from wards"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_field, states: [entity, field]}
+
+
+  - id: remove_integration-take-stripe-out-we-don-t
+    say: "take Stripe out, we don't charge anyone"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_integration, states: [integration]}
+
+
+  - id: remove_login-sarah-has-left-take-away-her
+    say: "sarah has left, take away her access"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_login, states: [person]}
+
+
+  - id: remove_requirement-forget-what-i-said-about-offline
+    say: "forget what I said about offline working"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_requirement, states: [requirement]}
+
+
+  - id: remove_rule-drop-the-experience-limit
+    say: "drop the experience limit"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_rule, states: [rule]}
+
+  - id: remove_rule-stop-nagging-about-the-registration-number
+    say: "stop nagging about the registration number"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_rule, states: [rule]}
+
+
+  - id: remove_workflow-remove-the-archive-nurse-thing
+    say: "remove the archive nurse thing"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_workflow, states: [workflow]}
+
+  - id: remove_workflow-we-don-t-want-the-monday
+    say: "we don't want the Monday reminder any more"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: remove_workflow, states: [workflow]}
+
+
+  - id: rename-the-button-should-say-register-nurse
+    say: "the button should say Register Nurse, not Add Nurse"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: routing
+    reaches: {verb: rename, states: [element_label, current_behavior, desired_behavior]}
+
+  - id: rename-the-title-at-the-top-should
+    say: "the title at the top should be New nurse"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: routing
+    reaches: {verb: rename, states: [element_label, desired_behavior]}
+
+  - id: rename-the-column-header-says-experience-make
+    say: "the column header says Experience, make it Years of experience"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: routing
+    reaches: {verb: rename, states: [element_label, current_behavior, desired_behavior]}
+
+  - id: rename-the-little-delete-link-on-each
+    say: "the little Delete link on each row should say Archive"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: routing
+    reaches: {verb: rename, states: [element_label, current_behavior, desired_behavior]}
+
+  - id: rename-save-should-say-submit-for-approval
+    say: "Save should say Submit for approval"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: routing
+    reaches: {verb: rename, states: [element_label, current_behavior, desired_behavior]}
+
+  - id: rename-spelling-mistake-it-says-recieve
+    say: "spelling mistake — it says Recieve"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: routing
+    reaches: {verb: rename, states: [element_label, current_behavior]}
+
+  - id: rename-it-says-employee-we-say-colleague
+    say: "it says Employee, we say Colleague"
+    checked: {colour: asks, via: none, missing: [target_file]}
+    source: routing
+    reaches: {verb: rename, states: [element_label, current_behavior, desired_behavior]}
+
+
+  - id: rename_entity-call-nurses-colleagues-everywhere
+    say: "call nurses colleagues everywhere"
+    checked: {colour: answers, via: limit}
+    source: routing
+    reaches: {verb: rename_entity, states: [entity, new_value]}
+
+
+  - id: rename_field-on-nurses-phone-should-be-mobile
+    say: "on nurses, phone should be mobile"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: rename_field, states: [entity, field, new_value]}
+
+  - id: rename_field-rename-years-of-experience-to-experience
+    say: "rename years of experience to experience years"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: routing
+    reaches: {verb: rename_field, states: [field, new_value]}
+
+  - id: rename_field-the-ward-s-capacity-should-be
+    say: "the ward's capacity should be called beds"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: rename_field, states: [entity, field, new_value]}
+
+  - id: rename_field-change-fathersname-to-guardianname-everywhere
+    say: "change fathersName to guardianName everywhere"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: routing
+    reaches: {verb: rename_field, states: [field, new_value]}
+
+
+  - id: reset_login-sarah-s-locked-out-send-her
+    say: "sarah's locked out, send her a new password link"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: reset_login, states: [person]}
+
+  - id: reset_login-dave-clinic-com-can-t-get
+    say: "dave@clinic.com can't get in"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: reset_login, states: [person]}
+
+
+  # vague but about the look
+  - id: restyle-make-it-nicer
+    say: "make it nicer"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: restyle, states: [change]}
+
+  - id: restyle-change-the-colour-from-blue-to
+    say: "change the colour from blue to green"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: restyle, states: [change]}
+
+  - id: restyle-use-our-hospital-colours-deep-teal
+    say: "use our hospital colours — deep teal and warm grey"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: restyle, states: [change]}
+
+  - id: restyle-make-it-darker
+    say: "make it darker"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: restyle, states: [change]}
+
+  - id: restyle-make-it-more-compact-we-stare
+    say: "make it more compact, we stare at it all day"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: restyle, states: [change]}
+
+  - id: restyle-bigger-text-the-screen-is-across
+    say: "bigger text, the screen is across the room"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: restyle, states: [change]}
+
+  - id: restyle-it-looks-like-a-toy-make
+    say: "it looks like a toy — make it look clinical"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: restyle, states: [change]}
+
+  - id: restyle-too-bright
+    say: "too bright"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: restyle, states: [change]}
+
+
+  - id: revert-that-s-not-what-i-wanted
+    say: "that's not what I wanted, revert it"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: revert, states: []}
+
+
+  # asks which screen
+  - id: ask-this-page-is-rubbish
+    say: "this page is rubbish"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: routing
+    reaches: {verb: compose_route, states: []}
+
+  # -- What it has cost to run (from the routing corpus) ------------------
+
+  - id: spend-what-have-i-spent-on-this
+    say: "what have I spent on this so far"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: spend, states: []}
   # -- Recognised, and refused with a reason -------------------------------
   #
   # These are verbs. They are not successes and they are not silent gaps:
