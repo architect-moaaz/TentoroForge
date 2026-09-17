@@ -24,8 +24,10 @@ from services.smith.verbs import REQUIRED_BY_VERB
 GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
     ("The screens",
      "Build a screen that isn't there, lay one out again, add a section to "
-     "one, change the words on something, or take a control off.",
-     frozenset({"compose_route", "add_widgets", "rename", "remove"})),
+     "one, change the words on something, take a control off, or remove a "
+     "whole screen.",
+     frozenset({"compose_route", "add_widgets", "rename", "remove",
+                "remove_page"})),
     ("What it keeps",
      "Add a box to a kind of record, rename or remove one everywhere it is "
      "used, or add and retire a whole kind of record.",
@@ -73,11 +75,10 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "compose them from the component library instead.",
      frozenset({"connect_figma", "connect_uxpilot", "disconnect_design"})),
     ("Asks I answer but cannot serve",
-     "Removing a whole screen, renaming a whole kind of record, changing what "
-     "kind of value a box holds, editing an endpoint in place, or moving "
-     "things around on a screen. I say why, and offer the nearest thing that "
-     "does work.",
-     frozenset({"remove_page", "rename_entity", "change_field_type",
+     "Renaming a whole kind of record, changing what kind of value a box "
+     "holds, editing an endpoint in place, or moving things around on a "
+     "screen. I say why, and offer the nearest thing that does work.",
+     frozenset({"rename_entity", "change_field_type",
                 "edit_api", "reorder"})),
     ("When it goes wrong in front of somebody",
      "Tell me it crashed or that it is slow, and I will tell you what the "

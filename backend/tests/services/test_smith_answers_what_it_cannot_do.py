@@ -2,8 +2,9 @@
 
 Eight things people ask for cannot be done. Each used to land on the verb that
 looked nearest — "delete the Wards page" read as removing a control — or on "I
-did not recognise that as something I can do", which is true and useless. Two
-of the eight stopped being limits: undo exists, and "build it" builds.
+did not recognise that as something I can do", which is true and useless.
+Three of the eight have stopped being limits: undo exists, "build it" builds,
+and a screen can be removed (`test_smith_removes_a_page`).
 """
 
 from __future__ import annotations
@@ -19,17 +20,16 @@ DOC = {
 
 
 def test_each_refusal_is_a_verb_the_classifier_can_reach():
-    for verb in ("remove_page", "rename_entity", "change_field_type", "edit_api", "reorder"):
+    for verb in ("rename_entity", "change_field_type", "edit_api", "reorder"):
         assert verb in REQUIRED_BY_VERB and verb in VERB_HELP, verb
         assert cannot(verb)
     assert not cannot("remove") and not cannot("rename_field") and not cannot("revert")
+    # It was the fifth of these until a screen could actually be removed.
+    assert "remove_page" in REQUIRED_BY_VERB and not cannot("remove_page")
 
 
-def test_a_screen_cannot_go_but_the_menu_and_the_record_can():
-    said, options = answer("remove_page", {"route": "/wards"}, DOC)
-    assert "cannot remove **Wards**" in said and "put it back" in said
-    assert options == ["Take Wards off the menu",
-                       "Retire the Ward record and everything built on it"]
+def test_a_screen_is_no_longer_answered_here_at_all():
+    assert answer("remove_page", {"route": "/wards"}, DOC) == ("", [])
 
 
 def test_a_record_cannot_be_renamed_but_the_words_people_read_can():
@@ -62,6 +62,7 @@ def test_a_verb_that_is_not_a_refusal_answers_nothing_here():
 
 
 def test_the_turn_says_why_and_offers_the_nearest_thing(tmp_path):
+    """`reorder` stands in for what `remove_page` used to demonstrate here."""
     import json
 
     from services.smith_session import SmithSession
@@ -72,9 +73,9 @@ def test_the_turn_says_why_and_offers_the_nearest_thing(tmp_path):
 
     session = SmithSession(
         project_id="p1", output_dir=str(tmp_path), guards_fn=lambda *a, **kw: [],
-        understand_ask_fn=lambda m, ctx, **kw: {"verb": "remove_page", "route": "/wards"},
+        understand_ask_fn=lambda m, ctx, **kw: {"verb": "reorder", "route": "/wards"},
         iteration_move_fn=lambda *a, **kw: None)
-    result = session.run_iteration(user_message="delete the Wards page")
+    result = session.run_iteration(user_message="move the chart above the table on /wards")
     assert result.status == "needs_user"
-    assert "cannot remove **Wards**" in result.answer
-    assert "Take Wards off the menu" in result.options
+    assert "cannot move things around on **/wards**" in result.answer
+    assert "Lay /wards out again" in result.options

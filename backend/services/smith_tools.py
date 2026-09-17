@@ -759,12 +759,15 @@ TOOL_CATALOG: list[dict] = [
     {"name": "remove_page",
      "signature": "remove_page(route, cascade?, _confirmed?) -> "
                   "{status: 'needs_confirmation'|'ok', ...}",
-     "desc": "Inverse of add_page. Deletes the schema at ROUTE (and "
-             "every archetype under it when cascade=true — the whole "
-             "feature area). Strips matching nav-flow entries + "
-             "transitions and regenerates registry.ts + sidebar so the "
-             "app dispatcher stops trying to import the deleted file. "
-             "Atomic with rollback. Use for 'remove X feature' asks."},
+     "desc": "Take a whole SCREEN out of the application: 'delete the "
+             "Wards page'. The route stops resolving, the entry leaves "
+             "the menu, and every link to it comes off the screens that "
+             "had one \u2014 those screens stop declaring what the link "
+             "did. The page is RETIRED, not deleted, so its layout stays "
+             "behind it and undo brings it back; its id is never given to "
+             "another screen. Refused only when it is the last screen "
+             "anyone can arrive at. NOT `remove`, which takes one control "
+             "off a screen that stays."},
     {"name": "add_workflow",
      "signature": "add_workflow(op, entity, name?) -> {applied, "
                   "changes, verify, edited_paths}",
@@ -1913,7 +1916,17 @@ def _smith_add_page(output_dir: str, args: dict) -> dict:
 
 
 def _smith_remove_page(output_dir: str, args: dict) -> dict:
-    """Direct wrapper around :func:`fix_applier._apply_remove_page`.
+    """Take a whole screen out of the application.
+
+    A BLUEPRINT APP REMOVES ITS PAGE THROUGH THE BLUEPRINT. The legacy path
+    below deletes the schema file on disk, and a Blueprint application
+    regenerates that file from the page the document still declares — so the
+    tool reported success and the next projection put the screen back. That is
+    the "asked twice and still sees the page" failure this verb exists to end.
+    `page_change.run` retires the page itself, and the schema file goes because
+    nothing plans it any more.
+
+    Below it, phase 1a — confirmation gate. Refuses to execute unless the LLM
 
     Phase 1a — confirmation gate. Refuses to execute unless the LLM
     passes ``_confirmed=True``. First call returns a structured
@@ -1927,6 +1940,18 @@ def _smith_remove_page(output_dir: str, args: dict) -> dict:
 
     route = str(args.get("route") or "").strip()
     cascade = bool(args.get("cascade"))
+    if _is_blueprint_app(output_dir) and isinstance(args, dict):
+        from services.smith.engine_blueprint_adapter import load_engine_doc
+        from services.smith.page_change import consequences
+        from services.smith.page_change import run as _page_run
+        if not args.get("_confirmed"):
+            said = consequences(load_engine_doc(output_dir) or {}, route)
+            if said.get("found"):
+                takes = list(said["menu"]) + list(said["links"]) + list(said["launches"])
+                if takes:
+                    return needs_confirmation_result(
+                        "page", route or "?", dependents=takes, removes=[said["route"]])
+        return _page_run(output_dir, route=route)
     if not args.get("_confirmed"):
         # Ask the SEAM what it will delete rather than inferring it. The
         # prompt used to pass only (kind, route), so `cascade` never reached

@@ -103,6 +103,10 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "connect_service": {"integration"},
     "compose_route": {"route"},
     "add_widgets": {"route", "widgets"},
+    # A whole screen retired: the route stops resolving, the entry leaves the
+    # menu, and every link to it comes off the screens that held it. Needs the
+    # route and nothing else — a page is named by where it is.
+    "remove_page": {"route"},
     # A new field on an existing entity's data model. `field` carries at least
     # {name, type}; the column is created nullable via drizzle-kit push, so it
     # is a migration, never a rebuild. Displaying it is a separate edit_page.
@@ -164,7 +168,6 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # control removal — or fell to "I did not recognise that", which is true
     # and useless. As verbs they are recognised, answered with the REASON, and
     # offered the nearest thing that does work. They change nothing.
-    "remove_page": {"route"},
     "rename_entity": {"entity", "new_value"},
     "change_field_type": {"entity", "field"},
     "edit_api": {"api"},
@@ -311,6 +314,14 @@ VERB_HELP: dict[str, str] = {
         '"put upcoming sessions and quorum status on the dashboard". NOT for a '
         "new data-model field — that is add_field."
     ),
+    "remove_page": (
+        "Take a whole SCREEN out of the application: \"delete the Wards page\", "
+        "\"remove the reports screen\". Its route stops resolving, it leaves the "
+        "menu, and every link to it comes off the screens that had one. The "
+        "screen is retired rather than deleted, so undo brings it back. NOT "
+        "`remove`, which takes one control off a screen that stays. Needs the "
+        "route."
+    ),
     "add_field": (
         "Add ONE NEW field/attribute to an existing entity's DATA MODEL: "
         '"add a discount field to offers", "give tasks a due date". This is '
@@ -337,10 +348,6 @@ VERB_HELP: dict[str, str] = {
         "pages from components instead\". The design record is removed, no "
         "page names a frame any more, and every screen is composed from the "
         "component library. The requirements, entities and rules are untouched."
-    ),
-    "remove_page": (
-        "They want a whole SCREEN gone: \"delete the Wards page\", \"remove "
-        "the reports screen\". Cannot be done directly. Needs the route."
     ),
     "rename_entity": (
         "They want a whole KIND OF RECORD called something else everywhere: "

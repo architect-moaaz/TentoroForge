@@ -516,6 +516,60 @@ class SmithSession:
             out.append("records that point at it: " + ", ".join(said["pointing"]))
         return out
 
+    def _cascade_of_page(self, route: str) -> list[str]:
+        """What else changes when a screen goes, in a person's words."""
+        from services.smith.engine_blueprint_adapter import load_engine_doc
+        from services.smith.page_change import consequences
+
+        said = consequences(load_engine_doc(str(self.output_dir)) or {}, route)
+        if not said.get("found"):
+            return []
+        out = []
+        if said["menu"]:
+            out.append("it comes off the menu (" + ", ".join(said["menu"]) + ")")
+        if said["links"]:
+            out.append(f"{len(said['links'])} link(s) to it come off other screens: "
+                       + ", ".join(said["links"][:6]))
+        if said["landing"]:
+            out.append("the application stops opening on it, and opens on whatever "
+                       "the menu leads with instead")
+        if said["launches"]:
+            out.append("processes started from it lose the screen they start from: "
+                       + ", ".join(said["launches"]))
+        if said["widgets"]:
+            out.append(f"{said['widgets']} widget(s) on it are retired with it")
+        return out
+
+    def _remove_page(self, route: str) -> "TurnResult":
+        """Take a whole screen out — `services.smith.page_change.run`."""
+        from services.smith.engine_blueprint_adapter import load_engine_doc
+        from services.smith.page_change import run as remove_run
+        from services.smith.page_change import why_not
+
+        # THE REFUSAL COMES BEFORE THE QUESTION. There is one screen that
+        # cannot go — the last one anyone can arrive at — and asking "shall I
+        # go ahead?" about it, only to answer "I cannot" to the yes, is a
+        # worse turn than the refusal on its own.
+        why = why_not(load_engine_doc(str(self.output_dir)) or {}, route)
+        if why:
+            return TurnResult(status="needs_user", answer=why)
+        # A SCREEN IS NOT A LEAF. The menu names it, other screens link to it,
+        # the application may open on it — so what the removal takes is named
+        # before it is taken, exactly as a field's and an entity's are. A
+        # screen nothing points at goes without a question.
+        gate = self._confirm_cascade("remove_page", route, self._cascade_of_page(route))
+        if gate is not None:
+            return gate
+        out = remove_run(str(self.output_dir), route=route, reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or
+                                         "I could not remove that screen and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Removed the screen."),
+                          touched_paths=touched,
+                          diff_summary=", ".join(touched[:8]) if touched else "")
+
     def _cascade_of_field(self, entity: str, field: str) -> list[str]:
         """Where a box is used, and the one thing undo cannot bring back."""
         from services.smith.engine_blueprint_adapter import load_engine_doc
@@ -1155,6 +1209,8 @@ class SmithSession:
             return self._disconnect_design(user_message)
         if verb in ("compose_route", "add_widgets"):
             return self._compose(verb, understanding, self._ask)
+        if verb == "remove_page":
+            return self._remove_page(str(understanding.get("route") or "").strip())
         if verb == "add_field":
             return self._add_field(understanding)
         if verb == "revert":

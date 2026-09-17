@@ -166,6 +166,24 @@ sentences:
     source: phrasebook
     reaches: {verb: remove, states: [target_file, element_label]}
 
+  - id: screens-delete-wards-page
+    say: "delete the Wards page"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_page, states: [route]}
+
+  - id: screens-remove-reports-screen
+    say: "remove the reports screen"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_page, states: [route]}
+
+  - id: screens-delete-that-page
+    say: "delete that page"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: phrasebook
+    reaches: {verb: remove_page, states: []}
+
   # -- What it keeps -------------------------------------------------------
 
   - id: keeps-discount-field
@@ -1748,18 +1766,6 @@ sentences:
   # These are verbs. They are not successes and they are not silent gaps:
   # `limits.answer` says why in a clause and offers the nearest thing that
   # works, and `limits.cannot` is what this is read from.
-
-  - id: refuse-delete-wards-page
-    say: "delete the Wards page"
-    checked: {colour: answers, via: limit}
-    source: code
-    reaches: {verb: remove_page, states: [route]}
-
-  - id: refuse-remove-reports-screen
-    say: "remove the reports screen"
-    checked: {colour: answers, via: limit}
-    source: code
-    reaches: {verb: remove_page, states: [route]}
 
   - id: refuse-call-nurses-colleagues
     say: "call nurses colleagues"

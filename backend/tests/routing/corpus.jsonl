@@ -127,6 +127,7 @@
 {"say": "that's not what I wanted, revert it", "verb": "revert"}
 {"say": "delete the Wards page", "verb": "remove_page"}
 {"say": "remove the reports screen", "verb": "remove_page"}
+{"say": "delete that page", "verb": "remove_page", "note": "names no screen; the turn asks which one"}
 {"say": "call nurses colleagues everywhere", "verb": "rename_entity"}
 {"say": "make the phone number a number instead of text", "verb": "change_field_type"}
 {"say": "change that endpoint to take a date range", "verb": "edit_api"}

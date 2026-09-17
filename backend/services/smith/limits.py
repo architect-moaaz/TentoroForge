@@ -3,8 +3,12 @@
 Eight things people ask for cannot be done, and until now each of them landed
 either on the verb that looked nearest — "delete the Wards page" read as a
 control removal — or on "I did not recognise that as something I can do",
-which is true and useless. Two of the eight stopped being limits today: undo
-exists, and "build it" builds.
+which is true and useless. Three of the eight have stopped being limits: undo
+exists, "build it" builds, and a page can now be removed — see
+`services.smith.page_change`, which took the entry below with it. The reply
+this module gave it ("a screen exists because something is described as
+needing it, so removing it here would put it back") was a description of the
+machinery, and the owner had asked about their application.
 
 Each of the rest is a VERB now, so the classifier has somewhere to put it and
 this module answers it: what cannot be done, why in one clause, and the
@@ -19,48 +23,11 @@ from __future__ import annotations
 from typing import Any
 
 
-def _routes(doc: dict) -> list[str]:
-    return [str(p.get("route")) for p in (doc or {}).get("pages") or []
-            if isinstance(p, dict) and p.get("status") != "DEPRECATED" and p.get("route")]
-
-
-def _page_named(doc: dict, route: str) -> dict:
-    from services.smith.labels import normalise
-
-    want = normalise(route)
-    for page in (doc or {}).get("pages") or []:
-        if not isinstance(page, dict) or page.get("status") == "DEPRECATED":
-            continue
-        if want in (normalise(page.get("route") or ""), normalise(page.get("name") or "")):
-            return page
-    return {}
-
-
-def _entity_of(doc: dict, page: dict) -> str:
-    eid = str((page.get("data") or {}).get("primaryEntity") or "")
-    for ent in ((doc or {}).get("data") or {}).get("entities") or []:
-        if isinstance(ent, dict) and str(ent.get("id")) == eid:
-            return str(ent.get("name") or "")
-    return ""
-
-
 def answer(verb: str, understanding: dict, doc: dict) -> tuple[str, list[str]]:
     """What to say for a verb that cannot be done, and what to offer instead."""
     said = {k: str(understanding.get(k) or "").strip() for k in ("route", "entity", "new_value", "api")}
     field = understanding.get("field") if isinstance(understanding.get("field"), dict) else {}
     box = str(field.get("name") or "").strip()
-
-    if verb == "remove_page":
-        page = _page_named(doc, said["route"])
-        name = str(page.get("name") or said["route"] or "that screen")
-        record = _entity_of(doc, page)
-        why = (f"I cannot remove **{name}** on its own — a screen exists "
-               "because something is described as needing it, so removing it "
-               "here would put it back the next time anything is built.")
-        options = [f"Take {name} off the menu"]
-        if record:
-            options.append(f"Retire the {record} record and everything built on it")
-        return why + "\n\nWhat I can do:", options
 
     if verb == "rename_entity":
         ent = said["entity"] or "that record"
@@ -100,7 +67,7 @@ def answer(verb: str, understanding: dict, doc: dict) -> tuple[str, list[str]]:
 
 def cannot(verb: str) -> bool:
     """Whether this verb is one of the honest refusals."""
-    return verb in {"remove_page", "rename_entity", "change_field_type", "edit_api", "reorder"}
+    return verb in {"rename_entity", "change_field_type", "edit_api", "reorder"}
 
 
 __all__ = ["answer", "cannot"]

@@ -87,8 +87,18 @@ def _planner_placeholders() -> set[str]:
 
 
 def _live(items: Any) -> list[dict]:
+    """Artifacts still in play — the same reading `projection` and
+    `completeness` take.
+
+    DEPRECATED was missing here, and it is not a nicety: a retired page kept
+    being graded. Its controls were checked, its contract was held to a screen
+    that no longer resolves, and the observer opened repair rounds against a
+    screen the owner had asked to be rid of. A retired artifact is not part of
+    the application the Blueprint describes, so it is not part of the question
+    "would this application work".
+    """
     return [i for i in (items or [])
-            if isinstance(i, dict) and i.get("status") != "SUPERSEDED"]
+            if isinstance(i, dict) and i.get("status") not in ("SUPERSEDED", "DEPRECATED")]
 
 
 def _action_props() -> set[str]:
