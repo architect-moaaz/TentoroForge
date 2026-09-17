@@ -185,3 +185,68 @@ def test_a_hybrid_is_both_and_refused_for_neither():
     }
     assert client_state_findings("/orders", hybrid) == []
     assert dangling_bindings(hybrid) == []
+
+
+# ------------------------------------------- one press, several values
+
+def _clear_key(actions):
+    return {
+        "page": "calculator", "route": "/",
+        "clientState": [
+            {"name": "display", "type": "string", "initial": "0"},
+            {"name": "error", "type": "boolean"},
+            {"name": "errorMessage", "type": "string"},
+        ],
+        "dataSources": [],
+        "root": {"type": "Stack", "props": {}, "children": [
+            {"type": "Text", "props": {
+                "content": "{{state.display}} {{state.error}} {{state.errorMessage}}"}},
+            {"id": "clear", "type": "Button",
+             "props": {"label": "C", "clientAction": actions}},
+        ]},
+    }
+
+
+CLEAR = [
+    {"kind": "set", "target": "display", "value": "0"},
+    {"kind": "set", "target": "error", "value": False},
+    {"kind": "set", "target": "errorMessage", "value": ""},
+]
+
+
+def test_a_clear_key_may_change_three_values_in_one_press():
+    """MEASURED ON A LIVE RUN. The composer authored exactly this and every
+    attempt at the page was refused, because the contract allowed one action
+    per control. The instinct was right and the contract was too narrow."""
+    body = _clear_key(CLEAR)
+    catalog = load_catalog()
+    assert validate_props({"root": body["root"]}, catalog) == []
+    assert validate_template(body, catalog) == []
+    assert client_state_findings("/", body) == []
+
+
+def test_one_action_is_still_one_action():
+    body = _clear_key({"kind": "set", "target": "display", "value": "0"})
+    assert validate_props({"root": body["root"]}, load_catalog()) == []
+    assert client_state_findings("/", body) == []
+
+
+def test_a_press_that_writes_one_value_twice_is_refused():
+    """The changes of a press are applied TOGETHER, each reading the state
+    before it — so a second write to the same value silently replaces the
+    first, and which one wins is a fact about list position, not about what
+    the page means."""
+    body = _clear_key(CLEAR + [{"kind": "set", "target": "display", "value": "1"}])
+    rules = [f["rule"] for f in client_state_findings("/", body)]
+    assert rules == ["client_action_writes_twice"]
+
+
+def test_every_action_in_a_press_is_checked_against_what_is_declared():
+    body = _clear_key(CLEAR + [{"kind": "set", "target": "ghost", "value": 1}])
+    rules = [f["rule"] for f in client_state_findings("/", body)]
+    assert "client_action_target_undeclared" in rules
+
+
+def test_nonsense_in_a_list_is_still_nonsense():
+    body = _clear_key([{"kind": "nope", "target": "display"}])
+    assert validate_props({"root": body["root"]}, load_catalog())

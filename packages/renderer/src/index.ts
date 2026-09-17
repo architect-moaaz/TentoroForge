@@ -58,11 +58,13 @@ export {
   ClientStateProvider,
   initialValues,
   isClientAction,
+  nextValues,
   nextValue,
   useClientState,
 } from "./client/ClientState";
 export type {
   ClientAction,
+  ClientActions,
   ClientStateController,
   ClientStateValue,
 } from "./client/ClientState";

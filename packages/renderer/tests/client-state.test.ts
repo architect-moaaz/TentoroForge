@@ -12,6 +12,7 @@ import {
   initialValues,
   isClientAction,
   nextValue,
+  nextValues,
   type ClientStateValue,
 } from "../src/client/ClientState";
 
@@ -80,5 +81,44 @@ describe("telling an action from a handler", () => {
     expect(isClientAction("submit")).toBe(false);
     expect(isClientAction({ kind: "navigate", target: "/" })).toBe(false);
     expect(isClientAction({ kind: "set" })).toBe(false);
+  });
+});
+
+describe("one press, several values", () => {
+  const CLEAR = [
+    { kind: "set", target: "display", value: "0" },
+    { kind: "set", target: "error", value: false },
+    { kind: "set", target: "errorMessage", value: "" },
+  ] as const;
+
+  it("applies every change of the press", () => {
+    expect(nextValues(CLEAR as never, { display: "12", error: true, errorMessage: "bad" }))
+      .toEqual({ display: "0", error: false, errorMessage: "" });
+  });
+
+  it("reads the state BEFORE the press, so nothing can chain", () => {
+    // A list is a simultaneous assignment. If `b` could see `a`'s write this
+    // would be 2; a page whose buttons are small scripts is the thing these
+    // semantics exist to prevent.
+    const out = nextValues(
+      [{ kind: "compute", target: "a", formula: "n + 1" },
+       { kind: "compute", target: "b", formula: "a + 1" }] as never,
+      { n: 0, a: 0, b: 0 },
+    );
+    expect(out).toEqual({ a: 1, b: 1 });
+  });
+
+  it("one bad formula does not stop the others", () => {
+    const out = nextValues(
+      [{ kind: "set", target: "display", value: "0" },
+       { kind: "compute", target: "error", formula: "((((" }] as never,
+      { display: "7", error: true },
+    );
+    expect(out).toEqual({ display: "0" });
+  });
+
+  it("a single action still works unwrapped", () => {
+    expect(nextValues({ kind: "set", target: "display", value: "0" } as never,
+                      { display: "9" })).toEqual({ display: "0" });
   });
 });

@@ -4,7 +4,7 @@ import {
   renderNode,
   ClientStateContext,
   initialValues,
-  nextValue,
+  nextValues,
   DialogStateProvider,
   useDialogState,
   ShellStateProvider,
@@ -13,7 +13,7 @@ import {
   useNavigator,
   type WorkflowDispatch,
 } from "@tentoroforge/renderer";
-import type { ClientAction, ClientStateValue } from "@tentoroforge/renderer";
+import type { ClientActions, ClientStateValue } from "@tentoroforge/renderer";
 import { buildDefaultRegistry } from "@tentoroforge/library";
 import type { EngineProps, SchemaNode } from "./types";
 import { fetchDataSources } from "./data/loader";
@@ -109,10 +109,14 @@ function EngineInner({ schema, apiBaseUrl = "", previewData, live }: EngineProps
   const declaredState = (schema as { clientState?: ClientStateValue[] } | undefined)?.clientState;
   const [stateValues, setStateValues] = React.useState<Record<string, unknown>>(
     () => initialValues(declaredState));
-  const runClientAction = React.useCallback((action: ClientAction) => {
+  const runClientAction = React.useCallback((action: ClientActions) => {
     setStateValues((prev) => {
-      const got = nextValue(action, prev);
-      return got ? { ...prev, [got.target]: got.value } : prev;
+      // ONE PRESS, EVERY CHANGE IT MAKES, ALL READING `prev`. A Clear key
+      // sets the display, the error flag and the message together; passing a
+      // partially-updated object to the second action is exactly how a list
+      // would stop being a simultaneous assignment and start being a script.
+      const changes = nextValues(action, prev);
+      return Object.keys(changes).length ? { ...prev, ...changes } : prev;
     });
   }, []);
   const setClientValue = React.useCallback((name: string, value: unknown) => {

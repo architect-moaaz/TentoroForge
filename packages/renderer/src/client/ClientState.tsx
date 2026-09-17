@@ -32,10 +32,13 @@ export type ClientAction =
   | { kind: "set"; target: string; value: string | number | boolean }
   | { kind: "compute"; target: string; formula: string };
 
+/** One change, or several applied together. See `nextValues`. */
+export type ClientActions = ClientAction | ClientAction[];
+
 export interface ClientStateController {
   values: Record<string, unknown>;
   set: (name: string, value: unknown) => void;
-  run: (action: ClientAction) => void;
+  run: (action: ClientActions) => void;
 }
 
 export const ClientStateContext = createContext<ClientStateController | null>(null);
@@ -93,6 +96,33 @@ export function nextValue(
 }
 
 /** Whether a value carried on a prop is a client action rather than a handler. */
+/**
+ * Every change one press makes, read against ONE SNAPSHOT of the state.
+ *
+ * A LIST IS A SIMULTANEOUS ASSIGNMENT, NOT A SCRIPT. Each action is evaluated
+ * against `values` as they were when the control was pressed, never against
+ * what an earlier action in the same list just wrote. So the order carries no
+ * meaning, nothing can chain, and a reader knows what a button does without
+ * simulating a sequence — which is the property that keeps a page declarative
+ * rather than a small imperative program.
+ *
+ * An action that produces nothing (a formula that will not evaluate) leaves
+ * its own target alone and does not stop the others: a Clear key that cannot
+ * work out one of three values should still clear the two it can.
+ */
+export function nextValues(
+  actions: ClientActions,
+  values: Record<string, unknown>,
+): Record<string, unknown> {
+  const list = Array.isArray(actions) ? actions : [actions];
+  const out: Record<string, unknown> = {};
+  for (const action of list) {
+    const got = nextValue(action, values);
+    if (got) out[got.target] = got.value;
+  }
+  return out;
+}
+
 export function isClientAction(candidate: unknown): candidate is ClientAction {
   if (!candidate || typeof candidate !== "object") return false;
   const kind = (candidate as { kind?: unknown }).kind;
@@ -121,11 +151,14 @@ export function ClientStateProvider({
     });
   }, [onChange]);
 
-  const run = useCallback((action: ClientAction) => {
+  const run = useCallback((action: ClientActions) => {
     setValues((prev) => {
-      const got = nextValue(action, prev);
-      if (!got) return prev;
-      const next = { ...prev, [got.target]: got.value };
+      // `prev` is the snapshot every action reads, including the second and
+      // third — passing a partially-updated object here is exactly how a list
+      // would become a script.
+      const changes = nextValues(action, prev);
+      if (!Object.keys(changes).length) return prev;
+      const next = { ...prev, ...changes };
       onChange?.(next);
       return next;
     });

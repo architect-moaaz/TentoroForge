@@ -73,6 +73,32 @@ describe("Engine — the screen's own values", () => {
     await waitFor(() => expect(screen.getByText("0")).toBeTruthy());
   });
 
+  it("a Clear key changes three values in one press", async () => {
+    const schema = {
+      schemaVersion: "2", id: "calculator", dataSources: [],
+      clientState: [
+        { name: "display", type: "string", initial: "12" },
+        { name: "error", type: "boolean", initial: true },
+        { name: "errorMessage", type: "string", initial: "Cannot divide by zero" },
+      ],
+      root: { type: "Stack", id: "r", children: [
+        { type: "Text", id: "d", props: { content: "{{state.display}}" } },
+        { type: "Text", id: "m", props: { content: "{{state.errorMessage}}" } },
+        { type: "Button", id: "c", props: { label: "Clear", clientAction: [
+          { kind: "set", target: "display", value: "0" },
+          { kind: "set", target: "error", value: false },
+          { kind: "set", target: "errorMessage", value: "" },
+        ] } },
+      ] },
+    } as any;
+    render(<Engine schema={schema} apiBaseUrl="" />);
+    expect(await screen.findByText("Cannot divide by zero")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Clear/i }));
+    await waitFor(() => expect(screen.getByText("0")).toBeTruthy());
+    expect(screen.queryByText("Cannot divide by zero")).toBeNull();
+  });
+
   it("a page that declares none renders exactly as before", async () => {
     const plain = {
       schemaVersion: "2", id: "p", dataSources: [],

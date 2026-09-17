@@ -7,7 +7,7 @@ import {
   type ComputeAction,
 } from "@tentoroforge/renderer";
 import { FormComputeContext } from "../Form/Form";
-import { ClientStateContext, type ClientAction } from "@tentoroforge/renderer";
+import { ClientStateContext, type ClientActions } from "@tentoroforge/renderer";
 import { fallbackDispatch } from "../../util/fallbackDispatch";
 import type { StyleSlotT } from "@tentoroforge/schema";
 import { resolveStyle } from "../../style/resolveStyle";
@@ -53,7 +53,7 @@ type Props = {
    * hold the display and made every press a workflow against a row that
    * never existed.
    */
-  clientAction?: ClientAction;
+  clientAction?: ClientActions;
   args?: Record<string, unknown>;
   /** When true, render as a native submit button (type="submit") so it triggers
    *  the enclosing <Form>'s onSubmit (which collects field values + dispatches the
@@ -202,9 +202,11 @@ export function Button({
         } else if (clientAction && typeof console !== "undefined") {
           // A page writing a value it never declared: silence here reads as a
           // dead button, which is the defect this path exists to remove.
+          const targets = (Array.isArray(clientAction) ? clientAction : [clientAction])
+            .map((a) => a.target).join(", ");
           console.warn(
-            `[Button] client action targets '${clientAction.target}', but this `
-            + "page declares no clientState for it",
+            `[Button] client action targets '${targets}', but this page `
+            + "declares no clientState for them",
           );
         }
         // Reset-all-filters: drop the whole query string, then tell the host to

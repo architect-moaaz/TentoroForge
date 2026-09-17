@@ -66,12 +66,31 @@ def declared(schema: dict) -> set[str]:
 
 
 def _actions(root: Any) -> list[tuple[dict, dict]]:
-    """Every (node, clientAction) pair in the tree."""
+    """Every (node, action) pair in the tree, a list counting as several.
+
+    One press may change several of the screen's own values — a Clear key sets
+    the display, the error flag and the message — so `clientAction` is one
+    action or a list of them. Flattened here because every check below asks
+    about a single write.
+    """
     out: list[tuple[dict, dict]] = []
     for node in _walk(root):
-        action = (node.get("props") or {}).get("clientAction")
-        if isinstance(action, dict):
-            out.append((node, action))
+        declared = (node.get("props") or {}).get("clientAction")
+        for action in (declared if isinstance(declared, list) else [declared]):
+            if isinstance(action, dict):
+                out.append((node, action))
+    return out
+
+
+def _presses(root: Any) -> list[tuple[dict, list[dict]]]:
+    """Every control and the whole set of changes ONE press makes."""
+    out: list[tuple[dict, list[dict]]] = []
+    for node in _walk(root):
+        declared = (node.get("props") or {}).get("clientAction")
+        group = [a for a in (declared if isinstance(declared, list) else [declared])
+                 if isinstance(a, dict)]
+        if group:
+            out.append((node, group))
     return out
 
 
@@ -123,6 +142,28 @@ def client_state_findings(route: str, schema: Any) -> list[dict]:
                 f"a control writes to '{target}', which this page does not "
                 f"declare in clientState — declare it, or write to one of: "
                 + (", ".join(sorted(names)) or "(nothing is declared)")))
+
+    # TWO WRITES TO ONE VALUE IN A SINGLE PRESS. The actions of one press are
+    # a SIMULTANEOUS assignment — each reads the state as it was when the
+    # control was pressed, never what a sibling just wrote — which is the
+    # property that keeps a list declarative instead of a small script. Under
+    # those semantics two actions naming the same target do not compose: one
+    # of them is discarded, and which one is a fact about list position rather
+    # than about what the page means.
+    for node, group in _presses(root):
+        seen: set[str] = set()
+        for action in group:
+            target = str(action.get("target") or "")
+            if target and target in seen:
+                out.append(_finding(
+                    "client_action_writes_twice", route,
+                    str(node.get("id") or node.get("type") or "control"),
+                    f"one press writes to '{target}' more than once. The "
+                    f"changes of a press are applied together, all reading the "
+                    f"state before it, so a second write to the same value "
+                    f"silently replaces the first — say it once"))
+                break
+            seen.add(target)
 
     # A VALUE NOBODY EVER SEES. Declared, perhaps written, and bound by no
     # control and no display: the page keeps a number in its head and shows a

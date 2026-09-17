@@ -777,6 +777,29 @@ export const ClientAction = z.discriminatedUnion("kind", [
   }),
 ]);
 
+/**
+ * What a control does when it is pressed: one change, or several at once.
+ *
+ * A LIST IS A SIMULTANEOUS ASSIGNMENT, NOT A SCRIPT. Every action in it reads
+ * the state as it was WHEN THE CONTROL WAS PRESSED, so the order carries no
+ * meaning and no action can depend on another's result. That is the property
+ * that keeps this declarative: a reader never has to simulate a sequence to
+ * know what a button does. Allowing each step to see the previous one's writes
+ * would turn a page into a small imperative program, which is the thing this
+ * contract exists to avoid.
+ *
+ * A single action was the first shape, and a live composition refused on it:
+ * a calculator's Clear key sets `display` to "0", `error` to false and
+ * `errorMessage` to "" — one press, three of the screen's own values, and no
+ * honest way to say it. The composer wrote the list anyway, which is the right
+ * instinct and was not expressible.
+ *
+ * Two actions writing the SAME value in one press are ambiguous under these
+ * semantics and are reported as a finding rather than silently resolved by
+ * position.
+ */
+export const ClientActions = z.union([ClientAction, z.array(ClientAction).min(1)]);
+
 export const PageLayout = z.object({
   /** Natural key — the page this tree renders. */
   page: PageId,
@@ -1878,6 +1901,7 @@ export type PatternTemplate = z.infer<typeof PatternTemplate>;
 export type PageLayout = z.infer<typeof PageLayout>;
 export type ClientStateValue = z.infer<typeof ClientStateValue>;
 export type ClientAction = z.infer<typeof ClientAction>;
+export type ClientActions = z.infer<typeof ClientActions>;
 export type SectionSketch = z.infer<typeof SectionSketch>;
 export type PageSketch = z.infer<typeof PageSketch>;
 export type Composition = z.infer<typeof Composition>;

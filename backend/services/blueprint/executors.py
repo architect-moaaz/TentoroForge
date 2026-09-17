@@ -1664,6 +1664,16 @@ def build_prompt(
             "\"display\", \"formula\": \"display + '7'\"}` evaluates "
             "over the current values and writes the result. Nothing declared "
             "here is stored, sent anywhere or kept after the page closes.\n\n"
+            # MEASURED ON A LIVE RUN. The composer wrote the list before the
+            # contract allowed one, and every attempt at the page was refused:
+            # a Clear key setting the display, the error flag and the message
+            # is three changes and one press, and there was no honest way to
+            # say it. The instinct was right and the contract was too narrow.
+            "One press may change several values: give `clientAction` a LIST "
+            "of actions and they are applied together. Every one of them reads "
+            "the state as it was BEFORE the press, so their order means "
+            "nothing and none can use another's result. Write each value at "
+            "most once in a press, and do not try to chain them.\n\n"
             "`clientState` and `dataSources` are independent. A screen with "
             "only data sources is the ordinary server-backed page. A screen "
             "with only client state is a self-contained tool, and it needs no "

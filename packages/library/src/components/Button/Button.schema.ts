@@ -30,10 +30,12 @@ export const ButtonProps = z.object({
   workflow:     z.string().optional(),
   args:         z.record(z.unknown()).optional(),
   /** What pressing this does to the SCREEN's own values — the page's
-   *  `clientState`. Taken straight from the Blueprint's `ClientAction` so the
-   *  catalogue advertises one shape, not a copy that can drift from it.
-   *  Orthogonal to `workflow`: a button may compute a total AND submit it. */
-  clientAction: BlueprintSchema.ClientAction.optional(),
+   *  `clientState`. One action, or several applied together: a Clear key sets
+   *  the display, the error flag and the message in one press. Taken straight
+   *  from the Blueprint so the catalogue advertises one shape, not a copy that
+   *  can drift from it. Orthogonal to `workflow`: a button may compute a total
+   *  AND submit it. */
+  clientAction: BlueprintSchema.ClientActions.optional(),
   /** Render as a native submit button so it triggers the enclosing Form's
    *  onSubmit (which collects field values + dispatches the form's workflow). */
   submit:       z.boolean().optional(),
