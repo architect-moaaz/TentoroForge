@@ -394,12 +394,15 @@ def _project(svc: Any, app_root: str | None) -> list[str]:
     if not app_root:
         return []
     from services.blueprint.projection import (
-        apply_frontend_projection, project_middleware, project_nav_flow,
-        project_public_resources, project_root_route, project_shell,
+        apply_frontend_projection, project_dispatches, project_middleware,
+        project_nav_flow, project_public_resources, project_root_route, project_shell,
     )
     files = [str(f) for f in (apply_frontend_projection(svc, app_root) or {}).get("files", [])]
+    # `project_dispatches` carries the incident map with it, which lists the
+    # routes a crash may be reported against. A retired page left in it would
+    # have the running application name a screen nobody can open.
     for fn in (project_shell, project_nav_flow, project_root_route,
-               project_middleware, project_public_resources):
+               project_middleware, project_public_resources, project_dispatches):
         try:
             files += list((fn(svc.doc, app_root) or {}).get("files") or [])
         except Exception as exc:  # noqa: BLE001
