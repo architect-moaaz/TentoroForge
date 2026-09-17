@@ -81,6 +81,23 @@ _MUTATING_TOOLS = frozenset({
     "plan_and_apply", "_tool_app_modifier", "set_field_interaction",
     # Writes a project_rules row + re-exports rules/index.json into the app.
     "create_business_rule",
+    # The other three field seams. `add_field` was listed from the first
+    # version and its siblings were not, so a turn could rename or drop a
+    # column with no understand_ask and answer "Done!" with nothing verified
+    # — on the three writes that are LARGER than the add's, not smaller.
+    # On a Blueprint app all three run through `services/smith/field_change.py`
+    # and rewrite the Blueprint and the projected app tree together.
+    #
+    # Renames the field on its entity and everywhere the name is a reference:
+    # `labelField`, relationship `fromField`/`toField`, the form and table
+    # controls bound to it, the workflow steps that read it. Then re-projects.
+    "rename_field",
+    # Drops the column and everything that named it — relationships, table
+    # columns, form fields, workflow steps. The rows' values go with it.
+    "remove_field",
+    # Rename and/or retype one column; a rename on a Blueprint app routes
+    # into `rename_field` above and writes exactly what it writes.
+    "edit_field",
 })
 _VERIFYING_TOOLS = frozenset({"verify_promise", "run_guards"})
 
@@ -486,6 +503,27 @@ def _pending_confirmation_from(trace: list[dict]) -> Optional[dict]:
     return None
 
 
+def _unrelayed_confirmation(trace: list[dict]) -> Optional[dict]:
+    """The confirmation request STILL STANDING when ``answer`` is reached.
+
+    Not simply the last one in the trace: a turn that asked and then applied
+    has two mutating entries, and the question is whether the LAST one is a
+    question. Anything else would refuse an answer about a change that landed.
+    """
+    for step in reversed(trace or []):
+        if not isinstance(step, dict):
+            continue
+        if (step.get("tool") or "") not in _MUTATING_TOOLS:
+            continue
+        if step.get("ran") is False:
+            continue
+        pending = step.get("needs_confirmation")
+        if isinstance(pending, dict) and pending:
+            return {"tool": step.get("tool"), **pending}
+        return None
+    return None
+
+
 def _edits_without_matching_verify(trace: list[dict]) -> list[str]:
     """Return names of mutating tools called with no verify/run_guards
     after the last one. Empty list ⇒ safe to answer."""
@@ -507,6 +545,16 @@ def _edits_without_matching_verify(trace: list[dict]) -> list[str]:
             # the flag. Absent flag ⇒ assume it RAN: over-gating costs one
             # verify call, under-gating ships an unverified edit.
             if step.get("ran") is False:
+                continue
+            # A tool that asked "are you sure?" wrote NOTHING, so there is
+            # nothing on disk for `verify_promise` to find. Gating on it
+            # makes the confirmation unrelayable — `answer` is refused, the
+            # question never reaches the user, and the turn dies at the
+            # iteration cap — which leaves every confirmed seam ungrantable
+            # for the same reason S24-8 did. The entry says so structurally
+            # (`needs_confirmation`, recorded from the tool's own result
+            # below), so this reads the record rather than the prose.
+            if step.get("needs_confirmation"):
                 continue
             if i > last_mutation_idx:
                 last_mutation_idx = i
@@ -792,6 +840,39 @@ def run_smith_agent(
                     "content": json.dumps({"error": "text must be a non-empty string"}),
                 })
                 continue
+            # A tool asked "are you sure?" and nothing was written. The only
+            # honest answer is the question itself, so the answer must carry
+            # OUR marker sentence — the same string `confirmation_was_requested`
+            # looks for next turn, which is how a "yes" becomes grantable at
+            # all. Without this, skipping the verify gate above would let
+            # "Done — removed it!" through on a turn where the column is still
+            # there AND leave the user's yes with nothing to attach to.
+            pending_ask = _unrelayed_confirmation(trace)
+            if pending_ask:
+                from services.confirmation_gate import CONFIRMATION_PROMPT_MARKER
+                if CONFIRMATION_PROMPT_MARKER not in text:
+                    trace.append({
+                        "tool": tool_name,
+                        "args": _trim_args(args),
+                        "result_summary": (
+                            "answer refused: unrelayed confirmation for "
+                            f"{pending_ask.get('kind')} {pending_ask.get('target')}"
+                        ),
+                    })
+                    messages.append({
+                        "role": "tool",
+                        "tool": tool_name,
+                        "content": json.dumps({
+                            "error": (
+                                f"{pending_ask.get('tool') or 'That tool'} asked for "
+                                "confirmation and changed nothing. Reply with its "
+                                "`summary` field verbatim, including the final line "
+                                f'"{CONFIRMATION_PROMPT_MARKER}" — that sentence is '
+                                "how the user's yes is recognised next turn."
+                            ),
+                        }),
+                    })
+                    continue
             unverified = _edits_without_matching_verify(trace)
             if unverified:
                 trace.append({
