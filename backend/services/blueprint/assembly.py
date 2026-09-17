@@ -162,6 +162,19 @@ RETIRED_SCAFFOLD_FILES: tuple[str, ...] = (
     # so an application assembled before that change must lose the old copy or
     # it will not build at all.
     "src/app/[...slug]/page.tsx",
+    # A ROUTE GROUP IS NOT A PATH SEGMENT. `(dashboard)` contributes nothing to
+    # the URL, so the scaffold's landing page inside it IS "/" — and with an
+    # optional catch-all also serving "/", Next refuses to start:
+    #
+    #   You cannot define a route with the same specificity as a optional
+    #   catch-all route ("/" and "/[[...slug]]")
+    #
+    # Measured on a generated master-data app: every node completed, the
+    # projection was correct, and the dev server would not boot. The list
+    # above retired `src/app/page.tsx` and stopped there, because that is
+    # where a landing page usually sits; this template keeps its own one
+    # directory deeper, inside the group.
+    "src/app/(dashboard)/page.tsx",
 )
 
 

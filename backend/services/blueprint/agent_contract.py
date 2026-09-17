@@ -439,7 +439,7 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None) -> None
         {"workflows": [p.body for p in proposals], "businessRules": [],
          "data": (doc or {}).get("data") or {}}))
     if problems:
-        raise InvalidWorkflowStep("; ".join(problems[:8]))
+        raise InvalidWorkflowStep(_all_of(problems))
 
 
 class InvalidBusinessRule(ValueError):
@@ -590,7 +590,28 @@ def check_pattern_templates(result: AgentResult,
                             and str(f.get("page")) == str(page_id))
 
     if problems:
-        raise InvalidPatternTemplate("; ".join(problems[:6]))
+        raise InvalidPatternTemplate(_all_of(problems))
+
+
+#: EVERY FAULT IN ONE REPLY, NOT THE FIRST FEW.
+#:
+#: A composer fixes what it is told about and re-authors the rest, so a fault
+#: held back is a fault discovered on the next attempt — at the price of a
+#: whole composition. The checks themselves have always accumulated; the joins
+#: below then kept six of them and dropped the rest silently, which is the
+#: same waste with a narrower window.
+#:
+#: Capped rather than unbounded because a reply is read by a model with a
+#: context budget, and a page emitting forty faults has one cause rather than
+#: forty. The cap says so out loud when it bites.
+MAX_REPORTED_FAULTS = 40
+
+
+def _all_of(problems: list[str], limit: int = MAX_REPORTED_FAULTS) -> str:
+    """Every fault, joined, saying how many were held back if any were."""
+    shown = "; ".join(problems[:limit])
+    extra = len(problems) - limit
+    return f"{shown}; (and {extra} more)" if extra > 0 else shown
 
 
 def _canonical_key(alloc: Any, section: str, body: Mapping[str, Any],
@@ -664,7 +685,7 @@ def check_composition(result: AgentResult, doc: dict) -> None:
             if count > 1:
                 problems.append(f"{pid}: sketched {count} times")
     if problems:
-        raise InvalidComposition("; ".join(problems[:6]))
+        raise InvalidComposition(_all_of(problems))
 
 
 def apply_agent_result(
