@@ -106,6 +106,23 @@ def event_loop():
     loop.close()
 
 
+#: ``(table, column) -> the server_default the model declared``, for every one
+#: the strip below removed. `setdefault`, never overwritten: the strip runs per
+#: test and after the first pass the live column is already None.
+_STRIPPED_SERVER_DEFAULTS: dict[tuple[str, str], object] = {}
+
+
+def stripped_server_default(table: str, column: str):
+    """What the model declared as this column's server_default, or None.
+
+    A test asserting the model's contract has to ask this as well as the live
+    column: the harness takes the default away so SQLite can compile the DDL,
+    and a guard that only reads the column cannot tell a model that never had
+    one from a model the harness has already been through.
+    """
+    return _STRIPPED_SERVER_DEFAULTS.get((table, column))
+
+
 def _strip_pg_only_server_defaults(metadata):
     """Neutralize PG-specific server_defaults SQLite can't compile.
 
@@ -117,6 +134,21 @@ def _strip_pg_only_server_defaults(metadata):
     when we're stripping ``gen_random_uuid()`` on a UUID PK so
     ``session.add(...)`` still gets a value. Sequence columns
     (``BIGINT`` seq) can safely be null in tests.
+
+    WHAT IS STRIPPED IS RECORDED, because this mutates the APPLICATION's
+    metadata for the rest of the process, not a copy of it. The first test
+    that takes the `test_db` fixture removes `Conversation.seq`'s
+    ``nextval(...)`` from the live model, and
+    `test_conversation_seq_column_is_crash_proof` — a regression guard for a
+    500 on every conversation write — then read a `server_default` of None and
+    failed. It passed alone and failed in the suite, which reads as the model
+    having lost its default rather than the harness having taken it.
+
+    Restoring it after ``create_all`` is not an option: SQLAlchemy omits a
+    column with a server_default from the INSERT, and on SQLite there is no
+    sequence or ``gen_random_uuid()`` behind it to fill the gap. So the value
+    is kept here instead, and :func:`stripped_server_default` is how a test
+    asks what the model declared.
     """
     import re
     import uuid as _uuid
@@ -144,9 +176,15 @@ def _strip_pg_only_server_defaults(metadata):
                     text_val = str(expr)
                 except Exception:  # noqa: BLE001
                     continue
+            if not (sequence_re.search(text_val) or uuid_re.search(text_val)):
+                continue
+            # Recorded BEFORE either branch clears it. Both kinds are a model
+            # contract a test may need to assert, and the sequence branch is
+            # the one `test_conversation_seq_column_is_crash_proof` reads.
+            _STRIPPED_SERVER_DEFAULTS.setdefault((table.name, col.name), sd)
             if sequence_re.search(text_val):
                 col.server_default = None
-            elif uuid_re.search(text_val):
+            else:
                 col.server_default = None
                 if isinstance(col.type, _PGUUID) and col.default is None:
                     # Wrap the callable in ColumnDefault so SQLAlchemy
@@ -159,6 +197,17 @@ def _strip_pg_only_server_defaults(metadata):
 async def test_db():
     """Create fresh in-memory tables for each test."""
     from database import Base, engine
+
+    # `create_all` CREATES WHAT THE METADATA KNOWS ABOUT, AND NOTHING ELSE. A
+    # model class registers itself on `Base.metadata` when its module is
+    # imported, and this fixture imported neither — so the tables that existed
+    # depended on which modules the collected test files happened to have
+    # imported first. Run the whole suite and something imports `models` early,
+    # so every table is there; run `test_api_integration.py` on its own and
+    # signup answered 500, `no such table: platform_users`, from a database
+    # this fixture had just finished creating. `alembic/env.py` imports the
+    # package for the same reason, with the same comment.
+    import models  # noqa: F401 — register all models with Base.metadata
 
     _strip_pg_only_server_defaults(Base.metadata)
 
