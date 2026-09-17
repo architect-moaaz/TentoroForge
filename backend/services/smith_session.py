@@ -710,6 +710,28 @@ class SmithSession:
                           answer=str(out.get("diff_summary") or "Loaded."),
                           touched_paths=list(out.get("edited_paths") or []))
 
+    def _export_data(self, understanding: dict) -> "TurnResult":
+        """Hand them their records back as a spreadsheet.
+
+        The one change verb that changes nothing — so `no_op` rather than
+        `resolved`: nothing was touched, and a turn that reports a change it
+        did not make is the thing every other seam here is careful about.
+        The project id is passed because the link the answer carries is a
+        platform URL, and the session is the only caller that knows it.
+        """
+        from services.smith.data_export import run as export_run
+
+        out = export_run(str(self.output_dir),
+                         str(understanding.get("entity") or "").strip(),
+                         project_id=str(self.project_id or ""),
+                         reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or
+                                         "I could not produce that file."))
+        return TurnResult(status="no_op",
+                          answer=str(out.get("diff_summary") or "Exported."))
+
     def _add_field(self, understanding: dict) -> "TurnResult":
         """Add one column to an existing entity — the incremental data-model
         change a field-add is (F-01). The field is added to the Living
@@ -1030,6 +1052,8 @@ class SmithSession:
             return self._revert()
         if verb == "import_data":
             return self._import_data(understanding)
+        if verb == "export_data":
+            return self._export_data(understanding)
         from services.smith.limits import cannot as _cannot
         if _cannot(verb):
             # HONEST, AND NOT A DEAD END. These are the asks Smith genuinely

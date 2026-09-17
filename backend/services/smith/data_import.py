@@ -294,6 +294,14 @@ def loadable_fields(entity: dict) -> list[dict]:
     return out
 
 
+def _db_owned(entity: dict) -> set[str]:
+    """Normalised names of the columns the DATABASE owns, not the owner: the
+    primary key and every declared foreign key."""
+    return {norm(f.get("name")) for f in (entity.get("fields") or [])
+            if isinstance(f, dict) and (f.get("primaryKey") or f.get("references"))
+            and f.get("name")}
+
+
 def match_exact(columns: list[str], fields: list[dict]) -> dict[str, str]:
     """Columns whose normalised heading IS a declared field's name."""
     by_norm = {norm(f.get("name")): str(f.get("name")) for f in fields}
@@ -535,6 +543,16 @@ def plan(doc: dict, output_dir: str | Path, entity_ref: str, *,
         raise ImportRefused(f"{rec['filename']} has headings but no rows.")
 
     ignored = [c for c in columns if c in set(ignore_columns or [])]
+    # THE DATABASE'S OWN COLUMNS ARE NOT THE OWNER'S DATA. A file that came
+    # out of `export` leads with the primary key and carries the foreign keys,
+    # and neither can be loaded from a spreadsheet: the key is minted by the
+    # database, and a reference names a record this cannot match by name. They
+    # are IGNORED WITH THE REASON PRINTED rather than refused — refusing would
+    # make the app's own export the one file it will not read, and dropping
+    # them in silence is what every other column here is protected from.
+    owned = [c for c in columns if c not in set(ignored)
+             and norm(c) in _db_owned(entity)]
+    ignored += owned
     live = [c for c in columns if c not in set(ignored)]
     fields = loadable_fields(entity)
 
@@ -578,7 +596,8 @@ def plan(doc: dict, output_dir: str | Path, entity_ref: str, *,
         "entity": str(entity.get("id") or ""), "entity_name": str(entity.get("name") or ""),
         "table": table_of(entity), "how": how,
         "columns": [{"column": c, "field": f} for c, f in pairs.items()],
-        "unmapped": unmapped, "ignored": ignored, "required_missing": required_missing,
+        "unmapped": unmapped, "ignored": ignored, "db_owned": owned,
+        "required_missing": required_missing,
         "rows": accepted, "rejects": rejects,
         "total": len(rows), "preview": rows[:PREVIEW_ROWS],
     }
@@ -637,6 +656,10 @@ def rows_account(report: dict) -> list[str]:
             lines.append(f"  - …and {len(report['rejects']) - 5} more like these")
     if report["ignored"]:
         lines.append("- leave out the column(s): " + ", ".join(report["ignored"]))
+    if report.get("db_owned"):
+        lines.append("  (" + ", ".join(report["db_owned"]) + " because the "
+                     "database writes " + ("that column" if len(report["db_owned"]) == 1
+                                           else "those columns") + " itself)")
     if report["columns"]:
         lines += ["", "Each column goes here:", ""]
         lines += [f"- {c['column']} → `{c['field']}`" for c in report["columns"]]

@@ -146,6 +146,20 @@ Return ONLY a JSON object with exactly these keys:
                         rows are read from the file itself, never from what
                         you write. Not add_entity (that declares a new kind
                         of record), not add_field (that is a new column).
+      "export_data"   — GIVE THEM THEIR DATA BACK as a spreadsheet: "can I
+                        get all this out as a spreadsheet?", "export the
+                        customers", "download all the bookings", "back it up
+                        somewhere", "I need this in Excel". Fill "entity" with
+                        which kind of record they named, or leave it "" when
+                        they asked for everything or named none — that is a
+                        backup of the whole application and is a legitimate
+                        answer, not a missing field.
+                        THE WORD "EXPORT" IS OVERLOADED HERE, and this verb is
+                        about the RECORDS. "Export the source", "export the
+                        code", "give me the project as a zip I can run" is
+                        about the SOURCE CODE and is NOT this verb: answer
+                        that one in "answer", saying they can `export` the
+                        source of the project, and leave "verb" "".
       "revert"        — UNDO the last change: "undo that", "undo", "put it
                         back", "that's not what I wanted, revert", "go back",
                         "reverse that". Restores the application as it stood
@@ -243,6 +257,9 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   edit_rule / remove_rule need:
   "rule": which rule, by the name the Blueprint below gives it; edit_rule
       also "change": what should be different.
+
+  export_data needs nothing. Fill "entity" only if they named one kind of
+      record; "" means all of them, in one file.
 
   import_data needs:
   "entity": which kind of record the attached spreadsheet holds, as the

@@ -107,6 +107,11 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # id is a thing only Smith has seen. First turn describes and waits;
     # `services.smith.data_import` holds the plan between the two.
     "import_data": {"entity"},
+    # Their data, back out. NEEDS NOTHING: an entity narrows it to one sheet,
+    # and no entity is the honest reading of "back it up somewhere" — all of
+    # them, in one file. A required slot here would turn a question anybody
+    # can ask into one they have to phrase correctly.
+    "export_data": set(),
     # THE ASKS THAT REACH NOTHING, GIVEN SOMEWHERE TO LAND. Each of these is a
     # thing people ask for that Smith genuinely cannot do. Without a verb they
     # were classified as whatever was nearest — "delete the Wards page" as a
@@ -294,6 +299,15 @@ VERB_HELP: dict[str, str] = {
         "how many would not and why, and which column becomes which field; "
         "the rows are loaded on a yes. A column the record has no field for "
         "is refused, not guessed at."
+    ),
+    "export_data": (
+        "Give them their data back as a spreadsheet: \"can I get all this out "
+        "as a spreadsheet?\", \"export the customers\", \"download the "
+        "bookings\", \"back it up somewhere\". Reads the records out of the "
+        "application's own database and produces the file on this turn. "
+        "`entity` narrows it to one kind of record; with none, every kind goes "
+        "into one zip, which is what a backup is. Changes nothing — the "
+        "application is untouched and there is nothing to undo."
     ),
     "rebuild": (
         "Regenerate the application from its definition. The honest answer "

@@ -56,8 +56,10 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "Load the records you already have — attach a spreadsheet and say which "
      "records it holds. I say how many rows would land and which column "
      "becomes which field before anything is written, and a column your "
-     "records have no field for is reported rather than guessed at.",
-     frozenset({"import_data"})),
+     "records have no field for is reported rather than guessed at. It goes "
+     "out the same way: ask for a spreadsheet of any kind of record, or for a "
+     "backup of everything, and you get the file.",
+     frozenset({"import_data", "export_data"})),
     ("A design somebody gave you",
      "Build the screens from a Figma or UX Pilot file, or unhook it and "
      "compose them from the component library instead.",

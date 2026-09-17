@@ -340,6 +340,8 @@ _VERB_NOTES: dict[str, str] = {
         "remove the connected design and compose every screen from the component library instead: 'disconnect the Figma design', 'drop the design'.",
     'import_data':
         "load the data they ALREADY HAVE from the spreadsheet they attached: 'here's our customer spreadsheet, load it in'. Needs only which kind of record the file holds; never pass rows or a filename. The first call writes nothing and returns the dry run to show them.",
+    'export_data':
+        "give them their data back as a spreadsheet: 'can I get all this out as a spreadsheet?', 'back it up somewhere'. One kind of record, or all of them in a zip when no entity is named. Reads only — nothing to confirm, nothing to undo.",
     'rebuild':
         'regenerate the whole application from its definition.',
     'rename':
@@ -876,6 +878,18 @@ TOOL_CATALOG: list[dict] = [
              "foreign key that named the old entity must move, so it confirms "
              "first and the completeness checks surface each reference. Refuses "
              "the auth/users entity and any rename into that namespace."},
+    {"name": "export_data",
+     "signature": "export_data(entity?) -> {applied, file, href, sheets, reason}",
+     "desc": "GIVE THE OWNER THEIR DATA BACK as a spreadsheet — 'can I get "
+             "all this out as a spreadsheet?', 'export the customers', 'back "
+             "it up somewhere'. Reads the rows out of the application's own "
+             "database and writes the file on this call. `entity` narrows it "
+             "to one kind of record; omit it for every kind in one zip, which "
+             "is what a backup means. READS ONLY — nothing about the "
+             "application changes, so there is nothing to confirm and nothing "
+             "to undo. Show the returned markdown link as it is: it is the "
+             "download. Sensitive fields are left out of the file by design "
+             "and the summary says which."},
     {"name": "import_data",
      "signature": "import_data(entity, confirm?, ignore_columns?[]) -> "
                   "{applied, asked, reason, options, edited_paths}",
@@ -1393,6 +1407,7 @@ READONLY_HANDLERS = {
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
     "revert":                   lambda output_dir, args: _smith_revert(output_dir),
     "import_data":              lambda output_dir, args: _smith_import_data(output_dir, args),
+    "export_data":              lambda output_dir, args: _smith_export_data(output_dir, args),
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
@@ -2163,6 +2178,18 @@ def _smith_import_data(output_dir: str, args: dict) -> dict:
     return _import_run(output_dir, str(args.get("entity") or ""),
                        confirm=bool(args.get("confirm")),
                        ignore_columns=ignore)
+
+
+def _smith_export_data(output_dir: str, args: dict) -> dict:
+    """Produce a spreadsheet of the owner's records. Reads only.
+
+    The project id is not an argument of this tool — the handlers are
+    `(output_dir, args)` — and the directory's name IS the project's short id,
+    which is what the platform's own download URL is keyed by (the same
+    derivation `preview_manager` callers use).
+    """
+    from services.smith.data_export import run as _export_run
+    return _export_run(output_dir, str(args.get("entity") or ""))
 
 
 def _smith_add_field(output_dir: str, args: dict) -> dict:

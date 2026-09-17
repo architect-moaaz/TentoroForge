@@ -50,6 +50,7 @@ import {
   XCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
@@ -264,7 +265,12 @@ function SmithProse({ text }: { text: string }) {
         "[&_table]:my-1.5 [&_table]:text-xs [&_th]:py-0.5 [&_td]:py-0.5",
       )}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      {/* `a` is overridden so an export link downloads with the platform's
+          Bearer token — a plain href comes back 401. Every other link is
+          untouched. See MarkdownLink. */}
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink }}>
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
