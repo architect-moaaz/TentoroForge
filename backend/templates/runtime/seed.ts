@@ -73,6 +73,50 @@ function tableFor(name: string): any {
   return null;
 }
 
+/**
+ * NO SEEDED ROW CARRIES A READABLE CREDENTIAL, and every one that needs a
+ * credential column gets a valid value.
+ *
+ * Both halves were broken and each broke something different. The plan's value
+ * for a password column is either a plaintext ("Passw0rd!") or a label
+ * ("Password Hash 1"), and it was inserted verbatim: `auth.ts` bcrypt-compares
+ * what it finds, so the account existed and NOBODY COULD SIGN INTO IT — while
+ * a plaintext password sat in the database and in the committed seed file
+ * (§42). Meanwhile a plan that named the column `passwordHash` matched no
+ * column on the shipped table (the platform calls it `password`), so the key
+ * was dropped, the NOT NULL insert failed, and the whole staff list seeded
+ * nothing at all.
+ *
+ * So the column is filled here, always, with the bcrypt hash of a fresh random
+ * UUID: a valid hash whose input nobody holds. The row exists as data — a
+ * staff list renders, a FK to it resolves — and the account cannot be signed
+ * into, which is the honest state of an account nobody was given. The ways in
+ * are `admin@example.com` and an invited account (`seedAccounts`), and neither
+ * comes through here.
+ *
+ * WHICH COLUMNS. Any whose name contains "password". That is the whole rule:
+ * such a column is a credential in every application there is, and a narrower
+ * question than the author-side refusal (`_CREDENTIAL_COLUMNS` in
+ * functional_completeness.py) deliberately — that one may over-reach onto
+ * `salt` because a workflow has no business writing it either, while this
+ * transforms a value in ANY table, where `salt` is a real column in a recipe
+ * app and would be corrupted.
+ */
+const _isCredentialColumn = (key: string) => norm(key).includes("password");
+
+/** A valid bcrypt hash whose input nobody holds, so the column is filled and
+ *  the account cannot be signed into. hashSync because both callers are
+ *  synchronous, and both run a handful of times per build. */
+const _unusableCredential = () => bcrypt.hashSync(randomUUID(), 10);
+
+function _unusableCredentials(table: any, out: Record<string, unknown>): void {
+  for (const key of Object.keys(table)) {
+    // UNCONDITIONALLY, unlike the fill in `minimalRow`: here the value came
+    // from the plan, and the whole point is that it must not land.
+    if (_isCredentialColumn(key)) out[key] = _unusableCredential();
+  }
+}
+
 /** Build a minimal insert row for `table`: fill every NOT NULL column that has
  *  no DB default with a type-appropriate placeholder (uuid→randomUUID, text→
  *  "Default <label>", number→0, bool→false, date→now). Columns WITH a default are
@@ -95,7 +139,12 @@ function minimalRow(
     if (skipFk && /Id$/.test(key)) continue;
     const ct = String(col?.columnType ?? "").toLowerCase();
     const dt = String(col?.dataType ?? "").toLowerCase();
-    if (ct.includes("uuid")) out[key] = randomUUID();
+    // A required credential column got "Default Admin", which `auth.ts`
+    // bcrypt-compares and no password ever matches. Filled with a hash nobody
+    // holds instead — and only when absent, because `seedAdmin` and
+    // `seedAccounts` pass the hash they mean in as an override.
+    if (_isCredentialColumn(key)) out[key] = _unusableCredential();
+    else if (ct.includes("uuid")) out[key] = randomUUID();
     else if (dt === "number") out[key] = 0;
     else if (dt === "boolean") out[key] = false;
     else if (dt === "date") out[key] = new Date();
@@ -437,6 +486,7 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
     }
     if (pool && pool.length) out[k] = pool[i % pool.length];
   }
+  _unusableCredentials(table, out);
   _driverSafeDates(table, out);
   return out;
 }
