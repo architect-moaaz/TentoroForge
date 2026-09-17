@@ -64,6 +64,33 @@ scikit-learn>=1.4.0
 aiosqlite>=0.20.0
 # Same class: tests/deploy/* import respx to stub the Neon/Vercel HTTP clients.
 respx>=0.21.0
+# Shuffles collection order every run, so a test that only passes because
+# something else ran first fails where it is, not three files later. Six
+# failures were exactly that and read as bugs in the files reporting them: a
+# stub installed by bare assignment and never removed took out five tests in
+# two unrelated modules, and the SQLite harness stripping a server_default off
+# the live model metadata took out the guard that asserts it is there.
+#
+# Order-dependence cannot be found by reading; it has to be run for. Until now
+# it could not even be run for — the plugin was absent, so the `-p no:randomly`
+# in the suite's own commands was a no-op and collection order was file order.
+# Disable it with `-p no:randomly` when comparing two runs' failure lists; the
+# seed is printed at the top of every run so any one of them can be repeated.
+pytest-randomly>=3.16,<4
+# WHAT THIS FILE SAYS AND WHAT THE SUITE RUNS ON ARE NOT THE SAME, and
+# finding out cost a run: installing pytest-randomly against these floors
+# resolved by dragging pytest 7.4.3 -> 9.1.1, a major upgrade in the middle of
+# a measurement. The interpreter that runs the suite today holds pytest 7.4.3
+# and pytest-asyncio 0.21.1 — BELOW BOTH FLOORS BELOW — so a clean
+# `pip install -r requirements.txt` produces a different test stack from the
+# one every number in this repo was measured on, and nothing says so until a
+# result disagrees.
+#
+# Not pinned down to the installed versions here, because pytest-asyncio 0.24+
+# requires pytest >= 8.4 and pinning 7.4.3 makes this file unresolvable: the
+# floors and the environment cannot both be right. Moving the environment up
+# is a migration someone should run deliberately, against a known failure
+# list, not a side effect of adding a plugin.
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
 pytest-cov>=5.0.0
