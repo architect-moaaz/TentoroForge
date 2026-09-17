@@ -15,6 +15,20 @@ import { useEditorStore } from "./editor-store";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
+/**
+ * Route → schema-file slug, mirroring the backend's `slugify_route`: "/" → "home",
+ * `:param` → `[param]`, leading/trailing slashes stripped. This is the same map
+ * the generated `src/schemas/registry.ts` uses (route → `import(./<slug>.json)`),
+ * so a save keyed off the route lands on the file the running app renders.
+ */
+export function slugifyRoute(route: string): string {
+  if (!route || route === "/") return "home";
+  return route
+    .replace(/:([A-Za-z0-9_]+)/g, "[$1]")
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/\/{2,}/g, "/");
+}
+
 async function saveFile(projectId: string, relPath: string, content: string): Promise<void> {
   // NOTE: errors are intentionally NOT caught here — callers decide the policy.
   // Write via the short-id project-file endpoint — symmetric with the editor's
@@ -71,7 +85,13 @@ export function buildPersister(projectId: string, debounceMs = 500): Persister {
       const path =
         schemaFileById.get(pageId) ??
         (route ? schemaFileByRoute.get(route) : undefined) ??
-        `src/schemas/${pageId}.json`;
+        // The last resort must match the file the RUNNING app reads — the
+        // registry maps a route to `src/schemas/<slugify(route)>.json`, so a
+        // page missing from nav-flow (e.g. the /offers list) still saves to the
+        // file the preview renders. `src/schemas/<pageId>.json` used the
+        // Blueprint id (PAGE-002), a file nothing imports, so the edit never
+        // reached the running app (DEFECT-RENAME-NOOP, editor half).
+        (route ? `src/schemas/${slugifyRoute(route)}.json` : `src/schemas/${pageId}.json`);
       await saveFile(projectId, path, JSON.stringify(page, null, 2));
     }
     await saveFile(
