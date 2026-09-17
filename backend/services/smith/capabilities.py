@@ -77,6 +77,11 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "screen. I say why, and offer the nearest thing that does work.",
      frozenset({"rename_entity", "change_field_type",
                 "edit_api", "reorder"})),
+    ("When it goes wrong in front of somebody",
+     "Tell me it crashed or that it is slow, and I will tell you what the "
+     "running application reported — what failed, where, how often, and what "
+     "it said — and offer the repair where the failure names one.",
+     frozenset({"explain_crash", "explain_slowness"})),
     ("Putting it back",
      "Undo the last change — the application returns to how it stood before "
      "it, and saying it again goes back another. Nothing is deleted: the undo "
