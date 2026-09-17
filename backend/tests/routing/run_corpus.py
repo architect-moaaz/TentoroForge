@@ -9,14 +9,32 @@ person who knows the right words was never the problem.
     python -m tests.routing.run_corpus --verb add_field
     python -m tests.routing.run_corpus --limit 20 --json report.json
 
-Measured on 2026-09-17, against the sample context below and the 138 sentences
-the corpus held THEN: 5 reached a DIFFERENT verb (3.6%), 79 routed as
-labelled, and 54 asked a question instead — which is not a failure, and for
-most of those it is the right answer, since the sample application has no
-dashboard to put a widget on. Track the first number.
+Measured on 2026-09-18 against the sample context below, over all 253
+sentences: 7 reached a DIFFERENT verb (2.8%), 167 routed as labelled (66%),
+and 79 asked a question instead — which is not a failure, and for most of
+those it is the right answer, since the sample application has no dashboard to
+put a widget on. Track the first number.
 
-The corpus has grown to 236 since and has not been re-measured, so that 3.6%
-describes a smaller corpus than this one. Re-run before quoting it.
+  2026-09-17   5 / 138   3.6%
+  2026-09-18   7 / 253   2.8%     the corpus nearly doubled in between
+
+TWO OF THE SEVEN WENT TO VERBS THAT DID NOT EXIST WHEN THEIR LABEL WAS
+WRITTEN, and both reads are arguable rather than wrong:
+
+    "/nurses just shows an error"                  compose_route -> explain_crash
+    "our rota system needs to pull today's shifts automatically"
+                                                   add_api -> connect_service
+
+They are left labelled as they were. A label moved to match what the model did
+is a measurement that has stopped measuring; if the intent really changed, the
+label should change deliberately, and in BOTH corpora — see
+`tests/services/test_corpora_agree.py`.
+
+The other five are the model's own misreads, and four of them are one family:
+a sentence about showing a field that already exists read as a request to add
+the column ("show phone on the nurse form", "I can't see the father's name on
+the registration page" -> add_field rather than add_widgets), which is the
+exact confusion the prompt already warns about at length.
 
 Calls a model once per sentence, so it costs real money and is NOT part of the
 test suite. `test_corpus.py` beside it checks the corpus itself — that every
