@@ -150,3 +150,15 @@
 {"say": "dave@clinic.com can't get in", "verb": "reset_login"}
 {"say": "remove Dave's login", "verb": "remove_login"}
 {"say": "sarah has left, take away her access", "verb": "remove_login"}
+{"say": "here's our customer spreadsheet, load it in", "verb": "import_data"}
+{"say": "import these suppliers", "verb": "import_data"}
+{"say": "can you put our existing bookings in", "verb": "import_data"}
+{"say": "can I get all this out as a spreadsheet?", "verb": "export_data"}
+{"say": "export the customers", "verb": "export_data"}
+{"say": "back it up somewhere", "verb": "export_data"}
+{"say": "it crashed", "verb": "explain_crash"}
+{"say": "it broke when I clicked save", "verb": "explain_crash"}
+{"say": "something went wrong", "verb": "explain_crash"}
+{"say": "it's really slow", "verb": "explain_slowness"}
+{"say": "why is it so slow", "verb": "explain_slowness"}
+{"say": "loading takes ages", "verb": "explain_slowness"}
