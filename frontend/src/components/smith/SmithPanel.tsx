@@ -50,6 +50,7 @@ import {
   XCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
@@ -264,7 +265,12 @@ function SmithProse({ text }: { text: string }) {
         "[&_table]:my-1.5 [&_table]:text-xs [&_th]:py-0.5 [&_td]:py-0.5",
       )}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      {/* `a` is overridden so an export link downloads with the platform's
+          Bearer token — a plain href comes back 401. Every other link is
+          untouched. See MarkdownLink. */}
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink }}>
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -1033,13 +1039,18 @@ export function SmithPanel({
         <div className="flex items-end gap-2">
           <label
             className="cursor-pointer rounded-md border p-2 text-muted-foreground hover:bg-muted"
-            title="Show Smith a screenshot or design"
+            title="Attach a screenshot, a design, or a spreadsheet to load in"
           >
             <Paperclip className="h-4 w-4" />
+            {/* A SPREADSHEET IS THE POINT OF THE PAPERCLIP for an owner who
+                already has a business: they attach customers.xlsx and say
+                "load it in" (services/smith/data_import.py). Leaving the sheet
+                formats out of this list made the import unreachable from the
+                panel it is driven from. */}
             <input
               type="file"
               multiple
-              accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown"
+              accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown,.csv,.tsv,.xlsx"
               className="hidden"
               disabled={busy}
               onChange={(e) => {

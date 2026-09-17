@@ -81,3 +81,9 @@ google-genai>=1.0.0
 langgraph>=0.2.60
 langchain-anthropic>=0.3.0
 langchain-core>=0.3.30
+
+# Reading an owner's spreadsheet (services/smith/data_import.py). "Our customer
+# spreadsheet" is an .xlsx far more often than a .csv, and refusing the format
+# every business actually has would make the import a feature for other
+# developers. Read-only use: openpyxl never writes a workbook here.
+openpyxl>=3.1.0

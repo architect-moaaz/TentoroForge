@@ -496,6 +496,14 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
     except Exception as e:
         errors.append(f"Failed to inject file storage: {e}")
 
+    # Inject account setup: the forge_invites table + the set-password route
+    # that gives an invited person a way to choose their own password. Without
+    # these, an account the owner adds has nowhere to get a password from.
+    try:
+        copied.extend(_inject_account_setup(output_path))
+    except Exception as e:
+        errors.append(f"Failed to inject account setup: {e}")
+
     # Rewrite any LLM-hallucinated workflow routes (non-existent getWorkflowEngine)
     # to the real stateless API so `next build` doesn't break.
     try:
@@ -644,6 +652,41 @@ def _plan_has_commerce_flag(output_path: Path) -> bool:
     except Exception:
         return False
     return False
+
+
+def _inject_account_setup(output_path: Path) -> list[str]:
+    """Emit the ``forge_invites`` table and ``/api/auth/set-password``.
+
+    The two halves of the only way an account gets a password other than
+    self-service sign-up: a one-time setup link, and the platform route that
+    hashes what the person types with the algorithm ``auth.ts`` verifies. The
+    seed writes the invite rows from the owner's roster
+    (``src/db/accounts.json``); the page that posts to the route ships with the
+    app foundation.
+    """
+    written: list[str] = []
+    schema_dir = output_path / "src" / "db" / "schema"
+
+    inv_schema = _TEMPLATE_DIR / "db" / "forge-invites.schema.ts"
+    if inv_schema.exists() and schema_dir.exists():
+        shutil.copy2(inv_schema, schema_dir / "_forge_invites.ts")
+        written.append("src/db/schema/_forge_invites.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_invites" not in txt:
+                barrel.write_text(
+                    txt.rstrip() + '\nexport { forgeInvites } from "./_forge_invites";\n',
+                    encoding="utf-8",
+                )
+
+    route_src = _TEMPLATE_DIR / "api-auth-set-password" / "route.ts"
+    if route_src.exists():
+        dst = output_path / "src" / "app" / "api" / "auth" / "set-password" / "route.ts"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(route_src, dst)
+        written.append("src/app/api/auth/set-password/route.ts")
+    return written
 
 
 def _inject_file_storage(output_path: Path) -> list[str]:

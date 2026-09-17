@@ -24,11 +24,17 @@ THREE THINGS THAT MUST NOT GO WRONG
    metadata only; the on-disk name is a generated id. `../../etc/passwd`
    is a legal thing for a browser to send.
 
-2. **Unsupported means unsupported, out loud.** `.docx` and `.xlsx` are
-   zip containers we have no reader for. Accepting one and quietly
-   attaching nothing is indistinguishable, from the user's seat, from the
-   model ignoring their file. So we refuse at upload time, where there is
-   a human present to see the message.
+2. **Unsupported means unsupported, out loud.** `.docx` is a zip
+   container we have no reader for. Accepting one and quietly attaching
+   nothing is indistinguishable, from the user's seat, from the model
+   ignoring their file. So we refuse at upload time, where there is a
+   human present to see the message — and the refusal names the way round
+   it, which for a spreadsheet is "save a copy as CSV".
+
+   `.xlsx` IS accepted, and is the one kind that is never read into a
+   prompt: an owner attaches a workbook to have its rows LOADED
+   (`services.smith.data_import`), so the block names the file and says
+   where its rows are. See `KIND_SPREADSHEET`.
 
 3. **Media types must be exactly what the API accepts.** Browsers send
    `image/jpg`, which the API rejects; PDFs must ride in a `document`
@@ -52,6 +58,13 @@ logger = logging.getLogger(__name__)
 KIND_IMAGE = "image"
 KIND_PDF = "pdf"
 KIND_TEXT = "text"
+#: A workbook. NOT a document to read: an owner attaches one to have its rows
+#: LOADED (`services.smith.data_import`), and its cells must not go into a
+#: prompt — a model asked to look at four hundred customers will transcribe
+#: some of them, and then the records in the database are the ones it typed.
+#: `.csv` stays KIND_TEXT: it was already readable text and other callers
+#: (the brief author) legitimately read one as a document.
+KIND_SPREADSHEET = "spreadsheet"
 KIND_UNSUPPORTED = "unsupported"
 
 # 10 MB. Base64 inflates ~33%, so this is ~13 MB on the wire per file —
@@ -68,6 +81,8 @@ MAX_ATTACHMENTS = 8
 MAX_TEXT_CHARS = 40_000
 
 _IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+#: What "our customer spreadsheet" actually is, most of the time.
+_SHEET_EXT = {".xlsx"}
 _TEXT_EXT = {".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".yaml", ".yml"}
 
 # The API accepts exactly these four. Anything else must be mapped or refused.
@@ -78,6 +93,10 @@ _IMAGE_MEDIA = {
     ".gif": "image/gif",
     ".webp": "image/webp",
 }
+
+#: Spreadsheets with no reader here. Named only to choose the wording of the
+#: refusal — every one of them can produce a CSV in one step.
+_OTHER_SHEET_EXT = {".xls", ".xlsm", ".numbers", ".ods"}
 
 # `image/jpg` is not a real media type but browsers send it constantly.
 _MEDIA_ALIASES = {"image/jpg": "image/jpeg", "image/pjpeg": "image/jpeg"}
@@ -113,6 +132,8 @@ def classify(filename: str, content_type: str = "") -> str:
         return KIND_IMAGE
     if ext == ".pdf":
         return KIND_PDF
+    if ext in _SHEET_EXT:
+        return KIND_SPREADSHEET
     if ext in _TEXT_EXT:
         return KIND_TEXT
     if ct.startswith("text/"):
@@ -120,9 +141,15 @@ def classify(filename: str, content_type: str = "") -> str:
     return KIND_UNSUPPORTED
 
 
+_XLSX_MEDIA = ("application/vnd.openxmlformats-officedocument"
+               ".spreadsheetml.sheet")
+
+
 def _media_type(filename: str, content_type: str, kind: str) -> str:
     if kind == KIND_PDF:
         return "application/pdf"
+    if kind == KIND_SPREADSHEET:
+        return _XLSX_MEDIA
     ct = _MEDIA_ALIASES.get((content_type or "").lower().strip(),
                             (content_type or "").lower().strip())
     if ct in set(_IMAGE_MEDIA.values()):
@@ -161,9 +188,19 @@ def save_attachment(root: str | Path, project_id: str, filename: str,
 
     kind = classify(filename, content_type)
     if kind == KIND_UNSUPPORTED:
+        # A REFUSAL NAMES THE WAY ROUND IT. `.xls` and `.numbers` are
+        # spreadsheets we cannot open, and the owner attaching one is trying
+        # to load their data — telling them the list of types we take, without
+        # telling them their file becomes one of those with a "Save as", sends
+        # them away.
+        if Path(filename or "").suffix.lower() in _OTHER_SHEET_EXT:
+            raise AttachmentError(
+                f"I cannot read {filename}, but I can read what it exports. "
+                f"Open it and save a copy as CSV (or .xlsx), attach that, and "
+                f"say which records it holds.")
         raise AttachmentError(
             f"{filename} is not supported — attach an image (PNG/JPEG/GIF/WebP), "
-            f"a PDF, or a text file (TXT/MD/CSV/JSON).")
+            f"a PDF, a spreadsheet (XLSX/CSV), or a text file (TXT/MD/JSON).")
 
     d = _project_dir(root, project_id)
     d.mkdir(parents=True, exist_ok=True)
@@ -238,6 +275,17 @@ def load_blocks(root: str | Path, project_id: str,
 
         name = rec.get("filename") or rec["id"]
         kind = rec.get("kind")
+
+        if kind == KIND_SPREADSHEET:
+            # NAMED, NOT READ. What to DO with it is a tool call
+            # (`import_data`), and the rows reach the database from the file
+            # on disk — they must not reach the model at all.
+            blocks.append({"type": "text", "text": (
+                f"Attached spreadsheet: {name} ({rec.get('bytes', 0)} bytes). "
+                f"Its rows are on disk, not here — use import_data to load "
+                f"them, and do not ask for them to be typed out.")})
+            used += 1
+            continue
 
         if kind == KIND_TEXT:
             text = raw.decode("utf-8", errors="replace")
