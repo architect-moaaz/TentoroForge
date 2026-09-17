@@ -33,13 +33,13 @@ describe("SideNav — the owner's mark in the corner", () => {
     expect(img).toBeTruthy();
     expect(img.getAttribute("src")).toBe("/brand/0123456789abcdef.png");
     expect(img.getAttribute("alt")).toBe("Bright Care");
-    // The initial's square is GONE, not hidden behind the image: the brand
-    // block's first child is the mark, and the only other thing in it is the
-    // name the rail has always shown beside it.
+    // The mark replaces the WHOLE lockup — the square and the name both.
+    // Setting a logo beside the name in text reads as a stutter, and worst
+    // where the mark is a wordmark, which is what most of them are.
     const block = brandBlock(container);
     expect(block.firstElementChild).toBe(img);
-    expect(block.children.length).toBe(2);
-    expect(block.lastElementChild?.textContent).toBe("Bright Care");
+    expect(block.children.length).toBe(1);
+    expect(block.textContent).not.toContain("Bright Care");
   });
 
   it("falls back to the application's name rather than going unnamed", () => {

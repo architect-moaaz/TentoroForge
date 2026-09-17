@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
 
@@ -51,7 +52,15 @@ export function MobileNav({
         className="md:hidden sticky top-0 z-50 flex h-14 shrink-0 items-center justify-between border-b border-black/10 px-4"
         style={{ background: barBg, color: fg }}
       >
-        <span className="truncate text-[15px] font-semibold tracking-tight">{appName}</span>
+        {/* The mark replaces the name, the same rule every chrome follows —
+            see `ShellBrand` in layout.tsx. This is the ONLY chrome a phone
+            shows for four of the six rails, so leaving it out would mean an
+            owner's logo vanished below 768px. */}
+        {BRAND_LOGO ? (
+          <BrandMark height={24} alt={appName} />
+        ) : (
+          <span className="truncate text-[15px] font-semibold tracking-tight">{appName}</span>
+        )}
         <button
           type="button"
           aria-label="Open menu"
@@ -76,7 +85,11 @@ export function MobileNav({
             style={{ background: barBg, color: fg }}
           >
             <div className="mb-3 flex items-center justify-between px-1">
-              <span className="truncate text-[15px] font-semibold tracking-tight">{appName}</span>
+              {BRAND_LOGO ? (
+                <BrandMark height={24} alt={appName} />
+              ) : (
+                <span className="truncate text-[15px] font-semibold tracking-tight">{appName}</span>
+              )}
               <button
                 type="button"
                 aria-label="Close menu"

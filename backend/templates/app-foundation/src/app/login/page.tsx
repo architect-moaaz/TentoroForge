@@ -149,7 +149,14 @@ function BrandPanel({ variant }: { variant: "full" | "panel" }) {
 const FormPane = ({ className = "" }: { className?: string }) => (
   <div className={`flex flex-1 items-center justify-center bg-background p-6 ${className}`}>
     <div className="w-full max-w-md rounded-[var(--radius)] border border-border bg-card p-8 shadow-sm">
-      <div className="mb-8 flex items-center gap-3 lg:hidden">
+      {/* `lg:hidden` because above lg the brand aside carries the identity —
+          but what it carries is the NAME, in text, over a gradient. A mark
+          belongs on this card, which is `bg-card` and neutral, and not on a
+          coloured wash whose contrast against someone's logo we cannot know.
+          So when there IS a mark the lockup shows at every width; the three
+          panel layouts (split-editorial, split-reversed, side-panel) otherwise
+          showed no logo at all on a desktop, which is most of them. */}
+      <div className={`mb-8 flex items-center gap-3${BRAND_LOGO ? "" : " lg:hidden"}`}>
         <Lockup size={36} />
       </div>
       <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>

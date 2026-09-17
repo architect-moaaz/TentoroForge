@@ -337,6 +337,16 @@ def test_every_chrome_less_surface_draws_the_mark():
         "app-foundation/src/app/login/page.tsx": "the sign-in screen",
         "app-foundation/src/app/signup/page.tsx": "the sign-up screen",
         "standalone-app/src/components/EdgePageFrame.tsx": "404 / 403 / 500 / maintenance",
+        "app-foundation/src/components/PublicPageFrame.tsx": "a public page",
+        # EVERY CHROME, NOT THE DEFAULT ONE. `(dashboard)/layout.tsx` picks
+        # between eight shells, and only `standard-rail` goes through the
+        # library's SideNav. The logo landed there and nowhere else: an
+        # application whose design DNA chose a wide rail, an icon rail, a dock,
+        # a topbar or persona pills showed the owner's mark on its sign-in
+        # screen and an initial in its own shell.
+        "app-foundation/src/app/(dashboard)/layout.tsx": "the four other rail chromes",
+        "app-foundation/src/app/(dashboard)/PersonaChrome.tsx": "the persona-pills chrome",
+        "app-foundation/src/app/(dashboard)/MobileNav.tsx": "every chrome below 768px",
     }
     for rel, what in surfaces.items():
         src = (tpl / rel).read_text(encoding="utf-8")

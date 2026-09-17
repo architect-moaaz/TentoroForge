@@ -192,6 +192,14 @@ export function SideNav({
             // application that has never been given one shows, and it is a
             // stand-in for exactly this.
             //
+            // IT REPLACES THE WHOLE LOCKUP, square and name both — the name
+            // span below renders only when there is no mark. A logo is how a
+            // company writes its name, so setting one beside the name in text
+            // reads as a stutter ("Bright Care | Bright Care"), worst exactly
+            // where the mark is a wordmark. Every chrome in the generated app
+            // follows the same rule; the scaffold's `ShellBrand` is the other
+            // half of it.
+            //
             // SIZED BY HEIGHT, NEVER SQUEEZED TO FIT. The mark takes the row's
             // 28px of height and whatever width its ratio then asks for, and
             // the collapsed rail — 64px wide — CLIPS it. Capping the width
@@ -229,14 +237,16 @@ export function SideNav({
               {(appName || "A").trim().charAt(0).toUpperCase()}
             </span>
           )}
-          <span
-            className="tf-brand"
-            title={appName}
-            aria-label={appName}
-            style={{ color: light ? "#0F172A" : "#fff" }}
-          >
-            {appName}
-          </span>
+          {!logoSrc && (
+            <span
+              className="tf-brand"
+              title={appName}
+              aria-label={appName}
+              style={{ color: light ? "#0F172A" : "#fff" }}
+            >
+              {appName}
+            </span>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "8px 0" }}>
