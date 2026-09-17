@@ -73,6 +73,7 @@ import json
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -93,6 +94,11 @@ logger = logging.getLogger(__name__)
 #: has ignored the same brief twice is the same failure at higher cost — the
 #: same argument as ``ATTEMPTS_BY_NODE``.
 OBSERVER_ROUNDS = 2
+
+#: Critic calls one observation makes at once, across a fan-out's subjects.
+#: The agents' own calls already run 14 wide (`WAVE_CONCURRENCY`); these read
+#: a snapshot and write nothing, and 8 covers every fan-out measured so far.
+CRITIC_CONCURRENCY = 8
 
 #: Which agent the observer is. Registered with no writable section — its
 #: capability is to flag, never to author.
@@ -469,43 +475,75 @@ class Observer:
         # still flags it.
         obs.deferred.append(f)
 
+    def _ask(self, obs: Observation, doc: Mapping[str, Any], subject: str, *,
+             user_request: str) -> tuple[str, Any] | None:
+        """One critic call for one subject: ``("ok", (verdict, items))``,
+        ``("unavailable", why)``, or ``None`` when there is nothing to judge.
+        Touches nothing on ``obs`` — it runs beside its siblings."""
+        context = observation_context(
+            doc, agent=obs.agent, subject=subject, user_request=user_request,
+        )
+        if not context["output"]:
+            # The node wrote nothing this subject can be judged on. A
+            # critique of an empty output is a critique of the prompt.
+            return None
+        system, user = critic_prompt(context)
+        t0 = time.monotonic()
+        try:
+            raw = self.critic(system=system, user=user, schema=VERDICT_SCHEMA)
+        except Exception as exc:  # noqa: BLE001 — recorded, never invented
+            return "unavailable", f"{type(exc).__name__}: {str(exc)[:200]}"
+        text = getattr(raw, "text", raw)
+        usage = getattr(raw, "usage", None)
+        if self.usage is not None and usage is not None:
+            try:
+                self.usage.record(node=f"observer:{obs.node}",
+                                  agent=OBSERVER_AGENT, usage=usage,
+                                  elapsed_s=time.monotonic() - t0, project="")
+            except Exception:  # noqa: BLE001 — the ledger never ends a run
+                pass
+        try:
+            reply = json.loads(text if isinstance(text, str) else "")
+            return "ok", (str(reply["verdict"]), list(reply.get("findings") or []))
+        except (ValueError, KeyError, TypeError) as exc:
+            return "unavailable", f"malformed reply: {str(exc)[:200]}"
+
     def _consult(self, obs: Observation, doc: Mapping[str, Any], *,
                  user_request: str,
                  subject_of: Callable[[str], str | None] | None = None) -> None:
         """Ask the critic, once per subject. Its findings are filed like any
-        other; its verdict is recorded as it was given."""
+        other; its verdict is recorded as it was given.
+
+        THE SUBJECTS ARE ASKED TOGETHER. One after another, a feature-per-call
+        node waited N critic calls for its verdict: `workflow_steps` took a
+        median 60s to be judged on two workflows, `page_details` up to 380s,
+        and everything downstream of it waited too. The calls read one
+        snapshot and write nothing, so they run side by side and are filed in
+        subject order afterwards — the verdict is the same one, sooner.
+        """
+        subjects = list(obs.subjects)
+        if len(subjects) > 1:
+            with ThreadPoolExecutor(
+                    max_workers=min(len(subjects), CRITIC_CONCURRENCY)) as pool:
+                answers = list(pool.map(
+                    lambda s: self._ask(obs, doc, s, user_request=user_request),
+                    subjects))
+        else:
+            answers = [self._ask(obs, doc, s, user_request=user_request)
+                       for s in subjects]
+
         verdicts: list[str] = []
-        for subject in obs.subjects:
-            context = observation_context(
-                doc, agent=obs.agent, subject=subject, user_request=user_request,
-            )
-            if not context["output"]:
-                # The node wrote nothing this subject can be judged on. A
-                # critique of an empty output is a critique of the prompt.
+        for answer in answers:
+            if answer is None:
                 continue
-            system, user = critic_prompt(context)
-            t0 = time.monotonic()
-            try:
-                raw = self.critic(system=system, user=user, schema=VERDICT_SCHEMA)
-            except Exception as exc:  # noqa: BLE001 — recorded, never invented
-                obs.critic = f"unavailable: {type(exc).__name__}: {str(exc)[:200]}"
-                return
-            text = getattr(raw, "text", raw)
-            usage = getattr(raw, "usage", None)
-            if self.usage is not None and usage is not None:
-                try:
-                    self.usage.record(node=f"observer:{obs.node}",
-                                      agent=OBSERVER_AGENT, usage=usage,
-                                      elapsed_s=time.monotonic() - t0, project="")
-                except Exception:  # noqa: BLE001 — the ledger never ends a run
-                    pass
-            try:
-                reply = json.loads(text if isinstance(text, str) else "")
-                verdict = str(reply["verdict"])
-                items = list(reply.get("findings") or [])
-            except (ValueError, KeyError, TypeError) as exc:
-                obs.critic = f"unavailable: malformed reply: {str(exc)[:200]}"
-                return
+            status, payload = answer
+            if status != "ok":
+                # One subject the critic could not judge makes the critic's
+                # half unavailable, as it always did; the findings the other
+                # subjects returned are still filed — they were given.
+                obs.critic = f"unavailable: {payload}"
+                continue
+            verdict, items = payload
 
             filed = 0
             for item in items:
@@ -539,7 +577,8 @@ class Observer:
                 filed += 1
             # A fail that names nothing is an opinion; recorded as what it is.
             verdicts.append("fail" if verdict == "fail" and filed else "pass")
-        obs.critic = "fail" if "fail" in verdicts else "pass"
+        if not obs.critic.startswith("unavailable"):
+            obs.critic = "fail" if "fail" in verdicts else "pass"
 
     # -- repair --------------------------------------------------------------
 
@@ -625,7 +664,7 @@ def anthropic_observer(model: Any = None, *, effort: str = "medium",
 
 
 __all__ = [
-    "CRITIC_EDGE", "OBSERVER_AGENT", "OBSERVER_MODEL_ENV", "OBSERVER_ROUNDS",
+    "CRITIC_CONCURRENCY", "CRITIC_EDGE", "OBSERVER_AGENT", "OBSERVER_MODEL_ENV", "OBSERVER_ROUNDS",
     "VERDICT_SCHEMA",
     "Observation", "Observer", "RepairTask", "anthropic_observer",
     "critic_prompt", "flag_unrepaired", "observation_context",

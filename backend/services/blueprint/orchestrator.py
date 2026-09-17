@@ -1265,6 +1265,8 @@ def _execute(
     #: future absent here is an ordinary call.
     kinds: dict[Future, str] = {}
     watches: dict[str, _Watch] = {}
+    #: Future -> the subjects an "observe" future is judging.
+    judging: dict[Future, list[str]] = {}
     rounds = int(getattr(observer_agent, "rounds", 1) or 1)
 
     def ready() -> list[str]:
@@ -1434,15 +1436,20 @@ def _execute(
 
     # -- the observer's half ------------------------------------------------
 
-    def observe(pool: ThreadPoolExecutor, key: str, subjects: list[str]) -> None:
+    def observe(pool: ThreadPoolExecutor, key: str, subjects: list[str],
+                *, final: bool = False) -> None:
         """Judge ``subjects`` of ``key`` on a worker, against the document as
         it is right now. The snapshot is taken here, under the lock, so the
         observer reads what the node finished with and not what the next
-        apply writes."""
-        watches.setdefault(key, _Watch(
+        apply writes. ``final``: the check after a subject's last repair,
+        which the node does not wait for (see `advance`)."""
+        w = watches.setdefault(key, _Watch(
             subjects=list(subjects),
             authored={k: set(v) for k, v in runs[key].authored.items()},
         ))
+        w.observing.update(subjects)
+        if final:
+            w.final.update(subjects)
         with svc.lock:
             snapshot = copy.deepcopy(svc.doc)
         fut = pool.submit(
@@ -1455,16 +1462,22 @@ def _execute(
         futures[fut] = TaskSpec(task_id=f"OBSERVE-{key}", node=key,
                                 agent=OBSERVER_AGENT)
         kinds[fut] = "observe"
+        judging[fut] = list(subjects)
 
-    def settle_observation(pool: ThreadPoolExecutor, key: str, obs: Any) -> None:
+    def settle_observation(pool: ThreadPoolExecutor, key: str, obs: Any,
+                           subjects: list[str]) -> None:
         w = watches[key]
+        w.observing.difference_update(subjects)
+        w.final.difference_update(subjects)
         if isinstance(obs, Exception):
             # The observer's own failure is not the node's. Recorded, and the
-            # node completes as its author left it.
+            # subjects it was judging stand as their author left them.
             logger.warning("[%s] observer failed: %s", key, _reason(obs))
             report.observed[key] = {"node": key, "ok": None,
                                     "error": _reason(obs)}
-            complete(key)
+            for subject in subjects:
+                w.open.pop(subject, None)
+            advance(pool, key)
             return
         _record_observation(report, ledger, obs)
         from services.blueprint.observer import CRITIC_EDGE as _CRITIC_EDGE
@@ -1523,34 +1536,54 @@ def _execute(
         _note(ledger, "unrepaired", key, subject, why)
 
     def advance(pool: ThreadPoolExecutor, key: str) -> None:
-        """Repair what is open, or flag it — once the rounds are spent, or as soon
-        as a round leaves a subject no better (see `_Watch.stuck`)."""
+        """Move every subject on by itself: repair what is open, or flag it —
+        once its rounds are spent, or as soon as a round leaves it no better
+        (see `_Watch.stuck`) — and complete the node when nothing it waits
+        on is left.
+
+        SUBJECT BY SUBJECT, NOT ROUND BY ROUND. A round used to wait for its
+        slowest repair before judging any of them, so one feature's rewrite
+        held every other feature's verdict. Each subject now goes back to the
+        critic the moment its own repair lands.
+
+        THE LAST CHECK DOES NOT HOLD THE NODE. After a subject's final repair
+        its verdict can only mark it repaired or flag it — nothing is sent
+        back again — so no dependent can consume an outcome that is about to
+        change (§28). The node completes as soon as only those checks are
+        outstanding; they finish on their workers and write their flag.
+        """
         w = watches[key]
-        # EARLY STOP: subjects a repair round did not improve. Flag them now
-        # rather than re-authoring against an identical brief that already failed.
-        for subject in [s for s in list(w.open) if s in w.stuck]:
-            _flag(key, subject, w.open.pop(subject))
-            w.stuck.discard(subject)
-        if not w.open:
+        limit = OBSERVER_ROUNDS_BY_NODE.get(key, rounds)
+        for subject in list(w.open):
+            if subject in w.awaiting or subject in w.observing:
+                continue
+            task = w.open[subject]
+            if subject in w.stuck or w.rounds.get(subject, 0) >= limit:
+                # EARLY STOP, or rounds spent: flag rather than re-author
+                # against a brief that has already failed.
+                _flag(key, subject, w.open.pop(subject))
+                w.stuck.discard(subject)
+                continue
+            dispatch_repair(pool, key, subject, task, limit)
+        if not w.closed and not w.awaiting and w.observing <= w.final:
+            w.closed = True
             complete(key)
-            return
-        if w.round >= OBSERVER_ROUNDS_BY_NODE.get(key, rounds):
-            for subject, task in list(w.open.items()):
-                _flag(key, subject, task)
-            complete(key)
-            return
-        w.round += 1
-        for subject, task in w.open.items():
-            spec = TaskSpec(
-                task_id=f"TASK-{task.label}-observer{w.round}",
-                node=key, agent=task.agent, attempt=w.round,
-                subject=subject, feedback=task.feedback,
-            )
-            _note(ledger, "repair", key, subject, w.round, rounds, task.feedback)
-            fut = pool.submit(_call, executor, spec)
-            futures[fut] = spec
-            kinds[fut] = "repair"
-            w.awaiting.add(subject)
+
+    def dispatch_repair(pool: ThreadPoolExecutor, key: str, subject: str,
+                        task: Any, limit: int) -> None:
+        """Send one subject back to its author with the observer's brief."""
+        w = watches[key]
+        n = w.rounds[subject] = w.rounds.get(subject, 0) + 1
+        spec = TaskSpec(
+            task_id=f"TASK-{task.label}-observer{n}",
+            node=key, agent=task.agent, attempt=n,
+            subject=subject, feedback=task.feedback,
+        )
+        _note(ledger, "repair", key, subject, n, limit, task.feedback)
+        fut = pool.submit(_call, executor, spec)
+        futures[fut] = spec
+        kinds[fut] = "repair"
+        w.awaiting.add(subject)
 
     def settle_repair(pool: ThreadPoolExecutor, spec: TaskSpec, outcome: Any) -> None:
         key = spec.node
@@ -1585,15 +1618,12 @@ def _execute(
                          f"rejected: {refused}",
             )
         else:
-            w.landed.append(spec.subject)
-        if w.awaiting:
-            return
-        landed, w.landed = w.landed, []
-        if landed:
-            # Verify again — the half of the loop that decides.
-            observe(pool, key, landed)
-        else:
-            advance(pool, key)
+            # Verify again — the half of the loop that decides — for this
+            # subject alone, now.
+            limit = OBSERVER_ROUNDS_BY_NODE.get(key, rounds)
+            observe(pool, key, [spec.subject],
+                    final=w.rounds.get(spec.subject, 0) >= limit)
+        advance(pool, key)
 
     def flush(pool: ThreadPoolExecutor) -> None:
         """Apply what arrived, holding back what must wait its turn."""
@@ -1629,7 +1659,8 @@ def _execute(
                     outcome = exc
                 kind = kinds.pop(fut, None)
                 if kind == "observe":
-                    settle_observation(pool, spec.node, outcome)
+                    settle_observation(pool, spec.node, outcome,
+                                       judging.pop(fut, []))
                     continue
                 if kind == "repair":
                     settle_repair(pool, spec, outcome)
@@ -1668,15 +1699,20 @@ class _Watch:
     """One node's passage through the observer: what is open, what round."""
 
     subjects: list[str]
-    round: int = 0
+    #: Subject -> repair rounds dispatched for it so far.
+    rounds: dict[str, int] = field(default_factory=dict)
     #: Subject -> the repair task it is waiting on (or about to be given).
     open: dict[str, Any] = field(default_factory=dict)
     #: Subject -> the observation that last failed it.
     last: dict[str, Any] = field(default_factory=dict)
-    #: Repair calls out on a worker this round.
+    #: Subjects with a repair call out on a worker.
     awaiting: set[str] = field(default_factory=set)
-    #: Repairs applied this round, to be judged again together.
-    landed: list[str] = field(default_factory=list)
+    #: Subjects with a critic check out on a worker.
+    observing: set[str] = field(default_factory=set)
+    #: Of those, the checks after a last repair — the node does not wait.
+    final: set[str] = field(default_factory=set)
+    #: The node has completed; later verdicts only record and flag.
+    closed: bool = False
     #: Subject -> identities the node's current answer for it consists of.
     authored: dict[str, set[tuple]] = field(default_factory=dict)
     #: Subjects a repair round left NO better (finding count did not drop). A
@@ -1987,12 +2023,17 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 #: `verification` unrepaired.
 #: `database`: 0 — sent back 8 times, 3 passed, 5 flagged. `integrations`: 0 —
 #: sent back once and flagged. Product decision the same day, for time and spend.
+#: `ux_architecture`: 0 — 17 of 19 failed the first look and 9 were repaired;
+#: most findings judged what later nodes fill ("the module's pages array is
+#: empty" before any page exists, an empty `initialRoute`, a missing citation),
+#: and it sat on the critical path.
 OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
     "page_layouts": 0,
     "entity_fields": 0,
     "requirements": 0,
     "database": 0,
     "integrations": 0,
+    "ux_architecture": 0,
 }
 
 
