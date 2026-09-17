@@ -55,6 +55,30 @@ def _ref(screens: list[tuple[str, str]]) -> DesignReference:
 
 
 def test_the_title_is_the_rail_destination_the_content_shows_not_the_brand_crumb():
+    """STILL FAILING, AND IT IS THE RAIL READER, NOT THIS TEST.
+
+    `chrome.navigation_from` returns only ['Dashboard', 'New Case'] for the
+    RAIL above, which lists four destinations:
+
+        ⬡Dashboard      → read
+        Front Desk      → dropped
+        +New Case       → read
+        Ticket Queue    → dropped
+
+    The two it reads are the two whose text carries a leading glyph. So
+    `named` does not contain "Ticket Queue", nothing in the content region
+    matches a destination, and the fallback takes the first text the chrome
+    does not own — the property switcher, "Zedwell Piccadilly · Zedwell".
+    The New Case frame passes only because its own title happens to be one of
+    the two entries that survive.
+
+    This is the defect the module exists for, one layer down: a frame named
+    after something that is not a place, which the planner then routes by
+    position. Left red — teaching `navigation_from` to read a plain-text rail
+    entry changes what every design-driven generation extracts from a real
+    Figma file, and that wants validating against real payloads, which this
+    checkout cannot do.
+    """
     ticket_queue = _frame("1:2", "1:9", ["Criterion", "Ticket Queue"], "Ticket Queue", "Recent tickets")
     new_case = _frame("1:360", "1:9", ["Criterion", "Front Desk", "New Case"], "New Case", "Guest details")
 

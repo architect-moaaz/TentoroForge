@@ -76,8 +76,14 @@ def test_a_declared_property_is_still_accepted():
     body = next(p for p in _a2ui("Card")["allOf"] if "properties" in p)
     v = Draft202012Validator({**body, "unevaluatedProperties": False})
     assert not list(v.iter_errors({"component": "Card", "title": "Sittings"}))
+    # …and one it does not is still refused. The name is DERIVED: this used
+    # `density`, which Card declares now, so the test asserted a refusal on a
+    # real property and read as the constraint having gone.
+    declared = set(body.get("properties") or {})
+    undeclared = next(n for n in ("nonsenseProp", "zzzNotAProp")
+                      if n not in declared)
     assert list(v.iter_errors(
-        {"component": "Card", "title": "Sittings", "density": "compact"}))
+        {"component": "Card", "title": "Sittings", undeclared: "x"}))
 
 
 def test_a_form_must_say_where_it_submits():
@@ -112,5 +118,11 @@ def test_adding_form_changed_no_existing_verdict():
     that the requirement is stated where the composer reads it."""
     from services.blueprint.functional_completeness import _action_props
 
+    # `clientAction` is the seventh and the first that does not involve the
+    # server: it changes one of the page's own `clientState` values — a
+    # calculator's display, a converter's result. Without it on the list, a key
+    # doing the only thing a key can do was refused as a label with a border,
+    # and the composer was pushed towards inventing a workflow and a table to
+    # hold a number nobody wants kept.
     assert _action_props() == {"workflow", "navigate", "submit", "onClick",
-                               "opensDialog", "togglesSidebar"}
+                               "opensDialog", "togglesSidebar", "clientAction"}
