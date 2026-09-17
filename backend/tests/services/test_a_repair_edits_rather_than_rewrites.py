@@ -239,3 +239,72 @@ def test_an_edit_that_fails_falls_back_to_the_rewrite(svc, watched):
     assert [c is PATCH_SCHEMA for c in calls] == [False, True, False]
     live = [m for m in svc.doc["modules"] if m.get("status") != "DEPRECATED"]
     assert live[0]["description"] == "Registers walk-in patients"
+
+
+# ------------------------- an edit that leaves a finding standing → rewrite
+
+class _ScriptedCritic:
+    """Fails with each scripted finding in turn, then passes."""
+
+    def __init__(self, *findings):
+        self.findings = list(findings)
+        self.enforces_schema = True
+
+    def __call__(self, *, system, user, schema):
+        if not self.findings:
+            return json.dumps({"verdict": "pass", "findings": []})
+        artifact, requirement, detail = self.findings.pop(0)
+        return json.dumps({"verdict": "fail", "findings": [{
+            "section": "modules", "artifact": artifact,
+            "requirement": requirement, "detail": detail}]})
+
+
+def _module_model(calls):
+    def model(*, system, user, schema):
+        calls.append(schema)
+        if schema is PATCH_SCHEMA:
+            return json.dumps({"edits": [_edit(
+                "/artifacts/0/body/description", f"edit {len(calls)}")], "note": ""})
+        return json.dumps({
+            "proposals": [{"section": "modules", "natural_key": "MODULE:intake",
+                           "body": json.dumps({"name": "Intake",
+                                               "description": f"authored {len(calls)}"})}],
+            "confidence": 0.9, "assumptions": [], "issues": [], "change_requests": []})
+    return model
+
+
+def test_a_finding_an_edit_did_not_clear_is_rewritten_next_round(svc, watched):
+    """dogfood bgjyuh1o: the same finding came back reworded after an edit,
+    and the second edit was no better. The second round rewrites."""
+    calls = []
+    critic = _ScriptedCritic(
+        ("MODULE-001", "REQ-001", "the description does not say what Intake does"),
+        ("MODULE-001", "REQ-001", "Intake's description still omits its purpose"),
+    )
+    report = run(svc, make_executor(svc, _module_model(calls)), plan=["ux_architecture"],
+                 observer_agent=Observer(critic=critic, rounds=2))
+    assert [c is PATCH_SCHEMA for c in calls] == [False, True, False]
+    assert report.repaired == ["ux_architecture"]
+
+
+def test_a_new_finding_after_an_edit_is_edited_again(svc, watched):
+    """The edit cleared what it was sent; the critic found something else."""
+    svc.doc["requirements"].append({"id": "REQ-002", "description": "Paginate."})
+    calls = []
+    critic = _ScriptedCritic(
+        ("MODULE-001", "REQ-001", "the description does not say what Intake does"),
+        ("MODULE-001", "REQ-002", "the description does not mention pagination"),
+    )
+    run(svc, make_executor(svc, _module_model(calls)), plan=["ux_architecture"],
+        observer_agent=Observer(critic=critic, rounds=2))
+    assert [c is PATCH_SCHEMA for c in calls] == [False, True, True]
+
+
+def test_a_reworded_finding_is_the_same_finding():
+    from services.blueprint.orchestrator import _finding_keys
+    from services.blueprint.verification import Finding
+    a = Finding("Observer↔Requirement", "REQ-005: age must be numeric", "RULE-003")
+    b = Finding("Observer↔Requirement", "REQ-005: non-numeric ages pass", "RULE-003")
+    c = Finding("Observer↔Requirement", "REQ-006: age must be numeric", "RULE-003")
+    assert _finding_keys([a]) == _finding_keys([b])
+    assert not _finding_keys([a]) & _finding_keys([c])

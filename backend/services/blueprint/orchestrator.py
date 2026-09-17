@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -1515,9 +1516,18 @@ def _execute(
                 # re-author whose output merely shifted keeps its full rounds.
                 prev = w.last.get(subject)
                 if prev is not None:
-                    def _sig(fs):
-                        return frozenset((f.edge, f.artifact_id, f.detail) for f in fs)
-                    if _sig(obs.findings[subject]) == _sig(prev.findings.get(subject, [])):
+                    before = prev.findings.get(subject, [])
+                    if subject in w.edited:
+                        # AN EDIT THAT LEFT A FINDING STANDING IS NOT STUCK —
+                        # the rewrite has not been tried. The critic words
+                        # the same finding differently each time, so a repeat
+                        # is the same artifact and requirement, not the same
+                        # text (dogfood bgjyuh1o: RULE-003 / REQ-005 twice,
+                        # reworded, and the edit's second try was a condition
+                        # that can never be true).
+                        if _finding_keys(obs.findings[subject]) & _finding_keys(before):
+                            w.rewrite.add(subject)
+                    elif _finding_sig(obs.findings[subject]) == _finding_sig(before):
                         w.stuck.add(subject)
                 w.open[subject] = RepairTask(
                     node=key, agent=DAG[key].agent, subject=subject,
@@ -1586,7 +1596,7 @@ def _execute(
         # written; after a landed repair that is the repaired output.
         with svc.lock:
             try:
-                current = tuple(editable_artifacts(
+                current = () if subject in w.rewrite else tuple(editable_artifacts(
                     svc.doc, DAG[key].produces,
                     w.authored.get(subject, set()),
                     output_dir=getattr(svc, "output_dir", None)))
@@ -1606,6 +1616,7 @@ def _execute(
         w.awaiting.add(subject)
 
     def settle_repair(pool: ThreadPoolExecutor, spec: TaskSpec, outcome: Any) -> None:
+        from services.blueprint.artifact_patch import was_edited
         key = spec.node
         w = watches[key]
         w.awaiting.discard(spec.subject)
@@ -1627,6 +1638,10 @@ def _execute(
                             note=f"superseded by the observer's repair of "
                                  f"{spec.task_id}")
                 w.authored[spec.subject] = now
+                if was_edited(outcome):
+                    w.edited.add(spec.subject)
+                else:
+                    w.edited.discard(spec.subject)
         if refused is not None:
             # The author's repair was refused; the original stands, and the
             # next round is told why. Nothing half-applied: apply validates
@@ -1740,9 +1755,34 @@ class _Watch:
     #: burning the remaining round — the observer's biggest source of wasted
     #: re-authoring on hard apps (measured: NKit page_layouts).
     stuck: set[str] = field(default_factory=set)
+    #: Subjects whose last repair was an edit.
+    edited: set[str] = field(default_factory=set)
+    #: Subjects an edit left with a finding the observer had already sent.
+    #: Their next repair rewrites in full: an edit that did not clear a
+    #: finding once is not the tool to clear it the second time.
+    rewrite: set[str] = field(default_factory=set)
     #: Findings already reported as deferred, so a second round's identical
     #: verdict does not repeat them in the report.
     deferred_seen: set[tuple] = field(default_factory=set)
+
+
+def _finding_sig(findings: Iterable[Any]) -> frozenset:
+    """A verdict's findings, word for word."""
+    return frozenset((f.edge, f.artifact_id, f.detail) for f in findings)
+
+
+_REQUIREMENT_ID = re.compile(r"\b(REQ-\d+)\b")
+
+
+def _finding_keys(findings: Iterable[Any]) -> frozenset:
+    """What each finding is about — its edge, artifact and the requirement it
+    cites first — so the same finding reworded still matches."""
+    keys = set()
+    for f in findings:
+        req = _REQUIREMENT_ID.search(f.detail or "")
+        keys.add((f.edge, f.artifact_id or f.section or "",
+                  req.group(1) if req else (f.detail or "")))
+    return frozenset(keys)
 
 
 def _applied(state: _NodeRun) -> list[str]:

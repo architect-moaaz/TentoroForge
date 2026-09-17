@@ -76,6 +76,16 @@ PATCH_SCHEMA: dict[str, Any] = {
 }
 
 
+#: How an edited repair announces itself in its result's assumptions.
+EDIT_NOTE = "repaired in place with"
+
+
+def was_edited(result: Any) -> bool:
+    """Whether a repair's result came from an edit rather than a rewrite."""
+    notes = getattr(result, "assumptions", None) or ()
+    return bool(notes) and str(notes[0]).startswith(EDIT_NOTE)
+
+
 class EditUnusable(ValueError):
     """The edit could not be applied as given; the caller rewrites instead."""
 
@@ -280,10 +290,11 @@ def patch_node_output(spec: Any, client: Callable[..., Any], *, system: str,
         proposals=[ArtifactProposal(section=a["section"],
                                     natural_key=str(a["natural_key"]),
                                     body=a["body"]) for a in patched],
-        assumptions=[f"repaired in place with {len(edits)} edit(s)"
+        assumptions=[f"{EDIT_NOTE} {len(edits)} edit(s)"
                      + (f": {note[:200]}" if note else "")],
     )
 
 
 __all__ = ["PATCH_SCHEMA", "MAX_EDITS", "EditUnusable", "editable_artifacts",
-           "build_edit_prompt", "apply_edits", "patch_node_output"]
+           "build_edit_prompt", "apply_edits", "patch_node_output", "EDIT_NOTE",
+           "was_edited"]
