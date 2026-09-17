@@ -358,19 +358,32 @@ def quoted_verbatim(say: str) -> tuple[str, ...]:
     return _quoted(_ANY_QUOTE.pattern).get(_normalise(say), ())
 
 
+#: A quote has to be a PHRASE before one sentence containing it means
+#: anything. `import_data`'s help says the record kind it needs is a word like
+#: "customers", and nine characters clears the length floor — so every
+#: phrasebook sentence with the word customers in it was read as a sentence the
+#: code quotes. A word is a value; three words is a way of asking. Exact
+#: matches are exempt because they are the whole sentence however short it is
+#: ("undo", "go back").
+MIN_PHRASE_WORDS = 3
+
+
 def quoted_under(say: str) -> tuple[str, ...]:
     """The verbs whose examples include this sentence, or ().
 
-    Containment either way: the phrasebook's sentence is what a person typed
-    ("Put it back how it was") and the code's example is the part of it that
-    names the ask ("put it back").
+    Two ways in. The code quotes the sentence WHOLE — "undo" is the whole of
+    what someone typed. Or the code quotes the PHRASE inside it that names the
+    ask: the phrasebook's sentence is "Put it back how it was" and `revert`'s
+    help quotes "put it back".
     """
     said = _normalise(say)
     if not said:
         return ()
     hits: set[str] = set()
     for quote, verbs in quoted_examples().items():
-        if quote in said or said in quote:
+        if quote == said:
+            hits.update(verbs)
+        elif len(quote.split()) >= MIN_PHRASE_WORDS and (quote in said or said in quote):
             hits.update(verbs)
     return tuple(sorted(hits))
 

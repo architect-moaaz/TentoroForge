@@ -584,6 +584,146 @@ sentences:
     source: code
     reaches: {verb: rebuild, states: []}
 
+  # -- The people who log in -----------------------------------------------
+  #
+  # Added 2026-09-18, and these sentences were in the closing list that
+  # morning. `edit_access` decides what a ROLE may do; these three are about
+  # who exists. Smith never holds a password: an account is created with a
+  # one-time link the person uses to choose their own.
+
+  - id: logins-set-up-for-email
+    say: "set up a login for dave@clinic.com"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_login, states: [email]}
+
+  - id: logins-new-receptionist
+    say: "add my new receptionist"
+    checked: {colour: asks, via: none, missing: [email]}
+    source: code
+    reaches: {verb: add_login, states: []}
+
+  - id: logins-six-staff
+    say: "my six staff need accounts"
+    checked: {colour: asks, via: none, missing: [email]}
+    source: code
+    reaches: {verb: add_login, states: []}
+
+  - id: logins-each-of-my-staff
+    say: "Each of my staff needs their own login"
+    checked: {colour: asks, via: none, missing: [email]}
+    source: phrasebook
+    reaches: {verb: add_login, states: []}
+
+  - id: logins-remove-daves
+    say: "remove Dave's login"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_login, states: [person]}
+
+  - id: logins-sarah-has-left
+    say: "Sarah has left"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_login, states: [person]}
+
+  - id: logins-take-away-access
+    say: "take away dave@clinic.com's access"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_login, states: [person]}
+
+  - id: logins-reset-daves-password
+    say: "reset Dave's password"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: reset_login, states: [person]}
+
+  - id: logins-sarah-locked-out
+    say: "Sarah is locked out"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: reset_login, states: [person]}
+
+  - id: logins-new-password-link
+    say: "send dave@clinic.com a new password link"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: reset_login, states: [person]}
+
+  - id: logins-forgot-her-password
+    say: "One of my team forgot her password — how does she reset it?"
+    checked: {colour: asks, via: none, missing: [person]}
+    source: phrasebook
+    reaches: {verb: reset_login, states: []}
+
+  # -- Their data in, and their data back out ------------------------------
+  #
+  # Added 2026-09-18. Three of the closing list's sentences went with it:
+  # loading a spreadsheet, getting the records out, and a backup — which is
+  # `export_data` with no kind of record named, so every kind goes into one
+  # zip.
+
+  - id: data-customer-spreadsheet
+    say: "here's our customer spreadsheet, load it in"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: import_data, states: [entity]}
+
+  - id: data-import-suppliers
+    say: "import these suppliers"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: import_data, states: [entity]}
+
+  - id: data-existing-bookings
+    say: "can you put our existing bookings in"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: import_data, states: [entity]}
+
+  - id: data-customers-in-a-spreadsheet
+    say: "I've got all my customers in a spreadsheet, can you load them in?"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: import_data, states: [entity]}
+
+  - id: data-import-a-csv
+    say: "Can I import a CSV of last year's bookings?"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: import_data, states: [entity]}
+
+  - id: data-all-this-out
+    say: "can I get all this out as a spreadsheet?"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: export_data, states: []}
+
+  - id: data-export-the-customers
+    say: "export the customers"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: export_data, states: []}
+
+  - id: data-download-the-bookings
+    say: "download the bookings"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: export_data, states: []}
+
+  - id: data-back-it-up-somewhere
+    say: "back it up somewhere"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: export_data, states: []}
+
+  - id: data-bookings-out-as-a-spreadsheet
+    say: "Can I get all the bookings out as a spreadsheet?"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: export_data, states: []}
+
   # -- Recognised, and refused with a reason -------------------------------
   #
   # These are verbs. They are not successes and they are not silent gaps:
@@ -656,66 +796,22 @@ sentences:
   # the claim is re-tested on every run: a verb, a command or a gate that
   # starts taking one of these turns its colour and fails the test.
 
-  - id: gap-spreadsheet-import
-    say: "I've got all my customers in a spreadsheet, can you load them in?"
-    checked: {colour: nothing, via: none}
-    source: phrasebook
-    gap: Getting data in
-    because: >-
-      no verb takes a file; `add_entity` and `add_field` describe the shape of a
-      record and nothing fills one
-
-  - id: gap-spreadsheet-import-csv
-    say: "Can I import a CSV of last year's bookings?"
-    checked: {colour: nothing, via: none}
-    source: phrasebook
-    gap: Getting data in
-    because: >-
-      the same: there is no verb for putting existing records into a built
-      application
-
-  - id: gap-individual-logins
-    say: "Each of my staff needs their own login"
-    checked: {colour: nothing, via: none}
-    source: phrasebook
-    gap: People and passwords
-    because: >-
-      `edit_access` decides roles and which screens each role opens, and no
-      verb creates an account for a named person
-
-  - id: gap-password-reset
-    say: "One of my team forgot her password — how does she reset it?"
-    checked: {colour: nothing, via: none}
-    source: phrasebook
-    gap: People and passwords
-    because: >-
-      there is nothing behind sign-in beyond the roles the access model
-      describes
-
-  - id: gap-records-export
-    say: "Can I get all the bookings out as a spreadsheet?"
-    checked: {colour: nothing, via: none}
-    source: phrasebook
-    gap: Getting data out
-    because: >-
-      `export` is the source code, not the records — it hands over the
-      application, not what has been typed into it
-
   - id: gap-nightly-backup
     say: "Can you back this up every night?"
     checked: {colour: nothing, via: none}
     source: phrasebook
     gap: Keeping it safe
     because: >-
-      undo restores the definition, not the data; nothing schedules or keeps a
-      copy of what the running application holds
+      `export_data` hands over every record as a zip when it is asked, which is
+      a backup — and nothing repeats it, so "every night" reaches nothing
 
   - id: gap-where-are-backups
     say: "Where are the backups kept?"
     checked: {colour: nothing, via: none}
     source: phrasebook
     gap: Keeping it safe
-    because: there is nothing to point at, so the question has no answer to read out
+    because: >-
+      a copy is handed to them, never kept, so there is nowhere to point at
 
   - id: gap-its-slow
     say: "It's slow"
