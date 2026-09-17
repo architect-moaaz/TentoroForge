@@ -88,6 +88,10 @@ export {
   NavigatorProvider,
   useNavigator,
 } from "./client/Navigator";
+// The box that opens a route when pressed. `Container` renders through it,
+// and so does the library's `Card`, so a clickable card is one affordance
+// with one keyboard behaviour wherever it is drawn.
+export { NavigateSurface } from "./client/NavigateSurface";
 export type { Navigator } from "./client/Navigator";
 
 // Shell state — mobile sidebar drawer open/close + delegated click handling.

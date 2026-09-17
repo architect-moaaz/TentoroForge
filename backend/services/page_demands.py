@@ -118,9 +118,12 @@ ACTION_TYPES = frozenset({
     "BulkActionBar", "Wizard", "Stepper",
 })
 
-# Takes a reader from a listed record to the record itself. Counted as an
-# action on a collection: opening the thing you found is acting on it.
-OPENS_RECORD_TYPES = frozenset({"Link", "NavLink", "CardLink"})
+# Takes a reader from a listed record to the record itself, when it carries a
+# destination. Counted as an action on a collection: opening the thing you
+# found is acting on it. `Card` and `Container` are here because a card grid
+# is how most designs present records — both render through the same
+# NavigateSurface seam, with the same keyboard behaviour, as a Link.
+OPENS_RECORD_TYPES = frozenset({"Link", "NavLink", "Card", "Container"})
 
 KPI_TYPES = frozenset({"MetricTile", "Stat", "KpiTile", "SplitArc"})
 CHART_TYPES = frozenset({"Chart", "Gauge", "Heatmap", "Sparkline", "Schematic"})

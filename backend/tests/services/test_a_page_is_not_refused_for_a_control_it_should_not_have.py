@@ -26,6 +26,10 @@ TABLE = {"type": "Table", "props": {"data": "{{rows}}"}}
     ({"type": "Table", "props": {"data": "{{r}}", "rowActions": [{"label": "View"}]}}, True),
     ({"type": "Table", "props": {"data": "{{r}}", "onRowClick": "/labs/{{id}}"}}, True),
     ({"type": "Link", "props": {"href": "/labs/1"}}, True),
+    # A card grid is how most designs list records; `Card.navigate` exists so
+    # one can open what it shows, through the same seam a Link uses.
+    ({"type": "Card", "props": {"title": "City Labs", "navigate": "/labs/1"}}, True),
+    ({"type": "Card", "props": {"title": "City Labs"}}, False),
     ({"type": "Button", "props": {"label": "New"}}, True),
     ({"type": "Text", "props": {"value": "nothing"}}, False),
 ])

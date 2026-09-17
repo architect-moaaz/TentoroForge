@@ -2221,6 +2221,9 @@
               "loose"
             ]
           },
+          "navigate": {
+            "type": "string"
+          },
           "style": {
             "type": "object",
             "properties": {

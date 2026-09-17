@@ -155,6 +155,13 @@ export const cardEntry: RegistryEntry = {
       group: "style",
       description: "Drop shadow size.",
     },
+    navigate: {
+      type: "string",
+      default: "",
+      control: "text",
+      group: "behavior",
+      description: "Route this card opens when pressed (a card that shows a record and opens it).",
+    },
     density: {
       type: "enum",
       options: ["tight", "regular", "loose"],

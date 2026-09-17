@@ -11,6 +11,12 @@ export const CardProps = z
     // strict schema rejected the `density` the composer legitimately emits for
     // dense dashboards ("Additional properties are not allowed ('density'…)").
     density: z.enum(["tight", "regular", "loose"]).optional(),
+    // A card that opens the record it shows. The same prop, seam and
+    // keyboard behaviour `Container` already carries (ContainerNode.props):
+    // a collection of cards is how most designs present records, and without
+    // this the only clickable card was an unstyled Container, so a card grid
+    // could not offer what a table offers through `rowActions`.
+    navigate: z.string().optional(),
     style: StyleSlot.optional(),
   })
   .strict();
