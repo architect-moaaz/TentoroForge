@@ -116,7 +116,7 @@ NODE_LABEL: dict[str, str] = {
     "testing": "Generating the tests",
     "memory": "Recording decisions and coverage",
     "verification": "Checking the blueprint against itself",
-    "preview": "Building the preview",
+    "assemble": "Assembling and starting the application",
     "install": "Installing the toolchain",
 }
 

@@ -167,7 +167,8 @@ PROJECTIONS: dict[str, tuple[str, str]] = {
     "integration": ("workflows + businessRules -> workflow definitions and "
                     "route wiring", "workflow engine"),
     "install": ("scaffold + vendored engines -> node_modules", "npm"),
-    "preview": ("runtime config + a running container", "build/preview service"),
+    "assemble": ("runtime config + a compiled, booting application",
+                 "build/assemble service"),
 }
 
 
@@ -389,7 +390,12 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # the tree being compiled, so a compile that waited for them was waiting
     # for a report it does not read. §94's state walk still gates PREVIEW on
     # `verification` having run — see `smith.BUILD_WALK`.
-    _n("preview", "build", ("integration", "install"), ("runtime",),
+    # NAMED FOR WHAT IT DOES. It was `preview`, and it previews nothing: no
+    # server is left running and there is no URL at the end of it. What it
+    # does is assemble the scaffold around the projected tree, compile it, and
+    # prove it starts — which is why a reader asking "what is preview doing
+    # here" was asking a fair question.
+    _n("assemble", "build", ("integration", "install"), ("runtime",),
        kind="projection"),
 )}
 
@@ -2581,7 +2587,7 @@ def _project_install(svc: BlueprintService, app_root: str) -> Any:
     return future
 
 
-def _project_preview(svc: BlueprintService, app_root: str) -> None:
+def _project_assemble(svc: BlueprintService, app_root: str) -> None:
     """Assemble the scaffold and engines around the projected application.
 
     Deliberately does not run ``app_emitter``'s repair cascade — see
@@ -2641,7 +2647,7 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     runtime["pages"] = page_funnel(svc.doc, app_root)
     if runtime["pages"]["missing"]:
         logger.warning(
-            "[preview] %d of %d planned pages are not served: %s",
+            "[assemble] %d of %d planned pages are not served: %s",
             len(runtime["pages"]["missing"]), runtime["pages"]["planned"],
             ", ".join(runtime["pages"]["missing"][:8]))
     svc.doc["runtime"] = runtime
@@ -2653,7 +2659,7 @@ PROJECTION_HANDLERS: dict[str, Any] = {
     "backend": _project_data_layer,
     "frontend": _project_frontend,
     "integration": _project_integration,
-    "preview": _project_preview,
+    "assemble": _project_assemble,
 }
 
 

@@ -100,3 +100,47 @@ def test_any_answer_counts_as_started():
     src = inspect.getsource(verify_boot)
     assert "HTTPError" in src, "a 4xx/5xx must count as served"
     assert "status = exc.code" in src
+
+
+def test_the_whole_process_tree_is_ended_not_just_npm():
+    """A RUN WENT SILENT AFTER A CLEAN BUILD BECAUSE OF THIS.
+
+    `npm run dev` spawns `next dev`, which spawns `next-server`, and all of
+    them inherit the pipe this reads. Terminating npm alone leaves the
+    grandchildren running and HOLDING THE PIPE OPEN, so a read waits for an
+    EOF that cannot come — the build node blocked for ever with no CPU, no
+    subprocess of its own to see, and nothing written to the ledger.
+
+    Its own session, killed as a group, and every read bounded.
+    """
+    import inspect
+
+    from services.blueprint.assembly import verify_boot
+
+    src = inspect.getsource(verify_boot)
+    assert "start_new_session=True" in src
+    assert "killpg" in src
+    # NO UNBOUNDED READ ANYWHERE. Every `communicate` carries a timeout, and
+    # the bare `proc.stdout.read()` that could wait for an EOF a surviving
+    # grandchild would never send is gone.
+    code = "\n".join(l for l in src.splitlines()
+                     if not l.strip().startswith("#"))
+    assert "proc.stdout.read()" not in code, (
+        "reading to EOF waits for a grandchild that may never close the pipe")
+    for line in code.splitlines():
+        if ".communicate(" in line:
+            assert "timeout" in line, line
+
+
+def test_the_tree_is_ended_even_when_npm_has_already_exited():
+    """`poll()` reports on npm, and npm exiting says nothing about the server
+    it spawned — which outlives it, on a port, holding the pipe."""
+    import inspect
+
+    from services.blueprint.assembly import verify_boot
+
+    src = inspect.getsource(verify_boot)
+    tail = src[src.index("finally:"):]
+    assert "_kill_tree()" in tail
+    assert "if proc.poll() is None" not in tail, (
+        "the cleanup must not be conditional on npm still running")

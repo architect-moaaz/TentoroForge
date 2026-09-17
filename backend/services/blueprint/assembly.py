@@ -693,7 +693,7 @@ def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
     actually served from, not against the Blueprint that intended it.
 
     Returns the counts and the missing routes rather than raising: whether a
-    shortfall should end a run is the caller's decision, and `_project_preview`
+    shortfall should end a run is the caller's decision, and `_project_assemble`
     records it either way. Reporting it is the part that was missing.
     """
     root = Path(app_root)
@@ -895,6 +895,7 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
     a sign-in — both mean the server started and routed. This checks booting,
     not behaviour, and a database is not required to run it.
     """
+    import signal
     import socket
     import subprocess
     import time
@@ -907,19 +908,42 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
         port = probe.getsockname()[1]
 
     started = time.monotonic()
+    # ITS OWN PROCESS GROUP, BECAUSE `npm` IS NOT THE SERVER. `npm run dev`
+    # spawns `next dev`, which spawns `next-server`, and all of them inherit
+    # this pipe. Terminating npm alone leaves the grandchildren running and
+    # HOLDING THE PIPE OPEN — so every read below waits for an EOF that cannot
+    # come, and the build node blocks for ever with no CPU, no subprocess of
+    # its own to see, and nothing written to the ledger. That is exactly how a
+    # run went silent after a clean build. Killing the group ends the whole
+    # tree and closes the pipe with it.
     proc = subprocess.Popen(
         ["npm", "run", "dev", "--", "--port", str(port)],
         cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, env={**os.environ, "BROWSER": "none"},
+        start_new_session=True,
     )
 
+    def _kill_tree() -> None:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(os.getpgid(proc.pid), sig)
+            except (ProcessLookupError, PermissionError):
+                return
+            try:
+                proc.wait(timeout=10)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+
     def _stop() -> str:
-        proc.terminate()
+        """End the whole tree, then read what it said. Never unbounded."""
+        _kill_tree()
         try:
-            out, _ = proc.communicate(timeout=20)
+            out, _ = proc.communicate(timeout=15)
         except subprocess.TimeoutExpired:
-            proc.kill()
-            out, _ = proc.communicate()
+            # The pipe is still held by something this could not kill. Its
+            # output is not worth hanging a build for.
+            return "(the application did not release its output)"
         return out or ""
 
     try:
@@ -929,10 +953,14 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
                 # IT DIED RATHER THAN SERVED. This is the route-collision case:
                 # Next prints the conflict and exits, so there is never a port
                 # to connect to. Its own words are the reason.
-                out = (proc.stdout.read() if proc.stdout else "") or ""
+                #
+                # Read through `_stop`, which bounds it. A bare
+                # `proc.stdout.read()` here waits for EOF on a pipe a
+                # surviving grandchild may still hold, and npm exiting says
+                # nothing about whether `next-server` did.
                 raise BootFailed(
                     "the application exited instead of starting: "
-                    + _last_error(out))
+                    + _last_error(_stop()))
             with socket.socket() as s2:
                 s2.settimeout(1)
                 if s2.connect_ex(("127.0.0.1", port)) == 0:
@@ -958,8 +986,12 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
         return {"port": port, "entry": entry, "status": status,
                 "seconds": round(time.monotonic() - started, 1)}
     finally:
-        if proc.poll() is None:
-            _stop()
+        # UNCONDITIONALLY. `poll()` reports on npm, and npm exiting leaves the
+        # server it spawned running — on a port, holding the pipe, outliving
+        # the build that started it.
+        _kill_tree()
+        if proc.stdout:
+            proc.stdout.close()
 
 
 def _last_error(output: str) -> str:
@@ -978,7 +1010,7 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
     ``install=False`` skips the install when the `install` node already ran
     it at the start of the build; ``build=False`` is that node's own call.
 
-    The `preview` node assembled a tree and reported success without ever
+    The `assemble` node built a tree and reported success without ever
     compiling it, so "an application was generated" meant "files were written".
     Two build-breaking faults survived every run that way: the scaffold's own
     user table was deleted by the projection guard, and the data engine's

@@ -279,7 +279,7 @@ BUILD_WALK: tuple[tuple[str, str], ...] = (
     ("DATABASE_PROVISIONING", "backend"),         # §56-62: schema, migrations, seed
     ("BUILD", "integration"),                     # the join projection
     ("VERIFICATION", "verification"),             # §107 step 20
-    ("PREVIEW", "preview"),                       # §107 step 21
+    ("PREVIEW", "assemble"),                      # §107 step 21
 )
 
 

@@ -77,7 +77,7 @@ def authoring_executor(spec):
 
 @pytest.fixture()
 def smith(tmp_path, monkeypatch):
-    # `preview` compiles what it assembles, which is the point of that node and
+    # `assemble` compiles what it builds, which is the point of that node and
     # not what these tests are about: they exercise §107's state machine, and
     # an `npm install` per test would make the file minutes long for a fact it
     # never asserts. The build itself is covered in test_assembly.
@@ -543,7 +543,7 @@ def _report(*completed: str):
 
 
 FULL_BUILD = ("requirements", "application_model", "backend", "integration",
-              "verification", "preview")
+              "verification", "assemble")
 
 
 def test_a_router_build_from_the_review_gate_reaches_preview(tmp_path):
@@ -570,9 +570,9 @@ def test_a_router_build_that_stalled_reads_where_it_stopped(tmp_path):
     svc.doc["requirements"] = [{"id": "REQ-001", "description": "x"}]
     svc.doc["state"] = "BLUEPRINT_REVIEW"
     svc.save()
-    # the join ran, verification did not, and preview did — the compile no
+    # the join ran, verification did not, and assemble did — the compile no
     # longer waits for the report, but the state still reads in §107's order
-    assert settle_state_after_build(svc, _report("backend", "integration", "preview")) == "BUILD"
+    assert settle_state_after_build(svc, _report("backend", "integration", "assemble")) == "BUILD"
 
 
 def test_a_router_build_that_defined_nothing_moves_nowhere(tmp_path):

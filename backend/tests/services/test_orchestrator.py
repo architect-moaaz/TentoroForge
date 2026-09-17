@@ -109,7 +109,7 @@ def test_nodes_only_claim_to_produce_what_their_agent_may_write():
 def test_descendants_walks_transitively():
     assert "verification" in descendants("data_model")
     assert "backend" in descendants("apis")
-    assert descendants("preview") == set()
+    assert descendants("assemble") == set()
 
 
 # --- §94: the state machine -------------------------------------------------
@@ -365,7 +365,7 @@ def test_projection_nodes_are_deterministic_not_model_calls():
     invent paths that pass validation against files nobody wrote."""
     from services.blueprint.orchestrator import PROJECTIONS
 
-    for key in ("backend", "frontend", "integration", "preview"):
+    for key in ("backend", "frontend", "integration", "assemble"):
         assert DAG[key].kind == "projection", key
         assert key in PROJECTIONS, f"{key} must declare what it projects"
 
@@ -381,8 +381,8 @@ def test_a_run_over_projection_nodes_reports_blocked_not_failed(svc):
     def never_called(spec):
         raise AssertionError("a projection node must not call an agent")
 
-    report = run(svc, never_called, plan=["backend", "preview"])
-    assert set(report.blocked) == {"backend", "preview"}
+    report = run(svc, never_called, plan=["backend", "assemble"])
+    assert set(report.blocked) == {"backend", "assemble"}
     assert report.failed == []
 
 
@@ -557,7 +557,7 @@ def test_the_plan_still_reaches_the_implementation(ats):
     """Narrowing must not cut the projections off — a change that never
     regenerates anything is not a change."""
     plan = incremental_plan(ats, ["RULE-004"], also_sections={"businessRules"})
-    for required in ("integration", "testing", "verification", "preview"):
+    for required in ("integration", "testing", "verification", "assemble"):
         assert required in plan
 
 
@@ -630,7 +630,7 @@ def test_narrowing_did_not_cut_off_what_reads_the_change(ats):
     change anything upstream can respond to.
     """
     plan = incremental_plan(ats, ["PAGE-009"])
-    for required in ("page_layouts", "frontend", "integration", "verification", "preview"):
+    for required in ("page_layouts", "frontend", "integration", "verification", "assemble"):
         assert required in plan, required
 
 
@@ -912,7 +912,7 @@ def test_completed_nodes_never_skips_projections():
     done = completed_nodes(doc)
     assert "backend" not in done
     assert "frontend" not in done
-    assert "preview" not in done
+    assert "assemble" not in done
 
 
 def test_completed_nodes_empty_for_a_fresh_document():
@@ -1425,9 +1425,9 @@ def test_install_depends_on_nothing_and_the_build_waits_for_it():
     first agent and be done before there is anything to compile."""
     assert DAG["install"].depends_on == frozenset()
     assert DAG["install"].kind == "projection"
-    assert "install" in DAG["preview"].depends_on
-    assert "integration" in DAG["preview"].depends_on
-    assert "verification" not in DAG["preview"].depends_on, (
+    assert "install" in DAG["assemble"].depends_on
+    assert "integration" in DAG["assemble"].depends_on
+    assert "verification" not in DAG["assemble"].depends_on, (
         "the compile waited for a report it does not read")
     assert "install" in levels()[0]
 
@@ -1496,12 +1496,12 @@ def test_a_failed_install_is_recorded_and_the_build_is_skipped(svc, tmp_path, mo
         return fut
 
     monkeypatch.setitem(orchestrator.PROJECTION_HANDLERS, "install", broken_install)
-    report = run(svc, page_agent_result, plan=["install", "preview"],
+    report = run(svc, page_agent_result, plan=["install", "assemble"],
                  max_attempts=1, app_root=str(tmp_path / "app"))
     assert report.failed == ["install"]
     assert "ENOTFOUND" in report.failed_because["install"]
-    assert "preview" in report.skipped
-    assert report.skipped_because["preview"] == "install"
+    assert "assemble" in report.skipped
+    assert report.skipped_because["assemble"] == "install"
 
 
 def test_the_build_does_not_install_again_when_the_install_node_did(svc, tmp_path, monkeypatch):
@@ -1523,12 +1523,12 @@ def test_the_build_does_not_install_again_when_the_install_node_did(svc, tmp_pat
                         lambda doc, root: {"planned": 0, "served": 0, "missing": []})
 
     (app_root / "node_modules").mkdir(parents=True)
-    orchestrator._project_preview(svc, str(app_root))
+    orchestrator._project_assemble(svc, str(app_root))
     assert seen[-1]["install"] is False
 
     import shutil
     shutil.rmtree(app_root / "node_modules")
-    orchestrator._project_preview(svc, str(app_root))
+    orchestrator._project_assemble(svc, str(app_root))
     assert seen[-1]["install"] is True, "no node_modules: the build installs for itself"
 
 
