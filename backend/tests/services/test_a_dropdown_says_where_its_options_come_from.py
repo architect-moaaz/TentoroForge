@@ -84,9 +84,12 @@ def test_a_foreign_key_select_with_nothing_said_still_gets_its_list():
 
 
 def test_items_named_by_label_alone_take_it_as_their_value():
+    """Where the component REQUIRES a value. This used `Tabs`, whose contract
+    has no `items` list at all — it reads `tabs` and `value` — so it protected
+    a shape the validator would refuse anyway. A menu is the real case."""
     from services.a2ui_to_forge import _translate_option_sources, _Binder
     root = {"type": "Stack", "props": {}, "children": [
-        {"type": "Tabs", "props": {"items": [{"label": "Front desk"}, {"label": "Guest", "value": "guest"}]}, "children": []}]}
+        {"type": "DropdownMenu", "props": {"items": [{"label": "Front desk"}, {"label": "Guest", "value": "guest"}]}, "children": []}]}
     _translate_option_sources(root, _Binder(REG, {}), REG)
     assert [i["value"] for i in root["children"][0]["props"]["items"]] == ["Front desk", "guest"]
 
@@ -104,5 +107,19 @@ def test_a_placeholder_option_becomes_the_placeholder():
     field = root["props"]["fields"][0]
     assert field["options"] == [{"label": "Complaint", "value": "COMPLAINT"}]
     assert field["placeholder"] == "Select a type"
+    # A Select's contract has no `placeholder`; the empty option still goes,
+    # and the caption is dropped rather than written where it is refused.
     sel = root["children"][0]["props"]
-    assert sel["options"] == [{"label": "High", "value": "HIGH"}] and sel["placeholder"] == "Choose…"
+    assert sel["options"] == [{"label": "High", "value": "HIGH"}]
+    assert "placeholder" not in sel
+
+
+def test_a_placeholder_option_becomes_the_placeholder_where_one_exists():
+    from services.a2ui_to_forge import _translate_option_sources, _Binder
+    root = {"type": "Stack", "props": {}, "children": [
+        {"type": "Combobox", "props": {"name": "priority", "options": [
+            {"label": "Choose…", "value": ""}, {"label": "High", "value": "HIGH"}]}, "children": []}]}
+    _translate_option_sources(root, _Binder(REG, {}), REG)
+    box = root["children"][0]["props"]
+    assert box["options"] == [{"label": "High", "value": "HIGH"}]
+    assert box["placeholder"] == "Choose…"

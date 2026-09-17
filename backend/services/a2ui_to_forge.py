@@ -1580,7 +1580,119 @@ def _enum_options_for_field(registry: dict, field_name: str,
     return [{"value": v, "label": v} for v in vals] if vals else None
 
 
+def _accepts_prop(kind: str, prop: str) -> bool:
+    """Whether `kind`'s contract declares `prop`. True when the catalogue
+    cannot say, so an unknown component keeps today's behaviour."""
+    try:
+        from services.blueprint.page_planner import load_catalog
+        entry = load_catalog().get(str(kind or ""))
+    except Exception:  # noqa: BLE001
+        return True
+    if not entry:
+        return True
+    return prop in ((entry.get("props") or {}).get("properties") or {})
+
+
+def _item_requires(kind: str, key: str) -> bool:
+    """Whether `kind`'s `items` entries REQUIRE `key`, per the component catalogue.
+
+    False when the catalogue cannot say — no `items` prop, an unconstrained
+    entry, or a catalogue that cannot be read. A rewrite nobody asked for is
+    the risk here; one that does not happen costs nothing the validator will
+    not then report in the composer's own terms.
+    """
+    return key in _item_required_keys(str(kind or ""))
+
+
+_ITEM_REQUIRED_CACHE: dict[str, frozenset[str]] = {}
+
+
+def _item_required_keys(kind: str) -> frozenset[str]:
+    if kind in _ITEM_REQUIRED_CACHE:
+        return _ITEM_REQUIRED_CACHE[kind]
+    try:
+        from services.blueprint.page_planner import load_catalog
+        props = ((load_catalog().get(kind) or {}).get("props") or {}).get("properties") or {}
+        entry = ((props.get("items") or {}).get("items") or {})
+        keys = frozenset(str(k) for k in (entry.get("required") or []))
+    except Exception:  # noqa: BLE001 — a lookup must never fail a translation
+        keys = frozenset()
+    _ITEM_REQUIRED_CACHE[kind] = keys
+    return keys
+
+
+def _node_at(root: Any, path: str) -> dict | None:
+    """The node a validator path names: `root`, `root.children[2].children[0]`."""
+    node = root
+    for index in re.findall(r"\[(\d+)\]", path):
+        kids = node.get("children") if isinstance(node, dict) else None
+        if not isinstance(kids, list) or int(index) >= len(kids):
+            return None
+        node = kids[int(index)]
+    return node if isinstance(node, dict) else None
+
+
 def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
+    """Rewrite option sources and item values — and never make a page worse.
+
+    THE INVARIANT: a tree that validated before this ran validates after it,
+    and a tree that had faults has no NEW ones. Checked by running the same
+    validator the contract runs, before and after.
+
+    WHY IT EXISTS. This step filled `value` into breadcrumb and navigation
+    entries that forbid it. The contract then refused the page and told the
+    COMPOSER to remove the key — a key the composer never wrote and could not
+    see. It removed nothing, resubmitted, and the translation added the key
+    back: an answer no composer could give, retried until every attempt was
+    spent. The bad rule was one line; the loop is what cost 101 retries.
+
+    A fault this step introduces is therefore its own defect, not the
+    author's. The affected component is put back as the composer wrote it
+    and the defect is logged as the platform's, so the composer is only ever
+    held to what it actually said. If a node-level rollback does not clear
+    it, the whole tree is restored — correctness of the check matters more
+    than keeping this step's other rewrites.
+    """
+    import copy
+
+    original = copy.deepcopy(root)
+    _rewrite_option_sources(root, binder, registry)
+    try:
+        from services.blueprint.page_planner import load_catalog, validate_props
+        catalog = load_catalog()
+        before = set(validate_props({"root": original}, catalog))
+        introduced = [e for e in validate_props({"root": root}, catalog)
+                      if e not in before]
+    except Exception:  # noqa: BLE001 — the check must never fail a translation
+        return
+    if not introduced:
+        return
+
+    reverted: list[str] = []
+    for error in introduced:
+        path = error.split(".props", 1)[0].strip()
+        node, written = _node_at(root, path), _node_at(original, path)
+        if node is None or written is None:
+            continue
+        node["props"] = copy.deepcopy(written.get("props") or {})
+        reverted.append(f"{node.get('type') or '?'} at {path}")
+    still = [e for e in validate_props({"root": root}, catalog) if e not in before]
+    if still and isinstance(root, dict) and isinstance(original, dict):
+        root.clear()
+        root.update(original)
+        reverted.append("the whole tree")
+    logger.error(
+        "[layout-translation] PLATFORM DEFECT: the option-source rewrite made "
+        "a valid tree invalid (%s); reverted %s so the composer is not blamed",
+        "; ".join(introduced[:3]), ", ".join(dict.fromkeys(reverted)) or "nothing")
+    record = getattr(binder, "_record", None)
+    if callable(record):
+        for error in introduced[:6]:
+            record("translation_reverted", "page", "",
+                   f"the platform's own rewrite introduced: {error[:200]}")
+
+
+def _rewrite_option_sources(root: Any, binder: Any, registry: dict) -> None:
     """Every place the tree says where options come from, in the contract's words.
 
     Three shapes, one meaning. A declarative Form field carries `optionsFrom`
@@ -1655,8 +1767,18 @@ def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
                             registry, str(field.get("name") or ""), form_entity)
                         if opts:
                             field["options"] = opts
+            # A VALUE ONLY WHERE THE COMPONENT ASKS FOR ONE. This filled
+            # `value` from `label` on every `items` list it met, whatever the
+            # component. Menus require it; breadcrumbs and navigation forbid
+            # it, so every breadcrumb and mobile nav a composer wrote came
+            # back invalid — and the composer was told to remove a key it
+            # had never written. LabConnect: 121 of those refusals behind 101
+            # layout retries, and 8 pages that ran out of attempts.
+            #
+            # Read from the same catalogue the validator reads, so the two
+            # cannot disagree about what an item may carry.
             items = props.get("items")
-            if isinstance(items, list):
+            if isinstance(items, list) and _item_requires(kind, "value"):
                 for item in items:
                     if isinstance(item, dict) and "value" not in item and item.get("label") is not None:
                         item["value"] = str(item["label"])
@@ -1664,7 +1786,8 @@ def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
             # is how a composer says what an empty select shows; the contract
             # says it with `placeholder` and refuses an option with no value.
             _placeholder_out_of_options(
-                props, getattr(binder, "losses", None), str(node.get("id") or ""))
+                props, getattr(binder, "losses", None), str(node.get("id") or ""),
+                accepts_placeholder=_accepts_prop(kind, "placeholder"))
             if kind == "Form":
                 for field in props.get("fields") or []:
                     if isinstance(field, dict):
@@ -1677,14 +1800,29 @@ def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
 
 
 def _placeholder_out_of_options(holder: dict, losses: "Losses | None" = None,
-                                where: str = "") -> None:
+                                where: str = "", *,
+                                accepts_placeholder: bool = True) -> None:
+    """Take an empty-valued option out of `options`; its caption becomes the
+    `placeholder` WHERE THE COMPONENT HAS ONE.
+
+    A Select has no `placeholder` in its contract; a MultiSelect, a Combobox
+    and a Form field do. Setting it on a Select made a page invalid while
+    fixing another fault in it — the same shape-not-contract mistake as the
+    breadcrumb `value`, caught by the guard on its first run.
+    """
     options = holder.get("options")
     if not isinstance(options, list):
         return
     kept = []
     for opt in options:
         if isinstance(opt, dict) and str(opt.get("value") or "") == "":
-            if opt.get("label") and not holder.get("placeholder"):
+            if opt.get("label") and not accepts_placeholder:
+                if losses is not None:
+                    losses.record(
+                        "dropped_option", where, str(opt["label"]),
+                        "an option with no value, on a component that has "
+                        "no placeholder to carry its caption")
+            elif opt.get("label") and not holder.get("placeholder"):
                 holder["placeholder"] = str(opt["label"])
             elif opt.get("label") and losses is not None:
                 # THE LABEL GOES NOWHERE. The option is removed because it has
