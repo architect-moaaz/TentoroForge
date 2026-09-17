@@ -89,13 +89,24 @@ def test_catalog_entries_all_have_signature_and_desc():
 
 
 def test_readonly_handlers_cover_every_inspection_tool_in_catalog():
-    """If a tool appears in the catalog but not in READONLY_HANDLERS the agent
-    can't dispatch it. Terminals are handled separately by the agent loop."""
+    """If a tool appears in the catalog but has no handler in EITHER table the
+    agent can't dispatch it. Terminals are handled separately by the loop.
+
+    Two tables, because two kinds of tool. `READONLY_HANDLERS` is served by an
+    `output_dir`; `PROJECT_HANDLERS` also needs to know whose project this is,
+    because what it hands back is a download url authorised against the
+    project row. Both are dispatched, so both count as covered here — a
+    catalog entry with no handler in either is a tool the model is coached to
+    call and that dead-ends on "unknown tool"."""
     catalog_names = {t["name"] for t in smith_tools.TOOL_CATALOG}
-    handler_names = set(smith_tools.READONLY_HANDLERS)
+    handler_names = set(smith_tools.READONLY_HANDLERS) | set(smith_tools.PROJECT_HANDLERS)
     terminals = {"propose_fix", "answer", "ask_user", "handoff_to_pipeline"}
     missing = (catalog_names - terminals) - handler_names
     assert not missing, f"catalog tools with no handler: {missing}"
+    # And the two tables must not both claim a name: the loop looks in
+    # READONLY first, so a duplicate would silently run the wrong one.
+    both = set(smith_tools.READONLY_HANDLERS) & set(smith_tools.PROJECT_HANDLERS)
+    assert not both, f"handled in both tables: {both}"
 
 
 def test_direct_specialists_all_registered_no_phantom_tools_in_prompt():

@@ -1013,6 +1013,28 @@ TOOL_CATALOG: list[dict] = [
              "Settings → Integrations; missing pieces surface as a clear "
              "error in the return."},
 
+    # The two asks under "can I trust this?". Both hand over a FILE, which is
+    # why they are tools and not an `answer` — a sentence saying the records
+    # exist is what these replace.
+    {"name": "export_records",
+     "signature": "export_records(entity?) -> {applied, url, filename, counts, summary}",
+     "desc": "Give the owner the RECORDS the application holds, as a "
+             "spreadsheet they download: 'can I get all this out as a "
+             "spreadsheet?', 'export the customers to Excel', 'I want a copy "
+             "of my data'. One CSV per kind of record, zipped when there is "
+             "more than one. `entity` narrows it to one kind; omit it for "
+             "everything. NOT the source — that is a different export. "
+             "RELAY `summary` as written: it carries the download link and "
+             "what the file does not do."},
+    {"name": "back_up",
+     "signature": "back_up() -> {applied, url, filename, counts, summary}",
+     "desc": "An archive of the records AND the definition, which the owner "
+             "downloads and keeps: 'back it up somewhere', 'what if I lose "
+             "all this?', 'is this stored anywhere else?'. Takes no "
+             "arguments. NOTHING IS SCHEDULED and there is no restore "
+             "button — do not promise either. RELAY `summary` as written; it "
+             "says so, and it carries the link."},
+
     {"name": "revert_last_patch",
      "signature": "revert_last_patch() -> "
                   "{ok, reverted_sha, files, summary}",
@@ -1376,14 +1398,7 @@ READONLY_HANDLERS = {
     "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
     "revert":                   lambda output_dir, args: _smith_revert(output_dir),
-    # NO ENTRY FOR export_records / back_up, deliberately. Both answer with a
-    # download url, and that url is project-scoped — `/api/projects/<id>/
-    # exports/<id>`, authorised against the project row. A handler here is
-    # given an `output_dir` and nothing else (`agents/smith_agent.py` never
-    # sees a project id), so the only way to serve them from this table would
-    # be to invent an unauthenticated path to somebody's records. They are
-    # dispatched from `smith_session`, which is handed the project id by
-    # `smith_chat_v2` — see `services.smith.records_out.run`.
+    # export_records / back_up are NOT here — see PROJECT_HANDLERS below.
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
@@ -1429,6 +1444,58 @@ READONLY_HANDLERS = {
     "remove_role":              lambda output_dir, args: _smith_remove_role(output_dir, args),
     "restrict_page_to_role":    lambda output_dir, args: _smith_restrict_page_to_role(output_dir, args),
 }
+
+
+#: Tools that cannot be served by an `output_dir` alone: they answer with a
+#: download url, and that url is project-scoped —
+#: `/api/projects/<project_id>/exports/<export_id>`, authorised against the
+#: project row before a byte is read.
+#:
+#: A SEPARATE TABLE RATHER THAN AN INJECTED ARG. Threading the id through
+#: `args` would put a key nobody declared into every handler's dict, and
+#: several of them (`_smith_add_page`, the seam wrappers) copy `args` straight
+#: into a patch — an id would have ridden into recorded payloads that have no
+#: business holding one. A second table says which tools need to know whose
+#: project this is, in one place, where it can be read.
+#:
+#: The signature is `(output_dir, args, project_id)`. An empty `project_id`
+#: is refused by the handler rather than papered over: a link with no project
+#: in it would be a link to nobody's records.
+PROJECT_HANDLERS = {
+    "export_records":           lambda output_dir, args, project_id: _smith_records_out(
+        output_dir, project_id, "export", args),
+    "back_up":                  lambda output_dir, args, project_id: _smith_records_out(
+        output_dir, project_id, "backup", args),
+}
+
+
+def _smith_records_out(output_dir: str, project_id: str, kind: str,
+                       args: dict) -> dict:
+    """The owner's records out, or a backup they keep.
+
+    Returns the same dict the chat dispatcher gets, plus `summary` — the model
+    composes its reply from tool results, so the sentence naming what this does
+    NOT do (nothing scheduled, no restore button, credentials left out) has to
+    be IN the result. A model left to summarise `{"applied": true}` in its own
+    words will promise a backup service nobody built.
+    """
+    from services.smith.records_out import run as _records_run
+
+    if not str(project_id or "").strip():
+        return {
+            "applied": False, "edited_paths": [],
+            "reason": ("I cannot hand over a file here: this turn is running "
+                       "without a project to serve it from, and a download "
+                       "link with no project in it reaches nobody's records. "
+                       "Ask me again from the project's own chat."),
+        }
+    out = _records_run(output_dir, str(project_id), kind=kind,
+                       entity=str((args or {}).get("entity") or ""))
+    if out.get("applied"):
+        # Named `summary` to match what every other mutating handler returns,
+        # so the loop's own trace summariser reads it without a special case.
+        out["summary"] = out.get("diff_summary") or ""
+    return out
 
 
 def _check_data_source_tool(output_dir: str, path: str) -> dict:

@@ -8549,6 +8549,11 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
                 progress_callback=_progress_cb,
                 pending_confirmation=_pending_confirmation,
                 current_route=current_route,
+                # `export_records` and `back_up` answer with a download url,
+                # and that url is authorised against this project's row. The
+                # agent has never needed the id before — everything else it
+                # does is a path under `output_dir`.
+                project_id=str(project.id),
             ))
             _smith_started_at = time.monotonic()
             try:

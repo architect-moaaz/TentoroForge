@@ -536,6 +536,7 @@ def run_smith_agent(
     pending_confirmation: Optional[dict] = None,
     current_route: Optional[str] = None,
     attachment_blocks: Optional[list[dict]] = None,
+    project_id: str = "",
 ) -> dict:
     """Run the conversational reasoning loop.
 
@@ -553,6 +554,12 @@ def run_smith_agent(
         max_iters: Hard cap on tool-call turns before the loop forces a
             terminal ``ask_user`` (matches fix-agent behaviour, one step
             higher since Smith has more inspection surface to walk).
+        project_id: Which project this turn belongs to. Needed only by the
+            tools in ``smith_tools.PROJECT_HANDLERS`` — the ones that hand
+            the owner a FILE, whose download url is authorised against this
+            project's row. Everything else works off ``output_dir`` alone,
+            so an empty string leaves every other tool exactly as it was and
+            those two refuse with the reason.
 
     Returns:
         A dict with **exactly one** of ``diagnosis`` / ``answer`` /
@@ -1089,6 +1096,17 @@ def run_smith_agent(
 
         # ---- read-only tools ----------------------------------------------
         tool_fn = smith_tools.READONLY_HANDLERS.get(tool_name)
+        if tool_fn is None:
+            # A HANDFUL OF TOOLS NEED TO KNOW WHOSE PROJECT THIS IS. They hand
+            # the owner a file, and the download url that reaches it is
+            # authorised against the project row — an `output_dir` cannot name
+            # one. The id is bound HERE, where the loop already holds it,
+            # rather than threaded through `args`, which several handlers copy
+            # verbatim into recorded payloads.
+            project_fn = smith_tools.PROJECT_HANDLERS.get(tool_name)
+            if project_fn is not None:
+                tool_fn = (lambda out, a, _fn=project_fn:
+                           _fn(out, a, project_id))
         if tool_fn is None:
             unknown_streak += 1
             trace.append({

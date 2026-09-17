@@ -136,3 +136,12 @@
 {"say": "start again", "verb": "rebuild"}
 {"say": "that thing I said about approvals — it's the manager who approves, not the admin", "verb": "edit_requirement"}
 {"say": "use this UX Pilot page https://uxpilot.ai/p/abc123", "verb": "connect_uxpilot"}
+{"say": "can I get all this out as a spreadsheet?", "verb": "export_records"}
+{"say": "export the nurses to excel", "verb": "export_records"}
+{"say": "I want a copy of my data", "verb": "export_records"}
+{"say": "can i get the customers in a csv", "verb": "export_records"}
+{"say": "download all the records", "verb": "export_records"}
+{"say": "back it up somewhere", "verb": "back_up"}
+{"say": "what happens if I lose all this?", "verb": "back_up"}
+{"say": "can I take a backup?", "verb": "back_up"}
+{"say": "is any of this stored anywhere else?", "verb": "back_up"}
