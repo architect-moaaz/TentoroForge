@@ -41,6 +41,11 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
     ("Who is allowed to do what",
      "Roles, permissions, and which screens each kind of person can open.",
      frozenset({"edit_access"})),
+    ("The people who log in",
+     "Give someone a login, take one away, or send someone a fresh link when "
+     "they are locked out. Each person sets their own password — I never see "
+     "one, and never tell you anyone else's.",
+     frozenset({"add_login", "remove_login", "reset_login"})),
     ("How it looks",
      "The colours, type and density of the whole application, and the menu "
      "down the side.",
@@ -55,6 +60,14 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      frozenset({"edit_product", "add_requirement", "edit_requirement",
                 "remove_requirement", "add_api", "remove_api",
                 "add_integration", "remove_integration", "connect_service"})),
+    ("Your own data",
+     "Load the records you already have — attach a spreadsheet and say which "
+     "records it holds. I say how many rows would land and which column "
+     "becomes which field before anything is written, and a column your "
+     "records have no field for is reported rather than guessed at. It goes "
+     "out the same way: ask for a spreadsheet of any kind of record, or for a "
+     "backup of everything, and you get the file.",
+     frozenset({"import_data", "export_data"})),
     ("A design somebody gave you",
      "Build the screens from a Figma or UX Pilot file, or unhook it and "
      "compose them from the component library instead.",

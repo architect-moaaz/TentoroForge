@@ -140,3 +140,16 @@
 {"say": "send the emails through our own account", "verb": "connect_service"}
 {"say": "connect it to Xero", "verb": "connect_service", "note": "no adapter: the reason, and what works instead"}
 {"say": "make a note that we use Stripe for payments", "verb": "add_integration", "note": "written down for later, not wired up"}
+{"say": "set up logins for my six staff", "verb": "add_login"}
+{"say": "add a login for dave@clinic.com", "verb": "add_login"}
+{"say": "my new receptionist needs an account, sarah@clinic.com", "verb": "add_login"}
+{"say": "give the ward manager an account - amina@clinic.com", "verb": "add_login"}
+{"say": "reset Dave's password", "verb": "reset_login"}
+{"say": "sarah's locked out, send her a new password link", "verb": "reset_login"}
+{"say": "dave@clinic.com can't get in", "verb": "reset_login"}
+{"say": "remove Dave's login", "verb": "remove_login"}
+{"say": "sarah has left, take away her access", "verb": "remove_login"}
+{"say": "here's our customer spreadsheet, load it in", "verb": "import_data"}
+{"say": "import these suppliers", "verb": "import_data"}
+{"say": "can I get all this out as a spreadsheet?", "verb": "export_data"}
+{"say": "back it up somewhere", "verb": "export_data", "note": "no entity: every kind of record in one zip"}

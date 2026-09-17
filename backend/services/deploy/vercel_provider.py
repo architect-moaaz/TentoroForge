@@ -122,6 +122,12 @@ _PLATFORM_REFRESH_FILES = ("vercel.json",)
 # projects on their next publish, without a regen.
 _PLATFORM_REFRESH_RUNTIME_MAP = (
     ("seed.ts", "src/db/seed.ts"),
+    # The CSV export answered anybody — no session, no role, every column
+    # including the password hash. It now reads the app's own ENTITY_ACCESS
+    # and SENSITIVE_COLUMNS projections. That is a fix to platform logic with
+    # no per-app content in it, and every already-generated project is
+    # serving the open version until its next publish carries this.
+    ("api-export/route.ts", "src/app/api/export/[entity]/route.ts"),
 )
 _TEMPLATE_RUNTIME_DIR = (
     Path(__file__).resolve().parents[2] / "templates" / "runtime"

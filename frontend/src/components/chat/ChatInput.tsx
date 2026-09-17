@@ -276,7 +276,7 @@ export function ChatInput({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,.txt,.md,.csv,.tsv,.json,.yaml,.yml"
+                accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,.txt,.md,.csv,.tsv,.xlsx,.json,.yaml,.yml"
                 className="hidden"
                 onChange={(e) => {
                   void addFiles(Array.from(e.target.files ?? []));
