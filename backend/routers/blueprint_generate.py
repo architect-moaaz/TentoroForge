@@ -108,8 +108,8 @@ _WHERE_IT_IS = {
 
 def _status_report(doc: dict) -> str:
     """A deterministic status line read straight off the Blueprint — never a
-    define. Answers 'where are we' with the state, what has been drafted, and
-    the next explicit step."""
+    define. Answers 'where are we' with what has been drafted and the next
+    explicit step, and NOT with the state machine's own name: see below."""
     from services.smith import decisions as _decisions
     state = (doc or {}).get("state", "DISCOVERY")
     reqs = len((doc or {}).get("requirements") or [])
