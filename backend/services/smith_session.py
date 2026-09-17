@@ -703,6 +703,80 @@ class SmithSession:
         return TurnResult(status="resolved",
                           answer=str(out.get("diff_summary") or ""),
                           touched_paths=[])
+    def _import_data(self, understanding: dict) -> "TurnResult":
+        """Load the spreadsheet they attached into one kind of record.
+
+        Two turns, and the first one writes NOTHING: it says how many rows
+        would land, how many would not and why, and which column becomes
+        which field. An import is the one change whose subject is data the
+        owner cannot regenerate, and finding out what it did by looking at
+        the result is not good enough.
+        """
+        from services.smith.data_import import run as import_run
+
+        entity = str(understanding.get("entity") or "").strip()
+        out = import_run(str(self.output_dir), entity,
+                         message=self._last_message, reasoning=self._reasoning)
+        if out.get("asked"):
+            return TurnResult(status="asked", answer=str(out.get("reason") or ""),
+                              options=list(out.get("options") or []))
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or
+                                         "I could not load that and nothing has been written."))
+        return TurnResult(status="resolved",
+                          answer=str(out.get("diff_summary") or "Loaded."),
+                          touched_paths=list(out.get("edited_paths") or []))
+
+    def _export_data(self, understanding: dict) -> "TurnResult":
+        """Hand them their records back as a spreadsheet.
+
+        The one change verb that changes nothing — so `no_op` rather than
+        `resolved`: nothing was touched, and a turn that reports a change it
+        did not make is the thing every other seam here is careful about.
+        The project id is passed because the link the answer carries is a
+        platform URL, and the session is the only caller that knows it.
+        """
+        from services.smith.data_export import run as export_run
+
+        out = export_run(str(self.output_dir),
+                         str(understanding.get("entity") or "").strip(),
+                         project_id=str(self.project_id or ""),
+                         reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or
+                                         "I could not produce that file."))
+        return TurnResult(status="no_op",
+                          answer=str(out.get("diff_summary") or "Exported."))
+
+    def _accounts(self, verb: str, understanding: dict) -> "TurnResult":
+        """Add, remove or reset ONE PERSON'S login.
+
+        Not a Blueprint change and not a role change: `edit_access` decides
+        what a Ward Manager may do, and this decides whether Dave exists and
+        can get in. The roster is a project ledger, so an undo of an unrelated
+        change cannot silently re-admit someone who was removed. See
+        `services.smith.accounts`.
+        """
+        from services.smith.accounts import run as accounts_run
+
+        out = accounts_run(
+            str(self.output_dir), verb,
+            email=str(understanding.get("email") or "").strip(),
+            person=str(understanding.get("person") or "").strip(),
+            name=str(understanding.get("person_name") or "").strip(),
+            role=str(understanding.get("role") or "").strip(),
+            reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason")
+                                         or "I could not change that login, and have "
+                                            "changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
+                          touched_paths=touched,
+                          diff_summary=", ".join(touched[:8]) if touched else "")
 
     def _add_field(self, understanding: dict) -> "TurnResult":
         """Add one column to an existing entity — the incremental data-model
@@ -818,6 +892,26 @@ class SmithSession:
                 if note and result.status == "resolved":
                     result.answer += note
                 return result
+        # AGREED, SO LOAD THEM NOW. The dry run described an import and is
+        # holding it; the yes is a turn of its own and the model would have to
+        # re-derive the verb from the question above it to get here. It is
+        # applied under the mapping that was SHOWN — see
+        # `services.smith.data_import.agreed`, which takes the plan as it
+        # reads it, so a yes cannot apply twice and cannot apply something else.
+        from services.smith import data_import as _import_mod
+        if _import_mod.wants(_import_mod.peek(self.output_dir), user_message):
+            pending_ask.clear(self.output_dir)
+            self._last_message = user_message
+            from services.smith.data_import import run as _import_run
+            out = _import_run(str(self.output_dir), message=user_message,
+                              reasoning=self._reasoning)
+            if not out.get("applied"):
+                return TurnResult(status="needs_user",
+                                  answer=str(out.get("reason") or
+                                             "I could not load that and nothing has been written."))
+            return TurnResult(status="resolved",
+                              answer=str(out.get("diff_summary") or "Loaded."),
+                              touched_paths=list(out.get("edited_paths") or []))
         if user_message.strip() == _plan_mod.REWORD_LABEL:
             _plan_mod.clear(self.output_dir)
             return TurnResult(status="asked",
@@ -1004,6 +1098,12 @@ class SmithSession:
             return self._revert()
         if verb == "spend":
             return self._spend()
+        if verb == "import_data":
+            return self._import_data(understanding)
+        if verb == "export_data":
+            return self._export_data(understanding)
+        if verb in ("add_login", "remove_login", "reset_login"):
+            return self._accounts(verb, understanding)
         from services.smith.limits import cannot as _cannot
         if _cannot(verb):
             # HONEST, AND NOT A DEAD END. These are the asks Smith genuinely

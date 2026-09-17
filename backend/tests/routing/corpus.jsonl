@@ -141,3 +141,12 @@
 {"say": "what did the build cost", "verb": "spend"}
 {"say": "how many tokens has this used", "verb": "spend"}
 {"say": "show me the usage", "verb": "spend"}
+{"say": "set up logins for my six staff", "verb": "add_login"}
+{"say": "add a login for dave@clinic.com", "verb": "add_login"}
+{"say": "my new receptionist needs an account, sarah@clinic.com", "verb": "add_login"}
+{"say": "give the ward manager an account - amina@clinic.com", "verb": "add_login"}
+{"say": "reset Dave's password", "verb": "reset_login"}
+{"say": "sarah's locked out, send her a new password link", "verb": "reset_login"}
+{"say": "dave@clinic.com can't get in", "verb": "reset_login"}
+{"say": "remove Dave's login", "verb": "remove_login"}
+{"say": "sarah has left, take away her access", "verb": "remove_login"}

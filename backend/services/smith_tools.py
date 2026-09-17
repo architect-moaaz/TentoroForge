@@ -338,6 +338,10 @@ _VERB_NOTES: dict[str, str] = {
         'attach a UX Pilot page as evidence. `key_env` is the NAME of the environment variable holding the UX Pilot API key; never the key itself.',
     'disconnect_design':
         "remove the connected design and compose every screen from the component library instead: 'disconnect the Figma design', 'drop the design'.",
+    'import_data':
+        "load the data they ALREADY HAVE from the spreadsheet they attached: 'here's our customer spreadsheet, load it in'. Needs only which kind of record the file holds; never pass rows or a filename. The first call writes nothing and returns the dry run to show them.",
+    'export_data':
+        "give them their data back as a spreadsheet: 'can I get all this out as a spreadsheet?', 'back it up somewhere'. One kind of record, or all of them in a zip when no entity is named. Reads only — nothing to confirm, nothing to undo.",
     'rebuild':
         'regenerate the whole application from its definition.',
     'rename':
@@ -673,6 +677,28 @@ TOOL_CATALOG: list[dict] = [
              "re-projects the middleware and access maps. On a Blueprint-built app "
              "add_role / remove_role / restrict_page_to_role route here. Pass the "
              "change in the user's words."},
+    {"name": "add_login",
+     "signature": "add_login(email, person_name?, role?) -> "
+                  "{applied, edited_paths, diff_summary, reason?}",
+     "desc": "GIVE ONE PERSON A LOGIN: \"set up a login for dave@clinic.com\", "
+             "\"my new receptionist needs an account\". The account is created with "
+             "NO usable password and a one-time setup link the person opens to "
+             "choose their own — never pass a password to this tool and never "
+             "repeat one a user offers. Needs the email address they will sign in "
+             "with. This is not edit_access: that decides what a ROLE may do, this "
+             "decides who exists."},
+    {"name": "remove_login",
+     "signature": "remove_login(person) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "STOP ONE PERSON SIGNING IN: \"remove Dave's login\", \"Sarah has "
+             "left\". Deactivates the account rather than deleting it, because the "
+             "records they created point at it. Needs who, by email or by the name "
+             "the login was set up under."},
+    {"name": "reset_login",
+     "signature": "reset_login(person) -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "GIVE ONE PERSON A WAY BACK IN: \"reset Dave's password\", \"Sarah is "
+             "locked out\". Their old password stops working and they get a "
+             "one-time link to choose a new one; no password is generated, shown or "
+             "stored. Needs who, by email or by the name the login was set up under."},
     {"name": "add_rule",
      "signature": "add_rule(rule) -> {applied, edited_paths, diff_summary, reason?}",
      "desc": "ADD A BUSINESS RULE in the user's words: \"years of experience cannot "
@@ -874,6 +900,36 @@ TOOL_CATALOG: list[dict] = [
              "foreign key that named the old entity must move, so it confirms "
              "first and the completeness checks surface each reference. Refuses "
              "the auth/users entity and any rename into that namespace."},
+    {"name": "export_data",
+     "signature": "export_data(entity?) -> {applied, file, href, sheets, reason}",
+     "desc": "GIVE THE OWNER THEIR DATA BACK as a spreadsheet — 'can I get "
+             "all this out as a spreadsheet?', 'export the customers', 'back "
+             "it up somewhere'. Reads the rows out of the application's own "
+             "database and writes the file on this call. `entity` narrows it "
+             "to one kind of record; omit it for every kind in one zip, which "
+             "is what a backup means. READS ONLY — nothing about the "
+             "application changes, so there is nothing to confirm and nothing "
+             "to undo. Show the returned markdown link as it is: it is the "
+             "download. Sensitive fields are left out of the file by design "
+             "and the summary says which."},
+    {"name": "import_data",
+     "signature": "import_data(entity, confirm?, ignore_columns?[]) -> "
+                  "{applied, asked, reason, options, edited_paths}",
+     "desc": "LOAD THE DATA THEY ALREADY HAVE from the spreadsheet attached to "
+             "this conversation — 'here's our customer spreadsheet, load it in', "
+             "'import these suppliers'. Every owner arrives with an existing "
+             "business and existing data; without this the first real use of "
+             "the app is typing it all in again. Pass only WHICH KIND OF "
+             "RECORD the file holds (check list_entities); the file is the one "
+             "they attached and is read from disk — never pass rows, and never "
+             "transcribe a row into any tool call. "
+             "CALLED WITHOUT `confirm` IT WRITES NOTHING: it returns the dry "
+             "run — how many rows would land, how many would not and why, and "
+             "which column becomes which field. Show that to them verbatim and "
+             "wait. When they agree, call it again with confirm=true and the "
+             "rows are written under the mapping they were shown. A column the "
+             "record has no field for is REFUSED, not guessed at: either "
+             "add_field first, or pass it in ignore_columns to leave it out."},
     {"name": "add_field",
      "signature": "add_field(entity, field:{name, type, length?, "
                   "precision?, scale?, default?}) -> {applied, changes, "
@@ -1373,6 +1429,11 @@ READONLY_HANDLERS = {
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
     "revert":                   lambda output_dir, args: _smith_revert(output_dir),
     "spend":                    lambda output_dir, args: _smith_spend(output_dir),
+    "import_data":              lambda output_dir, args: _smith_import_data(output_dir, args),
+    "export_data":              lambda output_dir, args: _smith_export_data(output_dir, args),
+    "add_login":                lambda output_dir, args: _smith_account(output_dir, "add_login", args),
+    "remove_login":             lambda output_dir, args: _smith_account(output_dir, "remove_login", args),
+    "reset_login":              lambda output_dir, args: _smith_account(output_dir, "reset_login", args),
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
@@ -2123,6 +2184,33 @@ def _smith_remove_workflow(output_dir: str, args: dict) -> dict:
     return result
 
 
+def _smith_account(output_dir: str, verb: str, args: dict) -> dict:
+    """add_login / remove_login / reset_login — see services/smith/accounts.py.
+
+    NO PASSWORD IS AN ARGUMENT HERE, by design. The account gets a one-time
+    setup link and the person chooses their own password, which the platform's
+    own route hashes; a `password` key handed in would be a plaintext
+    credential in a tool call that is written to the conversation log, so it is
+    ignored rather than honoured.
+    """
+    from services.smith.accounts import run as _accounts_run
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": f"{verb} requires an object arg"}
+    email = str(args.get("email") or "").strip()
+    person = str(args.get("person") or args.get("who") or "").strip()
+    if verb == "add_login" and not email:
+        return {"applied": False, "edited_paths": [],
+                "reason": "no email address given. Pass email: the address the "
+                          "person will sign in with."}
+    if verb != "add_login" and not (person or email):
+        return {"applied": False, "edited_paths": [],
+                "reason": "nobody named. Pass person: their email address, or the "
+                          "name their login was set up under."}
+    return _accounts_run(output_dir, verb, email=email, person=person,
+                         name=str(args.get("person_name") or args.get("name") or "").strip(),
+                         role=str(args.get("role") or "").strip())
+
+
 def _smith_revert(output_dir: str) -> dict:
     """Undo the last recorded change and re-project. Takes no arguments: it is
     always the most recent change."""
@@ -2135,6 +2223,31 @@ def _smith_spend(output_dir: str) -> dict:
     always this application — and changes nothing."""
     from services.smith.spend import run as _spend_run
     return _spend_run(output_dir)
+def _smith_import_data(output_dir: str, args: dict) -> dict:
+    """Load an attached spreadsheet into one kind of record.
+
+    Without `confirm` this is a dry run that writes nothing — the counts, the
+    rejects and the column-to-field mapping, for the model to show and the
+    owner to agree to. `confirm` applies the import that was described, under
+    the mapping that was shown rather than one decided again.
+    """
+    from services.smith.data_import import run as _import_run
+    ignore = [str(c) for c in (args.get("ignore_columns") or []) if str(c).strip()]
+    return _import_run(output_dir, str(args.get("entity") or ""),
+                       confirm=bool(args.get("confirm")),
+                       ignore_columns=ignore)
+
+
+def _smith_export_data(output_dir: str, args: dict) -> dict:
+    """Produce a spreadsheet of the owner's records. Reads only.
+
+    The project id is not an argument of this tool — the handlers are
+    `(output_dir, args)` — and the directory's name IS the project's short id,
+    which is what the platform's own download URL is keyed by (the same
+    derivation `preview_manager` callers use).
+    """
+    from services.smith.data_export import run as _export_run
+    return _export_run(output_dir, str(args.get("entity") or ""))
 
 
 def _smith_add_field(output_dir: str, args: dict) -> dict:

@@ -5,7 +5,9 @@ export default withAuth({
 });
 
 // Excludes:
-//   login/signup/api/auth — auth flow itself
+//   login/signup/set-password/api/auth — auth flow itself (set-password is
+//     where an invite or reset link lands; the visitor holding one has no
+//     password yet, so a gate would send them to a sign-in they cannot do)
 //   editor + api/editor + api/figma — (dev-only) routes; the editor has no
 //     login concept and runs only in dev. Excluded so devs can hit /editor
 //     without authenticating. The (dev-only) route group is tree-shaken
@@ -13,6 +15,6 @@ export default withAuth({
 //   _next, favicon, files with extensions — static assets
 export const config = {
   matcher: [
-    "/((?!login|signup|api/auth|api/editor|api/figma|editor|_next|favicon.ico|.*\\..*).*)",
+    "/((?!login|signup|set-password|api/auth|api/editor|api/figma|editor|_next|favicon.ico|.*\\..*).*)",
   ],
 };
