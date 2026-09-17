@@ -206,7 +206,7 @@
 {"say": "the app should also let a nurse mark herself unavailable", "verb": "add_requirement", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "REQ-012 should say the roster is published a week ahead", "verb": "edit_requirement"}
 {"say": "We no longer need the shift-swapping requirement", "verb": "remove_requirement"}
-{"say": "send email through SendGrid", "verb": "add_integration", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "send email through SendGrid", "verb": "connect_service", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "drop the Stripe integration", "verb": "remove_integration", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "Use this Figma design https://www.figma.com/design/188b8l0s/Nurse-Roster", "verb": "connect_figma"}
 {"say": "Use this Figma design https://www.figma.com/design/188b8l0s/Nurse-Roster — my token is in FIGMA_TOKEN", "verb": "connect_figma"}

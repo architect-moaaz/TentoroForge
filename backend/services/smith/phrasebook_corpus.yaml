@@ -1038,19 +1038,19 @@ sentences:
     say: "send the emails through SendGrid"
     checked: {colour: acts, via: handler}
     source: routing
-    reaches: {verb: add_integration, states: [integration]}
+    reaches: {verb: connect_service, states: [integration]}
 
   - id: add_integration-text-people-through-twilio
     say: "text people through Twilio"
     checked: {colour: acts, via: handler}
     source: routing
-    reaches: {verb: add_integration, states: [integration]}
+    reaches: {verb: connect_service, states: [integration]}
 
   - id: add_integration-connect-it-to-our-payroll-system
     say: "connect it to our payroll system"
     checked: {colour: acts, via: handler}
     source: routing
-    reaches: {verb: add_integration, states: [integration]}
+    reaches: {verb: connect_service, states: [integration]}
 
 
   - id: add_login-set-up-logins-for-my-six
