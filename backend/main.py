@@ -75,6 +75,7 @@ from routers.notifications import router as notifications_router
 from routers.sso import router as sso_router
 from routers.audit import router as audit_router
 from routers.attachments import router as attachments_router
+from routers.exports import router as exports_router
 from routers.files import router as files_router
 from routers.environments import router as environments_router
 from routers.webhooks import router as webhooks_router
@@ -204,6 +205,7 @@ app.include_router(sso_router)
 app.include_router(audit_router)
 app.include_router(files_router)
 app.include_router(attachments_router)
+app.include_router(exports_router)
 app.include_router(environments_router)
 app.include_router(webhooks_router)
 app.include_router(visual_editor_router)

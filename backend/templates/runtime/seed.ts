@@ -6,8 +6,22 @@
  * independent of any LLM step, so a fresh app is loginable and demoable out of the box.
  *
  *   1. Admin user — bcrypt-hashed with the same algorithm auth.ts verifies.
- *   2. Demo data — best-effort from contracts/seed-plan.json, in table order,
+ *   2. Imported data — the owner's OWN records, from src/db/imports/*.json
+ *      (written by services.smith.data_import when they load a spreadsheet).
+ *   3. Demo data — best-effort from contracts/seed-plan.json, in table order,
  *      coercing ISO dates and resolving foreign keys to already-inserted ids.
+ *
+ * WHY THE IMPORTS ARE HERE AND NOT IN A SCRIPT OF THEIR OWN. This is the only
+ * route in the product that writes rows, it is already run by start.sh, the
+ * preview manager and every publish, and it holds every hard-won rule about
+ * how a row actually reaches Postgres (tableFor, prepRow, _driverSafeDates,
+ * FK resolution). A second inserter would be a second copy of all of it.
+ *
+ * They are applied BEFORE the demo data and before both skip gates: an owner's
+ * real records must land in a reused database, and once they have, the demo
+ * pass leaves their table alone — so an app with four hundred real customers
+ * never shows "Customer 1". Applied at most once each, by import id, so a
+ * redeploy does not load the same spreadsheet twice.
  *
  * Idempotent: the admin upserts on email; each domain table is skipped when it
  * already has rows. Run via `npx tsx src/db/seed.ts` (start.sh does this).
@@ -73,6 +87,50 @@ function tableFor(name: string): any {
   return null;
 }
 
+/**
+ * NO SEEDED ROW CARRIES A READABLE CREDENTIAL, and every one that needs a
+ * credential column gets a valid value.
+ *
+ * Both halves were broken and each broke something different. The plan's value
+ * for a password column is either a plaintext ("Passw0rd!") or a label
+ * ("Password Hash 1"), and it was inserted verbatim: `auth.ts` bcrypt-compares
+ * what it finds, so the account existed and NOBODY COULD SIGN INTO IT — while
+ * a plaintext password sat in the database and in the committed seed file
+ * (§42). Meanwhile a plan that named the column `passwordHash` matched no
+ * column on the shipped table (the platform calls it `password`), so the key
+ * was dropped, the NOT NULL insert failed, and the whole staff list seeded
+ * nothing at all.
+ *
+ * So the column is filled here, always, with the bcrypt hash of a fresh random
+ * UUID: a valid hash whose input nobody holds. The row exists as data — a
+ * staff list renders, a FK to it resolves — and the account cannot be signed
+ * into, which is the honest state of an account nobody was given. The ways in
+ * are `admin@example.com` and an invited account (`seedAccounts`), and neither
+ * comes through here.
+ *
+ * WHICH COLUMNS. Any whose name contains "password". That is the whole rule:
+ * such a column is a credential in every application there is, and a narrower
+ * question than the author-side refusal (`_CREDENTIAL_COLUMNS` in
+ * functional_completeness.py) deliberately — that one may over-reach onto
+ * `salt` because a workflow has no business writing it either, while this
+ * transforms a value in ANY table, where `salt` is a real column in a recipe
+ * app and would be corrupted.
+ */
+const _isCredentialColumn = (key: string) => norm(key).includes("password");
+
+/** A valid bcrypt hash whose input nobody holds, so the column is filled and
+ *  the account cannot be signed into. hashSync because both callers are
+ *  synchronous, and both run a handful of times per build. */
+const _unusableCredential = () => bcrypt.hashSync(randomUUID(), 10);
+
+function _unusableCredentials(table: any, out: Record<string, unknown>): void {
+  for (const key of Object.keys(table)) {
+    // UNCONDITIONALLY, unlike the fill in `minimalRow`: here the value came
+    // from the plan, and the whole point is that it must not land.
+    if (_isCredentialColumn(key)) out[key] = _unusableCredential();
+  }
+}
+
 /** Build a minimal insert row for `table`: fill every NOT NULL column that has
  *  no DB default with a type-appropriate placeholder (uuid→randomUUID, text→
  *  "Default <label>", number→0, bool→false, date→now). Columns WITH a default are
@@ -95,7 +153,12 @@ function minimalRow(
     if (skipFk && /Id$/.test(key)) continue;
     const ct = String(col?.columnType ?? "").toLowerCase();
     const dt = String(col?.dataType ?? "").toLowerCase();
-    if (ct.includes("uuid")) out[key] = randomUUID();
+    // A required credential column got "Default Admin", which `auth.ts`
+    // bcrypt-compares and no password ever matches. Filled with a hash nobody
+    // holds instead — and only when absent, because `seedAdmin` and
+    // `seedAccounts` pass the hash they mean in as an override.
+    if (_isCredentialColumn(key)) out[key] = _unusableCredential();
+    else if (ct.includes("uuid")) out[key] = randomUUID();
     else if (dt === "number") out[key] = 0;
     else if (dt === "boolean") out[key] = false;
     else if (dt === "date") out[key] = new Date();
@@ -211,6 +274,135 @@ async function seedAdmin(): Promise<string | null> {
   }
 }
 
+/** One roster entry as Smith writes it into src/db/accounts.json. */
+type RosterEntry = {
+  email?: string;
+  name?: string;
+  role?: string;
+  status?: string;
+  invite?: { issue?: string; tokenHash?: string; purpose?: string; expiresAt?: string } | null;
+};
+
+/** The people the owner asked to be able to log in, or [] when none. */
+function accountRoster(): RosterEntry[] {
+  const rosterPath = path.join(process.cwd(), "src", "db", "accounts.json");
+  if (!fs.existsSync(rosterPath)) return [];
+  try {
+    const doc = JSON.parse(fs.readFileSync(rosterPath, "utf8"));
+    const rows = Array.isArray(doc) ? doc : doc?.accounts;
+    return Array.isArray(rows) ? (rows as RosterEntry[]) : [];
+  } catch (e) {
+    console.warn("[seed] accounts.json could not be read:", e);
+    return [];
+  }
+}
+
+/**
+ * The people who log in, as the owner asked for them.
+ *
+ * WHY THE SEED AND NOT A DIRECT WRITE. An account has to survive a redeploy or
+ * it is not an account: the database behind a generated app is rebuilt, reseeded
+ * and republished, and anything inserted into it out of band is gone the next
+ * time. The roster is a file in the project, so it is applied again on every
+ * start — which is also why this runs beside `seedAdmin`, ABOVE the skip gates:
+ * they preserve domain data, never the sign-in.
+ *
+ * NO PASSWORD PASSES THROUGH HERE. An account is created with a hash of a fresh
+ * random UUID — a valid bcrypt hash whose input nobody holds, so the account
+ * cannot be signed into — and inactive. What makes it usable is the person
+ * opening their setup link and choosing a password, which the platform's own
+ * /api/auth/set-password route hashes. Smith never sees a plaintext credential
+ * and never writes a credential column.
+ *
+ * IDEMPOTENT ON THE ISSUE, not on the row. An invite row is found by its
+ * `issue` — the id of that one issuance. Already there, the invite has been
+ * applied and is left alone, whether or not it has been used; otherwise it is
+ * new, and the account's password is cleared and the link opened. Without that,
+ * every restart would re-open a spent link and clear a password the person had
+ * already chosen.
+ */
+async function seedAccounts(): Promise<void> {
+  const roster = accountRoster();
+  if (!roster.length) return;
+  const users = tableFor("users");
+  if (!users) {
+    console.log("\u2139\uFE0F  no users table \u2014 skipping the account roster");
+    return;
+  }
+  const invites = tableFor("forgeInvites");
+  for (const entry of roster) {
+    const email = String(entry?.email || "").trim().toLowerCase();
+    if (!email) continue;
+    try {
+      // REMOVED IS DEACTIVATED, NOT DELETED. `authorize` rejects a falsy
+      // isActive, so the person can no longer sign in; the row stays because
+      // every record they created points at it.
+      if (String(entry.status || "active") === "removed") {
+        if ("isActive" in users) {
+          await db.update(users).set({ isActive: false } as any).where(eq((users as any).email, email));
+        }
+        // A pending link would set isActive back to true, so it is spent here.
+        if (invites) {
+          await db.update(invites).set({ usedAt: new Date() } as any)
+            .where(eq((invites as any).email, email));
+        }
+        console.log(`\u2705 login deactivated: ${email}`);
+        continue;
+      }
+
+      const row: Record<string, unknown> = { email, password: await bcrypt.hash(randomUUID(), 12) };
+      if ("name" in users && entry.name) row.name = String(entry.name);
+      if ("isActive" in users) row.isActive = false;
+      // Whichever column auth.ts reads a role from: an explicit `role` when the
+      // Blueprint added one, else the signup account type it falls back to.
+      if (entry.role) {
+        if ("role" in users) row.role = String(entry.role);
+        else if ("accountType" in users) row.accountType = String(entry.role);
+      }
+      await resolveRequiredFks(users, row);
+      Object.assign(row, minimalRow(users, String(entry.name || email), row, /* skipFk */ true));
+      const created = await db.insert(users).values(row as any)
+        .onConflictDoNothing({ target: (users as any).email }).returning();
+
+      const invite = entry.invite;
+      const issue = String(invite?.issue || "");
+      if (!invites || !invite || !issue || !invite.tokenHash || !invite.expiresAt) {
+        if (created.length) console.log(`\u2705 login created: ${email}`);
+        continue;
+      }
+      const [applied] = await db.select().from(invites)
+        .where(eq((invites as any).issue, issue)).limit(1);
+      if (applied) continue;                       // this issuance is already in
+
+      await db.insert(invites).values({
+        email,
+        tokenHash: String(invite.tokenHash),
+        issue,
+        purpose: String(invite.purpose || "invite"),
+        expiresAt: new Date(String(invite.expiresAt)),
+        usedAt: null,
+      } as any).onConflictDoUpdate({
+        target: (invites as any).email,
+        set: {
+          tokenHash: String(invite.tokenHash), issue,
+          purpose: String(invite.purpose || "invite"),
+          expiresAt: new Date(String(invite.expiresAt)), usedAt: null,
+        },
+      });
+      if (!created.length) {
+        // An existing account with a new issuance: the old password stops
+        // working now, which is what a reset means.
+        const cleared: Record<string, unknown> = { password: await bcrypt.hash(randomUUID(), 12) };
+        if ("isActive" in users) cleared.isActive = false;
+        await db.update(users).set(cleared as any).where(eq((users as any).email, email));
+      }
+      console.log(`\u2705 login ${created.length ? "created" : "reset"}, awaiting its password: ${email}`);
+    } catch (e) {
+      console.warn(`[seed] account ${email} failed:`, e);
+    }
+  }
+}
+
 function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, string[]>, i: number): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   // Map each Drizzle property by its normalized name so seed rows keyed in
@@ -308,11 +500,112 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
     }
     if (pool && pool.length) out[k] = pool[i % pool.length];
   }
+  _unusableCredentials(table, out);
   _driverSafeDates(table, out);
   return out;
 }
 
-async function seedDomain(adminId: string | null): Promise<void> {
+/**
+ * The owner's own records, loaded from a spreadsheet.
+ *
+ * Each file is `{ import, table, rows[] }` — one per import, named by the
+ * import's id, which is the content hash of the file they attached. The id is
+ * the idempotency key: `_forge_import_log` remembers which have been applied,
+ * so a redeploy, a reseed or a second boot does not give them every customer
+ * twice.
+ *
+ * A row that Postgres refuses is reported and skipped — the rest of the file
+ * still lands, and the count tells the owner (and the platform log) that some
+ * did not. The rows were already coerced to the declared field types before
+ * they were written, so a refusal here is a schema fact, not a value we could
+ * have fixed by guessing.
+ */
+async function applyImports(): Promise<Set<string>> {
+  const owned = new Set<string>();
+  const dir = path.join(process.cwd(), "src", "db", "imports");
+  if (!fs.existsSync(dir)) return owned;
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
+  if (!files.length) return owned;
+
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS _forge_import_log (
+        id TEXT PRIMARY KEY,
+        table_name TEXT NOT NULL,
+        rows_applied INT NOT NULL DEFAULT 0,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+  } catch (e) {
+    console.warn("[import] could not open the import log — skipping imports:", e);
+    return owned;
+  }
+
+  for (const file of files) {
+    let payload: { import?: string; table?: string; rows?: Record<string, unknown>[] };
+    try {
+      payload = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
+    } catch (e) {
+      console.error(`❌ [import] ${file} is not readable JSON:`, e);
+      continue;
+    }
+    const importId = String(payload.import || file.replace(/\.json$/, ""));
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    if (!payload.table || !rows.length) continue;
+
+    try {
+      const seen: any = await db.execute(
+        sql`SELECT rows_applied FROM _forge_import_log WHERE id = ${importId} LIMIT 1`
+      );
+      const seenRows: any[] = (seen as any).rows ?? seen ?? [];
+      if (seenRows.length) {
+        console.log(`ℹ️  [import] ${importId} already applied (${seenRows[0].rows_applied} rows)`);
+        owned.add(norm(String(payload.table)));
+        continue;
+      }
+    } catch (e) {
+      console.warn(`[import] ${importId}: could not read the log, skipping to be safe:`, e);
+      continue;                 // NEVER load twice because a probe failed.
+    }
+
+    owned.add(norm(String(payload.table)));
+    const table = tableFor(String(payload.table));
+    if (!table) {
+      console.error(`❌ [import] ${importId}: no table named ${payload.table} — the ` +
+                    `schema has moved on since the file was written. Nothing loaded.`);
+      continue;
+    }
+    let applied = 0;
+    let firstErr: string | null = null;
+    for (let i = 0; i < rows.length; i++) {
+      try {
+        await db.insert(table).values(prepRow(table, rows[i], {}, i)).returning();
+        applied++;
+      } catch (e: any) {
+        if (firstErr === null) firstErr = String(e?.message || e).slice(0, 500);
+      }
+    }
+    try {
+      await db.execute(sql`
+        INSERT INTO _forge_import_log (id, table_name, rows_applied)
+        VALUES (${importId}, ${String(payload.table)}, ${applied})
+        ON CONFLICT (id) DO NOTHING
+      `);
+    } catch (e) {
+      console.warn(`[import] ${importId}: applied ${applied} rows but could not record it:`, e);
+    }
+    if (applied === rows.length) {
+      console.log(`✅ [import] ${applied} row(s) into ${payload.table} (${importId})`);
+    } else {
+      console.error(`❌ [import] ${importId}: ${applied}/${rows.length} rows into ` +
+                    `${payload.table}${firstErr ? ` — first error: ${firstErr}` : ""}`);
+    }
+  }
+  return owned;
+}
+
+
+async function seedDomain(adminId: string | null, imported: Set<string> = new Set()): Promise<void> {
   // TWO PRODUCERS, ONE READER. The legacy pipeline wrote contracts/seed-plan.json;
   // the Blueprint projection writes src/db/seed.json as { table: rows[] } and
   // this read only the first, so every Blueprint-built app seeded nothing but
@@ -347,6 +640,17 @@ async function seedDomain(adminId: string | null): Promise<void> {
   const seedOne = async (t: any): Promise<number | null> => {
     const table = tableFor(t.name);
     if (!table) return null;
+    // A TABLE THE OWNER LOADED IS THEIRS. The demo rows exist so an empty
+    // screen is not mistaken for a broken one; a table holding the business's
+    // real records does not have that problem, and the "already has rows"
+    // check below does not cover it — a table with an `email` column takes
+    // the email-keyed branch and would add "Customer 1" beside four hundred
+    // real customers. The projection also stops emitting demo rows for an
+    // imported entity; this is the same guarantee where the insert happens.
+    if (imported.has(norm(t.name))) {
+      console.log(`ℹ️  ${t.name} holds imported data — no demo rows`);
+      return null;
+    }
     try {
       const [{ c }] = await db.select({ c: sql<number>`count(*)::int` }).from(table);
       if (c > 0) {
@@ -564,6 +868,17 @@ async function main(): Promise<void> {
   // idempotent and never clobbers a real admin.
   const adminId = await seedAdmin();
 
+  // AND SO MUST THE PEOPLE THE OWNER ADDED — for the same reason and above the
+  // same gates. An app whose staff cannot log in is not in use.
+  await seedAccounts();
+
+  // THE OWNER'S OWN RECORDS COME BEFORE THE DEMO ONES, and before both skip
+  // gates below: a database reused from an earlier deploy must still take the
+  // spreadsheet they loaded, and once their rows are in, the demo pass sees a
+  // populated table and leaves it alone. After the accounts, because a row
+  // that FKs a person wants that person to exist.
+  const importedTables = await applyImports();
+
   // Idempotency gate — preserve existing DOMAIN data when the DB is being
   // reused (redeploy) or the schema shape is unchanged and data is present.
   // Override with FORCE_SEED=1 for a manual reseed (after a data wipe or when
@@ -580,7 +895,7 @@ async function main(): Promise<void> {
     );
     return;
   }
-  await seedDomain(adminId);
+  await seedDomain(adminId, importedTables);
   await recordSeedFingerprint(currentFp);
   console.log(`[seed] complete — fingerprint recorded (${currentFp}).`);
 }
