@@ -12,20 +12,27 @@ from httpx import AsyncClient
 # Auth
 # ---------------------------------------------------------------------------
 
+# `validate_password_strength` requires an uppercase letter, a lowercase one and
+# a digit. These fixtures were written against the length-only policy and have
+# been sending "secret123" ever since: signup answered 400 and the tests read as
+# a broken signup endpoint rather than a stale password.
+_GOOD_PASSWORD = "Secret123"
+
+
 @pytest.mark.asyncio
 async def test_signup_and_login(client: AsyncClient):
     """New user can sign up and then log in."""
     resp = await client.post("/api/auth/signup", json={
         "email": "alice@example.com",
         "name": "Alice",
-        "password": "secret123",
+        "password": _GOOD_PASSWORD,
     })
     assert resp.status_code == 201
     assert "access_token" in resp.json()
 
     resp = await client.post("/api/auth/login", json={
         "email": "alice@example.com",
-        "password": "secret123",
+        "password": _GOOD_PASSWORD,
     })
     assert resp.status_code == 200
     assert "access_token" in resp.json()
@@ -37,7 +44,7 @@ async def test_duplicate_signup(client: AsyncClient):
     payload = {
         "email": "dup@example.com",
         "name": "Dup",
-        "password": "pass1234",
+        "password": _GOOD_PASSWORD,
     }
     await client.post("/api/auth/signup", json=payload)
     resp = await client.post("/api/auth/signup", json=payload)

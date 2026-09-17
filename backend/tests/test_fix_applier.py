@@ -15,6 +15,8 @@ import pytest
 from services import fix_applier
 
 
+from tests.sample_apps import require
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REAL_WORKFLOW = REPO_ROOT / "output" / "mc2xgclv" / "workflows" / "assessmentschedulingworkflow.json"
 
@@ -50,6 +52,9 @@ def _minimal_registry() -> dict:
 def app_dir(tmp_path: Path) -> Path:
     """A temp output dir carrying a copy of the real scheduling workflow + a
     minimal registry."""
+    # `output/` is gitignored build product: present on a machine that has
+    # generated this app, absent everywhere else — including every worktree.
+    require(REAL_WORKFLOW)
     out = tmp_path / "app"
     (out / "workflows").mkdir(parents=True)
     (out / "contracts").mkdir(parents=True)
