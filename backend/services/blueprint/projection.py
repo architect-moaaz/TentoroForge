@@ -660,6 +660,80 @@ def _write_route_registry(root: Path, written: list[str],
 # navigation — the route graph the guards and breadcrumbs read
 # ---------------------------------------------------------------------------
 
+def brand_mark(doc: dict) -> dict[str, Any]:
+    """The rail props that carry the owner's logo — ``{}`` when there is none.
+
+    Split out because two things need the same answer and must not disagree:
+    `project_shell` writes the reference into `shell.json`, and
+    `project_brand_logo` puts the file at the path that reference resolves to.
+
+    The alt text falls back to the application's name rather than to the file
+    name: a mark in the corner of every screen says WHICH APPLICATION this is,
+    and "a7f3c1e9.png" says nothing to anyone listening.
+    """
+    logo = (doc.get("designSystem") or {}).get("logo")
+    if not isinstance(logo, dict) or not str(logo.get("file") or "").strip():
+        return {}
+    from services import brand_logo
+
+    if not brand_logo.STORED_NAME.match(str(logo["file"])):
+        # A hand-edited path. The projection refuses to build a URL from it
+        # for the same reason `path_of` refuses to read one (§49: the absence
+        # is visible in the log, not swallowed).
+        logger.warning("[shell] logo path %r is not one we stored — ignored",
+                       logo["file"])
+        return {}
+    app_name = str((doc.get("application") or {}).get("name") or "App")
+    out: dict[str, Any] = {
+        "logoSrc": "/" + str(logo["file"]),
+        "logoAlt": str(logo.get("alt") or "").strip() or app_name,
+    }
+    width, height = logo.get("width"), logo.get("height")
+    if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+        out["logoAspect"] = round(width / height, 4)
+    return out
+
+
+def project_brand_logo(doc: dict, app_root: str | Path,
+                       output_dir: str | Path | None = None) -> dict[str, Any]:
+    """Copy the owner's logo into the generated tree's ``public/``.
+
+    The mark is stored once beside the Blueprint (``<output_dir>/brand/…``) and
+    copied into the app on every projection, because the app tree is
+    re-scaffolded and the Blueprint is not: a build that read the definition and
+    rebuilt the tree would otherwise leave `shell.json` pointing at a file that
+    is no longer there.
+
+    ``output_dir`` defaults to the app root's parent, which is where every
+    caller puts it (``app_root = <output_dir>/app``); it is a parameter so a
+    caller with the project directory in hand does not have to reconstruct it.
+
+    Writes nothing and reports nothing when the Blueprint names no logo. That
+    is the normal case — an application described in words has no mark.
+    """
+    logo = (doc.get("designSystem") or {}).get("logo")
+    if not isinstance(logo, dict):
+        return {"files": []}
+    from services import brand_logo
+
+    root = Path(output_dir) if output_dir is not None else Path(app_root).parent
+    src = brand_logo.path_of(root, logo)
+    if src is None:
+        # THE DOCUMENT CLAIMS A MARK THE PROJECT DOES NOT HAVE. Said out loud
+        # rather than swallowed: the shell will render the reference, the image
+        # will 404, and a line here is the only place that names why.
+        logger.warning("[brand] designSystem.logo names %r and there is no such "
+                       "file under %s — the shell will reference a missing image",
+                       logo.get("file"), root)
+        return {"files": [], "reason": "logo file missing"}
+
+    rel = str(logo["file"])                       # brand/<digest>.<ext>
+    dest = Path(app_root) / "public" / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(src.read_bytes())
+    return {"files": [f"public/{rel}"]}
+
+
 def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/schemas/shell.json`` from ``navigation.tree``.
 
@@ -742,11 +816,18 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     if not initial or str(initial) in ("/", "/home") or not _navigable(str(initial)):
         first = next((it for g in groups for it in (g.get("items") or [g]) if it.get("route")), None)
         initial = first.get("route") if first else None
+    rail: dict[str, Any] = {"groups": groups, "appName": app_name, "mode": "dark"}
+    # THE OWNER'S MARK GOES WHERE THE APPLICATION'S NAME IS. The rail's brand
+    # block draws a square with the first letter of the name in it; given a
+    # logo it draws the logo instead. Only the reference is written here —
+    # `project_brand_logo` is what puts the file where this src resolves, and
+    # it writes nothing when the Blueprint names no logo, so a rail with no
+    # mark is the same rail it has always been.
+    rail.update(brand_mark(doc))
     shell = {
         "type": "AppShell",
         "frame": "topbar" if nav.get("style") == "topbar" else "sidebar",
-        "children": [{"type": "SideNav",
-                      "props": {"groups": groups, "appName": app_name, "mode": "dark"}}],
+        "children": [{"type": "SideNav", "props": rail}],
     }
     if initial:
         shell["initialRoute"] = str(initial)

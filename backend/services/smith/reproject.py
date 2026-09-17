@@ -31,9 +31,10 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
         return []
     from services.blueprint.orchestrator import _project_integration
     from services.blueprint.projection import (
-        apply_frontend_projection, project_business_rules, project_data_layer,
-        project_design_tokens, project_entity_access, project_launch_roles,
-        project_middleware, project_public_resources, project_seed,
+        apply_frontend_projection, project_brand_logo, project_business_rules,
+        project_data_layer, project_design_tokens, project_entity_access,
+        project_launch_roles, project_middleware, project_public_resources,
+        project_seed, project_shell,
     )
 
     files: list[str] = []
@@ -59,6 +60,16 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
         _run(name, lambda fn=fn: fn(svc.doc, app_root))
     _run("seed", lambda: project_seed(svc.doc, app_root))
     _run("design_tokens", lambda: project_design_tokens(svc.doc, app_root))
+    # THE RAIL IS A PROJECTION TOO, and this list did not have it:
+    # `apply_frontend_projection` writes the page schemas, not `shell.json`.
+    # An undo that restores a document without a logo left the rail still
+    # carrying one, because the rail is only rewritten by `project_shell`.
+    # `project_brand_logo` then puts the file the rewritten rail names back
+    # under `public/`; the bytes of a mark that is no longer referenced are
+    # left where they are, unread and harmless, rather than deleted from a
+    # tree this function does not own.
+    _run("shell", lambda: project_shell(svc.doc, app_root))
+    _run("brand_logo", lambda: project_brand_logo(svc.doc, app_root))
     return sorted(set(f for f in files if f))
 
 

@@ -705,6 +705,23 @@ TOOL_CATALOG: list[dict] = [
              "screen picks the new look up without being re-composed. NOT "
              "edit_page (no single label or control) and NOT compose_route "
              "(no screen is rebuilt). Pass the change in the user's words."},
+    {"name": "set_logo",
+     "signature": "set_logo(alt?) -> {applied, edited_paths, diff_summary, "
+                  "logo, reason?}",
+     "desc": "PUT THE OWNER'S LOGO IN THE APPLICATION \u2014 \"put our logo in "
+             "the corner\", \"use this as our logo\", \"add our brand mark\". "
+             "The image is taken from the file they attached to THIS message; "
+             "you do not name it and cannot supply one yourself, so if they "
+             "attached nothing this says so and asks for the file. It goes in "
+             "the rail's brand block, where the application's initial is, on "
+             "every screen. Pass alt only if they said what it should be read "
+             "aloud as. NOT restyle \u2014 that is colour and type, and it "
+             "cannot carry an image."},
+    {"name": "remove_logo",
+     "signature": "remove_logo() -> {applied, edited_paths, diff_summary, reason?}",
+     "desc": "TAKE THE LOGO BACK OUT \u2014 \"remove the logo\", \"drop our "
+             "logo\", \"go back to no logo\". The rail shows the "
+             "application's initial again. Takes nothing."},
     {"name": "add_widgets",
      "signature": "add_widgets(route, widgets[], request?) -> {applied, "
                   "edited_paths, diff_summary, reason?}",
@@ -1341,6 +1358,8 @@ READONLY_HANDLERS = {
     "run_guards":               lambda output_dir, args: _smith_run_guards(output_dir),
     "edit_page":                lambda output_dir, args: _smith_edit_page(output_dir, args),
     "restyle":                  lambda output_dir, args: _smith_restyle(output_dir, args),
+    "set_logo":                 lambda output_dir, args: _smith_set_logo(output_dir, args),
+    "remove_logo":              lambda output_dir, args: _smith_remove_logo(output_dir),
     "edit_navigation":          lambda output_dir, args: _smith_edit_navigation(output_dir, args),
     "edit_access":              lambda output_dir, args: _smith_edit_access(output_dir, args),
     "rename_field":             lambda output_dir, args: _smith_field_change(output_dir, "rename_field", args),
@@ -1522,6 +1541,71 @@ def _smith_restyle(output_dir: str, args: dict) -> dict:
         return {"applied": False, "edited_paths": [],
                 "reason": "no change described. Pass change: what should look different, in the user's words."}
     return _restyle_run(output_dir, change)
+
+
+#: Tools the loop hands this turn's attached files to. See the dispatch site in
+#: `agents/smith_agent.py`: the model can see that a file was attached but never
+#: the id it is stored under, so a tool that needs the bytes has to be given
+#: them rather than asked for them.
+TURN_FILE_TOOLS = frozenset({"set_logo"})
+
+
+def _smith_set_logo(output_dir: str, args: dict) -> dict:
+    """The owner's mark, from the file they attached to this turn.
+
+    Thin like the rest: `services.smith.brand_logo_change.run` is the one place
+    `designSystem.logo` is written, and the upload route reaches the same
+    function. `services.brand_logo.store` is the one place the bytes land.
+
+    `files` is injected by the loop, not by the model — see `TURN_FILE_TOOLS`.
+    """
+    from services import brand_logo
+    from services.smith.brand_logo_change import run as _logo_run
+
+    if not isinstance(args, dict):
+        return {"applied": False, "edited_paths": [], "reason": "set_logo requires an object arg"}
+
+    images = [f for f in (args.get("files") or [])
+              if isinstance(f, dict) and str(f.get("kind") or "") == "image"]
+    if not images:
+        return {"applied": False, "edited_paths": [],
+                "reason": ("no image came with this message, and I cannot make one. "
+                           "Attach the logo file here \u2014 a PNG, JPEG, GIF or WebP \u2014 "
+                           "or upload it as the project's logo, and I will put it in "
+                           "the corner of every screen.")}
+    if len(images) > 1:
+        names = ", ".join(str(f.get("filename") or f.get("id")) for f in images)
+        return {"applied": False, "edited_paths": [],
+                "reason": (f"{len(images)} images came with this message ({names}). "
+                           f"Send the logo on its own and I will use it \u2014 I will not "
+                           f"guess which of them is the mark.")}
+
+    rec = images[0]
+    path = str(rec.get("path") or "")
+    if not path:
+        return {"applied": False, "edited_paths": [],
+                "reason": "I could not read that file any more \u2014 attach it again."}
+    try:
+        from pathlib import Path as _Path
+        body = brand_logo.store(output_dir, str(rec.get("filename") or "logo"),
+                                str(rec.get("media_type") or ""),
+                                _Path(path).read_bytes())
+    except brand_logo.BrandLogoError as exc:
+        return {"applied": False, "edited_paths": [], "reason": str(exc)}
+    except OSError as exc:
+        return {"applied": False, "edited_paths": [],
+                "reason": f"I could not read that file: {exc}"}
+    return _logo_run(output_dir, logo=body, alt=str(args.get("alt") or ""))
+
+
+def _smith_remove_logo(output_dir: str) -> dict:
+    """Its own tool rather than a flag on `set_logo`, so which of the two is
+    meant is read off the sentence by the model — "remove the old logo and use
+    this one" is a `set_logo`, and a flag inferred from the word "remove"
+    would get it backwards."""
+    from services.smith.brand_logo_change import run as _logo_run
+
+    return _logo_run(output_dir, remove=True)
 
 
 def _smith_compose(output_dir: str, args: dict, verb: str) -> dict:

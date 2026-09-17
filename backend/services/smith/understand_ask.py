@@ -76,6 +76,15 @@ Return ONLY a JSON object with exactly these keys:
                         it darker", "more compact". This is the design
                         system, not any one screen: NOT rename (no label
                         changes), NOT compose_route (no screen is rebuilt).
+      "set_logo"      — the owner's LOGO goes INTO the application: "put our
+                        logo in the corner", "here is our logo", "use this as
+                        our brand mark". The image is whatever they attached to
+                        the message — you do not name it and there is no field
+                        for it. NOT "restyle": colour and type are a decision,
+                        a logo is a file, and restyle cannot carry one.
+      "remove_logo"   — the logo comes OUT: "remove the logo", "drop our
+                        logo", "go back to no logo". "Remove the old logo and
+                        use this one" is set_logo, not this.
       "edit_navigation" — the MENU: what is in it, in what order, under
                         what label or icon or group heading, and which
                         page the app opens on: "put Master Data first",
@@ -257,6 +266,11 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   "change": what should look different, in the user's own words ("theme
       colour green instead of blue", "darker, more compact"). Not a hex
       value unless they gave one; the design agent decides the scheme.
+
+  set_logo needs nothing. The file is the request, and it came with the
+      message. Say so in "clarification_needed" ONLY if they asked for a logo
+      and attached nothing — and then ask for the file, not for a description
+      of it.
 
   compose_route needs:
   "route": the path of the screen, as it appears in the Blueprint ("/",

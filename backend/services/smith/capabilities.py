@@ -42,9 +42,10 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "Roles, permissions, and which screens each kind of person can open.",
      frozenset({"edit_access"})),
     ("How it looks",
-     "The colours, type and density of the whole application, and the menu "
-     "down the side.",
-     frozenset({"restyle", "edit_navigation"})),
+     "The colours, type and density of the whole application, the menu down "
+     "the side, and your own logo in the corner of every screen — attach the "
+     "image and ask.",
+     frozenset({"restyle", "edit_navigation", "set_logo", "remove_logo"})),
     ("What it is, and what it talks to",
      "Its name and purpose, requirements written down for later, API "
      "endpoints, and outside services — recorded with the names of their "

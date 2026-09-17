@@ -42,6 +42,15 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # wording. Needs only the change, in the user's words: the design agent
     # re-decides the section against it.
     "restyle": {"change"},
+    # The owner's mark. Nothing is required of the understanding, and that is
+    # the point: the one thing this verb needs is a FILE, and a file is not
+    # something the model can put in a field. It comes from what the person
+    # attached to the turn, which the loop hands to the tool directly.
+    "set_logo": set(),
+    # Its own verb, not a flag on the one above: which of the two this is has
+    # to be read off the sentence by the model. A flag set here from the word
+    # "remove" would be wrong on "remove the old logo and use this one".
+    "remove_logo": set(),
     # Workflows — the business processes. `workflow` is what the new one
     # should do (add) or which existing one is meant (edit/remove); `change`
     # is what should be different about it. `route` may name the screen a
@@ -133,6 +142,19 @@ VERB_HELP: dict[str, str] = {
         "more compact\". Re-decides the design system against the request; "
         "every screen picks it up through the tokens. Needs the change in the "
         "user's words."
+    ),
+    "set_logo": (
+        "Put the owner's LOGO in the application: \"put our logo in the "
+        "corner\", \"use this as our logo\", \"here is our brand mark\". "
+        "The image comes from the file attached to the message; there is no "
+        "field for it and none can be invented. It renders in the rail's brand "
+        "block on every screen, where the application's initial otherwise is. "
+        "NOT restyle — that is colour, type and density, and it carries no image."
+    ),
+    "remove_logo": (
+        "Take the owner\'s logo back OUT of the application: \"remove the logo\", "
+        "\"drop our logo\", \"go back to no logo\". The rail shows the "
+        "application\'s initial again. Needs nothing."
     ),
     "edit_navigation": (
         "Change the app's menu: \"put Master Data first\", \"call it Nurse "

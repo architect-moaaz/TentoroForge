@@ -585,6 +585,35 @@ class SmithSession:
                           touched_paths=touched,
                           diff_summary=", ".join(touched) if touched else "")
 
+    def _logo(self, verb: str) -> "TurnResult":
+        """Put the owner's mark in, or take it out.
+
+        Two verbs rather than one with a flag, so that which of the two this is
+        comes from the model reading the sentence — not from this method
+        sniffing the message for the word "remove", which would be wrong on
+        "remove the old logo and use this one" and on every language but
+        English.
+
+        THIS PATH CANNOT RECEIVE A FILE. The session is handed a message and a
+        Blueprint; the bytes of an attachment reach the ReAct loop, which is
+        where `set_logo` gets them. So a request to PUT a logo in is answered
+        with the ask for the file rather than with a shrug — and the same seam,
+        `services.smith.brand_logo_change.run`, is what says it, so the two
+        paths cannot drift into two different answers.
+        """
+        from services.smith.brand_logo_change import run as logo_run
+
+        out = logo_run(str(self.output_dir), remove=(verb == "remove_logo"),
+                       reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or
+                                         "I could not change the logo and have changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
+                          touched_paths=touched,
+                          diff_summary=", ".join(touched) if touched else "")
+
     def _compose(self, verb: str, understanding: dict,
                  user_message: str) -> "TurnResult":
         """Compose a screen, or add sections to one, through the real agent.
@@ -951,6 +980,8 @@ class SmithSession:
 
         if verb == "restyle":
             return self._restyle(understanding, self._ask)
+        if verb in ("set_logo", "remove_logo"):
+            return self._logo(verb)
         if verb in ("add_workflow", "edit_workflow", "remove_workflow"):
             return self._workflow(verb, understanding, self._ask)
         if verb == "edit_navigation":

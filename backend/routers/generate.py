@@ -8530,12 +8530,22 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
             # than in the agent so the agent stays free of storage concerns
             # and remains injectable in tests.
             _attach_blocks = []
+            # The same attachments a second way: the records, with the path of
+            # each file. The blocks are what the MODEL sees; these are what a
+            # TOOL is handed when it has to do something with the bytes (see
+            # `smith_tools.TURN_FILE_TOOLS`). Resolved here for the same reason
+            # the blocks are — this is the layer that knows the project id the
+            # attachments are filed under, and `output_dir` is keyed by the
+            # project's short id, not by it.
+            _attach_files = []
             if attachment_ids:
                 try:
                     from services import chat_attachments
+                    _root = chat_attachments.attachments_root()
                     _attach_blocks = chat_attachments.load_blocks(
-                        chat_attachments.attachments_root(),
-                        str(project.id), list(attachment_ids))
+                        _root, str(project.id), list(attachment_ids))
+                    _attach_files = chat_attachments.locate(
+                        _root, str(project.id), list(attachment_ids))
                     logger.info("smith turn: %d attachment block(s)", len(_attach_blocks))
                 except Exception as _e:  # noqa: BLE001 — never lose the turn
                     logger.warning("attachment load failed: %s", _e)
@@ -8544,6 +8554,7 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
                 run_smith_agent, message, output_dir, recall_block, _smith_memory,
                 prior_messages=prior_messages,
                 attachment_blocks=_attach_blocks,
+                attachment_files=_attach_files,
                 scoped_tools=scoped_tools,
                 reasoning_callback=_reasoning_cb,
                 progress_callback=_progress_cb,

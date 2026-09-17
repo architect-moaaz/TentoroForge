@@ -1952,6 +1952,35 @@
           "additionalProperties": {
             "type": "number"
           }
+        },
+        "logo": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "minLength": 1
+            },
+            "alt": {
+              "type": "string",
+              "default": ""
+            },
+            "mediaType": {
+              "type": "string",
+              "default": "image/png"
+            },
+            "width": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "file"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,
