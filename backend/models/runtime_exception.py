@@ -23,7 +23,7 @@ from sqlalchemy import (
     DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -82,20 +82,19 @@ class RuntimeException(Base):
     request_url: Mapped[str | None] = mapped_column(String(2048))
     request_method: Mapped[str | None] = mapped_column(String(16))
 
-    # NO LONGER WRITTEN, AND NOT TO BE WRITTEN AGAIN. These two held the whole
-    # POST body and the whole session user of whatever crashed — a customer's
-    # order and a customer's identity, in the platform's own tables, belonging
-    # to the owner of the application and not to us. The reporter no longer
-    # sends them and `RuntimeExceptionIn` no longer accepts them; what it
-    # sends instead is the KEYS of the payload, which name the shape without
-    # carrying anyone's record (see `services.incident_ledger`).
+    # GONE, AND NOT COMING BACK. `request_body` and `user_context` held the
+    # whole POST body and the whole session user of whatever crashed — a
+    # customer's order and a customer's identity, in the platform's own
+    # tables, belonging to the owner of the application and not to us. They
+    # were purged and dropped by `rx0918_drop_crash_payload`.
     #
-    # The columns stay because dropping them is a migration against a ten-head
-    # graph, and rows written before this may still hold that data: purging
-    # them is a deliberate operation on live data, not a side effect of a
-    # deploy.
-    request_body: Mapped[dict | None] = mapped_column(JSONB)
-    user_context: Mapped[dict | None] = mapped_column(JSONB)
+    # What stands in their place is on the report, not on this row: the KEYS
+    # a control sent, which name the shape without carrying anyone's record.
+    # They live in the project's own incident ledger beside its run ledger —
+    # see `services.incident_ledger`, which states in full what a report may
+    # and may not carry. Nothing here is the right home for them: this table
+    # answers "how many are open" for the self-heal loop, and a locator is all
+    # that question needs.
 
     # Dedup — the hash the ingest endpoint computes from (kind, message,
     # source_file, source_line). Constrained UNIQUE per project so a repeat

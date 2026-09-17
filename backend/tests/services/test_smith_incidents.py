@@ -313,3 +313,34 @@ def test_the_slow_endpoint_takes_a_measurement_and_nothing_else():
         SlowResponseIn(operation="FLOW-A", ms=4200, request_body={"email": "x"})
     with pytest.raises(ValidationError):
         SlowResponseIn(operation="FLOW-A", ms=-1)
+
+
+def test_the_table_has_nowhere_left_to_put_a_customers_record():
+    """The columns are dropped, not merely unwritten (`rx0918_drop_crash_payload`).
+
+    The endpoint refusing the fields is one guard; this is the other. A column
+    that still exists is a column something can start filling again, and the
+    row that filled it would look exactly like every other row.
+    """
+    from models.runtime_exception import RuntimeException
+
+    columns = set(RuntimeException.__table__.columns.keys())
+    assert "request_body" not in columns
+    assert "user_context" not in columns
+    # The locators stay — they are what makes a crash findable, and none of
+    # them is anybody's record.
+    assert {"workflow_id", "node_id", "page_route", "source_file"} <= columns
+
+
+def test_the_drop_is_chained_to_the_revision_that_created_the_columns():
+    """Ten heads in the graph, and only one of them has the table in its
+    ancestry. Chaining the drop anywhere else would fail on exactly the
+    environments that have something to drop."""
+    import pathlib
+    import re
+
+    versions = pathlib.Path(__file__).resolve().parents[2] / "alembic" / "versions"
+    drop = (versions / "rx0918_drop_crash_payload_columns.py").read_text("utf-8")
+    assert re.search(r'^down_revision = "svst5_faults"', drop, re.M)
+    # And it can be stepped back down, or it traps whatever it is run against.
+    assert "def downgrade()" in drop and "add_column" in drop
