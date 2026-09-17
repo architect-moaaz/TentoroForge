@@ -700,6 +700,73 @@ def page_findings(doc: dict) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# A WORKFLOW DOES NOT WRITE THE PLATFORM'S CREDENTIALS.
+#
+# `users` is a platform table (§97): auth owns it, the signup route writes
+# `password` and `name`, NextAuth reads them back, and the projector folds a
+# Blueprint `passwordHash` INTO the platform's `password` rather than adding a
+# column beside it. A workflow step, authored against the Blueprint's field
+# names, then writes `passwordHash` — a column the shipped table does not have.
+#
+# LabConnect (d1bl1nes) shipped exactly that: FLOW-001 wrote
+# `passwordHash: "{{password}}"` and FLOW-004 `passwordHash: "$uuid"`, and the
+# only thing that noticed was the engine dry run at `assemble`, forty minutes
+# into a build, where no repair round can reach it.
+#
+# Folding the name here would be worse than the failure: `{{password}}` is the
+# raw password, the platform's column holds a bcrypt hash, and a silent rename
+# would store a plaintext credential that cannot log in. So the credential is
+# refused outright — account creation belongs to the platform's signup — and a
+# field the projector merely renames is told its real column.
+# ---------------------------------------------------------------------------
+
+#: Columns of a platform table that hold a credential, by the name the platform
+#: uses and by the names a Blueprint reaches for.
+_CREDENTIAL_COLUMNS = {"password", "passwordhash", "hashedpassword",
+                       "passwordsalt", "salt"}
+
+
+def platform_write_findings(doc: dict) -> list[dict]:
+    from services.blueprint.projection import (
+        _PLATFORM_SYNONYMS, PLATFORM_TABLE_SOURCES,
+    )
+
+    out: list[dict] = []
+    for wf in _live(doc.get("workflows")):
+        for st in wf.get("steps") or []:
+            if not isinstance(st, dict):
+                continue
+            cfg = st.get("config") or {}
+            if cfg.get("actionType") not in ("db_insert", "db_update"):
+                continue
+            table = str(cfg.get("table") or "").lower()
+            if table not in PLATFORM_TABLE_SOURCES:
+                continue
+            values = cfg.get("values") if isinstance(cfg.get("values"), dict) else {}
+            synonyms = _PLATFORM_SYNONYMS.get(table, {})
+            where = f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}"
+            for column in sorted(str(k) for k in values):
+                folded = column.lower().replace("_", "")
+                if folded in _CREDENTIAL_COLUMNS:
+                    out.append({"rule": "platform-credential-write", "page": str(wf.get("id")),
+                                "detail": f"{where}: sets {column!r} on the platform's {table!r} "
+                                          f"table. The platform owns the credential — its signup "
+                                          f"route hashes the password and NextAuth reads it back — "
+                                          f"so a workflow that writes it either names a column the "
+                                          f"shipped table does not have, or stores a password the "
+                                          f"login cannot verify. Drop it from `values` and let the "
+                                          f"account be created through sign-up; write only what the "
+                                          f"Blueprint adds to {table!r}."})
+                elif folded in synonyms:
+                    out.append({"rule": "platform-column-renamed", "page": str(wf.get("id")),
+                                "detail": f"{where}: sets {column!r} on the platform's {table!r} "
+                                          f"table, which the platform already stores as "
+                                          f"{synonyms[folded]!r} — the shipped table has that column "
+                                          f"and not this one. Write {synonyms[folded]!r}."})
+    return out
+
+
 def authoring_findings(doc: dict) -> list[dict]:
     """What the engine would refuse in a workflow or rule as written — the
     author's refusals. Kept apart from :func:`page_findings` because a page
@@ -711,6 +778,7 @@ def authoring_findings(doc: dict) -> list[dict]:
     out.extend(template_findings(doc))
     out.extend(insert_findings(doc))
     out.extend(column_findings(doc))
+    out.extend(platform_write_findings(doc))
     # A step reads what no input declares and no earlier step produces — the
     # wire side of the contract (see dispatch_contract). Imported here: that
     # module reads this one's helpers.
