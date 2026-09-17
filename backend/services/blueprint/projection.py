@@ -660,6 +660,135 @@ def _write_route_registry(root: Path, written: list[str],
 # navigation — the route graph the guards and breadcrumbs read
 # ---------------------------------------------------------------------------
 
+def brand_mark(doc: dict) -> dict[str, Any]:
+    """The rail props that carry the owner's logo — ``{}`` when there is none.
+
+    Split out because two things need the same answer and must not disagree:
+    `project_shell` writes the reference into `shell.json`, and
+    `project_brand_logo` puts the file at the path that reference resolves to.
+
+    The alt text falls back to the application's name rather than to the file
+    name: a mark in the corner of every screen says WHICH APPLICATION this is,
+    and "a7f3c1e9.png" says nothing to anyone listening.
+    """
+    logo = (doc.get("designSystem") or {}).get("logo")
+    if not isinstance(logo, dict) or not str(logo.get("file") or "").strip():
+        return {}
+    from services import brand_logo
+
+    if not brand_logo.STORED_NAME.match(str(logo["file"])):
+        # A hand-edited path. The projection refuses to build a URL from it
+        # for the same reason `path_of` refuses to read one (§49: the absence
+        # is visible in the log, not swallowed).
+        logger.warning("[shell] logo path %r is not one we stored — ignored",
+                       logo["file"])
+        return {}
+    app_name = str((doc.get("application") or {}).get("name") or "App")
+    out: dict[str, Any] = {
+        "logoSrc": "/" + str(logo["file"]),
+        "logoAlt": str(logo.get("alt") or "").strip() or app_name,
+    }
+    width, height = logo.get("width"), logo.get("height")
+    if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+        out["logoAspect"] = round(width / height, 4)
+    return out
+
+
+def project_brand_logo(doc: dict, app_root: str | Path,
+                       output_dir: str | Path | None = None) -> dict[str, Any]:
+    """Copy the owner's logo into the generated tree's ``public/``.
+
+    The mark is stored once beside the Blueprint (``<output_dir>/brand/…``) and
+    copied into the app on every projection, because the app tree is
+    re-scaffolded and the Blueprint is not: a build that read the definition and
+    rebuilt the tree would otherwise leave `shell.json` pointing at a file that
+    is no longer there.
+
+    ``output_dir`` defaults to the app root's parent, which is where every
+    caller puts it (``app_root = <output_dir>/app``); it is a parameter so a
+    caller with the project directory in hand does not have to reconstruct it.
+
+    ALWAYS WRITES ``src/contracts/brand.ts``, including when there is no logo.
+    The rail reads the mark off `shell.json`, but the pages that render OUTSIDE
+    the rail — sign-in, sign-up, 404, 403 — have no shell to read, and they are
+    exactly the pages an anonymous visitor sees. They import this module, so it
+    has to exist on every application whether or not one was given: an import
+    of a file the tree does not contain does not fail the page, it fails the
+    build. (The scaffold ships the same module exporting `null`, as a
+    `SCAFFOLD_DEFAULT`, for the case where this projection never ran at all.)
+    """
+    written = [_write_brand_module(doc, app_root)]
+    logo = (doc.get("designSystem") or {}).get("logo")
+    if not isinstance(logo, dict):
+        return {"files": written}
+    from services import brand_logo
+
+    root = Path(output_dir) if output_dir is not None else Path(app_root).parent
+    src = brand_logo.path_of(root, logo)
+    if src is None:
+        # THE DOCUMENT CLAIMS A MARK THE PROJECT DOES NOT HAVE. Said out loud
+        # rather than swallowed: the shell will render the reference, the image
+        # will 404, and a line here is the only place that names why.
+        logger.warning("[brand] designSystem.logo names %r and there is no such "
+                       "file under %s — the shell will reference a missing image",
+                       logo.get("file"), root)
+        return {"files": written, "reason": "logo file missing"}
+
+    rel = str(logo["file"])                       # brand/<digest>.<ext>
+    dest = Path(app_root) / "public" / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(src.read_bytes())
+    written.append(f"public/{rel}")
+    return {"files": written}
+
+
+#: The module every chrome-less page imports to find the owner's mark. Kept
+#: beside the projector that writes it AND shipped by the scaffold with a
+#: `null` body, so the two cannot describe different shapes.
+BRAND_MODULE = "src/contracts/brand.ts"
+
+
+def _write_brand_module(doc: dict, app_root: str | Path) -> str:
+    """``src/contracts/brand.ts`` — the mark, for the pages with no shell.
+
+    A TypeScript module rather than JSON because its readers are CLIENT
+    components. `login/page.tsx` carries "use client" and cannot read a file at
+    render time; it can import a constant, which the bundler inlines.
+
+    Built from the same `brand_mark(doc)` the rail is, so the rail and the
+    sign-in screen cannot disagree about which image the application signs its
+    name with.
+    """
+    mark = brand_mark(doc)
+    body = "null" if not mark else json.dumps({
+        "src": mark["logoSrc"],
+        "alt": mark["logoAlt"],
+        **({"aspect": mark["logoAspect"]} if "logoAspect" in mark else {}),
+    }, indent=2, sort_keys=True)
+    out = Path(app_root) / "src" / "contracts"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "brand.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "//\n"
+        "// The owner's mark, for the pages that render with no shell around them —\n"
+        "// sign-in, sign-up, 404, 403. The rail reads the same thing from\n"
+        "// shell.json; both come from one function, so they cannot disagree.\n"
+        "//\n"
+        "// `null` is the normal case: an application described in words has no mark,\n"
+        "// and each page then draws the initial it has always drawn.\n"
+        "export type BrandLogo = {\n"
+        "  /** Served from the app's own `public/`. */\n"
+        "  src: string;\n"
+        "  /** The application's name unless the owner said otherwise. */\n"
+        "  alt: string;\n"
+        "  /** width / height of the source image, when it could be measured. */\n"
+        "  aspect?: number;\n"
+        "};\n\n"
+        f"export const BRAND_LOGO: BrandLogo | null = {body};\n",
+        "utf-8")
+    return BRAND_MODULE
+
+
 def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/schemas/shell.json`` from ``navigation.tree``.
 
@@ -742,11 +871,18 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     if not initial or str(initial) in ("/", "/home") or not _navigable(str(initial)):
         first = next((it for g in groups for it in (g.get("items") or [g]) if it.get("route")), None)
         initial = first.get("route") if first else None
+    rail: dict[str, Any] = {"groups": groups, "appName": app_name, "mode": "dark"}
+    # THE OWNER'S MARK GOES WHERE THE APPLICATION'S NAME IS. The rail's brand
+    # block draws a square with the first letter of the name in it; given a
+    # logo it draws the logo instead. Only the reference is written here —
+    # `project_brand_logo` is what puts the file where this src resolves, and
+    # it writes nothing when the Blueprint names no logo, so a rail with no
+    # mark is the same rail it has always been.
+    rail.update(brand_mark(doc))
     shell = {
         "type": "AppShell",
         "frame": "topbar" if nav.get("style") == "topbar" else "sidebar",
-        "children": [{"type": "SideNav",
-                      "props": {"groups": groups, "appName": app_name, "mode": "dark"}}],
+        "children": [{"type": "SideNav", "props": rail}],
     }
     if initial:
         shell["initialRoute"] = str(initial)
@@ -2848,6 +2984,198 @@ def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": written, "claimedBy": claimed,
             "removedStaleRoot": removed,
             "redirectsTo": None if root_page else landing_route(doc)}
+
+
+#: Written into every route file this projector emits, and the only way the
+#: sweep below can tell a file it owns from one the scaffold shipped or a
+#: person wrote. A marker rather than a manifest: a manifest is a second
+#: statement of which routes are public, and the two would drift.
+_PUBLIC_ROUTE_MARKER = "@generated forge:public-route"
+
+#: Top-level directories under `src/app` that belong to the scaffold or to
+#: Next. A Blueprint page that claims one of these routes is refused rather
+#: than written, because writing it would replace the sign-in screen with a
+#: form, or shadow the API the application talks to.
+_RESERVED_APP_SEGMENTS = frozenset({
+    "api", "login", "signup", "403", "_next", "favicon.ico",
+})
+
+#: A path segment is a plain slug or a single dynamic parameter. `route` comes
+#: out of a JSON document and becomes a DIRECTORY NAME; `..` in it would put a
+#: generated file anywhere on the disk the process can write.
+#:
+#: THE FIRST VERSION OF THIS PATTERN ADMITTED `..`, because `[A-Za-z0-9._-]+`
+#: matches it and the comment above says what the author meant rather than what
+#: the regex did. `/a/../b` wrote outside the directory it was given. A segment
+#: has to CONTAIN something that is not a dot.
+_ROUTE_SEGMENT = re.compile(
+    r"^(?:(?=[^.])[A-Za-z0-9._-]+|\[[A-Za-z_][A-Za-z0-9_]*\])$")
+
+
+def _public_route_file(route: str) -> str:
+    """The `page.tsx` that renders one public route, outside the gated group.
+
+    It is a thin call into `renderSchemaPage`, the same one every other route
+    file makes; what makes it different is only WHERE it sits.
+    """
+    segments = [seg for seg in route.split("/") if seg]
+    params = [seg[1:-1] for seg in segments if seg.startswith("[")]
+    head = (
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        f"// {_PUBLIC_ROUTE_MARKER}\n"
+        "//\n"
+        f"// {route} is declared PUBLIC, and a public page must not sit inside\n"
+        "// `(dashboard)` — that group's layout opens with `if (!session)\n"
+        "// redirect(\"/login\")`, so the projected middleware opened the route and\n"
+        "// the layout closed it again. A static segment outranks the group's\n"
+        "// `[entity]`, so this file is what Next matches, and the visitor gets the\n"
+        "// page instead of a sign-in screen.\n"
+        "//\n"
+        "// It also renders with no rail, which is what `nav-flow` already says\n"
+        "// about it (`shell: false`): navigation into a product the visitor\n"
+        "// cannot reach is worse than no navigation.\n"
+        "\n"
+        'import { renderSchemaPage } from "@/lib/schema-page";\n'
+        'import { PublicPageFrame } from "@/components/PublicPageFrame";\n'
+        "\n"
+    )
+    search = ("  searchParams?: Promise<Record<string, string | string[] | "
+              "undefined>>;\n")
+    if not params:
+        return (
+            head
+            + "export default async function PublicPage({ searchParams }: {\n"
+            + search
+            + "}) {\n"
+            + f'  const request = new Request("internal:?path={_encode(route)}");\n'
+            + "  return (\n"
+            + "    <PublicPageFrame>\n"
+            + f'      {{await renderSchemaPage("{route}", request, await searchParams)}}\n'
+            + "    </PublicPageFrame>\n"
+            + "  );\n"
+            + "}\n"
+        )
+    # The CONCRETE path is rebuilt from the params so breadcrumb ancestors
+    # resolve (renderer's `resolveCrumbHrefs` reads it), and the LAST dynamic
+    # segment rides as `id` — the key `data-engine-bridge` reads to turn a
+    # detail page into `engine.findById`. Right-to-left is the same preference
+    # the catch-all applies when it decides which segment was the record.
+    fields = ", ".join(f"{name}: string" for name in params)
+    literal = "/".join(
+        ("${encodeURIComponent(p." + seg[1:-1] + ")}") if seg.startswith("[") else seg
+        for seg in segments
+    )
+    return (
+        head
+        + "export default async function PublicPage({ params, searchParams }: {\n"
+        + f"  params: Promise<{{ {fields} }}>;\n"
+        + search
+        + "}) {\n"
+        + "  const p = await params;\n"
+        + f"  const path = `/{literal}`;\n"
+        + f"  const request = new Request(\n"
+        + f"    `internal:?id=${{encodeURIComponent(p.{params[-1]})}}"
+          "&path=${encodeURIComponent(path)}`,\n"
+        + "  );\n"
+        + "  return (\n"
+        + "    <PublicPageFrame>\n"
+        + f'      {{await renderSchemaPage("{route}", request, await searchParams)}}\n'
+        + "    </PublicPageFrame>\n"
+        + "  );\n"
+        + "}\n"
+    )
+
+
+def _encode(route: str) -> str:
+    from urllib.parse import quote
+    return quote(route, safe="")
+
+
+def project_public_routes(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Give every PUBLIC page its own route file, outside ``(dashboard)``.
+
+    THE MIDDLEWARE OPENED THE DOOR AND THE LAYOUT CLOSED IT. `project_middleware`
+    builds its matcher from what each page declares, so `/nurse-registration`
+    was excluded from the gate exactly as the Blueprint asked. But Next matches
+    a one-segment URL against `src/app/(dashboard)/[entity]/page.tsx`, and that
+    group's layout begins `if (!session) redirect("/login")` — it has no notion
+    of a public route and never did. So an anonymous visitor to a page declared
+    public got the sign-in screen, and `entity_access`'s `"*"` readers and
+    `launch_roles`'s `"*"` launchers — both already projected for exactly this
+    visitor — were never reached by anyone.
+
+    A static segment outranks a dynamic one in Next's matcher, so a file at
+    `src/app/nurse-registration/page.tsx` is what a request resolves to, and it
+    sits outside the group and therefore outside the gate. Which is also the
+    honest structure: a public page is not part of the dashboard, and saying so
+    with a directory is better than teaching the dashboard's layout to render
+    some of its children without itself.
+
+    `/` is left alone: the optional catch-all already serves it from outside
+    the group, so a public root page was the one case that always worked.
+
+    Files this projector wrote before and would not write now are removed. A
+    page that stops being public must stop having a door around the gate, and
+    the sweep is by the marker each file carries rather than by a manifest —
+    a manifest would be a second statement of which routes are public.
+    """
+    app = Path(app_root) / "src" / "app"
+    wanted: dict[Path, str] = {}
+    refused: list[str] = []
+
+    for page in _live(doc.get("pages")):
+        if (page.get("access") or "authenticated") != "public":
+            continue
+        route = str(page.get("route") or "")
+        if not route.startswith("/") or route == "/":
+            continue
+        segments = [seg for seg in route.split("/") if seg]
+        if not all(_ROUTE_SEGMENT.match(seg) for seg in segments):
+            refused.append(route)
+            logger.warning("[public-routes] %s is not a shape we can make a "
+                           "directory of — left inside the gate", route)
+            continue
+        if segments[0].lower() in _RESERVED_APP_SEGMENTS:
+            # Writing this would replace the sign-in screen, or shadow the API
+            # the application talks to. Named, not silently skipped: the page
+            # will not be reachable and someone has to know why.
+            refused.append(route)
+            logger.warning("[public-routes] %s collides with a route the scaffold "
+                           "owns (%s) — not written", route, segments[0])
+            continue
+        wanted[app.joinpath(*segments, "page.tsx")] = _public_route_file(route)
+
+    written: list[str] = []
+    for dest, body in sorted(wanted.items()):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(body, "utf-8")
+        written.append(str(dest.relative_to(Path(app_root))))
+
+    removed: list[str] = []
+    # LISTED BEFORE ANYTHING IS DELETED. `rglob` walks the tree lazily, so
+    # removing a directory mid-iteration makes it raise FileNotFoundError on
+    # the descent it had already queued — the sweep died partway through and
+    # left some of the files it had decided to take out.
+    stale = sorted(app.rglob("page.tsx")) if app.is_dir() else []
+    for existing in stale:
+        if existing in wanted:
+            continue
+        try:
+            if _PUBLIC_ROUTE_MARKER not in existing.read_text("utf-8"):
+                continue
+        except OSError:                          # unreadable: not ours to delete
+            continue
+        existing.unlink()
+        removed.append(str(existing.relative_to(Path(app_root))))
+        # A directory that held nothing but that file is now noise Next still
+        # walks; take it back out, parents included, up to `src/app`.
+        parent = existing.parent
+        while parent != app and parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+            parent = parent.parent
+
+    return {"files": sorted(written), "removed": sorted(removed),
+            "refused": sorted(refused)}
 
 
 def project_append_only_entities(doc: dict, app_root: str | Path) -> dict[str, Any]:

@@ -356,6 +356,54 @@ sentences:
     source: phrasebook
     reaches: {verb: restyle, states: [change]}
 
+  - id: looks-logo-in-the-corner
+    say: "put our logo in the corner"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: set_logo, states: []}
+
+  - id: looks-logo-at-the-top
+    say: "Can I put my logo at the top?"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: set_logo, states: []}
+
+  - id: looks-this-is-our-logo
+    say: "use this as our logo"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: set_logo, states: []}
+
+  - id: looks-logo-here-it-is
+    say: "here is our logo, put it on the app"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: set_logo, states: []}
+
+  - id: looks-brand-colours-from-the-logo
+    say: "put our brand colours, the green from our logo"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: restyle, states: [change]}
+
+  - id: looks-replace-the-logo
+    say: "remove the old logo and use this one"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: set_logo, states: []}
+
+  - id: looks-take-the-logo-off
+    say: "take our logo off"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: remove_logo, states: []}
+
+  - id: looks-drop-the-logo
+    say: "remove the logo"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_logo, states: []}
+
   - id: menu-master-data-first
     say: "put Master Data first"
     checked: {colour: acts, via: handler}
@@ -1838,14 +1886,6 @@ sentences:
     because: >-
       a copy is handed to them, never kept, so there is nowhere to point at
 
-  - id: gap-logo-upload
-    say: "Can I put my logo at the top?"
-    checked: {colour: nothing, via: none}
-    source: phrasebook
-    gap: Pictures and branding
-    because: >-
-      `restyle` decides colours, type and density from words — there is no way
-      to give it a file
 
   - id: gap-photo-per-record
     say: "I want to upload a photo for each nurse"

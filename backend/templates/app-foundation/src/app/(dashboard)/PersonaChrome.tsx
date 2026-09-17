@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { Bell, LogOut, Settings, User } from "lucide-react";
@@ -120,21 +121,30 @@ export function PersonaChrome({
         className="hidden md:block w-full shrink-0 border-b border-border"
       >
       <div className="mx-auto flex max-w-screen-2xl items-center justify-between gap-4 px-6 py-3">
-        {/* Brand mark + wordmark, left */}
+        {/* Brand mark + wordmark, left. The owner's logo REPLACES both when
+            there is one — the circle is a letter standing in for a mark, and
+            a mark beside the name in text reads as a stutter. Same rule as
+            every other chrome; see `ShellBrand` in layout.tsx. */}
         <div className="flex items-center gap-3 shrink-0">
-          <div
-            aria-hidden
-            className="h-9 w-9 rounded-full flex items-center justify-center text-sm font-semibold text-white"
-            style={{ background: chrome.accent }}
-          >
-            {(appName || "A").trim().charAt(0).toUpperCase()}
-          </div>
-          <span
-            className="text-[17px] font-semibold tracking-tight whitespace-nowrap"
-            style={{ fontFamily: "var(--font-heading, var(--font-display, inherit))" }}
-          >
-            {appName}
-          </span>
+          {BRAND_LOGO ? (
+            <BrandMark height={36} alt={appName} />
+          ) : (
+            <>
+              <div
+                aria-hidden
+                className="h-9 w-9 rounded-full flex items-center justify-center text-sm font-semibold text-white"
+                style={{ background: chrome.accent }}
+              >
+                {(appName || "A").trim().charAt(0).toUpperCase()}
+              </div>
+              <span
+                className="text-[17px] font-semibold tracking-tight whitespace-nowrap"
+                style={{ fontFamily: "var(--font-heading, var(--font-display, inherit))" }}
+              >
+                {appName}
+              </span>
+            </>
+          )}
         </div>
 
         {/* Persona pill container, center */}

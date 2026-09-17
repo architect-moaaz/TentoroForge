@@ -124,6 +124,10 @@ TOOL_SUBSETS: dict[str, Optional[list[str]]] = {
     "add_component": [
         "understand_ask", "list_components", "list_pages", "read_page",
         "find_component", "edit_page", "add_widgets",
+        # "put our logo in the corner" reads as adding something visible, and
+        # it is: a mark in the shell. No component can be composed to show it —
+        # the image comes off the turn, and only `set_logo` can take it.
+        "set_logo",
         "verify_promise", "answer", "ask_user",
     ],
     "add_token": [
@@ -140,8 +144,11 @@ TOOL_SUBSETS: dict[str, Optional[list[str]]] = {
         # tools that cannot answer it.
         "compose_route", "add_widgets",
         # The look of the application is the design system, not a page;
-        # the menu is the navigation, not a page.
-        "restyle", "edit_navigation",
+        # the menu is the navigation, not a page. The owner's logo is the
+        # design system too, and "put our logo in the corner" is an edit ask
+        # in their words — scoped away from it, Smith has no tool that can
+        # take the file they just attached.
+        "restyle", "edit_navigation", "set_logo", "remove_logo",
         "verify_promise", "answer", "ask_user",
     ],
     "edit_workflow": [
@@ -248,6 +255,10 @@ TOOL_TAGS: dict[str, set[str]] = {
     # there was: tagging it `add` only would hide it from every edit ask.
     "compose_route":             {"add", "edit", "page"},
     "restyle":                   {"edit", "token"},
+    # `shell` because that is where the mark renders, `token` because it is a
+    # `designSystem` field like the palette beside it.
+    "set_logo":                  {"add", "edit", "token", "shell"},
+    "remove_logo":               {"delete", "token", "shell"},
     "edit_navigation":           {"edit", "shell"},
     "edit_access":               {"add", "edit", "delete", "auth"},
     "rename_field":              {"edit", "entity"},

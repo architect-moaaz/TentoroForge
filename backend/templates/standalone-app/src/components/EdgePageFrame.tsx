@@ -1,5 +1,6 @@
 import * as React from "react";
 import "./EdgePageFrame.css";
+import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
 
 /**
  * Shared frame for 404 / 500 / 403 / loading / maintenance. Spec C5.
@@ -11,9 +12,10 @@ import "./EdgePageFrame.css";
  * automatically — no per-app override needed.
  *
  * Two shapes:
- *   - `code` + `title` — error-family pages (404/403/500/503). Renders a
- *     large monogram (first letter of {{app_name}} on brand background)
- *     next to a code label + title.
+ *   - `code` + `title` — error-family pages (404/403/500/503). Renders the
+ *     owner's logo when they gave one, and otherwise the large monogram
+ *     (first letter of {{app_name}} on brand background) it has always
+ *     drawn, next to a code label + title.
  *   - `variant="loading"` — softer variant with pulsing monogram, used
  *     by app-level loading.tsx.
  */
@@ -34,10 +36,21 @@ export function EdgePageFrame({ code, title, variant, children }: EdgePageFrameP
   return (
     <main className="edge-root" data-variant={variant ?? "error"}>
       <div className="edge-card">
-        <div className={`edge-monogram${isLoading ? " edge-monogram--pulse" : ""}`}
-             aria-hidden="true">
-          {APP_INITIAL || APP_NAME_LABEL.slice(0, 1) || "•"}
-        </div>
+        {/* These pages are the ones a visitor reaches with no session and no
+            shell around them, so they are where an application most needs to
+            look like itself. The monogram was always a stand-in for a mark
+            nobody could supply; it stays for the applications that still have
+            none. `aria-hidden` on the letter because it says nothing a screen
+            reader wants — the mark carries its own alt text and does. */}
+        {BRAND_LOGO ? (
+          <BrandMark height={56}
+                     className={`edge-mark${isLoading ? " edge-mark--pulse" : ""}`} />
+        ) : (
+          <div className={`edge-monogram${isLoading ? " edge-monogram--pulse" : ""}`}
+               aria-hidden="true">
+            {APP_INITIAL || APP_NAME_LABEL.slice(0, 1) || "•"}
+          </div>
+        )}
         {code && <div className="edge-code" aria-hidden="true">{code}</div>}
         <h1 className="edge-title">{title}</h1>
         <div className="edge-body">{children}</div>

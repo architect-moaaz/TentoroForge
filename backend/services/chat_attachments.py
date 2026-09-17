@@ -346,6 +346,33 @@ def read_attachment(root: str | Path, project_id: str,
     return data, media
 
 
+def locate(root: str | Path, project_id: str,
+           attachment_ids: list[str]) -> list[dict]:
+    """Records for the given attachments WITH the absolute path of each file.
+
+    `describe` deliberately drops the path: it feeds the conversation history,
+    where a filesystem location is neither useful nor safe to carry. But a tool
+    that has to do something with the bytes — `set_logo` copies the file into
+    the project — needs to be handed the file, because the model can name the
+    attachment and can never name its id.
+
+    Skips what it cannot find, like `load_blocks`: one unreadable attachment is
+    not worth losing the turn over.
+    """
+    try:
+        d = _project_dir(root, project_id)
+    except AttachmentError:
+        return []
+    out = []
+    for att_id in (attachment_ids or []):
+        rec = _load_record(d, str(att_id))
+        if rec is None:
+            continue
+        rec["path"] = str(rec.pop("_path"))
+        out.append(rec)
+    return out
+
+
 def describe(root: str | Path, project_id: str,
              attachment_ids: list[str]) -> list[dict]:
     """Records (no bytes) for the given ids — for logging and for echoing

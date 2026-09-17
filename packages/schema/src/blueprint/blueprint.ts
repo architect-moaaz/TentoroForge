@@ -1589,6 +1589,36 @@ export const DesignSource = z.object({
     .optional(),
 });
 
+/**
+ * §47 — the owner's own mark, as a file the generated application carries.
+ *
+ * A logo already reached the platform and was already read: `/api/brand/extract/logo`
+ * derives the palette from one and then drops the image. So "put our brand colours,
+ * the green from our logo" worked and "put our logo in the corner" had nowhere to
+ * land — there was no field to write, and the owner's phrasebook closed on
+ * "colours and type can change; no image can be supplied".
+ *
+ * `file` is a path RELATIVE TO THE PROJECT'S OUTPUT DIRECTORY — beside the
+ * Blueprint itself, not an attachment id and not an absolute path. An attachment is
+ * a chat artifact and may be swept; the mark is part of what the application IS, and
+ * has to survive a rebuild that reads nothing but this document. The projection
+ * copies it into the generated tree's `public/`, and the shell renders it where the
+ * application's name is.
+ */
+export const BrandLogo = z.object({
+  file: z.string().min(1),
+  /** What is read aloud in place of the image. Defaults to the application's name. */
+  alt: z.string().default(""),
+  mediaType: z.string().default("image/png"),
+  /**
+   * Intrinsic pixel size, when the image could be measured. The shell scales the
+   * mark to the height it has, and uses the ratio to keep a wide wordmark from
+   * being squared off; absent, it falls back to a square box.
+   */
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+});
+
 export const DesignSystem = z.object({
   visualPersonality: z.string().default(""),
   colors: z.record(z.string(), z.string()).default({}),
@@ -1612,6 +1642,12 @@ export const DesignSystem = z.object({
    * ground was the ground and not a guess.
    */
   paletteEvidence: z.record(z.string(), z.number()).optional(),
+  /**
+   * The owner's logo, when they supplied one. Absent is the normal case: an
+   * application built from a description has no mark, and the shell shows the
+   * application's initial rather than an empty box.
+   */
+  logo: BrandLogo.optional(),
 });
 
 // ===========================================================================
