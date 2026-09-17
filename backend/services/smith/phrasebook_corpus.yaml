@@ -548,6 +548,48 @@ sentences:
     checked: {colour: acts, via: handler}
     source: code
     reaches: {verb: write_guide, states: []}
+  # -- What it has cost to run ---------------------------------------------
+
+  - id: spend-how-much-has-this-cost-me
+    say: "how much has this cost me?"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: spend, states: []}
+
+  - id: spend-what-have-i-spent
+    say: "what have I spent on this"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: spend, states: []}
+
+  - id: spend-what-did-the-build-cost
+    say: "what did the build cost"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: spend, states: []}
+
+  - id: spend-how-many-tokens
+    say: "how many tokens has this used"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: spend, states: []}
+
+  - id: spend-show-me-the-usage
+    say: "show me the usage"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: spend, states: []}
+
+  # THE SENTENCE SECTION 08 CLOSED WITH. It was the last entry on the list of
+  # asks that reach nothing — "what a build spends is recorded against the run
+  # and never surfaced in the conversation that spent it" — and the ledger it
+  # wanted had been on disk the whole time. Kept verbatim, in the body now,
+  # for the same reason "Put it back how it was" is kept above it.
+  - id: spend-how-much-has-this-cost-me-so-far
+    say: "How much has this cost me so far?"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: spend, states: []}
 
   # -- Getting it built, looked at and out ---------------------------------
 
@@ -953,15 +995,6 @@ sentences:
     gap: Pictures and branding
     because: >-
       a field can be added to a record, and nothing puts an image into one
-
-  - id: gap-what-has-it-cost
-    say: "How much has this cost me so far?"
-    checked: {colour: nothing, via: none}
-    source: phrasebook
-    gap: What it costs
-    because: >-
-      what a build spends is recorded against the run and never surfaced in the
-      conversation that spent it
 
   - id: gap-pdf-invoice
     say: "Can it produce a PDF invoice?"
