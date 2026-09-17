@@ -55,6 +55,20 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Access — roles, permissions, who reaches which screen. One verb: the
     # security agent re-decides the model and a second call the screens.
     "edit_access": {"change"},
+    # THE PEOPLE, not the roles. `edit_access` says what a Ward Manager may
+    # do; these say who Dave is and whether he can get in at all — the moment
+    # an owner hands the application to their team, and previously a dead end
+    # in both directions ("set up logins for my six staff", "reset Dave's
+    # password"). Not a Blueprint change: people are data, not definition.
+    #
+    # `add_login` takes the EMAIL, because that is what identifies an account
+    # and what the person types to sign in; a name alone ("a login for Dave")
+    # is the request without the one fact it needs, so it is asked for. The
+    # other two take `person` — an email, or the name they were added under,
+    # resolved against the roster and refused when it is ambiguous.
+    "add_login": {"email"},
+    "remove_login": {"person"},
+    "reset_login": {"person"},
     # Business rules — what constrains a form or a record.
     "add_rule": {"rule"},
     "edit_rule": {"rule", "change"},
@@ -162,6 +176,27 @@ VERB_HELP: dict[str, str] = {
         "delete a nurse\", \"make Master Data admin-only\", \"let anyone open "
         "registration without signing in\". Re-decides roles, permissions and "
         "screen access. Needs the change in the user's words."
+    ),
+    "add_login": (
+        "Give a PERSON a login: \"set up a login for dave@clinic.com\", \"add "
+        "my new receptionist\", \"my six staff need accounts\". The account is "
+        "created with no password and a one-time setup link the person uses to "
+        "choose their own — nobody is ever told someone else's password. Needs "
+        "the email address they will sign in with; their name and the role "
+        "they sign in as are optional. NOT edit_access, which changes what a "
+        "role may do rather than who exists."
+    ),
+    "remove_login": (
+        "Stop a PERSON signing in: \"remove Dave's login\", \"Sarah has left\", "
+        "\"take away dave@clinic.com's access\". The account is deactivated, "
+        "not deleted — the records they created still point at it. Needs who, "
+        "by email or the name they were added under."
+    ),
+    "reset_login": (
+        "Give a PERSON a way back in: \"reset Dave's password\", \"Sarah is "
+        "locked out\", \"send dave@clinic.com a new password link\". Their old "
+        "password stops working and they get a one-time link to choose a new "
+        "one. Needs who, by email or the name they were added under."
     ),
     "add_rule": (
         "Add a business rule: \"years of experience cannot exceed 60\", \"a nurse "

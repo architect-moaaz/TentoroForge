@@ -685,6 +685,34 @@ class SmithSession:
                           answer=str(out.get("diff_summary") or "Undone."),
                           touched_paths=list(out.get("edited_paths") or []))
 
+    def _accounts(self, verb: str, understanding: dict) -> "TurnResult":
+        """Add, remove or reset ONE PERSON'S login.
+
+        Not a Blueprint change and not a role change: `edit_access` decides
+        what a Ward Manager may do, and this decides whether Dave exists and
+        can get in. The roster is a project ledger, so an undo of an unrelated
+        change cannot silently re-admit someone who was removed. See
+        `services.smith.accounts`.
+        """
+        from services.smith.accounts import run as accounts_run
+
+        out = accounts_run(
+            str(self.output_dir), verb,
+            email=str(understanding.get("email") or "").strip(),
+            person=str(understanding.get("person") or "").strip(),
+            name=str(understanding.get("person_name") or "").strip(),
+            role=str(understanding.get("role") or "").strip(),
+            reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason")
+                                         or "I could not change that login, and have "
+                                            "changed nothing."))
+        touched = list(out.get("edited_paths") or [])
+        return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
+                          touched_paths=touched,
+                          diff_summary=", ".join(touched[:8]) if touched else "")
+
     def _add_field(self, understanding: dict) -> "TurnResult":
         """Add one column to an existing entity — the incremental data-model
         change a field-add is (F-01). The field is added to the Living
@@ -983,6 +1011,8 @@ class SmithSession:
             return self._add_field(understanding)
         if verb == "revert":
             return self._revert()
+        if verb in ("add_login", "remove_login", "reset_login"):
+            return self._accounts(verb, understanding)
         from services.smith.limits import cannot as _cannot
         if _cannot(verb):
             # HONEST, AND NOT A DEAD END. These are the asks Smith genuinely

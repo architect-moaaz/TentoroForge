@@ -36,12 +36,15 @@ and a per-app auth secret.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 import shutil
 import os
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 #: Repairs from ``app_emitter`` that the Blueprint path makes unnecessary, and
 #: the projection that makes each one so. Stated rather than merely omitted, so
@@ -665,6 +668,17 @@ def apply_assembly(svc: Any, app_root: str | Path, *,
                    preview_url: str | None = None) -> dict[str, Any]:
     """Assemble, then record what was assembled in the Blueprint."""
     result = assemble(svc.doc, app_root, project_short_id=project_short_id)
+    # THE PEOPLE WHO LOG IN SURVIVE A REBUILD. Their roster is a project
+    # ledger rather than a Blueprint section (people are data, not definition
+    # — see `services.smith.accounts`), so nothing in `doc` would carry it
+    # into a freshly assembled tree, and the six staff an owner set up would
+    # quietly lose their accounts on the next build.
+    try:
+        from services.smith.accounts import project as project_accounts
+        result["accountRoster"] = project_accounts(svc.output_dir, app_root)
+    except Exception as exc:  # noqa: BLE001 — one file, not the assembly
+        result["accountRoster"] = []
+        logger.warning("[assembly] the account roster could not be projected: %s", exc)
     svc.doc["runtime"] = describe_runtime(app_root)
     svc.doc["deployment"] = describe_deployment(svc.doc, preview_url=preview_url)
     svc.doc["dependencies"] = describe_dependencies(app_root)

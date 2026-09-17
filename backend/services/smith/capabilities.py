@@ -41,6 +41,11 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
     ("Who is allowed to do what",
      "Roles, permissions, and which screens each kind of person can open.",
      frozenset({"edit_access"})),
+    ("The people who log in",
+     "Give someone a login, take one away, or send someone a fresh link when "
+     "they are locked out. Each person sets their own password — I never see "
+     "one, and never tell you anyone else's.",
+     frozenset({"add_login", "remove_login", "reset_login"})),
     ("How it looks",
      "The colours, type and density of the whole application, and the menu "
      "down the side.",

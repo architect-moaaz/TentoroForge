@@ -2256,9 +2256,15 @@ def project_ownership_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
 #: `/signup` was gated — the gate redirected the very visitor who has no account
 #: yet straight back to `/login`, so "Sign up" never opened the signup page.
 #: The pages that create or restore a session cannot themselves require one.
+#:
+#: `set-password` is the third of them. It is where a setup link lands — the
+#: screen on which someone the owner invited, or someone whose password was
+#: reset, chooses a password. Gated, it would redirect the one visitor who
+#: certainly cannot sign in yet to the sign-in they cannot complete. It leaks
+#: nothing: the page shows only the email its own one-time token resolves to.
 _ALWAYS_OPEN: tuple[str, ...] = (
     "api/auth", "_next", "favicon.ico",
-    "login", "signup",
+    "login", "signup", "set-password",
 )
 
 

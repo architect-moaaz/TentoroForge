@@ -211,6 +211,135 @@ async function seedAdmin(): Promise<string | null> {
   }
 }
 
+/** One roster entry as Smith writes it into src/db/accounts.json. */
+type RosterEntry = {
+  email?: string;
+  name?: string;
+  role?: string;
+  status?: string;
+  invite?: { issue?: string; tokenHash?: string; purpose?: string; expiresAt?: string } | null;
+};
+
+/** The people the owner asked to be able to log in, or [] when none. */
+function accountRoster(): RosterEntry[] {
+  const rosterPath = path.join(process.cwd(), "src", "db", "accounts.json");
+  if (!fs.existsSync(rosterPath)) return [];
+  try {
+    const doc = JSON.parse(fs.readFileSync(rosterPath, "utf8"));
+    const rows = Array.isArray(doc) ? doc : doc?.accounts;
+    return Array.isArray(rows) ? (rows as RosterEntry[]) : [];
+  } catch (e) {
+    console.warn("[seed] accounts.json could not be read:", e);
+    return [];
+  }
+}
+
+/**
+ * The people who log in, as the owner asked for them.
+ *
+ * WHY THE SEED AND NOT A DIRECT WRITE. An account has to survive a redeploy or
+ * it is not an account: the database behind a generated app is rebuilt, reseeded
+ * and republished, and anything inserted into it out of band is gone the next
+ * time. The roster is a file in the project, so it is applied again on every
+ * start — which is also why this runs beside `seedAdmin`, ABOVE the skip gates:
+ * they preserve domain data, never the sign-in.
+ *
+ * NO PASSWORD PASSES THROUGH HERE. An account is created with a hash of a fresh
+ * random UUID — a valid bcrypt hash whose input nobody holds, so the account
+ * cannot be signed into — and inactive. What makes it usable is the person
+ * opening their setup link and choosing a password, which the platform's own
+ * /api/auth/set-password route hashes. Smith never sees a plaintext credential
+ * and never writes a credential column.
+ *
+ * IDEMPOTENT ON THE ISSUE, not on the row. An invite row is found by its
+ * `issue` — the id of that one issuance. Already there, the invite has been
+ * applied and is left alone, whether or not it has been used; otherwise it is
+ * new, and the account's password is cleared and the link opened. Without that,
+ * every restart would re-open a spent link and clear a password the person had
+ * already chosen.
+ */
+async function seedAccounts(): Promise<void> {
+  const roster = accountRoster();
+  if (!roster.length) return;
+  const users = tableFor("users");
+  if (!users) {
+    console.log("\u2139\uFE0F  no users table \u2014 skipping the account roster");
+    return;
+  }
+  const invites = tableFor("forgeInvites");
+  for (const entry of roster) {
+    const email = String(entry?.email || "").trim().toLowerCase();
+    if (!email) continue;
+    try {
+      // REMOVED IS DEACTIVATED, NOT DELETED. `authorize` rejects a falsy
+      // isActive, so the person can no longer sign in; the row stays because
+      // every record they created points at it.
+      if (String(entry.status || "active") === "removed") {
+        if ("isActive" in users) {
+          await db.update(users).set({ isActive: false } as any).where(eq((users as any).email, email));
+        }
+        // A pending link would set isActive back to true, so it is spent here.
+        if (invites) {
+          await db.update(invites).set({ usedAt: new Date() } as any)
+            .where(eq((invites as any).email, email));
+        }
+        console.log(`\u2705 login deactivated: ${email}`);
+        continue;
+      }
+
+      const row: Record<string, unknown> = { email, password: await bcrypt.hash(randomUUID(), 12) };
+      if ("name" in users && entry.name) row.name = String(entry.name);
+      if ("isActive" in users) row.isActive = false;
+      // Whichever column auth.ts reads a role from: an explicit `role` when the
+      // Blueprint added one, else the signup account type it falls back to.
+      if (entry.role) {
+        if ("role" in users) row.role = String(entry.role);
+        else if ("accountType" in users) row.accountType = String(entry.role);
+      }
+      await resolveRequiredFks(users, row);
+      Object.assign(row, minimalRow(users, String(entry.name || email), row, /* skipFk */ true));
+      const created = await db.insert(users).values(row as any)
+        .onConflictDoNothing({ target: (users as any).email }).returning();
+
+      const invite = entry.invite;
+      const issue = String(invite?.issue || "");
+      if (!invites || !invite || !issue || !invite.tokenHash || !invite.expiresAt) {
+        if (created.length) console.log(`\u2705 login created: ${email}`);
+        continue;
+      }
+      const [applied] = await db.select().from(invites)
+        .where(eq((invites as any).issue, issue)).limit(1);
+      if (applied) continue;                       // this issuance is already in
+
+      await db.insert(invites).values({
+        email,
+        tokenHash: String(invite.tokenHash),
+        issue,
+        purpose: String(invite.purpose || "invite"),
+        expiresAt: new Date(String(invite.expiresAt)),
+        usedAt: null,
+      } as any).onConflictDoUpdate({
+        target: (invites as any).email,
+        set: {
+          tokenHash: String(invite.tokenHash), issue,
+          purpose: String(invite.purpose || "invite"),
+          expiresAt: new Date(String(invite.expiresAt)), usedAt: null,
+        },
+      });
+      if (!created.length) {
+        // An existing account with a new issuance: the old password stops
+        // working now, which is what a reset means.
+        const cleared: Record<string, unknown> = { password: await bcrypt.hash(randomUUID(), 12) };
+        if ("isActive" in users) cleared.isActive = false;
+        await db.update(users).set(cleared as any).where(eq((users as any).email, email));
+      }
+      console.log(`\u2705 login ${created.length ? "created" : "reset"}, awaiting its password: ${email}`);
+    } catch (e) {
+      console.warn(`[seed] account ${email} failed:`, e);
+    }
+  }
+}
+
 function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, string[]>, i: number): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   // Map each Drizzle property by its normalized name so seed rows keyed in
@@ -563,6 +692,10 @@ async function main(): Promise<void> {
   // was impossible. `seedAdmin` upserts on email, so running it every time is
   // idempotent and never clobbers a real admin.
   const adminId = await seedAdmin();
+
+  // AND SO MUST THE PEOPLE THE OWNER ADDED — for the same reason and above the
+  // same gates. An app whose staff cannot log in is not in use.
+  await seedAccounts();
 
   // Idempotency gate — preserve existing DOMAIN data when the DB is being
   // reused (redeploy) or the schema shape is unchanged and data is present.
