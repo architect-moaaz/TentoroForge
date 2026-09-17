@@ -724,6 +724,85 @@ sentences:
     source: phrasebook
     reaches: {verb: export_data, states: []}
 
+  # -- When something is wrong ---------------------------------------------
+  #
+  # Added 2026-09-18, hours after the three sentences below were written into
+  # the closing list. The running application reports what it broke on and
+  # what it timed, and Smith reads that back. Neither verb needs anything:
+  # not knowing what broke is the reason someone is asking.
+
+  - id: wrong-it-crashed
+    say: "it crashed"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: explain_crash, states: []}
+
+  - id: wrong-the-app-crashed
+    say: "the app crashed"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: explain_crash, states: []}
+
+  - id: wrong-i-got-an-error
+    say: "I got an error"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: explain_crash, states: []}
+
+  - id: wrong-broke-when-i-clicked-save
+    say: "it broke when I clicked save"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: explain_crash, states: []}
+
+  - id: wrong-something-went-wrong
+    say: "something went wrong"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: explain_crash, states: []}
+
+  - id: wrong-crashed-when-i-pressed-save
+    say: "It crashed when I pressed save"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: explain_crash, states: []}
+
+  - id: wrong-see-the-errors
+    say: "How do I see the errors?"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: explain_crash, states: []}
+
+  - id: wrong-really-slow
+    say: "it's really slow"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: explain_slowness, states: []}
+
+  - id: wrong-takes-forever
+    say: "this takes forever"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: explain_slowness, states: []}
+
+  - id: wrong-why-so-slow
+    say: "why is it so slow"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: explain_slowness, states: []}
+
+  - id: wrong-loading-takes-ages
+    say: "loading takes ages"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: explain_slowness, states: []}
+
+  - id: wrong-its-slow
+    say: "It's slow"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: explain_slowness, states: []}
+
   # -- Recognised, and refused with a reason -------------------------------
   #
   # These are verbs. They are not successes and they are not silent gaps:
@@ -812,31 +891,6 @@ sentences:
     gap: Keeping it safe
     because: >-
       a copy is handed to them, never kept, so there is nowhere to point at
-
-  - id: gap-its-slow
-    say: "It's slow"
-    checked: {colour: nothing, via: none}
-    source: phrasebook
-    gap: When something is wrong
-    because: >-
-      nothing measures a built application's speed, so this is neither a change
-      to make nor a fact to report
-
-  - id: gap-crashed-on-save
-    say: "It crashed when I pressed save"
-    checked: {colour: nothing, via: none}
-    source: phrasebook
-    gap: When something is wrong
-    because: >-
-      `verify & fix` reads pages as they render on request; nothing collects
-      what went wrong while someone was using it
-
-  - id: gap-see-the-errors
-    say: "How do I see the errors?"
-    checked: {colour: nothing, via: none}
-    source: phrasebook
-    gap: When something is wrong
-    because: the running application reports nothing back to this conversation
 
   - id: gap-logo-upload
     say: "Can I put my logo at the top?"

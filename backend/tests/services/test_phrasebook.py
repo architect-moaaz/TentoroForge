@@ -238,18 +238,18 @@ def test_the_known_dead_ends_are_still_dead(rows):
     They are asserted by the kind of thing they are rather than one by one, so
     a sentence added to a gap is covered the moment it is written down.
 
-    THREE OF THEM CLOSED ON 2026-09-18 and are struck from this list rather
+    FOUR OF THEM CLOSED ON 2026-09-18 and are struck from this list rather
     than left in it failing: getting data in (`import_data`), people and
-    passwords (`add_login`, `remove_login`, `reset_login`) and getting data out
-    (`export_data`). Their sentences moved up into the body of the corpus with
-    a verb each, which is what striking one means.
+    passwords (`add_login`, `remove_login`, `reset_login`), getting data out
+    (`export_data`) and when something is wrong (`explain_crash`,
+    `explain_slowness`). Their sentences moved up into the body of the corpus
+    with a verb each, which is what striking one means.
     """
     dead_by_gap: dict[str, list[str]] = {}
     for row in rows:
         if row.category == phrasebook.NOTHING:
             dead_by_gap.setdefault(str(row.entry.get("gap")), []).append(row.say)
-    for gap in ("Keeping it safe", "When something is wrong",
-                "Pictures and branding", "What it costs",
+    for gap in ("Keeping it safe", "Pictures and branding", "What it costs",
                 "Paper out the other end"):
         assert dead_by_gap.get(gap), (
             f"nothing under “{gap}” reaches nothing any more. If that is "
