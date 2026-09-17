@@ -16,13 +16,26 @@ def test_lifecycle_verb_only_matches_a_bare_command():
     assert _lifecycle_verb("") is None
 
 
-def test_status_report_never_defines_and_reads_state():
-    assert "DISCOVERY" in _status_report({})
-    assert "define" in _status_report({}).lower()
+def test_status_report_says_where_you_are_and_never_a_state_machines_name():
+    """This asserted "DISCOVERY" and "BLUEPRINT_REVIEW" appeared in the reply,
+    and the report was rewritten to make sure they never do — a state
+    machine's name tells a person nothing about what to do. The test kept
+    passing only because the module stopped importing (see the F-07 note
+    below), so nothing ran it for two days. Pinned the other way round now.
+    """
+    empty = _status_report({})
+    assert "Nothing is written down yet" in empty
+    assert "DISCOVERY" not in empty
+
     doc = {"state": "BLUEPRINT_REVIEW", "requirements": [{"id": "REQ-001"}],
            "pages": [{"id": "PAGE-001"}], "decisions": [{"id": "DEC-001", "source": "user"}]}
     r = _status_report(doc)
-    assert "BLUEPRINT_REVIEW" in r and "1 requirement" in r and "approve" in r.lower()
+    assert "BLUEPRINT_REVIEW" not in r
+    assert "waiting for you" in r          # where it is, in words
+    assert "**1** thing(s) it has to do" in r and "**1** screen(s) described" in r
+    assert "approve" in r.lower()          # and the next explicit step
+    # Never a define: the report is read off the document, nothing is drafted.
+    assert _status_report(doc) == r
 
 
 def test_functionless_brief_guard_is_conservative():
@@ -98,45 +111,28 @@ def test_requirement_report_when_nothing_is_defined_yet():
     assert "no requirements defined" in out and "define" in out.lower()
 
 
-# ── DEFECT-F-07: honest refusal for an unsupported external integration ──
-
-from routers.blueprint_generate import (
-    _unsupported_integration, _unsupported_integration_reply,
-)
-
-
-def test_unsupported_integration_is_detected():
-    assert _unsupported_integration("Integrate with Greenhouse.") == "Greenhouse"
-    assert _unsupported_integration("connect to Salesforce") == "Salesforce"
-    assert _unsupported_integration("please sync with our Stripe account") \
-        == "our Stripe account"
-    assert _unsupported_integration("pull from HubSpot nightly") == "HubSpot nightly"
-
-
-def test_supported_design_sources_are_not_refused():
-    # Figma / UX Pilot have their own connect flow — never the F-07 refusal.
-    assert _unsupported_integration("integrate with Figma") is None
-    assert _unsupported_integration("connect to UX Pilot") is None
-
-
-def test_internal_wiring_is_not_mistaken_for_an_integration():
-    # "connect X to the dashboard/page/list" is internal, not external.
-    assert _unsupported_integration("connect the form to the dashboard") is None
-    assert _unsupported_integration("connect to the candidates page") is None
-    assert _unsupported_integration("sync to the roles table") is None
-
-
-def test_non_integration_messages_are_ignored():
-    assert _unsupported_integration("add a candidates page") is None
-    assert _unsupported_integration("what does this app do?") is None
-    assert _unsupported_integration("") is None
-
-
-def test_integration_reply_names_the_system_and_offers_an_alternative():
-    r = _unsupported_integration_reply("Greenhouse")
-    assert "Greenhouse" in r
-    assert "requirement" in r.lower()          # offers the real alternative
-    assert "figma" in r.lower() and "pilot" in r.lower()  # names what IS supported
+# ── DEFECT-F-07 is gone, and so is what tested it ────────────────────────
+#
+# `_unsupported_integration` matched a phrase list — "integrate with",
+# "connect to", "sync with" — against the message and refused any ask that
+# named an outside system, with Figma and UX Pilot excepted because they have
+# their own connect flow, and "the dashboard" / "the page" / "the table"
+# excepted because those are internal. f58ee92 deleted it: it gave "send email
+# through SendGrid" a declaration and "connect it to our payroll system" a
+# refusal, which is two answers to one kind of ask, and an exception list is
+# the shape this codebase has been burned by. Both phrasings reach
+# `add_integration` now, which records the integration and says in the reply
+# that a declaration is not a connection.
+#
+# THE TESTS WENT ON IMPORTING IT, AND THAT IS WHY THIS COMMENT IS LONG. A
+# missing name at module scope is a COLLECTION error, not a failure: pytest
+# stops the whole run at it. So this file's other twenty-odd tests stopped
+# running, and so did every test after it in `backend/tests` — the suite has
+# not completed since that commit without being told to ignore this file.
+# Deleted rather than repaired: there is nothing to repair, the behaviour was
+# removed on purpose. What replaced it is covered by
+# `tests/services/test_smith_definition_changes.py::
+# test_an_integration_is_declared_with_secret_names_only`.
 
 
 # ── DEFECT-C-03/B-09: a change at the definition gate redrafts the definition ──
