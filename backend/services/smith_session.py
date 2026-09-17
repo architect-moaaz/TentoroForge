@@ -685,6 +685,27 @@ class SmithSession:
                           answer=str(out.get("diff_summary") or "Undone."),
                           touched_paths=list(out.get("edited_paths") or []))
 
+    def _guide(self) -> "TurnResult":
+        """The guide the owner hands their staff (§06).
+
+        The one verb that reads the application and writes nothing back to it:
+        no change is recorded, no projection re-runs, and `touched_paths`
+        carries the guide file alone. It needs no facts from the ask because
+        the audiences and the screens are in the document — asking who it is
+        for would be asking the owner to list their own roles.
+        """
+        from services.smith.handover import run as guide_run, summary_of
+
+        out = guide_run(str(self.output_dir),
+                        app_root=str(Path(self.output_dir) / "app"),
+                        reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or "I could not write the guide."))
+        return TurnResult(status="resolved",
+                          answer=summary_of(out),
+                          touched_paths=list(out.get("edited_paths") or []))
+
     def _add_field(self, understanding: dict) -> "TurnResult":
         """Add one column to an existing entity — the incremental data-model
         change a field-add is (F-01). The field is added to the Living
@@ -983,6 +1004,8 @@ class SmithSession:
             return self._add_field(understanding)
         if verb == "revert":
             return self._revert()
+        if verb == "write_guide":
+            return self._guide()
         from services.smith.limits import cannot as _cannot
         if _cannot(verb):
             # HONEST, AND NOT A DEAD END. These are the asks Smith genuinely

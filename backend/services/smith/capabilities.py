@@ -68,6 +68,12 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "it, and saying it again goes back another. Nothing is deleted: the undo "
      "is recorded too, so it can itself be undone.",
      frozenset({"revert"})),
+    ("Something to hand your staff",
+     "Write the one-page guide the people who will use this need on their "
+     "first morning — what each kind of person sees, and what they do with "
+     "it. Written from the screens that actually built, and saved in the "
+     "application so you can print it or pass the file on.",
+     frozenset({"write_guide"})),
     ("The whole application",
      "Regenerate it from its definition.",
      frozenset({"rebuild"})),

@@ -137,6 +137,15 @@ Return ONLY a JSON object with exactly these keys:
       "reorder"       — things should MOVE AROUND on a screen that exists:
                         "move the chart above the table", "put the search at
                         the top".
+      "write_guide"   — they want SOMETHING TO GIVE THEIR STAFF, not a change
+                        to the app: "write me a one-page guide for the team",
+                        "something I can hand to the staff", "how do I explain
+                        this to the people using it?", "a cheat sheet for the
+                        drivers". Smith writes it from the screens that
+                        actually built, per role, and saves it in the app so
+                        it can be printed. Nothing about the application
+                        changes. NOT edit_product, which changes what the app
+                        IS called and for.
       "revert"        — UNDO the last change: "undo that", "undo", "put it
                         back", "that's not what I wanted, revert", "go back",
                         "reverse that". Restores the application as it stood
