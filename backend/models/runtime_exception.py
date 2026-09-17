@@ -81,6 +81,19 @@ class RuntimeException(Base):
     page_route: Mapped[str | None] = mapped_column(String(512))
     request_url: Mapped[str | None] = mapped_column(String(2048))
     request_method: Mapped[str | None] = mapped_column(String(16))
+
+    # NO LONGER WRITTEN, AND NOT TO BE WRITTEN AGAIN. These two held the whole
+    # POST body and the whole session user of whatever crashed — a customer's
+    # order and a customer's identity, in the platform's own tables, belonging
+    # to the owner of the application and not to us. The reporter no longer
+    # sends them and `RuntimeExceptionIn` no longer accepts them; what it
+    # sends instead is the KEYS of the payload, which name the shape without
+    # carrying anyone's record (see `services.incident_ledger`).
+    #
+    # The columns stay because dropping them is a migration against a ten-head
+    # graph, and rows written before this may still hold that data: purging
+    # them is a deliberate operation on live data, not a side effect of a
+    # deploy.
     request_body: Mapped[dict | None] = mapped_column(JSONB)
     user_context: Mapped[dict | None] = mapped_column(JSONB)
 

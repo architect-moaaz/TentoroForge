@@ -1678,7 +1678,64 @@ def project_dispatches(doc: dict, app_root: str | Path) -> dict[str, Any]:
     entries = dispatches(doc)
     (out / "dispatches.json").write_text(
         json.dumps({"dispatches": entries}, indent=2, sort_keys=True) + "\n", "utf-8")
-    return {"files": ["src/contracts/dispatches.json"], "dispatches": len(entries)}
+    files = ["src/contracts/dispatches.json",
+             project_incident_map(doc, entries, app_root)["files"][0]]
+    return {"files": files, "dispatches": len(entries)}
+
+
+def project_incident_map(doc: dict, entries: list[dict],
+                         app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/incident-map.ts`` — what the running app needs to
+    describe its own failures in the owner's words rather than in ids.
+
+    THE SAME CONTRACT, READ AT THE OTHER END. `verify_dispatches` fails a
+    build naming the route, the control and the workflow; when the same wire
+    breaks in front of a customer months later, the reporter has only a
+    workflow id and a browser path. These two tables close that: the routes
+    let a concrete path (`/cases/8f2a…`) be reported as the pattern it matched
+    (`/cases/[id]`) and never as itself, and the controls let a failed
+    dispatch be named `Approve` on the case page.
+
+    Written from `entries` — the dispatch manifest already computed above —
+    so there is one source for what the build checked and what the run
+    reports, not two that can disagree.
+    """
+    routes = sorted({str(p.get("route")) for p in _live(doc.get("pages")) if p.get("route")}
+                    | {str(e.get("route")) for e in entries if e.get("route")})
+    # KEYED BY BOTH NAMES THE RUNTIME MIGHT USE. A control's `workflow` prop
+    # carries the Blueprint id; the projected definition is filed under its
+    # slug, and the execute route sees whichever the dispatcher sent. This is
+    # the same doubling `project_launch_roles` does, for the same reason — a
+    # lookup that misses names no control and the crash reads as an id again.
+    slugs = {str(w.get("id")): _workflow_slug(w)
+             for w in _live(doc.get("workflows")) if w.get("id")}
+    controls: dict[str, list[dict[str, str]]] = {}
+    for entry in entries:
+        wf = str(entry.get("workflow") or "")
+        if not wf:
+            continue
+        wired = {"route": str(entry.get("route") or ""),
+                 "control": str(entry.get("control") or ""),
+                 "label": str(entry.get("label") or "")}
+        for key in {wf, slugs.get(wf, wf)}:
+            controls.setdefault(key, []).append(dict(wired))
+    lib = Path(app_root) / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    (lib / "incident-map.ts").write_text(
+        "// Written by the Blueprint projection (project_incident_map) from the same\n"
+        "// dispatch contract the build-time dry run reads. Edit the Blueprint, not\n"
+        "// this file.\n"
+        "\n"
+        "/** Every route the application declares, as patterns (`/cases/[id]`). */\n"
+        f"export const ROUTES: string[] = {json.dumps(routes, indent=2)};\n"
+        "\n"
+        "/** workflow id -> the controls wired to it. */\n"
+        "export const CONTROLS: Record<string, Array<{ route: string; control: string; "
+        "label: string }>> =\n"
+        f"{json.dumps(controls, indent=2, sort_keys=True)};\n",
+        "utf-8")
+    return {"files": ["src/lib/incident-map.ts"], "routes": len(routes),
+            "workflows": len(controls)}
 
 
 def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:

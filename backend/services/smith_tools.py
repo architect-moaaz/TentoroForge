@@ -1372,6 +1372,8 @@ READONLY_HANDLERS = {
     "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
     "revert":                   lambda output_dir, args: _smith_revert(output_dir),
+    "explain_crash":            lambda output_dir, args: _smith_explain_crash(output_dir),
+    "explain_slowness":         lambda output_dir, args: _smith_explain_slowness(output_dir),
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
@@ -2127,6 +2129,23 @@ def _smith_revert(output_dir: str) -> dict:
     always the most recent change."""
     from services.smith.revert import run as _revert_run
     return _revert_run(output_dir)
+
+
+def _smith_explain_crash(output_dir: str) -> dict:
+    """What the running application has reported as crashing. Reads the
+    project's incident ledger; changes nothing. Takes no arguments — not
+    knowing what broke is why anybody asks."""
+    from services.incident_ledger import KIND_CRASH
+    from services.smith.incidents import run as _incidents_run
+    return _incidents_run(output_dir, kind=KIND_CRASH)
+
+
+def _smith_explain_slowness(output_dir: str) -> dict:
+    """What the running application has timed as too slow, and what cannot be
+    done about it. Reads the incident ledger; changes nothing."""
+    from services.incident_ledger import KIND_SLOW
+    from services.smith.incidents import run as _incidents_run
+    return _incidents_run(output_dir, kind=KIND_SLOW)
 
 
 def _smith_add_field(output_dir: str, args: dict) -> dict:
