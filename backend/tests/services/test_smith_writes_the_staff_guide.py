@@ -17,6 +17,7 @@ so it is tested where it lives, in what the writer is handed.
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 
@@ -266,6 +267,45 @@ def test_screens_nobody_can_open_are_named_back_beside_the_guide(built, tmp_path
 # --------------------------------------------------------------------------- #
 # The ask reaches it
 # --------------------------------------------------------------------------- #
+
+def test_the_turn_writes_the_guide_and_hands_back_the_file(built, monkeypatch):
+    """The seam between the classified verb and the writer.
+
+    `handover.run` and the classifier were each covered and the join between
+    them was not, which is the one place a typo reaches nobody's test.
+    """
+    from services.smith_session import SmithSession
+
+    monkeypatch.setattr("services.smith.handover.compose",
+                        lambda data, **kw: "# Using Ward Roster\n\nYou'll see today's shifts.")
+    session = SmithSession(project_id="p1", output_dir=str(built.output_dir),
+                           guards_fn=lambda *a, **kw: [],
+                           understand_ask_fn=lambda m, ctx, **kw: {"verb": "write_guide"},
+                           iteration_move_fn=lambda *a, **kw: None)
+    result = session.run_iteration(user_message="write me a one-page guide for the team")
+
+    assert result.status == "resolved"
+    assert "You'll see today's shifts." in result.answer
+    assert result.touched_paths == [handover.GUIDE_FILE]
+    saved = pathlib.Path(built.output_dir) / "app" / handover.GUIDE_FILE
+    assert saved.read_text("utf-8").startswith("# Using Ward Roster")
+
+
+def test_a_turn_with_nothing_composed_asks_rather_than_claiming_a_guide(built, monkeypatch):
+    from services.smith_session import SmithSession
+
+    built.doc["pageLayouts"] = []
+    built.save()
+    session = SmithSession(project_id="p1", output_dir=str(built.output_dir),
+                           guards_fn=lambda *a, **kw: [],
+                           understand_ask_fn=lambda m, ctx, **kw: {"verb": "write_guide"},
+                           iteration_move_fn=lambda *a, **kw: None)
+    result = session.run_iteration(user_message="write me a guide for the team")
+
+    assert result.status == "needs_user"
+    assert "Build it first" in result.answer
+    assert result.touched_paths == []
+
 
 def test_the_ask_is_a_verb_that_needs_nothing_and_has_a_home():
     from services.smith.capabilities import unaccounted
