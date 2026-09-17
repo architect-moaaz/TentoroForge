@@ -104,7 +104,25 @@ def drizzle_column(field: dict) -> tuple[str, str]:
             line += ".defaultRandom()"
     if field.get("required") and not field.get("primaryKey"):
         line += ".notNull()"
-    if field.get("unique"):
+    # A PRIMARY KEY IS ALREADY UNIQUE, AND SAYING SO TWICE STOPS A DEPLOY.
+    #
+    # `.primaryKey().defaultRandom().unique()` emits a second constraint,
+    # `<table>_id_unique`, over the column the primary key already covers. It
+    # indexes nothing new — and `drizzle-kit push` asks before adding a unique
+    # constraint to a table that holds rows:
+    #
+    #   You're about to add records_id_unique unique constraint to the table,
+    #   which contains 3 items. Do you want to truncate records table?
+    #
+    # That prompt waits for an answer. On a Vercel build there is no terminal
+    # to answer it, so the deployment sits there until it times out — and the
+    # question it is asking is whether to destroy the user's data.
+    #
+    # `--force` is already passed and did not suppress this one, so the fix is
+    # to stop asking: the constraint should never have been emitted. A unique
+    # column that is NOT the key still gets one, because that is a real
+    # constraint the entity asked for.
+    if field.get("unique") and not field.get("primaryKey"):
         line += ".unique()"
     # A NOT NULL timestamp nobody can supply must default, or the row cannot be
     # written at all. `created_at` was `.notNull()` with no default, and

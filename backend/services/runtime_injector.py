@@ -2044,9 +2044,17 @@ fi
 
 # 3. Migrations (DATABASE_URL exported above → drizzle-kit sees it). --force keeps
 #    drizzle-kit push non-interactive; a failed migration is FATAL (no tables = unusable).
+#
+#    `< /dev/null` because --force DOES NOT cover every prompt. drizzle-kit
+#    0.30 still asks before adding a unique constraint to a table that holds
+#    rows — "Do you want to truncate <table>?" — and waits. With no terminal to
+#    answer it, a Vercel build sits there until it times out, and the question
+#    it is waiting on is whether to destroy the data. Reading EOF makes it give
+#    up in a second instead, and the line below reports a real failure. A
+#    deployment that stops with a reason beats one that stops with a clock.
 if [ -f drizzle.config.ts ]; then
   say "${YELLOW}🔄 Running database migrations...${NC}"
-  if npx drizzle-kit push --force; then
+  if npx drizzle-kit push --force < /dev/null; then
     say "${GREEN}✅ Migrations applied${NC}"
   else
     say "${RED}❌ Migration failed — the app needs its tables. Check DATABASE_URL + drizzle.config.ts schema path.${NC}"
