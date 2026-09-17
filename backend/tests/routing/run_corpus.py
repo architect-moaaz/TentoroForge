@@ -9,14 +9,14 @@ person who knows the right words was never the problem.
     python -m tests.routing.run_corpus --verb add_field
     python -m tests.routing.run_corpus --limit 20 --json report.json
 
-Measured on 2026-09-18 against the sample context below, over all 253
+Measured on 2026-09-18 against the sample context below, over all 254
 sentences: 7 reached a DIFFERENT verb (2.8%), 167 routed as labelled (66%),
-and 79 asked a question instead — which is not a failure, and for most of
+and 80 asked a question instead — which is not a failure, and for most of
 those it is the right answer, since the sample application has no dashboard to
 put a widget on. Track the first number.
 
   2026-09-17   5 / 138   3.6%
-  2026-09-18   7 / 253   2.8%     the corpus nearly doubled in between
+  2026-09-18   7 / 254   2.8%     the corpus nearly doubled in between
 
 TWO OF THE SEVEN WENT TO VERBS THAT DID NOT EXIST WHEN THEIR LABEL WAS
 WRITTEN, and both reads are arguable rather than wrong:
