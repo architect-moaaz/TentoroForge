@@ -137,6 +137,15 @@ Return ONLY a JSON object with exactly these keys:
       "reorder"       — things should MOVE AROUND on a screen that exists:
                         "move the chart above the table", "put the search at
                         the top".
+      "import_data"   — LOAD DATA THEY ALREADY HAVE from the spreadsheet they
+                        attached: "here's our customer spreadsheet, load it
+                        in", "import these suppliers", "put our existing
+                        bookings in". Fill "entity" with WHICH KIND OF RECORD
+                        the file holds, as the Blueprint spells it. Do not
+                        name the file and do not repeat any row of it — the
+                        rows are read from the file itself, never from what
+                        you write. Not add_entity (that declares a new kind
+                        of record), not add_field (that is a new column).
       "revert"        — UNDO the last change: "undo that", "undo", "put it
                         back", "that's not what I wanted, revert", "go back",
                         "reverse that". Restores the application as it stood
@@ -234,6 +243,12 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   edit_rule / remove_rule need:
   "rule": which rule, by the name the Blueprint below gives it; edit_rule
       also "change": what should be different.
+
+  import_data needs:
+  "entity": which kind of record the attached spreadsheet holds, as the
+      Blueprint below spells it ("Customer", "Supplier"). Nothing else: the
+      file is the one attached to this message, and the mapping from its
+      columns to the record's fields is worked out from the file.
 
   add_entity needs:
   "entity": the entity in the user's words — its name and what it holds.

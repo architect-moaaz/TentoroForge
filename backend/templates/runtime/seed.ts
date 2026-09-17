@@ -6,8 +6,22 @@
  * independent of any LLM step, so a fresh app is loginable and demoable out of the box.
  *
  *   1. Admin user — bcrypt-hashed with the same algorithm auth.ts verifies.
- *   2. Demo data — best-effort from contracts/seed-plan.json, in table order,
+ *   2. Imported data — the owner's OWN records, from src/db/imports/*.json
+ *      (written by services.smith.data_import when they load a spreadsheet).
+ *   3. Demo data — best-effort from contracts/seed-plan.json, in table order,
  *      coercing ISO dates and resolving foreign keys to already-inserted ids.
+ *
+ * WHY THE IMPORTS ARE HERE AND NOT IN A SCRIPT OF THEIR OWN. This is the only
+ * route in the product that writes rows, it is already run by start.sh, the
+ * preview manager and every publish, and it holds every hard-won rule about
+ * how a row actually reaches Postgres (tableFor, prepRow, _driverSafeDates,
+ * FK resolution). A second inserter would be a second copy of all of it.
+ *
+ * They are applied BEFORE the demo data and before both skip gates: an owner's
+ * real records must land in a reused database, and once they have, the demo
+ * pass leaves their table alone — so an app with four hundred real customers
+ * never shows "Customer 1". Applied at most once each, by import id, so a
+ * redeploy does not load the same spreadsheet twice.
  *
  * Idempotent: the admin upserts on email; each domain table is skipped when it
  * already has rows. Run via `npx tsx src/db/seed.ts` (start.sh does this).
@@ -312,7 +326,107 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
   return out;
 }
 
-async function seedDomain(adminId: string | null): Promise<void> {
+/**
+ * The owner's own records, loaded from a spreadsheet.
+ *
+ * Each file is `{ import, table, rows[] }` — one per import, named by the
+ * import's id, which is the content hash of the file they attached. The id is
+ * the idempotency key: `_forge_import_log` remembers which have been applied,
+ * so a redeploy, a reseed or a second boot does not give them every customer
+ * twice.
+ *
+ * A row that Postgres refuses is reported and skipped — the rest of the file
+ * still lands, and the count tells the owner (and the platform log) that some
+ * did not. The rows were already coerced to the declared field types before
+ * they were written, so a refusal here is a schema fact, not a value we could
+ * have fixed by guessing.
+ */
+async function applyImports(): Promise<Set<string>> {
+  const owned = new Set<string>();
+  const dir = path.join(process.cwd(), "src", "db", "imports");
+  if (!fs.existsSync(dir)) return owned;
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
+  if (!files.length) return owned;
+
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS _forge_import_log (
+        id TEXT PRIMARY KEY,
+        table_name TEXT NOT NULL,
+        rows_applied INT NOT NULL DEFAULT 0,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+  } catch (e) {
+    console.warn("[import] could not open the import log — skipping imports:", e);
+    return owned;
+  }
+
+  for (const file of files) {
+    let payload: { import?: string; table?: string; rows?: Record<string, unknown>[] };
+    try {
+      payload = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
+    } catch (e) {
+      console.error(`❌ [import] ${file} is not readable JSON:`, e);
+      continue;
+    }
+    const importId = String(payload.import || file.replace(/\.json$/, ""));
+    const rows = Array.isArray(payload.rows) ? payload.rows : [];
+    if (!payload.table || !rows.length) continue;
+
+    try {
+      const seen: any = await db.execute(
+        sql`SELECT rows_applied FROM _forge_import_log WHERE id = ${importId} LIMIT 1`
+      );
+      const seenRows: any[] = (seen as any).rows ?? seen ?? [];
+      if (seenRows.length) {
+        console.log(`ℹ️  [import] ${importId} already applied (${seenRows[0].rows_applied} rows)`);
+        owned.add(norm(String(payload.table)));
+        continue;
+      }
+    } catch (e) {
+      console.warn(`[import] ${importId}: could not read the log, skipping to be safe:`, e);
+      continue;                 // NEVER load twice because a probe failed.
+    }
+
+    owned.add(norm(String(payload.table)));
+    const table = tableFor(String(payload.table));
+    if (!table) {
+      console.error(`❌ [import] ${importId}: no table named ${payload.table} — the ` +
+                    `schema has moved on since the file was written. Nothing loaded.`);
+      continue;
+    }
+    let applied = 0;
+    let firstErr: string | null = null;
+    for (let i = 0; i < rows.length; i++) {
+      try {
+        await db.insert(table).values(prepRow(table, rows[i], {}, i)).returning();
+        applied++;
+      } catch (e: any) {
+        if (firstErr === null) firstErr = String(e?.message || e).slice(0, 500);
+      }
+    }
+    try {
+      await db.execute(sql`
+        INSERT INTO _forge_import_log (id, table_name, rows_applied)
+        VALUES (${importId}, ${String(payload.table)}, ${applied})
+        ON CONFLICT (id) DO NOTHING
+      `);
+    } catch (e) {
+      console.warn(`[import] ${importId}: applied ${applied} rows but could not record it:`, e);
+    }
+    if (applied === rows.length) {
+      console.log(`✅ [import] ${applied} row(s) into ${payload.table} (${importId})`);
+    } else {
+      console.error(`❌ [import] ${importId}: ${applied}/${rows.length} rows into ` +
+                    `${payload.table}${firstErr ? ` — first error: ${firstErr}` : ""}`);
+    }
+  }
+  return owned;
+}
+
+
+async function seedDomain(adminId: string | null, imported: Set<string> = new Set()): Promise<void> {
   // TWO PRODUCERS, ONE READER. The legacy pipeline wrote contracts/seed-plan.json;
   // the Blueprint projection writes src/db/seed.json as { table: rows[] } and
   // this read only the first, so every Blueprint-built app seeded nothing but
@@ -347,6 +461,17 @@ async function seedDomain(adminId: string | null): Promise<void> {
   const seedOne = async (t: any): Promise<number | null> => {
     const table = tableFor(t.name);
     if (!table) return null;
+    // A TABLE THE OWNER LOADED IS THEIRS. The demo rows exist so an empty
+    // screen is not mistaken for a broken one; a table holding the business's
+    // real records does not have that problem, and the "already has rows"
+    // check below does not cover it — a table with an `email` column takes
+    // the email-keyed branch and would add "Customer 1" beside four hundred
+    // real customers. The projection also stops emitting demo rows for an
+    // imported entity; this is the same guarantee where the insert happens.
+    if (imported.has(norm(t.name))) {
+      console.log(`ℹ️  ${t.name} holds imported data — no demo rows`);
+      return null;
+    }
     try {
       const [{ c }] = await db.select({ c: sql<number>`count(*)::int` }).from(table);
       if (c > 0) {
@@ -564,6 +689,12 @@ async function main(): Promise<void> {
   // idempotent and never clobbers a real admin.
   const adminId = await seedAdmin();
 
+  // THE OWNER'S OWN RECORDS COME BEFORE THE DEMO ONES, and before both skip
+  // gates below: a database reused from an earlier deploy must still take the
+  // spreadsheet they loaded, and once their rows are in, the demo pass sees a
+  // populated table and leaves it alone.
+  const importedTables = await applyImports();
+
   // Idempotency gate — preserve existing DOMAIN data when the DB is being
   // reused (redeploy) or the schema shape is unchanged and data is present.
   // Override with FORCE_SEED=1 for a manual reseed (after a data wipe or when
@@ -580,7 +711,7 @@ async function main(): Promise<void> {
     );
     return;
   }
-  await seedDomain(adminId);
+  await seedDomain(adminId, importedTables);
   await recordSeedFingerprint(currentFp);
   console.log(`[seed] complete — fingerprint recorded (${currentFp}).`);
 }

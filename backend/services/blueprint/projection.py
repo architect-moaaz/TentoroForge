@@ -1809,9 +1809,19 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, An
     A preview of an empty database shows empty states everywhere, which looks
     identical to a broken one. Values are derived, never random, so the same
     Blueprint seeds the same rows and a screenshot is reproducible.
+
+    AN ENTITY THE OWNER HAS LOADED DATA INTO GETS NONE. The demo rows exist so
+    an empty screen is not mistaken for a broken one; an entity holding the
+    business's real records does not have that problem, and "Customer 1" sat
+    beside four hundred real customers is not demo data, it is a mistake in
+    their data. `data.imports` is the declaration
+    (`services.smith.data_import`); the rows themselves are in the app's own
+    database, never here.
     """
     entities = [e for e in (doc.get("data") or {}).get("entities") or []
                 if e.get("status") != "DEPRECATED"]
+    imported = {str(i.get("entity")) for i in ((doc.get("data") or {}).get("imports") or [])
+                if isinstance(i, dict) and i.get("entity")}
     tables_by_id = {str(e.get("id")): (e.get("table") or to_snake(e.get("name") or "entity"))
                     for e in entities if e.get("id")}
 
@@ -1819,6 +1829,8 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, An
     for entity in entities:
         table = entity.get("table") or to_snake(entity.get("name") or "entity")
         name = entity.get("name") or table
+        if str(entity.get("id")) in imported:
+            continue
         out_rows = []
         for row in range(1, rows + 1):
             record = {}

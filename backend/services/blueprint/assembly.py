@@ -75,6 +75,12 @@ PROJECTED_PATHS: tuple[str, ...] = (
     "src/app/(dashboard)/page.tsx",
     "src/lib/sensitive-columns.ts", "src/lib/searchable-columns.ts",
     "src/lib/append-only-entities.ts",
+    # The owner's OWN records, loaded from a spreadsheet
+    # (`services.smith.data_import`). Nothing in any scaffold layer writes
+    # here, so this is not resolving a conflict — it is saying whose the
+    # directory is, so that the day a copier decides it owns `src/db` it does
+    # not take a business's customer list with it.
+    "src/db/imports",
 )
 
 #: Files inside a projected directory that the *scaffold* still owns.

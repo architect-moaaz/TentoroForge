@@ -101,6 +101,12 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Undo. Needs nothing: it is always the last change, and asking which one
     # would be asking the person to know what Smith recorded.
     "revert": set(),
+    # The owner's own data, from the spreadsheet they attached. Needs only
+    # WHICH RECORDS it holds — the file is not a slot, for the same reason
+    # `revert` has none: it is always the one just attached, and an attachment
+    # id is a thing only Smith has seen. First turn describes and waits;
+    # `services.smith.data_import` holds the plan between the two.
+    "import_data": {"entity"},
     # THE ASKS THAT REACH NOTHING, GIVEN SOMEWHERE TO LAND. Each of these is a
     # thing people ask for that Smith genuinely cannot do. Without a verb they
     # were classified as whatever was nearest — "delete the Wards page" as a
@@ -278,6 +284,16 @@ VERB_HELP: dict[str, str] = {
         "restored as it stood before the change and every projection is "
         "written out again. Said twice it goes back two changes. Needs "
         "nothing — it is always the most recent change."
+    ),
+    "import_data": (
+        "Load the data they already have into the application: \"here's our "
+        "customer spreadsheet, load it in\", \"import these suppliers\", "
+        "\"can you put our existing bookings in\". The file is the one they "
+        "attached. Needs only WHICH KIND OF RECORD it holds (\"customers\"). "
+        "The first turn writes nothing — it says how many rows would land, "
+        "how many would not and why, and which column becomes which field; "
+        "the rows are loaded on a yes. A column the record has no field for "
+        "is refused, not guessed at."
     ),
     "rebuild": (
         "Regenerate the application from its definition. The honest answer "

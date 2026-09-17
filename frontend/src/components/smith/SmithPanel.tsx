@@ -1033,13 +1033,18 @@ export function SmithPanel({
         <div className="flex items-end gap-2">
           <label
             className="cursor-pointer rounded-md border p-2 text-muted-foreground hover:bg-muted"
-            title="Show Smith a screenshot or design"
+            title="Attach a screenshot, a design, or a spreadsheet to load in"
           >
             <Paperclip className="h-4 w-4" />
+            {/* A SPREADSHEET IS THE POINT OF THE PAPERCLIP for an owner who
+                already has a business: they attach customers.xlsx and say
+                "load it in" (services/smith/data_import.py). Leaving the sheet
+                formats out of this list made the import unreachable from the
+                panel it is driven from. */}
             <input
               type="file"
               multiple
-              accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown"
+              accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown,.csv,.tsv,.xlsx"
               className="hidden"
               disabled={busy}
               onChange={(e) => {

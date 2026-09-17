@@ -57,9 +57,20 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
                      ("entity_access", project_entity_access),
                      ("launch_roles", project_launch_roles)):
         _run(name, lambda fn=fn: fn(svc.doc, app_root))
+    # AN UNDONE IMPORT MUST STOP BEING LOADED. The declaration is gone from
+    # the restored document; its payload file has to go from the app tree too,
+    # or the seeder applies it on the next boot and the undo undid nothing.
+    # Before the seed, because the seed's content depends on which entities
+    # still hold imported data.
+    _run("imports", lambda: {"files": _reconcile_imports(svc.doc, app_root)})
     _run("seed", lambda: project_seed(svc.doc, app_root))
     _run("design_tokens", lambda: project_design_tokens(svc.doc, app_root))
     return sorted(set(f for f in files if f))
+
+
+def _reconcile_imports(doc: dict, app_root: str) -> list[str]:
+    from services.smith.data_import import reconcile
+    return reconcile(doc, app_root)
 
 
 __all__ = ["everything"]

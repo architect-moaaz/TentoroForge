@@ -338,6 +338,8 @@ _VERB_NOTES: dict[str, str] = {
         'attach a UX Pilot page as evidence. `key_env` is the NAME of the environment variable holding the UX Pilot API key; never the key itself.',
     'disconnect_design':
         "remove the connected design and compose every screen from the component library instead: 'disconnect the Figma design', 'drop the design'.",
+    'import_data':
+        "load the data they ALREADY HAVE from the spreadsheet they attached: 'here's our customer spreadsheet, load it in'. Needs only which kind of record the file holds; never pass rows or a filename. The first call writes nothing and returns the dry run to show them.",
     'rebuild':
         'regenerate the whole application from its definition.',
     'rename':
@@ -874,6 +876,24 @@ TOOL_CATALOG: list[dict] = [
              "foreign key that named the old entity must move, so it confirms "
              "first and the completeness checks surface each reference. Refuses "
              "the auth/users entity and any rename into that namespace."},
+    {"name": "import_data",
+     "signature": "import_data(entity, confirm?, ignore_columns?[]) -> "
+                  "{applied, asked, reason, options, edited_paths}",
+     "desc": "LOAD THE DATA THEY ALREADY HAVE from the spreadsheet attached to "
+             "this conversation — 'here's our customer spreadsheet, load it in', "
+             "'import these suppliers'. Every owner arrives with an existing "
+             "business and existing data; without this the first real use of "
+             "the app is typing it all in again. Pass only WHICH KIND OF "
+             "RECORD the file holds (check list_entities); the file is the one "
+             "they attached and is read from disk — never pass rows, and never "
+             "transcribe a row into any tool call. "
+             "CALLED WITHOUT `confirm` IT WRITES NOTHING: it returns the dry "
+             "run — how many rows would land, how many would not and why, and "
+             "which column becomes which field. Show that to them verbatim and "
+             "wait. When they agree, call it again with confirm=true and the "
+             "rows are written under the mapping they were shown. A column the "
+             "record has no field for is REFUSED, not guessed at: either "
+             "add_field first, or pass it in ignore_columns to leave it out."},
     {"name": "add_field",
      "signature": "add_field(entity, field:{name, type, length?, "
                   "precision?, scale?, default?}) -> {applied, changes, "
@@ -1372,6 +1392,7 @@ READONLY_HANDLERS = {
     "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
     "revert":                   lambda output_dir, args: _smith_revert(output_dir),
+    "import_data":              lambda output_dir, args: _smith_import_data(output_dir, args),
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
@@ -2127,6 +2148,21 @@ def _smith_revert(output_dir: str) -> dict:
     always the most recent change."""
     from services.smith.revert import run as _revert_run
     return _revert_run(output_dir)
+
+
+def _smith_import_data(output_dir: str, args: dict) -> dict:
+    """Load an attached spreadsheet into one kind of record.
+
+    Without `confirm` this is a dry run that writes nothing — the counts, the
+    rejects and the column-to-field mapping, for the model to show and the
+    owner to agree to. `confirm` applies the import that was described, under
+    the mapping that was shown rather than one decided again.
+    """
+    from services.smith.data_import import run as _import_run
+    ignore = [str(c) for c in (args.get("ignore_columns") or []) if str(c).strip()]
+    return _import_run(output_dir, str(args.get("entity") or ""),
+                       confirm=bool(args.get("confirm")),
+                       ignore_columns=ignore)
 
 
 def _smith_add_field(output_dir: str, args: dict) -> dict:

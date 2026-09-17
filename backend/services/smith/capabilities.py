@@ -52,6 +52,12 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      frozenset({"edit_product", "add_requirement", "edit_requirement",
                 "remove_requirement", "add_api", "remove_api",
                 "add_integration", "remove_integration"})),
+    ("Your own data",
+     "Load the records you already have — attach a spreadsheet and say which "
+     "records it holds. I say how many rows would land and which column "
+     "becomes which field before anything is written, and a column your "
+     "records have no field for is reported rather than guessed at.",
+     frozenset({"import_data"})),
     ("A design somebody gave you",
      "Build the screens from a Figma or UX Pilot file, or unhook it and "
      "compose them from the component library instead.",
