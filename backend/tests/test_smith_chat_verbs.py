@@ -1,8 +1,7 @@
 """DEFECT-STATUS-VERB / B-07 / C-06 — deterministic lifecycle-verb, status,
 functionless-guard and state-advance helpers on the live /smith/chat path."""
-import copy
 from routers.blueprint_generate import (
-    _lifecycle_verb, _status_report, _is_functionless_brief, _advance_state_to_review,
+    _lifecycle_verb, _is_functionless_brief, _advance_state_to_review,
     _requirement_query, _requirement_report,
 )
 
@@ -16,22 +15,15 @@ def test_lifecycle_verb_only_matches_a_bare_command():
     assert _lifecycle_verb("") is None
 
 
-def test_status_report_never_defines_and_says_where_it_is():
-    """A STATE MACHINE'S NAME IS NOT AN ANSWER, and `_status_report` stopped
-    printing one: "DISCOVERY" and "BLUEPRINT_REVIEW" told a person nothing
-    about what to do. It says where the application is and what the next act
-    is, in words — which is what these assertions hold it to now. (This test
-    asserted the old wording and this module could not even be imported, so
-    nothing here ran; the state names went, and nobody saw.)"""
-    empty = _status_report({})
-    assert "nothing is written down" in empty.lower()
-    assert "tell me what you want to build" in empty.lower()
-    assert "DISCOVERY" not in empty
-    doc = {"state": "BLUEPRINT_REVIEW", "requirements": [{"id": "REQ-001"}],
-           "pages": [{"id": "PAGE-001"}], "decisions": [{"id": "DEC-001", "source": "user"}]}
-    r = _status_report(doc)
-    assert "BLUEPRINT_REVIEW" not in r
-    assert "**1** thing(s) it has to do" in r and "approve" in r.lower()
+# `test_status_report_never_defines_and_reads_state` stood here and asserted
+# the opposite of what `_status_report` now does: it required the state
+# machine's own name in the reply ("DISCOVERY", "BLUEPRINT_REVIEW"). a4ff9a4
+# took those names out, because "State: BLUEPRINT_REVIEW" tells a person
+# nothing about what to do — the reply says where it is and what is next
+# instead. What the report says is held to in one place now, and it is the
+# newer one: tests/services/test_smith_never_dead_ends.py
+# ::test_a_state_machines_name_is_not_an_answer. Two tests of one sentence is
+# how this file came to assert a behaviour that had been deliberately removed.
 
 
 def test_functionless_brief_guard_is_conservative():
@@ -109,16 +101,24 @@ def test_requirement_report_when_nothing_is_defined_yet():
 
 # ── DEFECT-F-07: an integration ask, answered honestly ──
 #
-# `_unsupported_integration` was a phrase list that refused any message naming
-# an outside system, with Figma and UX Pilot as its exception list — and it is
-# gone, which left this module unimportable and its other twenty tests
-# uncollected. Two things answer the ask now, and which one depends on whether
-# there is an adapter rather than on the shape of the sentence:
-# `connect_service` CONNECTS outbound email, and `add_integration` DECLARES
-# anything else and says so every time. These tests keep what the old ones
-# were for: a service Forge cannot talk to is named, refused with a reason,
-# and handed the nearest thing that works — and internal wiring is never
-# mistaken for an outside service.
+# `_unsupported_integration` matched a phrase list ("integrate with", "connect
+# to", "sync with") and then excused Figma, UX Pilot and anything that sounded
+# internal — an exception list, which is the shape this codebase keeps being
+# burned by. Removed with the helper in f58ee92. DO NOT BRING IT BACK.
+#
+# What answers the ask now is not a phrase list but an adapter: `connect_service`
+# CONNECTS outbound email (the service is recorded, the app is projected to send
+# through it, the key is set on the platform) and refuses anything with no
+# adapter, naming the reason and the nearest thing that works; `add_integration`
+# WRITES DOWN the names of the secrets and says plainly it has connected
+# nothing. So "send email through SendGrid" and "connect it to our payroll
+# system" get the same KIND of answer, which is what F-07 was about, and the
+# difference between them is a fact about the runtime rather than about the
+# wording.
+#
+# These tests keep what the old ones were for, against the seam that decides
+# it. The payroll sentence is in tests/routing/corpus.jsonl; the declaration
+# path is in tests/services/test_smith_definition_changes.py.
 
 from services.smith.email_connect import refusal, service_for
 

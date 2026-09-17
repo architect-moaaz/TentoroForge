@@ -140,6 +140,11 @@
 {"say": "send the emails through our own account", "verb": "connect_service"}
 {"say": "connect it to Xero", "verb": "connect_service", "note": "no adapter: the reason, and what works instead"}
 {"say": "make a note that we use Stripe for payments", "verb": "add_integration", "note": "written down for later, not wired up"}
+{"say": "how much has this cost me?", "verb": "spend", "note": "the phrasebook's last dead end"}
+{"say": "what have I spent on this so far", "verb": "spend"}
+{"say": "what did the build cost", "verb": "spend"}
+{"say": "how many tokens has this used", "verb": "spend"}
+{"say": "show me the usage", "verb": "spend"}
 {"say": "set up logins for my six staff", "verb": "add_login"}
 {"say": "add a login for dave@clinic.com", "verb": "add_login"}
 {"say": "my new receptionist needs an account, sarah@clinic.com", "verb": "add_login"}

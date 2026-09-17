@@ -211,6 +211,15 @@ Return ONLY a JSON object with exactly these keys:
                         "reverse that". Restores the application as it stood
                         before the change. Not rebuild, which regenerates from
                         the definition as it now stands.
+      "spend"         — WHAT THIS APPLICATION HAS COST TO RUN: "how much has
+                        this cost me?", "what have I spent on this", "what did
+                        the build cost", "how many tokens has this used",
+                        "show me the usage". Reads the usage ledger and
+                        reports it. This is a question ABOUT the spending, not
+                        about the application, so it is a verb rather than an
+                        "answer" — the Blueprint below does not hold a single
+                        figure of it, and answering from the Blueprint would
+                        mean inventing one. It changes nothing.
       "compose_route" — build or rebuild the whole screen at a route. Use this
                         when a route renders nothing, is empty, or 404s, or
                         when they want it laid out again from scratch.
