@@ -101,6 +101,14 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Undo. Needs nothing: it is always the last change, and asking which one
     # would be asking the person to know what Smith recorded.
     "revert": set(),
+    # THE RECORDS, OUT. `entity` is optional on purpose: "can I get all this
+    # out as a spreadsheet?" is the ask, and it names nothing — requiring one
+    # would turn the question into "which of your seventeen record types?"
+    # before anyone had been shown a file. Named, it narrows to that one.
+    "export_records": set(),
+    # A copy of the whole thing — records AND the definition — that the owner
+    # keeps. Needs nothing; there is only ever one application to copy.
+    "back_up": set(),
     # THE ASKS THAT REACH NOTHING, GIVEN SOMEWHERE TO LAND. Each of these is a
     # thing people ask for that Smith genuinely cannot do. Without a verb they
     # were classified as whatever was nearest — "delete the Wards page" as a
@@ -271,6 +279,19 @@ VERB_HELP: dict[str, str] = {
         "They want things MOVED AROUND on a screen that already exists: "
         "\"move the chart above the table\", \"put the search at the top\". "
         "Nothing rearranges a composed screen. Needs the screen."
+    ),
+    "export_records": (
+        "Get the RECORDS out — what the application HOLDS, not what it is: "
+        "\"can I get all this out as a spreadsheet?\", \"export my customers "
+        "to Excel\", \"I want a copy of the data\". One CSV per kind of "
+        "record, downloaded. Optionally `entity` to take just one kind. NOT "
+        "`export`, the lifecycle command, which hands over the source."
+    ),
+    "back_up": (
+        "A copy of the whole application the owner keeps: \"back it up "
+        "somewhere\", \"what if I lose all this?\", \"can I take a backup?\". "
+        "The records and the definition in one archive, downloaded now. Says "
+        "plainly that nothing is scheduled and there is no restore button."
     ),
     "revert": (
         "Undo the last change: \"undo that\", \"undo\", \"put it back\", "

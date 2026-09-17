@@ -1075,6 +1075,23 @@ def _env_file(root: Path) -> dict[str, str]:
     return env
 
 
+def app_database_url(app_root: str | Path) -> str:
+    """The database THIS application opens, as its own ``.env.local`` says.
+
+    Not :func:`default_database_url`. That is the value assembly WRITES; the
+    file is the value the application READS, and `run.sh` rewrites it when it
+    picks a free port, so the two differ on any machine running more than one
+    app. Anything that wants to look at an application's records has to open
+    the database the application itself opened, or it is reading someone
+    else's — which is the whole of the defect
+    `test_each_application_gets_its_own_database` exists for.
+
+    Empty string when the file is absent or names no url: the caller says so
+    rather than falling back to a guess at somebody's database.
+    """
+    return _env_file(Path(app_root)).get("DATABASE_URL", "").strip()
+
+
 def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
     """Dry-run every wire the app ships through its own engine. Raises
     :class:`BuildFailed` naming the control, the workflow and the step for

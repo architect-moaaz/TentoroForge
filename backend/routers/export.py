@@ -1,9 +1,17 @@
-"""Export & deployment endpoints — Dockerfile, docker-compose, README, env, git push."""
+"""Export & deployment endpoints.
+
+Two different things share the word, and the difference matters to whoever is
+asking. Everything above :func:`download_export` hands over the DEFINITION —
+Dockerfile, compose file, README, env, the source pushed to a repository. The
+last route hands over what the application HOLDS: the records an owner asked
+Smith for, written by `services.smith.records_out`.
+"""
 
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -171,3 +179,37 @@ async def export_production_bundle(
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/api/projects/{project_id}/exports/{export_id}")
+async def download_export(
+    project_id: uuid.UUID,
+    export_id: str,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Give the owner a file Smith wrote for them — records, or a backup.
+
+    THE ONLY THING THAT DECIDES WHICH DIRECTORY IS READ is the project row
+    ``get_project_with_auth`` returns for THIS user. `export_id` names a file
+    inside it and nothing else: a junk or traversing id reads nothing and
+    answers 404, so one project can never address another's exports and the
+    404 says nothing about what exists.
+    """
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        raise HTTPException(status_code=404, detail="Export not found")
+
+    from services import project_exports
+
+    found = project_exports.read_export(project.output_dir, export_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Export not found")
+    data, media_type, filename = found
+    return Response(
+        content=data,
+        media_type=media_type,
+        # The browser saves it rather than rendering it, under the name the
+        # owner was shown in the chat bubble.
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

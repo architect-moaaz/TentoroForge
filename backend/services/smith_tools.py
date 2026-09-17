@@ -338,6 +338,10 @@ _VERB_NOTES: dict[str, str] = {
         'attach a UX Pilot page as evidence. `key_env` is the NAME of the environment variable holding the UX Pilot API key; never the key itself.',
     'disconnect_design':
         "remove the connected design and compose every screen from the component library instead: 'disconnect the Figma design', 'drop the design'.",
+    'export_records':
+        "the RECORDS out as a spreadsheet the owner downloads: 'can I get all this out as a spreadsheet?', 'export the customers', 'I want a copy of my data'. What the application HOLDS. Do NOT confuse with the `export` lifecycle command, which hands over the SOURCE. Optional `entity` narrows it to one kind of record; omit it for everything.",
+    'back_up':
+        "an archive of the records AND the definition, which the owner downloads and keeps: 'back it up somewhere', 'what if I lose all this?'. Takes no fields. The reply says plainly that nothing is scheduled and that there is no restore button — do not promise either.",
     'rebuild':
         'regenerate the whole application from its definition.',
     'rename':
@@ -1372,6 +1376,14 @@ READONLY_HANDLERS = {
     "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
     "revert":                   lambda output_dir, args: _smith_revert(output_dir),
+    # NO ENTRY FOR export_records / back_up, deliberately. Both answer with a
+    # download url, and that url is project-scoped — `/api/projects/<id>/
+    # exports/<id>`, authorised against the project row. A handler here is
+    # given an `output_dir` and nothing else (`agents/smith_agent.py` never
+    # sees a project id), so the only way to serve them from this table would
+    # be to invent an unauthenticated path to somebody's records. They are
+    # dispatched from `smith_session`, which is handed the project id by
+    # `smith_chat_v2` — see `services.smith.records_out.run`.
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),

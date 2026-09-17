@@ -222,6 +222,36 @@ def parse_platform_table(source: str) -> tuple[dict, ...]:
     return tuple(fields)
 
 
+#: Read back out of a projected module rather than recomputed from the
+#: Blueprint, because the database holds what drizzle-kit pushed and drizzle
+#: pushed what this file says. A second derivation of "which column is this
+#: field" would be a second derivation that drifts, and the reader that drifts
+#: is the one that SELECTs a column that is not there.
+_TABLE_NAME_RE = re.compile(r"pgTable\(\s*\"(?P<table>[^\"]+)\"")
+
+
+def parse_table_columns(source: str) -> tuple[str, tuple[tuple[str, str], ...]]:
+    """``(table, ((field, column), …))`` for one ``src/db/schema/*.ts`` module.
+
+    The field name is what the Blueprint calls the box and what a person
+    reading a spreadsheet should see at the top of the column; the column name
+    is what a ``SELECT`` has to say. Both come off the same declaration, so
+    they cannot disagree.
+
+    Returns ``("", ())`` for a file with no ``pgTable`` call — an index barrel,
+    or a module that is not a table.
+    """
+    start = source.find("pgTable(")
+    if start == -1:
+        return "", ()
+    named = _TABLE_NAME_RE.search(source[start:])
+    table = named.group("table") if named else ""
+    out: list[tuple[str, str]] = []
+    for m in _COLUMN_RE.finditer(source[start:]):
+        out.append((m.group("field"), m.group("column")))
+    return table, tuple(out)
+
+
 def platform_table(table: str) -> tuple[dict, ...]:
     """The platform's declaration for ``table``, or ``()`` if it owns none."""
     rel = PLATFORM_TABLE_SOURCES.get(table)

@@ -23,6 +23,7 @@
  * its state. Nothing streams a model's intermediate thinking into this pane.
  */
 
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
@@ -238,6 +239,64 @@ export interface SmithPanelProps {
 }
 
 /**
+ * A link to a file Smith wrote for this owner — records, or a backup.
+ *
+ * It cannot be a plain anchor. The platform authenticates with a bearer token
+ * held in localStorage, and a browser following an `href` sends cookies and no
+ * header — so the click would land on a 401 and the owner would be told their
+ * own data does not exist. The bytes are fetched with the token, handed to the
+ * browser as a blob, and the object url is revoked straight after; nothing
+ * about the file is put in an address bar.
+ */
+function DownloadLink({ href, children }: { href: string; children: ReactNode }) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState("");
+
+  const save = useCallback(async () => {
+    setBusy(true);
+    setFailed("");
+    try {
+      const token =
+        typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      const res = await fetch(`${API_BASE}${href}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const blob = await res.blob();
+      const name =
+        /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ??
+        href.split("/").pop() ??
+        "export";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.click();
+      // Not revoked synchronously: Safari and Firefox can still be reading
+      // the blob when the click returns, and a revoked url downloads nothing.
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch {
+      // Named, not swallowed: a download that silently does nothing is
+      // indistinguishable from an application that lost the data.
+      setFailed("could not be downloaded — try asking again");
+    } finally {
+      setBusy(false);
+    }
+  }, [href]);
+
+  return (
+    <button type="button" onClick={save} disabled={busy} className="underline">
+      {children}
+      {busy ? " …" : ""}
+      {failed ? ` (${failed})` : ""}
+    </button>
+  );
+}
+
+/** The export routes, and only those, are fetched rather than followed. */
+const EXPORT_HREF = /^\/api\/projects\/[^/]+\/exports\/[A-Za-z0-9_-]+$/;
+
+/**
  * Smith's side of the conversation, rendered as light markdown.
  *
  * Smith answers about an application by naming its screens, routes, fields
@@ -264,7 +323,19 @@ function SmithProse({ text }: { text: string }) {
         "[&_table]:my-1.5 [&_table]:text-xs [&_th]:py-0.5 [&_td]:py-0.5",
       )}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children }) =>
+            href && EXPORT_HREF.test(href) ? (
+              <DownloadLink href={href}>{children}</DownloadLink>
+            ) : (
+              <a href={href}>{children}</a>
+            ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }

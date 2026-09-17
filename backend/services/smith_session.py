@@ -685,6 +685,29 @@ class SmithSession:
                           answer=str(out.get("diff_summary") or "Undone."),
                           touched_paths=list(out.get("edited_paths") or []))
 
+    def _records_out(self, verb: str, understanding: dict) -> "TurnResult":
+        """The owner's records out, or a backup they keep (§83).
+
+        Neither writes anything to the Blueprint, so neither returns
+        `touched_paths` and neither appears in the change history: taking a
+        copy of an application is not a change to it, and an undo must not
+        step over one.
+        """
+        from services.smith.records_out import run as records_run
+
+        out = records_run(
+            str(self.output_dir), str(self.project_id),
+            kind="backup" if verb == "back_up" else "export",
+            entity=str(understanding.get("entity") or ""),
+            reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(
+                status="needs_user",
+                answer=str(out.get("reason")
+                           or "I could not get the records out of this application."))
+        return TurnResult(status="resolved",
+                          answer=str(out.get("diff_summary") or ""))
+
     def _add_field(self, understanding: dict) -> "TurnResult":
         """Add one column to an existing entity — the incremental data-model
         change a field-add is (F-01). The field is added to the Living
@@ -983,6 +1006,8 @@ class SmithSession:
             return self._add_field(understanding)
         if verb == "revert":
             return self._revert()
+        if verb in ("export_records", "back_up"):
+            return self._records_out(verb, understanding)
         from services.smith.limits import cannot as _cannot
         if _cannot(verb):
             # HONEST, AND NOT A DEAD END. These are the asks Smith genuinely

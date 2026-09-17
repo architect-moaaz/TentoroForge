@@ -63,6 +63,12 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "does work.",
      frozenset({"remove_page", "rename_entity", "change_field_type",
                 "edit_api", "reorder"})),
+    ("Getting your records out",
+     "Every record the application holds, as a spreadsheet you download — all "
+     "of them or one kind — and a backup: the same records together with the "
+     "definition they belong to, in one archive you keep. Taken when you ask; "
+     "nothing is scheduled and nothing puts them back for you.",
+     frozenset({"export_records", "back_up"})),
     ("Putting it back",
      "Undo the last change — the application returns to how it stood before "
      "it, and saying it again goes back another. Nothing is deleted: the undo "
@@ -83,8 +89,15 @@ COMMANDS: tuple[tuple[str, str], ...] = (
      "after a build, I read every page as it renders — is it laid out well, "
      "does it match what you asked for, do the buttons and links work — and "
      "re-compose anything that is off."),
-    ("`export`", "take the source away as a zip, or push it to a repository."),
+    # SAID APART FROM THE RECORDS, because `export` has meant the SOURCE here
+    # since before there were records to confuse it with — and an owner who
+    # types "export" means their data. The two are one line apart in this
+    # list so nobody has to discover the difference by getting the wrong file.
+    ("`export`", "take the SOURCE away as a zip, or push it to a repository — "
+                 "the application itself, not what it holds. For the records, "
+                 "ask for a spreadsheet or a backup."),
 )
+
 
 #: Said last, because both are things a person asks for and does not get here.
 LIMITS = (

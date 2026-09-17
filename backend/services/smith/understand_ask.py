@@ -137,6 +137,18 @@ Return ONLY a JSON object with exactly these keys:
       "reorder"       — things should MOVE AROUND on a screen that exists:
                         "move the chart above the table", "put the search at
                         the top".
+      "export_records" — they want the RECORDS OUT, as a file they keep:
+                        "can I get all this out as a spreadsheet?", "export
+                        the customers to Excel", "I want a copy of my data",
+                        "download everything". What the application HOLDS —
+                        not what it IS. A CSV per kind of record. If they
+                        named one kind, put it in "entity"; if they said
+                        "everything" or named nothing, leave it "".
+      "back_up"       — they are asking whether their work is safe: "back it
+                        up somewhere", "what happens if I lose all this?",
+                        "can I take a backup?", "is this stored anywhere
+                        else?". An archive of the records AND the definition,
+                        which they download and keep. Needs no fields.
       "revert"        — UNDO the last change: "undo that", "undo", "put it
                         back", "that's not what I wanted, revert", "go back",
                         "reverse that". Restores the application as it stood
@@ -215,6 +227,11 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   remove_requirement needs "requirement": which one.
 
   edit_product needs "change": what should be different, in the user's words.
+
+  export_records needs nothing. Optionally "entity": the ONE kind of record
+      they named, as the Blueprint spells it. Leave it "" for "everything".
+
+  back_up needs nothing.
 
   add_api needs "api": the endpoint in the user's words; remove_api needs
       "api": which one (method and path, or its id).
