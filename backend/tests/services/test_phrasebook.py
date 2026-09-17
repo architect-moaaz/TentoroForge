@@ -44,7 +44,7 @@ def test_the_corpus_loads_and_every_sentence_is_named(rows):
     assert len(set(ids)) == len(ids), "two sentences share an id"
     for row in rows:
         assert row.say.strip(), f"{row.id} has no sentence"
-        assert row.entry.get("source") in ("code", "phrasebook"), \
+        assert row.entry.get("source") in ("code", "phrasebook", "routing"), \
             f"{row.id} does not say where its sentence came from"
 
 
