@@ -98,6 +98,22 @@ _MUTATING_TOOLS = frozenset({
     # Rename and/or retype one column; a rename on a Blueprint app routes
     # into `rename_field` above and writes exactly what it writes.
     "edit_field",
+    # The entity and workflow writes, found by asking the other question: not
+    # "which handlers write?" but "which handlers can return
+    # `needs_confirmation`?". Every tool that asks before writing is by
+    # definition a tool that writes, and these three asked while sitting
+    # outside the list — so the confirmation was the only gate on them, and
+    # the two gates that catch a turn which never asked at all were not there.
+    #
+    # Drops the entity, its table and its data, and everything that named it.
+    # Confirms with `cascade=True`: the highest blast radius Smith has.
+    "remove_entity",
+    # Renames an entity and/or its table; everything that names it has to move
+    # with it, which is why it confirms with its dependents listed.
+    "edit_entity",
+    # Deletes a workflow. Every Button or Form that dispatched it stops
+    # resolving until it is rebound, so the write reaches the pages too.
+    "remove_workflow",
 })
 _VERIFYING_TOOLS = frozenset({"verify_promise", "run_guards"})
 
