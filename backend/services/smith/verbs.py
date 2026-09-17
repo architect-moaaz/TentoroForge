@@ -138,6 +138,16 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # them, in one file. A required slot here would turn a question anybody
     # can ask into one they have to phrase correctly.
     "export_data": set(),
+    # THE TWO ASKS THAT NEEDED A SIGNAL, NOT A VERB. "it crashed" and "it's
+    # really slow" were the only entries on the owner's phrasebook whose gap
+    # was not a missing capability: nothing left the running application for
+    # Smith to answer from, so the owner's sentence WAS the whole report.
+    # The application now reports its own failures and its own slow responses
+    # into its incident ledger, and these two read it back. Neither needs a
+    # field — a person saying "it crashed" is telling you they do not know
+    # what crashed, and asking them would be the whole problem again.
+    "explain_crash": set(),
+    "explain_slowness": set(),
     # THE ASKS THAT REACH NOTHING, GIVEN SOMEWHERE TO LAND. Each of these is a
     # thing people ask for that Smith genuinely cannot do. Without a verb they
     # were classified as whatever was nearest — "delete the Wards page" as a
@@ -339,6 +349,21 @@ VERB_HELP: dict[str, str] = {
         "They want things MOVED AROUND on a screen that already exists: "
         "\"move the chart above the table\", \"put the search at the top\". "
         "Nothing rearranges a composed screen. Needs the screen."
+    ),
+    "explain_crash": (
+        "Something in the RUNNING application broke and they are telling "
+        "you: \"it crashed\", \"the app crashed\", \"I got an error\", "
+        "\"it broke when I clicked save\", \"something went wrong\". I read "
+        "what the application itself reported — what failed, where, how often "
+        "and what it said — and offer the repair when the crash names one. "
+        "Needs nothing: not knowing what broke is the reason they are asking."
+    ),
+    "explain_slowness": (
+        "The running application is SLOW and they are telling you: \"it's "
+        "really slow\", \"this takes forever\", \"why is it so slow\", "
+        "\"loading takes ages\". I read what the application timed and say "
+        "what has been taking too long, and I say plainly that I cannot make "
+        "it faster on its own. Needs nothing."
     ),
     "revert": (
         "Undo the last change: \"undo that\", \"undo\", \"put it back\", "

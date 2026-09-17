@@ -1445,6 +1445,8 @@ READONLY_HANDLERS = {
     "add_login":                lambda output_dir, args: _smith_account(output_dir, "add_login", args),
     "remove_login":             lambda output_dir, args: _smith_account(output_dir, "remove_login", args),
     "reset_login":              lambda output_dir, args: _smith_account(output_dir, "reset_login", args),
+    "explain_crash":            lambda output_dir, args: _smith_explain_crash(output_dir),
+    "explain_slowness":         lambda output_dir, args: _smith_explain_slowness(output_dir),
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
@@ -2265,6 +2267,21 @@ def _smith_export_data(output_dir: str, args: dict) -> dict:
     """
     from services.smith.data_export import run as _export_run
     return _export_run(output_dir, str(args.get("entity") or ""))
+def _smith_explain_crash(output_dir: str) -> dict:
+    """What the running application has reported as crashing. Reads the
+    project's incident ledger; changes nothing. Takes no arguments — not
+    knowing what broke is why anybody asks."""
+    from services.incident_ledger import KIND_CRASH
+    from services.smith.incidents import run as _incidents_run
+    return _incidents_run(output_dir, kind=KIND_CRASH)
+
+
+def _smith_explain_slowness(output_dir: str) -> dict:
+    """What the running application has timed as too slow, and what cannot be
+    done about it. Reads the incident ledger; changes nothing."""
+    from services.incident_ledger import KIND_SLOW
+    from services.smith.incidents import run as _incidents_run
+    return _incidents_run(output_dir, kind=KIND_SLOW)
 
 
 def _smith_add_field(output_dir: str, args: dict) -> dict:

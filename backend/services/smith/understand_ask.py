@@ -193,6 +193,19 @@ Return ONLY a JSON object with exactly these keys:
                         about the SOURCE CODE and is NOT this verb: answer
                         that one in "answer", saying they can `export` the
                         source of the project, and leave "verb" "".
+      "explain_crash" — the RUNNING application broke and they are saying so:
+                        "it crashed", "the app crashed", "I got an error",
+                        "it broke when I clicked save", "it keeps failing".
+                        They are REPORTING, not asking for a change: what I
+                        do is read what the application itself reported and
+                        answer with it. Not "remove" or any other edit,
+                        however much the sentence sounds like a complaint
+                        about one control.
+      "explain_slowness" — the RUNNING application is slow and they are
+                        saying so: "it's really slow", "this takes forever",
+                        "why is it so slow", "loading takes ages".
+                        I answer with what the application timed. Not
+                        restyle, which is how it LOOKS.
       "revert"        — UNDO the last change: "undo that", "undo", "put it
                         back", "that's not what I wanted, revert", "go back",
                         "reverse that". Restores the application as it stood
