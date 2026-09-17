@@ -55,6 +55,20 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Access — roles, permissions, who reaches which screen. One verb: the
     # security agent re-decides the model and a second call the screens.
     "edit_access": {"change"},
+    # THE PEOPLE, not the roles. `edit_access` says what a Ward Manager may
+    # do; these say who Dave is and whether he can get in at all — the moment
+    # an owner hands the application to their team, and previously a dead end
+    # in both directions ("set up logins for my six staff", "reset Dave's
+    # password"). Not a Blueprint change: people are data, not definition.
+    #
+    # `add_login` takes the EMAIL, because that is what identifies an account
+    # and what the person types to sign in; a name alone ("a login for Dave")
+    # is the request without the one fact it needs, so it is asked for. The
+    # other two take `person` — an email, or the name they were added under,
+    # resolved against the roster and refused when it is ambiguous.
+    "add_login": {"email"},
+    "remove_login": {"person"},
+    "reset_login": {"person"},
     # Business rules — what constrains a form or a record.
     "add_rule": {"rule"},
     "edit_rule": {"rule", "change"},
@@ -105,6 +119,17 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # the screens are read off the composed application, not off the ask —
     # asking who it is for would be asking the owner to list their own roles.
     "write_guide": set(),
+    # The owner's own data, from the spreadsheet they attached. Needs only
+    # WHICH RECORDS it holds — the file is not a slot, for the same reason
+    # `revert` has none: it is always the one just attached, and an attachment
+    # id is a thing only Smith has seen. First turn describes and waits;
+    # `services.smith.data_import` holds the plan between the two.
+    "import_data": {"entity"},
+    # Their data, back out. NEEDS NOTHING: an entity narrows it to one sheet,
+    # and no entity is the honest reading of "back it up somewhere" — all of
+    # them, in one file. A required slot here would turn a question anybody
+    # can ask into one they have to phrase correctly.
+    "export_data": set(),
     # THE ASKS THAT REACH NOTHING, GIVEN SOMEWHERE TO LAND. Each of these is a
     # thing people ask for that Smith genuinely cannot do. Without a verb they
     # were classified as whatever was nearest — "delete the Wards page" as a
@@ -166,6 +191,27 @@ VERB_HELP: dict[str, str] = {
         "delete a nurse\", \"make Master Data admin-only\", \"let anyone open "
         "registration without signing in\". Re-decides roles, permissions and "
         "screen access. Needs the change in the user's words."
+    ),
+    "add_login": (
+        "Give a PERSON a login: \"set up a login for dave@clinic.com\", \"add "
+        "my new receptionist\", \"my six staff need accounts\". The account is "
+        "created with no password and a one-time setup link the person uses to "
+        "choose their own — nobody is ever told someone else's password. Needs "
+        "the email address they will sign in with; their name and the role "
+        "they sign in as are optional. NOT edit_access, which changes what a "
+        "role may do rather than who exists."
+    ),
+    "remove_login": (
+        "Stop a PERSON signing in: \"remove Dave's login\", \"Sarah has left\", "
+        "\"take away dave@clinic.com's access\". The account is deactivated, "
+        "not deleted — the records they created still point at it. Needs who, "
+        "by email or the name they were added under."
+    ),
+    "reset_login": (
+        "Give a PERSON a way back in: \"reset Dave's password\", \"Sarah is "
+        "locked out\", \"send dave@clinic.com a new password link\". Their old "
+        "password stops working and they get a one-time link to choose a new "
+        "one. Needs who, by email or the name they were added under."
     ),
     "add_rule": (
         "Add a business rule: \"years of experience cannot exceed 60\", \"a nurse "
@@ -291,6 +337,25 @@ VERB_HELP: dict[str, str] = {
         "restored as it stood before the change and every projection is "
         "written out again. Said twice it goes back two changes. Needs "
         "nothing — it is always the most recent change."
+    ),
+    "import_data": (
+        "Load the data they already have into the application: \"here's our "
+        "customer spreadsheet, load it in\", \"import these suppliers\", "
+        "\"can you put our existing bookings in\". The file is the one they "
+        "attached. Needs only WHICH KIND OF RECORD it holds (\"customers\"). "
+        "The first turn writes nothing — it says how many rows would land, "
+        "how many would not and why, and which column becomes which field; "
+        "the rows are loaded on a yes. A column the record has no field for "
+        "is refused, not guessed at."
+    ),
+    "export_data": (
+        "Give them their data back as a spreadsheet: \"can I get all this out "
+        "as a spreadsheet?\", \"export the customers\", \"download the "
+        "bookings\", \"back it up somewhere\". Reads the records out of the "
+        "application's own database and produces the file on this turn. "
+        "`entity` narrows it to one kind of record; with none, every kind goes "
+        "into one zip, which is what a backup is. Changes nothing — the "
+        "application is untouched and there is nothing to undo."
     ),
     "rebuild": (
         "Regenerate the application from its definition. The honest answer "
