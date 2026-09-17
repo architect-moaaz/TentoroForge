@@ -2608,8 +2608,8 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
 def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     """Everything the browser reads: page schemas, the route graph, the tokens."""
     from services.blueprint.projection import (
-        apply_frontend_projection, project_design_tokens, project_middleware,
-        project_public_resources,
+        apply_frontend_projection, project_brand_logo, project_design_tokens,
+        project_middleware, project_public_resources, project_public_routes,
         project_nav_flow, project_root_route, project_shell,
     )
 
@@ -2663,10 +2663,18 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # `shell.json` is what the scaffold's layout builds its sidebar from, and
     # nothing wrote it, so every rail was the flat fallback.
     project_shell(svc.doc, app_root)
+    # The rail references `/brand/<digest>.<ext>`; this is what puts the file
+    # there. After `project_shell`, so the two are read together, and before
+    # the tokens for no reason but that the look belongs in one place.
+    project_brand_logo(svc.doc, app_root)
     project_design_tokens(svc.doc, app_root)
     project_middleware(svc.doc, app_root)
     # The data route needs the same list the matcher was built from.
     project_public_resources(svc.doc, app_root)
+    # …and a page the matcher lets through needs a door that is not inside
+    # `(dashboard)`, whose layout redirects anyone without a session. After
+    # the middleware, because the two are one statement about the same pages.
+    project_public_routes(svc.doc, app_root)
     project_root_route(svc.doc, app_root)
 
     # DROP-AND-CONTINUE, NOT DROP-THE-APPLICATION. A page whose authored tree

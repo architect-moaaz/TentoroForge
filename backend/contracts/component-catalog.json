@@ -13603,6 +13603,15 @@
           "appName": {
             "type": "string"
           },
+          "logoSrc": {
+            "type": "string"
+          },
+          "logoAlt": {
+            "type": "string"
+          },
+          "logoAspect": {
+            "type": "number"
+          },
           "mode": {
             "type": "string",
             "enum": [

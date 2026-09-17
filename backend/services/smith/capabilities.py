@@ -49,9 +49,10 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "one, and never tell you anyone else's.",
      frozenset({"add_login", "remove_login", "reset_login"})),
     ("How it looks",
-     "The colours, type and density of the whole application, and the menu "
-     "down the side.",
-     frozenset({"restyle", "edit_navigation"})),
+     "The colours, type and density of the whole application, the menu down "
+     "the side, and your own logo in the corner of every screen — attach the "
+     "image and ask.",
+     frozenset({"restyle", "edit_navigation", "set_logo", "remove_logo"})),
     ("What it is, and what it talks to",
      "Its name and purpose, requirements written down for later, and API "
      "endpoints. Outside services: I connect the email for real — you name "

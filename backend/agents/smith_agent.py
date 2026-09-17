@@ -600,6 +600,7 @@ def run_smith_agent(
     pending_confirmation: Optional[dict] = None,
     current_route: Optional[str] = None,
     attachment_blocks: Optional[list[dict]] = None,
+    attachment_files: Optional[list[dict]] = None,
 ) -> dict:
     """Run the conversational reasoning loop.
 
@@ -1280,6 +1281,16 @@ def run_smith_agent(
             })
             continue
         seen_calls.add(call_key)
+
+        # THE FILES THE PERSON ATTACHED TO THIS TURN. A tool that takes one —
+        # `set_logo` does — cannot be told which by the model: the model sees
+        # "Attached file: logo.png" in its content blocks and never the id the
+        # file is stored under. So the loop, which is the only layer that knows
+        # what came in with the turn, hands the records over. Named tools only,
+        # because every other tool works from `output_dir` and an extra arg in
+        # its trace would read as something the model asked for.
+        if tool_name in smith_tools.TURN_FILE_TOOLS:
+            args = {**args, "files": list(attachment_files or [])}
 
         try:
             result = tool_fn(output_dir, args)

@@ -118,6 +118,13 @@ SCAFFOLD_OWNED: tuple[str, ...] = ()
 #: The floor is a plain-looking application, not an unbuildable one.
 SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     "src/app/tokens.css",
+    # The owner's mark, for the pages with no shell around them. `BrandMark.tsx`
+    # imports it and the sign-in screen and every error page render that, so a
+    # tree without this module does not compile — the same trap `tokens.css`
+    # above was added for. `project_brand_logo` writes it on every build, with a
+    # `null` body when no logo was given; this stands in when that projection
+    # did not run at all.
+    "src/contracts/brand.ts",
     # THE PLATFORM'S USERS TABLE IS A DEFAULT THE BLUEPRINT MAY EXTEND. The
     # projection emits `user.ts` for a Blueprint entity that maps to `users`
     # — the platform's columns as the platform declares them, then whatever

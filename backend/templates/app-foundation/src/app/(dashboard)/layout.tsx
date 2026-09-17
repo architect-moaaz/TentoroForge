@@ -20,6 +20,7 @@ import { MobileNav } from "./MobileNav";
 import { PersonaChrome } from "./PersonaChrome";
 import { RouteBreadcrumb, type RouteNode } from "./RouteBreadcrumb";
 import { AppNavigator } from "@/components/AppNavigator";
+import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
 import { schemas } from "@/schemas/registry";
 
 // The app shell renders the generated SideNav: a collapsible rail that expands on
@@ -327,8 +328,9 @@ function TopNav({ items, appName, id }: { items: Sub[]; appName: string; id: She
         style={{ background: bg, color: text, borderBottom: dark ? "none" : "1px solid rgba(0,0,0,0.08)" }}
         className="hidden md:flex h-14 shrink-0 items-center gap-6 px-4 lg:px-6"
       >
-        <span className="text-[15px] font-semibold tracking-tight whitespace-nowrap" style={{ fontFamily: "var(--font-heading)" }}>
-          {appName}
+        <span className="flex items-center text-[15px] font-semibold tracking-tight whitespace-nowrap"
+          style={{ fontFamily: "var(--font-heading)" }}>
+          <ShellBrand appName={appName} height={28}>{appName}</ShellBrand>
         </span>
         <nav data-shell-nav="" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {items.map((it) => (
@@ -633,6 +635,34 @@ function RailGlyph({ name, size = 17 }: { name?: string; size?: number }) {
 }
 
 /** Wide sectioned rail: 272px, uppercase group labels, pill actives, footer. */
+/**
+ * How a shell says which application it is.
+ *
+ * ONE RULE, EVERY CHROME: the owner's mark REPLACES the app-name lockup — the
+ * letter-in-a-box, the name in text, or both. It is not set beside the name,
+ * because a logo is how a company writes its name and the two together read as
+ * a stutter ("Bright Care | Bright Care") — worst exactly where the mark is a
+ * wordmark, which is what most of them are.
+ *
+ * Every branch below drew that lockup itself, and the logo landed in only one
+ * of them (`standard-rail`, through the library's SideNav). An application
+ * whose design DNA chose `wide-rail`, `icon-rail`, `dock`, `topbar` or
+ * `persona-pills` showed the owner's logo on its sign-in screen and an initial
+ * in its own shell.
+ *
+ * An application that gave no mark keeps the lockup it has always had; this
+ * renders nothing of its own.
+ */
+function ShellBrand({ appName, height, children }: {
+  appName: string;
+  height: number;
+  /** The lockup this surface draws when there is no mark. */
+  children: React.ReactNode;
+}) {
+  if (BRAND_LOGO) return <BrandMark height={height} alt={appName} />;
+  return <>{children}</>;
+}
+
 function WideRail({ props, appName }: { props: NavProps; appName: string }) {
   const dark = props.mode !== "light";
   const bg = props.bg ?? (dark ? "#141a18" : "#ffffff");
@@ -644,10 +674,12 @@ function WideRail({ props, appName }: { props: NavProps; appName: string }) {
       style={{ width: "var(--sk-nav-w, 272px)", background: bg, color: text,
                borderRight: dark ? "none" : "1px solid rgba(0,0,0,0.08)" }}>
       <div className="flex items-center gap-2.5 px-5 pb-2 pt-5">
-        <span className="grid h-8 w-8 place-items-center rounded-[var(--radius)] text-sm font-bold text-white"
-          style={{ background: accent }}>{appName.slice(0, 1)}</span>
-        <span className="text-[15px] font-semibold tracking-tight"
-          style={{ fontFamily: "var(--font-heading)" }}>{appName}</span>
+        <ShellBrand appName={appName} height={32}>
+          <span className="grid h-8 w-8 place-items-center rounded-[var(--radius)] text-sm font-bold text-white"
+            style={{ background: accent }}>{appName.slice(0, 1)}</span>
+          <span className="text-[15px] font-semibold tracking-tight"
+            style={{ fontFamily: "var(--font-heading)" }}>{appName}</span>
+        </ShellBrand>
       </div>
       <div className="flex-1 px-3 py-3">
         {props.groups.map((g, gi) => (
@@ -698,8 +730,16 @@ function IconRail({ props, appName }: { props: NavProps; appName: string }) {
     <nav data-shell-nav="" className="hidden h-full shrink-0 flex-col items-center overflow-y-auto md:flex"
       style={{ width: "var(--sk-nav-w, 64px)", background: bg, color: text,
                borderRight: dark ? "none" : "1px solid rgba(0,0,0,0.08)" }}>
-      <span className="mb-4 mt-4 grid h-9 w-9 place-items-center rounded-[var(--radius)] text-sm font-bold text-white"
-        style={{ background: accent }}>{appName.slice(0, 1)}</span>
+      {/* 64px of rail. `BrandMark` caps the mark at its container, so a wide
+          wordmark letterboxes into the width rather than pushing the rail
+          open — legible at 64px in a way it is not at the 28px the
+          hover-expand rail collapses to. */}
+      <div className="mb-4 mt-4 flex w-full justify-center px-2">
+        <ShellBrand appName={appName} height={36}>
+          <span className="grid h-9 w-9 place-items-center rounded-[var(--radius)] text-sm font-bold text-white"
+            style={{ background: accent }}>{appName.slice(0, 1)}</span>
+        </ShellBrand>
+      </div>
       <div className="flex flex-1 flex-col items-center gap-1 pb-4">
         {items.map((it) => (
           <a key={it.route} href={it.route} title={it.label} data-nav-item=""
@@ -727,8 +767,9 @@ function DockNav({ props, appName }: { props: NavProps; appName: string }) {
     <nav data-shell-nav="" data-dock=""
       className="fixed bottom-4 left-1/2 z-40 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-2xl px-2 py-1.5 shadow-2xl backdrop-blur"
       style={{ background: bg, color: text, border: "1px solid rgba(127,127,127,.18)" }}>
-      <span className="mx-1.5 text-[13px] font-bold tracking-tight" style={{ fontFamily: "var(--font-heading)" }}>
-        {appName.slice(0, 1)}
+      <span className="mx-1.5 flex items-center text-[13px] font-bold tracking-tight"
+        style={{ fontFamily: "var(--font-heading)" }}>
+        <ShellBrand appName={appName} height={20}>{appName.slice(0, 1)}</ShellBrand>
       </span>
       {items.map((it) => (
         <a key={it.route} href={it.route} data-nav-item="" title={it.label}
