@@ -321,6 +321,21 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
         except Exception as e:
             errors.append(f"Failed to copy error_reporter: {e}")
 
+    # The two lookups the reporter needs to name a crash in the owner's words:
+    # the routes this app declares, and which control runs which workflow.
+    # `project_dispatches` overwrites it with the real thing; this empty copy
+    # exists so `@/lib/incident-map` resolves in an app that has not been
+    # projected yet — the reporter imports it unconditionally, so a missing
+    # file is a compile error in every generated app.
+    incident_map_src = _TEMPLATE_DIR / "incident-map.ts"
+    incident_map_dst = src_lib / "incident-map.ts"
+    if incident_map_src.exists() and not incident_map_dst.exists():
+        try:
+            shutil.copy2(incident_map_src, incident_map_dst)
+            copied.append("src/lib/incident-map.ts")
+        except Exception as e:
+            errors.append(f"Failed to copy incident-map: {e}")
+
     # Global error boundary (Next.js App Router) — catches uncaught render
     # errors that escape every child boundary, reports them via the reporter
     # above, and shows a minimal recovery UI. Path is fixed by Next.js —
@@ -1294,6 +1309,13 @@ export const maxDuration = 300;
 
 import { NextResponse } from "next/server";
 import { triggerWorkflow } from "@/lib/workflows";
+// THE TWO SENTENCES AN OWNER TYPES. "it crashed" and "it's really slow" reach
+// nothing unless the run says so: a dispatch that throws is reported with the
+// workflow and the KEYS of what the control sent (never the values), and one
+// that drags is reported with how long it took. This is the wire the
+// build-time dry run already checks (`verify-dispatches.ts`) — the same route,
+// the same control, reported at run time in the same shape.
+import { measured, reportFromError } from "@/lib/error_reporter";
 import { LAUNCH_ROLES } from "@/lib/workflows/launch-roles";
 import { initializeRuntime } from "@/lib/runtime-loader";
 import { db } from "@/db";
@@ -1306,10 +1328,22 @@ export async function POST(
 ) {
   await initializeRuntime();
 
+  // Hoisted so the catch below can still name what was being run. A crash
+  // report that says only "something threw" is the report an owner already
+  // gave us by typing "it crashed".
+  let workflowId = "";
+  let payloadKeys: string[] = [];
+  let actingRole: string | undefined;
+
   try {
     const { id } = await params;
+    workflowId = id;
     const body = await request.json();
     const input = body.input || {};
+    // THE NAMES, NEVER THE VALUES. `input` is a customer's record — an order,
+    // an address, a diagnosis. Its keys say which wire broke; its values are
+    // the owner's data and do not leave this process.
+    payloadKeys = Object.keys(input ?? {}).filter((k) => !k.startsWith("__")).sort();
     // Acting user from the SERVER session (never trust a client-sent user). The
     // workflow runtime defaults owner FKs (ownerId/landlordId/userId/…) from
     // ctx.user.id; without this an authed create hits a NOT NULL FK error.
@@ -1321,6 +1355,9 @@ export async function POST(
       ? { ...Object.fromEntries(Object.entries(su).filter(([, v]) => v === null || ["string", "number", "boolean"].includes(typeof v))),
           id: String(su.id), role: su.role, email: su.email ?? undefined }
       : body.user;
+    // The ROLE, which is the owner's own vocabulary — never the id or the
+    // email beside it, which are a person.
+    actingRole = user?.role ? String(user.role) : undefined;
     // A LAUNCH IS GATED BY THE ROLES ITS PAGES DECLARE. The Blueprint names
     // the pages a workflow launches from and the roles those pages serve;
     // Reception could post a refund through the API because nothing here
@@ -1414,6 +1451,15 @@ export async function POST(
     if (detach) {
       void triggerWorkflow(id, input, user).catch((err: unknown) => {
         console.error("[workflow] detached run failed:", err);
+        // Detached is exactly where an owner has no other way to find out:
+        // the POST already returned 202 and nobody is holding the page.
+        reportFromError(err, {
+          kind: "workflow",
+          source_file: "src/app/api/workflows/[id]/execute/route.ts",
+          workflow_id: id,
+          payload_keys: payloadKeys,
+          role: actingRole,
+        });
       });
       return NextResponse.json(
         { status: "queued", workflowId: id, mode: "detached" },
@@ -1422,7 +1468,12 @@ export async function POST(
     }
 
     // triggerWorkflow persists a pending task itself if the workflow pauses.
-    const result = await triggerWorkflow(id, input, user);
+    // Timed: this is the whole of what a person waits for after clicking the
+    // control, measured on the server that does the waiting.
+    const result = await measured(
+      { operation: id, workflow_id: id, role: actingRole },
+      () => triggerWorkflow(id, input, user),
+    );
 
     // If resuming a completed task: update the task record
     if (taskId) {
@@ -1451,6 +1502,13 @@ export async function POST(
       result && typeof result === "object" && (result as any).status === "failed";
     return NextResponse.json(result, _wfFailed ? { status: 422 } : undefined);
   } catch (error) {
+    reportFromError(error, {
+      kind: "api_route",
+      source_file: "src/app/api/workflows/[id]/execute/route.ts",
+      workflow_id: workflowId || undefined,
+      payload_keys: payloadKeys,
+      role: actingRole,
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
       { status: 500 },
