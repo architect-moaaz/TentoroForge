@@ -183,3 +183,119 @@ def test_the_composer_is_refused_with_the_cause_not_the_symptom(tmp_path):
     assert "did not survive translation" in out["reason"]
     assert "Table" in out["reason"]
     assert out["losses"]
+
+
+# ----------------------------------------------------------- the long tail
+#
+# Everything below was silent before: no warning, no `unresolved`, no log
+# line. Each one changes the page, and each one was discovered only by
+# reading the output and wondering where something went.
+
+NURSE_REGISTRY = {"entities": {"Nurse": {"table": "nurses", "columns": [
+    {"name": "id", "type": "uuid"},
+    {"name": "fullName", "type": "varchar"},
+    {"name": "startsOn", "type": "date"},
+]}}}
+
+
+def test_two_components_with_one_id_do_not_overwrite_in_silence():
+    out = translate(_payload([
+        {"id": "root", "component": "Stack", "children": ["t"]},
+        {"id": "t", "component": "Text", "content": "one"},
+        {"id": "t", "component": "Heading", "content": "two"},
+    ]), REGISTRY)
+    lost = [e for e in out["material_losses"]
+            if e["kind"] == "dropped_component"]
+    assert [e["what"] for e in lost] == ["Text"]
+
+
+def test_a_component_with_no_id_says_why_it_cannot_be_placed():
+    """Reported here rather than by the orphan pass, which would call it
+    `pointed at from nowhere` and hide the real reason."""
+    out = translate(_payload([
+        {"id": "root", "component": "Stack", "children": []},
+        {"component": "Badge", "content": "no id"},
+    ]), REGISTRY)
+    said = next(e for e in out["losses"] if e["what"] == "Badge")
+    assert "no id" in said["detail"]
+
+
+def test_a_child_naming_nothing_is_the_mirror_of_an_orphan():
+    out = translate(_payload([
+        {"id": "root", "component": "Stack", "children": ["here", "gone"]},
+        {"id": "here", "component": "Heading", "content": "Nurses"},
+    ]), REGISTRY)
+    missing = [e for e in out["material_losses"]
+               if e["kind"] == "missing_component"]
+    assert [e["where"] for e in missing] == ["gone"]
+
+
+def test_a_condition_that_resolves_to_nothing_leaves_the_node_always_visible():
+    """The empty state the composer gated now renders over a populated
+    table — a difference the reader meets."""
+    out = translate(_payload([
+        {"id": "root", "component": "Stack", "children": ["e"]},
+        {"id": "e", "component": "EmptyState", "message": "Nothing yet",
+         "visibleIf": "/nowhere/id"},
+    ]), REGISTRY)
+    lost = [e for e in out["material_losses"] if e["what"] == "visibleIf"]
+    assert lost and "always visible" in lost[0]["detail"]
+
+
+def test_a_field_keeps_what_the_composer_decided_about_it():
+    """The props are rebuilt FROM THE COLUMN, which is right — the column
+    decides what a field is. It also discarded everything the composer
+    decided about how it reads, on every field of every form."""
+    out = translate(_payload([
+        {"id": "root", "component": "Stack", "children": ["n"]},
+        {"id": "n", "component": "Input", "name": "fullName",
+         "label": "Full name", "placeholder": "As on the licence"},
+    ]), NURSE_REGISTRY, route="/nurses/new", kind="form")
+    field = out["schema"]["root"]["children"][0]
+    assert field["props"]["placeholder"] == "As on the licence"
+
+
+def test_a_control_overruled_by_the_column_says_so():
+    out = translate(_payload([
+        {"id": "root", "component": "Stack", "children": ["d"]},
+        {"id": "d", "component": "Input", "name": "startsOn",
+         "label": "Starts on"},
+    ]), NURSE_REGISTRY, route="/nurses/new", kind="form")
+    said = next(e for e in out["losses"] if e["what"] == "component")
+    assert "DatePicker" in said["detail"]
+    assert said["material"] is False
+
+
+def test_a_catalogue_that_cannot_be_read_does_not_bless_everything():
+    """Returning "nothing unknown" meant a build with a missing registry dist
+    checked no prop on any component."""
+    import unittest.mock as mock
+
+    import services.a2ui_catalog as catalog
+
+    with mock.patch.object(catalog, "load_contracts",
+                           side_effect=OSError("registry dist missing")):
+        out = translate(_payload([
+            {"id": "root", "component": "Stack", "children": ["t"]},
+            {"id": "t", "component": "Text", "content": "hi", "bogus": 1},
+        ]), REGISTRY)
+    kinds = [e["kind"] for e in out["material_losses"]]
+    assert "catalogue_unreadable" in kinds
+    # Once for the page, not once per component.
+    assert kinds.count("catalogue_unreadable") == 1
+
+
+def test_a_list_source_has_one_page_size_not_two():
+    """`bind()` minted every generic list at 10 and `_adopt_table_bindings`
+    minted the same kind of thing at 50."""
+    from services.a2ui_to_forge import LIST_PAGE_SIZE
+
+    out = translate(_payload([
+        {"id": "root", "component": "Stack", "children": ["t"]},
+        {"id": "t", "component": "Table", "columns": [{"key": "fullName"}],
+         "rows": {"path": "/nurse/rows"}},
+    ], {"nurse": {"rows": [{"fullName": "A"}]}}), NURSE_REGISTRY,
+        route="/nurses", kind="entity_list")
+    caps = {s.get("limit") for s in out["schema"]["dataSources"]
+            if s.get("op") == "list"}
+    assert caps <= {LIST_PAGE_SIZE}

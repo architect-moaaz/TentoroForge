@@ -726,7 +726,7 @@ class _Binder:
             return "__literal__"
         else:
             name = self._add_source({"name": slug, "entity": entity,
-                                     "op": "list", "limit": 10})
+                                     "op": "list", "limit": LIST_PAGE_SIZE})
             binding = f"{{{{{name}}}}}"
 
         self._by_path[key] = binding
@@ -937,6 +937,46 @@ class _Binder:
                                        references=str(col.get("references") or ""))
             if translated:
                 props["optionsFrom"] = translated
+
+        # WHAT THE COMPOSER WROTE ON THIS FIELD, CARRIED RATHER THAN MOURNED.
+        #
+        # The props above are built FROM THE COLUMN, not from the component —
+        # deliberately, because the column is the authority on what the field
+        # collects and which control collects it. But everything ELSE the
+        # composer decided about the control was discarded with it:
+        # `placeholder`, `helpText`, `required`, `min`, `max`, `rows`,
+        # `defaultValue`, on every field of every form, silently.
+        #
+        # RECORDING THAT WOULD HAVE BEEN THE WRONG FIX. It is a real loss and
+        # the composer cannot do anything about it — composing again produces
+        # the same field and the same rebuild — so refusing would loop and
+        # reporting would be noise on every form this platform builds. The
+        # column decides what the field IS; the composer decides how it reads.
+        # Both can be true at once.
+        #
+        # Only props the control actually accepts, so this cannot put an
+        # unknown key on a strict node; anything else is left to
+        # `_unknown_props`, which is the check that owns that question.
+        try:
+            from services.a2ui_catalog import load_contracts, props_for
+            accepted = set(props_for(str(kind), load_contracts()) or {})
+        except Exception:  # noqa: BLE001 — never fail a composition on a lookup
+            accepted = set()
+        for prop, value in (comp or {}).items():
+            if prop in props or prop not in accepted or value in (None, ""):
+                continue
+            if prop in ("name", "label", "options", "optionsFrom"):
+                continue
+            props[prop] = value
+
+        # THE COMPOSER'S COMPONENT CHOICE, OVERRULED BY THE COLUMN'S TYPE. An
+        # `Input` becomes a `DatePicker` because the column is a date, which
+        # is right and was silent.
+        spoken = str(comp.get("component") or "")
+        if node_type and spoken and spoken != kind:
+            self._record("coerced", comp.get("id"), "component",
+                         f"written as {spoken}, rendered as {kind} because "
+                         f"{col['name']!r} is a {col.get('type') or 'column'}")
         return kind, props
 
     def resolve_breakdown(self, comp: dict, rows: list) -> list[dict] | None:
@@ -1159,6 +1199,21 @@ def _coerce_copy(kind: str, prop: str, value: Any) -> Any:
     return value
 
 
+def _note_coercion(losses: "Losses | None", where: str, prop: str,
+                   before: Any, after: Any) -> None:
+    """Say that a literal changed type on its way through.
+
+    Every branch of `_coerce_copy` rewrote silently — `True` became `"true"`,
+    a caption reading `6` became `"6"` — and a value in the Blueprint the
+    composer never wrote had no explanation anywhere. Never material: the
+    value is the one that was meant, in the type the component declares.
+    """
+    if losses is None or before == after or type(before) is type(after):
+        return
+    losses.record("coerced", where, prop,
+                  f"{before!r} stored as {after!r}, the type {prop!r} declares")
+
+
 def _has_pointer(value: Any) -> bool:
     """Whether a literal carries `{"path": ...}` anywhere inside it."""
     if isinstance(value, dict):
@@ -1166,6 +1221,17 @@ def _has_pointer(value: Any) -> bool:
     if isinstance(value, list):
         return any(_has_pointer(v) for v in value)
     return False
+
+
+#: HOW MANY ROWS A MINTED LIST SOURCE FETCHES. One number, because there
+#: were two: `bind()` minted every generic list at 10 and
+#: `_adopt_table_bindings` minted the same kind of thing at 50, so the same
+#: table showed ten rows or fifty depending on which path happened to name its
+#: source. Neither cap was written down anywhere the other could see.
+#:
+#: The composer never says how many rows it wants, so this is not a loss of
+#: its intent — it is a default, and a default that disagreed with itself.
+LIST_PAGE_SIZE = 50
 
 
 #: Fields that sit beside `props` in NodeV2 rather than inside it. A2UI emits
@@ -1247,11 +1313,47 @@ def _unknown_props(kind: str, props: dict) -> list[str]:
         from services.a2ui_catalog import load_contracts, props_for
 
         known = set(props_for(kind, load_contracts()) or {})
-    except Exception:  # noqa: BLE001 — never fail a translation over a lookup
+    except Exception as exc:  # noqa: BLE001 — never fail a translation over a lookup
+        # A CATALOGUE THAT CANNOT BE READ BLESSES EVERYTHING. Returning an
+        # empty list here reads as "nothing unknown", so a build whose
+        # registry dist is missing or stale checked no prop on any component
+        # and every unknown key rode through to a strict node unreported.
+        # Raised as one loss, once, rather than pretended about per component.
+        _catalogue_unreadable(str(exc))
         return []
     if not known:
+        _catalogue_silent(str(kind))
         return []
     return sorted(k for k in props if k not in known and k not in _NODE_SIBLINGS)
+
+
+#: The translation in flight, so `_unknown_props` — a module-level helper
+#: every caller shares — can report a catalogue it could not read without
+#: growing a parameter each of its six call sites would have to thread.
+_ACTIVE_LOSSES: list["Losses"] = []
+
+
+def _catalogue_unreadable(why: str) -> None:
+    for ledger in _ACTIVE_LOSSES:
+        if any(e["kind"] == "catalogue_unreadable" for e in ledger.entries):
+            return
+        ledger.record(
+            "catalogue_unreadable", "page", "",
+            f"the component contracts could not be read ({why[:120]}), so no "
+            f"prop on any component was checked and an unknown one will be "
+            f"refused by a strict node with nothing naming it",
+            material=True)
+
+
+def _catalogue_silent(kind: str) -> None:
+    for ledger in _ACTIVE_LOSSES:
+        if any(e["kind"] == "catalogue_silent" and e["what"] == kind
+               for e in ledger.entries):
+            return
+        ledger.record(
+            "catalogue_silent", "page", kind,
+            f"the contracts carry no props for {kind}, so nothing it was "
+            f"given could be checked")
 
 
 def _dangling_workflows(node: Any, known: set[str], path: str = "props"):
@@ -1315,7 +1417,7 @@ def _adopt_table_bindings(schema: dict, binder: Any, registry: dict) -> None:
         if any(s.get("name") == head for s in binder.sources):
             continue
         binder.sources.append({"name": head, "entity": entity,
-                               "op": "list", "limit": 50})
+                               "op": "list", "limit": LIST_PAGE_SIZE})
     schema["dataSources"] = binder.sources
 
 
@@ -1561,17 +1663,21 @@ def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
             # A PLACEHOLDER IS NOT AN OPTION. "Select a category" with value ""
             # is how a composer says what an empty select shows; the contract
             # says it with `placeholder` and refuses an option with no value.
-            _placeholder_out_of_options(props)
+            _placeholder_out_of_options(
+                props, getattr(binder, "losses", None), str(node.get("id") or ""))
             if kind == "Form":
                 for field in props.get("fields") or []:
                     if isinstance(field, dict):
-                        _placeholder_out_of_options(field)
+                        _placeholder_out_of_options(
+                            field, getattr(binder, "losses", None),
+                            str(node.get("id") or ""))
         for child in node.get("children") or []:
             walk(child)
     walk(root)
 
 
-def _placeholder_out_of_options(holder: dict) -> None:
+def _placeholder_out_of_options(holder: dict, losses: "Losses | None" = None,
+                                where: str = "") -> None:
     options = holder.get("options")
     if not isinstance(options, list):
         return
@@ -1580,6 +1686,15 @@ def _placeholder_out_of_options(holder: dict) -> None:
         if isinstance(opt, dict) and str(opt.get("value") or "") == "":
             if opt.get("label") and not holder.get("placeholder"):
                 holder["placeholder"] = str(opt["label"])
+            elif opt.get("label") and losses is not None:
+                # THE LABEL GOES NOWHERE. The option is removed because it has
+                # no value, and its text is kept only when there is no
+                # placeholder already — otherwise the composer's wording was
+                # deleted outright with nothing saying so.
+                losses.record(
+                    "dropped_option", where, str(opt["label"]),
+                    f"an option with no value, and {holder['placeholder']!r} "
+                    f"is already the placeholder")
             continue
         kept.append(opt)
     if len(kept) != len(options):
@@ -1592,17 +1707,65 @@ def translate(payload: dict, registry: dict, route: str = "/",
     """A2UI surface → Forge page schema. Returns {schema, warnings, dropped}."""
     comps: dict[str, dict] = {}
     data_model: dict = {}
+    # BEFORE THE FIRST MESSAGE IS READ. The ingest loop below is itself a
+    # place things are lost — a duplicate id, a component with none — so the
+    # ledger has to exist before it, not beside the binder that comes after.
+    losses = Losses()
+    _ACTIVE_LOSSES.append(losses)
+    try:
+        return _translate(payload, registry, route, page_id, kind,
+                          entity_hints, comps, data_model, losses)
+    finally:
+        _ACTIVE_LOSSES.remove(losses)
+
+
+def _translate(payload: dict, registry: dict, route: str, page_id: str,
+               kind: str, entity_hints: dict | None, comps: dict[str, dict],
+               data_model: dict, losses: "Losses") -> dict:
+    """The translation itself. Split from :func:`translate` only so the
+    ledger can be registered and removed around it — nothing else moved."""
     for msg in payload.get("messages", []) or []:
         for c in (msg.get("updateComponents") or {}).get("components", []) or []:
-            comps[c.get("id")] = c
+            cid = c.get("id")
+            if cid is None:
+                # UNADDRESSABLE. It lands under the key `None`, which nothing
+                # can reference, so it is written and never placed. Caught
+                # here rather than by the orphan pass, which would report it
+                # as "pointed at from nowhere" and hide the real reason.
+                losses.record(
+                    "dropped_component", "", str(c.get("component") or "?"),
+                    "written with no id, so nothing can reference it",
+                    material=True)
+                continue
+            if cid in comps:
+                # THE SECOND ONE WINS, SILENTLY. Two components declaring the
+                # same id — or one redeclared across `updateComponents`
+                # messages — overwrote each other here, so a whole component
+                # left the payload without a word.
+                losses.record(
+                    "dropped_component", str(cid),
+                    str(comps[cid].get("component") or "?"),
+                    f"a second component declares the same id, and it "
+                    f"replaced this one",
+                    material=True)
+            comps[cid] = c
         if "updateDataModel" in msg:
-            data_model = msg["updateDataModel"].get("value") or {}
+            replacement = msg["updateDataModel"].get("value") or {}
+            if data_model and replacement is not data_model:
+                # LAST ONE WINS. A composer sending the model in parts had
+                # every part but the last discarded, so pointers into the
+                # earlier ones resolved to nothing and their props were
+                # dropped — reported, much later, as bindings with no source.
+                losses.record(
+                    "dropped_data_model", "page", "updateDataModel",
+                    f"a later message replaced the data model; "
+                    f"{', '.join(sorted(data_model)[:6]) or 'its keys'} are "
+                    f"no longer readable")
+            data_model = replacement
 
     binder = _Binder(registry, data_model)
-    # EVERY REMOVAL FROM HERE ON IS WRITTEN DOWN. Carried on the binder so the
-    # sites that drop a prop deep inside `bind()` reach the same ledger as the
-    # ones in `build()`.
-    losses = Losses()
+    # THE SAME LEDGER, REACHABLE FROM INSIDE THE BINDER. The sites that drop a
+    # prop deep inside `bind()` write to the one the ingest loop already used.
     binder.losses = losses
     binder.page_kind = str(kind or "").strip().lower()
     # The route drives `is_record_page()`: a `[id]` segment means one existing
@@ -1743,6 +1906,16 @@ def translate(payload: dict, registry: dict, route: str = "/",
         out: list[dict] = []
         for i, item in enumerate(items):
             if not isinstance(item, dict):
+                # AN INSTANCE THAT NEVER DREW. The spec said four tiles and
+                # three were rendered, with no message: a reader counting the
+                # summary row sees one fewer number than the composer put
+                # there.
+                losses.record(
+                    "dropped_component", str(tid), f"instance {i}",
+                    f"the repeat's data holds a {type(item).__name__} at "
+                    f"position {i}, not an object, so that instance was not "
+                    f"drawn",
+                    material=True)
                 continue
             clone = dict(template)
             clone["id"] = f"{tid}-{i}"
@@ -1760,7 +1933,17 @@ def translate(payload: dict, registry: dict, route: str = "/",
                     # — the one part of updateDataModel worth keeping, and the
                     # only thing that tells the binder these are four different
                     # queries.
+                    # A KEY THE SAMPLE ITEM DOES NOT CARRY becomes None
+                    # here and is dropped further down, so an expanded
+                    # MetricTile can lose its `label` — required, and gone
+                    # from every instance at once, silently.
                     clone[k] = item.get(rel)
+                    if clone[k] is None:
+                        losses.record(
+                            "dropped_prop", f"{tid}-{i}", k,
+                            f"the repeat's item {i} has no {rel!r}, so this "
+                            f"instance was left without it",
+                            material=True)
             comps[clone["id"]] = clone
             node = build(clone["id"])
             if node:
@@ -1778,6 +1961,16 @@ def translate(payload: dict, registry: dict, route: str = "/",
         """
         c = comps.get(cid)
         if not c:
+            # A PARENT POINTING AT NOTHING. The child is filtered out of
+            # `kids` by the caller and the page ships one component short,
+            # with no record anywhere — the mirror of an orphan, and the more
+            # common of the two: an id that a later edit renamed, or a
+            # component the composer meant to emit and did not.
+            losses.record(
+                "missing_component", str(cid), "",
+                "a parent lists it as a child and no component carries that "
+                "id, so that part of the page was never built",
+                material=True)
             return None
         kind = c.get("component")
 
@@ -1821,6 +2014,26 @@ def translate(payload: dict, registry: dict, route: str = "/",
                 f"this page — dropped rather than sent as a pointer the "
                 f"renderer cannot read.")
             return None
+        # WRITTEN DOWN BEFORE THEY DISAPPEAR. These two filters removed
+        # props ahead of every other branch, so nothing downstream could
+        # report them: `weight` is a real layout intent (how much space this
+        # child takes) thrown away, and `_UNSUPPORTED` drops `Text.variant`
+        # and `Heading.variant` — the composer's typographic choice — with the
+        # component never learning it was asked for.
+        #
+        # Not material: the page still shows what the composer meant, in a
+        # default weight and a default size. Recorded so "why does this look
+        # evenly spaced when I asked for 2:1" has an answer.
+        for k in c:
+            if k in _CHILD_KEYS or k == "component" or k == "id":
+                continue
+            if k in _DROP_PROPS:
+                binder._record("dropped_prop", c.get("id"), k,
+                               f"{kind} carries no {k!r} through translation")
+            elif k in unsupported:
+                binder._record("dropped_prop", c.get("id"), k,
+                               f"the {kind} component has no {k!r}")
+
         items = [(k, v) for k, v in c.items()
                  if k not in _DROP_PROPS and k not in _CHILD_KEYS
                  and k not in unsupported]
@@ -1966,7 +2179,26 @@ def translate(payload: dict, registry: dict, route: str = "/",
                             f'{c.get("id")}.{k}.{k2}: "{raw2}" resolves to no '
                             f"source on this page — dropped rather than sent "
                             f"as a pointer the renderer cannot read.")
+                        # ONE INPUT SHORT IS THE WHOLE POINT OF `args`. The
+                        # control still dispatches and the workflow receives
+                        # nothing for this parameter, which fails at the
+                        # workflow rather than at render — so a button that
+                        # looks right writes a row with a null column.
+                        binder._record(
+                            "dropped_prop", c.get("id"), f"{k}.{k2}",
+                            f"{raw2!r} resolves to no source, so the workflow "
+                            f"receives nothing for {k2!r}",
+                            material=True)
                 if not resolved:
+                    # EVERY KEY FAILED, so the prop itself vanishes here — the
+                    # one event in this branch that was reported nowhere,
+                    # because the per-key warnings above say a key went and
+                    # nothing says the dispatch now carries no inputs at all.
+                    binder._record(
+                        "dropped_prop", c.get("id"), k,
+                        f"every value in {k!r} resolved to no source, so the "
+                        f"dispatch carries no inputs",
+                        material=True)
                     continue
             elif isinstance(val, dict) and "path" in val:
                 # A pointer on a non-data prop is COPY — a header title, a card
@@ -2001,7 +2233,11 @@ def translate(payload: dict, registry: dict, route: str = "/",
                         f"record this page shows — bound to {resolved!r} "
                         f"rather than read out of the sample.")
                 else:
-                    resolved = _coerce_copy(kind, k, at_path(raw))
+                    spoken_copy = at_path(raw)
+                    resolved = _coerce_copy(kind, k, spoken_copy)
+                    _note_coercion(getattr(binder, "losses", None),
+                                   str(c.get("id") or ""), k,
+                                   spoken_copy, resolved)
                 if not isinstance(resolved, (str, int, float, bool)):
                     field = raw.strip("/").split("/")[-1]
                     members = _enum_members(kind, k)
@@ -2068,9 +2304,27 @@ def translate(payload: dict, registry: dict, route: str = "/",
             else:
                 resolved = val
             if isinstance(resolved, str):
+                spoken = resolved
                 resolved = _ENUM_SYNONYMS.get(k, {}).get(resolved, resolved)
+                if resolved != spoken:
+                    # `direction: "column"` becomes `"vertical"`. The right
+                    # rewrite, and it left no trace, so a value in the
+                    # Blueprint that the composer never wrote had no
+                    # explanation anywhere.
+                    binder._record("coerced", c.get("id"), k,
+                                   f"{spoken!r} read as {resolved!r}")
             if resolved is not None:
                 canonical = aliases.get(k, k)
+                if canonical in props and canonical != k:
+                    # BOTH SPELLINGS ON ONE COMPONENT. A Badge carrying
+                    # `label` AND `content` renamed the first onto the second
+                    # and one of them won silently — the composer's copy,
+                    # gone, with the page looking fine.
+                    binder._record(
+                        "overwritten", c.get("id"), canonical,
+                        f"written both as {k!r} and as {canonical!r}; "
+                        f"{props[canonical]!r} replaced by {resolved!r}",
+                        material=True)
                 if canonical != k:
                     # Said out loud. The catalog already offers the right name,
                     # so a rename reaching here means the composer was told and
@@ -2119,7 +2373,18 @@ def translate(payload: dict, registry: dict, route: str = "/",
                     f"was given; defaulted to {default!r}. The catalog marks "
                     f"it required — the composer should be choosing it."
                 )
-        props.update(binder.extra_props.get(str(c.get("id")), {}))
+        # WHAT THE BINDER DECIDES, OVER WHAT THE COMPOSER WROTE. `Chart.series`
+        # and `xKey` are set from the resolved grouping, so a composer-authored
+        # series was replaced wholesale and the substitution left no trace —
+        # a chart plotting a different column than the one it was told to.
+        mine = binder.extra_props.get(str(c.get("id")), {})
+        for prop, value in mine.items():
+            if prop in props and props[prop] != value:
+                binder._record(
+                    "overwritten", c.get("id"), prop,
+                    f"the binder resolved {prop!r} from the data and replaced "
+                    f"what the composer wrote")
+        props.update(mine)
 
         # AFTER THE ALIASES AND THE BINDER'S OWN PROPS, so `Badge.label` is
         # already `content` and nothing this module attaches is reported as
@@ -2234,6 +2499,17 @@ def translate(payload: dict, registry: dict, route: str = "/",
             if bound:
                 path = bound.strip("{}").strip()
                 node["visibleIf"] = f"{path} = null" if negated else f"{path} != null"
+            else:
+                # A CONDITION THAT BECAME NO CONDITION. The node then shows
+                # ALWAYS — including the empty state the composer gated, so a
+                # page can render "nothing here yet" over a populated table.
+                # Material: the reader sees something the composer said to
+                # hide.
+                binder._record(
+                    "dropped_prop", c.get("id"), "visibleIf",
+                    f"{raw_cond!r} resolves to no source on this page, so "
+                    f"this node is now always visible",
+                    material=True)
         if c.get("id"):
             node["id"] = c["id"]
 
@@ -2366,6 +2642,12 @@ def translate(payload: dict, registry: dict, route: str = "/",
     if _table_searches:
         for n in _walk_nodes(root):
             if n.get("type") == "FilterBar":
+                if (n.get("props") or {}).get("showSearch") is not False:
+                    losses.record(
+                        "overwritten", str(n.get("id") or "FilterBar"),
+                        "showSearch",
+                        "the table on this page searches its own rows, so the "
+                        "second search box was switched off")
                 n.setdefault("props", {})["showSearch"] = False
 
     _translate_option_sources(root, binder, registry)
