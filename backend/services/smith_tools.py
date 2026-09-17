@@ -1035,16 +1035,25 @@ TOOL_CATALOG: list[dict] = [
              "button — do not promise either. RELAY `summary` as written; it "
              "says so, and it carries the link."},
 
+    # NAMED FOR A MECHANISM THAT IS ONLY HALF TRUE. This said "reverse the
+    # most recent commit", which is what it does on a legacy project and not
+    # what it does on a Blueprint one, where the history is the document's
+    # own versions and the repo has no commits. A description that teaches
+    # the wrong mental model is how "undo that" came to be answered with a
+    # git error on applications that HAD a working undo. The tool is
+    # described by what the user gets; the handler picks the store.
     {"name": "revert_last_patch",
-     "signature": "revert_last_patch() -> "
-                  "{ok, reverted_sha, files, summary}",
-     "desc": "Reverse the most recent commit as a NEW commit — the "
-             "underlying seam for 'undo that' / 'actually no, don't do "
-             "that'. History-preserving (original commit stays in git "
-             "log). Use ONLY when the user asks to undo or the previous "
-             "patch was wrong. Does not touch anything else. Never call "
-             "speculatively — a revert IS a mutation and shows up in "
-             "the app's git history."},
+     "signature": "revert_last_patch() -> {ok, summary, …}",
+     "desc": "UNDO THE LAST CHANGE — the seam for 'undo that', 'undo', "
+             "'put it back', 'no, that was wrong'. The application returns "
+             "to how it stood before the most recent change, and said again "
+             "it goes back another. Nothing is destroyed: the undo is "
+             "itself recorded, so it can be undone too. Works on every "
+             "project — it reverses a commit where the history is git, and "
+             "restores the definition where the history is the Blueprint, "
+             "without you having to know which. `revert` is the same tool "
+             "under the name understand_ask uses. Use ONLY when the user "
+             "asks to undo; never speculatively — an undo IS a mutation."},
 
     {"name": "add_role",
      "signature": "add_role(role_name) -> {ok, added, actors}",
@@ -1397,7 +1406,11 @@ READONLY_HANDLERS = {
     "edit_entity":              lambda output_dir, args: _smith_edit_entity(output_dir, args),
     "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
-    "revert":                   lambda output_dir, args: _smith_revert(output_dir),
+    # `revert` is what `understand_ask`'s verb list calls it, so the model
+    # emits that name as often as the catalog's. ONE FUNCTION BEHIND BOTH:
+    # two undos that could disagree about what "the last change" is would be
+    # the worst possible thing to have two of.
+    "revert":                   lambda output_dir, args: _smith_revert_last_patch(output_dir, args),
     # export_records / back_up are NOT here — see PROJECT_HANDLERS below.
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
@@ -2201,13 +2214,6 @@ def _smith_remove_workflow(output_dir: str, args: dict) -> dict:
     return result
 
 
-def _smith_revert(output_dir: str) -> dict:
-    """Undo the last recorded change and re-project. Takes no arguments: it is
-    always the most recent change."""
-    from services.smith.revert import run as _revert_run
-    return _revert_run(output_dir)
-
-
 def _smith_add_field(output_dir: str, args: dict) -> dict:
     """Add one column to an EXISTING entity — the incremental data-model change
     a field-add is supposed to be, instead of a whole-app rebuild (F-01).
@@ -2574,11 +2580,32 @@ def _smith_restrict_page_to_role(output_dir: str, args: dict) -> dict:
 
 
 def _smith_revert_last_patch(output_dir: str, args: dict) -> dict:
-    """Reverse the most recent commit in the app repo (Phase 1b).
+    """Undo the last change, by whichever record this project actually keeps.
 
-    Delegates to :func:`services.patch_history.revert_last_patch`. See
-    the tool catalog entry for user-facing rules.
+    TWO STORES, ONE ASK. A legacy project's history is its git log, and
+    `patch_history.revert_last_patch` reverses the top commit. A Blueprint
+    project's history is `changeHistory` plus the `versions/vN.json`
+    snapshot `BlueprintService.commit` writes before every change — and its
+    repo has no commits at all, so the git path found nothing to reverse and
+    "undo that" was answered with an error on every Blueprint application.
+
+    `services.smith.revert` was written for that and wired into the chat
+    verb, but this table is the other way the ask arrives and it still went
+    to git. The branch is the same one `add_field`, `remove_field` and the
+    rest of the seams already take: ask the project which kind it is.
     """
+    if _is_blueprint_app(output_dir):
+        from services.smith.revert import run as _revert_run
+        out = _revert_run(output_dir)
+        # `summary` and `ok` as well as the seam's own keys: this handler has
+        # two branches with two shapes, and the model reading the result
+        # should not have to know which branch ran to find out whether the
+        # undo happened and what it undid.
+        out["ok"] = bool(out.get("applied"))
+        out["summary"] = str(out.get("diff_summary") or out.get("reason") or "")
+        if not out["ok"]:
+            out["error"] = str(out.get("reason") or "")
+        return out
     from services.patch_history import revert_last_patch
     return revert_last_patch(output_dir)
 

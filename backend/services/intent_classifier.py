@@ -181,7 +181,13 @@ TOOL_SUBSETS: dict[str, Optional[list[str]]] = {
         "verify_promise", "answer", "ask_user",
     ],
 
-    # ---- Undo (Phase 1b — revert_last_patch tool wired) ------------------ #
+    # ---- Undo ------------------------------------------------------------ #
+    # ONLY THE ADVERTISED NAME. `revert` is a dispatchable alias for the same
+    # handler, but a subset is also what the catalog is FILTERED to when a
+    # turn is scoped — naming a tool the catalog does not carry would put a
+    # name in the allow-list that the model is never shown. Scoped, it sees
+    # `revert_last_patch` and calls it; the alias is for the unscoped turn,
+    # where there is no guard to get past.
     "undo": ["recall", "revert_last_patch", "verify_promise", "answer", "ask_user"],
 
     # ---- Fallback: no scoping ------------------------------------------- #
