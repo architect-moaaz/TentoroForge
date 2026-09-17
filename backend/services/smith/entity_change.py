@@ -149,34 +149,16 @@ def consequences(doc: dict, ref: str) -> dict:
 
 
 def _retire_pages(svc: Any, pages: list[dict]) -> list[str]:
-    ids = {str(p.get("id")) for p in pages}
-    routes = []
-    for p in pages:
-        p["status"] = "DEPRECATED"
-        routes.append(str(p.get("route")))
-    for layout in svc.doc.get("pageLayouts") or []:
-        if isinstance(layout, dict) and str(layout.get("page")) in ids and layout.get("status") != "SUPERSEDED":
-            layout["status"] = "DEPRECATED"
-    nav = svc.doc.get("navigation") or {}
-    def prune(tree):
-        out = []
-        for n in tree or []:
-            if not isinstance(n, dict):
-                continue
-            if str(n.get("page") or "") in ids:
-                continue
-            if n.get("children"):
-                n["children"] = prune(n["children"])
-                if not n["children"] and not n.get("page"):
-                    continue
-            out.append(n)
-        return out
-    if nav.get("tree"):
-        nav["tree"] = prune(nav["tree"])
-    initial = (nav.get("initialRoute") or {}).get("default") if isinstance(nav.get("initialRoute"), dict) else None
-    if initial in routes:
-        nav["initialRoute"] = {}
-    return routes
+    """The record's screens go the way a screen goes when it is asked for by
+    name — `page_change.retire`, which is the same job.
+
+    It used to be a smaller version of it here: the menu was pruned and the
+    layouts marked, and every link, arrow and widget still pointed at routes
+    that had stopped resolving. Retiring an entity left the same dead ends
+    `remove_page` exists to prevent, one level up.
+    """
+    from services.smith.page_change import retire
+    return retire(svc, pages)["routes"]
 
 
 def remove_entity(svc: Any, ref: str, *, app_root: str | None = None, reasoning: Any = None) -> dict:
