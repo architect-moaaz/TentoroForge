@@ -780,6 +780,22 @@ class SmithSession:
         return TurnResult(status="resolved", answer=str(out.get("diff_summary") or "Done."),
                           touched_paths=touched,
                           diff_summary=", ".join(touched[:8]) if touched else "")
+    def _explain_incident(self, verb: str) -> "TurnResult":
+        """Answer "it crashed" / "it's really slow" from what the app reported.
+
+        THE ONLY TWO VERBS WHOSE ANSWER COMES FROM THE RUNNING APPLICATION
+        rather than from the document. Both change nothing — they read the
+        project's incident ledger — so the result is `needs_user`: there is an
+        account, and where a crash names a control or a workflow there is a
+        repair to click, which is a decision only the owner can make.
+        """
+        from services.incident_ledger import KIND_CRASH, KIND_SLOW
+        from services.smith.incidents import run as incidents_run
+
+        out = incidents_run(str(self.output_dir),
+                            kind=KIND_SLOW if verb == "explain_slowness" else KIND_CRASH)
+        return TurnResult(status="needs_user", answer=str(out.get("answer") or ""),
+                          options=list(out.get("options") or []))
 
     def _add_field(self, understanding: dict) -> "TurnResult":
         """Add one column to an existing entity — the incremental data-model
@@ -1107,6 +1123,8 @@ class SmithSession:
             return self._export_data(understanding)
         if verb in ("add_login", "remove_login", "reset_login"):
             return self._accounts(verb, understanding)
+        if verb in ("explain_crash", "explain_slowness"):
+            return self._explain_incident(verb)
         from services.smith.limits import cannot as _cannot
         if _cannot(verb):
             # HONEST, AND NOT A DEAD END. These are the asks Smith genuinely

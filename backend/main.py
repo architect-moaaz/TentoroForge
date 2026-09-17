@@ -71,6 +71,7 @@ from routers.portal import router as portal_router
 from routers.health import router as health_router
 from routers.quality import router as quality_router
 from routers.runtime_exceptions import router as runtime_exceptions_router
+from routers.incidents import router as incidents_router
 from routers.notifications import router as notifications_router
 from routers.sso import router as sso_router
 from routers.audit import router as audit_router
@@ -157,6 +158,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(quality_router)
 app.include_router(runtime_exceptions_router)
+app.include_router(incidents_router)
 app.include_router(project_events_router)
 app.include_router(auth_router)
 app.include_router(orgs_router)
