@@ -1711,6 +1711,32 @@ def compose_page_via_a2ui(
 
     schema = result["schema"]
 
+    # WHAT THE TRANSLATION TOOK AWAY, BEFORE THE FLOOR JUDGES THE REMAINS.
+    #
+    # `a2ui_to_forge` removes things: a component nothing referenced, a page
+    # whose root never resolved, a select whose source could not be found. It
+    # recorded most of them on channels no caller read, so a page that lost
+    # its table was refused for having no list surface — true, and not the
+    # cause. The composer was then asked again and told the symptom.
+    #
+    # Only MATERIAL losses refuse: the ones that change what a reader would
+    # see. A renamed prop and a coerced number are recorded and pass, because
+    # the page still shows what the composer meant. This is reported BEFORE
+    # the floor so the reason names the cause rather than its consequence.
+    lost = result.get("material_losses") or []
+    if lost:
+        from services.a2ui_to_forge import Losses
+
+        ledger = Losses()
+        ledger.entries = list(result.get("losses") or [])
+        return {"applied": False, "route": route, "kind": kind,
+                "reason": "the composition did not survive translation: "
+                          + ledger.summary(),
+                "findings": [f"translation_{e['kind']}" for e in lost],
+                "losses": list(result.get("losses") or []),
+                "unresolved": result["unresolved"],
+                "warnings": result["warnings"]}
+
     findings = _floor_findings(kind, route, schema, registry, contract)
     pruned: list[str] = []
     # NO SALVAGE. This used to drop the widgets the floor named and re-judge,
@@ -1731,6 +1757,10 @@ def compose_page_via_a2ui(
                           + ", ".join(f["rule"] for f in findings),
                 "findings": [f["rule"] for f in findings],
                 "pruned": pruned,
+                # Carried even on the floor's own refusal: a loss that was not
+                # material can still be the reason a floor rule failed, and a
+                # reader of this result should not have to guess.
+                "losses": list(result.get("losses") or []),
                 "unresolved": result["unresolved"],
                 "warnings": result["warnings"]}
 
@@ -1747,9 +1777,10 @@ def compose_page_via_a2ui(
                        encoding="utf-8")
         tmp.replace(target)
 
-    logger.info("[a2ui] composed %s (%s) — %d dataSources, %d unresolved",
+    logger.info("[a2ui] composed %s (%s) — %d dataSources, %d unresolved, "
+                "%d translation loss(es)",
                 route, kind, len(schema.get("dataSources") or []),
-                len(result["unresolved"]))
+                len(result["unresolved"]), len(result.get("losses") or []))
     return {
         "applied": True, "route": route, "kind": kind, "reason": "ok",
         "pruned": pruned,
@@ -1763,6 +1794,11 @@ def compose_page_via_a2ui(
         "schema_path": str(target) if target is not None else None,
         "data_sources": len(schema.get("dataSources") or []),
         "assumptions": result["assumptions"],
+        # An accepted page can still have lost something immaterial — a
+        # renamed prop, a coerced number, a series descriptor the runtime
+        # supplies. Carried so the run's ledger can show what the translation
+        # changed rather than leaving it to be rediscovered from a diff.
+        "losses": list(result.get("losses") or []),
         "unresolved": result["unresolved"],
         "warnings": result["warnings"],
         "dropped_data_model_keys": result["dropped_data_model_keys"],

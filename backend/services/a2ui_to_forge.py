@@ -446,6 +446,18 @@ def _enum_filter(label: str, entity: str, registry: dict) -> dict | None:
 
 
 class _Binder:
+    def _record(self, kind: str, where: Any, what: str, detail: str,
+                *, material: bool = False) -> None:
+        """Write a removal to the translation's ledger.
+
+        Tolerates a binder built without one — the tests construct `_Binder`
+        directly, and a missing ledger must not turn a recorded loss into a
+        crash.
+        """
+        ledger = getattr(self, "losses", None)
+        if ledger is not None:
+            ledger.record(kind, where, what, detail, material=material)
+
     def __init__(self, registry: dict, data_model: dict | None = None):
         self.registry = registry
         # Read for SHAPE and for COPY only — never for values. Labels live
@@ -650,7 +662,14 @@ class _Binder:
         elif kind == "Chart" and prop in ("data", "series"):
             if prop == "series":
                 # Series descriptors are presentation, not rows — the runtime
-                # derives them from the grouped result.
+                # derives them from the grouped result. Written down because
+                # this was the one `bind()` exit with no record of any kind:
+                # the prop vanished and `expand_template`'s comment claiming
+                # "bind() already recorded why" was false for exactly this
+                # path. Not material — the runtime supplies the descriptors.
+                self._record("dropped_prop", comp.get("id"), prop,
+                             "series descriptors are derived from the grouped "
+                             "result at runtime, not bound")
                 return None
             # The component's own id and title say what it is ABOUT —
             # `categoryChart` means category — which is the only signal to the
@@ -662,14 +681,17 @@ class _Binder:
                 # means a uuid-labelled chart, which the dashboard floor
                 # rejects — taking the whole page down with it. Leave the
                 # chart unbound and say why.
-                self.unresolved.append({
-                    "component": str(comp.get("id") or ""), "prop": prop,
-                    "path": path, "label": label,
-                    "reason": (f"{entity} has no groupable dimension (no enum, "
-                               f"and every other column is a key, free text or "
-                               f"an ungroupable type) — a chart here could only "
-                               f"be grouped by a uuid"),
-                })
+                # A STRING, LIKE EVERY OTHER ENTRY. `unresolved` is
+                # declared `list[str]` and this one site appended a dict, so
+                # any consumer joining the list raised instead of reporting.
+                why = (f"{entity} has no groupable dimension (no enum, and "
+                       f"every other column is a key, free text or an "
+                       f"ungroupable type) — a chart here could only be "
+                       f"grouped by a uuid")
+                self.unresolved.append(
+                    f"{comp.get('id') or '?'}.{prop}: {why}")
+                self._record("dropped_prop", comp.get("id"), prop, why,
+                             material=True)
                 return None
             name = self._unique(f"{slug}By{group[:1].upper()}{group[1:]}")
             # `SeriesSource` reads `agg`, not `metrics` — the aggregate shape
@@ -1079,6 +1101,23 @@ def _contract_prop(kind: str, prop: str) -> dict:
         return {}
 
 
+def _required_props(kind: str) -> list[str]:
+    """Every prop `kind` cannot be rendered without, per the contracts.
+
+    Empty when the catalog cannot be read — which is the honest answer and
+    also a hole: `_is_required` has the same failure and answers ``False``,
+    so a thin or unreachable catalog silently blesses everything. Reported
+    once here rather than pretended about at seven call sites.
+    """
+    try:
+        from services.a2ui_catalog import load_contracts, props_for
+        entry = props_for(str(kind), load_contracts())
+    except Exception:  # noqa: BLE001 — a lookup must never fail a translation
+        return []
+    return [name for name, spec in (entry or {}).items()
+            if isinstance(spec, dict) and not spec.get("optional")]
+
+
 def _is_required(kind: str, prop: str) -> bool:
     """The contract knows the prop and does not mark it optional."""
     spec = _contract_prop(kind, prop)
@@ -1132,7 +1171,62 @@ def _has_pointer(value: Any) -> bool:
 #: Fields that sit beside `props` in NodeV2 rather than inside it. A2UI emits
 #: them among the props and the binder lifts them out afterwards, so they are
 #: not unknown — they are early.
+#:
+#: EVERY ONE OF THESE MUST ACTUALLY BE LIFTED. `bind` sat here for the excuse
+#: and nowhere else: excluded from the unknown-prop report because it was
+#: "early", and then never moved, so it reached a `.strict()` node as an
+#: unknown key and failed the whole page parse with no warning naming it.
 _NODE_SIBLINGS = frozenset({"style", "bind", "visibleIf", "id"})
+
+
+class Losses:
+    """Everything this translation takes away from what the composer wrote.
+
+    ONE CHANNEL, BECAUSE SIX WERE NONE. This module maintained `warnings`,
+    `assumptions`, `unresolved`, `dangling`, `dropped_data_model_keys` and
+    `dominant_entity`, built them at real cost, and every caller dropped all
+    but one on the floor. So a page refused for a binding with no source was
+    refused with a message about the binding, while the warning naming the
+    component and prop that had been removed three hundred lines earlier went
+    nowhere — and the losses with no channel at all (a whole unreferenced
+    subtree, the page replaced by an empty Stack, an `optionsFrom` popped and
+    never put back) left no trace anywhere.
+
+    MATERIAL MEANS THE READER WOULD SEE A DIFFERENCE. A renamed prop and a
+    coerced number are recorded and are not material: the page still shows
+    what the composer meant. A dropped subtree, a control that lost its
+    action, a select that lost its options — those change what is on screen,
+    and `compose_page_via_a2ui` refuses the page rather than shipping the
+    remains, because a composer asked again can fix what a silent removal
+    cannot.
+    """
+
+    __slots__ = ("entries",)
+
+    def __init__(self) -> None:
+        self.entries: list[dict] = []
+
+    def record(self, kind: str, where: str, what: str, detail: str,
+               *, material: bool = False) -> None:
+        self.entries.append({
+            "kind": kind, "where": str(where or "page"), "what": str(what or ""),
+            "detail": detail, "material": bool(material),
+        })
+
+    def material(self) -> list[dict]:
+        return [e for e in self.entries if e["material"]]
+
+    def summary(self) -> str:
+        """The material losses, as one line a composer can act on."""
+        out = []
+        for e in self.material():
+            where = f"{e['where']}." if e["where"] not in ("", "page") else ""
+            out.append(f"{where}{e['what']}: {e['detail']}" if e["what"]
+                       else f"{where or 'page'}: {e['detail']}")
+        return "; ".join(out)
+
+    def __len__(self) -> int:  # noqa: D105
+        return len(self.entries)
 
 
 def _unknown_props(kind: str, props: dict) -> list[str]:
@@ -1431,7 +1525,22 @@ def _translate_option_sources(root: Any, binder: Any, registry: dict) -> None:
                         if final:
                             field.setdefault("interaction", {})["optionsFrom"] = final
                             field.setdefault("options", [])
-                        continue
+                            continue
+                        # POPPED AND NEVER PUT BACK. `spoken` came off the
+                        # field at the top of this branch; when the source
+                        # could not be resolved the `continue` below skipped
+                        # the schema-enum recovery too, so the field shipped
+                        # with neither options nor a source — and the Form
+                        # contract refuses exactly that. The composer had
+                        # named a source and the translation lost it.
+                        #
+                        # Fall through to the enum recovery rather than
+                        # continuing, and say what was lost if that fails too.
+                        binder._record(
+                            "dropped_prop", str(c.get("id") or ""),
+                            "optionsFrom",
+                            f"named a source this page cannot resolve "
+                            f"({spoken!r}); recovering options from the schema")
                     # No source named. A select over a schema enum still needs
                     # its options declared — the composer omits them for a column
                     # the route entity does not own (a workflow field written to
@@ -1490,6 +1599,11 @@ def translate(payload: dict, registry: dict, route: str = "/",
             data_model = msg["updateDataModel"].get("value") or {}
 
     binder = _Binder(registry, data_model)
+    # EVERY REMOVAL FROM HERE ON IS WRITTEN DOWN. Carried on the binder so the
+    # sites that drop a prop deep inside `bind()` reach the same ledger as the
+    # ones in `build()`.
+    losses = Losses()
+    binder.losses = losses
     binder.page_kind = str(kind or "").strip().lower()
     # The route drives `is_record_page()`: a `[id]` segment means one existing
     # record is in scope, whatever the declared pattern.
@@ -2020,6 +2134,43 @@ def translate(payload: dict, registry: dict, route: str = "/",
             binder.warnings.append(
                 f'{c.get("id")}.{bad}: {kind} does not accept a {bad!r} prop. '
                 f"Passed through unchanged — it may be rejected downstream.")
+            binder._record(
+                "unknown_prop", c.get("id"), bad,
+                f"{kind} does not accept it; passed through and it will be "
+                f"rejected by a strict node")
+
+        # A REQUIRED PROP THAT DID NOT SURVIVE, WHEREVER IT WAS LOST.
+        #
+        # Seven places above can drop a prop — a measured literal, an enum
+        # whose pointer was row-relative, a pointer with no literal in the
+        # sample model, a binding the binder could not resolve — and exactly
+        # ONE of them consulted `_is_required` before dropping. The other six
+        # removed required props and said nothing stronger than a warning, so
+        # the component reached a validator missing something it cannot render
+        # without, and the page was refused for a schema path.
+        #
+        # Asked once, at the end, about what actually survived: that is the
+        # only place the answer is complete, and it needs no site to remember
+        # to ask. Material — a component missing a required prop is a
+        # component that cannot draw what the composer meant.
+        for required in _required_props(kind):
+            if required in props or required in _NODE_SIBLINGS:
+                continue
+            if required not in (c or {}):
+                continue
+            # THE SPECIFIC REASON WINS. A site that already said why this prop
+            # went — "no groupable dimension", "the sample model has no
+            # literal" — is more use to a composer than "it did not survive",
+            # and reporting both puts the same loss in the summary twice.
+            if any(e["where"] == str(c.get("id") or "page")
+                   and e["what"] == required
+                   for e in (getattr(binder, "losses", None) or Losses()).entries):
+                continue
+            binder._record(
+                "dropped_required_prop", c.get("id"), required,
+                f"{kind} requires it and the composer supplied it, but it "
+                f"did not survive translation",
+                material=True)
 
         # AFTER EVERY PROP IS ON. This walk ran above the `extra_props` merge,
         # so it inspected a dict that did not yet hold the props the binder
@@ -2058,6 +2209,15 @@ def translate(payload: dict, registry: dict, route: str = "/",
         style = props.pop("style", None)
         if style is not None:
             node["style"] = style
+        # LIFTED, BECAUSE IT WAS ONLY EVER EXCUSED. `bind` is in
+        # `_NODE_SIBLINGS`, which exists to say "this is not an unknown prop,
+        # it is an early one" — and nothing moved it, so it stayed in `props`,
+        # was never reported as unknown, and met a `.strict()` node as an
+        # unrecognised key. The whole page parse failed with no warning naming
+        # the cause.
+        bound = props.pop("bind", None)
+        if bound is not None:
+            node["bind"] = bound
         # `visibleIf` is a sibling of `type` too, and the composer writes it
         # as the pointer path it binds fields from — `/note/id`, or `!/note/id`
         # for "no record". The renderer evaluates it with FEEL-lite in data
@@ -2091,7 +2251,21 @@ def translate(payload: dict, registry: dict, route: str = "/",
             node["children"] = kids
         return node
 
-    root = build("root") or {"type": "Stack", "props": {}, "children": []}
+    root = build("root")
+    if root is None:
+        # THE WHOLE COMPOSITION, GONE, SILENTLY. A payload whose top-level
+        # component is not called "root" — or one whose root failed to build —
+        # was replaced by an empty Stack here, and the page then went to the
+        # floor, which refused it for having no table, no KPIs, no anything.
+        # The reason it reported was a symptom; the cause was that nothing
+        # had been translated at all, and no channel said so.
+        losses.record("dropped_page", "page", "root",
+                      "no component is reachable as `root`, so nothing the "
+                      "composer wrote was translated"
+                      + (f" (it emitted: {', '.join(sorted(str(c) for c in comps)[:8])})"
+                         if comps else " (it emitted no components)"),
+                      material=True)
+        root = {"type": "Stack", "props": {}, "children": []}
     # Layout rules live in one module now, applied again post-generate over
     # whatever composed the page. Called here too so an A2UI schema is
     # already well-shaped when the floor judges it.
@@ -2122,6 +2296,54 @@ def translate(payload: dict, registry: dict, route: str = "/",
             if dialog:
                 root.setdefault("children", []).append(dialog)
                 placed |= _ids(dialog)
+
+    # WHAT THE COMPOSER WROTE AND NOTHING PLACED. Only Dialogs were rescued
+    # above; every other unreached component — a Table, a Chart, a whole Card
+    # subtree — was dropped here with no record on any channel. A page that
+    # lost its table is then refused for having no list surface, which is
+    # true and is not the cause.
+    #
+    # Recorded rather than rescued: a component nothing references has no
+    # position, and appending it somewhere would be this module inventing
+    # layout. The composer is asked again instead, and told exactly what it
+    # left unreferenced.
+    # REFERENCED IS NOT THE SAME AS PLACED. A template is named once, by
+    # `children: {componentId: "tile", path: "/kpis"}`, and expanded into
+    # instances that carry none of its id — so `placed` never contains it and
+    # a check keyed on placement calls every repeat template an orphan. The
+    # question is whether the composer pointed at it from anywhere, in any of
+    # the ways A2UI can point: a child id, a `componentId`, a nested spec.
+    def _referenced(value: Any, out: set[str]) -> None:
+        if isinstance(value, str):
+            if value in comps:
+                out.add(value)
+        elif isinstance(value, dict):
+            target = value.get("componentId")
+            if isinstance(target, str):
+                out.add(target)
+            for v in value.values():
+                _referenced(v, out)
+        elif isinstance(value, list):
+            for v in value:
+                _referenced(v, out)
+
+    referenced: set[str] = set()
+    for cid, c in comps.items():
+        for key, value in c.items():
+            if key == "id":
+                continue
+            _referenced(value, referenced)
+
+    for cid, c in list(comps.items()):
+        if (str(cid) in placed or str(cid) in referenced
+                or c.get("component") == "Dialog" or str(cid) == "root"):
+            continue
+        losses.record(
+            "orphaned_component", str(cid), str(c.get("component") or "?"),
+            "written by the composer and pointed at from nowhere — no parent "
+            "lists it as a child and no template names it, so it has no place "
+            "on the page",
+            material=True)
 
     # ONE SEARCH PER LIST. A data-bound Table renders its own search toolbar,
     # and a composer that also places a FilterBar above it hands the page two
@@ -2193,5 +2415,11 @@ def translate(payload: dict, registry: dict, route: str = "/",
         # every binding resolved on its own.
         "questions": binder.questions,
         "warnings": binder.warnings,
+        # EVERYTHING THIS TRANSLATION TOOK AWAY, in one structured channel the
+        # caller actually reads. The five above are kept because tests and
+        # logs use them; this is the one that changes what happens, because a
+        # material loss refuses the page instead of shipping the remains.
+        "losses": list(losses.entries),
+        "material_losses": losses.material(),
         "dropped_data_model_keys": sorted(data_model),
     }
