@@ -135,9 +135,27 @@ Return ONLY a JSON object with exactly these keys:
                         managers", "the interface should be in Arabic".
       "add_api" / "remove_api" — an API endpoint: "an endpoint that lists
                         wards", "remove the export endpoint".
-      "add_integration" / "remove_integration" — a third-party service:
-                        "send email through SendGrid", "drop the Stripe
-                        integration".
+      "add_integration" / "remove_integration" — WRITE DOWN (or retire) a
+                        third-party service, without wiring it up: "make a
+                        note that we use Stripe for payments", "drop the
+                        Stripe integration". Only when they are recording it
+                        for later — if they want the application to actually
+                        talk to it, that is connect_service.
+      "connect_service" — they want the app to ACTUALLY TALK to an outside
+                        service: "connect it to our Outlook", "connect it to
+                        Xero", "send the emails through our own account",
+                        "send the emails through SendGrid", "text people
+                        through Twilio". Outbound email is connected for
+                        real; anything else is answered with why it cannot be
+                        and what works instead. A COMPLAINT is not this verb:
+                        "the confirmation email never came" is a question, and
+                        the outside services listed below say whether this
+                        application's email is connected — answer it from
+                        those. Put the service in
+                        "integration", in their words ("our Outlook", "Xero").
+                        NEVER put a key, token or password in any field — if
+                        they paste one, leave the field empty and ask for the
+                        NAME of the variable holding it instead.
       "remove_page"   — a whole SCREEN should go: "delete the Wards page",
                         "remove the reports screen". Not a control on a
                         screen (that is "remove").
@@ -281,6 +299,11 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
 
   add_integration needs "integration": the service in the user's words;
       remove_integration needs "integration": which one.
+
+  connect_service needs "integration": the service to connect, in the user's
+      words — "our Outlook", "our own account", "SendGrid", "Xero". Do not
+      translate it into a provider or a product name they did not use, and do
+      not include a credential of any kind.
 
   edit_navigation needs:
   "change": what should be different about the menu, in the user's words.

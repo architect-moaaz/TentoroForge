@@ -374,7 +374,7 @@ def summary_of(verb: str, out: dict) -> str:
         # application does not talk to the service until somebody builds that.
         # The reply used to stop at "Declared", which reads as "connected" to
         # anyone who asked for email to be sent.
-        return (f"Recorded **{out['name']}** in the definition ({out['integration']}, "
+        said = (f"Recorded **{out['name']}** in the definition ({out['integration']}, "
                 f"{out['kind']} via {out['provider'] or 'unspecified provider'}), "
                 f"as {out['requirement']}."
                 + (f"\n\nIt names these secrets, which have to be set in the environment: "
@@ -382,6 +382,22 @@ def summary_of(verb: str, out: dict) -> str:
                    "goes in the Blueprint." if out.get("secrets") else "")
                 + "\n\nThis is a declaration, not a connection: nothing is sent or received "
                   "until a developer wires it up against those secrets.")
+        # AND IF IT IS EMAIL, THERE IS A REAL PATH. Recording SendGrid when
+        # what the owner wanted was the confirmation email to arrive leaves
+        # them one sentence away from a connection and no way to know it.
+        # Only for an integration the agent declared as EMAIL. "Google
+        # Analytics" names Google and is not a mail service; offering to send
+        # the application's email through it would be a wrong suggestion
+        # dressed as a helpful one.
+        from services.smith.email_connect import service_for
+        chosen = (service_for(f"{out['name']} {out.get('provider') or ''}")
+                  if str(out.get("kind") or "") == "email" else None)
+        if chosen is not None:
+            said += (f"\n\nIf what you want is for the application to actually send "
+                     f"through it, say “connect it to {chosen.name}” and I will: the app "
+                     "is projected to send through that service, and you set the key "
+                     "once under Settings → Integrations.")
+        return said
     return f"Retired the integration {out['name']} ({out['integration']})."
 
 

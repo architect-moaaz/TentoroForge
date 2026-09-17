@@ -114,9 +114,9 @@
 {"say": "an endpoint that lists wards", "verb": "add_api"}
 {"say": "my IT guy is asking for an API for the nurse list", "verb": "add_api"}
 {"say": "remove the export endpoint", "verb": "remove_api"}
-{"say": "send the emails through SendGrid", "verb": "add_integration"}
-{"say": "text people through Twilio", "verb": "add_integration"}
-{"say": "connect it to our payroll system", "verb": "add_integration"}
+{"say": "send the emails through SendGrid", "verb": "connect_service", "note": "SendGrid sends through its SMTP relay: a real connection"}
+{"say": "text people through Twilio", "verb": "connect_service", "note": "SMS has no adapter; the refusal offers declaring it"}
+{"say": "connect it to our payroll system", "verb": "connect_service", "note": "no adapter: refused with the nearest thing that works"}
 {"say": "take Stripe out, we don't charge anyone", "verb": "remove_integration"}
 {"say": "use this design https://figma.com/design/abc/Nurse-Roster", "verb": "connect_figma"}
 {"say": "our designer sent me this, can you use it", "verb": "connect_figma"}
@@ -136,6 +136,10 @@
 {"say": "start again", "verb": "rebuild"}
 {"say": "that thing I said about approvals — it's the manager who approves, not the admin", "verb": "edit_requirement"}
 {"say": "use this UX Pilot page https://uxpilot.ai/p/abc123", "verb": "connect_uxpilot"}
+{"say": "connect it to our Outlook", "verb": "connect_service"}
+{"say": "send the emails through our own account", "verb": "connect_service"}
+{"say": "connect it to Xero", "verb": "connect_service", "note": "no adapter: the reason, and what works instead"}
+{"say": "make a note that we use Stripe for payments", "verb": "add_integration", "note": "written down for later, not wired up"}
 {"say": "how much has this cost me?", "verb": "spend", "note": "the phrasebook's last dead end"}
 {"say": "what have I spent on this so far", "verb": "spend"}
 {"say": "what did the build cost", "verb": "spend"}

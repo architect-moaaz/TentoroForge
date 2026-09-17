@@ -118,6 +118,17 @@ Tests: `__tests__/run-ownership-tests.sh` (renders the manifest with the real
 projection, then runs the shipped `data-engine.ts` against it with `drizzle-orm`
 and `@/db` stubbed — no bundler, no `node_modules`).
 
+`__tests__/run-email-tests.sh` runs the shipped `workflows/index.ts`
+`send_email` handler. An application knows which service it is meant to send
+through: `src/lib/integrations/connected.ts` is projected from the Blueprint's
+`integrations` (its owner chose the service in conversation) and names the
+provider plus the NAME of the variable carrying its credential — never a
+value, which arrives in the app's environment from the platform's credential
+store. A step that cannot send says which of the four things happened (no
+service connected, the credential unset here, nobody to send to, the provider
+refused) and returns `sent: false`; the engine collects those notices onto the
+run and the dispatch shows them instead of a success toast.
+
 `__tests__/run-insert-tests.sh` runs the shipped `workflows/index.ts`
 `_finalizeInsert` the same way: a value is shaped by drizzle's own `dataType`
 (a Date for `timestamp()`, text for a string-mode `date()`), because
