@@ -244,12 +244,18 @@ def test_the_known_dead_ends_are_still_dead(rows):
     (`export_data`) and when something is wrong (`explain_crash`,
     `explain_slowness`). Their sentences moved up into the body of the corpus
     with a verb each, which is what striking one means.
+
+    A FIFTH, "What it costs", closed the same day with `spend`. It was the
+    last entry on section 08 — "How much has this cost me so far?", against
+    the note that a build's spend is recorded against the run and never
+    surfaced in the conversation that spent it — and the ledger it wanted was
+    already on disk. Struck here, and the sentence is in the body now.
     """
     dead_by_gap: dict[str, list[str]] = {}
     for row in rows:
         if row.category == phrasebook.NOTHING:
             dead_by_gap.setdefault(str(row.entry.get("gap")), []).append(row.say)
-    for gap in ("Keeping it safe", "Pictures and branding", "What it costs",
+    for gap in ("Keeping it safe", "Pictures and branding",
                 "Paper out the other end"):
         assert dead_by_gap.get(gap), (
             f"nothing under “{gap}” reaches nothing any more. If that is "

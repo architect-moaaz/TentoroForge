@@ -100,7 +100,7 @@ def recompose(svc: Any, plan: list[str], *, request: str, app_root: str,
     from services.blueprint.observer import anthropic_observer
     from services.blueprint.orchestrator import run
 
-    usage = RunUsage()
+    usage = RunUsage.for_app(svc, phase="change")
     router = tiered_router(reasoning=reasoning)
     executor = make_executor(svc, router, usage=usage, reasoning=reasoning)
     watcher = anthropic_observer(router, usage=usage)

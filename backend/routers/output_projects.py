@@ -426,13 +426,20 @@ async def smith_turn(project_id: str, req: SmithTurnRequest):
     def _run() -> dict:
         smith = Smith.load(root, model=model)
         if req.run_agents:
-            from services.blueprint.executors import make_executor, tiered_router
+            from services.blueprint.executors import (
+                RunUsage, make_executor, tiered_router)
             from services.blueprint.observer import anthropic_observer
 
             # The specialists and the observer: AGENT_MODEL, tiered by node.
             router = tiered_router()
-            smith.executor = make_executor(smith.blueprint, router)
-            smith.observer_agent = anthropic_observer(router)
+            # THE CHANGE PATH WAS SPENDING OFF THE BOOKS. This is the only
+            # caller of `Smith.turn` for a free-form change to a built app,
+            # and it built its executor without a ledger — so every specialist
+            # and every critic call it made reached no usage row at all, and
+            # "what have the changes cost?" could only have answered nothing.
+            spend = RunUsage.for_app(smith.blueprint, phase="change")
+            smith.executor = make_executor(smith.blueprint, router, usage=spend)
+            smith.observer_agent = anthropic_observer(router, usage=spend)
         turn = smith.turn(
             req.text, preview=preview, run_agents=req.run_agents,
             observer=sink,

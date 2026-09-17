@@ -90,6 +90,10 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
     ("The whole application",
      "Regenerate it from its definition.",
      frozenset({"rebuild"})),
+    ("What it has cost to run",
+     "Ask what building it spent and what the changes since have spent. The "
+     "figure is what the models cost to run, never a bill.",
+     frozenset({"spend"})),
 )
 
 #: The things Smith does WITH an application rather than TO it. Not verbs:
