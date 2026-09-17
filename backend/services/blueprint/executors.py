@@ -3206,7 +3206,53 @@ def make_executor(
             logger.warning("[patch] %s: %s", spec.subject, exc)
             return None
 
+    def _edit_repair(spec: TaskSpec) -> AgentResult | None:
+        """An observer repair as edits to the accepted answer (see
+        ``artifact_patch``); ``None`` means rewrite in full, as before."""
+        from services.blueprint.artifact_patch import patch_node_output
+        from services.blueprint.orchestrator import DAG
+
+        client = (model.for_task(spec.node, spec.agent)
+                  if isinstance(model, ModelRouter) else model)
+        try:
+            with svc.lock:
+                system, context = build_prompt(
+                    svc.doc, spec.node,
+                    inline_schema=not getattr(client, "enforces_schema", True),
+                    subject=spec.subject, feedback="", references=[],
+                    output_dir=svc.output_dir, brief="",
+                )
+                project = str(svc.doc.get("application", {}).get("id", ""))
+            result = patch_node_output(
+                spec, client, system=system, produces=DAG[spec.node].produces,
+                task_id=spec.task_id, context=context, usage=usage,
+                project=project)
+        except Exception as exc:  # noqa: BLE001 — an edit that breaks is a rewrite
+            logger.warning("[edit-repair] %s: %s", spec.node, exc)
+            return None
+        if result is None:
+            return None
+        # The same identity pins a rewrite gets, so an edited fan-out subject
+        # still updates only its own artifacts.
+        if spec.node == "workflow_steps":
+            with svc.lock:
+                pin_workflow_identity(svc, spec.subject, result)
+        elif spec.node == "page_details":
+            with svc.lock:
+                pin_page_identity(svc, spec.subject, result)
+        return result
+
     def executor(spec: TaskSpec) -> AgentResult:
+        # A REPAIR EDITS WHAT WAS ACCEPTED. Only an observer repair carries
+        # `current`; a retry after a refusal has no accepted answer and
+        # rewrites. The two data-model envelopes are a different reply shape
+        # and both nodes are off the observer, so they keep the rewrite.
+        if (spec.feedback and getattr(spec, "current", ())
+                and spec.agent != "a2ui_pages"
+                and spec.node not in SCHEMA_BY_NODE):
+            edited = _edit_repair(spec)
+            if edited is not None:
+                return edited
         if spec.agent == "a2ui_pages" and spec.subject:
             # A REPAIR EDITS; A FIRST PASS COMPOSES. `feedback` is set only on
             # a retry or an observer repair, and only a page with an accepted

@@ -1005,6 +1005,12 @@ class TaskSpec:
     #: design system: primary colour green"). Feedback is about the last
     #: attempt; a brief is about this one.
     brief: str = ""
+    #: What this subject currently has in the document, as
+    #: ``({section, natural_key, body}, ...)`` — set only on an observer
+    #: repair, so the author can EDIT its accepted answer rather than write
+    #: it again (see ``artifact_patch``). Empty on a first pass and on a retry
+    #: after a refusal, where there is no accepted answer to edit.
+    current: tuple = ()
 
 
 @dataclass
@@ -1572,12 +1578,26 @@ def _execute(
     def dispatch_repair(pool: ThreadPoolExecutor, key: str, subject: str,
                         task: Any, limit: int) -> None:
         """Send one subject back to its author with the observer's brief."""
+        from services.blueprint.artifact_patch import editable_artifacts
         w = watches[key]
         n = w.rounds[subject] = w.rounds.get(subject, 0) + 1
+        # THE ACCEPTED ANSWER, SO THE REPAIR CAN EDIT IT. Read under the
+        # lock from what this subject is currently recorded as having
+        # written; after a landed repair that is the repaired output.
+        with svc.lock:
+            try:
+                current = tuple(editable_artifacts(
+                    svc.doc, DAG[key].produces,
+                    w.authored.get(subject, set()),
+                    output_dir=getattr(svc, "output_dir", None)))
+            except Exception as exc:  # noqa: BLE001 — then it rewrites
+                logger.info("[%s] no editable output for %s: %s",
+                            key, subject, exc)
+                current = ()
         spec = TaskSpec(
             task_id=f"TASK-{task.label}-observer{n}",
             node=key, agent=task.agent, attempt=n,
-            subject=subject, feedback=task.feedback,
+            subject=subject, feedback=task.feedback, current=current,
         )
         _note(ledger, "repair", key, subject, n, limit, task.feedback)
         fut = pool.submit(_call, executor, spec)
