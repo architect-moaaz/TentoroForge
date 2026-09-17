@@ -1814,7 +1814,64 @@ def project_dispatches(doc: dict, app_root: str | Path) -> dict[str, Any]:
     entries = dispatches(doc)
     (out / "dispatches.json").write_text(
         json.dumps({"dispatches": entries}, indent=2, sort_keys=True) + "\n", "utf-8")
-    return {"files": ["src/contracts/dispatches.json"], "dispatches": len(entries)}
+    files = ["src/contracts/dispatches.json",
+             project_incident_map(doc, entries, app_root)["files"][0]]
+    return {"files": files, "dispatches": len(entries)}
+
+
+def project_incident_map(doc: dict, entries: list[dict],
+                         app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/incident-map.ts`` — what the running app needs to
+    describe its own failures in the owner's words rather than in ids.
+
+    THE SAME CONTRACT, READ AT THE OTHER END. `verify_dispatches` fails a
+    build naming the route, the control and the workflow; when the same wire
+    breaks in front of a customer months later, the reporter has only a
+    workflow id and a browser path. These two tables close that: the routes
+    let a concrete path (`/cases/8f2a…`) be reported as the pattern it matched
+    (`/cases/[id]`) and never as itself, and the controls let a failed
+    dispatch be named `Approve` on the case page.
+
+    Written from `entries` — the dispatch manifest already computed above —
+    so there is one source for what the build checked and what the run
+    reports, not two that can disagree.
+    """
+    routes = sorted({str(p.get("route")) for p in _live(doc.get("pages")) if p.get("route")}
+                    | {str(e.get("route")) for e in entries if e.get("route")})
+    # KEYED BY BOTH NAMES THE RUNTIME MIGHT USE. A control's `workflow` prop
+    # carries the Blueprint id; the projected definition is filed under its
+    # slug, and the execute route sees whichever the dispatcher sent. This is
+    # the same doubling `project_launch_roles` does, for the same reason — a
+    # lookup that misses names no control and the crash reads as an id again.
+    slugs = {str(w.get("id")): _workflow_slug(w)
+             for w in _live(doc.get("workflows")) if w.get("id")}
+    controls: dict[str, list[dict[str, str]]] = {}
+    for entry in entries:
+        wf = str(entry.get("workflow") or "")
+        if not wf:
+            continue
+        wired = {"route": str(entry.get("route") or ""),
+                 "control": str(entry.get("control") or ""),
+                 "label": str(entry.get("label") or "")}
+        for key in {wf, slugs.get(wf, wf)}:
+            controls.setdefault(key, []).append(dict(wired))
+    lib = Path(app_root) / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    (lib / "incident-map.ts").write_text(
+        "// Written by the Blueprint projection (project_incident_map) from the same\n"
+        "// dispatch contract the build-time dry run reads. Edit the Blueprint, not\n"
+        "// this file.\n"
+        "\n"
+        "/** Every route the application declares, as patterns (`/cases/[id]`). */\n"
+        f"export const ROUTES: string[] = {json.dumps(routes, indent=2)};\n"
+        "\n"
+        "/** workflow id -> the controls wired to it. */\n"
+        "export const CONTROLS: Record<string, Array<{ route: string; control: string; "
+        "label: string }>> =\n"
+        f"{json.dumps(controls, indent=2, sort_keys=True)};\n",
+        "utf-8")
+    return {"files": ["src/lib/incident-map.ts"], "routes": len(routes),
+            "workflows": len(controls)}
 
 
 def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:
@@ -1939,15 +1996,61 @@ def _humanise_field(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", " ", name).replace("_", " ").strip().title()
 
 
+#: A field the seed must not invent a value for, however the Blueprint spells
+#: it. Anything this writes is either a plaintext password — a readable
+#: credential in a file that is committed, exported and published (§42) — or a
+#: label like "Password Hash 1", and BOTH produce an account that cannot be
+#: signed into, because `auth.ts` bcrypt-compares what it finds.
+#:
+#: THREE RULES ABOUT CREDENTIAL-SHAPED NAMES, because they answer three
+#: different questions, and each is narrower than the last on purpose:
+#:
+#:   * `sensitive_column_guard.is_sensitive_column` — what never reaches a
+#:     SCREEN or a generated payload. The widest: reset tokens, client
+#:     secrets and private keys have no business being displayed either.
+#:   * `functional_completeness._CREDENTIAL_COLUMNS` — what a WORKFLOW may
+#:     not write to a platform table. Wide is free there: a workflow has no
+#:     business writing `salt` to `users` either.
+#:   * this one — what the seed may not DERIVE A VALUE FOR, in any table.
+#:     Over-reaching here corrupts demo data: `salt` is a real column in a
+#:     recipe app and `passes` in a gym one, and blanking them to protect a
+#:     credential trades one broken application for another. It is also held
+#:     to what the runtime can fill (`_unusableCredentials` fills a
+#:     password column and nothing else), so omitting more than that would
+#:     lose the whole row to a NOT NULL constraint instead.
+#:
+#: A column whose name contains "password" is a credential in every
+#: application there is. That is the whole rule, with no exceptions to keep.
+def _is_credential_field(name: str) -> bool:
+    return "password" in re.sub(r"[^a-z]", "", str(name or "").lower())
+
+
 def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, Any]:
     """Write ``src/db/seed.json`` — a few rows per entity.
 
     A preview of an empty database shows empty states everywhere, which looks
     identical to a broken one. Values are derived, never random, so the same
     Blueprint seeds the same rows and a screenshot is reproducible.
+
+    NO CREDENTIAL IS DERIVED. A `password`/`passwordHash` field is left out of
+    every row: the seed cannot produce a value that works (a hash is not
+    derivable from a Blueprint) and every value it could produce is a readable
+    credential in a file that ships. The runtime seed fills the column with a
+    hash nobody holds, so the row exists as data and the account cannot be
+    signed into — `admin@example.com` and the invited accounts are the ways in.
+
+    AN ENTITY THE OWNER HAS LOADED DATA INTO GETS NONE. The demo rows exist so
+    an empty screen is not mistaken for a broken one; an entity holding the
+    business's real records does not have that problem, and "Customer 1" sat
+    beside four hundred real customers is not demo data, it is a mistake in
+    their data. `data.imports` is the declaration
+    (`services.smith.data_import`); the rows themselves are in the app's own
+    database, never here.
     """
     entities = [e for e in (doc.get("data") or {}).get("entities") or []
                 if e.get("status") != "DEPRECATED"]
+    imported = {str(i.get("entity")) for i in ((doc.get("data") or {}).get("imports") or [])
+                if isinstance(i, dict) and i.get("entity")}
     tables_by_id = {str(e.get("id")): (e.get("table") or to_snake(e.get("name") or "entity"))
                     for e in entities if e.get("id")}
 
@@ -1955,11 +2058,15 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, An
     for entity in entities:
         table = entity.get("table") or to_snake(entity.get("name") or "entity")
         name = entity.get("name") or table
+        if str(entity.get("id")) in imported:
+            continue
         out_rows = []
         for row in range(1, rows + 1):
             record = {}
             for field in entity.get("fields") or []:
                 if field.get("primaryKey"):
+                    continue
+                if _is_credential_field(field.get("name")):
                     continue
                 record[field.get("name")] = _seed_value(field, name, row, tables_by_id)
             out_rows.append(record)
@@ -2392,9 +2499,15 @@ def project_ownership_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
 #: `/signup` was gated — the gate redirected the very visitor who has no account
 #: yet straight back to `/login`, so "Sign up" never opened the signup page.
 #: The pages that create or restore a session cannot themselves require one.
+#:
+#: `set-password` is the third of them. It is where a setup link lands — the
+#: screen on which someone the owner invited, or someone whose password was
+#: reset, chooses a password. Gated, it would redirect the one visitor who
+#: certainly cannot sign in yet to the sign-in they cannot complete. It leaks
+#: nothing: the page shows only the email its own one-time token resolves to.
 _ALWAYS_OPEN: tuple[str, ...] = (
     "api/auth", "_next", "favicon.ico",
-    "login", "signup",
+    "login", "signup", "set-password",
 )
 
 

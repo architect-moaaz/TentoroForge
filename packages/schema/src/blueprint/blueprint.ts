@@ -1084,10 +1084,56 @@ export const Constraint = z.object({
   description: z.string().default(""),
 });
 
+/** One column of a spreadsheet, bound to one declared field of the entity. */
+export const ImportedColumn = z.object({
+  /** The column heading as the owner's file spells it. */
+  column: z.string(),
+  /** The declared field it was loaded into. Never a field that does not exist. */
+  field: z.string(),
+});
+
+/**
+ * A spreadsheet the owner loaded into their own application.
+ *
+ * THE ROWS ARE NOT HERE. They are the business's records; they live in the
+ * generated app's database, written by its own seeder from
+ * `src/db/imports/<id>.json`. What the Blueprint keeps is that the import
+ * HAPPENED, and under which mapping — because three producers need that fact
+ * and none of them need the data: the seed stops fabricating demo rows for an
+ * entity that now holds real ones, Smith can say what has been loaded and
+ * refuse the same file twice, and a change that leaves no trace in the
+ * Blueprint is invisible to everything else that reads it.
+ *
+ * `id` is the content hash of the file, so the same spreadsheet attached
+ * twice is the same import rather than a second copy of every row.
+ */
+export const DataImport = z.object({
+  id: z.string(),
+  entity: EntityId,
+  /** The table the rows were inserted into — what the payload file names. */
+  table: z.string(),
+  /** The file's own name, as the owner sees it in the conversation. */
+  source: z.string(),
+  /** Rows that satisfied every declared field they touch. */
+  rowCount: z.number().int().nonnegative().default(0),
+  /** Rows the import left out, and why is in the conversation, not here. */
+  rejectedCount: z.number().int().nonnegative().default(0),
+  columns: z.array(ImportedColumn).default([]),
+  /**
+   * Columns deliberately left out, by name. A column with no field is a
+   * REFUSAL, not a silent drop — this records only the ones the owner then
+   * said to import without.
+   */
+  ignoredColumns: z.array(z.string()).default([]),
+  importedAt: z.string().default(""),
+});
+
 export const DataModel = z.object({
   entities: z.array(Entity).default([]),
   relationships: z.array(Relationship).default([]),
   constraints: z.array(Constraint).default([]),
+  /** Spreadsheets loaded into the application's own database (§11). */
+  imports: z.array(DataImport).default([]),
 });
 
 // ===========================================================================

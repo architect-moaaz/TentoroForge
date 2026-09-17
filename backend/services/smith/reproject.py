@@ -36,6 +36,7 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
         project_launch_roles, project_middleware, project_public_resources,
         project_public_routes, project_seed, project_shell,
     )
+    from services.smith import accounts as _accounts
 
     files: list[str] = []
 
@@ -62,7 +63,19 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
                      ("entity_access", project_entity_access),
                      ("launch_roles", project_launch_roles)):
         _run(name, lambda fn=fn: fn(svc.doc, app_root))
+    # AN UNDONE IMPORT MUST STOP BEING LOADED. The declaration is gone from
+    # the restored document; its payload file has to go from the app tree too,
+    # or the seeder applies it on the next boot and the undo undid nothing.
+    # Before the seed, because the seed's content depends on which entities
+    # still hold imported data.
+    _run("imports", lambda: {"files": _reconcile_imports(svc.doc, app_root)})
     _run("seed", lambda: project_seed(svc.doc, app_root))
+    # THE ROSTER IS NOT IN THE DOCUMENT, and is re-projected anyway. Who may
+    # log in is a project ledger, not a Blueprint section (`smith.accounts`),
+    # so restoring an older document must not disturb it — but the file the
+    # seed reads lives in the app tree, and putting every projection back in
+    # step means putting that one back too.
+    _run("accounts", lambda: {"files": _accounts.project(svc.output_dir, app_root)})
     _run("design_tokens", lambda: project_design_tokens(svc.doc, app_root))
     # THE RAIL IS A PROJECTION TOO, and this list did not have it:
     # `apply_frontend_projection` writes the page schemas, not `shell.json`.
@@ -75,6 +88,11 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
     _run("shell", lambda: project_shell(svc.doc, app_root))
     _run("brand_logo", lambda: project_brand_logo(svc.doc, app_root))
     return sorted(set(f for f in files if f))
+
+
+def _reconcile_imports(doc: dict, app_root: str) -> list[str]:
+    from services.smith.data_import import reconcile
+    return reconcile(doc, app_root)
 
 
 __all__ = ["everything"]

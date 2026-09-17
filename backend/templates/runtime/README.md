@@ -175,3 +175,46 @@ export function SurveyForm() {
   // ...
 }
 ```
+
+## Telling Forge When It Breaks
+
+`error_reporter.ts` is how a generated app reports its own failures, so that
+an owner typing "it crashed" or "it's really slow" into Smith gets an answer
+made of what happened rather than a paraphrase of the complaint.
+
+- **Crashes** POST to `/api/projects/<id>/runtime-exceptions`. Identical
+  crashes inside a short window coalesce — a loop is one thing to fix.
+- **Slow responses** POST to `/api/projects/<id>/incidents`. These never
+  coalesce: for slowness the repeats *are* the measurement.
+- Both land in the project's own `.forge/incidents.jsonl`, beside its run
+  ledger, readable with `cat` on a host with no database.
+
+Configured by `FORGE_URL`, `FORGE_PROJECT_ID` and `FORGE_SLOW_MS` (default
+2000). With the first two missing the reporter no-ops, so a dev machine with
+no Forge running still boots.
+
+### What is sent, and what must not be
+
+A crash payload can carry a customer's data, and that data belongs to the
+owner of the application, not to the platform that generated it. Two rules
+hold, and both are structural — properties of what the reporter can reach,
+not filters that inspect content and decide:
+
+1. **Values never leave.** A report carries the *names* of what was involved:
+   the route pattern, the control's label, the workflow, the step, and the
+   **keys** of the payload a control sent. `payload_keys` comes from
+   `Object.keys` at the call site; the object itself never enters this module.
+2. **The route is a pattern, not a URL.** `routePattern` matches the browser's
+   path against the routes this app declares (`incident-map.ts`, written by
+   the projection from the same dispatch contract the build-time dry run
+   reads) and sends `/cases/[id]`, never `/cases/8f2a…`. A path matching
+   nothing declared is not sent. The query string is never read.
+
+The exception message is the one thing that cannot be made structural — a
+database driver writes the offending value into its own text. It is sent,
+because a crash without it is unactionable, and that is why the report lands
+in the owner's own project directory and nowhere else.
+
+**If you add a catch site, pass locators, never content.** There is no
+`request_body` and no `user_context`; the ingest endpoint rejects any field it
+does not declare.

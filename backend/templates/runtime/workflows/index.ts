@@ -1087,7 +1087,6 @@ export function registerDefaultActions(): void {
         source_file: "src/lib/workflows/index.ts",
         workflow_id: (config as any)?.__workflowId || (ctx as any)?.workflow?.id,
         node_id: (config as any)?.__nodeId,
-        page_route: typeof window !== "undefined" ? window.location?.pathname : undefined,
       });
       return { error: String(err) };
     }
@@ -1146,7 +1145,6 @@ export function registerDefaultActions(): void {
         source_file: "src/lib/workflows/index.ts",
         workflow_id: (config as any)?.__workflowId || (ctx as any)?.workflow?.id,
         node_id: (config as any)?.__nodeId,
-        page_route: typeof window !== "undefined" ? window.location?.pathname : undefined,
       });
       return { error: String(err) };
     }
@@ -1180,7 +1178,6 @@ export function registerDefaultActions(): void {
         source_file: "src/lib/workflows/index.ts",
         workflow_id: (config as any)?.__workflowId || (ctx as any)?.workflow?.id,
         node_id: (config as any)?.__nodeId,
-        page_route: typeof window !== "undefined" ? window.location?.pathname : undefined,
       });
       return { error: String(err) };
     }
