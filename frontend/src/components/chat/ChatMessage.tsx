@@ -2,6 +2,7 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { MarkdownLink } from "./MarkdownLink";
 import { User, Bot, Undo2, Brain, CheckCircle2 } from "lucide-react";
 import type { ChatMessage as ChatMessageType } from "@/types/project";
 import { PlanCard } from "./PlanCard";
@@ -283,7 +284,10 @@ export function ChatMessage({ message, onSend, isGenerating, isLastAssistantMess
                 {isUser ? (
                   message.content
                 ) : (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{ a: MarkdownLink }}
+                  >
                     {message.content}
                   </ReactMarkdown>
                 )}

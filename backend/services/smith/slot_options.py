@@ -29,6 +29,11 @@ ASKS: dict[str, str] = {
     "api": "Which endpoint?",
     "integration": "Which outside service?",
     "change": "What should be different about it?",
+    # An account is identified by the address its person signs in with, so the
+    # question asks for that and says why — "which person?" invites "Dave",
+    # which is the request again rather than an answer to it.
+    "email": "What email address will they sign in with?",
+    "person": "Which person? Their email address, or the name their login was set up under.",
     "new_value": "What should it say instead?",
     "element_label": "Which control? Copy the words printed on it.",
     "widgets": "What should go on it?",

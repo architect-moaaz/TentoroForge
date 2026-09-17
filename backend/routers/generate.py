@@ -7873,6 +7873,55 @@ async def _handle_fix_proposal_agent(
     yield sse_event("message", {"text": clarify})
 
 
+def _sheets_to_inbox(project: Project, output_dir: str,
+                     attachment_ids: list[str]) -> list[dict]:
+    """Put every spreadsheet on this turn in the project's import inbox.
+
+    Returns one record per spreadsheet, each with the `note` the turn carries
+    in place of the file's contents: its name, how many rows it holds, its
+    column headings and the first few rows. Enough for Smith to choose the
+    verb and name the entity; not enough to invent a record.
+
+    The inbox rather than an id threaded through three call paths: every
+    caller of the import — the tool loop, `SmithSession`, the CLI — has
+    `output_dir` and nothing else.
+    """
+    from services import chat_attachments
+    from services.smith import data_import
+
+    root = chat_attachments.attachments_root()
+    out: list[dict] = []
+    for rec in chat_attachments.describe(root, str(project.id), attachment_ids):
+        name = str(rec.get("filename") or "")
+        if not data_import.is_spreadsheet(name):
+            continue
+        blob = chat_attachments.read_attachment(root, str(project.id), rec["id"])
+        if blob is None:
+            continue
+        try:
+            accepted = data_import.accept(output_dir, name, blob[0])
+            columns, rows, how = data_import.read_sheet(
+                data_import.inbox_dir(output_dir) / accepted["id"] /
+                f"source{Path(name).suffix.lower()}")
+        except Exception as exc:  # noqa: BLE001 — a bad file is a note, not a lost turn
+            logger.warning("spreadsheet %s not readable: %s", name, exc)
+            out.append({"id": rec["id"], "note": (
+                f"They attached {name}, and I could not read it: {exc}")})
+            continue
+        preview = "\n".join(
+            "  | ".join(f"{c}={str(r.get(c, ''))[:40]}" for c in columns[:8])
+            for r in rows[:data_import.PREVIEW_ROWS])
+        out.append({"id": rec["id"], "note": (
+            f"<attached-spreadsheet name=\"{name}\" rows=\"{len(rows)}\">\n"
+            f"Read as {how}. Its columns are: {', '.join(columns)}.\n"
+            f"The first {min(len(rows), data_import.PREVIEW_ROWS)} row(s), so "
+            f"you can see what they hold:\n{preview}\n"
+            f"THE REST OF THE ROWS ARE ON DISK, deliberately not here. To load "
+            f"them, call import_data with the kind of record they are — never "
+            f"type a row into a tool call.\n</attached-spreadsheet>")})
+    return out
+
+
 async def _handle_smith_turn(project: Project, message: str, deferred: dict | None = None, current_route: str | None = None, attachment_ids: list[str] | None = None):
     """FORGE_SMITH turn — the conversational build/fix assistant.
 
@@ -8533,10 +8582,24 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
             if attachment_ids:
                 try:
                     from services import chat_attachments
+                    # A SPREADSHEET IS NOT A DOCUMENT TO READ. An owner
+                    # attaching one means "load this in", so it goes to the
+                    # project's import inbox — where `import_data` reads it
+                    # from disk — and the turn gets a NOTE about it instead of
+                    # its rows. Four hundred customers in the prompt is
+                    # thousands of tokens the model must not read, and an
+                    # invitation to transcribe records it should never touch.
+                    _sheets = _sheets_to_inbox(project, output_dir,
+                                               list(attachment_ids))
+                    _rest = [a for a in attachment_ids
+                             if a not in {s["id"] for s in _sheets}]
                     _attach_blocks = chat_attachments.load_blocks(
                         chat_attachments.attachments_root(),
-                        str(project.id), list(attachment_ids))
-                    logger.info("smith turn: %d attachment block(s)", len(_attach_blocks))
+                        str(project.id), _rest)
+                    _attach_blocks += [{"type": "text", "text": n}
+                                       for n in (s["note"] for s in _sheets)]
+                    logger.info("smith turn: %d attachment block(s), %d spreadsheet(s)",
+                                len(_attach_blocks), len(_sheets))
                 except Exception as _e:  # noqa: BLE001 — never lose the turn
                     logger.warning("attachment load failed: %s", _e)
 
