@@ -1973,8 +1973,24 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 #: pages and 78 repaired ones and passed none; two repair rounds per page were
 #: minutes spent to reach the verdict the first look gave. The verdict is still
 #: taken and recorded as the page's note; nothing is re-composed for it.
+#: `entity_fields`: 0 — across 71 observed runs (2026-09-10..17) it was sent back
+#: 25 times and passed 4; the other 21 were flagged unrepaired, and none of
+#: those passed in a later run. Its author details the one entity it is handed,
+#: and most findings asked for what only the whole data model can change. The
+#: entity is still held to its contract when it is applied and checked by
+#: `verification` at the end.
+#: `requirements`: 0 — a product decision (2026-09-17), taken for the time and
+#: spend. It was the node the observer repaired best (14 of 15 sent back
+#: passed), so what it caught now reaches later nodes and the terminal
+#: `verification` unrepaired.
+#: `database`: 0 — sent back 8 times, 3 passed, 5 flagged. `integrations`: 0 —
+#: sent back once and flagged. Product decision the same day, for time and spend.
 OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
     "page_layouts": 0,
+    "entity_fields": 0,
+    "requirements": 0,
+    "database": 0,
+    "integrations": 0,
 }
 
 
