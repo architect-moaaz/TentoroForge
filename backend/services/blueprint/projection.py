@@ -2758,6 +2758,198 @@ def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
             "redirectsTo": None if root_page else landing_route(doc)}
 
 
+#: Written into every route file this projector emits, and the only way the
+#: sweep below can tell a file it owns from one the scaffold shipped or a
+#: person wrote. A marker rather than a manifest: a manifest is a second
+#: statement of which routes are public, and the two would drift.
+_PUBLIC_ROUTE_MARKER = "@generated forge:public-route"
+
+#: Top-level directories under `src/app` that belong to the scaffold or to
+#: Next. A Blueprint page that claims one of these routes is refused rather
+#: than written, because writing it would replace the sign-in screen with a
+#: form, or shadow the API the application talks to.
+_RESERVED_APP_SEGMENTS = frozenset({
+    "api", "login", "signup", "403", "_next", "favicon.ico",
+})
+
+#: A path segment is a plain slug or a single dynamic parameter. `route` comes
+#: out of a JSON document and becomes a DIRECTORY NAME; `..` in it would put a
+#: generated file anywhere on the disk the process can write.
+#:
+#: THE FIRST VERSION OF THIS PATTERN ADMITTED `..`, because `[A-Za-z0-9._-]+`
+#: matches it and the comment above says what the author meant rather than what
+#: the regex did. `/a/../b` wrote outside the directory it was given. A segment
+#: has to CONTAIN something that is not a dot.
+_ROUTE_SEGMENT = re.compile(
+    r"^(?:(?=[^.])[A-Za-z0-9._-]+|\[[A-Za-z_][A-Za-z0-9_]*\])$")
+
+
+def _public_route_file(route: str) -> str:
+    """The `page.tsx` that renders one public route, outside the gated group.
+
+    It is a thin call into `renderSchemaPage`, the same one every other route
+    file makes; what makes it different is only WHERE it sits.
+    """
+    segments = [seg for seg in route.split("/") if seg]
+    params = [seg[1:-1] for seg in segments if seg.startswith("[")]
+    head = (
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        f"// {_PUBLIC_ROUTE_MARKER}\n"
+        "//\n"
+        f"// {route} is declared PUBLIC, and a public page must not sit inside\n"
+        "// `(dashboard)` — that group's layout opens with `if (!session)\n"
+        "// redirect(\"/login\")`, so the projected middleware opened the route and\n"
+        "// the layout closed it again. A static segment outranks the group's\n"
+        "// `[entity]`, so this file is what Next matches, and the visitor gets the\n"
+        "// page instead of a sign-in screen.\n"
+        "//\n"
+        "// It also renders with no rail, which is what `nav-flow` already says\n"
+        "// about it (`shell: false`): navigation into a product the visitor\n"
+        "// cannot reach is worse than no navigation.\n"
+        "\n"
+        'import { renderSchemaPage } from "@/lib/schema-page";\n'
+        'import { PublicPageFrame } from "@/components/PublicPageFrame";\n'
+        "\n"
+    )
+    search = ("  searchParams?: Promise<Record<string, string | string[] | "
+              "undefined>>;\n")
+    if not params:
+        return (
+            head
+            + "export default async function PublicPage({ searchParams }: {\n"
+            + search
+            + "}) {\n"
+            + f'  const request = new Request("internal:?path={_encode(route)}");\n'
+            + "  return (\n"
+            + "    <PublicPageFrame>\n"
+            + f'      {{await renderSchemaPage("{route}", request, await searchParams)}}\n'
+            + "    </PublicPageFrame>\n"
+            + "  );\n"
+            + "}\n"
+        )
+    # The CONCRETE path is rebuilt from the params so breadcrumb ancestors
+    # resolve (renderer's `resolveCrumbHrefs` reads it), and the LAST dynamic
+    # segment rides as `id` — the key `data-engine-bridge` reads to turn a
+    # detail page into `engine.findById`. Right-to-left is the same preference
+    # the catch-all applies when it decides which segment was the record.
+    fields = ", ".join(f"{name}: string" for name in params)
+    literal = "/".join(
+        ("${encodeURIComponent(p." + seg[1:-1] + ")}") if seg.startswith("[") else seg
+        for seg in segments
+    )
+    return (
+        head
+        + "export default async function PublicPage({ params, searchParams }: {\n"
+        + f"  params: Promise<{{ {fields} }}>;\n"
+        + search
+        + "}) {\n"
+        + "  const p = await params;\n"
+        + f"  const path = `/{literal}`;\n"
+        + f"  const request = new Request(\n"
+        + f"    `internal:?id=${{encodeURIComponent(p.{params[-1]})}}"
+          "&path=${encodeURIComponent(path)}`,\n"
+        + "  );\n"
+        + "  return (\n"
+        + "    <PublicPageFrame>\n"
+        + f'      {{await renderSchemaPage("{route}", request, await searchParams)}}\n'
+        + "    </PublicPageFrame>\n"
+        + "  );\n"
+        + "}\n"
+    )
+
+
+def _encode(route: str) -> str:
+    from urllib.parse import quote
+    return quote(route, safe="")
+
+
+def project_public_routes(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Give every PUBLIC page its own route file, outside ``(dashboard)``.
+
+    THE MIDDLEWARE OPENED THE DOOR AND THE LAYOUT CLOSED IT. `project_middleware`
+    builds its matcher from what each page declares, so `/nurse-registration`
+    was excluded from the gate exactly as the Blueprint asked. But Next matches
+    a one-segment URL against `src/app/(dashboard)/[entity]/page.tsx`, and that
+    group's layout begins `if (!session) redirect("/login")` — it has no notion
+    of a public route and never did. So an anonymous visitor to a page declared
+    public got the sign-in screen, and `entity_access`'s `"*"` readers and
+    `launch_roles`'s `"*"` launchers — both already projected for exactly this
+    visitor — were never reached by anyone.
+
+    A static segment outranks a dynamic one in Next's matcher, so a file at
+    `src/app/nurse-registration/page.tsx` is what a request resolves to, and it
+    sits outside the group and therefore outside the gate. Which is also the
+    honest structure: a public page is not part of the dashboard, and saying so
+    with a directory is better than teaching the dashboard's layout to render
+    some of its children without itself.
+
+    `/` is left alone: the optional catch-all already serves it from outside
+    the group, so a public root page was the one case that always worked.
+
+    Files this projector wrote before and would not write now are removed. A
+    page that stops being public must stop having a door around the gate, and
+    the sweep is by the marker each file carries rather than by a manifest —
+    a manifest would be a second statement of which routes are public.
+    """
+    app = Path(app_root) / "src" / "app"
+    wanted: dict[Path, str] = {}
+    refused: list[str] = []
+
+    for page in _live(doc.get("pages")):
+        if (page.get("access") or "authenticated") != "public":
+            continue
+        route = str(page.get("route") or "")
+        if not route.startswith("/") or route == "/":
+            continue
+        segments = [seg for seg in route.split("/") if seg]
+        if not all(_ROUTE_SEGMENT.match(seg) for seg in segments):
+            refused.append(route)
+            logger.warning("[public-routes] %s is not a shape we can make a "
+                           "directory of — left inside the gate", route)
+            continue
+        if segments[0].lower() in _RESERVED_APP_SEGMENTS:
+            # Writing this would replace the sign-in screen, or shadow the API
+            # the application talks to. Named, not silently skipped: the page
+            # will not be reachable and someone has to know why.
+            refused.append(route)
+            logger.warning("[public-routes] %s collides with a route the scaffold "
+                           "owns (%s) — not written", route, segments[0])
+            continue
+        wanted[app.joinpath(*segments, "page.tsx")] = _public_route_file(route)
+
+    written: list[str] = []
+    for dest, body in sorted(wanted.items()):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(body, "utf-8")
+        written.append(str(dest.relative_to(Path(app_root))))
+
+    removed: list[str] = []
+    # LISTED BEFORE ANYTHING IS DELETED. `rglob` walks the tree lazily, so
+    # removing a directory mid-iteration makes it raise FileNotFoundError on
+    # the descent it had already queued — the sweep died partway through and
+    # left some of the files it had decided to take out.
+    stale = sorted(app.rglob("page.tsx")) if app.is_dir() else []
+    for existing in stale:
+        if existing in wanted:
+            continue
+        try:
+            if _PUBLIC_ROUTE_MARKER not in existing.read_text("utf-8"):
+                continue
+        except OSError:                          # unreadable: not ours to delete
+            continue
+        existing.unlink()
+        removed.append(str(existing.relative_to(Path(app_root))))
+        # A directory that held nothing but that file is now noise Next still
+        # walks; take it back out, parents included, up to `src/app`.
+        parent = existing.parent
+        while parent != app and parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+            parent = parent.parent
+
+    return {"files": sorted(written), "removed": sorted(removed),
+            "refused": sorted(refused)}
+
+
 def project_append_only_entities(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/lib/append-only-entities.ts`` — imported by the data engine.
 

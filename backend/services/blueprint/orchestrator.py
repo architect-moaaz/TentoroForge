@@ -2609,7 +2609,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     """Everything the browser reads: page schemas, the route graph, the tokens."""
     from services.blueprint.projection import (
         apply_frontend_projection, project_brand_logo, project_design_tokens,
-        project_middleware, project_public_resources,
+        project_middleware, project_public_resources, project_public_routes,
         project_nav_flow, project_root_route, project_shell,
     )
 
@@ -2671,6 +2671,10 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     project_middleware(svc.doc, app_root)
     # The data route needs the same list the matcher was built from.
     project_public_resources(svc.doc, app_root)
+    # …and a page the matcher lets through needs a door that is not inside
+    # `(dashboard)`, whose layout redirects anyone without a session. After
+    # the middleware, because the two are one statement about the same pages.
+    project_public_routes(svc.doc, app_root)
     project_root_route(svc.doc, app_root)
 
     # DROP-AND-CONTINUE, NOT DROP-THE-APPLICATION. A page whose authored tree

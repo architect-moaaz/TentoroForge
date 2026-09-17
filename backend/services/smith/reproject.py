@@ -34,7 +34,7 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
         apply_frontend_projection, project_brand_logo, project_business_rules,
         project_data_layer, project_design_tokens, project_entity_access,
         project_launch_roles, project_middleware, project_public_resources,
-        project_seed, project_shell,
+        project_public_routes, project_seed, project_shell,
     )
 
     files: list[str] = []
@@ -55,6 +55,10 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
     _run("business_rules", lambda: project_business_rules(svc.doc, app_root))
     for name, fn in (("middleware", project_middleware),
                      ("public_resources", project_public_resources),
+                     # An undo that makes a page private again has to take its
+                     # route file back out, or the page stays reachable without
+                     # a session long after the document stopped saying so.
+                     ("public_routes", project_public_routes),
                      ("entity_access", project_entity_access),
                      ("launch_roles", project_launch_roles)):
         _run(name, lambda fn=fn: fn(svc.doc, app_root))
