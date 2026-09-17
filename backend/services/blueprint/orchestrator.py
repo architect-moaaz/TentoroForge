@@ -1969,10 +1969,12 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 }
 
 #: Observer repair rounds per node, where the default (the observer's own
-#: `rounds`) is wrong. `page_layouts`: 0 — the critic has judged 149 composed
-#: pages and 78 repaired ones and passed none; two repair rounds per page were
-#: minutes spent to reach the verdict the first look gave. The verdict is still
-#: taken and recorded as the page's note; nothing is re-composed for it.
+#: `rounds`) is wrong. A node at 0 is NOT JUDGED AT ALL: `finish` does not send
+#: it to the critic, since a verdict nothing can act on only costs a call.
+#: `page_layouts`: 0 — the critic has judged 149 composed pages and 78 repaired
+#: ones and passed none; two repair rounds per page were minutes spent to reach
+#: the verdict the first look gave. A page is still held to its contract and
+#: floor when it is composed, and checked by `verification` at the end.
 #: `entity_fields`: 0 — across 71 observed runs (2026-09-10..17) it was sent back
 #: 25 times and passed 4; the other 21 were flagged unrepaired, and none of
 #: those passed in a later run. Its author details the one entity it is handed,
