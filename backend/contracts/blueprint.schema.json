@@ -2780,6 +2780,28 @@
             "status"
           ],
           "additionalProperties": false
+        },
+        "boot": {
+          "type": "object",
+          "properties": {
+            "entry": {
+              "type": "string"
+            },
+            "port": {
+              "type": "number"
+            },
+            "status": {
+              "type": "number"
+            },
+            "seconds": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "entry",
+            "status"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,

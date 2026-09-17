@@ -150,6 +150,28 @@ class ModelRefused(RuntimeError):
     """The model declined the request (§ `stop_reason: "refusal"`)."""
 
 
+class NoAnswer(RuntimeError):
+    """The model stopped without writing any answer at all.
+
+    MEASURED ON UAT, and reported there as `StopIteration: ` — an empty
+    message on a failed node, twice, with every node after it skipped.
+    `page_contracts` for a 23-entity application spent its whole output budget
+    reasoning and returned a message holding thinking and no text block, and
+    `next(b.text for b in ...)` raised on the empty generator. The run said
+    nothing a person could act on, and the retry asked the same question with
+    the same budget and got the same nothing.
+
+    Carries the usage so the spend is still recorded: a call that consumed
+    32,000 output tokens is the most expensive kind to lose track of.
+    """
+
+    def __init__(self, message: str, usage: "Usage | None" = None,
+                 stop_reason: str | None = None) -> None:
+        super().__init__(message)
+        self.usage = usage
+        self.stop_reason = stop_reason
+
+
 # ---------------------------------------------------------------------------
 # §29 — the structured output envelope
 # ---------------------------------------------------------------------------
@@ -505,15 +527,31 @@ class AnthropicModel:
                 f"model declined this task"
                 f"{f' ({detail.category})' if detail else ''}"
             )
-        text = next(b.text for b in response.content if b.type == "text")
         u = response.usage
-        return ModelReply(text=text, usage=Usage(
+        spent = Usage(
             model=self.model,
             input_tokens=getattr(u, "input_tokens", 0) or 0,
             output_tokens=getattr(u, "output_tokens", 0) or 0,
             cache_read_tokens=getattr(u, "cache_read_input_tokens", 0) or 0,
             cache_write_tokens=getattr(u, "cache_creation_input_tokens", 0) or 0,
-        ), stop_reason=getattr(response, "stop_reason", None))
+        )
+        stop = getattr(response, "stop_reason", None)
+        # NO TEXT IS AN OUTCOME WITH A NAME. A reply can hold only thinking —
+        # the budget ran out before the answer began — and reading it with a
+        # bare `next()` raised StopIteration, which surfaced on UAT as a
+        # failed node whose reason was the empty string.
+        text = next((b.text for b in response.content
+                     if getattr(b, "type", None) == "text"), None)
+        if text is None:
+            if stop == "max_tokens":
+                why = (f"the model spent all {spent.output_tokens:,} output tokens "
+                       f"reasoning and wrote no answer — the budget "
+                       f"({self.max_tokens:,}) is too small for this task")
+            else:
+                why = (f"the model stopped ({stop or 'no stop reason'}) without "
+                       f"writing an answer")
+            raise NoAnswer(why, usage=spent, stop_reason=stop)
+        return ModelReply(text=text, usage=spent, stop_reason=stop)
 
 
 
@@ -2802,7 +2840,14 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     "data_model": 32000,
     # Declares the page set without the contracts; the 64k the single call
     # needed went on contracts, which `page_details` writes per feature.
-    "page_contracts": 32000,
+    #
+    # BACK TO 64k, BECAUSE THE SLOT LIST GROWS WITH THE APPLICATION. The table
+    # above already recorded this node reaching 32,000 once. On UAT a 23-entity
+    # laboratory app offered 24 slots in a 19,570-character question, and the
+    # model reasoned through the whole 32,000 without writing a single page —
+    # twice, failing the node and skipping every node after it. Unused headroom
+    # is free; this failure cost the entire build.
+    "page_contracts": 64000,
     "database": 64000,
     "security": 64000,
     # Declares thirty-odd workflows without their steps; the 64k the single
@@ -3208,12 +3253,24 @@ def make_executor(
                 )
             t0 = time.monotonic()
             reply_schema = SCHEMA_BY_NODE.get(spec.node, PROPOSAL_SCHEMA)
-            raw = (
-                client(system=system, user=prompt, schema=reply_schema,
-                       images=shown)
-                if shown else
-                client(system=system, user=prompt, schema=reply_schema)
-            )
+            try:
+                raw = (
+                    client(system=system, user=prompt, schema=reply_schema,
+                           images=shown)
+                    if shown else
+                    client(system=system, user=prompt, schema=reply_schema)
+                )
+            except NoAnswer as exc:
+                # Recorded before it surfaces: the call that wrote nothing is
+                # the one that spent the most. Not retried here — asking again
+                # with the same budget produced the same nothing on UAT, twice.
+                if usage is not None and exc.usage is not None:
+                    usage.record(
+                        node=spec.node, agent=spec.agent, usage=exc.usage,
+                        elapsed_s=time.monotonic() - t0,
+                        project=str(svc.doc.get("application", {}).get("id", "")),
+                    )
+                raise
             elapsed = time.monotonic() - t0
 
             # Clients may return a bare str (test fakes) or a ModelReply.

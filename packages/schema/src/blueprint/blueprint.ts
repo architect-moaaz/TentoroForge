@@ -1741,6 +1741,28 @@ export const Runtime = z.object({
       status: z.enum(["complete", "short"]),
     })
     .optional(),
+  /**
+   * Whether the assembled application actually started, and what it served.
+   *
+   * THE THIRD TIME THIS OMISSION HAS SHIPPED. `build` and `placeholders` above
+   * both record the same failure: the assemble node wrote a field this
+   * contract did not declare, `additionalProperties: false` refused it, and
+   * every generated application became unmodifiable on its next `save()`.
+   * The boot check wrote `boot` on 2026-09-17 without declaring it first, and
+   * it reached UAT that way — caught by the regression suite scanning a fresh
+   * build's Blueprint, after the cutover, not before it.
+   *
+   * `status` is the entry route's HTTP status. A boot that fails raises and is
+   * never recorded here, so a present `boot` always means the app served.
+   */
+  boot: z
+    .object({
+      entry: z.string(),
+      port: z.number().optional(),
+      status: z.number(),
+      seconds: z.number().optional(),
+    })
+    .optional(),
 });
 
 export const Database = z.object({

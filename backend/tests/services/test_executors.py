@@ -1589,8 +1589,11 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
     # The declarations are what remain of the calls that hit 32k writing
     # every field, every step and every contract; those are authored one
     # entity, one workflow and one feature per call inside the default.
-    for node in ("data_model", "workflows", "page_contracts"):
+    for node in ("data_model", "workflows"):
         assert r.for_task(node, "x").max_tokens == 32000, node
+    # The page set grows with the application: on UAT a 23-entity app spent
+    # the whole 32,000 reasoning over 24 slots and wrote no page at all.
+    assert r.for_task("page_contracts", "x").max_tokens == 64000
     for node in ("requirements", "ux_architecture", "integrations",
                  "page_layouts", "design_system", "testing", "workflow_steps",
                  "page_details", "entity_fields"):
