@@ -274,15 +274,18 @@ VERB_HELP: dict[str, str] = {
     "add_api": ("Declare an API endpoint: \"an endpoint that lists wards\". Needs it in the user's words."),
     "remove_api": ("Retire an endpoint. Needs which one (method and path, or id)."),
     "add_integration": (
-        "Declare an integration: \"send email through SendGrid\". Records the "
-        "NAMES of the secrets it needs, never their values. Needs it in the "
-        "user's words."
+        "WRITE DOWN an outside service without wiring it up: \"make a note "
+        "that we use Stripe for payments\". Records the NAMES of the secrets "
+        "it needs, never their values, and says plainly that nothing is "
+        "connected. Needs it in the user's words. NOT connect_service, which "
+        "makes the application actually talk to it."
     ),
     "remove_integration": ("Retire an integration. Needs which one."),
     "connect_service": (
         "Make the application actually talk to an outside service: \"connect "
         "it to our Outlook\", \"send the emails through our own account\", "
-        "\"connect it to Xero\". Outbound email has an adapter and is "
+        "\"send email through SendGrid\", \"connect it to Xero\". "
+        "Outbound email has an adapter and is "
         "connected for real — the service is recorded, the app sends through "
         "it, and the owner sets the key on the platform, never here. Anything "
         "else is answered with why it cannot be connected and the nearest "

@@ -410,6 +410,35 @@ sentences:
     say: "send email through SendGrid"
     checked: {colour: acts, via: handler}
     source: code
+    reaches: {verb: connect_service, states: [integration]}
+
+  # The three the document marked amber — "declared, not connected: it needs a
+  # service and its key". The service is recorded, the app is projected to
+  # send through it, and the key is set once on the platform, so the sentence
+  # reaches a connection rather than a note. "Xero" is the same verb and an
+  # honest refusal: there is no adapter, and it says so with what works.
+  - id: integration-connect-outlook
+    say: "connect it to our Outlook"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: connect_service, states: [integration]}
+
+  - id: integration-own-account
+    say: "send the emails through our own account"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: connect_service, states: [integration]}
+
+  - id: integration-connect-xero
+    say: "connect it to Xero"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: connect_service, states: [integration]}
+
+  - id: integration-note-stripe
+    say: "make a note that we use Stripe for payments"
+    checked: {colour: acts, via: handler}
+    source: code
     reaches: {verb: add_integration, states: [integration]}
 
   - id: integration-drop-stripe
