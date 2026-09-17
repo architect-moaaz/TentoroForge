@@ -907,7 +907,7 @@ async def generate_via_blueprint(
             # Effort is per node: thinking bills as output, and a node filling
             # in a constrained shape does not need a frontier thinking budget.
             # The nodes everything downstream derives from stay at `high`.
-            usage = RunUsage()
+            usage = RunUsage.for_app(svc)
             router = tiered_router()
             executor = make_executor(svc, router, usage=usage)
             # §73 — the observer judges each node as it lands and sends what
@@ -2045,7 +2045,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                   "alreadyComplete": sorted(already),
                   "awaitingApproval": not approved})
 
-    usage = RunUsage()
+    usage = RunUsage.for_app(svc)
     router = tiered_router()
     executor = make_executor(svc, router, usage=usage)
     watcher = anthropic_observer(router, usage=usage)

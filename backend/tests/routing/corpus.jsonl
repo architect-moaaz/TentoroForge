@@ -136,3 +136,8 @@
 {"say": "start again", "verb": "rebuild"}
 {"say": "that thing I said about approvals — it's the manager who approves, not the admin", "verb": "edit_requirement"}
 {"say": "use this UX Pilot page https://uxpilot.ai/p/abc123", "verb": "connect_uxpilot"}
+{"say": "how much has this cost me?", "verb": "spend", "note": "the phrasebook's last dead end"}
+{"say": "what have I spent on this so far", "verb": "spend"}
+{"say": "what did the build cost", "verb": "spend"}
+{"say": "how many tokens has this used", "verb": "spend"}
+{"say": "show me the usage", "verb": "spend"}

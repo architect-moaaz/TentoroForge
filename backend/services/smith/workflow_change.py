@@ -83,7 +83,8 @@ def _executor(svc: Any, executor: Any, reasoning: Any) -> Any:
     if executor is not None:
         return executor
     from services.blueprint.executors import RunUsage, make_executor, tiered_router
-    return make_executor(svc, tiered_router(reasoning=reasoning), usage=RunUsage(), reasoning=reasoning)
+    return make_executor(svc, tiered_router(reasoning=reasoning),
+                         usage=RunUsage.for_app(svc, phase="change"), reasoning=reasoning)
 
 
 def record_requirement(svc: Any, request: str) -> dict:

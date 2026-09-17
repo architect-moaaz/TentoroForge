@@ -1372,6 +1372,7 @@ READONLY_HANDLERS = {
     "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
     "revert":                   lambda output_dir, args: _smith_revert(output_dir),
+    "spend":                    lambda output_dir, args: _smith_spend(output_dir),
     "remove_field":             lambda output_dir, args: _smith_remove_field(output_dir, args),
     "edit_field":               lambda output_dir, args: _smith_edit_field(output_dir, args),
     "plan_and_apply":           lambda output_dir, args: _smith_plan_and_apply(output_dir, args),
@@ -2127,6 +2128,13 @@ def _smith_revert(output_dir: str) -> dict:
     always the most recent change."""
     from services.smith.revert import run as _revert_run
     return _revert_run(output_dir)
+
+
+def _smith_spend(output_dir: str) -> dict:
+    """Report what this application has cost to run. Takes no arguments — it is
+    always this application — and changes nothing."""
+    from services.smith.spend import run as _spend_run
+    return _spend_run(output_dir)
 
 
 def _smith_add_field(output_dir: str, args: dict) -> dict:
