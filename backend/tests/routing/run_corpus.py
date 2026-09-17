@@ -9,15 +9,29 @@ person who knows the right words was never the problem.
     python -m tests.routing.run_corpus --verb add_field
     python -m tests.routing.run_corpus --limit 20 --json report.json
 
-Measured on 2026-09-17, against the sample context below: 5 of 138 sentences
-reached a DIFFERENT verb (3.6%), 79 routed as labelled, and 54 asked a
-question instead — which is not a failure, and for most of those it is the
-right answer, since the sample application has no dashboard to put a widget
-on. Track the first number.
+Measured on 2026-09-17, against the sample context below and the 138 sentences
+the corpus held THEN: 5 reached a DIFFERENT verb (3.6%), 79 routed as
+labelled, and 54 asked a question instead — which is not a failure, and for
+most of those it is the right answer, since the sample application has no
+dashboard to put a widget on. Track the first number.
+
+The corpus has grown to 236 since and has not been re-measured, so that 3.6%
+describes a smaller corpus than this one. Re-run before quoting it.
 
 Calls a model once per sentence, so it costs real money and is NOT part of the
 test suite. `test_corpus.py` beside it checks the corpus itself — that every
 label is a real verb and nothing is duplicated — which is free and does run.
+
+THE OTHER HALF OF THE QUESTION lives in
+`backend/services/smith/phrasebook_corpus.yaml`. This file asks which verb the
+MODEL picks; that one asks what the CODE then does with it — acts, asks
+something back, answers with a reason, or nothing at all. They are not the
+same claim: "get rid of the export link" routes to `remove` and is still
+answered with "which screen?", because `remove` needs one and the sentence
+names none. Every sentence here is also there, and
+`tests/services/test_corpora_agree.py` fails if a sentence in both is labelled
+with two different verbs. Adding a sentence here means adding it there too;
+the failure says so.
 """
 
 from __future__ import annotations

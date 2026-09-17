@@ -53,12 +53,15 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "down the side.",
      frozenset({"restyle", "edit_navigation"})),
     ("What it is, and what it talks to",
-     "Its name and purpose, requirements written down for later, API "
-     "endpoints, and outside services — recorded with the names of their "
-     "secrets, never connected for you.",
+     "Its name and purpose, requirements written down for later, and API "
+     "endpoints. Outside services: I connect the email for real — you name "
+     "the service, set its key once on the platform, and the app sends "
+     "through it — and anything I have no adapter for I write down with the "
+     "names of the secrets it would need, and say so every time rather than "
+     "letting it look connected.",
      frozenset({"edit_product", "add_requirement", "edit_requirement",
                 "remove_requirement", "add_api", "remove_api",
-                "add_integration", "remove_integration"})),
+                "add_integration", "remove_integration", "connect_service"})),
     ("Your own data",
      "Load the records you already have — attach a spreadsheet and say which "
      "records it holds. I say how many rows would land and which column "

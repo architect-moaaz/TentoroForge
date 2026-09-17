@@ -102,11 +102,12 @@ def blueprint_to_context(
     rules = _render_rules(bp)
     workflows = _render_workflows(bp)
     pages = _render_pages(bp)
+    integrations = _render_integrations(bp)
     decisions = _render_design_decisions(bp)
 
     core_sections = "\n".join(
         s for s in (header, domain, requirements, entities, rules, workflows,
-                    pages, decisions) if s
+                    pages, integrations, decisions) if s
     )
 
     remaining = max(0, budget.max_chars - len(core_sections) - 200)
@@ -258,6 +259,60 @@ def _render_rules(bp: Blueprint) -> str:
         line = f"- **{r.get('name') or '?'}**: {said}"
         if r.get("when"):
             line += f"  · when `{r['when']}`"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _render_integrations(bp: Blueprint) -> str:
+    """The outside services, each said to be CONNECTED or DECLARED.
+
+    Smith only knows what this string says, and it said nothing about
+    integrations at all — so "the confirmation email never came" could only be
+    answered with sympathy, while the document held the answer: a service
+    written down, its key never set, and three steps sending through nothing.
+
+    Names of variables, never values. A value has no business in a prompt.
+    """
+    rows = [i for i in (getattr(bp, "integrations", None) or []) if isinstance(i, dict)]
+    if not rows:
+        return ""
+    lines = ["## Outside services"]
+    for row in rows:
+        steps = [str(x) for x in row.get("sending_steps") or []]
+        if row.get("gap"):
+            lines.append(
+                "- **Email: nothing is connected.** "
+                + (f"These steps try to send and cannot: {'; '.join(steps[:5])}. "
+                   if steps else "")
+                + "Say “connect it to <service>” — Outlook, Gmail, your own "
+                  "mail server, Resend — and the application will send through it.")
+            continue
+        name = row.get("name") or row.get("provider") or "an outside service"
+        what = f" ({row.get('kind')})" if row.get("kind") else ""
+        if not row.get("serves"):
+            lines.append(
+                f"- **{name}**{what} — DECLARED ONLY: it is written down with the "
+                "names of the secrets it would need, and nothing is sent or "
+                "received. There is no adapter for it; do not say it is connected.")
+            continue
+        if row.get("connected"):
+            line = (f"- **{name}**{what} — CONNECTED: `{row.get('needs')}` is set, "
+                    "so it works for real.")
+            unset = [k for k in row.get("secret_names") or []
+                     if k not in (row.get("set_names") or [])]
+            if unset:
+                line += " Still unset: " + ", ".join(f"`{k}`" for k in unset) + "."
+                if "FORGE_EMAIL_FROM" in unset:
+                    line += (" With no from-address of its own the mail goes out "
+                             "from the provider's stand-in address, which is what "
+                             "\"it's sending from a weird address\" means.")
+        else:
+            line = (f"- **{name}**{what} — DECLARED, NOT CONNECTED: the application "
+                    f"is set up to send through it, but `{row.get('needs')}` is not "
+                    "set for this organisation, so nothing is sent. It is set once "
+                    "under Settings → Integrations; never ask for the value here.")
+        if steps:
+            line += f" It carries: {'; '.join(steps[:5])}."
         lines.append(line)
     return "\n".join(lines)
 

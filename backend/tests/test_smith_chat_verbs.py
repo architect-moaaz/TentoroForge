@@ -99,17 +99,63 @@ def test_requirement_report_when_nothing_is_defined_yet():
     assert "no requirements defined" in out and "define" in out.lower()
 
 
-# ── DEFECT-F-07 is gone, and its tests with it ──
+# ── DEFECT-F-07: an integration ask, answered honestly ──
 #
 # `_unsupported_integration` matched a phrase list ("integrate with", "connect
 # to", "sync with") and then excused Figma, UX Pilot and anything that sounded
-# internal. It gave "send email through SendGrid" a declaration and "connect it
-# to our payroll system" a refusal — two answers to one kind of ask — and the
-# exception list is the shape this codebase keeps being burned by. Removed with
-# the helper in f58ee92; both asks reach `add_integration` now, which records
-# the NAMES of the secrets and says plainly that it has connected nothing.
-# Covered by tests/routing/corpus.jsonl (the payroll sentence) and
-# tests/services/test_smith_definition_changes.py. Do not bring it back.
+# internal — an exception list, which is the shape this codebase keeps being
+# burned by. Removed with the helper in f58ee92. DO NOT BRING IT BACK.
+#
+# What answers the ask now is not a phrase list but an adapter: `connect_service`
+# CONNECTS outbound email (the service is recorded, the app is projected to send
+# through it, the key is set on the platform) and refuses anything with no
+# adapter, naming the reason and the nearest thing that works; `add_integration`
+# WRITES DOWN the names of the secrets and says plainly it has connected
+# nothing. So "send email through SendGrid" and "connect it to our payroll
+# system" get the same KIND of answer, which is what F-07 was about, and the
+# difference between them is a fact about the runtime rather than about the
+# wording.
+#
+# These tests keep what the old ones were for, against the seam that decides
+# it. The payroll sentence is in tests/routing/corpus.jsonl; the declaration
+# path is in tests/services/test_smith_definition_changes.py.
+
+from services.smith.email_connect import refusal, service_for
+
+
+def test_a_service_there_is_no_adapter_for_is_not_matched_into_one():
+    for said in ("Integrate with Greenhouse.", "connect to Salesforce",
+                 "please sync with our Stripe account", "pull from HubSpot nightly"):
+        assert service_for(said) is None, said
+
+
+def test_the_design_tools_are_not_email_services():
+    # Figma / UX Pilot have their own connect verbs and their own credentials.
+    assert service_for("integrate with Figma") is None
+    assert service_for("connect to UX Pilot") is None
+
+
+def test_internal_wiring_is_not_mistaken_for_an_outside_service():
+    assert service_for("connect the form to the dashboard") is None
+    assert service_for("connect to the candidates page") is None
+    assert service_for("sync to the roles table") is None
+
+
+def test_messages_about_nothing_outside_match_nothing():
+    assert service_for("add a candidates page") is None
+    assert service_for("what does this app do?") is None
+    assert service_for("") is None
+
+
+def test_the_refusal_names_the_system_and_offers_what_works():
+    said, options = refusal("Greenhouse", {})
+    assert "Greenhouse" in said
+    # Why it cannot be done, and the two things that can: connect the email,
+    # or write it down with the names of the secrets it would need.
+    assert "cannot connect" in said and "adapter" in said
+    assert any("email" in o.lower() for o in options)
+    assert any("Declare Greenhouse" in o for o in options)
+
 
 # ── DEFECT-C-03/B-09: a change at the definition gate redrafts the definition ──
 
