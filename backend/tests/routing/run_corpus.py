@@ -9,20 +9,29 @@ person who knows the right words was never the problem.
     python -m tests.routing.run_corpus --verb add_field
     python -m tests.routing.run_corpus --limit 20 --json report.json
 
-Measured on 2026-09-18 against the sample context below, over the 262
-sentences the corpus held that day: 7 reached a DIFFERENT verb (2.7%), 174
-routed as labelled (66%), and 81 asked a question instead — which is not a failure, and for most of
-those it is the right answer, since the sample application has no dashboard to
-put a widget on. Track the first number.
+Measured on 2026-09-18 over the 262 sentences the corpus held that day: 4
+reach a DIFFERENT verb (1.5%), 180 route as labelled (69%), and 78 ask a
+question instead — which is not a failure, and for most of those it is the
+right answer, since the sample application has no dashboard to put a widget
+on. Track the first number.
 
   2026-09-17   5 / 138   3.6%
   2026-09-18   7 / 262   2.7%     the corpus nearly doubled in between
+  2026-09-18   4 / 262   1.5%     after `context` (below) — three of the seven
+                                  were being asked an unanswerable question
+
+THE THIRD ROW IS PART MEASURED, PART CARRIED FORWARD. The 45 sentences on the
+four verbs `context` touches were re-run; the rest keep their result from the
+row above, because a row that names no state takes the identical path it
+always did. Five sentences also moved between "as labelled" and "asked" in
+that re-run, one of them on unchanged input — the model is not deterministic,
+so treat a single point as ±1 rather than exact.
 
 A row here is only ever true of the corpus as it stood; it grows most days.
 Re-run before quoting one, and add a row rather than editing the last.
 
-TWO OF THE SEVEN WENT TO VERBS THAT DID NOT EXIST WHEN THEIR LABEL WAS
-WRITTEN, and both reads are arguable rather than wrong:
+WHAT THE FOUR ARE. Two went to verbs that did not exist when their label was
+written, and both reads are arguable rather than wrong:
 
     "/nurses just shows an error"                  compose_route -> explain_crash
     "our rota system needs to pull today's shifts automatically"
@@ -33,11 +42,19 @@ is a measurement that has stopped measuring; if the intent really changed, the
 label should change deliberately, and in BOTH corpora — see
 `tests/services/test_corpora_agree.py`.
 
-The other five are the model's own misreads, and four of them are one family:
-a sentence about showing a field that already exists read as a request to add
-the column ("show phone on the nurse form", "I can't see the father's name on
-the registration page" -> add_field rather than add_widgets), which is the
-exact confusion the prompt already warns about at length.
+The other two are the model's own misreads, and unrelated to each other:
+"on nurses, phone should be mobile" (rename_field -> change_field_type, where
+the sentence is genuinely ambiguous in English) and "we say colleague, never
+employee" (edit_product -> rename_entity, which is the very sentence
+`limits.answer` offers as the nearest thing to a rename_entity).
+
+THE FAMILY THAT USED TO BE HERE IS GONE. Three sentences — "show phone on the
+nurse form", "I can't see the father's name on the registration page" and
+"add a Ward with a name and a number of beds" — were counted as misroutes
+because they were measured against an application that could not make them
+right: the nurse had no phone and no father's name, and a Ward already
+existed. The prompt was never the problem; the harness was asking a question
+with no right answer. See `context` below.
 
 Calls a model once per sentence, so it costs real money and is NOT part of the
 test suite. `test_corpus.py` beside it checks the corpus itself — that every
@@ -118,9 +135,47 @@ SAMPLE_CONTEXT = """# App blueprint — project sample
 """
 
 
+#: ONE SENTENCE CAN NEED A DIFFERENT APPLICATION FROM ANOTHER. Half the corpus
+#: asks for a phone number to be ADDED to a nurse and half asks why the phone
+#: number is not SHOWN, and the right verb is a different one in each case —
+#: `add_field` when the column is not there, `add_widgets` when it is. No
+#: single application satisfies both, so measuring them all against the one
+#: above asked six sentences a question with no right answer and then counted
+#: the answer as a misroute. The same for "add a Ward…", which is `add_entity`
+#: only in an application that has no Ward yet.
+#:
+#: So a row says which state it assumes, in `context`, and gets it. This is the
+#: same discipline as the note above about "(no application yet)": the number
+#: is about the classifier only when the question is answerable.
+def _with_fields(base: str) -> str:
+    """The same application AFTER phone, father's name and ward were added."""
+    line = "- Nurse (nurses): id, name, gender, specialities, location, experienceYears"
+    assert line in base, "the Nurse entity line moved; this variant is now a lie"
+    return base.replace(line, line + ", phone, fathersName, ward")
+
+
+def _without_ward(base: str) -> str:
+    """The same application BEFORE anyone added a Ward."""
+    line = "- Ward (wards): id, name, capacity\n"
+    assert line in base, "the Ward entity line moved; this variant is now a lie"
+    return base.replace(line, "")
+
+
+#: The states a row may ask for. "" is the application as it stands above.
+CONTEXTS: dict[str, str] = {
+    "": SAMPLE_CONTEXT,
+    "fields-already-there": _with_fields(SAMPLE_CONTEXT),
+    "no-ward-yet": _without_ward(SAMPLE_CONTEXT),
+}
+
+
 def _route(row: dict, context: str = SAMPLE_CONTEXT) -> dict:
     from services.smith.understand_ask import understand_ask
 
+    # A row that names a state gets it; `--no-context` still overrides every
+    # row, because that run is deliberately asking the harder question.
+    if context is SAMPLE_CONTEXT and row.get("context"):
+        context = CONTEXTS[row["context"]]
     got = understand_ask(row["say"], context)
     verb = str(got.get("verb") or "").strip() or None
     if got.get("clarification_needed") and not verb:

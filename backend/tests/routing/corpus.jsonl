@@ -22,7 +22,7 @@
 {"say": "nurses don't need a fax number", "verb": "remove_field"}
 {"say": "take the middle name off, nobody uses it", "verb": "remove_field"}
 {"say": "remove notes from wards", "verb": "remove_field"}
-{"say": "add a Ward with a name and a number of beds", "verb": "add_entity"}
+{"say": "add a Ward with a name and a number of beds", "verb": "add_entity", "context": "no-ward-yet"}
 {"say": "we also need to keep track of shifts", "verb": "add_entity"}
 {"say": "we keep a record of every training course a nurse does", "verb": "add_entity"}
 {"say": "there's another thing: the agencies that supply nurses", "verb": "add_entity"}
@@ -42,10 +42,10 @@
 {"say": "the dashboard needs a count of nurses on duty", "verb": "add_widgets"}
 {"say": "add a chart of registrations per month", "verb": "add_widgets"}
 {"say": "I want a search box on the nurses list", "verb": "add_widgets"}
-{"say": "I can't see the father's name on the registration page", "verb": "add_widgets"}
-{"say": "where's the phone number gone?", "verb": "add_widgets"}
-{"say": "the ward isn't in the table", "verb": "add_widgets"}
-{"say": "add the phone column to the list", "verb": "add_widgets"}
+{"say": "I can't see the father's name on the registration page", "verb": "add_widgets", "context": "fields-already-there"}
+{"say": "where's the phone number gone?", "verb": "add_widgets", "context": "fields-already-there"}
+{"say": "the ward isn't in the table", "verb": "add_widgets", "context": "fields-already-there"}
+{"say": "add the phone column to the list", "verb": "add_widgets", "context": "fields-already-there"}
 {"say": "the button should say Register Nurse, not Add Nurse", "verb": "rename"}
 {"say": "the title at the top should be New nurse", "verb": "rename"}
 {"say": "the column header says Experience, make it Years of experience", "verb": "rename"}
@@ -179,8 +179,8 @@
 {"say": "add a dashboard at /", "verb": "compose_route", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "Lay the sessions screen out again from scratch", "verb": "compose_route"}
 {"say": "put upcoming sessions and quorum status on the dashboard", "verb": "add_widgets", "note": "quoted in the catalogue as an example of this verb"}
-{"say": "I cannot see fathersName on the registration page", "verb": "add_widgets", "note": "quoted in the catalogue as an example of this verb"}
-{"say": "show phone on the nurse form", "verb": "add_widgets", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "I cannot see fathersName on the registration page", "verb": "add_widgets", "note": "quoted in the catalogue as an example of this verb", "context": "fields-already-there"}
+{"say": "show phone on the nurse form", "verb": "add_widgets", "note": "quoted in the catalogue as an example of this verb", "context": "fields-already-there"}
 {"say": "On the nurse list, the button that says Delete should say Archive", "verb": "rename"}
 {"say": "Call it something clearer", "verb": "rename"}
 {"say": "remove the delete button", "verb": "remove", "note": "quoted in the catalogue as an example of this verb"}
@@ -190,7 +190,7 @@
 {"say": "customers need a phone number", "verb": "add_field", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "rename yearsOfExperience to experienceYears", "verb": "rename_field", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "On a nurse, rename yearsOfExperience to experienceYears", "verb": "rename_field"}
-{"say": "add a Ward entity with a name and a capacity", "verb": "add_entity", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "add a Ward entity with a name and a capacity", "verb": "add_entity", "note": "quoted in the catalogue as an example of this verb", "context": "no-ward-yet"}
 {"say": "we don't need the Department entity", "verb": "remove_entity", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "email the admin after a registration", "verb": "add_workflow", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "archive a nurse instead of deleting", "verb": "add_workflow", "note": "quoted in the catalogue as an example of this verb"}
