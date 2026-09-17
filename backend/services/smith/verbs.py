@@ -131,6 +131,10 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Undo. Needs nothing: it is always the last change, and asking which one
     # would be asking the person to know what Smith recorded.
     "revert": set(),
+    # The guide the owner hands their staff. Needs nothing: the audiences and
+    # the screens are read off the composed application, not off the ask —
+    # asking who it is for would be asking the owner to list their own roles.
+    "write_guide": set(),
     # What the application has cost to run. Needs nothing — it is always this
     # application, and the ledger is read whole. Answers a question that had
     # no verb at all: "how much has this cost me?" was the last entry on the
@@ -365,6 +369,15 @@ VERB_HELP: dict[str, str] = {
         "They want things MOVED AROUND on a screen that already exists: "
         "\"move the chart above the table\", \"put the search at the top\". "
         "Nothing rearranges a composed screen. Needs the screen."
+    ),
+    "write_guide": (
+        "Write the short guide the owner gives their staff: \"write me a "
+        "one-page guide for the team\", \"something I can hand to the staff\", "
+        "\"how do I explain this to my team?\". One page, per role, in the "
+        "words of the people who will use it — derived from the screens that "
+        "actually built, and saved as a file at the top of the application so "
+        "it can be printed and handed on. Changes nothing about the "
+        "application. Needs nothing."
     ),
     "explain_crash": (
         "Something in the RUNNING application broke and they are telling "

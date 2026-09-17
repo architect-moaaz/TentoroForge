@@ -246,3 +246,9 @@
 {"say": "Move the chart above the table on the dashboard", "verb": "reorder"}
 {"say": "what have I spent on this", "verb": "spend"}
 {"say": "How much has this cost me so far?", "verb": "spend"}
+{"say": "can you write me a one-page guide for the team?", "verb": "write_guide", "note": "section 06 listed this under \"no document generation\"; handover.py answers it"}
+{"say": "write me a one-page guide for the team", "verb": "write_guide", "note": "the bare ask, as VERB_HELP quotes it"}
+{"say": "something I can hand to the staff", "verb": "write_guide", "note": "no word for guide or document in it"}
+{"say": "how do I explain this to my team?", "verb": "write_guide", "note": "a question in form, a request for the guide"}
+{"say": "how do I explain this to the people using it?", "verb": "write_guide", "note": "same ask, said about the users"}
+{"say": "a cheat sheet for the drivers", "verb": "write_guide", "note": "names a role; the guide is per role anyway"}

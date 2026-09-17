@@ -1443,6 +1443,7 @@ READONLY_HANDLERS = {
     "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
     "revert":                   lambda output_dir, args: _smith_revert(output_dir),
+    "write_guide":              lambda output_dir, args: _smith_write_guide(output_dir),
     "spend":                    lambda output_dir, args: _smith_spend(output_dir),
     "import_data":              lambda output_dir, args: _smith_import_data(output_dir, args),
     "export_data":              lambda output_dir, args: _smith_export_data(output_dir, args),
@@ -2268,6 +2269,12 @@ def _smith_revert(output_dir: str) -> dict:
     return _revert_run(output_dir)
 
 
+def _smith_write_guide(output_dir: str) -> dict:
+    """Write the staff guide from the composed application. Takes no arguments:
+    the audiences and the screens are read off the document, and it changes
+    nothing about the application."""
+    from services.smith.handover import run as _guide_run
+    return _guide_run(output_dir)
 def _smith_spend(output_dir: str) -> dict:
     """Report what this application has cost to run. Takes no arguments — it is
     always this application — and changes nothing."""

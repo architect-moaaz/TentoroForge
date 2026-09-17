@@ -763,6 +763,27 @@ class SmithSession:
                           answer=str(out.get("diff_summary") or "Undone."),
                           touched_paths=list(out.get("edited_paths") or []))
 
+    def _guide(self) -> "TurnResult":
+        """The guide the owner hands their staff (§06).
+
+        The one verb that reads the application and writes nothing back to it:
+        no change is recorded, no projection re-runs, and `touched_paths`
+        carries the guide file alone. It needs no facts from the ask because
+        the audiences and the screens are in the document — asking who it is
+        for would be asking the owner to list their own roles.
+        """
+        from services.smith.handover import run as guide_run, summary_of
+
+        out = guide_run(str(self.output_dir),
+                        app_root=str(Path(self.output_dir) / "app"),
+                        reasoning=self._reasoning)
+        if not out.get("applied"):
+            return TurnResult(status="needs_user",
+                              answer=str(out.get("reason") or "I could not write the guide."))
+        return TurnResult(status="resolved",
+                          answer=summary_of(out),
+                          touched_paths=list(out.get("edited_paths") or []))
+
     def _spend(self) -> "TurnResult":
         """What this application has cost to run.
 
@@ -1194,6 +1215,8 @@ class SmithSession:
             return self._add_field(understanding)
         if verb == "revert":
             return self._revert()
+        if verb == "write_guide":
+            return self._guide()
         if verb == "spend":
             return self._spend()
         if verb == "import_data":

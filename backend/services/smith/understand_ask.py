@@ -170,6 +170,15 @@ Return ONLY a JSON object with exactly these keys:
       "reorder"       — things should MOVE AROUND on a screen that exists:
                         "move the chart above the table", "put the search at
                         the top".
+      "write_guide"   — they want SOMETHING TO GIVE THEIR STAFF, not a change
+                        to the app: "write me a one-page guide for the team",
+                        "something I can hand to the staff", "how do I explain
+                        this to the people using it?", "a cheat sheet for the
+                        drivers". Smith writes it from the screens that
+                        actually built, per role, and saves it in the app so
+                        it can be printed. Nothing about the application
+                        changes. NOT edit_product, which changes what the app
+                        IS called and for.
       "import_data"   — LOAD DATA THEY ALREADY HAVE from the spreadsheet they
                         attached: "here's our customer spreadsheet, load it
                         in", "import these suppliers", "put our existing
