@@ -2,6 +2,7 @@
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLogin } from "@/hooks/useLogin";
+import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
 
 /**
  * Auth page — COMPOSED PER APP.
@@ -65,6 +66,45 @@ function LoginForm() {
   );
 }
 
+/**
+ * How this screen says which application it is.
+ *
+ * Written once because the layouts below wanted it in three sizes and three
+ * places, and three copies of a lockup is how two of them drift.
+ *
+ * THE MARK REPLACES THE WHOLE LOCKUP, not just the square. The square-plus-name
+ * is what this page drew when it had no image: a decoration and, beside it, the
+ * information. A logo IS how a company writes its name, so setting one next to
+ * the name in text reads as a stutter — "Bright Care | Bright Care" — and it is
+ * worst exactly where the mark is a wordmark, which is what most of them are.
+ * Nothing is lost for an icon-only mark either: the form's own subtitle one line
+ * below says "Sign in to <app>".
+ *
+ * (The rail in the component library keeps both, because a rail names the
+ * application nowhere else and hides the text when it is collapsed anyway.)
+ */
+function Lockup({ size }: { size: 36 | 48 }) {
+  if (BRAND_LOGO) return <BrandMark height={size} />;
+  const box = size === 48 ? "h-12 w-12 text-lg" : "h-9 w-9 text-sm";
+  const name = size === 48 ? "text-xl" : "text-base";
+  return (
+    <>
+      <span
+        className={`grid ${box} place-items-center rounded-[var(--radius)] font-bold text-primary-foreground`}
+        style={{ background: "linear-gradient(140deg, hsl(var(--primary)), hsl(var(--accent)))" }}
+      >
+        {APP_NAME.slice(0, 1)}
+      </span>
+      <span
+        className={`${name} font-semibold tracking-tight text-foreground`}
+        style={{ fontFamily: "var(--font-heading)" }}
+      >
+        {APP_NAME}
+      </span>
+    </>
+  );
+}
+
 /** Brand surface painted from the app's palette — never a stock image. */
 function BrandPanel({ variant }: { variant: "full" | "panel" }) {
   return (
@@ -110,18 +150,7 @@ const FormPane = ({ className = "" }: { className?: string }) => (
   <div className={`flex flex-1 items-center justify-center bg-background p-6 ${className}`}>
     <div className="w-full max-w-md rounded-[var(--radius)] border border-border bg-card p-8 shadow-sm">
       <div className="mb-8 flex items-center gap-3 lg:hidden">
-        <span
-          className="grid h-9 w-9 place-items-center rounded-[var(--radius)] text-sm font-bold text-primary-foreground"
-          style={{ background: "linear-gradient(140deg, hsl(var(--primary)), hsl(var(--accent)))" }}
-        >
-          {APP_NAME.slice(0, 1)}
-        </span>
-        <span
-          className="text-base font-semibold tracking-tight text-foreground"
-          style={{ fontFamily: "var(--font-heading)" }}
-        >
-          {APP_NAME}
-        </span>
+        <Lockup size={36} />
       </div>
       <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
         <LoginForm />
@@ -155,6 +184,13 @@ export default function LoginPage() {
       return (
         <main className="flex min-h-screen items-center justify-center bg-background p-6">
           <div className="w-full max-w-md rounded-[var(--radius)] border border-border bg-card p-8 shadow-sm">
+            {/* This layout is "quiet and premium" — a single card and nothing
+                else — and it stays that way for an application with no mark.
+                One that HAS a mark is signing its own front door, which is the
+                whole point of giving us one. */}
+            {BRAND_LOGO && (
+              <div className="mb-8 flex items-center gap-3"><Lockup size={36} /></div>
+            )}
             <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
               <LoginForm />
             </Suspense>
@@ -169,6 +205,9 @@ export default function LoginPage() {
           <div className="absolute inset-0"><BrandPanel variant="full" /></div>
           <div className="relative z-10 flex min-h-screen items-center justify-end p-6 lg:p-16">
             <div className="w-full max-w-md rounded-[var(--radius)] bg-card/95 p-8 shadow-2xl backdrop-blur">
+              {BRAND_LOGO && (
+                <div className="mb-8 flex items-center gap-3"><Lockup size={36} /></div>
+              )}
               <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
                 <LoginForm />
               </Suspense>
@@ -183,12 +222,7 @@ export default function LoginPage() {
         <main className="min-h-screen bg-background">
           <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-6">
             <div className="mb-10 flex flex-col items-center gap-3">
-              <span className="grid h-12 w-12 place-items-center rounded-[var(--radius)] text-lg font-bold text-primary-foreground"
-                style={{ background: "linear-gradient(140deg, hsl(var(--primary)), hsl(var(--accent)))" }}>
-                {APP_NAME.slice(0, 1)}
-              </span>
-              <span className="text-xl font-semibold tracking-tight text-foreground"
-                style={{ fontFamily: "var(--font-heading)" }}>{APP_NAME}</span>
+              <Lockup size={48} />
             </div>
             <Suspense fallback={<div className="text-sm text-muted-foreground">Loading…</div>}>
               <LoginForm />

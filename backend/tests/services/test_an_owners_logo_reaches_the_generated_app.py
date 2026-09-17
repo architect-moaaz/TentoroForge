@@ -203,7 +203,11 @@ def test_an_application_with_no_logo_keeps_the_rail_it_had(svc, tmp_path):
     project_shell(svc.doc, app_root)
     rail = json.loads((app_root / "src/schemas/shell.json").read_text())["children"][0]["props"]
     assert "logoSrc" not in rail and rail["appName"] == "Bright Care"
-    assert project_brand_logo(svc.doc, app_root)["files"] == []
+    # The contract module is still written — the sign-in screen imports it —
+    # but nothing is copied into the tree.
+    assert project_brand_logo(svc.doc, app_root)["files"] == ["src/contracts/brand.ts"]
+    assert "BRAND_LOGO: BrandLogo | null = null" in (
+        app_root / "src/contracts/brand.ts").read_text()
     assert not (app_root / "public").exists()
 
 
@@ -214,7 +218,8 @@ def test_a_document_naming_a_file_the_project_lost_does_not_fail_the_build(svc, 
     svc.doc["designSystem"]["logo"] = {"file": "brand/" + "a" * 16 + ".png",
                                        "mediaType": "image/png", "alt": ""}
     out = project_brand_logo(svc.doc, tmp_path / "app")
-    assert out["files"] == [] and out["reason"] == "logo file missing"
+    assert out["files"] == ["src/contracts/brand.ts"]
+    assert out["reason"] == "logo file missing"
 
 
 def test_a_hand_edited_path_never_becomes_a_url(svc):
@@ -237,3 +242,104 @@ def test_a_restyle_does_not_take_the_mark_with_it(svc, tmp_path):
     svc.validate()
     assert svc.doc["designSystem"]["logo"] == body
     assert svc.doc["designSystem"]["colors"] == {"primary": "#116611"}
+
+
+# --------------------------------------------------------------------------- #
+# 5. the pages with no shell around them
+# --------------------------------------------------------------------------- #
+
+def test_the_pages_with_no_shell_are_given_the_mark_too(svc, tmp_path):
+    """Sign-in, sign-up and the error pages render outside the rail — and they
+    are the ones an anonymous visitor actually reaches. They cannot read
+    `shell.json` (two of them are client components, and an application with no
+    navigation tree has no shell file at all), so the mark is projected as a
+    module they import."""
+    app_root = tmp_path / "app"
+    body = brand_logo.store(tmp_path, "logo.png", "image/png", _png(160, 40))
+    set_logo(svc, body, alt="Bright Care", app_root=str(app_root))
+
+    module = (app_root / "src/contracts/brand.ts").read_text()
+    assert f'"src": "/{body["file"]}"' in module
+    assert '"alt": "Bright Care"' in module
+    assert '"aspect": 4' in module
+
+
+def test_the_rail_and_the_sign_in_screen_cannot_disagree(svc, tmp_path):
+    """Both are built from `brand_mark(doc)`. Two readers, one answer — the
+    failure this forecloses is a logo in the corner of the app and a letter on
+    its front door."""
+    app_root = tmp_path / "app"
+    body = brand_logo.store(tmp_path, "logo.png", "image/png", _png(160, 40))
+    set_logo(svc, body, app_root=str(app_root))
+
+    rail = json.loads((app_root / "src/schemas/shell.json").read_text())["children"][0]["props"]
+    module = (app_root / "src/contracts/brand.ts").read_text()
+    assert f'"src": "{rail["logoSrc"]}"' in module
+    assert f'"alt": "{rail["logoAlt"]}"' in module
+
+
+def test_taking_the_logo_off_empties_the_module_too(svc, tmp_path):
+    app_root = tmp_path / "app"
+    body = brand_logo.store(tmp_path, "logo.png", "image/png", _png(64, 64))
+    set_logo(svc, body, app_root=str(app_root))
+    clear_logo(svc, app_root=str(app_root))
+    assert "= null;" in (app_root / "src/contracts/brand.ts").read_text()
+
+
+def test_the_scaffold_ships_the_same_module_as_a_default():
+    """`BrandMark.tsx` imports it and every error page renders that, so a tree
+    without the module does not compile. The projection writes it on every
+    build; this is the floor for a build where the projection never ran."""
+    from services.blueprint.assembly import PROJECTED_PATHS, SCAFFOLD_DEFAULTS
+
+    root = Path(__file__).resolve().parents[2] / "templates" / "app-foundation"
+    shipped = root / "src" / "contracts" / "brand.ts"
+    assert shipped.is_file()
+    assert "BRAND_LOGO: BrandLogo | null = null" in shipped.read_text()
+    # Without the default listing, `src/contracts` being projection-owned means
+    # the copy step skips it and the floor is never laid.
+    assert "src/contracts/brand.ts" in SCAFFOLD_DEFAULTS
+    assert any("src/contracts".startswith(p) or p == "src/contracts"
+               for p in PROJECTED_PATHS)
+
+
+def test_the_module_and_the_default_declare_one_shape():
+    """Two files exporting `BRAND_LOGO` is two chances to describe it
+    differently; the importer is typed against whichever one the tree has."""
+    import re
+
+    from services.blueprint.projection import _write_brand_module
+
+    root = Path(__file__).resolve().parents[2] / "templates" / "app-foundation"
+    shipped = (root / "src/contracts/brand.ts").read_text()
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        _write_brand_module({}, tmp)
+        projected = (Path(tmp) / "src/contracts/brand.ts").read_text()
+
+    def fields(src: str) -> set[str]:
+        block = re.search(r"export type BrandLogo = \{(.*?)\n\};", src, re.S)
+        assert block, src
+        return set(re.findall(r"^\s*(\w+)\??:", block.group(1), re.M))
+
+    assert fields(shipped) == fields(projected) == {"src", "alt", "aspect"}
+
+
+def test_every_chrome_less_surface_draws_the_mark():
+    """The scaffold's .tsx files have no test harness of their own, so this is
+    the only thing holding the four screens an anonymous visitor reaches to
+    drawing the owner's mark. Each keeps its OWN fallback — the gradient square
+    on sign-in, the big monogram on a 404 — so this checks that the mark is
+    reached for, not that the four designs were collapsed into one."""
+    tpl = Path(__file__).resolve().parents[2] / "templates"
+    surfaces = {
+        "app-foundation/src/app/login/page.tsx": "the sign-in screen",
+        "app-foundation/src/app/signup/page.tsx": "the sign-up screen",
+        "standalone-app/src/components/EdgePageFrame.tsx": "404 / 403 / 500 / maintenance",
+    }
+    for rel, what in surfaces.items():
+        src = (tpl / rel).read_text(encoding="utf-8")
+        assert "BrandMark" in src and "BRAND_LOGO" in src, (
+            f"{what} ({rel}) no longer reaches for the owner's mark")
+        assert "@/components/BrandMark" in src, rel

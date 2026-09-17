@@ -708,12 +708,19 @@ def project_brand_logo(doc: dict, app_root: str | Path,
     caller puts it (``app_root = <output_dir>/app``); it is a parameter so a
     caller with the project directory in hand does not have to reconstruct it.
 
-    Writes nothing and reports nothing when the Blueprint names no logo. That
-    is the normal case — an application described in words has no mark.
+    ALWAYS WRITES ``src/contracts/brand.ts``, including when there is no logo.
+    The rail reads the mark off `shell.json`, but the pages that render OUTSIDE
+    the rail — sign-in, sign-up, 404, 403 — have no shell to read, and they are
+    exactly the pages an anonymous visitor sees. They import this module, so it
+    has to exist on every application whether or not one was given: an import
+    of a file the tree does not contain does not fail the page, it fails the
+    build. (The scaffold ships the same module exporting `null`, as a
+    `SCAFFOLD_DEFAULT`, for the case where this projection never ran at all.)
     """
+    written = [_write_brand_module(doc, app_root)]
     logo = (doc.get("designSystem") or {}).get("logo")
     if not isinstance(logo, dict):
-        return {"files": []}
+        return {"files": written}
     from services import brand_logo
 
     root = Path(output_dir) if output_dir is not None else Path(app_root).parent
@@ -725,13 +732,61 @@ def project_brand_logo(doc: dict, app_root: str | Path,
         logger.warning("[brand] designSystem.logo names %r and there is no such "
                        "file under %s — the shell will reference a missing image",
                        logo.get("file"), root)
-        return {"files": [], "reason": "logo file missing"}
+        return {"files": written, "reason": "logo file missing"}
 
     rel = str(logo["file"])                       # brand/<digest>.<ext>
     dest = Path(app_root) / "public" / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(src.read_bytes())
-    return {"files": [f"public/{rel}"]}
+    written.append(f"public/{rel}")
+    return {"files": written}
+
+
+#: The module every chrome-less page imports to find the owner's mark. Kept
+#: beside the projector that writes it AND shipped by the scaffold with a
+#: `null` body, so the two cannot describe different shapes.
+BRAND_MODULE = "src/contracts/brand.ts"
+
+
+def _write_brand_module(doc: dict, app_root: str | Path) -> str:
+    """``src/contracts/brand.ts`` — the mark, for the pages with no shell.
+
+    A TypeScript module rather than JSON because its readers are CLIENT
+    components. `login/page.tsx` carries "use client" and cannot read a file at
+    render time; it can import a constant, which the bundler inlines.
+
+    Built from the same `brand_mark(doc)` the rail is, so the rail and the
+    sign-in screen cannot disagree about which image the application signs its
+    name with.
+    """
+    mark = brand_mark(doc)
+    body = "null" if not mark else json.dumps({
+        "src": mark["logoSrc"],
+        "alt": mark["logoAlt"],
+        **({"aspect": mark["logoAspect"]} if "logoAspect" in mark else {}),
+    }, indent=2, sort_keys=True)
+    out = Path(app_root) / "src" / "contracts"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "brand.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "//\n"
+        "// The owner's mark, for the pages that render with no shell around them —\n"
+        "// sign-in, sign-up, 404, 403. The rail reads the same thing from\n"
+        "// shell.json; both come from one function, so they cannot disagree.\n"
+        "//\n"
+        "// `null` is the normal case: an application described in words has no mark,\n"
+        "// and each page then draws the initial it has always drawn.\n"
+        "export type BrandLogo = {\n"
+        "  /** Served from the app's own `public/`. */\n"
+        "  src: string;\n"
+        "  /** The application's name unless the owner said otherwise. */\n"
+        "  alt: string;\n"
+        "  /** width / height of the source image, when it could be measured. */\n"
+        "  aspect?: number;\n"
+        "};\n\n"
+        f"export const BRAND_LOGO: BrandLogo | null = {body};\n",
+        "utf-8")
+    return BRAND_MODULE
 
 
 def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
