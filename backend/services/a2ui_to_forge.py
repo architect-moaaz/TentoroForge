@@ -1751,7 +1751,7 @@ def _rewrite_option_sources(root: Any, binder: Any, registry: dict) -> None:
                         # Fall through to the enum recovery rather than
                         # continuing, and say what was lost if that fails too.
                         binder._record(
-                            "dropped_prop", str(c.get("id") or ""),
+                            "dropped_prop", str(node.get("id") or ""),
                             "optionsFrom",
                             f"named a source this page cannot resolve "
                             f"({spoken!r}); recovering options from the schema")
