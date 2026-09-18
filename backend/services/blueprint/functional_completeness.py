@@ -1017,6 +1017,19 @@ def _entity_of_source(doc: dict, layout: dict, name: str) -> str | None:
         if isinstance(src, dict) and src.get("name") == name:
             ent = _entity_by_ref(doc, str(src.get("entity") or ""))
             return str((ent or {}).get("id") or src.get("entity") or "") or None
+    # A NAME THE PAGE NEVER DECLARED CAN STILL BE A DATA RESOURCE. A Form's
+    # dropdown loads `optionsFrom.source` through `fetchData(source)`, which is
+    # `/api/data/<source>` — and the data route registers every table under its
+    # Drizzle export name (`clinics`, `dentistSchedules`). A dental app's forms
+    # chose a clinic and an appointment that way with no page source declared
+    # (UAT, 2026-09-18); the running app filled both dropdowns, and this check
+    # reported "nothing there names one" — a refusal the composer could only
+    # retry. Resolved with the projector's own naming, so the two cannot drift.
+    if name:
+        from services.blueprint.projection import _var_name
+        for ent in _live((doc.get("data") or {}).get("entities")):
+            if isinstance(ent, dict) and _var_name(ent) == name:
+                return str(ent.get("id") or "") or None
     return None
 
 
