@@ -9377,9 +9377,20 @@ def _sync_workflows_from_plan(output_dir: str, plan: dict | None) -> None:
 
     for wf in workflows:
         name = wf.get("name", "Untitled")
+        # `existing_wf` IS WHAT ANOTHER WRITER LEFT, NOT WHAT THIS LOOP HAS
+        # WRITTEN. It used to be both — the loop added each name as it went —
+        # so the SECOND of two workflows the plan named the same was read as
+        # "already on disk" and skipped. The plan declared two and the
+        # application got one, with nothing said; where the two differed, the
+        # second one's steps were simply gone.
+        #
+        # `_unique_id` above already resolves a repeated id to `name-2`, and
+        # the file is named from that id, so the machinery for keeping both was
+        # in place the whole time. This skip reached it first. A plan that
+        # names the same workflow twice now gets two files, which is what it
+        # asked for; if that is a planner defect it is a visible one.
         if _fold_wf(name) in existing_wf:
-            continue  # already on disk (this run or a previous writer)
-        existing_wf.add(_fold_wf(name))
+            continue  # another writer produced this one — leave it alone
         steps = wf.get("steps", [])
 
         # R1/R2: top-level event/schedule trigger contract for the runtime

@@ -24,21 +24,15 @@ def test_sync_duplicate_named_rich_workflows_do_not_clobber(tmp_path):
     """Two rich workflows whose names slug to the same value must produce two
     distinct files — the slug-based id must not silently overwrite.
 
-    STILL FAILING, AND IT IS THE CODE, NOT THIS TEST. `_sync_workflows_from_plan`
-    folds each workflow's name to an alphanumeric key and skips one whose key it
-    has already seen, so the SECOND of two same-named workflows is dropped
-    instead of overwriting the first. The outcome is the same either way: the
-    plan declared two workflows and the application gets one, with nothing said.
+    The skip set used to be two things at once — names another writer had left
+    on disk, AND names this loop had just written — so the second of two
+    same-named workflows was read as "already there" and dropped. The plan
+    declared two and the application got one, silently.
 
-    Sharpened to prove the loss rather than count files, because a file count
-    cannot tell dedup-of-identical-twins from losing a workflow. The two below
-    differ — one writes `records`, the other `audit_entries` — and only the
-    first reaches disk.
-
-    Left red on purpose. The fix is a change to generation output (disambiguate
-    the slug, or refuse the plan and say which name is duplicated), and which
-    of those is right is a decision about what a plan with two same-named
-    workflows MEANS. Nobody should make that by editing an assertion.
+    Asserted on CONTENT, not on a file count: a count cannot tell
+    dedup-of-identical-twins from losing a workflow. The two below differ —
+    one writes `records`, the other `audit_entries` — so both have to survive
+    for this to pass.
     """
     def _steps(table):
         return [
@@ -132,3 +126,32 @@ def test_graph_gate_is_idempotent_on_translated(tmp_path):
                       for r in (report or {}).get("reports", {}).values())
     assert report.get("repaired", 0) == 0 and total_fixes == 0, \
         f"graph gate had to repair translated workflows: {report}"
+
+
+def test_a_workflow_another_writer_already_left_is_not_overwritten(tmp_path):
+    """The other half of that set, which had no test and is the reason it
+    exists: a CRUD scaffold or archetype emitter may write a workflow before
+    the plan sync reaches it, and the plan must not stamp over it.
+
+    Without this, "keep both same-named workflows" could be implemented by
+    dropping the skip altogether, and the file another writer owns would be
+    replaced by the plan's version on every run.
+    """
+    (tmp_path / "workflows").mkdir(parents=True)
+    mine = tmp_path / "workflows" / "approval-workflow.json"
+    mine.write_text(json.dumps({"id": "approval-workflow",
+                                "name": "Approval Workflow",
+                                "writtenByAnotherPass": True}))
+
+    _sync_workflows_from_plan(str(tmp_path), {"workflows": [{
+        "name": "Approval Workflow",
+        "steps": [
+            {"id": "trigger", "type": "trigger", "next": "ins"},
+            {"id": "ins", "type": "action", "next": "end",
+             "config": {"actionType": "db_insert", "table": "records",
+                        "fields": ["email"]}},
+            {"id": "end", "type": "end"},
+        ]}]})
+
+    assert json.loads(mine.read_text())["writtenByAnotherPass"] is True
+    assert len(list((tmp_path / "workflows").glob("*.json"))) == 1
