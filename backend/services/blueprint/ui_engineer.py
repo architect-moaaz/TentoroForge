@@ -443,6 +443,30 @@ def typecheck(doc: dict, app_root: Path, page_id: str, load: str, view: str,
         shutil.rmtree(check, ignore_errors=True)
 
 
+def _unwired_actions(doc: dict, page: dict, view: str) -> list[str]:
+    """Each workflow launched from this page, that the view never runs.
+
+    The contract says what a person does on this page; a workflow launched
+    from it is one of those things. A view that leaves it out compiles, looks
+    finished, and has no way to do it — the missing button no one notices
+    until they need it."""
+    from services.blueprint.app_sdk import workflow_keys
+
+    keys = workflow_keys(doc)
+    out = []
+    for w in doc.get("workflows") or []:
+        if w.get("status") == "DEPRECATED":
+            continue
+        if str(page.get("id")) not in [str(x) for x in (w.get("launchedFrom") or [])]:
+            continue
+        key = keys.get(str(w.get("id")))
+        if key and not re.search(r"\bworkflows\." + re.escape(key) + r"\b", view):
+            out.append(f"view.tsx: `{w.get('name')}` is launched from this page (workflows.{key}) "
+                       f"but nothing on it runs it — give it a control: a WorkflowForm, a "
+                       f"WorkflowButton, or useWorkflow(workflows.{key}).")
+    return out
+
+
 def _static_findings(load: str, view: str) -> list[str]:
     """What the compiler cannot see and the rules forbid."""
     out = []
@@ -483,7 +507,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             note = f"Your reply was not valid JSON ({exc}). Return the object only."
             continue
         load, view = str(body.get("load") or ""), str(body.get("view") or "")
-        errors = _static_findings(load, view) + typecheck(doc, app_root, str(page.get("id")), load, view)
+        errors = (_static_findings(load, view) + _unwired_actions(doc, page, view)
+                  + typecheck(doc, app_root, str(page.get("id")), load, view))
         if not errors:
             return ({"page": str(page.get("id")), "rationale": str(body.get("rationale") or ""),
                      "load": load, "view": view,

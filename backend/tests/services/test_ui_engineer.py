@@ -137,6 +137,8 @@ def test_the_reviewer_never_shares_the_persons_build_or_database(monkeypatch, tm
     assert page_review._database_port(tmp_path) == 5437
     ran, started = [], {}
     monkeypatch.setattr(page_review, "_listening", lambda port: True)          # the person's DB is up
+    monkeypatch.setattr(page_review, "_clone_database",
+                        lambda root: ("c1", "app_review", "postgresql://x@localhost:5437/app_review"))
     monkeypatch.setattr(page_review.subprocess, "run", lambda cmd, **kw: ran.append(cmd))
     class _P:
         pid = 1
@@ -149,4 +151,63 @@ def test_the_reviewer_never_shares_the_persons_build_or_database(monkeypatch, tm
     with page_review.RunningApp(tmp_path):
         pass
     assert started["NEXT_DIST_DIR"] == page_review.REVIEW_DIST_DIR != ".next"
+    assert started["DATABASE_URL"].endswith("/app_review"), "clicks never touch the person's data"
+    assert "FORGE_REVIEW" not in started, "no flag: the build dir is the signal"
     assert not any("start.sh" in " ".join(c) or "compose" in " ".join(c) for c in ran)
+    assert ["docker", "exec", "c1", "dropdb", "-U", "postgres", "--if-exists", "app_review"] in ran
+
+
+def test_what_the_browser_proves_broken_fails_the_page():
+    from services.blueprint.page_review import hard_findings
+
+    shot = {"status": 200, "errors": [],
+            "states": {"missing": {"status": 200, "state": "404", "errors": []}},
+            "controls": [{"kind": "link", "label": "View", "outcome": "navigated", "detail": "/x"},
+                         {"kind": "button", "label": "Export", "outcome": "nothing", "detail": "-"},
+                         {"kind": "link", "label": "Annual", "outcome": "broken-link", "detail": "404"},
+                         {"kind": "button", "label": "Recalc", "outcome": "error", "detail": "boom"}]}
+    hard = hard_findings(shot)
+    assert len(hard) == 3, hard                   # a streamed 404 is a 404; a working link is fine
+    assert any('"Export" does nothing' in h for h in hard)
+    shot["states"]["missing"] = {"status": 200, "state": None, "errors": ["TypeError: x"]}
+    assert any("renders as if it did" in h for h in hard_findings(shot))
+    assert any("TypeError" in h for h in hard_findings(shot))
+
+
+def test_a_workflow_launched_from_a_page_must_be_used_by_it():
+    from services.blueprint.ui_engineer import _unwired_actions
+
+    doc = _doc()
+    doc["workflows"] = [{"id": "FLOW-001", "name": "Close Case", "launchedFrom": ["PAGE-001"]}]
+    page = doc["pages"][0]
+    assert "Close Case" in _unwired_actions(doc, page, GOOD_VIEW)[0]
+    assert _unwired_actions(doc, page, GOOD_VIEW + "\n// <WorkflowButton workflow={workflows.closeCase} />") == []
+
+
+def test_a_rewrite_that_scores_lower_is_undone(monkeypatch, tmp_path):
+    """2g13o6yz's edit page went 7 -> 6 and the worse version stayed."""
+    from contextlib import contextmanager
+    from services.blueprint import page_review
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Desk", domain="ops")
+    svc.doc["pages"] = [{"id": "PAGE-001", "name": "Edit", "route": "/cases", "purpose": "x"}]
+    svc.doc["pageCode"] = [{"page": "PAGE-001", "rationale": "first", "load": GOOD_LOAD, "view": GOOD_VIEW}]
+    svc.save()
+
+    class _App:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    monkeypatch.setattr(page_review, "RunningApp", lambda root: _App())
+    monkeypatch.setattr(page_review, "shoot", lambda app, doc, ids, out: [{"id": i, "file": "x"} for i in ids])
+    scores = iter([7, 6])
+    monkeypatch.setattr(page_review, "critique",
+                        lambda doc, page, shot, client: ({"score": next(scores), "verdict": "revise",
+                                                          "issues": [], "strengths": [], "broken": []}, None))
+    monkeypatch.setattr(ui_engineer, "compose_page", lambda *a, **k: (
+        {"page": "PAGE-001", "rationale": "rewrite", "load": GOOD_LOAD, "view": GOOD_VIEW}, []))
+    monkeypatch.setattr("services.blueprint.app_sdk.project_code_pages", lambda doc, root: [])
+    monkeypatch.setattr(page_review.time, "sleep", lambda s: None)
+
+    out = page_review.review_app(svc, tmp_path / "app", client=object(), rounds=2)
+    assert out["pages"]["PAGE-001"]["scores"] == [7, 6]
+    assert [r["rationale"] for r in svc.doc["pageCode"]] == ["first"], "the better version is kept"

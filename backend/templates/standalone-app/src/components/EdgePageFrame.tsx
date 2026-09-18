@@ -34,7 +34,10 @@ const APP_NAME_LABEL = "{{app_name}}";
 export function EdgePageFrame({ code, title, variant, children }: EdgePageFrameProps) {
   const isLoading = variant === "loading";
   return (
-    <main className="edge-root" data-variant={variant ?? "error"}>
+    // `data-forge-page-state` says which edge page this is ("404", "500", …) in
+    // a form a check can read: with a `loading.tsx` streaming the response, a
+    // not-found page is sent as HTTP 200, so the status alone cannot say it.
+    <main className="edge-root" data-variant={variant ?? "error"} data-forge-page-state={code ?? variant ?? "error"}>
       <div className="edge-card">
         {/* These pages are the ones a visitor reaches with no session and no
             shell around them, so they are where an application most needs to

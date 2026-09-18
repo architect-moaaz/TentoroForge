@@ -91,18 +91,58 @@ def _free_port() -> int:
 REVIEW_DIST_DIR = ".next-review"
 
 
-def _database_port(app_root: Path) -> int | None:
-    """The port the app's DATABASE_URL points at, from `.env.local` or `.env`."""
+def _database_url(app_root: Path) -> str | None:
+    """The app's DATABASE_URL, from `.env.local` or `.env`."""
     import re as _re
     for name in (".env.local", ".env"):
         try:
             text = (app_root / name).read_text()
         except OSError:
             continue
-        m = _re.search(r"^DATABASE_URL=\S*?@[^:/]+:(\d+)/", text, _re.M)
+        m = _re.search(r"^DATABASE_URL=(\S+)", text, _re.M)
         if m:
-            return int(m.group(1))
+            return m.group(1).strip().strip('"')
     return None
+
+
+def _database_port(app_root: Path) -> int | None:
+    """The port the app's DATABASE_URL points at."""
+    import re as _re
+    m = _re.search(r"@[^:/]+:(\d+)/", _database_url(app_root) or "")
+    return int(m.group(1)) if m else None
+
+
+def _clone_database(app_root: Path) -> tuple[str, str, str] | None:
+    """A copy of the app's database for the reviewer to click through.
+
+    Pressing every control creates, updates and deletes rows. The person's own
+    database is theirs; the review works on `<name>_review`, cloned from it in
+    the app's own Postgres container and dropped afterwards. Returns
+    (container, copy name, the copy's URL), or None when it cannot be made."""
+    url = _database_url(app_root) or ""
+    import re as _re
+    m = _re.match(r"^(postgres(?:ql)?://[^/]+/)([A-Za-z0-9_]+)", url)
+    if not m:
+        return None
+    base, name = m.group(1), m.group(2)
+    copy = f"{name}_review"
+    # By the port it publishes: `start.sh` names the compose project through an
+    # environment variable `.env` does not keep, so `docker compose ps` run
+    # later from the app finds nothing. The port is what the app itself uses.
+    port = _database_port(app_root)
+    ps = subprocess.run(["docker", "ps", "-q", "--filter", f"publish={port}"],
+                        capture_output=True, text=True, timeout=60) if port else None
+    container = (ps.stdout.strip().splitlines() or [""])[0] if ps and ps.stdout else ""
+    if not container:
+        return None
+    script = (f'dropdb -U postgres --if-exists {copy} && createdb -U postgres {copy} && '
+              f'pg_dump -U postgres {name} | psql -U postgres -q {copy} > /dev/null')
+    done = subprocess.run(["docker", "exec", container, "sh", "-c", script],
+                          capture_output=True, text=True, timeout=300)
+    if done.returncode != 0:
+        logger.warning("[page_review] could not copy the database: %s", done.stderr[-300:])
+        return None
+    return container, copy, base + copy
 
 
 def _listening(port: int | None) -> bool:
@@ -123,6 +163,7 @@ class RunningApp:
         self.base = f"http://127.0.0.1:{self.port}"
         self.proc: subprocess.Popen | None = None
         self.started_db = False
+        self.clone: tuple[str, str, str] | None = None
 
     def __enter__(self) -> "RunningApp":
         # A DATABASE THAT IS UP IS SOMEONE'S. `start.sh` finds its port taken,
@@ -137,11 +178,16 @@ class RunningApp:
             if seeded.returncode != 0:
                 raise ReviewUnavailable(f"start.sh --seed-only failed: {seeded.stdout[-600:]}{seeded.stderr[-400:]}")
             self.started_db = True
+        self.clone = _clone_database(self.root)
+        if self.clone is None:
+            raise ReviewUnavailable("could not make a copy of the app's database to click through")
         self.proc = subprocess.Popen(
             ["npx", "next", "dev", "--port", str(self.port)], cwd=self.root,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
             env={**os.environ, "BROWSER": "none", "NEXTAUTH_URL": self.base,
-                 "NEXT_DIST_DIR": REVIEW_DIST_DIR})
+                 # Also what the SDK's empty state answers to: only this server
+                 # builds into `.next-review`.
+                 "NEXT_DIST_DIR": REVIEW_DIST_DIR, "DATABASE_URL": self.clone[2]})
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             try:
@@ -161,6 +207,10 @@ class RunningApp:
                     break
                 except Exception:  # noqa: BLE001
                     continue
+        if self.clone is not None:
+            container, copy, _ = self.clone
+            subprocess.run(["docker", "exec", container, "dropdb", "-U", "postgres", "--if-exists", copy],
+                           capture_output=True, timeout=120)
         if self.started_db:
             subprocess.run(["docker", "compose", "stop"], cwd=self.root, capture_output=True, timeout=120)
         shutil.rmtree(self.root / REVIEW_DIST_DIR, ignore_errors=True)
@@ -179,7 +229,8 @@ def shoot(app: RunningApp, doc: dict, page_ids: list[str], out_dir: Path) -> lis
     cfg = out_dir / "shots.json"
     out_dir.mkdir(parents=True, exist_ok=True)
     cfg.write_text(json.dumps({"baseUrl": app.base, "email": "admin@example.com",
-                               "password": "admin1234", "outDir": str(out_dir), "pages": pages}))
+                               "password": "admin1234", "outDir": str(out_dir), "pages": pages,
+                               "probe": True}))
     work = out_dir / "run"
     work.mkdir(exist_ok=True)
     link = work / "node_modules"
@@ -190,12 +241,46 @@ def shoot(app: RunningApp, doc: dict, page_ids: list[str], out_dir: Path) -> lis
     env = {**os.environ}
     env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(Path.home() / "Library/Caches/ms-playwright"))
     proc = subprocess.run(["node", str(script), str(cfg)], cwd=work, capture_output=True,
-                          text=True, timeout=120 + 90 * len(pages), env=env)
+                          text=True, timeout=180 + 240 * len(pages), env=env)
     line = next((l for l in reversed(proc.stdout.splitlines()) if l.startswith("[") or l.startswith("{")), "")
     result = json.loads(line) if line else {"error": proc.stderr[-400:]}
     if isinstance(result, dict):
         raise ReviewUnavailable(f"screenshots failed: {result.get('error')}")
     return result
+
+
+#: What a control did that means it does not work.
+BROKEN_OUTCOMES = {"nothing": "does nothing when pressed", "error": "errors",
+                   "broken-link": "leads to a page that is not there",
+                   "workflow-failed": "runs a workflow that fails"}
+
+
+def hard_findings(shot: dict) -> list[str]:
+    """What the browser proved is broken — no judgement involved, so these
+    fail the page whatever it scores: an error while it loads, empty or not,
+    a record page that crashes on a record that does not exist, and a control
+    that does nothing or fails when pressed."""
+    out = [f"the page errors as it loads: {e}" for e in shot.get("errors") or []]
+    if shot.get("status") and int(shot["status"]) >= 500:
+        out.append(f"the page answers HTTP {shot['status']}")
+    empty = (shot.get("states") or {}).get("empty")
+    if empty:
+        if empty.get("status") and int(empty["status"]) >= 500:
+            out.append(f"with no data the page answers HTTP {empty['status']}")
+        out += [f"with no data the page errors: {e}" for e in empty.get("errors") or []]
+    missing = (shot.get("states") or {}).get("missing")
+    if missing:
+        # The rendered 404 counts, not only the status: a streamed response
+        # (the app has a `loading.tsx`) sends the not-found page as HTTP 200.
+        if missing.get("status") != 404 and str(missing.get("state")) != "404":
+            out.append(f"for a record that does not exist the page renders as if it did "
+                       f"(HTTP {missing.get('status')}) — load must return null so it is a 404")
+        out += [f"for a record that does not exist the page errors: {e}" for e in missing.get("errors") or []]
+    for c in shot.get("controls") or []:
+        if c.get("outcome") in BROKEN_OUTCOMES:
+            out.append(f"the {c.get('kind')} \"{c.get('label')}\" {BROKEN_OUTCOMES[c['outcome']]}"
+                       f" ({c.get('detail')})")
+    return out
 
 
 def critique(doc: dict, page: dict, shot: dict, client: Any) -> tuple[dict, Any]:
@@ -218,14 +303,26 @@ def critique(doc: dict, page: dict, shot: dict, client: Any) -> tuple[dict, Any]
               + "\n".join(f"- {c.get('topic')}: {c.get('rule')}" for c in comp.get("conventions") or [])
               + f"\n\nThe standard pages are held to:\n{DESIGN_PRINCIPLES}\n\n"
               f"Score 1-10. {PASS_SCORE} or more with no high-severity issue passes.")
-    errors = "\n".join(f"- {e}" for e in shot.get("errors") or []) or "(none)"
+    hard = hard_findings(shot)
+    broken = "\n".join(f"- {h}" for h in hard) or "(none)"
+    pressed = "\n".join(f"- {c.get('kind')} \"{c.get('label')}\": {c.get('outcome')} — {c.get('detail')}"
+                        for c in shot.get("controls") or []) or "(no controls)"
     user = ("The page's contract:\n```json\n" + json.dumps(_page_brief(doc, page), indent=1)
-            + f"\n```\nIt was opened at {shot.get('url')} (HTTP {shot.get('status')}). "
-            f"Browser errors while it loaded:\n{errors}\n\nThe screenshot is attached. Review it.")
+            + f"\n```\nIt was opened at {shot.get('url')} (HTTP {shot.get('status')}).\n\n"
+            f"What the browser proved broken:\n{broken}\n\n"
+            f"Every control was pressed; what each did:\n{pressed}\n\n"
+            "The first screenshot is the page with its data; the second, when attached, is the "
+            "same page with no data at all — its empty state. Review both.")
+    images = [shot["file"]]
+    empty = ((shot.get("states") or {}).get("empty") or {}).get("file")
+    if empty and Path(empty).exists():
+        images.append(empty)
     t0 = time.monotonic()
-    reply = client(system=system, user=user, schema=REVIEW_SCHEMA, images=[shot["file"]])
+    reply = client(system=system, user=user, schema=REVIEW_SCHEMA, images=images)
     body = json.loads(getattr(reply, "text", reply))
-    if any(i.get("severity") == "high" for i in body.get("issues") or []) or int(body.get("score") or 0) < PASS_SCORE:
+    body["broken"] = hard
+    if hard or any(i.get("severity") == "high" for i in body.get("issues") or []) \
+            or int(body.get("score") or 0) < PASS_SCORE:
         body["verdict"] = "revise"
     return body, (getattr(reply, "usage", None), time.monotonic() - t0)
 
@@ -235,11 +332,12 @@ def review_brief(review: dict, shot: dict) -> str:
              "Keep what works and fix every issue:"]
     for s in review.get("strengths") or []:
         lines.append(f"  + {s}")
+    broken = review.get("broken") or hard_findings(shot)
+    if broken:
+        lines.append("BROKEN — proved in the browser, fix every one first:")
+        lines += [f"  ! {b}" for b in broken]
     for i in review.get("issues") or []:
         lines.append(f"  - [{i.get('severity')}] {i.get('where')}: {i.get('problem')} → {i.get('fix')}")
-    if shot.get("errors"):
-        lines.append("The browser reported errors while it loaded — fix their cause:")
-        lines += [f"  ! {e}" for e in shot["errors"]]
     return "\n".join(lines)
 
 
@@ -269,6 +367,12 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
         return {"pages": report, "skipped": "no coded pages"}
 
     out_root = Path(svc.output_dir) / ".forge" / "review"
+    # THE BEST VERSION WINS. A rewrite is not always better — the edit page of
+    # 2g13o6yz went 7 -> 6 and the worse one stayed (2026-09-19). Each judged
+    # version is ranked (nothing proven broken first, then the score) and the
+    # best one is what the page keeps.
+    best: dict[str, tuple[tuple[int, int], dict, dict]] = {}
+    latest: dict[str, tuple[int, int]] = {}
     with RunningApp(root) as app:
         for round_ in range(1, rounds + 1):
             with svc.lock:
@@ -294,6 +398,11 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
                 report[pid]["scores"].append(v.get("score"))
                 report[pid]["review"] = v
                 report[pid]["passed"] = v.get("verdict") == "pass"
+                rank = (0 if v.get("broken") else 1, int(v.get("score") or 0))
+                latest[pid] = rank
+                row = next((r for r in doc.get("pageCode") or [] if str(r.get("page")) == pid), None)
+                if row is not None and (pid not in best or rank > best[pid][0]):
+                    best[pid] = (rank, dict(row), v)
                 if v.get("verdict") != "pass":
                     failing.append(pid)
             logger.info("[page_review] round %d: %d of %d pages need work", round_, len(failing), len(pending))
@@ -328,6 +437,23 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
             pending = [pid for pid, _ in rewrites]
             if not pending:
                 break
+        # A page whose last version ranks below its best gets the best back.
+        restored = []
+        for pid, (rank, row, verdict) in best.items():
+            if latest.get(pid, rank) < rank:
+                keep = {k: row[k] for k in ("page", "rationale", "load", "view", "requirements") if k in row}
+                with svc.lock:
+                    apply_agent_result(svc, AgentResult(
+                        task_id=f"TASK-page_review-{pid}-best", agent="ui_engineer", confidence=0.9,
+                        proposals=[ArtifactProposal(section="pageCode", natural_key=pid, body=keep)]),
+                        commit=True)
+                report[pid]["passed"] = verdict.get("verdict") == "pass"
+                report[pid]["review"] = verdict
+                restored.append(pid)
+        if restored:
+            with svc.lock:
+                project_code_pages(svc.doc, root)
+            logger.info("[page_review] kept the better earlier version of %s", ", ".join(restored))
     return {"pages": report}
 
 

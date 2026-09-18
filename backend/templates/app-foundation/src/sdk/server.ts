@@ -59,6 +59,20 @@ export interface SeriesPoint {
   value: number;
 }
 
+/** The page reviewer's empty state: on the reviewer's own server — the one
+ *  that builds into `.next-review`, which nothing else does — a request
+ *  carrying the `forge-review-empty` cookie reads an application with no rows,
+ *  so the reviewer can see every page's empty state without a second database. */
+async function reviewingEmpty(): Promise<boolean> {
+  if (process.env.NEXT_DIST_DIR !== ".next-review") return false;
+  try {
+    const { cookies } = await import("next/headers");
+    return (await cookies()).get("forge-review-empty")?.value === "1";
+  } catch {
+    return false;
+  }
+}
+
 async function actor() {
   try {
     const session = await auth();
@@ -107,9 +121,10 @@ export async function currentUser(): Promise<SessionUser | null> {
 export async function listPage<E extends EntityName>(
   entity: E, opts: ListOptions<E> = {},
 ): Promise<Page<Entities[E]>> {
-  await ensureDataEngineInitialized();
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   const page = Math.max(opts.page ?? 1, 1);
+  if (await reviewingEmpty()) return { rows: [], total: 0, page, limit };
+  await ensureDataEngineInitialized();
   try {
     const res = await engine.query(entity, {
       search: opts.search || undefined,
@@ -136,7 +151,7 @@ export async function list<E extends EntityName>(
 export async function record<E extends EntityName>(
   entity: E, id: string | undefined,
 ): Promise<Entities[E] | null> {
-  if (!id || /[[\]]/.test(id)) return null;
+  if (!id || /[[\]]/.test(id) || (await reviewingEmpty())) return null;
   await ensureDataEngineInitialized();
   try {
     return plain(entity, await engine.findById(entity, id, await actor()));
@@ -147,6 +162,7 @@ export async function record<E extends EntityName>(
 
 /** How many rows match. */
 export async function count<E extends EntityName>(entity: E, where?: Where<E>): Promise<number> {
+  if (await reviewingEmpty()) return 0;
   const out = await resolveAggregate({
     name: "count", entity, op: "aggregate",
     metrics: { value: { fn: "count", filter: where ?? undefined } },
@@ -158,6 +174,7 @@ export async function count<E extends EntityName>(entity: E, where?: Where<E>): 
 export async function total<E extends EntityName>(
   entity: E, fn: "sum" | "avg" | "min" | "max", field: NumericField<E>, where?: Where<E>,
 ): Promise<number> {
+  if (await reviewingEmpty()) return 0;
   const out = await resolveAggregate({
     name: "total", entity, op: "aggregate",
     metrics: { value: { fn, field, filter: where ?? undefined } },
@@ -176,6 +193,7 @@ export async function series<E extends EntityName>(
     field?: NumericField<E>;
   },
 ): Promise<SeriesPoint[]> {
+  if (await reviewingEmpty()) return [];
   return resolveSeries({
     name: "series", entity, op: "series",
     groupBy: opts.groupBy, bucket: opts.bucket,
