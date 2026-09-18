@@ -77,7 +77,7 @@ def test_the_designed_page_sits_on_its_floor():
     assert {"page_layouts", "install", "ui_direction", "workflow_steps"} <= node.depends_on
     assert "page_code" in DAG["frontend"].depends_on
     assert DAG["ui_direction"].optional and DAG["ui_direction"].produces == frozenset({"composition"})
-    assert DAG["page_review"].depends_on == frozenset({"assemble"}) and DAG["page_review"].optional
+    assert "page_review" not in DAG, "reviewing the pages is the user's Verify & fix, not a build step"
 
 
 def test_resume_writes_only_the_pages_without_code():
@@ -211,3 +211,30 @@ def test_a_rewrite_that_scores_lower_is_undone(monkeypatch, tmp_path):
     out = page_review.review_app(svc, tmp_path / "app", client=object(), rounds=2)
     assert out["pages"]["PAGE-001"]["scores"] == [7, 6]
     assert [r["rationale"] for r in svc.doc["pageCode"]] == ["first"], "the better version is kept"
+
+
+def test_verify_and_fix_reviews_coded_pages(monkeypatch, tmp_path):
+    """The page review is the user's choice after the build: Verify & fix on an
+    app with coded pages runs it, scoped, and says what happened."""
+    from routers import blueprint_generate as bg
+    from services.blueprint import orchestrator
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Desk", domain="ops")
+    svc.doc["pages"] = [{"id": "PAGE-001", "name": "Cases", "route": "/cases", "purpose": "x"},
+                        {"id": "PAGE-002", "name": "Case", "route": "/cases/[id]", "purpose": "x"}]
+    svc.doc["pageCode"] = [{"page": p, "load": GOOD_LOAD, "view": GOOD_VIEW} for p in ("PAGE-001", "PAGE-002")]
+    svc.save()
+    seen = {}
+    def review(svc, app_root, *, only=None, emit=None):
+        seen["only"] = only
+        return {"pages": {"PAGE-001": {"scores": [6, 8], "passed": True, "rewritten": True},
+                          "PAGE-002": {"scores": [5], "passed": False, "rewritten": False,
+                                       "review": {"broken": ['the button "Export" does nothing']}}}}
+    monkeypatch.setattr(orchestrator, "review_coded_pages", review)
+    events = []
+    bg._run_smith_review(str(tmp_path), str(tmp_path / "app"), emit=lambda k, p: events.append((k, p)),
+                         routes=["/cases"])
+    assert seen["only"] == {"PAGE-001"}
+    said = [p["text"] for k, p in events if k == "message"][-1]
+    assert "/cases" in said and "rewrote 1" in said and '"Export" does nothing' in said
+    assert ("review", {"phase": "start"}) in events

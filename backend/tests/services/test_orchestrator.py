@@ -109,8 +109,7 @@ def test_nodes_only_claim_to_produce_what_their_agent_may_write():
 def test_descendants_walks_transitively():
     assert "verification" in descendants("data_model")
     assert "backend" in descendants("apis")
-    # Only the page review looks at the assembled app.
-    assert descendants("assemble") == {"page_review"}
+    assert descendants("assemble") == set()
 
 
 # --- §94: the state machine -------------------------------------------------

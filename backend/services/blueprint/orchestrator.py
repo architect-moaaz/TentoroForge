@@ -399,14 +399,10 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # here" was asking a fair question.
     _n("assemble", "build", ("integration", "install"), ("runtime",),
        kind="projection"),
-    # §73, closed on the rendered page. The application is booted with its
-    # seeded database, every coded page is screenshotted signed in, a reviewer
-    # judges each against the direction and the design standard, and the ones
-    # that fall short go back to the UI engineer with the review as their
-    # brief — then are looked at again (see `page_review`). Optional: without
-    # Docker or a browser the build is complete, just unreviewed.
-    _n("page_review", "page_reviewer", ("assemble",), (), kind="projection",
-       optional=True, note="§73; each page judged as it renders, rewritten by its author"),
+    # NO `page_review` NODE. Looking at every page as it renders — the browser
+    # checks, the critique, the rewrites — is the user's call after the build,
+    # taken as "Verify & fix" (`review_coded_pages`), not minutes and money
+    # spent on every build whether it was wanted or not.
 )}
 
 
@@ -2764,8 +2760,10 @@ def _project_assemble(svc: BlueprintService, app_root: str) -> None:
     svc.save()
 
 
-def _review_pages(svc: BlueprintService, app_root: str) -> None:
-    """Judge every coded page as it renders; have the weak ones rewritten.
+def review_coded_pages(svc: BlueprintService, app_root: str, *,
+                       only: set[str] | None = None, emit: Any = None) -> dict:
+    """Verify & fix for coded pages: judge each as it renders; have the weak
+    ones rewritten. `only` narrows it to those page ids.
 
     A rewrite is compiled before it is committed, and the application is built
     again once any page changed. Should that build fail, the pages go back to
@@ -2782,7 +2780,8 @@ def _review_pages(svc: BlueprintService, app_root: str) -> None:
     client = router.for_task("page_review", "page_reviewer")
     with svc.lock:
         before = _copy.deepcopy(svc.doc.get("pageCode") or [])
-    outcome = review_app(svc, app_root, client, usage=RunUsage.for_app(svc, phase="review"))
+    outcome = review_app(svc, app_root, client, usage=RunUsage.for_app(svc, phase="review"),
+                         only=only, emit=emit)
     rewritten = [pid for pid, r in (outcome.get("pages") or {}).items() if r.get("rewritten")]
     if rewritten:
         try:
@@ -2800,10 +2799,10 @@ def _review_pages(svc: BlueprintService, app_root: str) -> None:
                                  for pid, r in (outcome.get("pages") or {}).items()}
         svc.doc["runtime"] = runtime
         svc.save()
+    return outcome
 
 
 PROJECTION_HANDLERS: dict[str, Any] = {
-    "page_review": _review_pages,
     "install": _project_install,
     "backend": _project_data_layer,
     "frontend": _project_frontend,

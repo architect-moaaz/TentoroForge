@@ -342,7 +342,8 @@ def review_brief(review: dict, shot: dict) -> str:
 
 
 def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None,
-               rounds: int = ROUNDS, workers: int = 6) -> dict[str, Any]:
+               rounds: int = ROUNDS, workers: int = 6, only: set[str] | None = None,
+               emit: Any = None) -> dict[str, Any]:
     """Look at every coded page and have the failing ones rewritten.
 
     Returns what happened per page: its scores by round, whether it passed,
@@ -361,7 +362,16 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
             usage.record(node=node, agent=agent, usage=u, elapsed_s=elapsed, project=project)
 
     with svc.lock:
-        pending = [str(r.get("page")) for r in svc.doc.get("pageCode") or [] if r.get("status") != "DEPRECATED"]
+        pending = [str(r.get("page")) for r in svc.doc.get("pageCode") or []
+                   if r.get("status") != "DEPRECATED" and (only is None or str(r.get("page")) in only)]
+        routes = {str(p.get("id")): str(p.get("route") or p.get("id")) for p in svc.doc.get("pages") or []}
+
+    def say(phase: str, **payload: Any) -> None:
+        if emit is not None:
+            try:
+                emit("review", {"phase": phase, **payload})
+            except Exception:  # noqa: BLE001 — narration never fails a review
+                pass
     report: dict[str, Any] = {pid: {"scores": [], "rewritten": False} for pid in pending}
     if not pending:
         return {"pages": report, "skipped": "no coded pages"}
@@ -375,6 +385,7 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
     latest: dict[str, tuple[int, int]] = {}
     with RunningApp(root) as app:
         for round_ in range(1, rounds + 1):
+            say("shots", round=round_, pages=[routes.get(p, p) for p in pending])
             with svc.lock:
                 doc = json.loads(json.dumps(svc.doc))
             shots = {s["id"]: s for s in shoot(app, doc, pending, out_root / f"round-{round_}")
@@ -388,6 +399,7 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
                 record("page_review", "page_reviewer", spent)
                 return pid, body
 
+            say("analysis", round=round_)
             with cf.ThreadPoolExecutor(workers) as pool:
                 verdicts = dict(pool.map(judge, pending))
             failing = []
@@ -422,6 +434,7 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
                     record("page_code", "ui_engineer", s)
                 return pid, body
 
+            say("fixing", round=round_, pages=[routes.get(p, p) for p in failing])
             with cf.ThreadPoolExecutor(workers) as pool:
                 rewrites = [r for r in pool.map(rewrite, failing) if r[1] is not None]
             for pid, body in rewrites:

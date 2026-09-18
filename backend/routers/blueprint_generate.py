@@ -2144,6 +2144,47 @@ def _verify_scope(message: str) -> list[str] | None:
     return [route if route.startswith("/") else "/" + route]
 
 
+def _review_coded(output_dir: str, app_root: str, *, emit, routes: list[str] | None = None) -> None:
+    """Verify & fix for an app written as React (`review_coded_pages`), told
+    in the chat's own review events and a plain summary at the end."""
+    from services.blueprint.orchestrator import review_coded_pages
+    from services.blueprint.page_review import ReviewUnavailable
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.load(output_dir=output_dir)
+    pages = {str(p.get("id")): p for p in svc.doc.get("pages") or []}
+    route_of = {pid: str(p.get("route") or pid) for pid, p in pages.items()}
+    only = ({pid for pid, r in route_of.items() if r in set(routes)} if routes else None)
+    emit("review", {"phase": "start"})
+    try:
+        outcome = review_coded_pages(svc, app_root, only=only, emit=emit)
+    except ReviewUnavailable as exc:
+        emit("review", {"phase": "done", "skipped": True})
+        emit("message", {"text": f"I couldn't check the pages in a browser here: {exc}."})
+        return
+    report = outcome.get("pages") or {}
+    rewritten = [route_of.get(p, p) for p, r in report.items() if r.get("rewritten")]
+    passing = [route_of.get(p, p) for p, r in report.items() if r.get("passed")]
+    short = {route_of.get(p, p): r for p, r in report.items() if not r.get("passed")}
+    emit("review", {"phase": "done", "skipped": False, "converged": not short,
+                    "recomposed": rewritten, "remaining": sorted(short),
+                    "refused": [], "unrepaired": []})
+    parts = [f"I opened {len(report)} page{'s' if len(report) != 1 else ''} in a browser — "
+             "with data, with none, and on a record that doesn't exist — and pressed every "
+             "button and link."]
+    if rewritten:
+        parts.append(f"I rewrote {len(rewritten)}: {', '.join(rewritten)}.")
+    if passing:
+        parts.append(f"{len(passing)} {'pass' if len(passing) != 1 else 'passes'} the review.")
+    for route, r in sorted(short.items()):
+        v = r.get("review") or {}
+        why = (v.get("broken") or [None])[0] or next(
+            (f"{i.get('where')}: {i.get('problem')}" for i in v.get("issues") or []), "")
+        score = (r.get("scores") or [None])[-1]
+        parts.append(f"{route} is still below the bar ({score}/10){': ' + why[:160] if why else ''}.")
+    emit("message", {"text": " ".join(parts)})
+
+
 def _run_smith_review(output_dir: str, app_root: str, *, emit,
                       app_name: str = "", routes: list[str] | None = None) -> None:
     """Smith's OUTER render loop: review the built app, re-compose the pages a
@@ -2158,6 +2199,23 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
     re-run passes ``announce_completion=False`` so the sub-builds do not each
     re-announce "built" — the loop narrates its own rounds instead.
     """
+    # CODED PAGES ARE REVIEWED WHERE THEY ARE WRITTEN. The loop below drops a
+    # page's layout and rebuilds — right for a page that IS its layout, and a
+    # no-op for one written as React, whose rebuild is the same template. So
+    # an app with coded pages gets the page review: every page opened, empty
+    # and on a missing record, every control pressed, judged, and the weak
+    # ones rewritten by their author.
+    try:
+        from services.blueprint.service import BlueprintService as _BS
+        if (_BS.load(output_dir=output_dir).doc.get("pageCode") or []):
+            _review_coded(output_dir, app_root, emit=emit, routes=routes)
+            return
+    except Exception as exc:  # noqa: BLE001 — fall through to say so below
+        logger.warning("[review] coded review failed for %s: %s", Path(output_dir).name, exc)
+        emit("review", {"phase": "done", "skipped": True})
+        emit("message", {"text": ("I couldn't finish checking the pages "
+                                  f"({str(exc).splitlines()[0][:160]}). The app is unchanged.")})
+        return
     try:
         from services.blueprint.service import BlueprintService
         from services.smith.review_loop import run_review_loop
