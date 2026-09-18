@@ -78,7 +78,7 @@ def test_integration_waits_for_both_branches():
     level_of = {k: i for i, level in enumerate(lv) for k in level}
     assert level_of["integration"] > level_of["backend"]
     assert level_of["integration"] > level_of["frontend"]
-    assert level_of["verification"] > level_of["testing"]
+    assert level_of["verification"] > level_of["memory"]
 
 
 def test_a_cycle_raises_instead_of_hanging():
@@ -560,7 +560,7 @@ def test_the_plan_still_reaches_the_implementation(ats):
     """Narrowing must not cut the projections off — a change that never
     regenerates anything is not a change."""
     plan = incremental_plan(ats, ["RULE-004"], also_sections={"businessRules"})
-    for required in ("integration", "testing", "verification", "assemble"):
+    for required in ("integration", "memory", "verification", "assemble"):
         assert required in plan
 
 
@@ -727,12 +727,12 @@ def test_a_partial_node_still_unblocks_what_depends_on_it(svc):
     _fanout_svc(svc)
 
     def executor(spec):
-        if spec.node == "database" or spec.subject == "ENTITY-002":
+        if spec.node == "security" or spec.subject == "ENTITY-002":
             raise RuntimeError("broken")
         return _layout_result(spec)
 
-    report = run(svc, executor, plan=["entity_fields", "database"], max_attempts=1)
-    assert "database" not in report.skipped, (
+    report = run(svc, executor, plan=["entity_fields", "security"], max_attempts=1)
+    assert "security" not in report.skipped, (
         "a partial entity_fields must not skip the node behind it")
 
 
@@ -1173,19 +1173,19 @@ def test_one_node_cannot_spend_the_whole_wave_budget(svc):
 
 
 def test_an_optional_node_failure_does_not_sink_the_run(svc):
-    """`testing` is verification, not the running app — and the last node to
-    spend the API. A failure there (a low credit balance) must NOT hold a built
-    app in draft: it is shipped without, recorded in `degraded`, and the run
-    stays ok so the app can still reach ready."""
+    """`ui_direction` shapes the look, not the running app. A failure there (a
+    low credit balance) must NOT hold a built app in draft: it is shipped
+    without, recorded in `degraded`, and the run stays ok so the app can still
+    reach ready."""
     def executor(spec: TaskSpec) -> AgentResult:
-        if spec.node == "testing":
+        if spec.node == "ui_direction":
             raise RuntimeError("credit balance too low")
         return page_agent_result(spec)
 
-    report = run(svc, executor, plan=["testing"], max_attempts=1)
+    report = run(svc, executor, plan=["ui_direction"], max_attempts=1)
     assert report.ok, f"failed={report.failed} blocked={report.blocked}"
-    assert "testing" in report.degraded and "testing" not in report.failed
-    assert "credit balance too low" in report.degraded["testing"]
+    assert "ui_direction" in report.degraded and "ui_direction" not in report.failed
+    assert "credit balance too low" in report.degraded["ui_direction"]
 
 
 # ---------------------------------------------------------------------------
@@ -1411,12 +1411,12 @@ def test_install_depends_on_nothing_and_the_build_waits_for_it():
     assert "install" in levels()[0]
 
 
-def test_testing_waits_for_what_it_reads_not_for_the_projections():
-    from services.blueprint.agent_contract import capability_for
-
-    reads = capability_for(DAG["testing"].agent).reads
-    assert "codeMap" not in reads
-    assert DAG["testing"].depends_on == frozenset({"apis", "workflow_steps", "business_rules"})
+def test_nothing_is_authored_that_nothing_reads():
+    """`testing` declared tests nobody wrote or ran; `database` wrote the same
+    four constants every build. Neither is a node now."""
+    assert "testing" not in DAG and "database" not in DAG
+    assert DAG["memory"].depends_on == frozenset({"apis", "workflow_steps", "business_rules"})
+    assert "entity_fields" in DAG["apis"].depends_on
 
 
 def test_a_deterministic_node_may_hand_back_a_future_and_is_done_when_it_lands(svc, tmp_path, monkeypatch):
@@ -1627,7 +1627,7 @@ def test_everything_about_data_waits_for_the_fields_not_the_names():
     and enums every downstream node reads are authored per entity."""
     assert DAG["entity_fields"].depends_on == frozenset({"data_model"})
     assert DAG["entity_fields"].fanout == "entities"
-    for consumer in ("database", "page_contracts", "security", "business_rules",
+    for consumer in ("page_contracts", "security", "business_rules",
                      "workflows"):
         assert "entity_fields" in DAG[consumer].depends_on, consumer
         assert "data_model" not in DAG[consumer].depends_on, consumer

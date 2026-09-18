@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { renderSchemaPage } from "@/lib/schema-page";
 import { entryRoute, schemas as routesRegistry } from "@/schemas/registry";
+import CodedRoot, { hasCodeRoot } from "../_root/page";
 
 /**
  * DV-BIND: dynamic-segment aware catch-all.
@@ -30,8 +31,18 @@ import { entryRoute, schemas as routesRegistry } from "@/schemas/registry";
  */
 export default async function Page({
   params,
-}: { params: Promise<{ slug?: string[] }> }) {
+  searchParams,
+}: {
+  params: Promise<{ slug?: string[] }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { slug = [] } = await params;
+  // `/` WRITTEN AS REACT. A coded root page cannot have its own route file
+  // (this catch-all already answers `/`), so it lives in the private `_root`
+  // module and is rendered from here — before any schema lookup.
+  if (slug.length === 0 && hasCodeRoot) {
+    return CodedRoot({ params: Promise.resolve({}), searchParams });
+  }
   // OPTIONAL, SO IT SERVES "/" TOO. `[...slug]` needs at least one segment,
   // so the root URL matched no route at all and Next answered 404 — while
   // `src/app/page.tsx` is deliberately retired on every assembly, leaving

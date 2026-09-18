@@ -322,6 +322,7 @@ export const AGENT_REGISTRY: AgentInfo[] = [
 
   // ── Composition ───────────────────────────────────────────────────────
   { id: "ui_director", name: "Design Director", spriteKey: "detective", room: "design_studio", role: "Sets the whole app's look and conventions", color: "#BE185D" },
+  { id: "testing", name: "Testing", spriteKey: "qa_tester", room: "qa", role: "Generates the tests", color: "#0891B2" },
   { id: "page_reviewer", name: "Page Reviewer", spriteKey: "scientist", room: "qa", role: "Looks at each page as it renders and sends weak ones back", color: "#0D9488" },
   { id: "ui_engineer", name: "UI Engineer", spriteKey: "artist", room: "composition", role: "Writes each page in React and compiles it", color: "#E11D48" },
   { id: "page_template", name: "Page Layout", spriteKey: "agent_builder", room: "composition", role: "Lays out each page from its contract", color: "#DB2777" },
@@ -336,7 +337,6 @@ export const AGENT_REGISTRY: AgentInfo[] = [
   { id: "security", name: "Security", spriteKey: "security", room: "security", role: "Sets roles and permissions", color: "#DC2626" },
 
   // ── Verification ──────────────────────────────────────────────────────
-  { id: "testing", name: "Testing", spriteKey: "qa_tester", room: "qa", role: "Generates the tests", color: "#0891B2" },
   { id: "verification", name: "Verification", spriteKey: "validator", room: "qa", role: "Checks the blueprint against itself", color: "#7C3AED" },
   { id: "memory", name: "Memory", spriteKey: "inspector", room: "qa", role: "Records decisions and coverage", color: "#92400E" },
 

@@ -1690,6 +1690,33 @@ def _edges(chain: list[str], steps: list[dict], catalog: WorkflowNodeCatalog,
     return edges
 
 
+class WorkflowGraphInvalid(ValueError):
+    """A projected workflow the engine would loop on or could not follow."""
+
+
+def _check_graph(name: str, nodes: list[dict], edges: list[dict],
+                 catalog: WorkflowNodeCatalog) -> None:
+    """What the engine needs of a graph, checked where the graph is made.
+
+    A node id used twice, an edge from a node to itself, an edge out of an
+    end: each is a workflow that loops until the engine's cycle guard stops it
+    or that runs past where it should stop — shipped, and found by someone
+    pressing a button (22lzrc2p's Delete, 2026-09-19). The authoring check
+    (`WorkflowNodeCatalog.flow_errors`) keeps the Blueprint from saying so;
+    this keeps the projection from ever writing it, whatever it was given."""
+    ids = [n.get("id") for n in nodes]
+    problems = [f"node id {i!r} is used twice" for i in sorted({i for i in ids if ids.count(i) > 1})]
+    types = {n.get("id"): n.get("type") for n in nodes}
+    for e in edges:
+        if e["source"] == e["target"]:
+            problems.append(f"{e['source']!r} flows into itself")
+        node = catalog.node(types.get(e["source"])) or {}
+        if types.get(e["source"]) != "trigger" and not node.get("handles", {}).get("out", True):
+            problems.append(f"{e['source']!r} is an end but flows on to {e['target']!r}")
+    if problems:
+        raise WorkflowGraphInvalid(f"workflow {name}: " + "; ".join(problems))
+
+
 def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/lib/workflows/definitions/*.json`` from the Blueprint.
 
@@ -1764,6 +1791,7 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             chain.append(end_id)
 
         edges = _edges(chain, steps, catalog, end_id)
+        _check_graph(str(wf.get("name") or wf.get("id")), nodes, edges, catalog)
 
         definition = {
             "id": slug,
@@ -3221,6 +3249,55 @@ def project_public_routes(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
     return {"files": sorted(written), "removed": sorted(removed),
             "refused": sorted(refused)}
+
+
+def public_nav(doc: dict) -> dict[str, Any]:
+    """The public pages a visitor can move between, in navigation order.
+
+    A page that needs a record (`[id]` in its route) is reached from a list,
+    never from the menu. Order follows the navigation tree where it names the
+    page, then the order the pages were declared in."""
+    pages = [p for p in _live(doc.get("pages"))
+             if (p.get("access") or "authenticated") == "public"
+             and not re.search(r"\[[^\]]+\]", str(p.get("route") or ""))
+             and str(p.get("route") or "").startswith("/")]
+    order: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key in ("page", "pageId", "id"):
+                if isinstance(node.get(key), str):
+                    order.append(node[key])
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+    walk((doc.get("navigation") or {}).get("tree"))
+    rank = {pid: i for i, pid in enumerate(dict.fromkeys(order))}
+    # Home first, wherever the tree lists it: a menu starts where the app does.
+    pages.sort(key=lambda p: (str(p.get("route")) != "/",
+                              rank.get(str(p.get("id")), len(rank)), _live(doc.get("pages")).index(p)))
+    signed_in = any((p.get("access") or "authenticated") != "public"
+                    for p in _live(doc.get("pages")))
+    return {"appName": str((doc.get("application") or {}).get("name") or ""),
+            "items": [{"label": str(p.get("name") or p.get("route")), "route": str(p.get("route"))}
+                      for p in pages],
+            "signIn": signed_in}
+
+
+def project_public_nav(doc: dict, app_root: str | Path) -> str:
+    """Write ``src/contracts/public-nav.ts`` — the public frame's menu."""
+    nav = public_nav(doc)
+    path = Path(app_root) / "src" / "contracts" / "public-nav.ts"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "// The public pages a visitor can move between; `PublicPageFrame` renders them.\n"
+        "export type PublicNavItem = { label: string; route: string };\n\n"
+        "export const PUBLIC_NAV: { appName: string; items: PublicNavItem[]; signIn: boolean } = "
+        + json.dumps(nav, indent=2) + ";\n", "utf-8")
+    return str(path.relative_to(Path(app_root)))
 
 
 def project_append_only_entities(doc: dict, app_root: str | Path) -> dict[str, Any]:

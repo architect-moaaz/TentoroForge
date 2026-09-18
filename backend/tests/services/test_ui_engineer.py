@@ -100,3 +100,53 @@ def test_a_page_code_row_is_accepted_by_the_contract(tmp_path):
         body={"page": "PAGE-001", "rationale": "r2", "load": GOOD_LOAD, "view": GOOD_VIEW})])
     apply_agent_result(svc, again)
     assert [r["rationale"] for r in svc.doc["pageCode"]] == ["r2"], "one row per page, replaced"
+
+
+def test_a_page_that_fails_in_the_finished_app_is_rewritten_or_served_by_its_layout(monkeypatch, tmp_path):
+    """Compiled when written, but the finished tree is the one that ships; a page
+    that fails there must not ship broken (2g13o6yz's root, 2026-09-19)."""
+    from services.blueprint.ui_engineer import settle_code_pages
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Desk", domain="ops")
+    svc.doc["pages"] = [{"id": "PAGE-001", "name": "Home", "route": "/cases", "purpose": "x"},
+                        {"id": "PAGE-002", "name": "Other", "route": "/other", "purpose": "x"}]
+    svc.doc["pageCode"] = [{"page": p, "load": GOOD_LOAD, "view": GOOD_VIEW} for p in ("PAGE-001", "PAGE-002")]
+    svc.save()
+    broken = {"PAGE-001", "PAGE-002"}
+    monkeypatch.setattr(ui_engineer, "typecheck",
+                        lambda doc, root, pid, *a, **k: ["page.tsx(1,1): error TS2554"] if pid in broken else [])
+    def rewrite(doc, page, root, client, **kw):
+        if page["id"] == "PAGE-002":
+            raise CompileError("still broken")
+        broken.discard("PAGE-001")
+        return {"page": "PAGE-001", "rationale": "fixed", "load": GOOD_LOAD, "view": GOOD_VIEW}, []
+    monkeypatch.setattr(ui_engineer, "compose_page", rewrite)
+    monkeypatch.setattr("services.blueprint.app_sdk.project_code_pages", lambda doc, root: [])
+    out = settle_code_pages(svc, tmp_path / "app", client=object())
+    assert out["PAGE-001"] == "rewritten"
+    assert out["PAGE-002"].startswith("served by its layout")
+    assert [r["page"] for r in svc.doc["pageCode"]] == ["PAGE-001"]
+
+
+def test_the_reviewer_never_shares_the_persons_build_or_database(monkeypatch, tmp_path):
+    """A second `next dev` in the same `.next` broke the person's own server,
+    and `start.sh` + `compose stop` moved and then stopped their database."""
+    from services.blueprint import page_review
+
+    (tmp_path / ".env.local").write_text("DATABASE_URL=postgresql://postgres:postgres@localhost:5437/app\n")
+    assert page_review._database_port(tmp_path) == 5437
+    ran, started = [], {}
+    monkeypatch.setattr(page_review, "_listening", lambda port: True)          # the person's DB is up
+    monkeypatch.setattr(page_review.subprocess, "run", lambda cmd, **kw: ran.append(cmd))
+    class _P:
+        pid = 1
+        def __init__(self, cmd, **kw): started.update(kw.get("env") or {})
+        def wait(self, timeout=None): return 0
+    monkeypatch.setattr(page_review.subprocess, "Popen", _P)
+    monkeypatch.setattr(page_review.urllib.request, "urlopen", lambda *a, **k: None)
+    monkeypatch.setattr(page_review.os, "killpg", lambda *a: None)
+    monkeypatch.setattr(page_review.os, "getpgid", lambda pid: pid)
+    with page_review.RunningApp(tmp_path):
+        pass
+    assert started["NEXT_DIST_DIR"] == page_review.REVIEW_DIST_DIR != ".next"
+    assert not any("start.sh" in " ".join(c) or "compose" in " ".join(c) for c in ran)

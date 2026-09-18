@@ -820,7 +820,7 @@ class ModelRouter:
 
         router = ModelRouter(
             default=AnthropicModel(),
-            by_node={"testing": kimi, "business_rules": kimi},
+            by_node={"business_rules": kimi},
         )
 
     Whether a given split is *better* is an empirical question, and you can now
@@ -1267,10 +1267,6 @@ NODE_TASKS: dict[str, str] = {
         "Where authorisation really "
         "is by role and every holder sees every row, write that as a prose rule "
         "so the absence of a scoping object reads as a decision."
-    ),
-    "testing": (
-        "Write the tests that verify the requirements. Every approved requirement "
-        "needs at least one."
     ),
 }
 
@@ -2801,7 +2797,6 @@ EFFORT_BY_NODE: dict[str, str] = {
     # stay_high protects them because everything downstream derives from what
     # they decide. That objection was right about `data_model` too — the fix
     # there was the reply's shape, not its reasoning.
-    "database": "medium",
     # The same argument as `database`, one level up: `data_model` names the
     # entity and what it is for, and this authors the columns of ONE of them
     # against that. Measured at 284s for a first call on a five-field entity —
@@ -2811,7 +2806,6 @@ EFFORT_BY_NODE: dict[str, str] = {
     # the ceiling is paid once per record rather than once per build.
     "entity_fields": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
-    "testing": "medium",
     # A short list of named third parties.
     "integrations": "low",
 }
@@ -2854,7 +2848,6 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     # twice, failing the node and skipping every node after it. Unused headroom
     # is free; this failure cost the entire build.
     "page_contracts": 64000,
-    "database": 64000,
     "security": 64000,
     # Declares thirty-odd workflows without their steps; the 64k the single
     # call needed went on step graphs, which `workflow_steps` now writes one

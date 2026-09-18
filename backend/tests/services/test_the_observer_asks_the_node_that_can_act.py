@@ -165,7 +165,7 @@ def test_the_requirements_author_is_not_sent_to_the_observer(tmp_path):
 
 
 @pytest.mark.parametrize("node", ["entity_fields", "requirements", "ux_architecture",
-                                  "database", "integrations"])
+                                  "integrations", "page_code"])
 def test_the_nodes_taken_off_the_observer_have_no_repair_rounds(node):
     """Zero rounds is what keeps a node away from the critic entirely
     (`finish` skips `observe`); the runs above show it for three of them."""

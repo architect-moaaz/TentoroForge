@@ -73,6 +73,6 @@ def test_a_deprecated_subject_is_not_owed():
 
 
 def test_single_write_nodes_keep_the_section_rule():
-    """`database` writes once; content in its section is completion."""
+    """`security` writes once; content in its section is completion."""
     doc = _doc(["ENTITY-001"], ["ENTITY-001"])
-    assert "database" in completed_nodes(doc)
+    assert "security" in completed_nodes(doc)

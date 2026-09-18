@@ -159,9 +159,6 @@ _READS: dict[str, set[str]] = {
     "api": {"requirements", "data", "database", "workflows", "pages",
             "widgets", "permissions"},
 
-    # Tests are written against everything that claims to do something.
-    "testing": {"requirements", "data", "pages", "apis", "workflows",
-                "businessRules"},
 
 }
 
@@ -252,7 +249,6 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     "business_rules": _cap("business_rules", {"businessRules"}),
     "integration": _cap("integration", {"integrations"}),
     "security": _cap("security", {"security", "roles", "permissions"}),
-    "testing": _cap("testing", {"tests"}),
     "accessibility": _cap("accessibility", {"designSystem"}),
     "build": _cap("build", {"runtime"}),
     # Verification reports divergence; it never edits an artifact's content.
@@ -267,6 +263,9 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # sends the ones that fall short back to the UI engineer, who rewrites
     # them. Writes nothing itself — the rewrite is the engineer's.
     "page_reviewer": _cap("page_reviewer", set(), may_set_status=True),
+    # §27's test agent. Registered because §27 names it; no node runs it now —
+    # the declarations it wrote were never written out or run (see the DAG).
+    "testing": _cap("testing", {"tests"}),
     "deployment": _cap(
         "deployment", {"deployment"},
         tools={"build:approved", "deploy:config", "vercel"},

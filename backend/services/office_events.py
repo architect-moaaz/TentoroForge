@@ -71,6 +71,7 @@ ROOM_OF: dict[str, str] = {
     "ui_engineer": "composition",
     "ui_director": "design_studio",
     "page_reviewer": "qa",
+    "testing": "qa",
     "a2ui_pages": "composition",
     "frontend": "composition",
     # Logic — what the business does (§107 step 16)
@@ -79,7 +80,6 @@ ROOM_OF: dict[str, str] = {
     # Security — permissions guard entities, so this sits next to Data (§100)
     "security": "security",
     # Verification — the §75 matrix, the tests, and what the run remembers
-    "testing": "qa",
     "verification": "qa",
     # The observer (§73) sits with verification: it judges each node as it
     # lands and sends the incomplete ones back to their author.
@@ -117,7 +117,6 @@ NODE_LABEL: dict[str, str] = {
     "security": "Setting roles and permissions",
     "integrations": "Connecting the outside services",
     "integration": "Assembling the application",
-    "testing": "Generating the tests",
     "memory": "Recording decisions and coverage",
     "verification": "Checking the blueprint against itself",
     "page_review": "Looking at each page as it renders",

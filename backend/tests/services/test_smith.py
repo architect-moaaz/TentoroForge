@@ -396,7 +396,7 @@ def test_a_proposal_still_drives_regeneration(ats, tmp_path):
     plan = turn.change.impact.plan
     assert plan, "a written artifact must reach the implementation"
     # Downstream consumes the new workflow...
-    assert "verification" in plan and "testing" in plan
+    assert "verification" in plan and "memory" in plan
     # ...but the workflow agent does not re-author what Smith just wrote from
     # the user's own words (§20).
     assert "workflows" not in plan

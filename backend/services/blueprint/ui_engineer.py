@@ -166,9 +166,12 @@ Every one of these renders on its own with plain props; pass resolved data, neve
   <Calendar events={rows} dateField="dueDate" titleField="title" view="month" | "week" | "agenda" />
   <DataGrid columns={[{ key: "title", label: "Title", sortable: true }]} rows={rows} rowKey="id" />
   <DescriptionList items={[{ label: "Guest", value: "Emma Clarke" }]} orientation="horizontal" />
+      value is TEXT (a string or number) — it is printed, so a JSX value renders as
+      "[object Object]". For a badge, a link or formatted markup in a value, write your
+      own <dl> grid instead. The same holds for KeyValueList.
   <PersonCard name="Maya Patel" role="Case manager" email="maya@hotel.test" />
   <ApprovalStepper steps={[{ id: "a", label: "Submitted", status: "complete" | "current" | "pending" | "rejected" }]} />
-  <KeyValueList items={[{ label: "Folio", value: "RSV-88037" }]} />
+  <KeyValueList items={[{ label: "Folio", value: "RSV-88037" }]} />      (value is text)
   <MoneyDisplay value={1240.5} currency="GBP" />
   <Tag label="Urgent" variant="default" | "primary" | "success" | "warning" | "danger" />
 
@@ -178,6 +181,17 @@ any other library component."""
 
 DESIGN_PRINCIPLES = """\
 What a finished page looks like:
+
+- THE FRAME IS NOT YOURS. The application wraps every page in its own frame —
+  the sidebar for signed-in pages, the top bar for public ones — with the
+  app's name or logo, the menu, and sign-in. Never draw a sidebar, a top
+  navigation bar, an app-name or logo header, a menu of the app's pages, or a
+  footer. A page that does looks different from its neighbours, and the app
+  shows two menus. Your page is the content area: start with its own header.
+  Links to related pages belong in the content (a back link, a "view all").
+  The frame also sets the page's width and outer padding — do not wrap the
+  page in a max-width container or add outer page padding; fill the width you
+  are given (a narrow form may sit in a card of its own width inside it).
 
 - ONE JOB, OBVIOUS. The page header says where you are (small eyebrow + title) and
   shows the one primary action for the page on the right. Secondary actions are
@@ -414,13 +428,16 @@ def typecheck(doc: dict, app_root: Path, page_id: str, load: str, view: str,
         proc = subprocess.run([str(tsc), "-p", str(check / "tsconfig.json"), "--pretty", "false"],
                               cwd=str(app_root), capture_output=True, text=True, timeout=timeout)
         rel_dir = str(check.relative_to(app_root))
-        errors = []
+        errors: list[str] = []
+        ours = False
         for line in (proc.stdout + proc.stderr).splitlines():
-            if not line.startswith(rel_dir + "/"):
-                if errors and line.startswith(" "):
-                    errors[-1] += " " + line.strip()      # continuation of the last error
-                continue
-            errors.append(line[len(rel_dir) + 1:])
+            if line.startswith(rel_dir + "/"):
+                errors.append(line[len(rel_dir) + 1:])
+                ours = True
+            elif ours and line.startswith(" "):
+                errors[-1] += " " + line.strip()          # continuation of OUR last error
+            else:
+                ours = False                              # a scaffold file's error, and its tail
         return errors
     finally:
         shutil.rmtree(check, ignore_errors=True)
@@ -475,7 +492,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         current = {"load": load, "view": view}
         note = ("The TypeScript compiler (strict) and the page rules refused it:\n"
                 + "\n".join(f"- {e}" for e in errors[:40]))
-        logger.info("[ui_engineer] %s round %d: %d error(s)", page.get("id"), round_, len(errors))
+        logger.warning("[ui_engineer] %s round %d: %d error(s): %s", page.get("id"), round_,
+                       len(errors), "; ".join(errors[:3])[:400])
     raise CompileError(f"{page.get('id')}: still does not compile after {COMPILE_ROUNDS} rounds — "
                        + "; ".join(last_errors[:12]))
 
@@ -518,5 +536,76 @@ def compose_direction(doc: dict, client: Any) -> tuple[dict, Any]:
             getattr(reply, "usage", None))
 
 
-__all__ = ["compose_page", "compose_direction", "typecheck", "ensure_sdk", "system_prompt",
+def settle_code_pages(svc: Any, app_root: str | Path, client: Any = None,
+                      usage: Any = None) -> dict[str, str]:
+    """Compile every coded page against the FINISHED tree, just before it is built.
+
+    A page is compiled when it is written, but that tree is not yet the one
+    that ships — the scaffold's last layer lands at assembly — and `next build`
+    ignores type errors, so a page that fails here would ship broken. On
+    2g13o6yz (2026-09-19) the root page was accepted with a `load()` its route
+    calls as `load(ctx)`. So: each coded page is compiled again, in parallel;
+    one that fails goes back to its author once with the compiler's words; one
+    that still fails loses its code and is served by its layout, which every
+    page has. Returns `{page_id: outcome}` for the pages that did not pass."""
+    import concurrent.futures as cf
+    import copy as _copy
+
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
+    from services.blueprint.app_sdk import project_code_pages
+
+    root = Path(app_root)
+    with svc.lock:
+        doc = _copy.deepcopy(svc.doc)
+    rows = [r for r in doc.get("pageCode") or [] if r.get("status") != "DEPRECATED"]
+    pages = {str(p.get("id")): p for p in doc.get("pages") or []}
+
+    def check(row: dict) -> tuple[dict, list[str]]:
+        return row, typecheck(doc, root, str(row["page"]), str(row["load"]), str(row["view"]))
+
+    with cf.ThreadPoolExecutor(6) as pool:
+        failing = [(r, e) for r, e in pool.map(check, rows) if e]
+    outcome: dict[str, str] = {}
+    if not failing:
+        return outcome
+
+    def fix(item: tuple[dict, list[str]]) -> tuple[str, dict | None, list[str]]:
+        row, errors = item
+        pid = str(row["page"])
+        if client is None or pid not in pages:
+            return pid, None, errors
+        note = ("It compiled when you wrote it, but not in the finished application. The "
+                "TypeScript compiler (strict) says:\n" + "\n".join(f"- {e}" for e in errors[:40]))
+        try:
+            body, spent = compose_page(doc, pages[pid], root, client, feedback=note, current=row)
+        except CompileError as exc:
+            return pid, None, [str(exc)]
+        if usage is not None:
+            for u, elapsed in spent:
+                usage.record(node="page_code", agent="ui_engineer", usage=u, elapsed_s=elapsed,
+                             project=str((doc.get("application") or {}).get("id", "")))
+        return pid, body, []
+
+    with cf.ThreadPoolExecutor(6) as pool:
+        fixed = list(pool.map(fix, failing))
+    with svc.lock:
+        for pid, body, errors in fixed:
+            if body is not None:
+                apply_agent_result(svc, AgentResult(
+                    task_id=f"TASK-settle-{pid}", agent="ui_engineer", confidence=0.9,
+                    proposals=[ArtifactProposal(section="pageCode", natural_key=pid, body=body)]),
+                    commit=True)
+                outcome[pid] = "rewritten"
+            else:
+                svc.doc["pageCode"] = [r for r in svc.doc.get("pageCode") or []
+                                       if str(r.get("page")) != pid]
+                svc.save()
+                outcome[pid] = "served by its layout: " + "; ".join(errors[:3])[:300]
+                logger.warning("[ui_engineer] %s does not compile in the finished app — "
+                               "its layout serves it: %s", pid, "; ".join(errors[:3])[:300])
+        project_code_pages(svc.doc, root)
+    return outcome
+
+
+__all__ = ["settle_code_pages", "compose_page", "compose_direction", "typecheck", "ensure_sdk", "system_prompt",
            "user_prompt", "CompileError", "PAGE_CODE_SCHEMA", "DIRECTION_SCHEMA", "COMPILE_ROUNDS"]

@@ -155,20 +155,20 @@ def test_the_check_after_the_last_repair_does_not_hold_the_node(svc):
     """rounds=1: one repair, then a check that can only flag. It is slow; the
     node completes — and its dependent starts — before the flag is written."""
     def author(spec):
-        if spec.node == "database":
+        if spec.node == "security":
             return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9)
         return _author(svc)(spec)
 
     critic = _Critic(passes_after={"ENTITY-002": 0, "ENTITY-003": 0},
                      delay=lambda s, n: 0.5 if n == 2 else 0.0)
-    report = run(svc, author, plan=["entity_fields", "database"],
+    report = run(svc, author, plan=["entity_fields", "security"],
                  observer_agent=Observer(critic=critic, rounds=1))
 
     events = _events(svc)
     at = {(e["event"], e.get("node")): i for i, e in enumerate(events)}
     flagged = at[("observer:unrepaired", "entity_fields")]
     assert at[("node:done", "entity_fields")] < flagged
-    assert at[("node:start", "database")] < flagged
+    assert at[("node:start", "security")] < flagged
     # The verdict still lands in full: reported, and the entity flagged.
     assert list(report.unrepaired) == ["entity_fields:ENTITY-001"]
     entity = next(e for e in svc.doc["data"]["entities"] if e["id"] == "ENTITY-001")
@@ -178,17 +178,17 @@ def test_the_check_after_the_last_repair_does_not_hold_the_node(svc):
 def test_a_check_that_can_still_send_back_does_hold_the_node(svc):
     """§28 is unchanged: with a round left, dependents wait for the verdict."""
     def author(spec):
-        if spec.node == "database":
+        if spec.node == "security":
             return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9)
         return _author(svc)(spec)
 
     critic = _Critic(passes_after={"ENTITY-001": 1, "ENTITY-002": 0, "ENTITY-003": 0},
                      delay=lambda s, n: 0.3 if n == 2 else 0.0)
-    run(svc, author, plan=["entity_fields", "database"],
+    run(svc, author, plan=["entity_fields", "security"],
         observer_agent=Observer(critic=critic, rounds=2))
     events = _events(svc)
     verdicts = [i for i, e in enumerate(events)
                 if e["event"] == "observer:verdict" and e["subject"] == "ENTITY-001"]
     start = next(i for i, e in enumerate(events)
-                 if e["event"] == "node:start" and e["node"] == "database")
+                 if e["event"] == "node:start" and e["node"] == "security")
     assert verdicts[-1] < start

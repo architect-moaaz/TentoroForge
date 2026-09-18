@@ -367,6 +367,13 @@ def sdk_reference(doc: dict) -> str:
 
 CODE_PAGE_MARKER = "// forge:code-page"
 
+#: Where `/` lives when it has code. The optional catch-all `[[...slug]]`
+#: answers `/`, and Next refuses a second answer, so the root page is a private
+#: module (`_root`, never routed by Next) that the catch-all renders. The
+#: scaffold ships a stub there; the stub is put back when `/` has no code.
+ROOT_DIR = "src/app/_root"
+_ROOT_STUB = Path(__file__).resolve().parents[2] / "templates/standalone-app/src/app/_root/page.tsx"
+
 
 def code_page_dir(page: dict) -> str:
     """Where a coded page lives, relative to the app root — where the page's
@@ -377,11 +384,13 @@ def code_page_dir(page: dict) -> str:
     routes either way."""
     from services.blueprint.projection import public_route_segments
 
+    route = str(page.get("route") or "/").strip("/")
+    if not route:
+        return ROOT_DIR
     public = public_route_segments(page)
     if public:
         return "src/app/" + "/".join(public)
-    route = str(page.get("route") or "/").strip("/")
-    return "src/app/(dashboard)" + (f"/{route}" if route else "")
+    return "src/app/(dashboard)/" + route
 
 
 def _entities_read(doc: dict, code: str) -> list[str]:
@@ -396,13 +405,16 @@ def page_module(doc: dict, page: dict, row: dict) -> str:
     from services.blueprint.projection import public_route_segments
 
     entities = _entities_read(doc, str(row.get("load") or ""))
-    public = public_route_segments(page) is not None
+    # A public root has no segments of its own but is still a public page.
+    public = (page.get("access") or "authenticated") == "public" and (
+        public_route_segments(page) is not None or not str(page.get("route") or "/").strip("/"))
     # A public page renders as the public route file it replaces does — in
     # the public frame, with no rail into a product the visitor cannot reach.
     frame_open = "<PublicPageFrame><PageFrame" if public else "<PageFrame"
     frame_close = "</PageFrame></PublicPageFrame>" if public else "</PageFrame>"
     frame_import = ('import { PublicPageFrame } from "@/components/PublicPageFrame";\n'
                     if public else "")
+    root = code_page_dir(page) == ROOT_DIR
     return (
         f"{CODE_PAGE_MARKER} {page.get('id')}\n"
         f"// {page.get('name')} — generated from the Living Blueprint (pageCode). Edit the\n"
@@ -415,7 +427,9 @@ def page_module(doc: dict, page: dict, row: dict) -> str:
         'import View from "./view";\n'
         "\n"
         'export const dynamic = "force-dynamic";\n'
-        "\n"
+        + ("// The catch-all renders this for `/` (see ROOT_DIR).\nexport const hasCodeRoot = true;\n"
+           if root else "")
+        + "\n"
         "type Search = Record<string, string | string[] | undefined>;\n"
         "\n"
         "export default async function Page(props: { params: Promise<Record<string, string>>; searchParams: Promise<Search> }) {\n"
@@ -476,6 +490,10 @@ def project_code_pages(doc: dict, app_root: str | Path) -> list[str]:
             if head.startswith(CODE_PAGE_MARKER):
                 for name in ("page.tsx", "load.ts", "view.tsx"):
                     (page_file.parent / name).unlink(missing_ok=True)
+                if page_file.parent == root / ROOT_DIR and _ROOT_STUB.exists():
+                    # The catch-all imports it: `/` without code is the stub.
+                    page_file.write_text(_ROOT_STUB.read_text())
+                    continue
                 parent = page_file.parent
                 while parent != app and parent.is_dir() and not any(parent.iterdir()):
                     parent.rmdir()

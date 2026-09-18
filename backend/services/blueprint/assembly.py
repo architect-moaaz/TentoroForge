@@ -118,6 +118,12 @@ SCAFFOLD_OWNED: tuple[str, ...] = ()
 #: The floor is a plain-looking application, not an unbuildable one.
 SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     "src/app/tokens.css",
+    # The coded root page the catch-all imports (`app_sdk.ROOT_DIR`). The
+    # projection writes it when `/` has code and the stub otherwise; this is
+    # the stub for a tree the projection never reached.
+    "src/app/_root/page.tsx",
+    # The public frame's menu (`project_public_nav`); the frame imports it.
+    "src/contracts/public-nav.ts",
     # The owner's mark, for the pages with no shell around them. `BrandMark.tsx`
     # imports it and the sign-in screen and every error page render that, so a
     # tree without this module does not compile — the same trap `tokens.css`
@@ -1044,6 +1050,53 @@ def _last_error(output: str) -> str:
         if "Error" in line or "error" in line or "cannot" in line.lower():
             return line[:400]
     return (lines[-1][:400] if lines else "no output")
+
+
+class RouteCollision(RuntimeError):
+    """Two page files in the assembled tree answer the same URL."""
+
+
+def route_collisions(app_root: str | Path) -> list[tuple[str, list[str]]]:
+    """Every URL two or more `page.tsx` files resolve to.
+
+    Next refuses such a tree — "You cannot have two parallel pages that
+    resolve to the same path" — but only after the full `next build` has run,
+    and only in its own words. Every writer of a route file (the scaffold, the
+    public routes, the coded pages, the task inbox) is right on its own; this
+    is the one place that sees all of them at once. Route groups `(x)` and
+    parallel slots `@x` do not appear in a URL; dynamic segments collide
+    whatever their parameter is named (`[id]` and `[slug]` at one level are
+    one route to Next); an optional catch-all also answers its parent.
+    """
+    app = Path(app_root) / "src" / "app"
+    if not app.is_dir():
+        return []
+    seen: dict[str, list[str]] = {}
+    for page in sorted(app.rglob("page.tsx")):
+        rel_parts = page.parent.relative_to(app).parts
+        if any(p.startswith("_") for p in rel_parts):
+            continue                                        # a private folder is never a route
+        parts = [p for p in rel_parts
+                 if not (p.startswith("(") and p.endswith(")")) and not p.startswith("@")]
+        # `[id]`/`[slug]` are one route; a catch-all `[...x]` is a different one.
+        norm = ["[...*]" if p.startswith("[...") else "[[...*]]" if p.startswith("[[...")
+                else "[*]" if p.startswith("[") else p for p in parts]
+        urls = ["/" + "/".join(norm)]
+        if norm and norm[-1].startswith("[[..."):
+            urls.append("/" + "/".join(norm[:-1]))          # `[[...slug]]` also answers its parent
+        rel = str(page.relative_to(Path(app_root)))
+        for url in urls:
+            seen.setdefault(url.replace("//", "/"), []).append(rel)
+    return [(url, files) for url, files in sorted(seen.items()) if len(files) > 1]
+
+
+def check_route_tree(app_root: str | Path) -> None:
+    """Refuse a tree with two pages at one URL, naming both — before a build
+    that would take minutes to say the same thing less plainly."""
+    clashes = route_collisions(app_root)
+    if clashes:
+        raise RouteCollision("; ".join(f"{url} is served by {' and '.join(files)}"
+                                       for url, files in clashes[:8]))
 
 
 def verify_build(app_root: str | Path, *, timeout: int = 900,

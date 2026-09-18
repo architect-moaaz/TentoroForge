@@ -46,7 +46,6 @@ EDGES: tuple[str, ...] = (
     "Workflow↔API",
     "Design↔DesignSystem",
     "Requirement↔Code",
-    "Requirement↔Test",
     "Blueprint↔Implementation",
     # Added by the migration ledger: each collapses a cluster of passes from
     # the old repair chain that the PRD's ten edges do not cover.
@@ -95,7 +94,6 @@ SECTION_OWNER: dict[str, str] = {
     "security": "security",
     "roles": "security",
     "permissions": "security",
-    "tests": "testing",
     "runtime": "build",
     "deployment": "deployment",
     "codeMap": "backend",
@@ -125,7 +123,6 @@ EDGE_SECTIONS: dict[str, tuple[str, ...]] = {
     "Requirement↔Code": ("requirements", "pages", "apis", "workflows",
                          "businessRules", "components", "data.entities",
                          "codeMap"),
-    "Requirement↔Test": ("requirements", "tests"),
     "Blueprint↔Implementation": ("pages", "apis", "workflows", "businessRules",
                                  "components", "data.entities", "codeMap"),
     "Navigation↔Page": ("navigation", "pages"),
@@ -571,19 +568,6 @@ def check_requirement_code(doc: dict) -> list[Finding]:
     return out
 
 
-def check_requirement_test(doc: dict) -> list[Finding]:
-    """§75 Requirement↔Test — an unverified requirement is an assertion."""
-    verified: set[str] = set()
-    for t in _live(doc.get("tests")):
-        verified.update(t.get("verifies") or [])
-    return [
-        Finding("Requirement↔Test", section="requirements", artifact_id=r.get("id"),
-                detail="no test verifies this requirement")
-        for r in _live(doc.get("requirements"))
-        if r.get("status") not in ("PROPOSED",) and r.get("id") not in verified
-    ]
-
-
 def check_blueprint_implementation(doc: dict) -> list[Finding]:
     """§76 — anything claiming to be built must say where it lives."""
     mapped = {e.get("artifact") for e in doc.get("codeMap") or []}
@@ -934,7 +918,6 @@ CHECKS: dict[str, Callable[[dict], list[Finding]]] = {
     "Page↔Function": check_page_function,
     "Design↔DesignSystem": check_design_system,
     "Requirement↔Code": check_requirement_code,
-    "Requirement↔Test": check_requirement_test,
     "Blueprint↔Implementation": check_blueprint_implementation,
     "Navigation↔Page": check_navigation_page,
     "Page↔Precondition": check_page_precondition,
@@ -1000,7 +983,6 @@ def requirement_verdict(doc: dict, requirement_id: str) -> dict[str, Any]:
     """
     facets = {
         "Requirement↔Code": check_requirement_code,
-        "Requirement↔Test": check_requirement_test,
     }
     detail: dict[str, Any] = {}
     failed = False

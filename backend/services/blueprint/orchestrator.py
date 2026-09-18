@@ -234,10 +234,15 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("entity_fields", "data_model", ("data_model",), ("data.entities",),
        fanout="entities",
        note="fields, keys, enums, sensitivity and constraints, per entity"),
-    _n("database", "data_model", ("entity_fields",), ("database",)),
+    # NO `database` NODE. It was one model call that wrote the same four
+    # constants every time (`engine: postgres`, `provider: neon`, nothing
+    # applied, nothing seeded), which no projection and no check read — the
+    # tables come from `data.entities`. It sat on the path to the APIs at 75s
+    # median and 9 minutes at p90. The section stays in the contract for the
+    # documents that carry it.
     # Derived, not authored: mutations from workflows, reads from the data
     # engine, analytics from widgets. See services.blueprint.api_derivation.
-    _n("apis", "api", ("database", "workflow_steps", "page_details"), ("apis",),
+    _n("apis", "api", ("entity_fields", "workflow_steps", "page_details"), ("apis",),
        kind="service",
        note="endpoints are implied by entities + workflows + widgets"),
     _n("backend", "backend", ("apis",), ("codeMap",), kind="projection"),
@@ -361,17 +366,17 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("integration", "backend",
        ("backend", "frontend", "workflow_steps", "business_rules", "security", "integrations"),
        (), kind="projection"),
-    # Reads requirements, data, pages, apis, workflows and rules — never a
-    # projected file — so it waits for the producers of those and runs beside
-    # the projections instead of behind them. `apis` carries the data model
-    # and the pages transitively; the other two are named because nothing
-    # between them and this node would.
-    _n("testing", "testing", ("apis", "workflow_steps", "business_rules"),
-       ("tests",), optional=True),
+    # NO `testing` NODE. It declared tests — names and file paths — that were
+    # never written and never run; the one reader counted them against the
+    # requirements. About a tenth of a build's spend for a number. Behaviour
+    # is proven where it can be: the compiler on every coded page, the dry
+    # run of every control's workflow, the build, the boot, and the page
+    # review looking at each page as it renders.
     # §20 + §23 — both read off what the Blueprint already carries, so neither
     # is an agent. Placed after authoring and before verification, so the
     # verification report is made against a document that knows what it assumed.
-    _n("memory", "memory", ("testing",), ("decisions", "completeness"),
+    _n("memory", "memory", ("apis", "workflow_steps", "business_rules"),
+       ("decisions", "completeness"),
        kind="service",
        note="§20 decision memory + §23 completeness, both derived"),
     _n("verification", "verification", ("memory",), (), kind="service"),
@@ -2060,8 +2065,12 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 #: spend. It was the node the observer repaired best (14 of 15 sent back
 #: passed), so what it caught now reaches later nodes and the terminal
 #: `verification` unrepaired.
-#: `database`: 0 — sent back 8 times, 3 passed, 5 flagged. `integrations`: 0 —
-#: sent back once and flagged. Product decision the same day, for time and spend.
+#: `integrations`: 0 — sent back once and flagged. Product decision the same
+#: day, for time and spend.
+#: `page_code`: 0 — a page's code is judged by the compiler before it is
+#: accepted and by `page_review` as it renders; a critic reading the source
+#: had nothing either of those does not see better, and its repair would be a
+#: rewrite neither had asked for.
 #: `ux_architecture`: 0 — 17 of 19 failed the first look and 9 were repaired;
 #: most findings judged what later nodes fill ("the module's pages array is
 #: empty" before any page exists, an empty `initialRoute`, a missing citation),
@@ -2069,8 +2078,8 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
     "entity_fields": 0,
     "requirements": 0,
-    "database": 0,
     "integrations": 0,
+    "page_code": 0,
     "ux_architecture": 0,
 }
 
@@ -2600,6 +2609,8 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # `(dashboard)`, whose layout redirects anyone without a session. After
     # the middleware, because the two are one statement about the same pages.
     project_public_routes(svc.doc, app_root)
+    from services.blueprint.projection import project_public_nav
+    project_public_nav(svc.doc, app_root)
     project_root_route(svc.doc, app_root)
 
     # DROP-AND-CONTINUE, NOT DROP-THE-APPLICATION. A page whose authored tree
@@ -2698,7 +2709,16 @@ def _project_assemble(svc: BlueprintService, app_root: str) -> None:
     # missing directory means it did not run (no app_root at the time, a
     # resumed plan without it) and the build installs for itself.
     from pathlib import Path as _P
+    from services.blueprint.assembly import check_route_tree
+    from services.blueprint.executors import RunUsage, tiered_router
+    from services.blueprint.ui_engineer import settle_code_pages
 
+    # Every coded page compiled once more, now the tree is final; a page that
+    # fails is rewritten from the compiler's errors or served by its layout.
+    if svc.doc.get("pageCode"):
+        settle_code_pages(svc, app_root, tiered_router().for_task("page_code", "ui_engineer"),
+                          usage=RunUsage.for_app(svc, phase="build"))
+    check_route_tree(app_root)
     result = verify_build(app_root, install=not (_P(app_root) / "node_modules").is_dir())
     result.setdefault("install", 0)
 

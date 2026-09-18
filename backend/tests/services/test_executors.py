@@ -124,7 +124,7 @@ def test_an_agent_sees_only_what_it_may_read(svc):
 
 
 def test_context_always_carries_application_identity(svc):
-    for agent in ("page_design", "data_model", "testing"):
+    for agent in ("page_design", "data_model", "security"):
         assert "application" in context_for(svc.doc, agent)
 
 
@@ -338,8 +338,8 @@ def kimi() -> "OpenAICompatibleModel":
 def test_router_sends_each_node_to_its_assigned_model():
     from services.blueprint.executors import AnthropicModel, ModelRouter
 
-    router = ModelRouter(default=AnthropicModel(), by_node={"testing": kimi()})
-    assert router.for_task("testing", "testing").model == "kimi-k2-0711-preview"
+    router = ModelRouter(default=AnthropicModel(), by_node={"integrations": kimi()})
+    assert router.for_task("integrations", "integration").model == "kimi-k2-0711-preview"
     assert router.for_task("data_model", "data_model").model == DEFAULT_MODEL
 
 
@@ -354,17 +354,17 @@ def test_node_assignment_beats_agent_assignment():
     from services.blueprint.executors import AnthropicModel, ModelRouter
 
     k = kimi()
-    router = ModelRouter(default=AnthropicModel(), by_node={"testing": k},
-                         by_agent={"testing": AnthropicModel()})
-    assert router.for_task("testing", "testing") is k
+    router = ModelRouter(default=AnthropicModel(), by_node={"integrations": k},
+                         by_agent={"integration": AnthropicModel()})
+    assert router.for_task("integrations", "integration") is k
 
 
 def test_assignments_report_what_runs_where():
     from services.blueprint.executors import AnthropicModel, ModelRouter
 
-    router = ModelRouter(default=AnthropicModel(), by_node={"testing": kimi()})
+    router = ModelRouter(default=AnthropicModel(), by_node={"integrations": kimi()})
     a = router.assignments()
-    assert a["testing"] == "kimi-k2-0711-preview"
+    assert a["integrations"] == "kimi-k2-0711-preview"
     assert a["data_model"] == DEFAULT_MODEL
     assert set(a) == set(DAG), "every node must have a declared model"
 
@@ -372,8 +372,8 @@ def test_assignments_report_what_runs_where():
 def test_a_transport_that_cannot_enforce_the_schema_gets_it_in_the_prompt(svc):
     """Kimi's JSON mode guarantees valid JSON, not our envelope. The constraint
     has to be stated somewhere, so it moves into the system prompt."""
-    enforced, _ = build_prompt(svc.doc, "testing", inline_schema=False)
-    stated, _ = build_prompt(svc.doc, "testing", inline_schema=True)
+    enforced, _ = build_prompt(svc.doc, "integrations", inline_schema=False)
+    stated, _ = build_prompt(svc.doc, "integrations", inline_schema=True)
     marker = "Your reply must be a single JSON object"
     assert marker in stated and "natural_key" in stated
     assert marker not in enforced, "Claude's transport enforces it; don't pay the tokens"
@@ -395,11 +395,11 @@ def test_the_executor_picks_the_prompt_form_from_the_clients_capability(svc):
         return Spy()
 
     router = ModelRouter(
-        default=spy("claude", True), by_node={"testing": spy("kimi", False)}
+        default=spy("claude", True), by_node={"integrations": spy("kimi", False)}
     )
     ex = make_executor(svc, router)
     ex(TaskSpec("T-1", "page_contracts", "page_design"))
-    ex(TaskSpec("T-2", "testing", "testing"))
+    ex(TaskSpec("T-2", "integrations", "integration"))
 
     marker = "Your reply must be a single JSON object"
     assert marker not in seen["claude"], "schema-enforcing transport: no inline envelope"
@@ -513,13 +513,13 @@ def test_a_run_can_mix_anthropic_gemini_and_an_openai_compatible_provider(svc):
     router = ModelRouter(
         default=AnthropicModel(),
         by_node={
-            "testing": provider("moonshot", "kimi-k2-0711-preview"),
+            "integrations": provider("moonshot", "kimi-k2-0711-preview"),
             "business_rules": GeminiModel(),
         },
     )
     a = router.assignments()
     assert a["data_model"] == DEFAULT_MODEL
-    assert a["testing"] == "kimi-k2-0711-preview"
+    assert a["integrations"] == "kimi-k2-0711-preview"
     assert a["business_rules"] == "gemini-2.5-pro"
     assert len(set(a.values())) >= 3
 
@@ -537,7 +537,7 @@ def test_prompt_form_follows_each_providers_capability(svc):
         (provider("moonshot", "kimi-k2-0711-preview"), True),
     ):
         system, _ = build_prompt(
-            svc.doc, "testing",
+            svc.doc, "integrations",
             inline_schema=not client.enforces_schema,
         )
         marker = "Your reply must be a single JSON object"
@@ -852,7 +852,7 @@ def test_unfillable_fields_are_withheld_from_agents():
         f"{offenders} are prompted through build_prompt and can now author "
         "decisions — stop withholding the field for them")
 
-    for agent in ("api", "data_model", "page_design", "workflow", "testing"):
+    for agent in ("api", "data_model", "page_design", "workflow", "security"):
         for section, shape in writable_shapes(agent).items():
             if "properties" not in shape:
                 continue
@@ -1035,7 +1035,7 @@ def test_an_agent_sees_provenance_only_for_what_it_owns():
     owner = context_for(doc, "requirement")
     assert "evidence" in owner["requirements"][0]
 
-    consumer = context_for(doc, "testing")
+    consumer = context_for(doc, "security")
     assert "evidence" not in consumer["requirements"][0]
     assert consumer["requirements"][0]["description"] == "d"
     assert "syncNote" not in consumer["pages"][0]
@@ -1058,7 +1058,7 @@ def test_effort_is_tiered_per_node_and_the_load_bearing_nodes_stay_high():
                  "page_contracts", "business_rules", "security", "workflows",
                  "page_layouts"):
         assert r.for_task(node, "x").effort == "high", node
-    assert r.for_task("testing", "x").effort == "medium"
+    assert r.for_task("ux_architecture", "x").effort == "medium"
     assert r.for_task("integrations", "x").effort == "low"
 
 
@@ -1466,7 +1466,7 @@ def test_database_is_tuned_but_the_deciding_nodes_are_not():
     from services.blueprint.executors import tiered_router
 
     r = tiered_router()
-    assert r.for_task("database", "x").effort == "medium"
+    assert r.for_task("design_system", "x").effort == "medium"
     for node in ("security", "workflows", "business_rules", "data_model"):
         assert r.for_task(node, "x").effort == "high", node
 
@@ -1584,7 +1584,7 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
                                               MAX_TOKENS_BY_NODE, tiered_router)
 
     r = tiered_router()
-    for node in ("database", "security"):
+    for node in ("page_contracts", "security"):
         assert r.for_task(node, "x").max_tokens == 64000, node
     # The declarations are what remain of the calls that hit 32k writing
     # every field, every step and every contract; those are authored one
@@ -1595,11 +1595,11 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
     # the whole 32,000 reasoning over 24 slots and wrote no page at all.
     assert r.for_task("page_contracts", "x").max_tokens == 64000
     for node in ("requirements", "ux_architecture", "integrations",
-                 "page_layouts", "design_system", "testing", "workflow_steps",
+                 "page_layouts", "design_system", "workflow_steps",
                  "page_details", "entity_fields"):
         assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
     assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
-                                       "database", "security", "workflows",
+                                       "security", "workflows",
                                        "page_code"}   # a page's two whole files
 
 
@@ -1612,8 +1612,6 @@ def test_raising_the_ceiling_did_not_disturb_effort():
     # tuned for tokens only — effort must stay at the default
     assert r.for_task("workflows", "x").effort == "high"
     assert r.for_task("security", "x").effort == "high"
-    # tuned for both
-    assert r.for_task("database", "x").effort == "medium"
     # tuned for effort only — ceiling must stay default
     assert r.for_task("integrations", "x").effort == "low"
     assert r.for_task("ux_architecture", "x").effort == "medium"

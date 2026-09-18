@@ -57,7 +57,10 @@ def test_all_ten_section_75_edges_are_implemented():
     added = {"Navigation↔Page", "Page↔Workflow", "Widget↔DataSource",
              "Page↔Layout", "Page↔Precondition", "Page↔Function"}
     prd_ten = set(EDGES) - added
-    assert len(prd_ten) == 10
+    # Nine of §75's ten: Requirement↔Test counted declared tests that no step
+    # ever wrote out or ran, so it could only ever say every requirement was
+    # unverified. It returns when tests are generated and run.
+    assert len(prd_ten) == 9 and "Requirement↔Test" not in EDGES
     assert new_edges_required() <= set(EDGES)
 
 
@@ -217,13 +220,7 @@ def test_approved_requirement_nothing_claims_is_caught():
 
 def test_proposed_requirement_is_not_yet_owed_an_implementation():
     d = doc(requirements=[{"id": "REQ-001", "description": "x", "status": "PROPOSED"}])
-    assert verify(d, edges=("Requirement↔Code", "Requirement↔Test")).passed
-
-
-def test_untested_requirement_is_caught():
-    d = doc(requirements=[{"id": "REQ-001", "description": "x", "status": "APPROVED"}])
-    hits = verify(d, edges=("Requirement↔Test",)).findings
-    assert len(hits) == 1 and "no test" in hits[0].detail
+    assert verify(d, edges=("Requirement↔Code",)).passed
 
 
 def test_artifact_claiming_to_be_built_with_no_codemap_is_caught():
@@ -257,7 +254,7 @@ def test_requirement_verdict_matches_the_section_74_shape():
                            "status": "APPROVED"}])
     verdict = requirement_verdict(d, "REQ-001")
     assert verdict["result"] == "FAILED"
-    assert verdict["facets"]["Requirement↔Test"]["ok"] is False
+    assert verdict["facets"]["Requirement↔Code"]["ok"] is False
 
 
 def test_summary_states_what_it_did_not_verify():

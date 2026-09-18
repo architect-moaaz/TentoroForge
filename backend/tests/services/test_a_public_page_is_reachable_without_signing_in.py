@@ -130,7 +130,26 @@ def test_the_page_renders_with_no_rail_and_somewhere_for_a_mark(svc, tmp_path):
     assert "PublicPageFrame" in body and "SideNav" not in body
 
     frame = (TEMPLATES / "app-foundation/src/components/PublicPageFrame.tsx").read_text()
-    assert "if (!BRAND_LOGO) return <>{children}</>;" in frame
+    # bare only when there is nothing to put in the header: no mark, no menu, no sign-in
+    assert "if (!BRAND_LOGO && !hasNav && !signIn) return <>{children}</>;" in frame
+    assert "SideNav" not in frame, "a public page never gets the signed-in rail"
+
+
+def test_a_public_app_has_one_menu_for_every_public_page():
+    """An application whose pages are public had no navigation, and its coded
+    pages each drew their own or none (2g13o6yz, 2026-09-19)."""
+    from services.blueprint.projection import public_nav
+
+    doc = {"application": {"name": "Records"}, "pages": [
+        {"id": "P1", "name": "Dashboard", "route": "/", "access": "public"},
+        {"id": "P2", "name": "Master Data", "route": "/records", "access": "public"},
+        {"id": "P3", "name": "Record", "route": "/records/[id]", "access": "public"},
+        {"id": "P4", "name": "Admin", "route": "/admin"}],
+        "navigation": {"tree": [{"page": "P2"}, {"page": "P1"}]}}
+    nav = public_nav(doc)
+    assert nav["appName"] == "Records"
+    assert [i["route"] for i in nav["items"]] == ["/", "/records"]      # home first, then tree order; no [id]
+    assert nav["signIn"] is True                                          # /admin is behind sign-in
 
 
 # --------------------------------------------------------------------------- #

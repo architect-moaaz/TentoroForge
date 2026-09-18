@@ -270,9 +270,9 @@ def test_the_plan_forecasts_what_should_exist(tmp_path):
     }
     f = forecast(doc)
     assert f["pages"] == 2 and f["entities"] == 1
-    # 2 pages x 2 + 1 workflow x 3
-    assert f["expectedTests"] == 7
-    assert "2 pages" in render(f)
+    # no "expected tests": a build writes and runs none, so none are promised
+    assert "expectedTests" not in f
+    assert "2 pages" in render(f) and "tests" not in render(f)
 
 
 def test_deprecated_artifacts_are_not_forecast(tmp_path):

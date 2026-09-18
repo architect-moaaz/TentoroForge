@@ -88,7 +88,7 @@ def test_the_sdk_is_idempotent(tmp_path):
 def test_a_coded_page_lives_in_the_dashboard_group():
     doc = _doc()
     assert code_page_dir(doc["pages"][1]) == "src/app/(dashboard)/cases/[id]"
-    assert code_page_dir(doc["pages"][2]) == "src/app/(dashboard)"
+    assert code_page_dir(doc["pages"][2]) == "src/app/_root"      # `/`: the catch-all renders it
     files = code_page_files(doc, {"page": "PAGE-002", "load": "L", "view": "V"})
     page = files["src/app/(dashboard)/cases/[id]/page.tsx"]
     assert page.startswith(CODE_PAGE_MARKER)
@@ -191,3 +191,51 @@ def test_a_straight_line_never_flows_out_of_an_end(tmp_path):
     (defn,) = list((tmp_path / "src/lib/workflows/definitions").glob("*.json"))
     edges = [(e["source"], e["target"]) for e in _json.loads(defn.read_text())["definition"]["edges"]]
     assert ("done", "other") not in edges and ("save", "done") in edges
+
+
+def test_two_pages_at_one_url_are_refused_before_the_build(tmp_path):
+    from services.blueprint.assembly import RouteCollision, check_route_tree, route_collisions
+
+    app = tmp_path / "src/app"
+    for rel in ("(dashboard)/cases/page.tsx", "(dashboard)/[entity]/page.tsx",
+                "[...slug]/page.tsx", "cases/[id]/page.tsx", "(dashboard)/cases/[caseId]/page.tsx"):
+        (app / rel).parent.mkdir(parents=True, exist_ok=True)
+        (app / rel).write_text("export default function P() { return null }")
+    clashes = dict(route_collisions(tmp_path))
+    assert set(clashes) == {"/cases/[*]"}, clashes           # [entity] vs [...slug] may coexist
+    (app / "cases/page.tsx").write_text("x")
+    import pytest
+    with pytest.raises(RouteCollision) as e:
+        check_route_tree(tmp_path)
+    assert "src/app/(dashboard)/cases/page.tsx" in str(e.value) and "src/app/cases/page.tsx" in str(e.value)
+
+
+def test_a_graph_that_would_loop_is_never_projected():
+    import pytest
+    from services.blueprint.projection import WorkflowGraphInvalid, _check_graph
+    from services.catalog import workflow_nodes
+
+    nodes = [{"id": "trigger", "type": "trigger"}, {"id": "end", "type": "end"}]
+    with pytest.raises(WorkflowGraphInvalid, match="flows into itself"):
+        _check_graph("W", nodes, [{"source": "trigger", "target": "trigger"}], workflow_nodes())
+    with pytest.raises(WorkflowGraphInvalid, match="is an end but flows on"):
+        _check_graph("W", nodes + [{"id": "x", "type": "end"}], [{"source": "end", "target": "x"}], workflow_nodes())
+    with pytest.raises(WorkflowGraphInvalid, match="used twice"):
+        _check_graph("W", nodes + [{"id": "end", "type": "end"}], [], workflow_nodes())
+
+
+def test_the_root_page_is_rendered_by_the_catch_all_and_its_stub_comes_back(tmp_path):
+    """`/` cannot have its own route file beside `[[...slug]]`; a coded root sat
+    in `(dashboard)/page.tsx`, which assembly retires, and was lost
+    (2g13o6yz, 2026-09-19). It lives in the private `_root` module now."""
+    doc = _doc()
+    doc["pageCode"] = [{"page": "PAGE-003", "load": "L", "view": "V"}]
+    project_code_pages(doc, tmp_path)
+    root = tmp_path / "src/app/_root/page.tsx"
+    assert "export const hasCodeRoot = true;" in root.read_text()
+    doc["pageCode"] = []
+    project_code_pages(doc, tmp_path)
+    assert "export const hasCodeRoot = false;" in root.read_text(), "the catch-all imports it"
+    assert not (tmp_path / "src/app/_root/load.ts").exists()
+    from services.blueprint.assembly import route_collisions
+    assert route_collisions(tmp_path) == []                  # a private folder is not a route

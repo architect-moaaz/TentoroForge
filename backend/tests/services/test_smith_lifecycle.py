@@ -389,7 +389,7 @@ def test_a_build_runs_the_whole_dag_not_a_sub_plan(smith):
     assert set(ran) == set(domain_nodes()), "the domain gate runs the cheap half"
 
     say(smith, plan_json(intent="command", command="approve"))
-    assert set(ran) >= {"requirements", "data_model", "page_contracts", "testing"}
+    assert set(ran) >= {"requirements", "data_model", "page_contracts", "page_code"}
 
 
 def test_the_state_walk_follows_what_completed_not_what_was_asked(smith, tmp_path):

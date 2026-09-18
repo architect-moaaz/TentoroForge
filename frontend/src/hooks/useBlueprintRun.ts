@@ -41,7 +41,6 @@ export interface RunForecast {
   workflows?: number;
   businessRules?: number;
   apis?: number;
-  expectedTests?: number;
   [k: string]: number | undefined;
 }
 

@@ -45,13 +45,13 @@ const node = (key: string, state: RunNode["state"]): RunNode => ({
 
 describe("the Smith working indicator", () => {
   it("names the current stage as a present participle, not a noun", () => {
-    // page_layouts is running -> "Composing the screens", never "Working".
+    // page_code is running -> "Writing each page in React", never "Working".
     const v = mount({
       thoughts: [],
-      nodes: [node("requirements", "done"), node("page_layouts", "running")],
+      nodes: [node("requirements", "done"), node("page_code", "running")],
       busy: true,
     });
-    expect(v.text()).toContain("Composing the screens");
+    expect(v.text()).toContain("Writing each page in React");
     expect(v.text()).not.toContain("Working");
     v.unmount();
   });

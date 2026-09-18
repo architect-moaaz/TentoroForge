@@ -1,37 +1,53 @@
 import type * as React from "react";
+import Link from "next/link";
 import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
+import { PublicNavLinks } from "@/components/PublicNavLinks";
+import { PUBLIC_NAV } from "@/contracts/public-nav";
 
 /**
- * What a page open to the public renders inside.
+ * What a page open to the public renders inside — every one of them, coded or
+ * laid out, so they read as one application.
  *
- * A public page has no rail on purpose — `project_nav_flow` marks it
- * `shell: false`, because navigation into a product the visitor cannot reach
- * is worse than no navigation. That leaves the page with nothing at all saying
- * whose it is, which is fine for an application that never gave us a mark and
- * wrong for one that did: "put our logo in the corner" means this page most of
- * all. It is the one a stranger sees.
- *
- * So the header appears only when there IS a mark. An application with none
- * keeps the bare page it has always had — this frame is not a redesign of
- * public pages, it is somewhere for a logo to go.
- *
- * Not a link. A mark in the corner usually goes home, and home here is behind
- * the sign-in the visitor does not have.
+ * A public page has no rail: the sidebar belongs to the signed-in application,
+ * and a rail into pages the visitor cannot reach is worse than none. But an
+ * application that IS public — a directory, an intake form and its list — was
+ * left with no navigation at all, and its pages each drew their own, or none
+ * (2g13o6yz, 2026-09-19). So the frame carries one header: the application's
+ * mark or name, the public pages a visitor can move between
+ * (`contracts/public-nav.ts`, projected from the Blueprint), and a way to sign
+ * in when there is more behind it. One public page, and no mark: the bare page,
+ * as before.
  */
 export function PublicPageFrame({ children }: { children: React.ReactNode }) {
-  if (!BRAND_LOGO) return <>{children}</>;
+  const { appName, items, signIn } = PUBLIC_NAV;
+  const hasNav = items.length > 1;
+  if (!BRAND_LOGO && !hasNav && !signIn) return <>{children}</>;
   return (
     <>
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex max-w-6xl items-center px-4 py-3 md:px-6">
-          {/* No `alt` override: the mark carries the alt text the owner gave,
-              and failing that the application's own name from the Blueprint —
-              which is a better answer than any placeholder this file could
-              hold. */}
-          <BrandMark height={28} />
+      <header className="sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 md:px-6">
+          <Link href={items[0]?.route ?? "/"} className="flex shrink-0 items-center gap-2">
+            {BRAND_LOGO ? (
+              <BrandMark height={28} />
+            ) : (
+              <span className="text-sm font-semibold tracking-tight text-foreground">{appName}</span>
+            )}
+          </Link>
+          {hasNav && <PublicNavLinks items={items} />}
+          {signIn && (
+            <Link
+              href="/login"
+              className="ml-auto shrink-0 rounded-md border border-input px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+            >
+              Sign in
+            </Link>
+          )}
         </div>
       </header>
-      {children}
+      {/* The page's width and outer padding, set once for every public page —
+          the same measure the signed-in shell gives its pages. A page fills
+          it; it does not choose its own. */}
+      <div className="mx-auto w-full max-w-7xl px-4 py-6 md:px-6 md:py-8">{children}</div>
     </>
   );
 }

@@ -83,26 +83,65 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+#: The reviewer's own build directory. `next dev` compiles into `distDir`, and
+#: two dev servers sharing one directory overwrite each other's modules — the
+#: person's own server on this app then fails every page with
+#: "__webpack_modules__[moduleId] is not a function" (2g13o6yz, 2026-09-19).
+#: The generated `next.config.js` reads `NEXT_DIST_DIR`, as `verify_build` does.
+REVIEW_DIST_DIR = ".next-review"
+
+
+def _database_port(app_root: Path) -> int | None:
+    """The port the app's DATABASE_URL points at, from `.env.local` or `.env`."""
+    import re as _re
+    for name in (".env.local", ".env"):
+        try:
+            text = (app_root / name).read_text()
+        except OSError:
+            continue
+        m = _re.search(r"^DATABASE_URL=\S*?@[^:/]+:(\d+)/", text, _re.M)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _listening(port: int | None) -> bool:
+    if not port:
+        return False
+    with socket.socket() as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 class RunningApp:
-    """The generated app, its database up and its dev server serving."""
+    """The generated app, its database up and its dev server serving — beside
+    whatever the person is already running, never over it."""
 
     def __init__(self, app_root: Path):
         self.root = app_root
         self.port = _free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.proc: subprocess.Popen | None = None
+        self.started_db = False
 
     def __enter__(self) -> "RunningApp":
-        if not shutil.which("docker"):
-            raise ReviewUnavailable("Docker is not available for the app's database")
-        seeded = subprocess.run(["bash", "start.sh", "--seed-only"], cwd=self.root,
-                                capture_output=True, text=True, timeout=600)
-        if seeded.returncode != 0:
-            raise ReviewUnavailable(f"start.sh --seed-only failed: {seeded.stdout[-600:]}{seeded.stderr[-400:]}")
+        # A DATABASE THAT IS UP IS SOMEONE'S. `start.sh` finds its port taken,
+        # moves the app to another one and rewrites `.env` under the running
+        # server; stopping compose afterwards took the person's database down.
+        # So a running database is used as it is and left running.
+        if not _listening(_database_port(self.root)):
+            if not shutil.which("docker"):
+                raise ReviewUnavailable("Docker is not available for the app's database")
+            seeded = subprocess.run(["bash", "start.sh", "--seed-only"], cwd=self.root,
+                                    capture_output=True, text=True, timeout=600)
+            if seeded.returncode != 0:
+                raise ReviewUnavailable(f"start.sh --seed-only failed: {seeded.stdout[-600:]}{seeded.stderr[-400:]}")
+            self.started_db = True
         self.proc = subprocess.Popen(
             ["npx", "next", "dev", "--port", str(self.port)], cwd=self.root,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
-            env={**os.environ, "BROWSER": "none", "NEXTAUTH_URL": self.base})
+            env={**os.environ, "BROWSER": "none", "NEXTAUTH_URL": self.base,
+                 "NEXT_DIST_DIR": REVIEW_DIST_DIR})
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             try:
@@ -122,7 +161,9 @@ class RunningApp:
                     break
                 except Exception:  # noqa: BLE001
                     continue
-        subprocess.run(["docker", "compose", "stop"], cwd=self.root, capture_output=True, timeout=120)
+        if self.started_db:
+            subprocess.run(["docker", "compose", "stop"], cwd=self.root, capture_output=True, timeout=120)
+        shutil.rmtree(self.root / REVIEW_DIST_DIR, ignore_errors=True)
 
 
 def shoot(app: RunningApp, doc: dict, page_ids: list[str], out_dir: Path) -> list[dict]:
@@ -167,6 +208,10 @@ def critique(doc: dict, page: dict, shot: dict, client: Any) -> tuple[dict, Any]
               "hierarchy, spacing, alignment, density, typography, colour used for meaning, and "
               "whether the page does its job for the people who use it. The data is seeded demo "
               "data — judge the design and the behaviour it implies, not how many rows exist. "
+              "The app's frame (the sidebar or the public top bar, with the menu and the app's "
+              "name) is the platform's and is the same on every page — judge the content. A page "
+              "that draws its own sidebar, top navigation or app header is a high-severity issue: "
+              "remove it. "
               "Be specific: every issue names where on the page it is and exactly what to change, "
               "in terms a front-end engineer can act on without seeing the screenshot.\n\n"
               f"The app's direction:\n{comp.get('vision') or '(none stated)'}\n"
