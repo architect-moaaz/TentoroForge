@@ -26,6 +26,7 @@ not composed correctly, and the composer is the thing that should hear about it.
 
 from __future__ import annotations
 
+import functools
 import re
 from typing import Any, Iterator
 
@@ -879,9 +880,7 @@ def _form_fields_of(form: dict) -> set[str]:
     for inner in _walk(form):
         props = inner.get("props") or {}
         name = props.get("name")
-        if inner.get("type") in ("Input", "Select", "Textarea", "Checkbox", "DatePicker", "Field", "Combobox", "MultiSelect") and name:
-            names.add(str(name))
-        elif inner.get("type") == "FileUpload":
+        if inner.get("type") == "FileUpload":
             # A file input is not typed by hand: a FileUpload provides the URL
             # column (its `name`, default "file") and, via the companion
             # fields, the file name and mime type. So a Form holding a
@@ -891,7 +890,38 @@ def _form_fields_of(form: dict) -> set[str]:
                 v = props.get(key)
                 if v:
                     names.add(str(v))
+        elif name and inner.get("type") in _field_input_types():
+            names.add(str(name))
     return names
+
+
+@functools.lru_cache(maxsize=1)
+def _field_input_types() -> frozenset[str]:
+    """Every component that collects a named field, read off the catalogue.
+
+    READ, NOT LISTED. This was eight names typed by hand, and `NumberInput`
+    was not one of them — so a Form that collected latitude and longitude
+    with NumberInputs was judged to collect neither. The dispatch manifest
+    uses this same function, so the engine's dry run sent a payload without
+    them and refused a working form (Neighbourhood Kit, UAT, 2026-09-18).
+    Sixteen other inputs were missing the same way: MoneyInput, RadioGroup,
+    Switch, Slider, TimePicker, DateRangePicker among them.
+
+    The rule is the catalogue's own: a component of the `form` category that
+    declares a `name` prop. `Avatar` and `PersonCard` declare a `name` too and
+    are not inputs, which is why the category matters. `Field` is kept for
+    trees written before the catalogue named it.
+    """
+    try:
+        from services.blueprint.page_planner import load_catalog
+        catalog = load_catalog()
+    except Exception:  # noqa: BLE001 — no catalogue, fall back to the old set
+        catalog = {}
+    derived = {n for n, e in catalog.items()
+               if e.get("category") == "form"
+               and "name" in ((e.get("props") or {}).get("properties") or {})}
+    return frozenset(derived | {"Input", "Select", "Textarea", "Checkbox",
+                                "DatePicker", "Combobox", "MultiSelect", "Field"})
 
 
 def _form_chooses(doc: dict, layout: dict, control: dict, name: str,
