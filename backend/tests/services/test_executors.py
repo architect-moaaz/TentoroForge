@@ -1598,8 +1598,12 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
                  "page_layouts", "design_system", "testing", "workflow_steps",
                  "page_details", "entity_fields"):
         assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
+    # The whole-app sketch grows with the page count: a 46-page dental app on
+    # UAT (2026-09-18) filled exactly 32,000 four calls running.
+    assert r.for_task("composition", "x").max_tokens == 64000
     assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
-                                       "database", "security", "workflows"}
+                                       "database", "security", "workflows",
+                                       "composition"}
 
 
 def test_raising_the_ceiling_did_not_disturb_effort():
@@ -1705,8 +1709,13 @@ def test_the_authors_reply_updates_the_declared_row_whatever_it_called_it(tmp_pa
     assert result.proposals[0].natural_key == "Open a Case"
     assert body["id"] == wid and body["name"] == "Open a Case"
     assert body["trigger"] == {"kind": "manual"}, "the trigger is declared, not authored"
-    assert [i["name"] for i in body["inputs"]] == ["title"], (
-        "inputs are declared: the pages were composed against them")
+    # The declared inputs are kept as declared and first; an input the author
+    # ADDS survives. `page_layouts` composes the forms after this node, and
+    # the page check requires a form to collect every input a step writes —
+    # while discarding it made "declare it as an input" a refusal no author
+    # could answer (a dental app's Book Appointment shipped with no steps).
+    assert [i["name"] for i in body["inputs"]] == ["title", "priority"], (
+        "declared inputs first and unchanged, the author's addition kept")
     assert body["steps"]
 
     applied = apply_agent_result(svc, result, commit=False, user_request="")

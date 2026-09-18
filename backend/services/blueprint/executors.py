@@ -2507,12 +2507,38 @@ def pin_workflow_identity(svc: Any, workflow_id: str, result: AgentResult) -> No
             continue
         proposal.natural_key = key
         body = dict(proposal.body or {})
+        authored_inputs = body.get("inputs")
         for field_name in _DECLARED_FIELDS:
             if field_name in row:
                 body[field_name] = row[field_name]
             else:
                 body.pop(field_name, None)
+        body["inputs"] = _declared_plus_added(row.get("inputs"), authored_inputs)
+        if not body["inputs"] and "inputs" not in row:
+            body.pop("inputs")
         proposal.body = body
+
+
+def _declared_plus_added(declared: Any, authored: Any) -> list:
+    """The declared inputs, untouched, plus any NEW input the step author adds.
+
+    A REFUSAL THE AUTHOR COULD NOT ANSWER. The reference check tells a step
+    author whose step reads `{{endTime}}` to "declare 'endTime' as an input".
+    It did — and this function's caller put every declared field back from
+    the declaration, `inputs` among them, so the declaration was discarded,
+    the same refusal came back, and after two the author was not asked again.
+    On UAT (2026-09-18) that left a dental app's Book Appointment and Add
+    Service workflows with no steps at all.
+
+    Declared inputs still cannot be changed or removed — pages were designed
+    against them. An input the declaration never had is added, and the page
+    checks then require a form to collect it, like any other.
+    """
+    base = [i for i in (declared or []) if isinstance(i, dict)]
+    have = {str(i.get("name")) for i in base}
+    extra = [i for i in (authored or []) if isinstance(i, dict)
+             and i.get("name") and str(i.get("name")) not in have]
+    return base + extra
 
 
 def expand_data_model(data: dict) -> list["ArtifactProposal"]:
@@ -2888,6 +2914,12 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     # call needed went on step graphs, which `workflow_steps` now writes one
     # workflow at a time inside the default.
     "workflows": 32000,
+    # The whole-app sketch, one call, sized by the page count. A 46-page
+    # dental app (UAT, 2026-09-18) filled exactly 32,000 output tokens four
+    # times running, was cut off mid-string each time, failed as malformed
+    # JSON — and every page waits on this node, so the build ended with none
+    # composed. Same lesson as page_contracts above: unused headroom is free.
+    "composition": 64000,
 }
 
 
