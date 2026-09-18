@@ -1128,7 +1128,12 @@ def _session_filled_records(doc: dict, page: dict) -> set[str]:
     return out
 
 
-_TEMPLATE_NAME = re.compile(r"\{\{\s*([A-Za-z_][\w]*)\s*\}\}")
+# The HEAD of a reference: `latitude` in `{{latitude}}`, and `clinic` in
+# `{{clinic.id}}` or `{{rows[0].x}}`. Matching only the bare form missed every
+# record reference, so an optional record input a step writes through
+# `{{appointment.id}}` was never demanded of the form (dental app, UAT,
+# 2026-09-18: Book Appointment's clinic, Upload Document's appointment).
+_TEMPLATE_NAME = re.compile(r"\{\{\s*([A-Za-z_]\w*)(?:[.\[][^}]*)?\s*\}\}")
 
 
 def _inputs_a_step_writes(wf: dict) -> set[str]:

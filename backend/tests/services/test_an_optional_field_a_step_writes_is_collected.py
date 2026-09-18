@@ -98,3 +98,18 @@ def test_inputs_are_read_off_the_catalogue_not_a_list():
         assert real_input in types, f"{real_input} collects a field"
     for not_an_input in ("Avatar", "PersonCard", "Button"):
         assert not_an_input not in types, f"{not_an_input} has a name but collects nothing"
+
+
+# ---- a record reference counts as written: `{{clinic.id}}` writes `clinic`
+
+def test_an_optional_record_a_step_writes_through_a_dotted_path_is_demanded():
+    """Dental app, UAT: Book Appointment wrote `clinicId: {{clinic.id}}` from
+    an optional `clinic` input. The written-names pattern matched only bare
+    `{{name}}`, so the form was never asked for it and `assemble` refused the
+    control instead."""
+    from services.blueprint.functional_completeness import _inputs_a_step_writes
+    wf = {"steps": [{"key": "insert_appointment", "config": {
+        "actionType": "db_insert", "table": "appointments",
+        "values": {"clinicId": "{{clinic.id}}", "slot": "{{load.rows[0].start}}",
+                   "startTime": "{{ startTime }}", "createdAt": "$now"}}}]}
+    assert _inputs_a_step_writes(wf) == {"clinic", "load", "startTime"}
