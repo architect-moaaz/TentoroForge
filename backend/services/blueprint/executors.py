@@ -969,19 +969,6 @@ two modules naming the same entity update one record rather than duplicating \
 it — which makes a near-miss spelling the one thing that creates a duplicate."""
 
 NODE_TASKS: dict[str, str] = {
-    "composition": (
-        "Compose the whole application once. For every page, choose a layout "
-        "and an ordered list of sections, naming the purpose of each section "
-        "and the catalog components it is expected to use. Then state the "
-        "conventions every page will follow: how a page header reads, where "
-        "filters and the primary action sit, how empty and error states are "
-        "treated, how dense the information is.\n\n"
-        "Structure and intent only — no props, no data bindings. You are the "
-        "only call that sees every page at once, so the job is coherence: the "
-        "list page and the dashboard should read as one product, and a user "
-        "moving between them should never have to re-learn where things are. "
-        "Decide from the domain and who uses it; say why in each rationale."
-    ),
     "figma_intelligence": (
         "Read a connected Figma design and record what it is evidence for.\n\n"
         "You are not designing the application and you are not authoring "
@@ -1454,22 +1441,6 @@ that leaves a required group empty is refused with the group named.
 """
 
 
-COMPOSITION_ADDENDUM = """
-
-## The components that exist
-
-Name components from this list only — a section that names one that is not \
-here is rejected. Names are all you give; the per-page author is shown the \
-props and composes against them.
-
-Sketch **every** page listed below, each exactly once. A page with NO PRIMARY \
-ENTITY still gets a sketch — an entry redirect or a sign-in page has a layout \
-too, however small.
-
-{page_facts}
-{catalog}
-"""
-
 CONVENTIONS_ADDENDUM = """
 
 ## The application as a whole
@@ -1526,7 +1497,7 @@ def _conventions_addendum(doc: dict) -> str:
 def build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
     subject: str = "", feedback: str = "", references: Sequence[Path] = (),
-    output_dir: Any = None, brief: str = "",
+    output_dir: Any = None, brief: str = "", agent: str = "",
 ) -> tuple[str, str]:
     """Build (system, user) for a node.
 
@@ -1544,54 +1515,29 @@ def build_prompt(
     ambiguous about its own status, and the expensive reading — a screenshot of
     the system being replaced taken as a specification of the one being built —
     is the one a model reaches for unprompted.
+
+    ``agent`` is who is being asked, when that is not the node's own owner:
+    Smith recomposing a screen asks `a2ui_pages` for a `page_layouts`
+    subject, and the build lays pages out without a model at all.
     """
     spec = DAG[node]
-    cap = capability_for(spec.agent)
+    agent = agent or spec.agent
+    cap = capability_for(agent)
     system = SYSTEM.format(
-        agent=spec.agent,
+        agent=agent,
         writes="\n".join(f"  - {s}" for s in sorted(cap.writes)) or "  (none)",
         reply_rules=(DATA_MODEL_REPLY_RULES if node in SCHEMA_BY_NODE
                      else ENVELOPE_RULES),
         task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns."),
     )
     if inline_shapes:
-        shapes = writable_shapes(spec.agent)
+        shapes = writable_shapes(agent)
         if shapes:
             system += SHAPE_ADDENDUM.format(
                 shapes=json.dumps(shapes, indent=2)[:12000]
             )
     system += reference_addendum(references, node)
-    if spec.agent == "a2ui_composition":
-        from services.blueprint.page_planner import (
-            app_brief, catalog_index, load_catalog, pattern_page_facts,
-        )
-
-        system += COMPOSITION_ADDENDUM.format(
-            catalog=catalog_index(load_catalog()),
-            page_facts=pattern_page_facts(doc) or "(no pages declare a pattern)",
-        )
-        if inline_schema:
-            system += SCHEMA_ADDENDUM.format(
-                schema=json.dumps(PROPOSAL_SCHEMA, indent=2)
-            )
-        user = (
-            "Compose this application as a whole. You are given the product, "
-            "its requirements, its navigation, its roles and every page's "
-            "contract. Return one `composition` artifact with natural_key "
-            "\"composition\" whose `pages` holds one sketch per page, keyed by "
-            "the page's id.\n\n```json\n"
-            + json.dumps(app_brief(doc), indent=2, sort_keys=True)
-            + "\n```"
-        )
-        if feedback:
-            user += (
-                "\n\nYour previous attempt was rejected:\n\n" + feedback +
-                "\n\nFix exactly those. Every page must be sketched once and "
-                "every component name must be one from the list above."
-            )
-        return system, user
-
-    if spec.agent == "a2ui_pages":
+    if agent == "a2ui_pages":
         from services.blueprint.page_planner import (
             catalog_digest, load_catalog, page_brief,
         )
@@ -1769,7 +1715,7 @@ def build_prompt(
         slots = workflow_slots(doc)
         user = (
             "Here is the Blueprint.\n\n```json\n"
-            + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
+            + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
             + "\n```"
         )
         if slots:
@@ -1806,7 +1752,7 @@ def build_prompt(
             page_slot_prompt(doc) + "\n\n```json\n"
             + json.dumps(page_slots(doc), indent=2) + "\n```\n\n"
             "Here is the Blueprint the features were derived from.\n\n```json\n"
-            + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
+            + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
             + "\n```"
         )
         # NAME THE FRAME A PAGE IS. `pages[].figmaFrame` has been in the
@@ -1859,7 +1805,7 @@ def build_prompt(
         system += SCHEMA_ADDENDUM.format(
             schema=json.dumps(PROPOSAL_SCHEMA, indent=2)
         )
-    if spec.agent == "figma_intelligence" and subject:
+    if agent == "figma_intelligence" and subject:
         # §48 — the design is evidence, and the brief is where that bound is
         # set. The agent sees the screens' vocabulary and the extraction's
         # gaps; it does not see the generated TSX, which is layout noise that
@@ -1900,7 +1846,7 @@ def build_prompt(
     user = (
         "Here is the Blueprint as it stands. Propose the artifacts your stage "
         "owns.\n\n```json\n"
-        + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
+        + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
         + "\n```"
     )
     # WHAT THE USER HANDED OVER. A specification uploaded instead of typed is
@@ -1923,7 +1869,7 @@ def build_prompt(
     # usually follows and occasionally does not, and one `references: ""`
     # fails the whole contract. Told what was rejected, the author fixes its
     # own field; told nothing, it re-emits it.
-    if spec.agent == "solution_architecture":
+    if agent == "solution_architecture":
         # THE DESIGN DRAWS THE NAVIGATION. Its sidebar is the same subtree on
         # every screen, and `store.connect` records what it says. This agent
         # is the one author of `navigation.tree`, and it could not see a
@@ -2914,12 +2860,9 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     # call needed went on step graphs, which `workflow_steps` now writes one
     # workflow at a time inside the default.
     "workflows": 32000,
-    # The whole-app sketch, one call, sized by the page count. A 46-page
-    # dental app (UAT, 2026-09-18) filled exactly 32,000 output tokens four
-    # times running, was cut off mid-string each time, failed as malformed
-    # JSON — and every page waits on this node, so the build ended with none
-    # composed. Same lesson as page_contracts above: unused headroom is free.
-    "composition": 64000,
+    # One page's thinking plus two whole files — a record workspace's view
+    # runs to several hundred lines — and a compile round re-sends the code.
+    "page_code": 48000,
 }
 
 
@@ -3286,7 +3229,7 @@ def make_executor(
                     svc.doc, spec.node,
                     inline_schema=not getattr(client, "enforces_schema", True),
                     subject=spec.subject, feedback="", references=[],
-                    output_dir=svc.output_dir, brief="",
+                    output_dir=svc.output_dir, brief="", agent=spec.agent,
                 )
                 project = str(svc.doc.get("application", {}).get("id", ""))
             result = patch_node_output(
@@ -3308,7 +3251,52 @@ def make_executor(
                 pin_page_identity(svc, spec.subject, result)
         return result
 
+    def _compose_ui(spec: TaskSpec) -> AgentResult:
+        """The UI director and the UI engineer (see ``ui_engineer``). Their
+        replies are code and prose, not artifact envelopes, and the engineer's
+        is compiled before it is returned — so they have their own path."""
+        import copy as _copy
+
+        from services.blueprint import ui_engineer
+        from services.llm_client import tell
+
+        client = (model.for_task(spec.node, spec.agent)
+                  if isinstance(model, ModelRouter) else model)
+        project = str((svc.doc.get("application") or {}).get("id", ""))
+
+        def record(u: Any, elapsed: float) -> None:
+            if usage is not None and u is not None:
+                usage.record(node=spec.node, agent=spec.agent, usage=u,
+                             elapsed_s=elapsed, project=project)
+
+        with svc.lock:
+            doc = _copy.deepcopy(svc.doc)
+        if spec.agent == "ui_director":
+            t0 = time.monotonic()
+            body, u = ui_engineer.compose_direction(doc, client)
+            record(u, time.monotonic() - t0)
+            return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
+                               proposals=[ArtifactProposal(section="composition",
+                                                           natural_key="composition", body=body)])
+        page = next((p for p in doc.get("pages") or [] if str(p.get("id")) == spec.subject), None)
+        if page is None:
+            raise ValueError(f"{spec.subject} is not a page of this application")
+        current = next((row for row in doc.get("pageCode") or []
+                        if str(row.get("page")) == spec.subject), None)
+        tell(reasoning, f"Writing {page.get('route')} in React.", "step", spec.node)
+        body, spent = ui_engineer.compose_page(
+            doc, page, Path(svc.output_dir) / "app", client,
+            feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
+            current=current if (spec.feedback or getattr(spec, "brief", "")) else None)
+        for u, elapsed in spent:
+            record(u, elapsed)
+        return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
+                           proposals=[ArtifactProposal(section="pageCode",
+                                                       natural_key=spec.subject, body=body)])
+
     def executor(spec: TaskSpec) -> AgentResult:
+        if spec.agent in ("ui_director", "ui_engineer"):
+            return _compose_ui(spec)
         # A REPAIR EDITS WHAT WAS ACCEPTED. Only an observer repair carries
         # `current`; a retry after a refusal has no accepted answer and
         # rewrites. The two data-model envelopes are a different reply shape
@@ -3353,6 +3341,7 @@ def make_executor(
                 inline_schema=not getattr(client, "enforces_schema", True),
                 subject=spec.subject, feedback=spec.feedback, references=shown,
                 output_dir=svc.output_dir, brief=getattr(spec, "brief", "") or "",
+                agent=spec.agent,
             )
         last: Exception | None = None
 

@@ -129,11 +129,12 @@ def test_a_fanning_out_node_records_each_subject(svc):
     """"Which of the eighteen stopped it" is unanswerable from one aggregate
     line, and eighteen model calls with no lines between them is a silence the
     office cannot draw progress through."""
-    # The standing fixture already carries every layout, and resume is
-    # continue-not-redo: a composed page is not a subject. Uncompose them.
-    svc.doc["pageLayouts"] = []
+    # `entity_fields` fans out over the entities; resume is continue-not-redo,
+    # so an entity already detailed is not a subject. Undetail them.
+    for entity in svc.doc["data"]["entities"]:
+        entity["fields"] = []
     svc.save()
-    seen = watch(svc, ok, plan=["page_layouts"])
+    seen = watch(svc, ok, plan=["entity_fields"])
 
     start = next(line for line in seen if line["event"] == "node:start")
     subjects = [line for line in seen if line["event"] == "node:subject"]

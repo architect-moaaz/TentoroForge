@@ -878,6 +878,38 @@ export const PageLayout = z.object({
   ...artifactBase,
 });
 
+/**
+ * §34 — a page written as React by the UI engineer, against the component
+ * library and the app's typed SDK (`src/sdk`, projected from this document).
+ *
+ * Two modules, because a Next.js page that loads data on the server cannot
+ * also hold the hooks its interactions need. `load` is `load.ts`: a server
+ * function that reads through `@/sdk/server` and returns the view's props
+ * (or null for a 404). `view` is `view.tsx`, a client module: the screen
+ * itself, composed from the app's UI kit and `@tentoroforge/library`, running
+ * workflows through `@/sdk/client`. The route's `page.tsx` joining them is
+ * projected, not authored, so every coded page gets the same frame.
+ *
+ * The SDK is typed from the Blueprint — entities, workflow inputs, page
+ * routes — so what this code may say about the application is checked by
+ * the TypeScript compiler before it is accepted: a field the entity lacks,
+ * a workflow input a form does not collect, a route that does not exist.
+ *
+ * A page with no row here renders its `pageLayouts` tree, which every page
+ * has; the code is the designed page, the layout is its floor.
+ */
+export const PageCode = z.object({
+  /** Natural key — the page this code renders. */
+  page: PageId,
+  /** Why the page is built this way, in terms of what the user asked for. */
+  rationale: z.string().default(""),
+  /** `load.ts` — the server half: `export async function load(ctx)`. */
+  load: z.string().min(1),
+  /** `view.tsx` — a client component, the screen itself. */
+  view: z.string().min(1),
+  ...artifactBase,
+});
+
 // ===========================================================================
 // §34 · app-level composition — the one call that sees every page at once
 // ===========================================================================
@@ -1859,6 +1891,21 @@ export const Runtime = z.object({
       seconds: z.number().optional(),
     })
     .optional(),
+  /**
+   * What the page reviewer found, per page id: its score each time it was
+   * looked at, whether it passed, and whether it was rewritten. Written by the
+   * `page_review` node (declared before its producer, so the first review
+   * never meets `additionalProperties: false`).
+   */
+  pageReview: z
+    .record(
+      z.object({
+        scores: z.array(z.number().nullable()).default([]),
+        passed: z.boolean().nullable().optional(),
+        rewritten: z.boolean().nullable().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const Database = z.object({
@@ -1989,6 +2036,9 @@ export const Blueprint = z.object({
   /** §34 — the whole app sketched once: per-page skeletons and the
    *  conventions every page inherits. Authored by A2UI before any page is. */
   composition: Composition.default({}),
+  /** §34 — pages written as React against the library and the typed SDK.
+   *  Takes precedence over the page's `pageLayouts` tree when both exist. */
+  pageCode: z.array(PageCode).default([]),
 
   requirements: z.array(Requirement).default([]),
   completeness: Completeness.default({}),

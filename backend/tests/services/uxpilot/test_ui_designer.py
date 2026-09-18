@@ -78,18 +78,15 @@ def test_recording_writes_the_fact_and_the_citation(svc):
         ud.record(svc, "figma")
 
 
-def test_the_gate_asks_before_building_and_refuses_uxpilot_without_a_key():
-    """The router's approved path consults the question before the graph, and
-    the answer path resumes the build the approval asked for."""
+def test_the_approval_builds_without_asking_who_designs_the_screens():
+    """The build lays every page out from its contract with no model, so there
+    is no designer to choose at the gate: Approve goes straight to the graph."""
     from routers import blueprint_generate
 
     src = inspect.getsource(blueprint_generate.smith_chat)
     approved_at = src.index("if req.approved:")
-    assert "ui_designer.undecided(svc.doc)" in src[approved_at:approved_at + 2000]
-    assert "ui_designer.configured(output_dir)" in src[approved_at:approved_at + 2000]
-    assert src.index("ui_designer.answer_in(") < approved_at
-    answer_at = src.index("ui_designer.answer_in(")
-    assert "approved=True" in src[answer_at:answer_at + 1500]
+    assert "ui_designer" not in src
+    assert "_run_dag(" in src[approved_at:approved_at + 1500]
 
 
 def test_the_configure_text_never_asks_for_the_key_itself():

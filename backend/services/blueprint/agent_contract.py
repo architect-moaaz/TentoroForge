@@ -51,7 +51,7 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "pageLayouts", "composition", "completeness"}
+       "pageLayouts", "pageCode", "composition", "completeness"}
 )
 
 
@@ -163,12 +163,6 @@ _READS: dict[str, set[str]] = {
     "testing": {"requirements", "data", "pages", "apis", "workflows",
                 "businessRules"},
 
-    # §34 — the whole app at once, and nothing below the page contract. No
-    # entity fields, no endpoints: the sketch carries no props to bind them to,
-    # and seeing them would only invite it to author what the per-page call
-    # authors against the full catalog.
-    "a2ui_composition": {"requirements", "product", "pages", "modules",
-                         "navigation", "widgets", "roles", "designSystem"},
 }
 
 
@@ -223,15 +217,28 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "component_catalog:read", "mcp:a2ui"},
     ),
-    # §34 — the whole app composed once, before any page is. It writes a
-    # skeleton (per page: layout and ordered sections, no props) and the
-    # conventions every page inherits. Its own agent, not a mode of a2ui_pages,
-    # so the boundary reads: this one sketches, it never renders.
-    "a2ui_composition": _cap(
-        "a2ui_composition",
+    # §34 — every page the build lays out, from the page's own contract
+    # (`template_page`) or its drawn frame. Deterministic: no model, no tools.
+    "page_template": _cap(
+        "page_template",
+        {"pageLayouts"},
+        reads={"pages", "data", "workflows", "security", "designSources"},
+        tools={"blueprint:read"},
+    ),
+    # §34 — the whole app's direction, once: `composition.vision` and its
+    # conventions. No model output reaches a page without passing through them.
+    "ui_director": _cap(
+        "ui_director",
         {"composition"},
+        tools={"blueprint:read", "design_system:read"},
+    ),
+    # §34 — each page written as React against the typed app SDK. Its tool is
+    # the compiler: a page is type-checked before it is proposed.
+    "ui_engineer": _cap(
+        "ui_engineer",
+        {"pageCode"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
-               "component_catalog:read", "mcp:a2ui"},
+               "sdk:read", "tsc:check"},
     ),
     "data_model": _cap(
         "data_model",
@@ -256,6 +263,10 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # observer that patched a page directly would be a second author with no
     # §30 boundary.
     "observer": _cap("observer", set(), may_set_status=True),
+    # §73 for the rendered page: looks at each coded page as it renders and
+    # sends the ones that fall short back to the UI engineer, who rewrites
+    # them. Writes nothing itself — the rewrite is the engineer's.
+    "page_reviewer": _cap("page_reviewer", set(), may_set_status=True),
     "deployment": _cap(
         "deployment", {"deployment"},
         tools={"build:approved", "deploy:config", "vercel"},
@@ -276,10 +287,9 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     #   apis             derived from entities + workflows + widgets by
     #                    api_derivation; anything authored here is overwritten
     #                    on the next derivation, so writing it is a lie.
-    #   pageLayouts      validated against the real component catalog, which is
-    #   composition      injected into the a2ui prompts and not into Smith's.
-    #                    Authoring blind would fail check_page_layout or
-    #                    check_composition anyway.
+    #   pageLayouts      laid out from each page's contract by `page_template`;
+    #   composition      the catalog is not in Smith's prompt, so authoring
+    #                    blind would fail check_pattern_templates anyway.
     #   codeMap          projection output. A model asked for file paths
     #                    produces plausible ones, and Blueprint↔Implementation
     #                    then goes green against files nobody wrote.
@@ -646,60 +656,6 @@ def _canonical_key(alloc: Any, section: str, body: Mapping[str, Any],
     return canon
 
 
-class InvalidComposition(ValueError):
-    """A2UI sketched the app against pages or components that do not exist."""
-
-
-def check_composition(result: AgentResult, doc: dict) -> None:
-    """Reject a whole-app sketch that does not fit the app it is for.
-
-    Three things are checked, all structural: every sketch names a page that
-    exists, every page is sketched exactly once, and every component a section
-    names is in the catalog. That is the contract the per-page author relies
-    on — a sketch for a page that does not exist is noise, a page without one
-    is authored blind, and a component that does not exist would be carried
-    into the page prompt as an instruction to use it.
-
-    Nothing about the *quality* of the sketch is gated here. Whether the
-    sections make sense for the page is a judgement, and the observer makes
-    it; a heuristic gate on that would be the kind of validator the old
-    pipeline drowned in.
-    """
-    proposals = [p for p in result.proposals if p.section == "composition"]
-    if not proposals:
-        return
-
-    from services.blueprint.page_planner import load_catalog
-
-    catalog = load_catalog()
-    live = {
-        p["id"] for p in (doc.get("pages") or [])
-        if p.get("id") and p.get("status") != "DEPRECATED"
-    }
-    problems: list[str] = []
-    for proposal in proposals:
-        seen: dict[str, int] = {}
-        for sketch in proposal.body.get("pages") or []:
-            pid = sketch.get("page") or "?"
-            seen[pid] = seen.get(pid, 0) + 1
-            if pid not in live:
-                problems.append(f"{pid}: not a page in this Blueprint")
-            for section in sketch.get("sections") or []:
-                for name in section.get("components") or []:
-                    if name not in catalog:
-                        problems.append(
-                            f"{pid} / {section.get('name', '?')}: {name!r} is "
-                            "not a registered component"
-                        )
-        for pid in sorted(live - set(seen)):
-            problems.append(f"{pid}: no sketch — every page must be sketched once")
-        for pid, count in seen.items():
-            if count > 1:
-                problems.append(f"{pid}: sketched {count} times")
-    if problems:
-        raise InvalidComposition(_all_of(problems))
-
-
 def apply_agent_result(
     svc: BlueprintService,
     result: AgentResult,
@@ -727,7 +683,6 @@ def apply_agent_result(
     from services.blueprint.layout_vocabulary import translate_layout_vocabulary
     translate_layout_vocabulary(result, svc.doc)
     check_pattern_templates(result, svc.doc)
-    check_composition(result, svc.doc)
     check_workflow_steps(result, svc.doc)
     check_business_rules(result, svc.doc)
 

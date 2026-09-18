@@ -145,6 +145,32 @@ class WorkflowNodeCatalog:
             if not isinstance(step, dict):
                 continue
             errors.extend(f"{step.get('key') or '?'}: {e}" for e in self.step_errors(step))
+        errors.extend(self.flow_errors(body))
+        return errors
+
+    def flow_errors(self, body: dict) -> list[str]:
+        """Where each step goes, where that is ambiguous.
+
+        A step naming no `next` is chained to the step after it in the list —
+        right for a straight line, wrong for a branch. A condition with no
+        targets had its then-branch run into the next step and nothing on its
+        else-branch, and the two ends listed after it chained into each other,
+        so "Record Created" ran on into "Validation Failed" (22lzrc2p,
+        2026-09-19). So a branching step names both targets, and every target
+        named is a step of this workflow. A straight line still needs nothing."""
+        steps = [s for s in body.get("steps") or [] if isinstance(s, dict) and s.get("key")]
+        keys = {str(s["key"]) for s in steps}
+        branching = set(self.branching_types())
+        errors: list[str] = []
+        for s in steps:
+            targets = [str(t) for t in s.get("next") or []]
+            for t in targets:
+                if t not in keys:
+                    errors.append(f"{s['key']}: `next` names {t!r}, which is not a step of this workflow")
+            if s.get("type") in branching and len([t for t in targets if t in keys]) < 2:
+                errors.append(f"{s['key']}: a {s.get('type')} branches — `next` must name the "
+                              f"then-step first and the else-step second (e.g. the step that "
+                              f"proceeds, then the end that reports the failure)")
         return errors
 
     # -- prompt rendering ---------------------------------------------------

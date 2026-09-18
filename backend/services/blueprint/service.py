@@ -89,6 +89,8 @@ KEYED_LIST_SECTIONS: dict[str, tuple[str, ...]] = {
     # One tree per page — re-authoring a page replaces its layout rather than
     # accumulating a second one for the same page.
     "pageLayouts": ("page",),
+    # One page module per page, the same way.
+    "pageCode": ("page",),
     "data.relationships": ("from", "to", "kind"),
     "data.constraints": ("entity", "kind", "expression"),
 }

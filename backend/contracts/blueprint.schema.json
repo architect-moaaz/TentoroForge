@@ -2485,6 +2485,51 @@
       "additionalProperties": false,
       "default": {}
     },
+    "pageCode": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "$ref": "#/properties/modules/items/properties/pages/items"
+          },
+          "rationale": {
+            "type": "string",
+            "default": ""
+          },
+          "load": {
+            "type": "string",
+            "minLength": 1
+          },
+          "view": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/status"
+          },
+          "requirements": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/requirements"
+          },
+          "decisions": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/decisions"
+          },
+          "confidence": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/confidence"
+          },
+          "syncNote": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          }
+        },
+        "required": [
+          "page",
+          "load",
+          "view"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
     "requirements": {
       "type": "array",
       "items": {
@@ -2904,6 +2949,37 @@
             "status"
           ],
           "additionalProperties": false
+        },
+        "pageReview": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "scores": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "default": []
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "rewritten": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false,

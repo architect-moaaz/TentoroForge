@@ -471,9 +471,17 @@ export function registerEntity(
 ) {
   const columns = Object.keys(table);
   const slug = opts?.slug || name.replace(/([A-Z])/g, "-$1").toLowerCase().replace(/^-/, "");
-  const searchFields = opts?.searchFields || columns.filter(c =>
+  // WHAT A SEARCH BOX SEARCHES IS DECLARED, NOT GUESSED. The Blueprint's
+  // searchable columns are projected to `searchable-columns.ts`; every
+  // registration used to skip it and fall back to six column names, so a
+  // Record whose text column is `fullName` matched every search with every
+  // row — the box was there and did nothing (22lzrc2p, 2026-09-19). The
+  // manifest first (by export name, then by the entity's own name), the
+  // old guess only for a table the manifest does not know.
+  const declared = searchableColumnsFor(name).filter((c) => columns.includes(c));
+  const searchFields = opts?.searchFields || (declared.length ? declared : columns.filter(c =>
     ["name", "title", "email", "description", "firstName", "lastName"].includes(c)
-  );
+  ));
   const rec = { table, slug, searchFields };
   _entities.set(name.toLowerCase(), rec);
   _entities.set(slug, rec);

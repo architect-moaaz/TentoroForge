@@ -67,7 +67,10 @@ ROOM_OF: dict[str, str] = {
     "backend": "data",
     # Composition — the page trees A2UI authors, and the projection that turns
     # them into what the engine renders (§34)
-    "a2ui_composition": "composition",
+    "page_template": "composition",
+    "ui_engineer": "composition",
+    "ui_director": "design_studio",
+    "page_reviewer": "qa",
     "a2ui_pages": "composition",
     "frontend": "composition",
     # Logic — what the business does (§107 step 16)
@@ -102,8 +105,9 @@ NODE_LABEL: dict[str, str] = {
     "design_system": "Setting the design language",
     "page_contracts": "Deciding the page set",
     "page_details": "Writing each feature's page contracts",
-    "composition": "Sketching the whole app",
-    "page_layouts": "Composing page trees",
+    "page_layouts": "Laying out each page",
+    "ui_direction": "Setting the app's look and conventions",
+    "page_code": "Writing each page in React",
     "figma_intelligence": "Reading the design out of Figma",
     "figma_design_system": "Turning Figma into design tokens",
     "frontend": "Projecting the page schemas",
@@ -116,6 +120,7 @@ NODE_LABEL: dict[str, str] = {
     "testing": "Generating the tests",
     "memory": "Recording decisions and coverage",
     "verification": "Checking the blueprint against itself",
+    "page_review": "Looking at each page as it renders",
     "assemble": "Assembling and starting the application",
     "install": "Installing the toolchain",
 }

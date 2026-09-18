@@ -49,7 +49,6 @@ from services.blueprint.agent_contract import (
     AgentResult,
     ArtifactProposal,
     ContractViolation,
-    InvalidComposition,
     InvalidPatternTemplate,
     InvalidWorkflowStep, InvalidBusinessRule,
     apply_agent_result,
@@ -286,47 +285,43 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("figma_design_system", "figma_intelligence", ("design_system",),
        ("designSystem",), kind="service",
        note="§40, §47, §53; explicit design outranks generic recommendation"),
-    # §34 — one composed tree per page. There were two nodes ahead of this one
-    # and both were residue from the pipeline A2UI replaced.
+    # §34 — ONE TREE PER PAGE, FROM THE PAGE'S OWN CONTRACT. No model designs
+    # a screen. A page's contract already says what it is for, which entity it
+    # shows and which workflows launch from it, and the templates in
+    # `template_page` turn exactly that into a tree — a list, a form, a record,
+    # or a workspace for everything else — built against the checks a page is
+    # held to, so every control runs something. A page bound to a drawn frame
+    # is built from the drawing instead (`figma_layout`, also deterministic).
     #
-    # `page_designs` authored `components` and `uiRegistry`: two LLM sections
-    # naming components that were never code. `uiRegistry` reached exactly two
-    # consumers — pasted into this node's own prompt, and cross-checked against
-    # the components the `frontend` projection derives. Neither is worth a
-    # model call, and a page composed against invented component names is
-    # composed against nothing.
+    # This replaced six producers: a whole-app composition sketch, the A2UI
+    # composer, UX Pilot, an LLM page author, the retry ladder between them and
+    # the template as their last resort. They were the dominant cost and time of
+    # a run (~102s a page, 44 pages) for pages the critic then passed none of.
     #
-    # `patterns` authored one template per pattern, back when the planner
-    # instantiated those templates per page with no model call. That was the
-    # primary path; A2UI composing each page made it the fallback, and a full
-    # LLM node maintaining a fallback for the exception is the wrong trade.
-    # A page nobody composes is now skipped and reported, not silently stubbed
-    # from a template that never saw it (§76).
-    # `workflows` is a dependency, not an ordering nicety: the composer is told
-    # which workflows this page launches so a button can name one, and a
-    # workflow that has not been authored yet is a button that cannot exist.
-    # Dropping the two nodes that used to sit in front of this one moved it two
-    # waves earlier, into the same wave as `workflows` — concurrent with the
-    # thing it reads.
-    # §34 — THE WHOLE APP SKETCHED ONCE, BEFORE ANY PAGE IS. One call, no
-    # props: per page a layout and ordered sections, plus the conventions
-    # every page inherits. Per-page composition never sees the page next
-    # door, so a bespoke page could re-decide the header, the filters and the
-    # empty state and nothing had looked at both. This is the only call that
-    # sees every page at once, and it is what gives the fan-out below a
-    # shared rhythm — the one thing per-page authoring cannot give itself.
-    # After the page set is complete and the design language is final, so
-    # the sketch is made of real pages under the design the user chose.
-    _n("composition", "a2ui_composition",
+    # After `workflow_steps`, not `workflows`: a Form collects a workflow's
+    # inputs, and the inputs are written with the steps.
+    _n("page_layouts", "page_template",
+       ("page_details", "workflow_steps", "figma_design_system"),
+       ("pageLayouts",), kind="service",
+       note="§34; one tree per page from its contract, no model call"),
+    # §34 — THE DESIGNED PAGE. The layout above is every page's floor; this is
+    # the page as a UI engineer writes it — React against the app's UI kit, the
+    # component library and an SDK typed from this document — compiled before
+    # it is accepted (see `ui_engineer`). First one call decides the whole
+    # app's direction, so thirty pages written apart read as one product.
+    #
+    # Both optional: a direction that fails leaves the engineer the defaults,
+    # and a page whose code never compiles keeps its layout — the run is
+    # degraded, never stopped. `install` because the compiler lives in the
+    # app's node_modules; `workflow_steps` because a form collects inputs.
+    _n("ui_direction", "ui_director",
        ("page_details", "design_system", "figma_design_system"), ("composition",),
-       note="§34; whole-app skeleton and conventions, no props, one call"),
-    _n("page_layouts", "a2ui_pages",
-       ("composition", "page_details", "design_system", "figma_design_system",
-        "workflows"),
-       ("pageLayouts",),
-       fanout="pages",
-       note="§34; one composed tree per page, gated on the component catalog"),
-    _n("frontend", "frontend", ("page_layouts",), ("codeMap",), kind="projection",
+       optional=True, note="§34; the whole app's look and conventions, one call"),
+    _n("page_code", "ui_engineer",
+       ("ui_direction", "page_layouts", "workflow_steps", "install"), ("pageCode",),
+       fanout="pages", optional=True,
+       note="§34; each page as React, type-checked against the app SDK"),
+    _n("frontend", "frontend", ("page_layouts", "page_code"), ("codeMap",), kind="projection",
        note="pattern templates + page contracts -> engine page schemas"),
 
     # §107 step 16 places workflow and rules alongside backend/API generation;
@@ -399,6 +394,14 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # here" was asking a fair question.
     _n("assemble", "build", ("integration", "install"), ("runtime",),
        kind="projection"),
+    # §73, closed on the rendered page. The application is booted with its
+    # seeded database, every coded page is screenshotted signed in, a reviewer
+    # judges each against the direction and the design standard, and the ones
+    # that fall short go back to the UI engineer with the review as their
+    # brief — then are looked at again (see `page_review`). Optional: without
+    # Docker or a browser the build is complete, just unreviewed.
+    _n("page_review", "page_reviewer", ("assemble",), (), kind="projection",
+       optional=True, note="§73; each page judged as it renders, rewritten by its author"),
 )}
 
 
@@ -654,9 +657,8 @@ def sections_of(doc: dict, artifact_ids: Iterable[str]) -> set[str]:
 #: any of them.
 INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "requirements", "pages", "components", "widgets", "pageLayouts",
-    # A sketch is a composition of components, and adding a page has to give
-    # that page a sketch — so the composition follows the pages, not the frame.
-    "composition",
+    # A page's code follows its page: adding a page must give it one.
+    "pageCode",
     "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
     "codeMap", "database", "runtime", "roles", "permissions", "security",
@@ -934,9 +936,10 @@ def completed_nodes(
     return done
 
 
-def _layout_present(doc: Mapping[str, Any], page_id: str) -> bool:
+def _code_present(doc: Mapping[str, Any], page_id: str) -> bool:
+    """A page is written once it has its `pageCode` row."""
     return any(isinstance(row, dict) and str(row.get("page") or "") == page_id
-               for row in doc.get("pageLayouts") or [])
+               for row in doc.get("pageCode") or [])
 
 
 def _fields_present(doc: Mapping[str, Any], entity_id: str) -> bool:
@@ -973,7 +976,7 @@ def _steps_present(doc: Mapping[str, Any], workflow_id: str) -> bool:
 #: section-level rule above, which is the behaviour every run had before this
 #: existed.
 _SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
-    "pages": _layout_present,
+    "pages": _code_present,
     "workflows": _steps_present,
     "page_features": _contracts_present,
     "entities": _fields_present,
@@ -1069,9 +1072,6 @@ class RunReport:
     #: not a failure of the run, because nothing was lost — it is a divergence
     #: the report names rather than a repair the platform hid.
     unrepaired: dict[str, str] = field(default_factory=dict)
-    #: Subjects composed by the node's fallback after every model attempt was
-    #: refused (`FALLBACK_BY_NODE`) — served plain rather than not at all.
-    fallbacks: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -1423,18 +1423,6 @@ def _execute(
                 commit=commit, user_request=user_request,
                 report=report, ledger=ledger,
             )
-            # PERSIST AS GENERATED. A composed page reaches disk the moment its
-            # layout commits — under the same lock that guarded the commit, so it
-            # reads exactly what landed — rather than waiting for the frontend
-            # node. A build interrupted at page_layouts then still has, and can
-            # render, the pages it made. Best-effort; never fail the run over it.
-            if verdict == "applied" and commit and app_root \
-                    and key == "page_layouts" and spec.subject:
-                try:
-                    from services.blueprint.projection import project_page_schema
-                    project_page_schema(svc.doc, spec.subject, app_root)
-                except Exception:  # noqa: BLE001 — the node re-projects at the end
-                    pass
         state.in_flight.discard(spec.subject)
         if verdict == "retry":
             state.queue.append(spec.subject)
@@ -1863,7 +1851,7 @@ def _repair_apply(
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
-    except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
+    except (BlueprintInvalid, InvalidPatternTemplate,
             InvalidWorkflowStep, InvalidBusinessRule) as exc:
         return _reason(exc), None
     if application.applied:
@@ -2057,21 +2045,11 @@ def _run_deterministic(
 #: worth having and a fourth is just the same failure twice more.
 ATTEMPTS_BY_NODE: dict[str, int] = {
     "data_model": 4,
-    # A page refusal names one specific fault and the composer answers it, so
-    # retries converge: across 1,132 compositions, 66 pages were accepted on
-    # the retry and 69 more were still converging when the two-attempt cap
-    # cut them off. Four attempts rescue those; a page that passes first time
-    # costs nothing extra.
-    "page_layouts": 4,
 }
 
 #: Observer repair rounds per node, where the default (the observer's own
 #: `rounds`) is wrong. A node at 0 is NOT JUDGED AT ALL: `finish` does not send
 #: it to the critic, since a verdict nothing can act on only costs a call.
-#: `page_layouts`: 0 — the critic has judged 149 composed pages and 78 repaired
-#: ones and passed none; two repair rounds per page were minutes spent to reach
-#: the verdict the first look gave. A page is still held to its contract and
-#: floor when it is composed, and checked by `verification` at the end.
 #: `entity_fields`: 0 — across 71 observed runs (2026-09-10..17) it was sent back
 #: 25 times and passed 4; the other 21 were flagged unrepaired, and none of
 #: those passed in a later run. Its author details the one entity it is handed,
@@ -2089,35 +2067,11 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 #: empty" before any page exists, an empty `initialRoute`, a missing citation),
 #: and it sat on the critical path.
 OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
-    "page_layouts": 0,
     "entity_fields": 0,
     "requirements": 0,
     "database": 0,
     "integrations": 0,
     "ux_architecture": 0,
-}
-
-
-def _template_page_result(svc: "BlueprintService", subject: str, task_id: str) -> Any:
-    """The composer of last resort for one page — the deterministic template
-    from the page's own contract (see ``template_page``). ``None`` when the
-    page's family has none."""
-    from services.blueprint.template_page import template_layout
-    with svc.lock:
-        page = next((p for p in svc.doc.get("pages") or [] if p.get("id") == subject), None)
-        body = template_layout(svc.doc, page) if page else None
-    if not body:
-        return None
-    return AgentResult(task_id=task_id, agent=DAG["page_layouts"].agent,
-                       proposals=[ArtifactProposal(section="pageLayouts",
-                                                   natural_key=subject, body=body)],
-                       confidence=0.5)
-
-
-#: What composes a subject when every model attempt has been refused — the
-#: last resort a node has before its subject is lost.
-FALLBACK_BY_NODE: dict[str, Any] = {
-    "page_layouts": _template_page_result,
 }
 
 
@@ -2149,39 +2103,6 @@ def accumulate_refusals(previous: str, attempt: int, reason: str) -> str:
         return ("Every refusal so far — the next reply must satisfy ALL of them "
                 f"together, not trade one for another:\n{line}")
     return f"{previous.rstrip()}\n{line}"
-
-
-def _fallback_compose(svc: "BlueprintService", key: str, subject: str, *,
-                      attempt: int, reason: str, commit: bool, user_request: str,
-                      report: "RunReport", ledger: Any = None,
-                      authored: dict | None = None) -> bool:
-    """The node's composer of last resort, once every model attempt was
-    refused. Held to the same contract as an authored result; ``True`` when
-    its subject landed, in which case the report counts it under
-    ``fallbacks`` and the ledger says what it replaced."""
-    make = FALLBACK_BY_NODE.get(key)
-    if make is None or not subject:
-        return False
-    label = f"{key}:{subject}"
-    try:
-        result = make(svc, subject, f"TASK-{label}-fallback")
-        if result is None:
-            return False
-        application = apply_agent_result(svc, result, commit=commit, user_request=user_request)
-    except Exception as exc:  # noqa: BLE001 — a fallback that fails is a failure, not a crash
-        logger.warning("[fallback] %s: %s", label, exc)
-        return False
-    if not application.applied:
-        return False
-    report.artifacts.extend(application.artifacts)
-    report.fallbacks.append(label)
-    if authored is not None:
-        authored.setdefault(subject, set()).update(_proposed_identities(result, application))
-    logger.info("[fallback] %s composed from its template after %d refused attempt(s): %s",
-                label, attempt, reason[:160])
-    _note(ledger, "node_retry", key, subject, attempt, attempt,
-          f"composed from the template instead: {reason[:200]}")
-    return True
 
 
 #: How many model calls one fanning-out node keeps in flight. Pages are
@@ -2309,11 +2230,6 @@ def _apply_subject(
             _note(ledger, "node_retry", key, subject, attempt, max_attempts,
                   f"refused the same way twice; not asking again — {reason}")
         if attempt >= max_attempts or repeated:
-            if _fallback_compose(svc, key, subject, attempt=attempt, reason=reason,
-                                 commit=commit, user_request=user_request, report=report,
-                                 ledger=ledger, authored=state.authored):
-                _note(ledger, "node_subject", key, subject, _at(), total, True)
-                return "applied"
             report.failed.append(label)
             report.failed_because[label] = reason
             state.failed.append(subject)
@@ -2329,7 +2245,7 @@ def _apply_subject(
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
-    except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
+    except (BlueprintInvalid, InvalidPatternTemplate,
                 InvalidWorkflowStep, InvalidBusinessRule, ContractViolation) as exc:
         # The author's refusals are outcomes here too. InvalidBusinessRule
         # escaped this path on 2026-09-06 and took a whole build down with
@@ -2517,9 +2433,6 @@ def _run_agent_subject(
             # trades faults (see `accumulate_refusals`).
             feedback = accumulate_refusals(feedback, attempt, str(exc))
             if attempt == max_attempts:
-                if _fallback_compose(svc, key, subject, attempt=attempt, reason=_reason(exc),
-                                     commit=commit, user_request=user_request, report=report):
-                    return "completed"
                 report.failed.append(label)
                 report.failed_because[label] = _reason(exc)
                 return None
@@ -2529,7 +2442,7 @@ def _run_agent_subject(
             application = apply_agent_result(
                 svc, result, commit=commit, user_request=user_request,
             )
-        except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
+        except (BlueprintInvalid, InvalidPatternTemplate,
                 InvalidWorkflowStep, InvalidBusinessRule) as exc:
             feedback = accumulate_refusals(feedback, attempt, str(exc))
             # A rejected proposal is an outcome, not a crash. This used to
@@ -2538,9 +2451,6 @@ def _run_agent_subject(
             # traceback surfaced instead of a report. Nothing was written —
             # apply validates before it commits — so a retry is clean.
             if attempt == max_attempts:
-                if _fallback_compose(svc, key, subject, attempt=attempt, reason=_reason(exc),
-                                     commit=commit, user_request=user_request, report=report):
-                    return "completed"
                 report.failed.append(label)
                 report.failed_because[label] = _reason(exc)
                 return None
@@ -2637,6 +2547,16 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # to "what does this screen look like". An honest 404 on the front door is
     # a defect anyone can see; a tile grid nobody authored is one they cannot.
     result = apply_frontend_projection(svc, app_root)
+    # THE DESIGNED PAGES, OVER THEIR FLOORS. The SDK they were compiled against
+    # (the fixed half ships with the scaffold; the typed half is this
+    # document), then each `pageCode` row as its route's page/load/view — a
+    # static route segment, so it outranks the schema catch-all that still
+    # serves the page's layout to the editor and to any page without code.
+    from services.blueprint.app_sdk import project_code_pages
+    from services.blueprint.ui_engineer import ensure_sdk
+
+    ensure_sdk(svc.doc, Path(app_root))
+    project_code_pages(svc.doc, app_root)
     # A page A2UI authored and the planner cannot render is a defect, not an
     # acceptable loss. This projection wrote 23 schemas from 30 authored trees
     # and reported success: every collection page — /jobs, /customers, /bikes,
@@ -2824,7 +2744,46 @@ def _project_assemble(svc: BlueprintService, app_root: str) -> None:
     svc.save()
 
 
+def _review_pages(svc: BlueprintService, app_root: str) -> None:
+    """Judge every coded page as it renders; have the weak ones rewritten.
+
+    A rewrite is compiled before it is committed, and the application is built
+    again once any page changed. Should that build fail, the pages go back to
+    what they were before the review and the tree is projected from them again
+    — a review can only ever leave the application better or as it was."""
+    import copy as _copy
+
+    from services.blueprint.app_sdk import project_code_pages
+    from services.blueprint.assembly import verify_build
+    from services.blueprint.executors import RunUsage, tiered_router
+    from services.blueprint.page_review import review_app
+
+    router = tiered_router()
+    client = router.for_task("page_review", "page_reviewer")
+    with svc.lock:
+        before = _copy.deepcopy(svc.doc.get("pageCode") or [])
+    outcome = review_app(svc, app_root, client, usage=RunUsage.for_app(svc, phase="review"))
+    rewritten = [pid for pid, r in (outcome.get("pages") or {}).items() if r.get("rewritten")]
+    if rewritten:
+        try:
+            verify_build(app_root, install=False)
+        except Exception as exc:  # noqa: BLE001 — undone below, then reported
+            with svc.lock:
+                svc.doc["pageCode"] = before
+                svc.save()
+                project_code_pages(svc.doc, app_root)
+            raise RuntimeError(f"the reviewed pages did not build; restored the pages as they were: {exc}")
+    with svc.lock:
+        runtime = dict(svc.doc.get("runtime") or {})
+        runtime["pageReview"] = {pid: {"scores": r.get("scores"), "passed": r.get("passed"),
+                                       "rewritten": r.get("rewritten")}
+                                 for pid, r in (outcome.get("pages") or {}).items()}
+        svc.doc["runtime"] = runtime
+        svc.save()
+
+
 PROJECTION_HANDLERS: dict[str, Any] = {
+    "page_review": _review_pages,
     "install": _project_install,
     "backend": _project_data_layer,
     "frontend": _project_frontend,
@@ -2850,6 +2809,47 @@ def _record_memory(svc: BlueprintService) -> None:
     apply_completeness(svc)
 
 
+def _compose_page_layouts(svc: BlueprintService) -> None:
+    """§34 — a tree for every page that has none, from its drawn frame when
+    it has one and its contract otherwise. A page that already has a layout
+    keeps it: Smith's edits to a screen live there, and a page whose contract
+    changes has its layout dropped by the change that changed it.
+
+    Each page goes through `apply_agent_result` like any authored layout, so
+    the catalog and completeness checks still hold it. A page refused there is
+    logged and left without a layout, which `verification` reports."""
+    from services.blueprint import figma_layout
+    from services.blueprint.template_page import template_layout
+
+    have = {str(l.get("page")) for l in svc.doc.get("pageLayouts") or [] if isinstance(l, dict)}
+    for page in list(svc.doc.get("pages") or []):
+        pid = str(page.get("id") or "")
+        if not pid or page.get("status") == "DEPRECATED" or pid in have:
+            continue
+        body = None
+        try:
+            drawn = figma_layout.compose(svc, page, app_root=Path(svc.output_dir) / "app")
+        except Exception as exc:  # noqa: BLE001 — a design must never cost the page
+            logger.warning("[page_layouts] %s: frame not usable: %s", pid, exc)
+            drawn = None
+        if drawn is not None:
+            body = {"page": pid, "root": drawn["root"],
+                    "dataSources": drawn["dataSources"],
+                    "composedBy": str(drawn.get("provider") or "figma"),
+                    **({"canvas": drawn["canvas"]} if drawn.get("canvas") else {}),
+                    "rationale": f"built from its drawn frame {page.get('figmaFrame')} (§48)",
+                    "requirements": list(page.get("requirements") or [])}
+        body = body or template_layout(svc.doc, page)
+        result = AgentResult(task_id=f"TASK-page_layouts-{pid}", agent=DAG["page_layouts"].agent,
+                             proposals=[ArtifactProposal(section="pageLayouts",
+                                                         natural_key=pid, body=body)],
+                             confidence=1.0)
+        try:
+            apply_agent_result(svc, result, commit=True)
+        except Exception as exc:  # noqa: BLE001 — one page never costs the others
+            logger.warning("[page_layouts] %s refused: %s", pid, exc)
+
+
 def _project_design_reference(svc: BlueprintService) -> None:
     """§47 — the connected design's own tokens. No-op without one."""
     from services.figma.projection import apply_design_reference
@@ -2858,6 +2858,7 @@ def _project_design_reference(svc: BlueprintService) -> None:
 
 
 SERVICE_HANDLERS: dict[str, Any] = {
+    "page_layouts": _compose_page_layouts,
     "figma_design_system": _project_design_reference,
     "verification": _run_verification,
     "apis": _derive_apis,

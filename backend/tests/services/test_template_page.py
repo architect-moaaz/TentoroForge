@@ -1,5 +1,6 @@
-"""The composer of last resort, and the two policies around it: four page
-attempts, and the observer's verdict on a page recorded but never repaired."""
+"""Every page's layout, laid out from its own contract with no model call:
+the three families, the workspace for everything else, and the node that
+writes them."""
 
 import json
 
@@ -8,10 +9,7 @@ import pytest
 from services.blueprint.agent_contract import (
     AgentResult, ArtifactProposal, InvalidPatternTemplate, check_pattern_templates,
 )
-from services.blueprint.orchestrator import (
-    ATTEMPTS_BY_NODE, DAG, FALLBACK_BY_NODE, OBSERVER_ROUNDS_BY_NODE, RunReport,
-    TaskSpec, _run_agent_subject, run,
-)
+from services.blueprint.orchestrator import DAG, run
 from services.blueprint.observer import Observer
 from services.blueprint.run_ledger import read, runs
 from services.blueprint.service import BlueprintService
@@ -68,7 +66,7 @@ def _accepted(doc, page_id):
     page = next(p for p in doc["pages"] if p["id"] == page_id)
     body = template_layout(doc, page)
     assert body is not None, page_id
-    res = AgentResult(task_id="t", agent="a2ui_pages", confidence=0.5,
+    res = AgentResult(task_id="t", agent="page_template", confidence=1.0,
                       proposals=[ArtifactProposal(section="pageLayouts", natural_key=page_id, body=body)])
     check_pattern_templates(res, doc)          # raises when the contract refuses
     return body
@@ -129,22 +127,68 @@ def test_a_control_appears_only_when_the_blueprint_can_bind_it():
     assert _controls(lst["root"]) == [("Button", "Add Record", "/add-data"),
                                       ("rowAction", "Edit", "/add-data?id={{id}}")]
     doc["workflows"] = []                                                          # nothing to run at all
-    assert template_layout(doc, doc["pages"][1]) is None                           # a form with no workflow is not a page
+    frm = _accepted(doc, "PAGE-002")                                               # still a page, with no Form
+    assert not [n for n in _walk(frm["root"]) if n["type"] == "Form"]
 
 
-def test_families_without_a_template_get_nothing():
+def test_a_page_outside_the_families_is_laid_out_as_a_workspace():
     doc = _doc()
+    doc["pages"][3]["data"] = {"primaryEntity": "ENTITY-001"}
+    doc["pages"][3]["navigatesTo"] = ["PAGE-001", "PAGE-003"]
+    doc["workflows"].append({"id": "FLOW-004", "name": "Recount Totals", "trigger": {"kind": "manual"},
+                             "launchedFrom": ["PAGE-004"], "inputs": [], "steps": []})
+    # "Archive" reads as a delete and this one deletes nothing: the contract
+    # would refuse the button, so it is left out rather than cost the page
+    doc["workflows"].append({"id": "FLOW-005", "name": "Archive Stale", "trigger": {"kind": "manual"},
+                             "launchedFrom": ["PAGE-004"], "inputs": [], "steps": []})
     assert family_of(doc["pages"][3]) is None
-    assert template_layout(doc, doc["pages"][3]) is None
-    assert template_layout(doc, {"id": "X", "route": "/x", "pattern": "entity_list"}) is None   # no entity
+    ws = _accepted(doc, "PAGE-004")
+    assert ws["composedBy"] == "deterministic"
+    # an overview counts what it reads, runs what launches from it, lists its
+    # entity, and leads to the pages it names — but not to an [id] route
+    assert {"name": "record_count", "entity": "Record", "op": "aggregate",
+            "metrics": {"value": {"fn": "count"}}} in ws["dataSources"]
+    controls = _controls(ws["root"])
+    assert ("Button", "Recount Totals", "FLOW-004") in controls
+    assert not any(c[2] == "FLOW-005" for c in controls)
+    assert ("Button", "Master Data", "/master-data") in controls
+    assert not any(c[2] == "/master-data/[id]" for c in controls)
 
 
-# --- the three policies ------------------------------------------------------
+def test_a_page_with_no_entity_is_still_a_page():
+    doc = _doc()
+    ws = _accepted(doc, "PAGE-004")
+    assert ws["dataSources"] == []
+    assert [n["props"]["content"] for n in _walk(ws["root"]) if n["type"] == "Heading"] == ["Overview"]
+    assert template_layout(doc, {"id": "X", "route": "/x", "pattern": "entity_list"})["page"] == "X"
 
-def test_pages_get_four_attempts_and_no_observer_repairs():
-    assert ATTEMPTS_BY_NODE["page_layouts"] == 4
-    assert OBSERVER_ROUNDS_BY_NODE["page_layouts"] == 0
-    assert "page_layouts" in FALLBACK_BY_NODE
+
+def test_a_workflow_the_page_cannot_supply_gets_no_control():
+    """Update Record needs a record; on a page with no record in view and no
+    list to pick one from, a Form for it would be refused — so none is made."""
+    doc = _doc()
+    doc["workflows"][1]["launchedFrom"] = ["PAGE-004"]
+    doc["workflows"][1]["inputs"][0]["entity"] = "ENTITY-404"       # nothing to choose it from
+    ws = _accepted(doc, "PAGE-004")
+    assert not any(c[2] == "FLOW-002" for c in _controls(ws["root"]))
+
+
+def test_a_record_input_is_chosen_from_a_list():
+    doc = _doc()
+    doc["workflows"][1]["launchedFrom"] = ["PAGE-004"]
+    ws = _accepted(doc, "PAGE-004")
+    form = next(n for n in _walk(ws["root"]) if n["type"] == "Form")
+    pick = next(f for f in form["props"]["fields"] if f["name"] == "record")
+    assert pick["interaction"]["optionsFrom"]["value"] == "id"
+    assert any(s["op"] == "list" and s["entity"] == "Record" for s in ws["dataSources"])
+
+
+# --- the node ----------------------------------------------------------------
+
+def test_the_node_calls_no_model():
+    assert DAG["page_layouts"].kind == "service"
+    assert "composition" not in DAG
+    assert "workflow_steps" in DAG["page_layouts"].depends_on   # a Form collects the inputs
 
 
 @pytest.fixture()
@@ -157,70 +201,26 @@ def svc(tmp_path) -> BlueprintService:
     return s
 
 
-def test_a_page_refused_at_the_cap_is_composed_from_its_template(svc):
-    seen = []
+def test_every_page_is_laid_out_without_asking_a_model(svc):
     def executor(spec):
-        seen.append(spec.attempt)
-        raise InvalidPatternTemplate("/master-data: Table 'Table' runs Create Record — a table collects no fields")
-    report = RunReport()
-    out = _run_agent_subject(svc, executor, "page_layouts", DAG["page_layouts"], "PAGE-001",
-                             max_attempts=2, commit=False, user_request="", report=report)
-    assert seen == [1, 2]                                   # every model attempt was spent first
-    assert out == "completed"
-    assert report.failed == [] and report.fallbacks == ["page_layouts:PAGE-001"]
-    layout = next(l for l in svc.doc["pageLayouts"] if l["page"] == "PAGE-001")
-    assert layout["composedBy"] == "deterministic"
-    assert ("rowAction", "Delete", "FLOW-003") in _controls(layout["root"])
+        raise AssertionError(f"a model was asked for {spec.node}")
+    report = run(svc, executor, plan=["page_layouts"])
+    assert "page_layouts" in report.completed and not report.failed
+    laid = {l["page"]: l for l in svc.doc["pageLayouts"]}
+    assert set(laid) == {"PAGE-001", "PAGE-002", "PAGE-003", "PAGE-004"}
+    assert all(l["composedBy"] == "deterministic" for l in laid.values())
 
 
-def test_a_page_with_no_template_still_fails_honestly(svc):
-    def executor(spec):
-        raise InvalidPatternTemplate("refused")
-    report = RunReport()
-    _run_agent_subject(svc, executor, "page_layouts", DAG["page_layouts"], "PAGE-004",
-                       max_attempts=1, commit=False, user_request="", report=report)
-    assert report.failed == ["page_layouts:PAGE-004"] and report.fallbacks == []
-
-
-class _Critic:
-    def __init__(self, reply):
-        self.reply, self.calls, self.enforces_schema = reply, [], True
-
-    def __call__(self, *, system, user, schema):
-        self.calls.append(json.loads(user))
-        return json.dumps(self.reply)
-
-
-def test_a_page_is_not_sent_to_the_observer_at_all(svc):
-    """ITS REPAIR ROUNDS ARE ZERO, SO ITS VERDICT COULD ONLY EVER BE A NOTE.
-
-    This used to judge the page, never re-compose it, and leave the verdict as
-    an OUT_OF_SYNC note. Measured on a four-page build: 4 of 29 observer calls
-    (14%), 13% of the observer's cost and 105 seconds, with no repair behind
-    any of them. A composed
-    page is held to its contract and floor when it is written, and checked by
-    `verification` at the end; the critic is not asked about it.
-    """
-    calls = []
-    def executor(spec):
-        calls.append((spec.subject, spec.feedback))
-        page = next(p for p in svc.doc["pages"] if p["id"] == spec.subject)
-        return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
-                           proposals=[ArtifactProposal(section="pageLayouts", natural_key=spec.subject,
-                                                       body=template_layout(svc.doc, page))])
-    critic = _Critic({"verdict": "fail", "findings": [{
-        "section": "pageLayouts", "artifact": "PAGE-001", "requirement": "REQ-001",
-        "detail": "the table omits the '#' column the requirement names"}]})
-    svc.doc["pages"] = [p for p in svc.doc["pages"] if p["id"] == "PAGE-001"]
+def test_a_page_that_has_a_layout_keeps_it(svc):
+    """Smith's edits to a screen live in its layout; re-running the node must
+    not lay the page out again over them."""
+    kept = {"page": "PAGE-001", "composedBy": "agent", "dataSources": [],
+            "root": {"type": "Heading", "props": {"content": "Mine", "level": 1}, "children": []}}
+    svc.doc["pageLayouts"] = [kept]
     svc.save()
-    report = run(svc, executor, plan=["page_layouts"], observer_agent=Observer(critic=critic, rounds=2))
-    assert [c[0] for c in calls] == ["PAGE-001"]           # composed once
-    assert critic.calls == [], "the critic was asked about a node it cannot change"
-    events = [l["event"] for l in read(svc.output_dir, runs(svc.output_dir)[0])]
-    assert "observer:verdict" not in events and "observer:repair" not in events
-    assert "page_layouts" in report.completed
-    page = next(p for p in svc.doc["pages"] if p["id"] == "PAGE-001")
-    assert page.get("status") != "OUT_OF_SYNC"
+    run(svc, lambda spec: None, plan=["page_layouts"])
+    assert next(l for l in svc.doc["pageLayouts"] if l["page"] == "PAGE-001")["root"] == kept["root"]
+    assert len(svc.doc["pageLayouts"]) == 4
 
 
 def test_the_contract_judges_a_page_with_the_other_pages_in_view():
@@ -233,7 +233,7 @@ def test_the_contract_judges_a_page_with_the_other_pages_in_view():
     body = template_layout(doc, page)
     table = next(n for n in _walk(body["root"]) if n["type"] == "Table")
     table["props"]["rowActions"] = [a for a in table["props"]["rowActions"] if a["label"] != "Edit"]
-    res = AgentResult(task_id="t", agent="a2ui_pages", confidence=0.5,
+    res = AgentResult(task_id="t", agent="page_template", confidence=1.0,
                       proposals=[ArtifactProposal(section="pageLayouts", natural_key="PAGE-001", body=body)])
     with pytest.raises(InvalidPatternTemplate) as e:
         check_pattern_templates(res, doc)

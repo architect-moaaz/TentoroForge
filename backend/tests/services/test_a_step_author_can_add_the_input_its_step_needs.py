@@ -14,7 +14,7 @@ from services.blueprint.agent_contract import (
     AgentResult, ArtifactProposal, InvalidWorkflowStep, check_workflow_steps,
 )
 from services.blueprint.executors import (
-    MAX_TOKENS_BY_NODE, _declared_plus_added, pin_workflow_identity,
+    _declared_plus_added, pin_workflow_identity,
 )
 from services.blueprint.service import BlueprintService
 
@@ -65,6 +65,3 @@ def test_a_declared_input_cannot_be_changed_or_dropped():
     assert merged == DECLARED
     assert _declared_plus_added(DECLARED, []) == DECLARED
 
-
-def test_composition_has_room_for_a_large_application():
-    assert MAX_TOKENS_BY_NODE["composition"] >= 64000

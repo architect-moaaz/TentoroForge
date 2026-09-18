@@ -266,7 +266,7 @@ export const DEPARTMENTS: Department[] = [
   { id: "architecture", label: "Architecture", color: "#0369A1", description: "Modules, navigation and the seams outward" },
   { id: "design_studio", label: "Design Studio", color: "#8B5CF6", description: "The design language, before anything composes" },
   { id: "data", label: "Data", color: "#059669", description: "Entities, schema, and the endpoints they imply" },
-  { id: "composition", label: "Composition", color: "#EC4899", description: "A2UI patterns and the page trees built from them" },
+  { id: "composition", label: "Composition", color: "#EC4899", description: "The page trees and the schemas projected from them" },
   { id: "logic", label: "Logic", color: "#4F46E5", description: "Workflows and business rules" },
   { id: "security", label: "Security", color: "#DC2626", description: "Roles and the permissions that guard entities" },
   { id: "qa", label: "Verification", color: "#0891B2", description: "Tests, the verification matrix, and what the run remembers" },
@@ -321,7 +321,11 @@ export const AGENT_REGISTRY: AgentInfo[] = [
   { id: "backend", name: "Backend Projection", spriteKey: "data_modeler", room: "data", role: "Projects the data layer", color: "#B45309" },
 
   // ── Composition ───────────────────────────────────────────────────────
-  { id: "a2ui_pages", name: "Page Composer", spriteKey: "component_builder", room: "composition", role: "Composes a tree per page", color: "#EC4899" },
+  { id: "ui_director", name: "Design Director", spriteKey: "detective", room: "design_studio", role: "Sets the whole app's look and conventions", color: "#BE185D" },
+  { id: "page_reviewer", name: "Page Reviewer", spriteKey: "scientist", room: "qa", role: "Looks at each page as it renders and sends weak ones back", color: "#0D9488" },
+  { id: "ui_engineer", name: "UI Engineer", spriteKey: "artist", room: "composition", role: "Writes each page in React and compiles it", color: "#E11D48" },
+  { id: "page_template", name: "Page Layout", spriteKey: "agent_builder", room: "composition", role: "Lays out each page from its contract", color: "#DB2777" },
+  { id: "a2ui_pages", name: "Page Composer", spriteKey: "component_builder", room: "composition", role: "Recomposes a screen Smith is asked to change", color: "#EC4899" },
   { id: "frontend", name: "Frontend Projection", spriteKey: "seed_generator", room: "composition", role: "Projects the page schemas", color: "#16A34A" },
 
   // ── Logic ─────────────────────────────────────────────────────────────

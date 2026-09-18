@@ -7,7 +7,7 @@ larger each time. "The produced section already has content" is the correct
 test for a node that writes once.
 
 It is the wrong test for a node that writes once PER SUBJECT, and wrong by
-exactly the failures. `page_layouts` fans out over pages. A real run ended with
+exactly the failures. `page_layouts` fanned out over pages. A real run ended with
 4 of 15 pages composed and 11 rejected; the next run read `pageLayouts` as
 non-empty, planned itself without `page_layouts` at all — nine nodes, none of
 them the one with eleven failures — and built `frontend` from a four-page
@@ -24,13 +24,17 @@ keeps the section-level rule — the behaviour every run had before.
 """
 from services.blueprint.orchestrator import DAG, completed_nodes
 
+# `entity_fields` fans out over entities: `data_model` names them, one call per
+# entity details it, and an entity is detailed once it carries fields. (This
+# was written against `page_layouts`, which no longer calls a model.)
 
-def _doc(page_ids, layout_page_ids, deprecated=()):
+
+def _doc(entity_ids, detailed_ids, deprecated=()):
     doc = {
-        "pages": [{"id": pid, "status": "DEPRECATED" if pid in deprecated else "ACTIVE"}
-                  for pid in page_ids],
-        "pageLayouts": [{"page": pid, "root": {"type": "Container"}}
-                        for pid in layout_page_ids],
+        "data": {"entities": [
+            {"id": eid, "status": "DEPRECATED" if eid in deprecated else "ACTIVE",
+             **({"fields": [{"name": "name"}]} if eid in detailed_ids else {})}
+            for eid in entity_ids]},
     }
     # Every other produced section present, so only the fan-out decides.
     # `produces` paths are dotted (`data.entities`), and `_section` resolves
@@ -40,7 +44,7 @@ def _doc(page_ids, layout_page_ids, deprecated=()):
         if node.kind != "agent":
             continue
         for path in node.produces:
-            if path in ("pages", "pageLayouts"):
+            if path == "data.entities":
                 continue
             cursor = doc
             *parents, leaf = path.split(".")
@@ -50,45 +54,25 @@ def _doc(page_ids, layout_page_ids, deprecated=()):
     return doc
 
 
-def test_a_partially_composed_fan_out_is_not_complete():
-    """The bug: 4 of 15 pages composed read as done."""
-    doc = _doc([f"PAGE-{i:03}" for i in range(1, 16)],
-               ["PAGE-003", "PAGE-004", "PAGE-005", "PAGE-015"])
-    assert "page_layouts" not in completed_nodes(doc)
+def test_a_partially_detailed_fan_out_is_not_complete():
+    """The bug: 4 of 15 subjects authored read as done."""
+    doc = _doc([f"ENTITY-{i:03}" for i in range(1, 16)],
+               ["ENTITY-003", "ENTITY-004", "ENTITY-005", "ENTITY-015"])
+    assert "entity_fields" not in completed_nodes(doc)
 
 
-def test_a_fully_composed_fan_out_is_complete():
-    ids = [f"PAGE-{i:03}" for i in range(1, 16)]
-    assert "page_layouts" in completed_nodes(_doc(ids, ids))
+def test_a_fully_detailed_fan_out_is_complete():
+    ids = [f"ENTITY-{i:03}" for i in range(1, 16)]
+    assert "entity_fields" in completed_nodes(_doc(ids, ids))
 
 
-def test_an_empty_section_is_still_not_complete():
-    """The original rule still holds at the bottom: nothing written, nothing done."""
-    assert "page_layouts" not in completed_nodes(_doc(["PAGE-001"], []))
-
-
-def test_a_deprecated_page_does_not_need_a_layout():
-    """Rows, not counts: the retired page has no layout and the node is done."""
-    doc = _doc(["PAGE-001", "PAGE-002"], ["PAGE-001"], deprecated=("PAGE-002",))
-    assert "page_layouts" in completed_nodes(doc)
-
-
-def test_a_layout_for_a_page_that_no_longer_exists_does_not_count():
-    """Rows, not counts, the other way: two layouts, one of them orphaned, and
-    a live page still uncomposed."""
-    doc = _doc(["PAGE-001", "PAGE-002"], ["PAGE-001", "PAGE-999"])
-    assert "page_layouts" not in completed_nodes(doc)
-
-
-def test_no_pages_at_all_means_nothing_is_owed():
-    """A fan-out with no subjects completes without invoking anything, so an
-    application with no pages yet must not be held open by this rule."""
-    doc = _doc([], [])
-    doc["pageLayouts"] = [{"page": "PAGE-000", "root": {}}]  # section non-empty
-    assert "page_layouts" in completed_nodes(doc)
+def test_a_deprecated_subject_is_not_owed():
+    """Rows, not counts: the retired entity has no fields and the node is done."""
+    doc = _doc(["ENTITY-001", "ENTITY-002"], ["ENTITY-001"], deprecated=("ENTITY-002",))
+    assert "entity_fields" in completed_nodes(doc)
 
 
 def test_single_write_nodes_keep_the_section_rule():
-    """`data_model` writes once; content in its section is completion."""
-    doc = _doc(["PAGE-001"], ["PAGE-001"])
-    assert "data_model" in completed_nodes(doc)
+    """`database` writes once; content in its section is completion."""
+    doc = _doc(["ENTITY-001"], ["ENTITY-001"])
+    assert "database" in completed_nodes(doc)

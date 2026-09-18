@@ -1011,8 +1011,8 @@ def test_the_page_authoring_prefix_is_identical_across_subjects():
         ],
         "data": {"entities": []},
     }
-    first, _ = build_prompt(doc, "page_layouts", subject="PAGE-001")
-    second, _ = build_prompt(doc, "page_layouts", subject="PAGE-002")
+    first, _ = build_prompt(doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
+    second, _ = build_prompt(doc, "page_layouts", subject="PAGE-002", agent="a2ui_pages")
     assert first == second
 
 
@@ -1165,7 +1165,7 @@ def test_the_authoring_prompt_asks_for_the_empty_state_to_carry_its_action():
     doc = {"pages": [{"id": "PAGE-001", "route": "/customers",
                       "purpose": "p", "pattern": "entity_list"}],
            "data": {"entities": []}}
-    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
     assert "EmptyState.action" in user
     assert "not as a Button beside it" in user
 
@@ -1178,7 +1178,7 @@ def test_the_authoring_prompt_forbids_a_loading_state():
     doc = {"pages": [{"id": "PAGE-001", "route": "/customers",
                       "purpose": "p", "pattern": "entity_list"}],
            "data": {"entities": []}}
-    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
     assert "loading or skeleton" in user
     assert "gated for you" in user
 
@@ -1500,8 +1500,8 @@ def test_the_design_language_rides_in_the_cached_prefix():
         "data": {"entities": []},
         "requirements": [],
     }
-    s1, u1 = build_prompt(doc, "page_layouts", subject="PAGE-001")
-    s2, u2 = build_prompt(doc, "page_layouts", subject="PAGE-002")
+    s1, u1 = build_prompt(doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
+    s2, u2 = build_prompt(doc, "page_layouts", subject="PAGE-002", agent="a2ui_pages")
 
     # Identical prefix, or every page writes a new cache entry instead of
     # reading the last one — which is what an 18% hit rate looked like.
@@ -1527,7 +1527,7 @@ def test_the_page_brief_still_carries_what_is_per_page():
         "data": {"entities": []},
         "requirements": [],
     }
-    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
     assert "PAGE-001" in user
     assert "/sessions" in user
 
@@ -1598,12 +1598,9 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
                  "page_layouts", "design_system", "testing", "workflow_steps",
                  "page_details", "entity_fields"):
         assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
-    # The whole-app sketch grows with the page count: a 46-page dental app on
-    # UAT (2026-09-18) filled exactly 32,000 four calls running.
-    assert r.for_task("composition", "x").max_tokens == 64000
     assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
                                        "database", "security", "workflows",
-                                       "composition"}
+                                       "page_code"}   # a page's two whole files
 
 
 def test_raising_the_ceiling_did_not_disturb_effort():
@@ -1943,21 +1940,13 @@ def _page(pid="PAGE-001", route="/candidates"):
             "pattern": "entity_list", "data": {"primaryEntity": "ENTITY-001"}}
 
 
-def test_the_composition_prompt_is_the_whole_app_with_names_only(svc):
-    svc.doc["pages"] = [_page(), _page("PAGE-002", "/roles")]
-    system, user = build_prompt(svc.doc, "composition")
-    assert "Name components from this list only" in system
-    assert "props:" not in system, "the index carries names, not signatures"
-    assert '"PAGE-001"' in user and '"PAGE-002"' in user
-    assert 'natural_key "composition"' in user
-
-
 def test_the_page_composer_inherits_the_apps_conventions(svc):
     """A page authored bespoke used to re-decide the header, the filters, the
-    empty state. Now the app decided them once, and the composer is told —
-    in the cached prefix, since the decisions are the app's, not the page's."""
+    empty state. An app composed before the build stopped sketching carries
+    its decisions, and Smith's composer is still told them — in the cached
+    prefix, since the decisions are the app's, not the page's."""
     svc.doc["pages"] = [_page(), _page("PAGE-002", "/roles")]
-    before, plain_user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001")
+    before, plain_user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
     svc.doc["composition"] = {
         "vision": "Calm and dense",
         "conventions": [{"topic": "header", "rule": "Title left, action right"}],
@@ -1966,9 +1955,9 @@ def test_the_page_composer_inherits_the_apps_conventions(svc):
                   {"page": "PAGE-002", "layout": "single_column",
                    "sections": [{"name": "List", "purpose": "scan"}]}],
     }
-    system, user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001")
+    system, user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
     assert "Calm and dense" not in before
     assert "Calm and dense" in system and "Title left, action right" in system
     assert "composition.sketch" in user and "composition.sketch" not in plain_user
-    other, _ = build_prompt(svc.doc, "page_layouts", subject="PAGE-002")
+    other, _ = build_prompt(svc.doc, "page_layouts", subject="PAGE-002", agent="a2ui_pages")
     assert other == system, "the prefix must stay identical across the fan-out"

@@ -1660,7 +1660,13 @@ def _edges(chain: list[str], steps: list[dict], catalog: WorkflowNodeCatalog,
         edges.append(e)
 
     if not declared:
+        # A straight line — but an end is an end. Chaining the list in order
+        # ran one end node into the next ("Record Created" into "Validation
+        # Failed"); nothing flows out of a step with no out handle.
         for a, b in zip(chain, chain[1:]):
+            node = catalog.node((by_key.get(a) or {}).get("type")) or {}
+            if not node.get("handles", {}).get("out", True):
+                continue
             add(a, b)
         return edges
 
@@ -1721,8 +1727,22 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
         # `start` is the Blueprint's own boundary marker (the trigger node is
         # the start); documents predating the catalog are migrated on load,
         # but a projection must never turn one into an action with no action.
-        steps = [s for s in (wf.get("steps") or [])
-                 if isinstance(s, dict) and s.get("key") and s.get("type") != "start"]
+        #
+        # A step of type `trigger` is the same boundary under the catalog's own
+        # name, and the same rule holds: the Start node is projected from
+        # `wf.trigger` below. Kept, it became a SECOND node — and when its key
+        # was `trigger` too, the same id as Start, with the edge
+        # `trigger -> trigger`. The engine re-entered Start until its cycle
+        # guard stopped it at 200 executions, so a generated Delete button
+        # could never delete (22lzrc2p, 2026-09-19). What the marker hands off
+        # to is where Start goes first.
+        declared = [s for s in (wf.get("steps") or []) if isinstance(s, dict) and s.get("key")]
+        markers = [s for s in declared if s.get("type") in ("start", "trigger")]
+        steps = [s for s in declared if s.get("type") not in ("start", "trigger")]
+        first = next((t for m in markers for t in (m.get("next") or [])
+                      if any(x.get("key") == t for x in steps)), None)
+        if first:
+            steps.sort(key=lambda x: x.get("key") != first)       # stable: only `first` moves
         # Top-to-bottom, one node per row: the editor's handles are top (in)
         # and bottom (out), so this is the layout its edges are drawn for.
         nodes = [_wf_node("trigger", "trigger", 0, trigger_cfg, "Start")]
@@ -3091,6 +3111,25 @@ def _encode(route: str) -> str:
     return quote(route, safe="")
 
 
+def public_route_segments(page: dict) -> list[str] | None:
+    """The directory segments a PUBLIC page's own route file sits at, outside
+    `(dashboard)` — or None when the page is not public, is the root (the
+    catch-all serves it), or cannot be a directory there. One rule, read by
+    every writer of a page's route file, so two of them can never put a page
+    at two paths that resolve to the same URL."""
+    if (page.get("access") or "authenticated") != "public":
+        return None
+    route = str(page.get("route") or "")
+    if not route.startswith("/") or route == "/":
+        return None
+    segments = [seg for seg in route.split("/") if seg]
+    if not all(_ROUTE_SEGMENT.match(seg) for seg in segments):
+        return None
+    if segments[0].lower() in _RESERVED_APP_SEGMENTS:
+        return None
+    return segments
+
+
 def project_public_routes(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Give every PUBLIC page its own route file, outside ``(dashboard)``.
 
@@ -3123,8 +3162,14 @@ def project_public_routes(doc: dict, app_root: str | Path) -> dict[str, Any]:
     wanted: dict[Path, str] = {}
     refused: list[str] = []
 
+    # A page with code has its own route file at the same place (see
+    # `app_sdk.code_page_dir`); writing this one too would be two pages at
+    # one URL, which Next refuses to build.
+    coded = {str(r.get("page")) for r in _live(doc.get("pageCode"))}
     for page in _live(doc.get("pages")):
         if (page.get("access") or "authenticated") != "public":
+            continue
+        if str(page.get("id")) in coded:
             continue
         route = str(page.get("route") or "")
         if not route.startswith("/") or route == "/":

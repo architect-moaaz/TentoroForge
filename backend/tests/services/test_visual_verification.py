@@ -85,8 +85,8 @@ def test_a_finding_is_addressed_to_whoever_composes_the_page():
         pass_=False, topIssues=[FakeIssue("high", "domainFeel", "Reads generic")]))
 
     assert findings[0].section == SECTION
-    assert findings[0].responsible_agent == "a2ui_pages"
-    assert SECTION_OWNER[SECTION] == "a2ui_pages"
+    assert findings[0].responsible_agent == "page_template"
+    assert SECTION_OWNER[SECTION] == "page_template"
 
 
 def test_the_issue_keeps_its_severity_and_its_suggestion():
