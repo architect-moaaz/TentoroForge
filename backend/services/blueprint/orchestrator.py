@@ -48,6 +48,7 @@ from services.blueprint import approval
 from services.blueprint.agent_contract import (
     AgentResult,
     ArtifactProposal,
+    ContractViolation,
     InvalidComposition,
     InvalidPatternTemplate,
     InvalidWorkflowStep, InvalidBusinessRule,
@@ -2329,10 +2330,14 @@ def _apply_subject(
             svc, outcome, commit=commit, user_request=user_request,
         )
     except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
-                InvalidWorkflowStep, InvalidBusinessRule) as exc:
+                InvalidWorkflowStep, InvalidBusinessRule, ContractViolation) as exc:
         # The author's refusals are outcomes here too. InvalidBusinessRule
         # escaped this path on 2026-09-06 and took a whole build down with
-        # no end event written.
+        # no end event written. ContractViolation — the §29 output contract,
+        # raised by `result.validate()` — did the same on UAT on 2026-09-18:
+        # an agent proposed the section `product.capabilities`, a field
+        # inside a section it may write, and the whole turn died where one
+        # subject should have been asked again.
         from services.blueprint.refusals import record_refusal
         record_refusal(svc.output_dir, subject or key, 0,
                        list(getattr(outcome, "proposals", None) or []), _reason(exc))

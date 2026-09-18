@@ -354,7 +354,19 @@ class AgentResult:
             raise ContractViolation("task_id is required — §103 requires retryable tasks")
         for p in self.proposals:
             if p.section not in WRITABLE_SECTIONS:
-                raise ContractViolation(f"{p.section!r} is not a writable Blueprint section")
+                # SAY WHAT WOULD HAVE BEEN RIGHT. `product.capabilities` is
+                # the shape this takes live (UAT, 2026-09-18): the agent
+                # addressed a field INSIDE a section it may write, and the
+                # refusal named neither the section that does exist nor the
+                # ones that do. A retry told only that its answer was wrong
+                # has nothing to change.
+                parent = p.section.split(".")[0] if "." in p.section else ""
+                hint = (f" — write {parent!r} and put {p.section.split('.', 1)[1]!r} "
+                        f"inside its body" if parent in WRITABLE_SECTIONS else
+                        f" — the writable sections are: "
+                        f"{', '.join(sorted(WRITABLE_SECTIONS))}")
+                raise ContractViolation(
+                    f"{p.section!r} is not a writable Blueprint section{hint}")
             if not p.natural_key:
                 raise ContractViolation(
                     "every proposal needs a natural_key, or re-running the agent "
