@@ -11,6 +11,8 @@
 // through the namespace either way.
 import * as standIn from "../workflows/dry-run-stand-in.ts";
 const STEP_OUTPUT: unknown = (standIn as any).STEP_OUTPUT ?? (standIn as any).default?.STEP_OUTPUT;
+const setVariableNames: (d: unknown) => string[] =
+  (standIn as any).setVariableNames ?? (standIn as any).default?.setVariableNames;
 
 function walk(root: unknown, path: string): unknown {
   const parts = path.split(".").flatMap((p) => {
@@ -34,6 +36,14 @@ for (const path of ["load_rental.id", "load_rental.rows[0].listingId",
   check(`${path} reads as "dry-run"`, String(v) === "dry-run");
 }
 check("it interpolates as text", `${walk(variables, "load_rental.rows[0].listingId")}` === "dry-run");
+
+// A set_variable step's name is supplied by the run, like a step's output.
+const def = { definition: { nodes: [
+  { id: "set_clinic", data: { config: { actionType: "set_variable", variableName: "resolvedClinicId", value: "{{clinic.id}}" } } },
+  { id: "insert_appointment", data: { config: { actionType: "db_insert", table: "appointments" } } },
+] } };
+check("set_variable names are read off the definition",
+      JSON.stringify(setVariableNames(def)) === JSON.stringify(["resolvedClinicId"]));
 
 if (failed) { console.log(`${failed} failed`); process.exit(1); }
 console.log("all passed");

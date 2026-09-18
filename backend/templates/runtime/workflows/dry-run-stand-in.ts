@@ -24,3 +24,18 @@ export const STEP_OUTPUT: unknown = new Proxy(
         : STEP_OUTPUT,
   },
 );
+
+/**
+ * Names a workflow's `set_variable` steps write. The engine stores the value
+ * under `variableName`, not the node id, so the dry run seeds these beside the
+ * node ids — otherwise `{{resolvedClinicId}}` set by one step and read by the
+ * next is "empty" and a correct workflow is refused at assemble.
+ */
+export function setVariableNames(def: unknown): string[] {
+  const d = def as any;
+  const nodes: any[] = (d?.definition?.nodes ?? d?.nodes ?? []) as any[];
+  return nodes
+    .map((n) => n?.data?.config ?? n?.config ?? {})
+    .filter((c) => c?.actionType === "set_variable" && typeof c.variableName === "string" && c.variableName)
+    .map((c) => String(c.variableName));
+}

@@ -23,7 +23,7 @@ import {
   _buildWhere, _resolveTable, _resolveValueMap, listWorkflows,
 } from "./index";
 import type { WorkflowDefinition, WorkflowExecutionContext } from "./types";
-import { STEP_OUTPUT } from "./dry-run-stand-in";
+import { STEP_OUTPUT, setVariableNames } from "./dry-run-stand-in";
 
 export interface DryRunProblem {
   node: string;
@@ -62,6 +62,9 @@ export function dryRunWorkflow(
   const problems: DryRunProblem[] = [];
   const variables: Record<string, unknown> = { ...input, user: { ...(user as any) } };
   for (const id of _allNodeIds(def)) if (!(id in variables)) variables[id] = _STEP_OUTPUT;
+  // A set_variable step stores its value under `variableName`, not its node id —
+  // supplied by the run, like any step output (see _supplied_by_workflow).
+  for (const name of setVariableNames(def)) if (!(name in variables)) variables[name] = _STEP_OUTPUT;
   const ctx = { input, variables, log: [], user } as unknown as WorkflowExecutionContext;
   const steps = _actionNodes(def);
   for (const { id, config } of steps) {

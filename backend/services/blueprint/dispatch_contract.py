@@ -146,7 +146,23 @@ def step_refs(wf: Mapping[str, Any]) -> Iterator[tuple[str, str, str]]:
 def _supplied_by_workflow(wf: Mapping[str, Any]) -> set[str]:
     inputs = {str(i.get("name")) for i in (wf.get("inputs") or []) if isinstance(i, dict) and i.get("name")}
     keys = {str(s.get("key")) for s in (wf.get("steps") or []) if isinstance(s, dict) and s.get("key")}
-    return inputs | keys | set(RUNTIME_HEADS)
+    return inputs | keys | set_variables(wf) | set(RUNTIME_HEADS)
+
+
+def set_variables(wf: Mapping[str, Any]) -> set[str]:
+    """Names a `set_variable` step writes — the engine stores its value under
+    `variableName` (engine.ts), and the step author is told it may read it.
+
+    Left out, the reference check refused the very answer its own refusal
+    recommends: told "set it from a step", a dental app's Book Appointment
+    author set `resolvedClinicId` with two set_variable steps and was refused
+    again for reading it (UAT, 2026-09-18), and shipped with no steps."""
+    names: set[str] = set()
+    for s in wf.get("steps") or []:
+        cfg = (s or {}).get("config") or {} if isinstance(s, dict) else {}
+        if cfg.get("actionType") == "set_variable" and cfg.get("variableName"):
+            names.add(str(cfg["variableName"]))
+    return names
 
 
 def workflow_ref_findings(doc: Mapping[str, Any]) -> list[dict]:
