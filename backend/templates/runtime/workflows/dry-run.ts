@@ -23,6 +23,7 @@ import {
   _buildWhere, _resolveTable, _resolveValueMap, listWorkflows,
 } from "./index";
 import type { WorkflowDefinition, WorkflowExecutionContext } from "./types";
+import { STEP_OUTPUT } from "./dry-run-stand-in";
 
 export interface DryRunProblem {
   node: string;
@@ -37,10 +38,8 @@ export interface DryRunResult {
   problems: DryRunProblem[];
 }
 
-const _STEP_OUTPUT: unknown = new Proxy(
-  {},
-  { get: (_t, prop) => (prop === "toString" || prop === Symbol.toPrimitive ? () => "dry-run" : "dry-run") },
-);
+// Any depth answers — see dry-run-stand-in.ts for why one level was not enough.
+const _STEP_OUTPUT: unknown = STEP_OUTPUT;
 
 function _actionNodes(def: WorkflowDefinition): Array<{ id: string; config: any }> {
   const nodes: any[] = ((def as any).definition?.nodes ?? (def as any).nodes ?? []) as any[];
