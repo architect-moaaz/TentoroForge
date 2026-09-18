@@ -1098,6 +1098,24 @@ def _session_filled_records(doc: dict, page: dict) -> set[str]:
     return out
 
 
+_TEMPLATE_NAME = re.compile(r"\{\{\s*([A-Za-z_][\w]*)\s*\}\}")
+
+
+def _inputs_a_step_writes(wf: dict) -> set[str]:
+    """Input names a db_insert/db_update step templates into its `values` —
+    exactly the set the engine's dry run resolves against the payload."""
+    names: set[str] = set()
+    for st in wf.get("steps") or []:
+        cfg = (st or {}).get("config") or {}
+        if cfg.get("actionType") not in ("db_insert", "db_update"):
+            continue
+        values = cfg.get("values") if isinstance(cfg.get("values"), dict) else {}
+        for ref in values.values():
+            if isinstance(ref, str):
+                names.update(_TEMPLATE_NAME.findall(ref))
+    return names
+
+
 def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
                        workflow_id: str) -> list[str]:
     """What the control cannot supply for the workflow it runs."""
@@ -1111,8 +1129,18 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
     session_records = _session_filled_records(doc, page)
     out: list[str] = []
     fields = None
+    written = _inputs_a_step_writes(wf)
     for inp in wf.get("inputs") or []:
-        if not inp.get("required", True):
+        # OPTIONAL IS NOT THE SAME AS UNUSED. This skipped every optional
+        # input, while the engine's dry run (templates/runtime/workflows/
+        # dry-run.ts) refuses any `{{name}}` a step writes that the payload
+        # leaves empty — optional or not. So a form passed composition and
+        # failed `assemble` for the same field: Neighbourhood Kit's "Add
+        # Listing" never collected latitude/longitude, and "Submit Decision"
+        # never collected agreedStartDate/agreedEndDate (UAT, 2026-09-18),
+        # found only after the pages were paid for. An optional input a step
+        # writes must be collectable; one nothing writes may still be left out.
+        if not inp.get("required", True) and str(inp.get("name") or "") not in written:
             continue
         name = str(inp.get("name") or "")
         if name in args:
