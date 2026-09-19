@@ -13,6 +13,7 @@ import { toast } from "sonner";
 
 import { editorApi, failureOf, type JitBundle } from "./api";
 import { breakpointForWidth } from "./lib/classes";
+import { dropPosition, type DropWhere } from "./lib/drop";
 import { mainRoot, plainName, topmost } from "./lib/plain";
 import type { Breakpoint, Device, Finding, HistoryEntry, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, Rect } from "./types";
 
@@ -120,6 +121,8 @@ export interface EditorState {
   showHistory: boolean;
   showReadiness: boolean;
   editingTextId: string | null;
+  /** The palette item being dragged — the canvas frame cannot read the drag's own data. */
+  dragComponent: string | null;
 
   smith: SmithState;
 
@@ -147,6 +150,9 @@ export interface EditorState {
   duplicateSelected: () => Promise<boolean>;
   insertJsx: (jsx: string, imports: Op[], opts?: { parentId?: string; index?: number | null; afterId?: string; label?: string }) => Promise<boolean>;
   moveNode: (id: string, parentId: string, index: number | null) => Promise<boolean>;
+  setDragComponent: (id: string | null) => void;
+  /** Add a palette item where it was dropped: on a layer or on the page. `targetId` null is the end of the page. */
+  dropComponent: (compId: string, targetId: string | null, where: DropWhere | { y: number }) => Promise<boolean>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   restore: (revision: string) => Promise<void>;
@@ -273,6 +279,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showHistory: false,
   showReadiness: false,
   editingTextId: null,
+  dragComponent: null,
 
   smith: emptySmith(),
 
@@ -463,6 +470,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       locate = (m) => [m.nodes[parentId]?.children[at]].filter(Boolean) as string[];
     }
     return get().applyOps([...imports, op], opts.label ?? "Add", { reselect: locate });
+  },
+
+  setDragComponent: (dragComponent) => set({ dragComponent }),
+
+  dropComponent: async (compId, targetId, whereOrY) => {
+    const { doc } = get();
+    const model = doc?.model;
+    const def = doc?.registry.components.find((c) => c.id === compId);
+    if (!model || !def || def.status !== "ready") return false;
+    const target = targetId ? model.nodes[targetId] : null;
+    const where: DropWhere = !target ? "inside" : typeof whereOrY === "string" ? whereOrY : dropPosition(target, whereOrY.y);
+    const parentId = !target ? mainRoot(model)! : where === "inside" ? target.id : target.parent!;
+    const index = !target || where === "inside" ? null : target.index + (where === "after" ? 1 : 0);
+    if (def.guide) {
+      // A guided kind asks its questions first; it goes where it was dropped.
+      get().select([parentId]);
+      get().setLeftTab("add");
+      toast.info(`${def.label}: click it in Add to choose what it shows — it will go inside the selected ${plainName(model.nodes[parentId], doc?.registry).toLowerCase()}.`);
+      return false;
+    }
+    return get().insertJsx(def.jsx, def.imports.map((i) => ({ op: "addImport", source: i.source, names: i.names }) as Op),
+                           { parentId, index, label: `Add ${def.label.toLowerCase()}` });
   },
 
   moveNode: async (id, parentId, index) => {

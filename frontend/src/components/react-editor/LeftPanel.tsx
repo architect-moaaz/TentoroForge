@@ -1,7 +1,7 @@
 "use client";
 /**
  * The left panel: Pages, Add (the palette, COMP-001), and Layers (EDIT-003).
- * Adding is click-to-insert or drag onto a layer; guided kinds — a form, a
+ * Adding is click-to-insert, or drag onto the page or a layer; guided kinds — a form, a
  * table, a workflow button — ask one thing at a time (UX-003) and insert
  * something that compiles against the app.
  */
@@ -17,13 +17,12 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import { ChartDialog } from "./ChartDialog";
+import { VOID, dropPosition } from "./lib/drop";
 import { isDescendant, mainRoot, plainName, plainType } from "./lib/plain";
 import { checkModel, findingsByNode } from "./lib/readiness";
 import { entityColumns, formImports, formJsx, tableImports, tableJsx, workflowButtonImports, workflowButtonJsx } from "./lib/templates";
 import { useEditorStore, type LeftTab } from "./store";
 import type { ComponentDef, ModelNode, Op, PageModel } from "./types";
-
-const VOID = new Set(["input", "img", "br", "hr", "textarea", "select", "Input", "Textarea", "Separator", "Skeleton", "Checkbox"]);
 
 /** Where an added thing goes, from what is selected: inside a container, after anything else. */
 export function insertionTarget(model: PageModel, selection: string[], def: ComponentDef | null):
@@ -122,6 +121,7 @@ function AddTab() {
   const doc = useEditorStore((s) => s.doc);
   const selection = useEditorStore((s) => s.selection);
   const insertJsx = useEditorStore((s) => s.insertJsx);
+  const setDragComponent = useEditorStore((s) => s.setDragComponent);
   const busy = useEditorStore((s) => s.busy);
   const [q, setQ] = useState("");
   const [guide, setGuide] = useState<ComponentDef | null>(null);
@@ -151,7 +151,7 @@ function AddTab() {
         <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
         <Input className="h-8 pl-7 text-xs" placeholder="What do you want to add?" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search things to add" />
       </div>
-      <p className="mb-2 px-1 text-[11px] text-muted-foreground">Click to add {target.why}. Or drag onto the Layers list to choose exactly where.</p>
+      <p className="mb-2 px-1 text-[11px] text-muted-foreground">Click to add {target.why}. Or drag it onto the page, or onto the Layers list, to choose exactly where.</p>
       {cats.map((cat) => {
         const items = registry.components.filter((c) => c.category === cat && matches(c));
         if (!items.length) return null;
@@ -162,7 +162,9 @@ function AddTab() {
               {items.map((c) => (
                 <button key={c.id} type="button" disabled={busy || c.status !== "ready"} onClick={() => void add(c)}
                   draggable={c.status === "ready"}
-                  onDragStart={(e) => { e.dataTransfer.setData("application/x-forge-component", c.id); e.dataTransfer.effectAllowed = "copy"; }}
+                  onDragStart={(e) => { e.dataTransfer.setData("application/x-forge-component", c.id); e.dataTransfer.effectAllowed = "copy"; setDragComponent(c.id); }}
+                  // Later, not now: `dragend` can land before the page's drop message does.
+                  onDragEnd={() => setTimeout(() => setDragComponent(null), 400)}
                   title={c.status === "ready" ? c.description : `${c.description}. Not available yet.`}
                   className={cn("flex flex-col items-start rounded-md border border-border bg-background p-2 text-left hover:border-primary/50 hover:bg-muted disabled:opacity-50",
                     c.guide && "border-dashed")}>
@@ -318,7 +320,6 @@ function LayersTab() {
   const removeSelected = useEditorStore((s) => s.removeSelected);
   const duplicateSelected = useEditorStore((s) => s.duplicateSelected);
   const moveNode = useEditorStore((s) => s.moveNode);
-  const insertJsx = useEditorStore((s) => s.insertJsx);
   const setEditingTextId = useEditorStore((s) => s.setEditingTextId);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [q, setQ] = useState("");
@@ -357,10 +358,7 @@ function LayersTab() {
     const parentId = where === "inside" ? target.id : target.parent!;
     const index = where === "inside" ? null : target.index + (where === "after" ? 1 : 0);
     if (compId) {
-      const def = doc?.registry.components.find((c) => c.id === compId);
-      if (!def) return;
-      if (def.guide) { select([where === "inside" ? target.id : target.parent!]); useEditorStore.getState().setLeftTab("add"); return; }
-      await insertJsx(def.jsx, def.imports.map((i) => ({ op: "addImport", source: i.source, names: i.names }) as Op), { parentId, index, label: `Add ${def.label.toLowerCase()}` });
+      await useEditorStore.getState().dropComponent(compId, target.id, where);
     } else if (movingId && movingId !== target.id && !isDescendant(model, target.id, movingId)) {
       await moveNode(movingId, parentId, index);
     }
@@ -371,7 +369,6 @@ function LayersTab() {
     if (!n || !matches(n)) return null;
     const isSel = selection.includes(id);
     const open = !collapsed[id];
-    const canHold = !n.selfClosing && !VOID.has(n.type);
     const badges = nodeBadges(n, model);
     return (
       <div>
@@ -382,7 +379,7 @@ function LayersTab() {
             e.preventDefault();
             const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
             const y = (e.clientY - r.top) / r.height;
-            setDrop({ id, where: canHold && y > 0.3 && y < 0.7 ? "inside" : y < 0.5 ? "before" : "after" });
+            setDrop({ id, where: dropPosition(n, y) });
           }}
           onDragLeave={() => setDrop((d) => (d?.id === id ? null : d))}
           onDrop={(e) => void onDrop(e, n, drop?.id === id ? drop.where : "after")}

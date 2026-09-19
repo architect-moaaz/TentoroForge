@@ -23,7 +23,8 @@ import type { usePreview } from "@/hooks/usePreview";
 import { cn } from "@/lib/utils";
 
 import { InlineTextEditor } from "./InlineTextEditor";
-import { plainName } from "./lib/plain";
+import { dropPosition } from "./lib/drop";
+import { mainRoot, plainName } from "./lib/plain";
 import { DEVICE_WIDTHS, useEditorStore } from "./store";
 import type { Rect } from "./types";
 
@@ -171,6 +172,10 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
     }
   }, [setFrame]);
 
+  // A drag that ends anywhere takes its landing hint with it.
+  const dragComponent = useEditorStore((s) => s.dragComponent);
+  useEffect(() => { if (!dragComponent) post("drop-hint", {}); }, [dragComponent, post]);
+
   // Messages from the frame: the bridge, and (instant) the page's own shims.
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -191,7 +196,29 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
           if (!p.fid) { if (!p.shift) s.clearSelection(); break; }
           s.select([String(p.fid)], { extend: !!p.shift || !!p.meta, toggle: !!p.meta });
           if (!s.smith.open && !s.smith.pinned) s.setSmith({ open: true });
+          // Selecting is how something is configured: its settings come with it.
+          // A closed panel whose toggle had scrolled out of the top bar left
+          // a selected component with nothing to set.
+          if (!s.rightOpen) s.setRightOpen(true);
           break;
+        case "drag-over": {
+          // A palette item over the page: say where it would land.
+          const model = s.doc?.model;
+          if (s.mode !== "design" || !s.dragComponent || !model) { post("drop-hint", {}); break; }
+          const node = p.fid ? model.nodes[String(p.fid)] : null;
+          if (!node) { post("drop-hint", { fid: mainRoot(model), where: "inside" }); break; }
+          post("drop-hint", { fid: node.id, where: dropPosition(node, Number(p.y ?? 1)) });
+          break;
+        }
+        case "drop": {
+          const comp = String(p.component || s.dragComponent || "");
+          s.setDragComponent(null);
+          post("drop-hint", {});
+          if (s.mode !== "design" || !comp) break;
+          const known = p.fid && s.doc?.model?.nodes[String(p.fid)] ? String(p.fid) : null;
+          void s.dropComponent(comp, known, { y: Number(p.y ?? 1) });
+          break;
+        }
         case "region":
           if (Array.isArray(p.fids) && p.fids.length) { s.select(p.fids.map(String)); s.setSmith({ open: true }); }
           s.setRegionSelect(false);

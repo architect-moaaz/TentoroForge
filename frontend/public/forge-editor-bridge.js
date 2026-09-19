@@ -5,8 +5,9 @@
  * What it does: turns clicks into selections of the element's source node
  * (`data-fid`, which the editor stamps on the running copy of each page),
  * draws hover/selection outlines, supports a region drag that resolves to
- * node ids, reports where the app navigates to, and steps out of the way
- * entirely in Preview mode.
+ * node ids, takes a palette item dropped onto the page (the editor decides
+ * where it lands and inserts it), reports where the app navigates to, and
+ * steps out of the way entirely in Preview mode.
  *
  * Protocol: messages are `{type: "forge-editor:<name>", payload}`, posted to
  * the parent at the page's own origin.
@@ -31,6 +32,12 @@
   layer.appendChild(hoverBox);
   var regionBox = box("rgba(37,99,235,0.10)", "1px solid rgba(37,99,235,0.9)");
   layer.appendChild(regionBox);
+  // Where a dragged palette item would land: a box for "inside", a bar for
+  // "before"/"after" — the editor decides which and says so (drop-hint).
+  var dropBox = box("rgba(37,99,235,0.12)", "2px solid #2563eb");
+  layer.appendChild(dropBox);
+  var dropBar = box("#2563eb", "0");
+  layer.appendChild(dropBar);
   var selectBoxes = [];
   document.documentElement.appendChild(layer);
 
@@ -182,6 +189,42 @@
                      rect: { top: r.top, left: r.left, width: r.right - r.left, height: r.bottom - r.top } });
   }, true);
 
+  // --- dropping a palette item onto the page ---------------------------------
+  // The drag starts in the editor; the frame only says what is under the
+  // pointer and how far down it (0 top .. 1 bottom), and where it was let go.
+  var dragAt = null;
+  function hideDrop() { dropBox.style.display = "none"; dropBar.style.display = "none"; }
+  function dropTarget(e) {
+    var el = fidEl(e.target) || document.querySelector("[data-fid]");
+    if (!el) return { fid: null, y: 1 };
+    var r = el.getBoundingClientRect();
+    return { fid: el.getAttribute("data-fid"), y: r.height ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 1 };
+  }
+  document.addEventListener("dragover", function (e) {
+    if (mode !== "design") return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    var t = dropTarget(e);
+    var band = t.y < 0.3 ? 0 : t.y > 0.7 ? 2 : 1;
+    if (!dragAt || dragAt.fid !== t.fid || dragAt.band !== band) {
+      dragAt = { fid: t.fid, band: band };
+      send("drag-over", t);
+    }
+  }, true);
+  document.addEventListener("dragleave", function (e) {
+    if (!e.relatedTarget) { dragAt = null; hideDrop(); }
+  }, true);
+  document.addEventListener("drop", function (e) {
+    if (mode !== "design") return;
+    swallow(e);
+    var t = dropTarget(e);
+    var comp = "";
+    try { comp = (e.dataTransfer && e.dataTransfer.getData("application/x-forge-component")) || ""; } catch (err) { /* not readable here */ }
+    dragAt = null;
+    hideDrop();
+    send("drop", { fid: t.fid, y: t.y, component: comp });
+  }, true);
+
   // --- where the app is ----------------------------------------------------
   function reportLocation() { send("navigate", { path: window.location.pathname + window.location.search }); }
   ["pushState", "replaceState"].forEach(function (name) {
@@ -217,6 +260,15 @@
       case "scroll-to": {
         var t = byFid(p.fid);
         if (t) t.scrollIntoView({ behavior: "smooth", block: "center" });
+        break;
+      }
+      case "drop-hint": {
+        hideDrop();
+        var d = byFid(p.fid);
+        if (!d || !p.where) break;
+        var dr = rectOf(d);
+        if (p.where === "inside") place(dropBox, dr);
+        else place(dropBar, { top: (p.where === "before" ? dr.top : dr.top + dr.height) - 1.5, left: dr.left, width: dr.width, height: 3 });
         break;
       }
       case "get-rects": reportRects(); break;

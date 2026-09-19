@@ -71,7 +71,10 @@ export function TopBar({ preview }: { preview: ReturnType<typeof usePreview> }) 
   const bp = BREAKPOINTS.slice().reverse().find((b) => width >= b.minWidth);
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-1 overflow-hidden border-b border-border bg-card px-2">
+    // Scrolls sideways rather than clipping: a narrow window cut the settings
+    // toggle off with nothing to show it was there. That toggle is pinned to
+    // the right edge so it is always in reach.
+    <div className="flex h-11 shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden border-b border-border bg-card px-2 [scrollbar-width:thin]">
       <Seg active={leftOpen} onClick={() => setLeftOpen(!leftOpen)} title="Show or hide the left panel (⌘/)"><PanelLeft className="h-3.5 w-3.5" /></Seg>
       <div className="mx-1 min-w-0 max-w-[14rem]">
         <div className="truncate text-sm font-semibold leading-tight">{doc?.page.name ?? "Editor"}</div>
@@ -139,7 +142,9 @@ export function TopBar({ preview }: { preview: ReturnType<typeof usePreview> }) 
           {preview.isStarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />} Start the app
         </Button>
       )}
-      <Seg active={rightOpen} onClick={() => setRightOpen(!rightOpen)} title="Show or hide settings (⌘.)"><PanelRight className="h-3.5 w-3.5" /></Seg>
+      <div className="sticky right-0 ml-auto shrink-0 bg-card pl-1">
+        <Seg active={rightOpen} onClick={() => setRightOpen(!rightOpen)} title="Show or hide settings (⌘.)"><PanelRight className="h-3.5 w-3.5" /></Seg>
+      </div>
     </div>
   );
 }
