@@ -1174,7 +1174,12 @@ class SmithSession:
         # old behaviour with a receipt.
         from services.smith import plan as _plan
         steps = [str(a).strip() for a in (understanding.get("asks") or []) if str(a).strip()]
-        if len(steps) > 1 and not _plan.wants_next(user_message):
+        from services.smith import confirm as _confirm_mod
+        # A "YES" CONFIRMS WHAT IT WAS ASKED ABOUT; it is not a new ask to plan.
+        # Joined to the step it answers and read again, it split into a plan,
+        # and the plan's step asked for the yes again — a loop (UAT replay).
+        if len(steps) > 1 and not _plan.wants_next(user_message) \
+                and not _confirm_mod.is_yes(user_message):
             from services.smith import confirm as _confirm
             if not _confirm.granted(self.output_dir, self._last_message, "plan", " | ".join(steps)):
                 _confirm.remember(self.output_dir, _confirm.fingerprint("plan", " | ".join(steps)))
@@ -1186,9 +1191,16 @@ class SmithSession:
                 if getattr(self, "_in_plan_step", False):
                     rest = [r for r in _plan.peek(self.output_dir) if r not in planned]
                     _plan.remember_all(self.output_dir, planned + over + rest)
-                    over = over + rest
-                else:
-                    _plan.remember(self.output_dir, planned)
+                    after = over + rest
+                    question = _plan.as_question(planned, [])
+                    if after:
+                        question = question.replace(
+                            "\n\nShall I work through them?",
+                            "\n\nAfter those, the rest of the plan is still waiting:\n"
+                            + "\n".join(f"- {a}" for a in after) + "\n\nShall I work through them?")
+                    return TurnResult(status="asked", answer=question,
+                                      options=[_plan.ALL_LABEL, _plan.FIRST_LABEL, _plan.REWORD_LABEL])
+                _plan.remember(self.output_dir, planned)
                 return TurnResult(status="asked",
                                   answer=_plan.as_question(planned, over),
                                   options=[_plan.ALL_LABEL, _plan.FIRST_LABEL,

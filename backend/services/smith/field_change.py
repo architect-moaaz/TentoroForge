@@ -46,6 +46,10 @@ def find_field(doc: dict, entity_ref: str, field_ref: str) -> tuple[dict, dict]:
         raise SectionChangeError(f"I cannot tell which entity {entity_ref!r} means. The entities are: {names(_entities(doc))}.")
     want = (field_ref or "").strip().lower()
     fields = [f for f in (ent.get("fields") or []) if isinstance(f, dict)]
+    if not want:
+        # Asked, not refused: "Tool has no field ''" read as a broken app.
+        raise SectionChangeError(f"Which field of {ent.get('name')} do you mean? Its fields are: "
+                                 f"{', '.join(str(f.get('name')) for f in fields) or '(none)'}.")
     fld = next((f for f in fields if str(f.get("name") or "").lower() == want), None)
     if fld is None:
         hits = [f for f in fields if want and want in str(f.get("name") or "").lower()]
