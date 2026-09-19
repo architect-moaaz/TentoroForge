@@ -2226,14 +2226,30 @@ fi
 #    it is waiting on is whether to destroy the data. Reading EOF makes it give
 #    up in a second instead, and the line below reports a real failure. A
 #    deployment that stops with a reason beats one that stops with a clock.
+#    EXTENSIONS FIRST: an embedding field is a `vector` column, and push
+#    cannot create one until pgvector is switched on in THIS database. The
+#    image carried it and nothing enabled it, so 0l133sp2's push failed on
+#    `type "vector" does not exist` and no table was created.
+#    AND A PUSH THAT ERRORS HAS FAILED, whatever its exit code: drizzle-kit
+#    printed the PostgresError, exited 0, and this said "Migrations applied"
+#    over a database with no tables — the seed then failed on every one and
+#    nobody could sign in, because `users` did not exist either.
 if [ -f drizzle.config.ts ]; then
+  if [ -f src/db/extensions.ts ]; then
+    npx tsx src/db/extensions.ts < /dev/null || say "${YELLOW}⚠️  Could not enable database extensions — see above${NC}"
+  fi
   say "${YELLOW}🔄 Running database migrations...${NC}"
-  if npx drizzle-kit push --force < /dev/null; then
+  PUSH_LOG="$(mktemp)"
+  npx drizzle-kit push --force < /dev/null 2>&1 | tee "$PUSH_LOG"
+  PUSH_STATUS=${PIPESTATUS[0]}
+  if [ "$PUSH_STATUS" -eq 0 ] && ! grep -qE "PostgresError|DrizzleError|^Error:|error: " "$PUSH_LOG"; then
     say "${GREEN}✅ Migrations applied${NC}"
   else
-    say "${RED}❌ Migration failed — the app needs its tables. Check DATABASE_URL + drizzle.config.ts schema path.${NC}"
+    say "${RED}❌ Migration failed — the app needs its tables (see the error above).${NC}"
+    rm -f "$PUSH_LOG"
     exit 1
   fi
+  rm -f "$PUSH_LOG"
 fi
 
 # 4. Seed (non-fatal; errors surfaced).

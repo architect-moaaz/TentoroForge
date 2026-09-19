@@ -78,6 +78,7 @@ function shimPlugin(shims, appRoot) {
       b.onResolve({ filter: /^next\/link$/ }, () => ({ path: join(shims, "link.tsx") }));
       b.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: join(shims, "navigation.tsx") }));
       b.onResolve({ filter: /^next\/image$/ }, () => ({ path: join(shims, "image.tsx") }));
+      b.onResolve({ filter: /^next-auth\/react$/ }, () => ({ path: join(shims, "next-auth.tsx") }));
       b.onResolve({ filter: /^next\/(headers|cache|server)$/ }, () => ({ path: join(shims, "empty.ts") }));
       b.onResolve({ filter: /^server-only$/ }, () => ({ path: join(shims, "empty.ts") }));
       b.onResolve({ filter: /^@\/sdk\/server$/ }, () => ({ path: join(shims, "sample-server.ts") }));
@@ -105,7 +106,7 @@ const BASE_BUILD = {
 };
 
 function isBare(spec) {
-  return !/^(\.|\/|@\/|next\/|server-only$)/.test(spec) && !spec.startsWith("forge-");
+  return !/^(\.|\/|@\/|next\/|next-auth\/react$|server-only$)/.test(spec) && !spec.startsWith("forge-");
 }
 
 function isVendorPath(p) {

@@ -41,9 +41,15 @@ def _type(field: dict) -> str:
 
 
 def is_embedding_field(field: Any) -> bool:
-    """A field the platform fills and no person reads or writes."""
-    return isinstance(field, dict) and (
-        isinstance(field.get("embedding"), dict) or _type(field) == "vector")
+    """A field the platform fills and no person reads or writes: a `vector`
+    field, or an untyped one that says what it embeds. A field typed as
+    something a person reads stays that type whatever else it carries —
+    0l133sp2's `kycStatus: {type: "string", embedding: {of: "none"}}` became a
+    vector(512) column, and a status nobody could write."""
+    if not isinstance(field, dict):
+        return False
+    kind = _type(field)
+    return kind in ("vector", "embedding") or (isinstance(field.get("embedding"), dict) and not kind)
 
 
 def is_image_field(field: Any) -> bool:
