@@ -217,6 +217,18 @@ COMPONENTS: list[dict[str, Any]] = [
        search=["nothing", "placeholder", "no results", "blank"], types=[],
        jsx='<div className="rounded-lg border border-dashed border-border p-8 text-center">\n  <p className="text-sm font-medium text-foreground">Nothing here yet</p>\n  <p className="mt-1 text-sm text-muted-foreground">When there is, it will show up here.</p>\n</div>',
        container=True),
+    # ---- Charts -----------------------------------------------------------
+    _c("chart", "Chart", "Charts", "A bar, line, pie or other chart of the app's records",
+       search=["graph", "bar", "line", "pie", "donut", "analytics", "report", "echarts", "trend"], types=["WidgetView"],
+       jsx="", imports=[{"source": "@/sdk/client", "names": ["WidgetView"]}, {"source": "@/sdk", "names": ["widgets"]}],
+       guide="chart",
+       settings=[_s("height", "Height", "select", {"kind": "prop", "name": "height", "expr": True},
+                    options=[{"value": "200", "label": "Short"}, {"value": "260", "label": "Normal"},
+                             {"value": "360", "label": "Tall"}, {"value": "480", "label": "Very tall"}], default="260")]),
+    _c("metric", "Number tile", "Charts", "One number — a count, a total or an average",
+       search=["kpi", "stat", "count", "total", "average", "tile", "metric"], types=[],
+       jsx="", imports=[{"source": "@/sdk/client", "names": ["WidgetView"]}, {"source": "@/sdk", "names": ["widgets"]}],
+       guide="metric"),
     # ---- Navigation -------------------------------------------------------
     _c("tabs", "Tabs", "Navigation", "Several views in one place, one shown at a time",
        search=["switch", "sections", "views"], types=["Tabs"],

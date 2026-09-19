@@ -22,7 +22,7 @@ from database import get_db
 from models.auth import PlatformUser
 from services.project_paths import project_root
 from services.project_service import get_project_with_auth
-from services.react_editor import jit, service, smith
+from services.react_editor import jit, service, smith, widgets
 from services.react_editor.service import EditorError, Project
 
 router = APIRouter(tags=["react-editor"])
@@ -71,6 +71,11 @@ class SmithRequest(BaseModel):
     breakpoint: str = "desktop"
     proposalId: str | None = None
     prior: dict[str, Any] | None = None
+
+
+class WidgetRequest(BaseModel):
+    spec: dict[str, Any]
+    pageRevision: str | None = None
 
 
 class SmithApplyRequest(BaseModel):
@@ -124,6 +129,28 @@ async def render_page(project_id: uuid.UUID, page_id: str, params: str | None = 
             out = {}
         return {str(k): str(v) for k, v in out.items()} if isinstance(out, dict) else {}
     return await _run(jit.build, project, page_id, params=_dict(params), search=_dict(search), fresh=fresh)
+
+
+@router.post("/api/projects/{project_id}/react-editor/pages/{page_id}/widgets")
+async def create_widget(project_id: uuid.UUID, page_id: str, req: WidgetRequest,
+                        user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """A chart or number tile on the page, written through the Blueprint and checked."""
+    project = await _project(project_id, user, db)
+    return await _run(widgets.create, project, page_id, req.spec)
+
+
+@router.patch("/api/projects/{project_id}/react-editor/widgets/{widget_id}")
+async def update_widget(project_id: uuid.UUID, widget_id: str, req: WidgetRequest,
+                        user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    return await _run(widgets.update, project, widget_id, req.spec, page_revision=req.pageRevision)
+
+
+@router.delete("/api/projects/{project_id}/react-editor/widgets/{widget_id}")
+async def remove_widget(project_id: uuid.UUID, widget_id: str,
+                        user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    return await _run(widgets.remove, project, widget_id)
 
 
 @router.get("/api/projects/{project_id}/react-editor/pages/{page_id}/history")

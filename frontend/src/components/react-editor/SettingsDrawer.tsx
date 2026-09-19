@@ -18,7 +18,8 @@ import { cn } from "@/lib/utils";
 import { BREAKPOINTS, CLASS_GROUPS, GROUP_BY_KEY, effectiveValue, getVisibility, setGroupValue, setVisibility, type Visibility } from "./lib/classes";
 import { breadcrumb, componentFor, plainName, plainType } from "./lib/plain";
 import { checkModel } from "./lib/readiness";
-import { buttonAction, buttonActionOps, pageHref } from "./lib/templates";
+import { buttonAction, buttonActionOps, pageHref, widgetOfNode } from "./lib/templates";
+import { ChartSettings } from "./ChartSettings";
 import { useEditorStore } from "./store";
 import type { Breakpoint, ModelNode, Op, PageDoc, PropValue, SettingSpec } from "./types";
 
@@ -132,6 +133,11 @@ export function SettingsDrawer({ onClose }: { onClose: () => void }) {
       )}
 
       <div className="min-h-0 flex-1 overflow-auto">
+        {!multi && node.type === "WidgetView" && (
+          <Section title={widgetOfNode(node, doc.widgets)?.kind === "metric" ? "Number tile" : "Chart"}>
+            <div className="-mx-3"><ChartSettings node={node} doc={doc} /></div>
+          </Section>
+        )}
         <SimpleSettings nodes={nodes} doc={doc} def={def} />
         {viewLevel === "advanced" ? (
           <>

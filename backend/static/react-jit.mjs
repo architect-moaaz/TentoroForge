@@ -368,6 +368,74 @@ export async function total(entity: string, fn: string, field: string, where?: a
   if (fn === "max") return Math.max(...vals);
   return vals.length;
 }
+export type QueryRow = Record<string, string | number | null>;
+export interface WidgetData { rows: QueryRow[]; value: number | null }
+export interface DateRange { from?: string; to?: string }
+export type QueryOptions<E, M> = any; export type Measure<E> = any; export type Dimension<E> = any;
+function bucketOf(v: any, bucket: string): string {
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return String(v ?? "");
+  const y = d.getUTCFullYear(), mo = d.getUTCMonth() + 1;
+  if (bucket === "year") return String(y);
+  if (bucket === "quarter") return y + "-Q" + (Math.floor((mo - 1) / 3) + 1);
+  if (bucket === "month") return y + "-" + String(mo).padStart(2, "0");
+  if (bucket === "week") { const t = new Date(Date.UTC(y, mo - 1, d.getUTCDate())); const day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day); const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1)); return t.getUTCFullYear() + "-W" + String(Math.ceil((((t.getTime() - y0.getTime()) / 86400000) + 1) / 7)).padStart(2, "0"); }
+  return d.toISOString().slice(0, 10);
+}
+function aggregate(m: any, rows: any[]): number | null {
+  const vals = rows.map((r) => r[m.field]).filter((v) => v !== null && v !== undefined);
+  const nums = vals.map(Number).filter((n) => !isNaN(n));
+  switch (m.aggregation) {
+    case "count": return rows.length;
+    case "count_distinct": return new Set(vals.map(String)).size;
+    case "sum": return nums.reduce((a, b) => a + b, 0);
+    case "avg": return nums.length ? Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 100) / 100 : null;
+    case "min": return nums.length ? Math.min(...nums) : null;
+    case "max": return nums.length ? Math.max(...nums) : null;
+  }
+  return rows.length;
+}
+function runQuery(entity: string, q: { measures: any[]; dimensions?: any[]; where?: any; sort?: any; limit?: number }): QueryRow[] {
+  const dims = (q.dimensions ?? []).map((d: any) => (typeof d === "string" ? { field: d } : d));
+  const groups = new Map<string, { vals: any[]; rows: any[] }>();
+  for (const r of filter(entity, { where: q.where })) {
+    const vals = dims.map((d: any) => (d.bucket ? bucketOf(r[d.field], d.bucket) : r[d.field] ?? null));
+    const k = JSON.stringify(vals);
+    if (!groups.has(k)) groups.set(k, { vals, rows: [] });
+    groups.get(k)!.rows.push(r);
+  }
+  let out: QueryRow[] = [...groups.values()].map(({ vals, rows }) => {
+    const row: QueryRow = {};
+    dims.forEach((d: any, i: number) => { row[d.field] = vals[i]; });
+    for (const m of q.measures) row[m.key] = aggregate(m, rows);
+    return row;
+  });
+  const bucketed = dims.find((d: any) => d.bucket);
+  const by = q.sort?.by ?? (bucketed ? bucketed.field : q.measures[0]?.key);
+  const order = q.sort?.order ?? (bucketed && !q.sort ? "asc" : "desc");
+  if (by) out.sort((a, b) => ((a[by] ?? "") > (b[by] ?? "") ? 1 : (a[by] ?? "") < (b[by] ?? "") ? -1 : 0) * (order === "desc" ? -1 : 1));
+  if (q.limit) out = out.slice(0, q.limit);
+  return out;
+}
+/** Measures by dimensions over the sample rows — the shape the Data Engine returns. */
+export async function query(entity: string, opts: any): Promise<QueryRow[]> {
+  await wait();
+  const measures = Object.entries(opts.measures ?? {}).map(([key, m]: [string, any]) => ({ key, aggregation: m.fn, field: m.field }));
+  return runQuery(entity, { measures, dimensions: opts.dimensions, where: opts.where, sort: opts.sort, limit: opts.limit });
+}
+/** A widget as the Blueprint declares it, over the sample rows. */
+export async function runWidget(widget: any, opts: any = {}): Promise<WidgetData> {
+  await wait();
+  const src = widget.source;
+  if (src.op === "list") {
+    const rows = await list(src.entity, { where: { ...src.filter, ...(opts.where ?? {}) }, sort: src.sort, order: "desc", limit: src.limit });
+    return { rows, value: null };
+  }
+  const rows = runQuery(src.entity, { measures: src.measures, dimensions: src.dimensions, where: { ...src.filter, ...(opts.where ?? {}) }, sort: src.sort, limit: src.limit });
+  const single = !src.dimensions?.length;
+  const first = src.measures[0]?.key;
+  return { rows, value: single && first ? Number(rows[0]?.[first] ?? 0) : null };
+}
 export async function series(entity: string, opts: any): Promise<SeriesPoint[]> {
   await wait();
   const groups = new Map<string, number[]>();

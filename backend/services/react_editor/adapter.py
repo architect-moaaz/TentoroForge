@@ -74,6 +74,10 @@ def patch(view: str, ops: list[dict[str, Any]], *, app_root: Path | None = None)
     return str(run("patch", {"view": view, "ops": ops}, app_root=app_root)["view"])
 
 
+def patch_load(load: str, ops: list[dict[str, Any]], *, app_root: Path | None = None) -> str:
+    return str(run("patchLoad", {"load": load, "ops": ops}, app_root=app_root)["load"])
+
+
 def annotate(view: str, *, app_root: Path | None = None) -> str:
     return str(run("annotate", {"view": view}, app_root=app_root)["view"])
 

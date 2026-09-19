@@ -43,9 +43,11 @@ def _tooling_hash() -> str:
     return h.hexdigest()[:12]
 
 
-def _cache_key(page_id: str, revision: str, params: dict, search: dict, vendor_key: str) -> str:
+def _cache_key(page_id: str, revision: str, params: dict, search: dict, vendor_key: str, widgets: Any = None) -> str:
     h = hashlib.sha1()
     h.update(revision.encode())
+    # A chart's definition is in the Blueprint, not the page's files.
+    h.update(json.dumps(widgets or [], sort_keys=True, default=str).encode())
     h.update(vendor_key.encode())
     h.update(json.dumps([params, search], sort_keys=True).encode())
     h.update(_tooling_hash().encode())
@@ -131,7 +133,7 @@ def build(project: Project, page_id: str, *, params: dict[str, str] | None = Non
     revision = adapter.revision_of(view, load)
     params, search = dict(params or {}), dict(search or {})
     shared = vendor(project, fresh=fresh)
-    key = _cache_key(page_id, revision, params, search, shared["key"])
+    key = _cache_key(page_id, revision, params, search, shared["key"], _live(doc.get("widgets")))
     cache = project.editor_dir / "jit" / f"{key}.json"
     if cache.exists() and not fresh:
         try:

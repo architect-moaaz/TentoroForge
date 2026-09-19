@@ -37,6 +37,7 @@ export interface PageModel {
   imports: { source: string; names: string[]; typeOnly: boolean }[];
   loadKeys: string[];
   viewProps: string[];
+  viewParam?: { kind: "identifier"; name: string } | { kind: "pattern"; names: string[]; span: [number, number] } | { kind: "none" } | null;
 }
 
 export type SettingTarget =
@@ -69,7 +70,7 @@ export interface ComponentDef {
   container: boolean;
   settings: SettingSpec[];
   events: { name: string; label: string; prop: string }[];
-  guide: "form" | "table" | "workflow-button" | null;
+  guide: "form" | "table" | "workflow-button" | "chart" | "metric" | null;
   status: "ready" | "unsupported";
 }
 
@@ -109,7 +110,47 @@ export interface EntityRef {
   id: string;
   name: string;
   typeName: string;
+  table?: string | null;
   fields: { name: string; type: string; required: boolean; label: string; options: string[] }[];
+}
+
+export type ChartMark = "bar" | "line" | "area" | "pie" | "donut" | "funnel" | "radar" | "scatter" | "heatmap" | "treemap";
+
+export interface WidgetMeasure { key: string; aggregation: "count" | "count_distinct" | "sum" | "avg" | "min" | "max"; field?: string; label?: string }
+export interface WidgetDimension { field: string; bucket?: "day" | "week" | "month" | "quarter" | "year" }
+
+/** A chart or number tile: a Blueprint widget, drawn by `WidgetView` from its `widgets.key` handle. */
+export interface WidgetRef {
+  id: string;
+  key: string | null;
+  page: string;
+  label: string;
+  description: string;
+  kind: "metric" | "chart" | "list" | "table" | "feed" | "gauge" | "text";
+  unit: "number" | "currency" | "percent" | "duration" | "date" | "text";
+  size: "sm" | "md" | "lg" | "full" | null;
+  chart: { mark: ChartMark; stacked?: boolean; horizontal?: boolean } | null;
+  order: number | null;
+  source: { op: "query"; entity: string; measures: WidgetMeasure[]; dimensions: WidgetDimension[]; filter: Record<string, unknown>; timeField?: string; sort?: { by: string; order?: "asc" | "desc" }; limit?: number }
+        | { op: string; entity: string; [k: string]: unknown };
+}
+
+/** What the person chose for a chart — the backend turns it into a widget row. */
+export interface WidgetSpec {
+  label?: string;
+  description?: string;
+  kind?: "chart" | "metric" | "gauge";
+  unit?: WidgetRef["unit"];
+  size?: "sm" | "md" | "lg" | "full";
+  entity?: string;
+  measures?: WidgetMeasure[];
+  dimensions?: WidgetDimension[];
+  mark?: ChartMark;
+  stacked?: boolean;
+  horizontal?: boolean;
+  limit?: number | null;
+  sort?: { by: string; order?: "asc" | "desc" } | null;
+  timeField?: string | null;
 }
 
 export interface HistoryEntry {
@@ -132,6 +173,7 @@ export interface PageDoc {
   pages: PageRef[];
   workflows: WorkflowRef[];
   entities: EntityRef[];
+  widgets?: WidgetRef[];
   theme: Record<string, unknown>;
   history: HistoryEntry[];
   toolchain?: { typecheck: boolean };
@@ -204,7 +246,10 @@ export type Op =
   | { op: "move"; id: string; parentId: string; index: number | null }
   | { op: "duplicate"; id: string }
   | { op: "replaceNode"; id: string; jsx: string }
-  | { op: "addImport"; source: string; names: string[] };
+  | { op: "addImport"; source: string; names: string[]; file?: "load" }
+  | { op: "ensureProp"; name: string }
+  | { op: "addReturnKey"; file: "load"; key: string; expr: string }
+  | { op: "removeReturnKey"; file: "load"; key: string };
 
 export type Device = "desktop" | "tablet" | "mobile" | "custom";
 export type Breakpoint = "" | "sm" | "md" | "lg" | "xl";

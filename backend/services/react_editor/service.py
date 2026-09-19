@@ -167,6 +167,11 @@ def _entity_refs(doc: dict) -> list[dict]:
     return out
 
 
+def _widget_refs(doc: dict) -> list[dict]:
+    from services.react_editor.widgets import refs
+    return refs(doc)
+
+
 def _humanise(name: str) -> str:
     import re
     spaced = re.sub(r"(?<!^)(?=[A-Z])", " ", name.strip())
@@ -282,6 +287,7 @@ def open_page(project: Project, page_id: str, *, annotate: bool = True) -> dict[
             "pages": _page_refs(doc),
             "workflows": _workflow_refs(doc),
             "entities": _entity_refs(doc),
+            "widgets": _widget_refs(doc),
             "theme": _theme(doc),
             "history": history(project, page_id)[-30:],
             "toolchain": {"typecheck": (project.app_root / "node_modules/.bin/tsc").exists()},
@@ -344,17 +350,20 @@ def apply(project: Project, page_id: str, *, base_revision: str, ops: list[dict[
         if source is not None:
             new_view, new_load = str(source.get("view", view)), str(source.get("load", load))
         else:
+            # An op names its file; `load` ops extend what the page reads.
+            view_ops = [o for o in ops if o.get("file") != "load"]
+            load_ops = [{k: v for k, v in o.items() if k != "file"} for o in ops if o.get("file") == "load"]
             try:
-                new_view = adapter.patch(view, ops, app_root=project.app_root)
+                new_view = adapter.patch(view, view_ops, app_root=project.app_root) if view_ops else view
+                new_load = adapter.patch_load(load, load_ops, app_root=project.app_root) if load_ops else load
             except AdapterError as exc:
                 raise EditorError(422, exc.code, str(exc), line=exc.line)
-            new_load = load
         if new_view == view and new_load == load:
             model = adapter.model(view, load, app_root=project.app_root)
             return {"revision": revision, "model": model, "source": {"view": view, "load": load},
                     "checked": False, "unchanged": True, "version": svc.doc.get("version")}
         must_check = check if check is not None else not (
-            source is None and all(op.get("op") in _TYPE_SAFE_OPS for op in ops))
+            source is None and all(op.get("op") in _TYPE_SAFE_OPS and op.get("file") != "load" for op in ops))
         found: list[dict] = []
         if must_check:
             found = _check(svc.doc, project, page_id, new_view, new_load)

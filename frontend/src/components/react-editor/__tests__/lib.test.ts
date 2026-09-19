@@ -217,3 +217,41 @@ describe("preview navigation", () => {
     expect(pageForPath("/nowhere", pages)).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Charts — a widget the page reads in load and draws in view
+// ---------------------------------------------------------------------------
+
+import { dataAccess, measureLabel, widgetOfNode, widgetOps, widgetRemovalOps } from "../lib/templates";
+import type { WidgetRef } from "../types";
+
+describe("charts", () => {
+  const widget: WidgetRef = { id: "WIDGET-001", key: "revenueByStatus", page: "PAGE-001", label: "Revenue by status", description: "", kind: "chart", unit: "currency", size: "md",
+    chart: { mark: "bar" }, order: 1, source: { op: "query", entity: "Order", measures: [{ key: "sum_total", aggregation: "sum", field: "total" }], dimensions: [{ field: "status" }], filter: {} } };
+
+  it("reaches the data through the View's parameter, extending a destructured one", () => {
+    expect(dataAccess({ ...model, viewParam: { kind: "identifier", name: "props" } }, "x")).toEqual({ expr: "props.x", ops: [] });
+    expect(dataAccess({ ...model, viewParam: { kind: "pattern", names: ["rows"], span: [0, 0] } }, "x")).toEqual({ expr: "x", ops: [{ op: "ensureProp", name: "x" }] });
+  });
+
+  it("writes the load key, the imports and the card as one transaction", () => {
+    const ops = widgetOps({ ...model, viewParam: { kind: "pattern", names: [], span: [0, 0] } }, widget, { parentId: "r1", index: 0 });
+    expect(ops.filter((o) => "file" in o && o.file === "load").map((o) => o.op)).toEqual(["addImport", "addImport", "addReturnKey"]);
+    expect(ops.find((o) => o.op === "addReturnKey")).toEqual({ op: "addReturnKey", file: "load", key: "revenueByStatus", expr: "await runWidget(widgets.revenueByStatus)" });
+    expect(ops[ops.length - 1]).toEqual({ op: "insert", parentId: "r1", index: 0, jsx: "<WidgetView widget={widgets.revenueByStatus} data={revenueByStatus} />" });
+    expect(ops.some((o) => o.op === "ensureProp")).toBe(true);
+  });
+
+  it("finds a card's widget by its handle and removes both the card and the key", () => {
+    const card = node("r1.9", "WidgetView", { props: [{ name: "widget", kind: "expr", value: "widgets.revenueByStatus", span: [0, 0], valueSpan: null }] });
+    expect(widgetOfNode(card, [widget])?.id).toBe("WIDGET-001");
+    expect(widgetOfNode(card, [])).toBeNull();
+    expect(widgetRemovalOps(card, widget)).toEqual([{ op: "remove", ids: ["r1.9"] }, { op: "removeReturnKey", file: "load", key: "revenueByStatus" }]);
+  });
+
+  it("names measures in plain words", () => {
+    expect(measureLabel({ aggregation: "count" }, "Order")).toBe("How many order records");
+    expect(measureLabel({ aggregation: "sum", field: "total" }, "Order")).toBe("Total total");
+    expect(measureLabel({ aggregation: "avg", field: "unitPrice" }, "Order")).toBe("Average unit price");
+  });
+});

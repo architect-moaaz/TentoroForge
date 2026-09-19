@@ -12,6 +12,7 @@
  *
  *   model     {view, load?}            → {ok, roots, nodes, imports, loadKeys, viewProps}
  *   patch     {view, ops: [...]}       → {ok, view, applied} | {ok: false, error}
+ *   patchLoad {load, ops: [...]}       → {ok, load, applied}   addReturnKey / removeReturnKey / addImport
  *   annotate  {view}                   → {ok, view}   every JSX opening element gets data-fid="<id>"
  *
  * Ids are paths: `r0` is the first JSX root of the file (normally the View's
@@ -245,6 +246,20 @@ function importsOf(source, ast) {
   return out;
 }
 
+function viewParam(ast) {
+  // How the View takes its data: `(props: Props)`, `({ a, b }: Props)`, or nothing.
+  for (const s of ast.program.body) {
+    if (s.type !== "ExportDefaultDeclaration") continue;
+    const fn = s.declaration;
+    if (!fn || !fn.params) return null;
+    if (!fn.params.length) return { kind: "none", span: [fn.start, fn.end] };
+    const p = fn.params[0];
+    if (p.type === "ObjectPattern") return { kind: "pattern", names: p.properties.filter((x) => x.type === "ObjectProperty").map((x) => x.key.name ?? x.key.value), span: [p.start, p.end] };
+    if (p.type === "Identifier") return { kind: "identifier", name: p.name };
+  }
+  return null;
+}
+
 function viewProps(ast) {
   // `export default function View({ a, b }: Props)` → ["a", "b"]; `(props)` → ["props"].
   for (const s of ast.program.body) {
@@ -295,7 +310,7 @@ function model(view, load) {
     buildNode(view, { node: r.node, container: null, context: null }, id, null, nodes, i);
     return { id, owner: r.owner ?? null };
   });
-  return { ok: true, roots, nodes, imports: importsOf(view, ast), loadKeys: loadKeys(load), viewProps: viewProps(ast) };
+  return { ok: true, roots, nodes, imports: importsOf(view, ast), loadKeys: loadKeys(load), viewProps: viewProps(ast), viewParam: viewParam(ast) };
 }
 
 // ---------------------------------------------------------------------------
@@ -510,8 +525,18 @@ function opReplaceNode(source, m, op) {
   return splice(source, n.span[0], n.span[1], indentSnippet(op.jsx, indent));
 }
 
+function localOf(name) {
+  // "default:Link" and "*:ns" bind the name after the colon.
+  return name.includes(":") ? name.slice(name.indexOf(":") + 1) : name;
+}
+
 function opAddImport(source, m, op) {
-  const names = (op.names ?? []).filter(Boolean);
+  // A name already bound by ANY import stays as it is — the page may take
+  // `widgets` from "@/sdk/widgets" rather than "@/sdk", and a second binding
+  // would not parse.
+  const bound = new Set(m.imports.filter((i) => !i.typeOnly).flatMap((i) => i.names.map(localOf)));
+  const names = (op.names ?? []).filter((nm) => nm && !bound.has(localOf(nm)));
+  if (!names.length) return source;
   const existing = m.imports.find((i) => i.source === op.source && !i.typeOnly);
   if (existing) {
     const missing = names.filter((nm) => !existing.names.includes(nm));
@@ -523,7 +548,10 @@ function opAddImport(source, m, op) {
     const spaced = before.endsWith("{") ? before + " " : before + ", ";
     return splice(source, existing.span[0], existing.span[1], `${spaced}${missing.join(", ")} ${raw.slice(brace)}`);
   }
-  const line = `import { ${names.join(", ")} } from "${op.source}";\n`;
+  const defaults = names.filter((n) => n.startsWith("default:")).map(localOf);
+  const named = names.filter((n) => !n.includes(":"));
+  const clause = [defaults[0], named.length ? `{ ${named.join(", ")} }` : ""].filter(Boolean).join(", ");
+  const line = `import ${clause} from "${op.source}";\n`;
   const last = m.imports.length ? m.imports[m.imports.length - 1] : null;
   if (last) {
     let at = last.span[1];
@@ -534,6 +562,23 @@ function opAddImport(source, m, op) {
   const m2 = /^(\s*["']use client["'];?\s*\n)/.exec(source);
   const at = m2 ? m2[0].length : 0;
   return splice(source, at, at, (m2 ? "\n" : "") + line);
+}
+
+function opEnsureProp(source, m, op) {
+  // The View must be able to reach a key `load()` returns: add it to a
+  // destructured parameter; a plain `props` parameter reaches it already.
+  const ast = parseTsx(source);
+  const p = viewParam(ast);
+  if (!p) throw new PatchError("no-view", "This page has no View the editor can extend — ask Smith.");
+  if (p.kind === "identifier") return source;
+  if (p.kind === "none") throw new PatchError("no-props", "This page does not take its data in a way the editor can extend — ask Smith to connect it.");
+  if (p.names.includes(op.name)) return source;
+  const [start, end] = p.span;
+  const raw = source.slice(start, end);
+  const brace = raw.lastIndexOf("}");
+  const before = raw.slice(0, brace).replace(/\s*,?\s*$/, "");
+  const inner = before.endsWith("{") ? `${before} ${op.name} ` : `${before}, ${op.name} `;
+  return splice(source, start, end, inner + raw.slice(brace));
 }
 
 const VOID_TAGS = new Set(["input", "img", "br", "hr", "textarea", "select"]);
@@ -552,7 +597,97 @@ const OPS = {
   duplicate: opDuplicate,
   replaceNode: opReplaceNode,
   addImport: opAddImport,
+  ensureProp: opEnsureProp,
 };
+
+// ---------------------------------------------------------------------------
+// load.ts — what the page reads, as ops on its `return { … }`
+// ---------------------------------------------------------------------------
+
+function loadModel(source) {
+  const ast = parseTsx(source);
+  let fn = null;
+  for (const s of ast.program.body) {
+    const d = s.type === "ExportNamedDeclaration" ? s.declaration : s;
+    if (d && d.type === "FunctionDeclaration" && d.id && d.id.name === "load") fn = d;
+    if (d && d.type === "VariableDeclaration") {
+      for (const v of d.declarations) if (v.id.type === "Identifier" && v.id.name === "load" && v.init && /Function/.test(v.init.type)) fn = v.init;
+    }
+  }
+  const returns = [];
+  if (fn) {
+    const walk = (n) => {
+      if (n.type === "ReturnStatement" && n.argument) {
+        let arg = n.argument;
+        while (arg.type === "TSAsExpression" || arg.type === "ParenthesizedExpression" || arg.type === "TSSatisfiesExpression") arg = arg.expression;
+        if (arg.type === "ObjectExpression") returns.push({ stmt: n, obj: arg });
+        return;
+      }
+      if ((n.type === "ArrowFunctionExpression" || n.type === "FunctionExpression" || n.type === "FunctionDeclaration") && n !== fn) return;
+      for (const c of children(n)) walk(c);
+    };
+    walk(fn.body);
+  }
+  return { imports: importsOf(source, ast), fn, returns };
+}
+
+function needLoad(m) {
+  if (!m.fn) throw new PatchError("no-load", "This page has no `load` the editor can extend — ask Smith.");
+  if (!m.returns.length) throw new PatchError("load-shape", "What this page loads is not written in a way the editor can extend — ask Smith to add it.");
+}
+
+function opAddReturnKey(source, m, op) {
+  needLoad(m);
+  // Every `return { … }` of load gets the key, so the page's data has one shape.
+  const edits = [];
+  for (const { stmt, obj } of m.returns) {
+    const existing = obj.properties.find((p) => p.type === "ObjectProperty" && (p.key.name ?? p.key.value) === op.key);
+    if (existing) { edits.push([existing.value.start, existing.value.end, op.expr]); continue; }
+    const props = obj.properties;
+    if (!props.length) {
+      const indent = lineIndent(source, stmt.start);
+      edits.push([obj.start, obj.end, `{\n${indent}  ${op.key}: ${op.expr},\n${indent}}`]);
+      continue;
+    }
+    const last = props[props.length - 1];
+    const indent = lineIndent(source, last.start);
+    edits.push([last.end, last.end, `,\n${indent}${op.key}: ${op.expr}`]);
+  }
+  edits.sort((a, b) => b[0] - a[0]);
+  for (const [s, e, text] of edits) source = splice(source, s, e, text);
+  return source;
+}
+
+function opRemoveReturnKey(source, m, op) {
+  needLoad(m);
+  const edits = [];
+  for (const { obj } of m.returns) {
+    const i = obj.properties.findIndex((p) => p.type === "ObjectProperty" && (p.key.name ?? p.key.value) === op.key);
+    if (i < 0) continue;
+    const p = obj.properties[i];
+    let end = p.end;
+    const after = source.slice(end, obj.end);
+    const comma = /^\s*,/.exec(after);
+    if (comma) end += comma[0].length;
+    edits.push([p.start, end]);
+  }
+  edits.sort((a, b) => b[0] - a[0]);
+  for (const [s, e] of edits) source = cutWithLine(source, s, e);
+  return source;
+}
+
+const LOAD_OPS = { addReturnKey: opAddReturnKey, removeReturnKey: opRemoveReturnKey, addImport: opAddImport };
+
+function patchLoad(load, ops) {
+  let source = load;
+  for (const op of ops) {
+    const fn = LOAD_OPS[op.op];
+    if (!fn) throw new PatchError("unknown-op", `Unknown load operation ${op.op}`);
+    source = fn(source, loadModel(source), op);
+  }
+  try { parseTsx(source); } catch (e) { throw new PatchError("syntax", `The change would leave what the page loads unreadable: ${e.message}`); }
+  return { ok: true, load: source, applied: ops.map((o) => o.op) };
+}
 
 function patch(view, ops) {
   let source = view;
@@ -610,6 +745,7 @@ async function main() {
     let out;
     if (cmd === "model") out = model(input.view ?? "", input.load ?? null);
     else if (cmd === "patch") out = patch(input.view ?? "", input.ops ?? []);
+    else if (cmd === "patchLoad") out = patchLoad(input.load ?? "", input.ops ?? []);
     else if (cmd === "annotate") out = annotate(input.view ?? "");
     else throw new PatchError("usage", `unknown command ${cmd}`);
     process.stdout.write(JSON.stringify(out));

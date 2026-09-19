@@ -7,7 +7,7 @@
  * a status text, which is exactly the wording (UX-004) the editor exists to
  * show.
  */
-import type { ApplyResult, Finding, HistoryEntry, Op, PageDoc, PageListItem, Proposal } from "./types";
+import type { ApplyResult, Finding, HistoryEntry, Op, PageDoc, PageListItem, Proposal, WidgetRef, WidgetSpec } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -111,6 +111,13 @@ export const editorApi = {
   applyProposal: (projectId: string, pageId: string, proposalId: string, baseRevision: string, allowScopeExpansion: boolean) =>
     post<ApplyResult & { proposal: Proposal; alreadyApplied?: boolean }>(
       `${base(projectId)}/pages/${pageId}/smith/${proposalId}/apply`, { baseRevision, allowScopeExpansion }),
+  createWidget: (projectId: string, pageId: string, spec: WidgetSpec) =>
+    post<{ widget: WidgetRef }>(`${base(projectId)}/pages/${pageId}/widgets`, { spec }),
+  updateWidget: (projectId: string, widgetId: string, spec: WidgetSpec, pageRevision: string | null) =>
+    call<{ widget: WidgetRef; renamed: { from: string; to: string; revision: string } | null }>(
+      `${base(projectId)}/widgets/${widgetId}`, { method: "PATCH", body: JSON.stringify({ spec, pageRevision }) }),
+  removeWidget: (projectId: string, widgetId: string) =>
+    call<{ removed: boolean }>(`${base(projectId)}/widgets/${widgetId}`, { method: "DELETE" }),
   discardProposal: (projectId: string, pageId: string, proposalId: string) =>
     post<Proposal>(`${base(projectId)}/pages/${pageId}/smith/${proposalId}/discard`),
 };

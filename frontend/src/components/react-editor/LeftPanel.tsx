@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
+import { ChartDialog } from "./ChartDialog";
 import { isDescendant, mainRoot, plainName, plainType } from "./lib/plain";
 import { checkModel, findingsByNode } from "./lib/readiness";
 import { entityColumns, formImports, formJsx, tableImports, tableJsx, workflowButtonImports, workflowButtonJsx } from "./lib/templates";
@@ -181,6 +182,11 @@ function AddTab() {
 
 /** One decision at a time; a live summary of what will be added; back and skip. */
 function GuideDialog({ def, onClose }: { def: ComponentDef; onClose: () => void }) {
+  if (def.guide === "chart" || def.guide === "metric") return <ChartDialog def={def} onClose={onClose} />;
+  return <FlowDialog def={def} onClose={onClose} />;
+}
+
+function FlowDialog({ def, onClose }: { def: ComponentDef; onClose: () => void }) {
   const doc = useEditorStore((s) => s.doc)!;
   const selection = useEditorStore((s) => s.selection);
   const insertJsx = useEditorStore((s) => s.insertJsx);

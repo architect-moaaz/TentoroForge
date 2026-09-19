@@ -113,6 +113,14 @@ def test_the_adapter_refuses_what_would_break_the_page_in_plain_words():
     assert e.value.code == "missing-target"
 
 
+def test_a_name_imported_from_anywhere_is_not_imported_twice():
+    src = VIEW.replace('import { workflows } from "@/sdk";', 'import { widgets, workflows } from "@/sdk/widgets";')
+    out = adapter.patch(src, [{"op": "addImport", "source": "@/sdk", "names": ["widgets", "pages"]},
+                              {"op": "addImport", "source": "next/link", "names": ["default:Link"]}])
+    assert out.count("widgets") == src.count("widgets"), "already bound, from another module"
+    assert 'import { pages } from "@/sdk";' in out and 'import Link from "next/link";' in out
+
+
 def test_dynamic_classes_are_edited_at_their_static_literal_or_refused():
     src = VIEW.replace('className="text-sm text-muted-foreground"', 'className={cn("text-sm", muted && "text-muted-foreground")}')
     out = adapter.patch(src, [{"op": "setClasses", "id": "r0.1", "classes": "text-lg"}])
@@ -460,3 +468,104 @@ def test_a_page_without_code_or_toolchain_is_refused_plainly(tmp_path, monkeypat
     with pytest.raises(EditorError) as e:
         jit.build(service.locate(tmp_path), "PAGE-999")
     assert e.value.code == "no-page"
+
+
+# ---------------------------------------------------------------------------
+# Charts — a widget written through the Blueprint, read in load, drawn in view
+# ---------------------------------------------------------------------------
+
+def _chart_project(tmp_path, monkeypatch):
+    from services.react_editor import widgets  # noqa: F401 — imported for the monkeypatch below
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Desk", domain="ops")
+    svc.doc["pages"] = [{"id": "PAGE-001", "name": "Dashboard", "route": "/", "purpose": "Overview."}]
+    svc.doc["data"] = {"entities": [{"id": "ENTITY-001", "name": "Order", "table": "orders", "fields": [
+        {"name": "id", "type": "uuid"}, {"name": "customer", "type": "string"},
+        {"name": "status", "type": "string", "enumValues": ["Open", "Paid"]},
+        {"name": "total", "type": "decimal"}, {"name": "placedAt", "type": "datetime"}]}]}
+    svc.doc["pageCode"] = [{"page": "PAGE-001", "load": 'import { count, type PageContext } from "@/sdk/server";\nexport async function load(ctx: PageContext) {\n  return {\n    open: await count("Order", { status: "Open" }),\n  };\n}\n',
+                            "view": '"use client";\nimport type { load } from "./load";\ntype Props = NonNullable<Awaited<ReturnType<typeof load>>>;\nexport default function View({ open }: Props) {\n  return (\n    <div className="p-6">\n      <h1>Orders</h1>\n    </div>\n  );\n}\n'}]
+    svc.save()
+    (tmp_path / "app/src/app/_root").mkdir(parents=True)
+    (tmp_path / "app/package.json").write_text("{}")
+    monkeypatch.setattr(service, "_check", lambda *a: [])
+    # The SDK projection wants the scaffold's fixed files; the generated half is what matters here.
+    return service.locate(tmp_path)
+
+
+def test_a_chart_is_a_widget_the_page_reads_and_draws(tmp_path, monkeypatch):
+    from services.react_editor import widgets
+    project = _chart_project(tmp_path, monkeypatch)
+    out = widgets.create(project, "PAGE-001", {"label": "Revenue by status", "kind": "chart", "entity": "Order",
+                                                 "measures": [{"aggregation": "sum", "field": "total"}],
+                                                 "dimensions": [{"field": "status"}], "mark": "bar", "stacked": True})
+    w = out["widget"]
+    assert w["id"].startswith("WIDGET-") and w["key"] == "revenueByStatus" and w["chart"] == {"mark": "bar", "stacked": True}
+    assert w["source"]["entity"] == "Order" and w["source"]["measures"][0] == {"key": "sum_total", "aggregation": "sum", "field": "total"}
+    sdk = (project.app_root / "src/sdk/widgets.ts").read_text()
+    assert "revenueByStatus:" in sdk and '"mark": "bar"' in sdk, "the typed handle is regenerated"
+    assert service.load_blueprint(project).doc["version"] > 1, "written through the Blueprint, versioned"
+
+    doc = service.open_page(project, "PAGE-001")
+    assert doc["widgets"][0]["key"] == "revenueByStatus"
+    ops = [{"op": "addImport", "file": "load", "source": "@/sdk/server", "names": ["runWidget"]},
+           {"op": "addImport", "file": "load", "source": "@/sdk", "names": ["widgets"]},
+           {"op": "addReturnKey", "file": "load", "key": "revenueByStatus", "expr": "await runWidget(widgets.revenueByStatus)"},
+           {"op": "addImport", "source": "@/sdk/client", "names": ["WidgetView"]},
+           {"op": "addImport", "source": "@/sdk", "names": ["widgets"]},
+           {"op": "ensureProp", "name": "revenueByStatus"},
+           {"op": "insert", "parentId": "r0", "jsx": "<WidgetView widget={widgets.revenueByStatus} data={revenueByStatus} />"}]
+    r = service.apply(project, "PAGE-001", base_revision=doc["revision"], ops=ops, label="Add chart")
+    assert r["checked"] is True
+    row = service.load_blueprint(project).doc["pageCode"][0]
+    assert "revenueByStatus: await runWidget(widgets.revenueByStatus)," in row["load"]
+    assert 'import { count, type PageContext, runWidget } from "@/sdk/server";' in row["load"]
+    assert "function View({ open, revenueByStatus }: Props)" in row["view"]
+    assert "<WidgetView widget={widgets.revenueByStatus} data={revenueByStatus} />" in row["view"]
+    assert r["model"]["nodes"]["r0.1"]["type"] == "WidgetView"
+
+
+def test_a_chart_the_data_cannot_draw_is_refused_before_it_exists(tmp_path, monkeypatch):
+    from services.react_editor import widgets
+    project = _chart_project(tmp_path, monkeypatch)
+    with pytest.raises(EditorError) as e:
+        widgets.create(project, "PAGE-001", {"label": "Bad", "kind": "chart", "entity": "Order",
+                                              "measures": [{"aggregation": "sum", "field": "customer"}], "dimensions": [{"field": "status"}], "mark": "bar"})
+    assert e.value.code == "bad-widget" and "not a number" in str(e.value)
+    with pytest.raises(EditorError) as e:
+        widgets.create(project, "PAGE-001", {"label": "Bad", "kind": "chart", "entity": "Order",
+                                              "measures": [{"aggregation": "count"}], "dimensions": [{"field": "status", "bucket": "month"}], "mark": "line"})
+    assert "not a date" in str(e.value)
+    with pytest.raises(EditorError) as e:
+        widgets.create(project, "PAGE-001", {"label": "Bad", "kind": "chart", "entity": "Order",
+                                              "measures": [{"aggregation": "count"}], "dimensions": [], "mark": "pie"})
+    assert "pie chart needs 1" in str(e.value)
+    assert not service.load_blueprint(project).doc.get("widgets"), "nothing was written"
+
+
+def test_changing_a_chart_edits_its_definition_and_renaming_it_follows_the_page(tmp_path, monkeypatch):
+    from services.react_editor import widgets
+    project = _chart_project(tmp_path, monkeypatch)
+    w = widgets.create(project, "PAGE-001", {"label": "Orders by status", "kind": "chart", "entity": "Order",
+                                              "measures": [{"aggregation": "count"}], "dimensions": [{"field": "status"}], "mark": "bar"})["widget"]
+    doc = service.open_page(project, "PAGE-001")
+    service.apply(project, "PAGE-001", base_revision=doc["revision"], label="Add chart", ops=[
+        {"op": "addImport", "file": "load", "source": "@/sdk/server", "names": ["runWidget"]},
+        {"op": "addImport", "file": "load", "source": "@/sdk", "names": ["widgets"]},
+        {"op": "addReturnKey", "file": "load", "key": "ordersByStatus", "expr": "await runWidget(widgets.ordersByStatus)"},
+        {"op": "addImport", "source": "@/sdk/client", "names": ["WidgetView"]}, {"op": "addImport", "source": "@/sdk", "names": ["widgets"]},
+        {"op": "ensureProp", "name": "ordersByStatus"},
+        {"op": "insert", "parentId": "r0", "jsx": "<WidgetView widget={widgets.ordersByStatus} data={ordersByStatus} />"}])
+    out = widgets.update(project, w["id"], {"mark": "donut", "limit": 5})
+    assert out["widget"]["chart"] == {"mark": "donut"} and out["widget"]["source"]["limit"] == 5 and out["renamed"] is None
+    rev = service.open_page(project, "PAGE-001")["revision"]
+    out = widgets.update(project, w["id"], {"label": "Status mix"}, page_revision=rev)
+    assert out["widget"]["key"] == "statusMix" and out["renamed"]["from"] == "ordersByStatus"
+    row = service.load_blueprint(project).doc["pageCode"][0]
+    assert "widgets.statusMix" in row["view"] and "widgets.statusMix" in row["load"]
+    assert "widgets.ordersByStatus" not in row["view"] and "widgets.ordersByStatus" not in row["load"]
+    assert "data={ordersByStatus}" in row["view"], "the page's own data key is the person's to rename"
+    assert [h["label"] for h in service.history(project, "PAGE-001")][-1] == "Rename chart handle to statusMix"
+
+    assert widgets.remove(project, w["id"])["removed"] is True
+    live = [x for x in service.load_blueprint(project).doc["widgets"] if x.get("status") != "DEPRECATED"]
+    assert live == [] and "statusMix" not in (project.app_root / "src/sdk/widgets.ts").read_text()
