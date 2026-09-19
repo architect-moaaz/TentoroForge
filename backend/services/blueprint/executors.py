@@ -1093,7 +1093,11 @@ NODE_TASKS: dict[str, str] = {
         "`memberId` → that entity). Do not model a separate profile or user "
         "entity beside it, and do not use the platform's own users table. When "
         "only staff sign in and nobody's record is about themselves, mark "
-        "none."
+        "none.\n\n"
+        "TERMS TWO PEOPLE NEGOTIATE carry the negotiation in their status — "
+        "requested, countered, accepted, declined, withdrawn — and, when each "
+        "offer should be kept, an Offer entity (who proposed it, the proposed "
+        "terms, when) related to the record being agreed."
     ),
     "entity_fields": (
         "Author the fields of ONE entity, the one given below. Its `name` and "
@@ -1110,7 +1114,11 @@ NODE_TASKS: dict[str, str] = {
         "the entity what a person LOOKS AT to decide about one of these records "
         "— a listing's category, description, photos and what is included; a "
         "person's display name and area — because a screen can only show what "
-        "is stored. Add `constraints` for uniqueness and "
+        "is stored. A place people are near to each other — where a member "
+        "lives, where a listing is collected — is one field of type "
+        "`location` ({lat, lng}, kept to about 100 m), never a street address "
+        "or separate latitude/longitude columns; it is what lets a page say "
+        "\"0.4 mi away\". Add `constraints` for uniqueness and "
         "checks the columns cannot express on their own, for this entity only. "
         "A picture a person uploads is a field of `type: \"image\"`. When the "
         "application finds these records by what they look like or mean — "
@@ -1122,7 +1130,12 @@ NODE_TASKS: dict[str, str] = {
     ),
     "ux_architecture": (
         "Organise the application into modules and a navigation tree. Every list "
-        "and dashboard page must be reachable from navigation."
+        "and dashboard page must be reachable from navigation." + "\n\n"
+        "HOW A PHONE GETS AROUND. Set `navigation.mobile`: `tabs` for a "
+        "mobile-first product — a bottom tab bar of its three to five main "
+        "destinations, so order the top of `navigation.tree` by what people "
+        "open every visit — or `drawer` when phones are occasional and the "
+        "menu can sit behind a hamburger."
     ),
     "page_contracts": (
         "Decide the page set, feature by feature, from the slots below: fill "
@@ -1239,6 +1252,9 @@ NODE_TASKS: dict[str, str] = {
         "owner's loans: Rental rows `via` toolId… is the tool's; Review rows "
         "`via` subjectId `of` ownerId are the owner's) — narrowed by `where`; a "
         "total adds `fn` and a numeric `field`.\n"
+        "- `distance`: how far the reader is from the record — its `location` "
+        "`field`, or through `via` the location of the record it points at "
+        "(the owner's area for a tool). Never the coordinates themselves.\n"
         "- `process`: what a rule or a workflow means for the reader, `about` "
         "which: \"condition photos are taken by both sides at handover\", "
         "\"what happens after a dispute is opened\".\n"
@@ -1349,7 +1365,15 @@ NODE_TASKS: dict[str, str] = {
         "field a step will later read (`{{title}}`) must be declared here as "
         "a `field` input, and a workflow acting on a record must declare the "
         "record; the step author cannot add inputs the pages were not told "
-        "about."
+        "about.\n\n"
+        "AGREEING TERMS IS A CONVERSATION OF OFFERS. When two people agree "
+        "something through the application — the dates and terms of a loan, a "
+        "price, a schedule — model each move as its own workflow, not one "
+        "approve/decline: the request, a counter-offer that changes the terms "
+        "and sets the record to a `countered` state, accepting (which locks "
+        "the terms), declining, and withdrawing. Each is launched from the "
+        "record's page by the party whose turn it is. Nothing loops: the "
+        "record's state says whose move it is."
     ),
     "workflow_steps": (
         "Author the steps of ONE workflow, the one given below. Its identity "
@@ -1374,6 +1398,17 @@ NODE_TASKS: dict[str, str] = {
         "to the person as a failure, never as the success message. Any step "
         "that mutates an entity must name a real one.\n\n"
         + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
+        + "\n\nTELL THE OTHER PERSON. When a step changes something another person "
+        "must act on or would want to know — a request arrives for the owner, "
+        "the owner approves or declines, a dispute is opened against them, a "
+        "return is confirmed — add an `action` step with `actionType: "
+        "send_notification`, a short `title`, a `message` in the domain's words "
+        "and `recipient`: that person's user id. Find it with a `db_query` "
+        "first when it lives on another record (`{{find_tool.ownerId}}` — a "
+        "query's fields are read from its first row); never `$user.id`, which "
+        "is the person acting. A whole team is `recipientRole`. Where the "
+        "application has an email integration, a `send_email` step beside it "
+        "reaches them away from the app."
     ),
     "business_rules": (
         "State the rules that constrain the application, each as a sentence a "

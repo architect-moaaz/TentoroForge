@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { Bell, LogOut, Settings, User } from "lucide-react";
+import { LogOut, Settings, User } from "lucide-react";
 
 // The client-side chrome for the persona-pills shell frame:
 //   [brand] [Member · Instructor · Admin] [search] [🔔] [avatar ▾]
@@ -204,13 +204,7 @@ export function PersonaChrome({
             />
           </label>
 
-          <button
-            type="button"
-            aria-label="Notifications"
-            className="grid h-9 w-9 place-items-center rounded-full border border-border hover:bg-muted/50 transition-colors"
-          >
-            <Bell size={16} strokeWidth={2} />
-          </button>
+          {/* Notifications: the frame's NotificationBell, beside the breadcrumb. */}
 
           <details className="relative">
             <summary

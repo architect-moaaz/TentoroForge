@@ -27,6 +27,22 @@ function filter(entity: string, opts: any = {}) {
 export async function currentUser(): Promise<SessionUser | null> { await wait(); return ${JSON.stringify(user)}; }
 /** The signed-in person's own record: the account entity's first sample row. */
 export async function myAccount(): Promise<any | null> { await wait(); return ${JSON.stringify((() => { const a = entities.find((e) => e.account); return a ? rows[a.name][0] : null; })())}; }
+export type GeoPoint = { lat: number; lng: number };
+export function distanceKm(a: any, b: any): number | null {
+  if (!a || !b || !Number.isFinite(a.lat) || !Number.isFinite(b.lat)) return null;
+  const r = (d: number) => (d * Math.PI) / 180, dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+export function formatDistance(km: number | null | undefined): string { return km == null ? "" : (km * 0.621371).toFixed(1) + " mi"; }
+export function parseNear(v: any): GeoPoint | null { const m = String(v ?? "").match(/^(-?[\\d.]+),(-?[\\d.]+)$/); return m ? { lat: Number(m[1]), lng: Number(m[2]) } : null; }
+/** The sample reader stands a street away from the first sample row. */
+export async function whereAmI(_ctx?: any): Promise<GeoPoint | null> { return { lat: 51.507, lng: -0.128 }; }
+export async function near(entity: string, field: string, from: GeoPoint | null, opts: any = {}): Promise<any[]> {
+  const rows = filter(entity, { where: opts.where }).map((r) => ({ ...r, distanceKm: from ? distanceKm(from, r[field]) : null }));
+  if (from) rows.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+  await wait(); return rows.slice(0, opts.limit ?? 50);
+}
 export async function listPage(entity: string, opts: any = {}): Promise<Page<any>> {
   await wait();
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200); const page = Math.max(opts.page ?? 1, 1);
@@ -161,6 +177,7 @@ export function sampleRow(entity, i, entities) {
     const opts = f.enumValues || f.options || [];
     const lower = fname.toLowerCase();
     if (lower === "id") row[fname] = `sample-${name.toLowerCase()}-${i + 1}`;
+    else if (/^(location|geo|geopoint|geo_point|coordinates|latlng|point)$/.test(type)) row[fname] = { lat: Number((51.507 + 0.004 * (i + 1)).toFixed(3)), lng: Number((-0.128 + 0.006 * (i + 1)).toFixed(3)) };
     else if (opts.length) row[fname] = opts[i % opts.length];
     else if (/email/.test(lower)) row[fname] = `${FIRST[i % FIRST.length].toLowerCase()}.${LAST[i % LAST.length].toLowerCase()}@example.com`;
     else if (/phone|tel/.test(lower)) row[fname] = `+1 555 01${String(i).padStart(2, "0")} ${String(1000 + i * 37).slice(0, 4)}`;

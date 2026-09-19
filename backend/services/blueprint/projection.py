@@ -43,6 +43,8 @@ REMAINING: tuple[str, ...] = (
 )
 
 #: Blueprint field type -> (drizzle builder, import name).
+from services.blueprint.geo_types import LOCATION_TYPES, is_location_field  # noqa: E402
+
 _TYPES: dict[str, str] = {
     "uuid": "uuid", "guid": "uuid",
     "text": "text", "string": "text", "str": "text", "email": "text",
@@ -56,6 +58,8 @@ _TYPES: dict[str, str] = {
     "date": "date",
     "datetime": "timestamp", "timestamp": "timestamp", "time": "timestamp",
     "json": "jsonb", "jsonb": "jsonb", "object": "jsonb", "array": "jsonb",
+    # A place: `{lat, lng}` (see geo_types).
+    **{t: "jsonb" for t in LOCATION_TYPES},
 }
 _DEFAULT_TYPE = "text"
 
@@ -844,6 +848,40 @@ def _write_brand_module(doc: dict, app_root: str | Path) -> str:
     return BRAND_MODULE
 
 
+#: A bottom tab bar holds this many destinations; the rest stay in the menu.
+MOBILE_TABS = 5
+
+
+def mobile_style(doc: dict) -> str:
+    """`tabs` or `drawer`: the Blueprint's `navigation.mobile` when it says,
+    else tabs when most pages say a phone is their primary device."""
+    said = str(((doc.get("navigation") or {}).get("mobile")) or "")
+    if said in ("tabs", "drawer"):
+        return said
+    pages = [p for p in doc.get("pages") or []
+             if isinstance(p, dict) and p.get("status") != "DEPRECATED" and p.get("pattern") != "auth"]
+    phone_first = [p for p in pages if str(((p.get("responsive") or {}).get("mobile")) or "") == "primary"]
+    return "tabs" if pages and len(phone_first) * 2 > len(pages) else "drawer"
+
+
+def mobile_tabs(doc: dict, groups: list[dict]) -> list[dict]:
+    """The bottom tab bar of a mobile-first application: its first main
+    destinations, in rail order — a group contributes its first item."""
+    if mobile_style(doc) != "tabs":
+        return []
+    out: list[dict] = []
+    for g in groups:
+        first = g if g.get("route") else next((i for i in g.get("items") or [] if i.get("route")), None)
+        if first and first["route"] not in [t["route"] for t in out]:
+            tab = {"label": str(first.get("label") or g.get("label") or ""), "route": first["route"]}
+            if first.get("icon") or g.get("icon"):
+                tab["icon"] = str(first.get("icon") or g.get("icon"))
+            out.append(tab)
+        if len(out) == MOBILE_TABS:
+            break
+    return out if len(out) >= 2 else []
+
+
 def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/schemas/shell.json`` from ``navigation.tree``.
 
@@ -941,6 +979,9 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     }
     if initial:
         shell["initialRoute"] = str(initial)
+    tabs = mobile_tabs(doc, groups)
+    if tabs:
+        shell["mobile"] = {"style": "tabs", "tabs": tabs}
     out = Path(app_root) / "src" / "schemas"
     out.mkdir(parents=True, exist_ok=True)
     (out / "shell.json").write_text(json.dumps(shell, indent=2), "utf-8")
@@ -2309,6 +2350,9 @@ def _seed_value(field: dict, entity_name: str, row: int,
 
     kind = str(field.get("type") or "text").lower()
     name = field.get("name") or "field"
+    if kind in LOCATION_TYPES:
+        # A few streets apart, so seeded distances read like a neighbourhood.
+        return {"lat": round(51.507 + 0.004 * row, 3), "lng": round(-0.128 + 0.006 * row, 3)}
     # Spread across rows on purpose: with three rows and three states, the
     # seeded data holds one record in each, which is what lets a page that only
     # means something once something is submitted be reviewed at all.

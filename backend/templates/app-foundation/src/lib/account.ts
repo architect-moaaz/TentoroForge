@@ -14,7 +14,7 @@ export interface AccountField {
 }
 
 /** The entity each login IS (its id is the login's id), and what signup asks for it. */
-export const ACCOUNT: null | { entity: string; fields: AccountField[]; labelField: string | null } = null;
+export const ACCOUNT: null | { entity: string; fields: AccountField[]; labelField: string | null; locationField: string | null } = null;
 
 /** The role a person who creates their own account gets; null leaves the platform default. */
 export const SIGNUP_ROLE: string | null = null;

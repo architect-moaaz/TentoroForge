@@ -25,6 +25,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from services.blueprint.geo_types import LOCATION_TYPES
+
 #: The two auth pages every application with a sign-in has.
 AUTH_PAGES: tuple[dict[str, str], ...] = (
     {"auth": "login", "route": "/login", "name": "Sign in",
@@ -83,7 +85,8 @@ def account_fields(doc: dict) -> list[dict]:
         ftype = str(f.get("type") or "string").lower()
         if not name or name in _SYSTEM or f.get("primaryKey") or f.get("references"):
             continue
-        if ftype in ("vector", "image", "file", "json", "jsonb", "uuid") or "[]" in ftype:
+        if ftype in ("vector", "image", "file", "json", "jsonb", "uuid") or "[]" in ftype \
+                or ftype in LOCATION_TYPES:
             continue
         kind = "email" if "email" in name.lower() and ftype == "string" else _KIND.get(ftype, "text")
         if kind == "text" and re.search(r"phone|mobile|tel$", name, re.I):
@@ -161,14 +164,17 @@ def project_account(doc: dict, app_root: str | Path) -> dict[str, Any]:
     ent = account_entity(doc)
     header = ("// Generated from the Living Blueprint (services/blueprint/account_model.py).\n"
               "// Edit the Blueprint, not this file.\n\n")
+    from services.blueprint.projection import is_location_field
+    location = next((f.get("name") for f in (ent or {}).get("fields") or [] if is_location_field(f)), None)
     account = ("null" if ent is None else json.dumps({
-        "entity": ent.get("name"), "fields": account_fields(doc), "labelField": ent.get("labelField")}, indent=2))
+        "entity": ent.get("name"), "fields": account_fields(doc), "labelField": ent.get("labelField"),
+        "locationField": location}, indent=2))
     (root / "account.ts").write_text(
         header
         + "export interface AccountField {\n  name: string;\n  label: string;\n"
           '  kind: "text" | "textarea" | "email" | "tel" | "url" | "number" | "date" | "select" | "checkbox";\n'
           "  required: boolean;\n  options?: { label: string; value: string }[];\n}\n\n"
-        + f"export const ACCOUNT: null | {{ entity: string; fields: AccountField[]; labelField: string | null }} = {account};\n\n"
+        + f"export const ACCOUNT: null | {{ entity: string; fields: AccountField[]; labelField: string | null; locationField: string | null }} = {account};\n\n"
         + f"export const SIGNUP_ROLE: string | null = {json.dumps(signup_role(doc))};\n\n"
         + f"export const AFTER_SIGNUP: string = {json.dumps(after_signup_route(doc))};\n\n"
         + f"export const HOME: string = {json.dumps(home_route(doc))};\n", "utf-8")

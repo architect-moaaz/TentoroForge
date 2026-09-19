@@ -30,7 +30,7 @@ from typing import Any
 #: Types a proposed field may take — what the data model already uses.
 FIELD_TYPES = frozenset({
     "string", "text", "integer", "number", "decimal", "float", "boolean", "date", "datetime",
-    "timestamp", "enum", "email", "phone", "url", "image", "file", "json",
+    "timestamp", "enum", "email", "phone", "url", "image", "file", "json", "location",
 })
 
 
@@ -136,6 +136,31 @@ def item_findings(item: dict, page: dict, doc: dict) -> list[str]:
                 out.append(f"{label!r}: a total names the numeric `field` of {ent.get('name')}")
         return out
 
+    if kind == "distance":
+        from services.blueprint.geo_types import is_location_field
+        via = str(src.get("via") or "")
+        if via:
+            if primary is None or _field(primary, via) is None:
+                return [f"{label!r}: `via` must be a foreign key of the page's record"]
+            target = ent
+            if target is None:
+                return [f"{label!r}: name the `entity` {via} points at"]
+        else:
+            target = ent or primary
+        if target is None:
+            return [f"{label!r}: a `distance` fact needs the page's primary entity or `entity`"]
+        name = str(src.get("field") or "")
+        f = _field(target, name) if name else None
+        if f is None:
+            new = src.get("newField") or {}
+            if not name or str(new.get("type") or "").lower() != "location":
+                return [f"{label!r}: {target.get('name')} has no location field {name!r} — propose it in "
+                        f"`source.newField` with type `location`"]
+            return []
+        if not is_location_field(f):
+            return [f"{label!r}: {target.get('name')}.{name} is {f.get('type')!r}, not a `location`"]
+        return []
+
     if kind == "process":
         if not str(src.get("about") or "").strip():
             out.append(f"{label!r}: a `process` fact says what it is `about` — the rule or the step")
@@ -185,9 +210,9 @@ def requested_fields(doc: dict) -> dict[str, list[dict]]:
         for item in page.get("content") or []:
             src = (item or {}).get("source") or {}
             new = src.get("newField")
-            if src.get("kind") not in ("field", "related") or not new or not src.get("field"):
+            if src.get("kind") not in ("field", "related", "distance") or not new or not src.get("field"):
                 continue
-            eid = str(src.get("entity") or (primary_id if src.get("kind") == "field" else ""))
+            eid = str(src.get("entity") or (primary_id if src.get("kind") != "related" and not src.get("via") else ""))
             ent = ents.get(eid)
             name = str(src["field"])
             if ent is None or _field(ent, name) is not None or not _type_ok(new.get("type")):
@@ -250,6 +275,12 @@ def content_brief(doc: dict, page: dict) -> list[dict]:
             read = f"count(\"{name}\", {_sdk_where(src, rec)})"
         elif kind == "total":
             read = f"total(\"{name}\", \"{src.get('fn')}\", \"{src.get('field')}\", {_sdk_where(src, rec)})"
+        elif kind == "distance":
+            where = (f"(await record(\"{name}\", {rec}.{src.get('via')}))?.{src.get('field')}" if src.get("via")
+                     else f"{rec}.{src.get('field')}")
+            read = (f"formatDistance(distanceKm(await whereAmI(ctx), {where}))"
+                    + ("" if one else f" — or rank the rows with near(\"{primary.get('name')}\", \"{src.get('field')}\", "
+                                      f"await whereAmI(ctx))" if not src.get("via") else ""))
         else:
             read = f"copy about: {src.get('about')} — from the rules and workflow steps below"
         out.append({"label": item.get("label"), "answers": item.get("answers") or "",

@@ -233,9 +233,12 @@ export const PagePattern = z.enum([
  *   through `of`), narrowed by `where`; `total` applies `fn` to `field`.
  * - `process` — what a rule or a workflow means for the reader (`about`):
  *   reassurance beside an action, or what happens next.
+ * - `distance` — how far the reader is from the record: its `location` field
+ *   (`field`), or, through the foreign key `via`, the location of the record it
+ *   points at (`entity`, `field`) — the owner's area for a tool.
  */
 export const PageContentSource = z.object({
-  kind: z.enum(["field", "related", "count", "total", "process"]),
+  kind: z.enum(["field", "related", "count", "total", "process", "distance"]),
   entity: EntityId.optional(),
   field: z.string().optional(),
   via: z.string().optional(),
@@ -537,6 +540,13 @@ export const Navigation = z.object({
   tree: z.array(NavNode).default([]),
   /** Landing route per role — resolved deterministically, never guessed. */
   initialRoute: z.record(z.string(), z.string()).default({}),
+  /**
+   * How a phone navigates: `tabs` is a bottom tab bar of the main
+   * destinations (a mobile-first product), `drawer` the menu behind a
+   * hamburger. Unset, the projection decides from the pages: tabs when most
+   * say a phone is their primary device.
+   */
+  mobile: z.enum(["tabs", "drawer"]).optional(),
 });
 
 // ===========================================================================

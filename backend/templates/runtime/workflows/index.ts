@@ -506,6 +506,18 @@ function _recordIdFallback(path: string, vars: Record<string, unknown>): unknown
   return undefined;
 }
 
+// `{{find_tool.ownerId}}` over a lookup step: a db_query's output is
+// `{rows, count}`, so the field is on its first row. Step authors write the
+// short form (Tool Share: `{{fetch_tool_owner.ownerId}}`) and it resolved to
+// nothing, so the notification went to nobody.
+function _firstRowFallback(path: string, vars: Record<string, unknown>): unknown {
+  const m = path.match(/^([A-Za-z_]\w*)\.(.+)$/);
+  if (!m) return undefined;
+  const base = vars[m[1]] as { rows?: unknown } | undefined;
+  if (!base || !Array.isArray(base.rows) || base.rows.length === 0) return undefined;
+  return _walkPath(base.rows[0], m[2]);
+}
+
 function _walkPath(root: unknown, path: string): unknown {
   if (root == null) return undefined;
   // Split "a.b[0].c" into ["a", "b", 0, "c"]. `\d+` inside `[]` becomes a
@@ -574,7 +586,8 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
       if (v !== undefined) return v;
       if (!key.includes(".") && !key.includes("[")) return "";
       const walked = _walkPath(ctx.variables, key);
-      return walked === undefined ? _recordIdFallback(key, ctx.variables) : walked;
+      return walked !== undefined ? walked
+        : _firstRowFallback(key, ctx.variables) ?? _recordIdFallback(key, ctx.variables);
     }
     // Accept dotted paths PLUS bracket-index segments: `search.result.data.web[0].url`.
     // Feel-lite (used elsewhere for expressions) refuses `[` in identifier
@@ -589,7 +602,7 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
       if (v !== undefined) return v == null ? "" : String(v);
       if (!key.includes(".") && !key.includes("[")) return "";
       let walked = _walkPath(ctx.variables, key);
-      if (walked === undefined) walked = _recordIdFallback(key, ctx.variables);
+      if (walked === undefined) walked = _firstRowFallback(key, ctx.variables) ?? _recordIdFallback(key, ctx.variables);
       return walked == null ? "" : String(walked);
     });
   }
@@ -1338,8 +1351,12 @@ export function registerDefaultActions(): void {
   registerActionHandler("send_notification", async (config, ctx) => {
     const title = String(_resolveRef((config as any).title ?? (config as any).subject ?? "Notification", ctx) ?? "Notification");
     const message = String(_resolveRef((config as any).message ?? (config as any).body ?? "", ctx) ?? "");
-    const userId = _resolveRef((config as any).to ?? (config as any).userId ?? null, ctx);
-    const role = (config as any).toRole ?? (config as any).assigneeRole ?? null;
+    // `recipient` is what the step author writes ("{{tool.ownerId}}"); it was
+    // not read, so every such notification was stored for nobody.
+    const who = (config as any).to ?? (config as any).userId ?? (config as any).recipient
+      ?? (config as any).recipientId ?? (config as any).recipientUserId ?? null;
+    const userId = _resolveRef(who, ctx);
+    const role = (config as any).toRole ?? (config as any).assigneeRole ?? (config as any).recipientRole ?? null;
     const type = String((config as any).notificationType ?? (config as any).type ?? "info");
     const entityId = _resolveRef((config as any).entityId ?? null, ctx);
     const table = (schema as any).forgeNotifications;

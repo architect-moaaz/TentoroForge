@@ -139,10 +139,14 @@ def entity_columns(entity: dict, doc: dict) -> list[dict]:
     return fields
 
 
+from services.blueprint.geo_types import LOCATION_TS, LOCATION_TYPES  # noqa: E402
+
 def ts_type(field: dict) -> str:
     """The value a row carries for this column, as the SDK hands it over:
     numbers as numbers (numeric columns are coerced), dates as ISO strings."""
     type_name = str(field.get("type") or "").lower()
+    if type_name in LOCATION_TYPES:
+        return LOCATION_TS
     if is_list_type(type_name):
         return "string[]"
     enum = field.get("enumValues") or field.get("enum")

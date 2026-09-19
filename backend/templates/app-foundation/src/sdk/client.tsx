@@ -10,10 +10,12 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { Workflow } from "./workflows";
 import { fileUrl } from "./files";
+import { roundPoint, isPoint, type GeoPoint } from "./geo";
 
 export { WidgetView, chartPropsFor, type WidgetViewData, type WidgetViewProps } from "./widget-view";
 export { SignInForm, SignUpForm, useSignIn, useSignUp, signupFields, type AccountField } from "./auth";
 export type { ChartSelection } from "@tentoroforge/library";
+export { distanceKm, formatDistance, parseNear, type GeoPoint } from "./geo";
 
 type Json = Record<string, unknown>;
 
@@ -64,6 +66,8 @@ export function useWorkflow<I extends Json>(
         return { ok: false, result, error: message };
       }
       if (!options.silent) toast.success(options.successMessage ?? `${workflow.name} — done`);
+      // The notification bell looks again: this run may have told someone something.
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("forge:workflow-done"));
       if (options.redirectTo) router.push(options.redirectTo);
       else router.refresh();
       return { ok: true, result, error: null };
@@ -99,6 +103,8 @@ export type FieldSpec<V> =
         ? { label: string; kind?: "checkbox" | "switch"; help?: string }
         : V extends string[]
           ? { label: string; kind: "tags" | "multiselect"; options?: Option[]; help?: string }
+          : V extends GeoPoint
+            ? { label: string; kind: "location"; help?: string }
           : { label: string;
               kind?: "text" | "textarea" | "email" | "date" | "datetime" | "select" | "password" | "url" | "tel" | "image";
               options?: Option[]; placeholder?: string; help?: string });
@@ -159,6 +165,8 @@ function Field({ name, spec, value, required, onChange }: {
     );
   } else if (kind === "image") {
     control = <ImageUpload id={id} required={required} value={(value as string) ?? ""} onChange={onChange} />;
+  } else if (kind === "location") {
+    control = <LocationInput id={id} value={value} onChange={onChange} />;
   } else if (kind === "tags") {
     control = <input id={id} required={required} className={inputClass} placeholder="Comma separated"
       value={Array.isArray(value) ? (value as string[]).join(", ") : ""}
@@ -230,6 +238,82 @@ function ImageUpload({ id, required, value, onChange }: {
 /** Search by picture: pick or drop an image, and the page's `?image=` becomes
  *  its stored id, so `load` can pass `ctx.searchParams.image` to `similar()`.
  *  Shows the image being searched for, and clears it. */
+/** Ask the browser where the person is, once, with their permission. */
+function askPosition(): Promise<GeoPoint> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      reject(new Error("This browser cannot share a location."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve(roundPoint({ lat: pos.coords.latitude, lng: pos.coords.longitude })),
+      (err) => reject(new Error(err.code === err.PERMISSION_DENIED
+        ? "Location permission was declined — allow it in the browser to use this."
+        : "Your location could not be found — try again.")),
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 600_000 },
+    );
+  });
+}
+
+/** A `location` input: the person's approximate position (about 100 m),
+ *  taken from the browser with their permission. Never shown as numbers. */
+function LocationInput({ id, value, onChange }: { id: string; value: unknown; onChange: (v: unknown) => void }) {
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const set = isPoint(value);
+  return (
+    <div className="grid gap-2">
+      <button id={id} type="button" disabled={busy}
+        onClick={async () => {
+          setBusy(true); setError(null);
+          try { onChange(await askPosition()); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+          finally { setBusy(false); }
+        }}
+        className={"inline-flex h-10 items-center justify-center gap-2 rounded-md border px-4 text-sm font-medium transition "
+          + (set ? "border-primary/40 bg-primary/5 text-primary" : "border-input bg-background hover:bg-muted")}>
+        {busy ? "Finding you…" : set ? "Location set — update" : "Use my current location"}
+      </button>
+      <p className="text-xs text-muted-foreground">
+        {set ? "Saved to about 100 m — only distances are ever shown to others." : "Only an approximate position is kept."}
+      </p>
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/** "Near me": sorts a page by distance from the reader. Writes `?near=` (about
+ *  100 m) so load.ts reads it with `whereAmI(ctx)`; pressed again, clears it. */
+export function NearMe({ label = "Near me", param = "near", className }: { label?: string; param?: string; className?: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = React.useState(false);
+  const [on, setOn] = React.useState(false);
+  React.useEffect(() => { setOn(new URLSearchParams(window.location.search).has(param)); }, [param]);
+  const go = async () => {
+    const url = new URL(window.location.href);
+    if (on) { url.searchParams.delete(param); router.push(url.pathname + url.search); setOn(false); return; }
+    setBusy(true);
+    try {
+      const p = await askPosition();
+      url.searchParams.set(param, `${p.lat},${p.lng}`);
+      router.push(url.pathname + url.search);
+      setOn(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+  return (
+    <button type="button" onClick={go} disabled={busy} aria-pressed={on}
+      className={"inline-flex h-9 items-center gap-2 rounded-full border px-3 text-sm font-medium transition "
+        + (on ? "border-accent bg-accent-subtle text-accent-subtle-foreground" : "border-input bg-background hover:bg-muted")
+        + " " + (className ?? "")}>
+      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" />
+      </svg>
+      {busy ? "Finding you…" : label}
+    </button>
+  );
+}
+
 export function ImageSearch({ label = "Search by image", param = "image", className }: {
   label?: string; param?: string; className?: string;
 }) {

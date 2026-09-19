@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { ShellStateProvider } from "@tentoroforge/renderer";
 import { MobileNav } from "./MobileNav";
+import { NotificationBell } from "./NotificationBell";
+import { MobileTabBar } from "./MobileTabBar";
 import { PersonaChrome } from "./PersonaChrome";
 import { RouteBreadcrumb, type RouteNode } from "./RouteBreadcrumb";
 import { AppNavigator } from "@/components/AppNavigator";
@@ -71,6 +73,12 @@ function isDetailPage(title: string | undefined, route: string): boolean {
 // item is icon-less. Only used by the nav-flow fallback below (a shell-provided
 // SideNav already carries its own icons).
 const ICON_MAP: [RegExp, string][] = [
+  [/discover|browse|explore|search|find/, "search"],
+  [/dispute|issue|problem|complaint/, "flag"],
+  [/review|rating|feedback/, "star"],
+  [/rental|loan|borrow|lend|swap/, "arrow-left-right"],
+  [/community|neighbo|group/, "users"],
+  [/tool|repair|equipment/, "wrench"],
   [/dash|home|overview/, "layout-dashboard"],
   [/user|member|guest|customer|client|contact|people|staff|employee/, "users"],
   [/room|unit|property|space/, "door-open"],
@@ -538,6 +546,21 @@ async function readNavPersonas(): Promise<NavPersona[]> {
   }
 }
 
+// A mobile-first application's bottom tabs (shell.json `mobile.tabs`), or none.
+async function readMobileTabs(): Promise<Sub[]> {
+  try {
+    const sp = path.join(process.cwd(), "src", "schemas", "shell.json");
+    const shell = JSON.parse(await fs.readFile(sp, "utf8"));
+    const tabs = shell?.mobile?.style === "tabs" ? shell.mobile.tabs : null;
+    return Array.isArray(tabs)
+      ? tabs.filter((t: Sub) => t && t.route && !/\[/.test(t.route))
+          .map((t: Sub) => ({ ...t, icon: t.icon || iconFor(t.label ?? "", t.route) }))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 async function readShellAppName(): Promise<string | undefined> {
   // 2026-08-13 — shell.json now carries a top-level `appName` string
   // (shell_templates.build_shell_deterministic). Prefer it so the
@@ -797,10 +820,23 @@ export default async function DashboardLayout({
   // Every frame below renders `body` rather than `children` directly, so
   // the crumb lands above page content in all four shell shapes without
   // four copies of the same JSX.
+  const mobileTabs = await readMobileTabs();
   const body = (
     <>
-      <RouteBreadcrumb routes={routeTree} />
+      {/* The frame's own row: where you are, and what the app told you. */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1"><RouteBreadcrumb routes={routeTree} /></div>
+        {session?.user && <NotificationBell />}
+      </div>
       {children}
+      {mobileTabs.length > 0 && (
+        <>
+          {/* Room under the last row for the bar, on a phone only. */}
+          <div aria-hidden="true" className="h-20 md:hidden" />
+          <MobileTabBar tabs={mobileTabs.map((t) => ({ label: t.label ?? t.route, route: t.route,
+                                                      icon: <RailGlyph name={t.icon} size={20} /> }))} />
+        </>
+      )}
     </>
   );
   const appName = navProps.appName || "__APP_NAME__";
@@ -920,7 +956,10 @@ export default async function DashboardLayout({
         <main data-shell-main className="h-full overflow-y-auto pb-24">
           <div className={frameClass(identity.density)}>{body}</div>
         </main>
-        <DockNav props={navProps} appName={appName} />
+        {/* A phone has the tab bar; two bottom bars would overlap. */}
+        <div className={mobileTabs.length ? "hidden md:block" : undefined}>
+          <DockNav props={navProps} appName={appName} />
+        </div>
       </div>
     );
   } else if (chrome === "right-rail") {

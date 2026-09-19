@@ -109,6 +109,9 @@ list(entity, opts?: ListOptions): Promise<Row[]>
 listPage(entity, opts?: ListOptions): Promise<Page<Row>>
 record(entity, id: string | undefined): Promise<Row | null>
 recordsById(entity, ids: (string | null | undefined)[]): Promise<Record<id, Row>>   // the rows foreign keys point at — show a related record by NAME
+near(entity, locationField, from: GeoPoint | null, { where?, radiusKm?, limit? }?): Promise<(Row & { distanceKm: number | null })[]>   // closest first
+whereAmI(ctx): Promise<GeoPoint | null>     // the reader: ?near= (set by <NearMe />), else their account's location
+distanceKm(a, b): number | null;  formatDistance(km): string   // "0.4 mi" — also from "@/sdk/client"
 count(entity, where?): Promise<number>
 total(entity, fn: "sum" | "avg" | "min" | "max", numericField, where?): Promise<number>
 series(entity, { groupBy: field; bucket?: "day" | "week" | "month"; fn?: "count" | "sum" | "avg" | "min" | "max"; field?: numericField }): Promise<SeriesPoint[]>
@@ -271,6 +274,11 @@ What a finished page looks like:
   with its facts in words ("Due back in 1 day 6 hrs · Mon 18:00") and its action.
   Then the rest, grouped by what the reader does with it (Active · Upcoming ·
   Past), not by table.
+- PLACES ARE DISTANCES. A `location` is never shown as numbers or a map pin of
+  someone's home: show how far it is (formatDistance → "0.4 mi"), rank lists with
+  near(…, await whereAmI(ctx)), offer <NearMe /> beside the search on a list of
+  nearby things, and in a form it is { label, kind: "location" } — the person
+  shares an approximate position with a button.
 - NAMES, NEVER IDS. A reader never sees an id or a shortened one ("Tool #a1b2…"). A
   foreign key is shown as the record it points at — its name, its owner, its
   picture: load them with recordsById(Entity, rows.map(r => r.toolId)) in load.ts
@@ -325,7 +333,7 @@ TECH_RULES = """\
 You write exactly two files for the page.
 
 load.ts — server only.
-  import { … } from "@/sdk/server";   (reads: list, listPage, record, recordsById, count, total, series, similar, currentUser, myAccount)
+  import { … } from "@/sdk/server";   (reads: list, listPage, record, recordsById, near, whereAmI, count, total, series, similar, currentUser, myAccount)
   export async function load(ctx: PageContext) { … return { …props } }
   - Return a plain object: the view's props. Return null for a record that does not
     exist (the route answers 404).
@@ -344,7 +352,7 @@ view.tsx — "use client" on the first line.
     react, next/link, next/navigation (useRouter, useSearchParams, usePathname),
     lucide-react (icons), the UI kit and library below,
     "@/sdk" (entity types, workflows, pages, widgets, href, fileUrl), "@/sdk/client" (useWorkflow,
-    WorkflowForm, WorkflowButton, WidgetView, ImageSearch), and
+    WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm), and
     `import type { Page, SeriesPoint, QueryRow, WidgetData } from "@/sdk/server"`.
   - Links: <Link href={href(pages.someKey, { id: row.id })}> — never a hand-written path.
   - Changing data: only through a workflow — <WorkflowForm workflow={workflows.x} fields={…} />,

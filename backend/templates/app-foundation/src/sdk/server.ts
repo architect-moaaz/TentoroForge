@@ -13,6 +13,9 @@ import { ensureDataEngineInitialized } from "@/lib/data-init";
 import { NUMERIC_FIELDS, READABLE_FIELDS } from "./schema";
 import type { AccountEntity, Entities, EntityName, NumericField } from "./schema";
 import { ACCOUNT } from "@/lib/account";
+import { distanceKm, isPoint, parseNear, type GeoPoint } from "./geo";
+
+export { distanceKm, formatDistance, parseNear, type GeoPoint } from "./geo";
 import type { WidgetRef } from "./widgets";
 
 export type { Entities, EntityName } from "./schema";
@@ -147,6 +150,34 @@ export async function list<E extends EntityName>(
   entity: E, opts: ListOptions<E> = {},
 ): Promise<Entities[E][]> {
   return (await listPage(entity, opts)).rows;
+}
+
+/** Rows of `entity` nearest to `from`, closest first, each with its
+ *  `distanceKm` — read as the signed-in user, so only what they may see.
+ *  `field` is the entity's `location` field; rows with none are left out.
+ *  Ranked over the first `scan` rows that match `where` (default 200): a
+ *  neighbourhood's worth, not a city's. */
+export async function near<E extends EntityName>(
+  entity: E, field: keyof Entities[E] & string, from: GeoPoint | null,
+  opts: { where?: Where<E>; radiusKm?: number; limit?: number; scan?: number } = {},
+): Promise<(Entities[E] & { distanceKm: number | null })[]> {
+  const rows = await list(entity, { where: opts.where, limit: Math.min(opts.scan ?? 200, 200) });
+  const out = rows
+    .map((r) => ({ ...r, distanceKm: from ? distanceKm(from, (r as unknown as Record<string, unknown>)[field]) : null }))
+    .filter((r) => (from ? r.distanceKm !== null && (opts.radiusKm === undefined || r.distanceKm <= opts.radiusKm) : true));
+  if (from) out.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+  return out.slice(0, opts.limit ?? 50);
+}
+
+/** Where the reader is: `?near=lat,lng` (set by <NearMe />), else the
+ *  location on their own account record, else null. */
+export async function whereAmI(ctx?: { searchParams?: Record<string, string | undefined> }): Promise<GeoPoint | null> {
+  const asked = parseNear(ctx?.searchParams?.near);
+  if (asked) return asked;
+  const field = ACCOUNT?.locationField;
+  if (!field) return null;
+  const mine = (await myAccount()) as Record<string, unknown> | null;
+  return mine && isPoint(mine[field]) ? mine[field] : null;
 }
 
 /** One record by id, or null when it does not exist or is not this user's to see. */

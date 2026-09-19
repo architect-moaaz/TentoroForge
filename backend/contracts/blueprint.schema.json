@@ -531,7 +531,8 @@
                         "related",
                         "count",
                         "total",
-                        "process"
+                        "process",
+                        "distance"
                       ]
                     },
                     "entity": {
@@ -796,6 +797,13 @@
             "type": "string"
           },
           "default": {}
+        },
+        "mobile": {
+          "type": "string",
+          "enum": [
+            "tabs",
+            "drawer"
+          ]
         }
       },
       "additionalProperties": false,
