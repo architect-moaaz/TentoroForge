@@ -141,7 +141,7 @@ export interface EntityRef {
   fields: { name: string; type: string; required: boolean; label: string; options: string[] }[];
 }
 
-export type ChartMark = "bar" | "line" | "area" | "pie" | "donut" | "funnel" | "radar" | "scatter" | "heatmap" | "treemap";
+export type ChartMark = "bar" | "line" | "area" | "pie" | "donut" | "funnel" | "radar" | "scatter" | "heatmap" | "treemap" | "sunburst" | "graph" | "map";
 
 export interface WidgetMeasure { key: string; aggregation: "count" | "count_distinct" | "sum" | "avg" | "min" | "max"; field?: string; label?: string }
 export interface WidgetRange { label?: string; from?: number; to?: number }
@@ -286,7 +286,7 @@ export type Op =
   | { op: "wrapCondition"; id: string; expr: string }
   | { op: "unwrapCondition"; id: string }
   | { op: "setObjectProp"; id: string; name: string; entries: ObjectEntry[] }
-  | { op: "addReturnKey"; file: "load"; key: string; expr: string }
+  | { op: "addReturnKey"; file: "load"; key: string; expr: string; type?: string; typeSource?: string; fallback?: string }
   | { op: "removeReturnKey"; file: "load"; key: string };
 
 export type Device = "desktop" | "tablet" | "mobile" | "custom";

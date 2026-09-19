@@ -685,3 +685,45 @@ def test_the_menu_is_arranged_and_validated_and_a_page_is_removed_with_its_links
     doc = service.load_blueprint(project).doc
     assert next(p for p in doc["pages"] if p["id"] == "PAGE-001")["status"] == "DEPRECATED"
     assert [n["page"] for n in doc["navigation"]["tree"]] == ["PAGE-002"], "its menu entry went with it"
+
+
+TYPED_LOAD = '''import { runWidget } from "@/sdk/server";
+import type { PageContext } from "@/sdk/server";
+import { widgets } from "@/sdk/widgets";
+
+export interface DashboardProps {
+  total: WidgetData;
+  error: string | null;
+}
+
+export async function load(ctx: PageContext): Promise<DashboardProps> {
+  try {
+    const total = await runWidget(widgets.total);
+    return {
+      total,
+      error: null,
+    };
+  } catch (e) {
+    return {
+      total: { rows: [], value: null },
+      error: "x",
+    };
+  }
+}
+'''
+
+
+def test_a_key_added_to_a_typed_load_is_declared_and_its_fallback_kept():
+    # A page whose load promises `DashboardProps` would refuse an undeclared key
+    # (TS2353); the op declares it, imports its type, and gives the catch return
+    # the fallback rather than a second query.
+    out = adapter.patch_load(TYPED_LOAD, [{"op": "addReturnKey", "file": "load", "key": "byCountry",
+                                          "expr": "await runWidget(widgets.byCountry)", "type": "WidgetData",
+                                          "typeSource": "@/sdk/server", "fallback": "{ rows: [], value: null }"}])
+    assert 'import type { PageContext, WidgetData } from "@/sdk/server";' in out
+    assert "  error: string | null;\n  byCountry: WidgetData;\n}" in out
+    assert "      error: null,\n      byCountry: await runWidget(widgets.byCountry),\n" in out
+    assert "      error: \"x\",\n      byCountry: { rows: [], value: null },\n" in out
+    back = adapter.patch_load(out, [{"op": "removeReturnKey", "file": "load", "key": "byCountry"}])
+    assert "byCountry" not in back
+    assert "  error: string | null;\n}" in back

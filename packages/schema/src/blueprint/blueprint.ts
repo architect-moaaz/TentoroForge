@@ -1102,10 +1102,12 @@ export const DataSource = z.discriminatedUnion("op", [
 
 /** How a chart widget draws its query. The encoding is the query's own shape:
  *  the first dimension is the axis (or the slice, the node, the heatmap
- *  column), the second the split, the measures the values. */
+ *  column, the map's country, where a graph's link starts), the second the
+ *  split (or the heatmap row, where a graph's link ends), the measures the
+ *  values. */
 export const ChartMark = z.enum([
   "bar", "line", "area", "pie", "donut", "funnel", "radar",
-  "scatter", "heatmap", "treemap",
+  "scatter", "heatmap", "treemap", "sunburst", "graph", "map",
 ]);
 
 export const ChartSpec = z.object({

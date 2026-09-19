@@ -35,7 +35,7 @@ export const ChartNode = z.object({
   props: z.object({
     chartType: z.enum([
       "line", "bar", "area", "pie", "donut", "funnel", "radar",
-      "scatter", "heatmap", "treemap",
+      "scatter", "heatmap", "treemap", "sunburst", "graph", "map",
     ]),
     // Either an inline array of row objects OR a Mustache binding string
     // like `"{{stats.dailyUsers}}"` that the runtime resolves to a real
@@ -59,9 +59,12 @@ export const ChartNode = z.object({
     // colorKey — the split: one series per distinct value of this key, the
     //   value read from the first series' dataKey. Rows `{month, status,
     //   count}` with xKey "month" and colorKey "status" draw a line per status.
-    // yKey — the second axis field: the heatmap's row, the scatter's y value.
-    // valueKey — the number a heatmap cell, a slice or a treemap node shows
-    //   (default: the first series' dataKey, then "value").
+    // yKey — the second axis field: the heatmap's row, the scatter's y value,
+    //   the graph's link end (xKey is where the link starts).
+    // valueKey — the number a heatmap cell, a slice, a treemap or sunburst
+    //   node, a graph link or a map's country shows (default: the first
+    //   series' dataKey, then "value"). A map reads xKey as the country's
+    //   name or ISO code.
     // sizeKey — a scatter point's area (a bubble chart).
     // labelKey — what names a scatter point in its tooltip.
     colorKey: z.string().optional(),

@@ -326,6 +326,35 @@ export function ChartPreview({ rows, mark, dimension, measureKey }: { rows: Reco
   if (!dimension) {
     return <p className="py-2 text-center text-2xl font-semibold tabular-nums">{rows[0][measureKey]}</p>;
   }
+  if (mark === "graph") {
+    const keys = Object.keys(rows[0]).filter((k) => k !== measureKey);
+    const [from, to] = keys;
+    return (
+      <ul className="space-y-0.5 text-[10px]">
+        {rows.slice(0, 8).map((r, i) => (
+          <li key={i} className="flex items-center gap-1">
+            <span className="truncate text-muted-foreground">{String(r[from] ?? "")}</span>
+            <span className="h-px flex-1 bg-border" style={{ height: `${Math.max(1, (4 * (Number(r[measureKey]) || 0)) / max)}px` }} />
+            <span className="truncate text-muted-foreground">{to ? String(r[to] ?? "") : "?"}</span>
+            <span className="ml-1 tabular-nums">{r[measureKey]}</span>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (mark === "map") {
+    return (
+      <ul className="grid grid-cols-2 gap-x-2 text-[10px]">
+        {rows.slice(0, 10).map((r, i) => (
+          <li key={i} className="flex items-center gap-1">
+            <span className="h-2 w-2 rounded-sm" style={{ background: `hsl(217 91% 60% / ${0.25 + (0.75 * (Number(r[measureKey]) || 0)) / max})` }} />
+            <span className="truncate text-muted-foreground">{String(r[dimension])}</span>
+            <span className="ml-auto tabular-nums">{r[measureKey]}</span>
+          </li>
+        ))}
+      </ul>
+    );
+  }
   if (mark === "heatmap" || mark === "scatter") {
     const keys = Object.keys(rows[0]);
     return (
@@ -335,7 +364,7 @@ export function ChartPreview({ rows, mark, dimension, measureKey }: { rows: Reco
       </table>
     );
   }
-  if (mark === "pie" || mark === "donut" || mark === "funnel" || mark === "treemap") {
+  if (mark === "pie" || mark === "donut" || mark === "funnel" || mark === "treemap" || mark === "sunburst") {
     return (
       <div>
         <div className="flex h-4 w-full overflow-hidden rounded-full">

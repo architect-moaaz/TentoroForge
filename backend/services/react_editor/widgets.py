@@ -26,7 +26,7 @@ from services.react_editor.service import EditorError, Project, _live, load_blue
 
 logger = logging.getLogger(__name__)
 
-MARKS = ("bar", "line", "area", "pie", "donut", "funnel", "radar", "scatter", "heatmap", "treemap")
+MARKS = ("bar", "line", "area", "pie", "donut", "funnel", "radar", "scatter", "heatmap", "treemap", "sunburst", "graph", "map")
 AGGREGATIONS = ("count", "count_distinct", "sum", "avg", "min", "max")
 BUCKETS = ("day", "week", "month", "quarter", "year")
 UNITS = ("number", "currency", "percent", "duration", "date", "text")

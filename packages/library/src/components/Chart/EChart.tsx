@@ -10,9 +10,10 @@ import * as React from "react";
 import * as echarts from "echarts/core";
 import {
   BarChart, LineChart, PieChart, FunnelChart, RadarChart, ScatterChart, HeatmapChart, TreemapChart,
+  SunburstChart, GraphChart, MapChart,
 } from "echarts/charts";
 import {
-  GridComponent, TooltipComponent, LegendComponent, VisualMapComponent, AriaComponent,
+  GridComponent, TooltipComponent, LegendComponent, VisualMapComponent, AriaComponent, GeoComponent,
 } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import type { ChartPropsType } from "./Chart.schema";
@@ -23,9 +24,21 @@ import {
 
 echarts.use([
   BarChart, LineChart, PieChart, FunnelChart, RadarChart, ScatterChart, HeatmapChart, TreemapChart,
-  GridComponent, TooltipComponent, LegendComponent, VisualMapComponent, AriaComponent,
+  SunburstChart, GraphChart, MapChart,
+  GridComponent, TooltipComponent, LegendComponent, VisualMapComponent, AriaComponent, GeoComponent,
   CanvasRenderer,
 ]);
+
+// The world's outlines are a quarter-megabyte ECharts does not ship; they are
+// fetched the first time a map chart mounts and registered once per page.
+let worldReady: Promise<void> | null = null;
+function ensureWorldMap(): Promise<void> {
+  if (echarts.getMap("world")) return Promise.resolve();
+  worldReady ??= import("./maps/world.json").then((mod) => {
+    if (!echarts.getMap("world")) echarts.registerMap("world", (mod.default ?? mod) as any);
+  });
+  return worldReady;
+}
 
 /** What a click on a mark says: the category (axis value, slice, cell column),
  *  the series it belongs to, its value, and — for a cell — the row value. */
@@ -123,7 +136,9 @@ export function EChart({ onSelect, className, ...props }: EChartProps) {
       if (!cb) return;
       const category = p.seriesType === "heatmap" && Array.isArray(p.value)
         ? String((inst.getOption() as any).xAxis?.[0]?.data?.[p.value[0]] ?? "")
-        : String(p.name ?? "");
+        : p.seriesType === "graph" && p.dataType === "edge"
+          ? `${p.data?.source ?? ""} → ${p.data?.target ?? ""}`
+          : String(p.name ?? "");
       const raw = Array.isArray(p.value) ? p.value[p.value.length - 1] : p.value;
       cb({ category, series: p.seriesName ?? null, value: typeof raw === "number" ? raw : null });
     });
@@ -136,10 +151,28 @@ export function EChart({ onSelect, className, ...props }: EChartProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [JSON.stringify(props), theme]);
 
+  // A map waits for its outlines; every other chart draws at once.
+  const [worldLoaded, setWorldLoaded] = React.useState(false);
+  const needsWorld = props.chartType === "map";
   React.useEffect(() => {
-    chart.current?.setOption(option as echarts.EChartsCoreOption, { notMerge: true });
+    if (!needsWorld || worldLoaded) return;
+    let live = true;
+    ensureWorldMap().then(() => { if (live) setWorldLoaded(true); })
+      .catch((err) => console.warn("[Chart] could not load the world map:", err));
+    return () => { live = false; };
+  }, [needsWorld, worldLoaded]);
+
+  React.useEffect(() => {
+    if (needsWorld && !worldLoaded) return;
+    try {
+      chart.current?.setOption(option as echarts.EChartsCoreOption, { notMerge: true });
+    } catch (err) {
+      // A chart that cannot draw its data leaves its box empty; it does not
+      // take the page with it.
+      console.warn("[Chart] could not draw:", err);
+    }
     if (ref.current) ref.current.style.cursor = onSelect ? "pointer" : "";
-  }, [option, onSelect]);
+  }, [option, onSelect, needsWorld, worldLoaded]);
 
   return (
     <div

@@ -1049,7 +1049,10 @@
                   "radar",
                   "scatter",
                   "heatmap",
-                  "treemap"
+                  "treemap",
+                  "sunburst",
+                  "graph",
+                  "map"
                 ]
               },
               "stacked": {

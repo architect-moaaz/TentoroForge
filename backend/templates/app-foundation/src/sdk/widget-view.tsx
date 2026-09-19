@@ -59,7 +59,8 @@ export function chartPropsFor(widget: WidgetRef, rows: Row[], currency = "USD") 
     return { ...base, xKey: ms[0]?.key, yKey: ms[1]?.key, sizeKey: ms[2]?.key,
              labelKey: dims[0]?.field, colorKey: dims[1]?.field };
   }
-  if (mark === "heatmap") {
+  if (mark === "heatmap" || mark === "graph") {
+    // The heatmap's column and row; the graph's link start and end.
     return { ...base, xKey: dims[0]?.field, yKey: dims[1]?.field, valueKey: ms[0]?.key };
   }
   return { ...base, xKey: dims[0]?.field ?? "label", colorKey: dims[1]?.field, valueKey: ms[0]?.key };

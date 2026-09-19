@@ -170,6 +170,7 @@ Every one of these renders on its own with plain props; pass resolved data, neve
 `{{binding}}` strings. Verified shapes:
 
   <Chart chartType="bar" | "line" | "area" | "pie" | "donut" | "funnel" | "radar" | "scatter" | "heatmap" | "treemap"
+                   | "sunburst" | "graph" | "map"
          data={rows} xKey="placedAt" series={[{ name: "Revenue", dataKey: "revenue" }]}
          colorKey?="region" yKey? valueKey? sizeKey? labelKey? format?="number" | "currency" | "percent" | "duration"
          currency?="GBP" encoding?={{ stacked?, horizontal?, sorted?: "asc" | "desc", topN?, valueLabels? }}
@@ -177,7 +178,9 @@ Every one of these renders on its own with plain props; pass resolved data, neve
       ECharts, themed from the app's tokens; colours come from a validated palette — do not pass them.
       Rows are QueryRow[] from `query()` (or SeriesPoint[] with xKey="label", dataKey "value").
       colorKey splits long-format rows into one series per value (a line per status); heatmap takes
-      xKey + yKey + valueKey; scatter takes xKey + yKey (two measures), sizeKey for bubbles.
+      xKey + yKey + valueKey; scatter takes xKey + yKey (two measures), sizeKey for bubbles;
+      sunburst nests xKey under colorKey like treemap; graph links xKey → yKey, valueKey the link's
+      weight; map colours the country named (or ISO-coded) in xKey by valueKey.
       One value axis only — never plot two measures of different scale on one chart.
   <MetricTile label="Open cases" value={42} format="number" | "currency" | "percent"
               delta={{ value: 0.12, direction: "up" }} trend={[3, 5, 4, 7]} />

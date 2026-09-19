@@ -869,6 +869,11 @@ _MARK_SHAPE: dict[str, tuple[tuple[int, int], tuple[int, int]]] = {
     "treemap": ((1, 2), (1, 1)),
     "heatmap": ((2, 2), (1, 1)),
     "scatter": ((1, 2), (2, 3)),
+    "sunburst": ((1, 2), (1, 1)),
+    # a link from the first dimension's value to the second's, as wide as the measure
+    "graph":   ((2, 2), (1, 1)),
+    # the dimension holds a country's name or ISO code
+    "map":     ((1, 1), (1, 1)),
 }
 
 _DATE_TYPES = ("date", "time", "timestamp")

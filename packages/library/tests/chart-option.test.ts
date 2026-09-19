@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildChartOption, formatValue, DEFAULT_THEME, MAX_SERIES } from "../src/components/Chart/chartOption";
+import { buildChartOption, formatValue, placeName, DEFAULT_THEME, MAX_SERIES } from "../src/components/Chart/chartOption";
 import type { ChartPropsType } from "../src/components/Chart/Chart.schema";
 
 const props = (p: Partial<ChartPropsType>): ChartPropsType =>
@@ -124,6 +124,50 @@ describe("buildChartOption — other marks", () => {
     expect(parent.children.map((c: any) => [c.name, c.value])).toEqual([["A", 1], ["B", 2]]);
     // leaves wear their parent's hue: the split is the identity
     expect(parent.children.every((c: any) => c.itemStyle.color === parent.itemStyle.color)).toBe(true);
+  });
+
+  it("sunburst nests leaves under the split, the outer ring lighter", () => {
+    const data = [{ cat: "A", team: "x", value: 1 }, { cat: "B", team: "x", value: 2 }, { cat: "A", team: "y", value: 4 }];
+    const o = opt({ chartType: "sunburst", data, xKey: "cat", colorKey: "team" });
+    expect(o.series[0].type).toBe("sunburst");
+    expect(o.series[0].data.map((d: any) => [d.name, d.children.map((c: any) => c.value)])).toEqual([["x", [1, 2]], ["y", [4]]]);
+    expect(o.series[0].levels[2].itemStyle.opacity).toBeLessThan(1);
+    // without a split: plain slices, one hue
+    const flat = opt({ chartType: "sunburst", data, xKey: "cat" });
+    expect(flat.series[0].data.map((d: any) => [d.name, d.value])).toEqual([["A", 5], ["B", 2]]);
+  });
+
+  it("graph links the first key's value to the second's, as wide as the measure", () => {
+    const data = [
+      { from: "Sales", to: "Support", n: 6 }, { from: "Sales", to: "Support", n: 2 },
+      { from: "Support", to: "Sales", n: 1 }, { from: "Ops", to: "Ops", n: 9 },
+    ];
+    const o = opt({ chartType: "graph", data, xKey: "from", yKey: "to", valueKey: "n" });
+    const s = o.series[0];
+    expect(s.type).toBe("graph");
+    expect(s.links.map((l: any) => [l.source, l.target, l.value])).toEqual([["Sales", "Support", 8], ["Support", "Sales", 1]]);
+    // a link to itself is not a link; the node's size is everything touching it
+    expect(s.data.map((n: any) => [n.name, n.value])).toEqual([["Sales", 9], ["Support", 9]]);
+    expect(s.links[0].lineStyle.width).toBeGreaterThan(s.links[1].lineStyle.width);
+    expect(o.legend.data).toEqual(["From", "To"]);
+  });
+
+  it("map colours each place by its total, reading codes and short names", () => {
+    const data = [{ country: "US", n: 3 }, { country: "United States", n: 4 }, { country: "uk", n: 1 }, { country: "Kenya", n: 2 }];
+    const o = opt({ chartType: "map", data, xKey: "country", valueKey: "n" });
+    expect(o.series[0]).toMatchObject({ type: "map", map: "world" });
+    expect(o.series[0].data).toEqual([{ name: "United States", value: 7 }, { name: "United Kingdom", value: 1 }, { name: "Kenya", value: 2 }]);
+    expect(o.visualMap.inRange.color).toEqual(DEFAULT_THEME.sequential);
+    expect(o.visualMap.max).toBe(7);
+  });
+
+  it("the world outline names every place the aliases point at", async () => {
+    const world = (await import("../src/components/Chart/maps/world.json")).default as { features: { properties: { name: string } }[] };
+    const names = new Set(world.features.map((f) => f.properties.name));
+    expect(world.features.length).toBeGreaterThan(200);
+    for (const n of ["United States", "United Kingdom", "Kenya", "Czech Rep.", "Dem. Rep. Congo", "Côte d'Ivoire", "Korea"]) expect(names.has(n)).toBe(true);
+    expect(names.has(placeName("usa"))).toBe(true);
+    expect(placeName("Kenya")).toBe("Kenya");
   });
 
   it("radar draws one polygon per series over the categories", () => {

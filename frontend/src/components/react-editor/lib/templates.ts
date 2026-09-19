@@ -221,7 +221,8 @@ export function widgetOps(model: PageModel, widget: WidgetRef, opts: { parentId?
   return [
     { op: "addImport", file: "load", source: "@/sdk/server", names: ["runWidget"] },
     { op: "addImport", file: "load", source: "@/sdk", names: ["widgets"] },
-    { op: "addReturnKey", file: "load", key, expr: `await runWidget(widgets.${key})` },
+    { op: "addReturnKey", file: "load", key, expr: `await runWidget(widgets.${key})`,
+      type: "WidgetData", typeSource: "@/sdk/server", fallback: "{ rows: [], value: null }" },
     { op: "addImport", source: "@/sdk/client", names: ["WidgetView"] },
     { op: "addImport", source: "@/sdk", names: ["widgets"] },
     ...ops,
@@ -271,6 +272,9 @@ export const MARKS: { value: ChartMark; label: string; dims: [number, number]; m
   { value: "treemap", label: "Treemap", dims: [1, 2], measures: [1, 1], about: "Rectangles sized by one number" },
   { value: "heatmap", label: "Heatmap", dims: [2, 2], measures: [1, 1], about: "A grid of two groupings, coloured by one number" },
   { value: "scatter", label: "Scatter", dims: [1, 2], measures: [2, 3], about: "A dot per group placed by two numbers (a third sets its size)" },
+  { value: "sunburst", label: "Sunburst", dims: [1, 2], measures: [1, 1], about: "Rings of shares — the split inside, its groups around it" },
+  { value: "graph", label: "Graph", dims: [2, 2], measures: [1, 1], about: "Who connects to whom: a link from the first grouping to the second, as thick as the number" },
+  { value: "map", label: "Map", dims: [1, 1], measures: [1, 1], about: "Countries coloured by one number — group by a field that holds a country's name or code" },
 ];
 
 /** Why a mark cannot be drawn from these choices, in plain words — or null when it can. */
@@ -278,7 +282,10 @@ export function markProblem(mark: ChartMark, dims: number, measures: number): st
   const m = MARKS.find((x) => x.value === mark);
   if (!m) return "Unknown chart";
   const [dlo, dhi] = m.dims; const [mlo, mhi] = m.measures;
-  if (dims < dlo) return dlo === 2 ? "needs a second grouping (“also split by”)" : "needs something to group by";
+  if (dims < dlo) {
+    if (mark === "graph") return "needs a second grouping (“also split by”) — where each link ends";
+    return dlo === 2 ? "needs a second grouping (“also split by”)" : "needs something to group by";
+  }
   if (dims > dhi) return dhi === 1 ? "groups by one thing only — remove the split" : "too many groupings";
   if (measures < mlo) return mlo === 2 ? "needs a second number (“and also”)" : "needs a number";
   if (measures > mhi) return mhi === 1 ? "shows one number only — remove the extra" : "too many numbers";

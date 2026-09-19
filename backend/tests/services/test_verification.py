@@ -550,6 +550,11 @@ def test_a_chart_needs_its_mark_and_the_mark_its_shape():
     assert any("heatmap draws 2 dimension" in h for h in _query_hits(query_doc({"mark": "heatmap"})))
     # a scatter plots two measures against each other
     assert any("scatter draws 2–3 measure" in h for h in _query_hits(query_doc({"mark": "scatter"})))
+    # a graph links where a link starts to where it ends
+    assert any("graph draws 2 dimension" in h for h in _query_hits(query_doc({"mark": "graph"})))
+    # a map is one place per row; a split has nowhere to go
+    d = query_doc({"mark": "map"}, dimensions=[{"field": "region"}, {"field": "team"}])
+    assert any("map draws 1 dimension" in h for h in _query_hits(d))
     # a split line draws one measure
     d = query_doc({"mark": "line"}, measures=[{"key": "a", "aggregation": "count"},
                                              {"key": "b", "aggregation": "sum", "field": "days"}],

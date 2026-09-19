@@ -28,7 +28,7 @@
  * the platform's.
  */
 import { createHash } from "crypto";
-import { mkdirSync, readFileSync, writeFileSync, existsSync, copyFileSync, readdirSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, copyFileSync, readdirSync, realpathSync, statSync } from "fs";
 import { createRequire } from "module";
 import { dirname, join, resolve } from "path";
 
@@ -59,11 +59,22 @@ function prepare(appRoot, shimsDir, entities, roles) {
   return { req, esbuild: req("esbuild"), shims };
 }
 
+/** Libraries the vendored engine imports by package name that are not
+ *  packages: they ship as loose files under the app's src/lib and Next's
+ *  config aliases them (assembly.LOOSE_LIBS). Resolved the same way here, so a
+ *  build does not depend on a node_modules above the app that happens to
+ *  hold them. */
+const LOOSE_LIBS = { "@tentoroforge/feel-lite": "src/lib/feel-lite" };
+
 /** The resolutions every build shares: Next's modules and the server SDK go to the shims. */
-function shimPlugin(shims) {
+function shimPlugin(shims, appRoot) {
   return {
     name: "forge-jit-shims",
     setup(b) {
+      for (const [name, rel] of Object.entries(LOOSE_LIBS)) {
+        const escaped = name.replace(/[/@.]/g, "\\$&");
+        b.onResolve({ filter: new RegExp(`^${escaped}(/.*)?$`) }, (args) => ({ path: resolveLoose(join(appRoot, rel), args.path.slice(name.length)) }));
+      }
       b.onResolve({ filter: /^next\/link$/ }, () => ({ path: join(shims, "link.tsx") }));
       b.onResolve({ filter: /^next\/navigation$/ }, () => ({ path: join(shims, "navigation.tsx") }));
       b.onResolve({ filter: /^next\/image$/ }, () => ({ path: join(shims, "image.tsx") }));
@@ -75,6 +86,15 @@ function shimPlugin(shims) {
       b.onLoad({ filter: /.*/, namespace: "forge-css" }, () => ({ contents: "", loader: "js" }));
     },
   };
+}
+
+/** The file a loose library's specifier names: its index, or a file inside it. */
+function resolveLoose(dir, sub) {
+  const base = sub ? join(dir, sub) : dir;
+  for (const c of [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx"), join(base, "index.js")]) {
+    if (existsSync(c) && !statSync(c).isDirectory()) return c;
+  }
+  return base;
 }
 
 const BASE_BUILD = {
@@ -114,7 +134,7 @@ async function buildVendor({ appRoot, pages, shimsDir, entities, roles }) {
     `export const __all = [f0, f1, f2, f3, ${(pages || []).map((_, i) => `v${i}, l${i}`).join(", ")}];`,
   ];
   writeFileSync(probe, lines.join("\n") + "\n");
-  const disc = await esbuild.build({ ...BASE_BUILD, absWorkingDir: appRoot, entryPoints: [probe], outfile: join(work, "probe.js"), plugins: [shimPlugin(shims)] });
+  const disc = await esbuild.build({ ...BASE_BUILD, absWorkingDir: appRoot, entryPoints: [probe], outfile: join(work, "probe.js"), plugins: [shimPlugin(shims, appRoot)] });
   const specifiers = new Set(ALWAYS_VENDOR);
   for (const [file, info] of Object.entries(disc.metafile.inputs)) {
     if (isVendorPath(file)) continue; // only what APP code asks for by name
@@ -131,7 +151,7 @@ async function buildVendor({ appRoot, pages, shimsDir, entities, roles }) {
   writeFileSync(entry, list.map((s, i) => `import * as m${i} from ${JSON.stringify(s)};`).join("\n")
     + `\nwindow.__forgeVendor = {\n${list.map((s, i) => `  ${JSON.stringify(s)}: m${i},`).join("\n")}\n};\n`);
   const result = await esbuild.build({ ...BASE_BUILD, absWorkingDir: appRoot, entryPoints: [entry], outfile: join(work, "vendor.js"),
-    format: "iife", minify: true, plugins: [shimPlugin(shims)] });
+    format: "iife", minify: true, plugins: [shimPlugin(shims, appRoot)] });
   const js = (result.outputFiles.find((f) => f.path.endsWith("vendor.js")) ?? result.outputFiles[0])?.text ?? "";
   if (!js) throw new Error("esbuild produced no vendor script");
 
@@ -140,7 +160,19 @@ async function buildVendor({ appRoot, pages, shimsDir, entities, roles }) {
   const inputs = Object.keys(result.metafile.inputs).filter((p) => !p.startsWith("<"));
   const candidates = vendorCandidates(appRoot, req, inputs);
 
-  const versions = list.map((s) => { try { return req(`${s.split("/").slice(0, s.startsWith("@") ? 2 : 1).join("/")}/package.json`).version; } catch { return "?"; } });
+  // A package's version names it — except a vendored one (`file:./vendor/…`),
+  // which a platform cutover replaces under the same version; its entry
+  // file's stamp tells those apart.
+  const versions = list.map((s) => {
+    const name = s.split("/").slice(0, s.startsWith("@") ? 2 : 1).join("/");
+    try {
+      const pj = req.resolve(`${name}/package.json`);
+      const meta = req(pj);
+      if (!/\/vendor\//.test(realpathSync(pj))) return meta.version;
+      const st = statSync(join(dirname(realpathSync(pj)), meta.main || "package.json"));
+      return `${meta.version}@${Math.round(st.mtimeMs)}:${st.size}`;
+    } catch { return "?"; }
+  });
   const key = createHash("sha1").update(JSON.stringify([list, versions])).digest("hex").slice(0, 16);
   return { key, js, specifiers: list, candidates, inputs: inputs.length,
            timings: { discoverMs: tBuild - tDisc, buildMs: tCand - tBuild, candidatesMs: Date.now() - tCand } };
@@ -212,7 +244,7 @@ module.exports = out;`,
   };
   const tEs = Date.now();
   const result = await esbuild.build({ ...BASE_BUILD, absWorkingDir: appRoot, entryPoints: [entry], outfile: join(work, "bundle.js"),
-    format: "iife", plugins: [shimPlugin(shims), vendorPlugin] });
+    format: "iife", plugins: [shimPlugin(shims, appRoot), vendorPlugin] });
   const js = (result.outputFiles.find((f) => f.path.endsWith("bundle.js")) ?? result.outputFiles[0])?.text ?? "";
   if (!js) throw new Error("esbuild produced no script");
   const inputs = Object.keys(result.metafile.inputs).filter((p) => !p.startsWith("<") && !p.startsWith("forge-vendor:"));

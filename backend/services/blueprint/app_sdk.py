@@ -433,7 +433,7 @@ def emit_widgets(doc: dict) -> str:
            'import type { EntityName } from "./schema";',
            "",
            "export type WidgetUnit = \"number\" | \"currency\" | \"percent\" | \"duration\" | \"date\" | \"text\";",
-           "export type ChartMark = \"bar\" | \"line\" | \"area\" | \"pie\" | \"donut\" | \"funnel\" | \"radar\" | \"scatter\" | \"heatmap\" | \"treemap\";",
+           "export type ChartMark = \"bar\" | \"line\" | \"area\" | \"pie\" | \"donut\" | \"funnel\" | \"radar\" | \"scatter\" | \"heatmap\" | \"treemap\" | \"sunburst\" | \"graph\" | \"map\";",
            "export type WidgetSource =",
            "  | { op: \"query\"; entity: EntityName;",
            "      measures: readonly { key: string; label?: string; aggregation: \"count\" | \"count_distinct\" | \"sum\" | \"avg\" | \"min\" | \"max\"; field?: string }[];",

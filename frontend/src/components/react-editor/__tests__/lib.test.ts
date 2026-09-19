@@ -238,7 +238,8 @@ describe("charts", () => {
   it("writes the load key, the imports and the card as one transaction", () => {
     const ops = widgetOps({ ...model, viewParam: { kind: "pattern", names: [], span: [0, 0] } }, widget, { parentId: "r1", index: 0 });
     expect(ops.filter((o) => "file" in o && o.file === "load").map((o) => o.op)).toEqual(["addImport", "addImport", "addReturnKey"]);
-    expect(ops.find((o) => o.op === "addReturnKey")).toEqual({ op: "addReturnKey", file: "load", key: "revenueByStatus", expr: "await runWidget(widgets.revenueByStatus)" });
+    expect(ops.find((o) => o.op === "addReturnKey")).toEqual({ op: "addReturnKey", file: "load", key: "revenueByStatus", expr: "await runWidget(widgets.revenueByStatus)",
+      type: "WidgetData", typeSource: "@/sdk/server", fallback: "{ rows: [], value: null }" });
     expect(ops[ops.length - 1]).toEqual({ op: "insert", parentId: "r1", index: 0, jsx: "<WidgetView widget={widgets.revenueByStatus} data={revenueByStatus} />" });
     expect(ops.some((o) => o.op === "ensureProp")).toBe(true);
   });
@@ -302,8 +303,12 @@ describe("interactions", () => {
 import { MARKS, markProblem } from "../lib/templates";
 
 describe("every chart the app draws", () => {
-  it("offers all ten marks and says what each needs", () => {
-    expect(MARKS.map((m) => m.value)).toEqual(["bar", "line", "area", "pie", "donut", "funnel", "radar", "treemap", "heatmap", "scatter"]);
+  it("offers every mark the app draws and says what each needs", () => {
+    expect(MARKS.map((m) => m.value)).toEqual(["bar", "line", "area", "pie", "donut", "funnel", "radar", "treemap", "heatmap", "scatter", "sunburst", "graph", "map"]);
+    expect(markProblem("graph", 1, 1)).toBe("needs a second grouping (“also split by”) — where each link ends");
+    expect(markProblem("graph", 2, 1)).toBeNull();
+    expect(markProblem("map", 2, 1)).toBe("groups by one thing only — remove the split");
+    expect(markProblem("sunburst", 2, 1)).toBeNull();
     expect(markProblem("bar", 1, 1)).toBeNull();
     expect(markProblem("heatmap", 1, 1)).toBe("needs a second grouping (“also split by”)");
     expect(markProblem("scatter", 1, 1)).toBe("needs a second number (“and also”)");

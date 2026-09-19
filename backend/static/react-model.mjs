@@ -440,19 +440,46 @@ function loadModelFromAst(ast) {
   }
   const returns = [];
   if (fn) {
-    const walk = (n) => {
+    // A return inside a `catch` is the page's fallback shape, not its data.
+    const walk = (n, inCatch) => {
       if (n.type === "ReturnStatement" && n.argument) {
         let arg = n.argument;
         while (arg.type === "TSAsExpression" || arg.type === "ParenthesizedExpression" || arg.type === "TSSatisfiesExpression") arg = arg.expression;
-        if (arg.type === "ObjectExpression") returns.push({ stmt: n, obj: arg });
+        if (arg.type === "ObjectExpression") returns.push({ stmt: n, obj: arg, fallback: inCatch });
         return;
       }
       if ((n.type === "ArrowFunctionExpression" || n.type === "FunctionExpression" || n.type === "FunctionDeclaration") && n !== fn) return;
-      for (const c of children(n)) walk(c);
+      for (const c of children(n)) walk(c, inCatch || n.type === "CatchClause");
     };
-    walk(fn.body);
+    walk(fn.body, false);
   }
-  return { fn, returns };
+  return { fn, returns, propsType: fn ? propsTypeOf(ast, fn) : null };
+}
+
+/** The object type `load` promises — `Promise<DashboardProps>` resolved to
+ *  the interface or type literal that declares it, so a key added to the
+ *  data can be declared too. Null when the type is not written down here. */
+function propsTypeOf(ast, fn) {
+  let t = fn.returnType && fn.returnType.typeAnnotation;
+  if (!t) return null;
+  if (t.type === "TSTypeReference" && t.typeName.type === "Identifier" && t.typeName.name === "Promise"
+      && t.typeParameters && t.typeParameters.params.length) t = t.typeParameters.params[0];
+  if (t.type === "TSTypeLiteral") return { members: t.members, start: t.start, end: t.end };
+  if (t.type !== "TSTypeReference" || t.typeName.type !== "Identifier") return null;
+  const name = t.typeName.name;
+  for (const s of ast.program.body) {
+    const d = s.type === "ExportNamedDeclaration" ? s.declaration : s;
+    if (!d) continue;
+    if (d.type === "TSInterfaceDeclaration" && d.id.name === name) return { members: d.body.body, start: d.body.start, end: d.body.end };
+    if (d.type === "TSTypeAliasDeclaration" && d.id.name === name && d.typeAnnotation.type === "TSTypeLiteral") {
+      return { members: d.typeAnnotation.members, start: d.typeAnnotation.start, end: d.typeAnnotation.end };
+    }
+  }
+  return null;
+}
+
+function memberNamed(members, key) {
+  return members.find((mb) => mb.type === "TSPropertySignature" && mb.key && (mb.key.name ?? mb.key.value) === key) || null;
 }
 
 function model(view, load) {
@@ -687,11 +714,13 @@ function localOf(name) {
 function opAddImport(source, m, op) {
   // A name already bound by ANY import stays as it is — the page may take
   // `widgets` from "@/sdk/widgets" rather than "@/sdk", and a second binding
-  // would not parse.
-  const bound = new Set(m.imports.filter((i) => !i.typeOnly).flatMap((i) => i.names.map(localOf)));
+  // would not parse. A type-only import (`typeOnly`) is satisfied by a
+  // type-only binding as well.
+  const typeOnly = !!op.typeOnly;
+  const bound = new Set(m.imports.filter((i) => typeOnly || !i.typeOnly).flatMap((i) => i.names.map(localOf)));
   const names = (op.names ?? []).filter((nm) => nm && !bound.has(localOf(nm)));
   if (!names.length) return source;
-  const existing = m.imports.find((i) => i.source === op.source && !i.typeOnly);
+  const existing = m.imports.find((i) => i.source === op.source && !!i.typeOnly === typeOnly);
   if (existing) {
     const missing = names.filter((nm) => !existing.names.includes(nm));
     if (!missing.length) return source;
@@ -705,7 +734,7 @@ function opAddImport(source, m, op) {
   const defaults = names.filter((n) => n.startsWith("default:")).map(localOf);
   const named = names.filter((n) => !n.includes(":"));
   const clause = [defaults[0], named.length ? `{ ${named.join(", ")} }` : ""].filter(Boolean).join(", ");
-  const line = `import ${clause} from "${op.source}";\n`;
+  const line = `import ${typeOnly ? "type " : ""}${clause} from "${op.source}";\n`;
   const last = m.imports.length ? m.imports[m.imports.length - 1] : null;
   if (last) {
     let at = last.span[1];
@@ -835,23 +864,43 @@ function needLoad(m) {
 
 function opAddReturnKey(source, m, op) {
   needLoad(m);
-  // Every `return { … }` of load gets the key, so the page's data has one shape.
+  // Every `return { … }` of load gets the key, so the page's data has one
+  // shape; a `catch` return gets the fallback value when one is given.
   const edits = [];
-  for (const { stmt, obj } of m.returns) {
+  for (const { stmt, obj, fallback } of m.returns) {
+    const expr = fallback && op.fallback ? op.fallback : op.expr;
     const existing = obj.properties.find((p) => p.type === "ObjectProperty" && (p.key.name ?? p.key.value) === op.key);
-    if (existing) { edits.push([existing.value.start, existing.value.end, op.expr]); continue; }
+    if (existing) { edits.push([existing.value.start, existing.value.end, expr]); continue; }
     const props = obj.properties;
     if (!props.length) {
       const indent = lineIndent(source, stmt.start);
-      edits.push([obj.start, obj.end, `{\n${indent}  ${op.key}: ${op.expr},\n${indent}}`]);
+      edits.push([obj.start, obj.end, `{\n${indent}  ${op.key}: ${expr},\n${indent}}`]);
       continue;
     }
     const last = props[props.length - 1];
     const indent = lineIndent(source, last.start);
-    edits.push([last.end, last.end, `,\n${indent}${op.key}: ${op.expr}`]);
+    edits.push([last.end, last.end, `,\n${indent}${op.key}: ${expr}`]);
+  }
+  // The declared props type says the key is there too, when the page has one.
+  const pt = m.propsType;
+  if (pt && op.type) {
+    const existing = memberNamed(pt.members, op.key);
+    if (existing && existing.typeAnnotation) {
+      edits.push([existing.typeAnnotation.typeAnnotation.start, existing.typeAnnotation.typeAnnotation.end, op.type]);
+    } else if (!existing) {
+      const last = pt.members[pt.members.length - 1];
+      const indent = last ? lineIndent(source, last.start) : lineIndent(source, pt.start) + "  ";
+      const close = pt.end - 1;
+      const nl = source[close - 1] === "\n" ? "" : "\n";
+      edits.push([close, close, `${nl}${indent}${op.key}: ${op.type};\n${indent.slice(0, Math.max(0, indent.length - 2))}`]);
+    }
   }
   edits.sort((a, b) => b[0] - a[0]);
   for (const [s, e, text] of edits) source = splice(source, s, e, text);
+  const typeName = op.type && /^[A-Za-z_$][\w$]*/.exec(op.type);
+  if (pt && typeName && op.typeSource) {
+    source = opAddImport(source, loadModel(source), { source: op.typeSource, names: [typeName[0]], typeOnly: true });
+  }
   return source;
 }
 
@@ -867,6 +916,14 @@ function opRemoveReturnKey(source, m, op) {
     const comma = /^\s*,/.exec(after);
     if (comma) end += comma[0].length;
     edits.push([p.start, end]);
+  }
+  const mb = m.propsType ? memberNamed(m.propsType.members, op.key) : null;
+  if (mb) {
+    let end = mb.end;
+    const after = source.slice(end, m.propsType.end);
+    const sep = /^\s*[;,]/.exec(after);
+    if (sep && !/\n/.test(sep[0])) end += sep[0].length;
+    edits.push([mb.start, end]);
   }
   edits.sort((a, b) => b[0] - a[0]);
   for (const [s, e] of edits) source = cutWithLine(source, s, e);

@@ -77,6 +77,22 @@ def _require_toolchain(project: Project) -> None:
                                                "cannot be rendered here. Run the build once, then open the editor.")
 
 
+def _vendored_stamp(project: Project) -> str:
+    """The platform packages the app carries under ``vendor/`` (``file:`` deps),
+    by version and entry-file stamp: a cutover replaces them under the same
+    version, and the shared script must follow."""
+    h = hashlib.sha1()
+    for pj in sorted((project.app_root / "vendor").glob("*/*/package.json")):
+        try:
+            meta = json.loads(pj.read_text("utf-8"))
+            main = pj.parent / str(meta.get("main") or "package.json")
+            st = main.stat()
+            h.update(f"{pj.parent.name}@{meta.get('version')}:{int(st.st_mtime)}:{st.st_size};".encode())
+        except (OSError, json.JSONDecodeError, ValueError):
+            h.update(f"{pj.parent.name}:?;".encode())
+    return h.hexdigest()[:12]
+
+
 def vendor(project: Project, *, fresh: bool = False, timeout: float = 180.0) -> dict[str, Any]:
     """The shared script every page of this app runs on — React, the library,
     the icons — built once and cached by what it contains. ``{key, js, specifiers,
@@ -96,7 +112,8 @@ def vendor(project: Project, *, fresh: bool = False, timeout: float = 180.0) -> 
     if pointer.exists() and not fresh:
         try:
             current = json.loads(pointer.read_text("utf-8"))
-            same_pages = current.get("pages") == pages and current.get("tooling") == _tooling_hash()
+            same_pages = (current.get("pages") == pages and current.get("tooling") == _tooling_hash()
+                          and current.get("vendored") == _vendored_stamp(project))
             path = cache_dir / f"vendor-{current.get('key')}.json"
             if same_pages and path.exists():
                 out = json.loads(path.read_text("utf-8"))
@@ -113,7 +130,8 @@ def vendor(project: Project, *, fresh: bool = False, timeout: float = 180.0) -> 
            "ms": int((time.monotonic() - t0) * 1000), "timings": result.get("timings"), "cached": False}
     cache_dir.mkdir(parents=True, exist_ok=True)
     (cache_dir / f"vendor-{out['key']}.json").write_text(json.dumps(out), "utf-8")
-    pointer.write_text(json.dumps({"key": out["key"], "pages": pages, "tooling": _tooling_hash()}), "utf-8")
+    pointer.write_text(json.dumps({"key": out["key"], "pages": pages, "tooling": _tooling_hash(),
+                                   "vendored": _vendored_stamp(project)}), "utf-8")
     for old in cache_dir.glob("vendor-*.json"):
         if old.name not in (f"vendor-{out['key']}.json", "vendor-current.json"):
             old.unlink(missing_ok=True)

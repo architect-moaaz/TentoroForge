@@ -37,7 +37,7 @@ function Placeholder({ height, children }: { height?: number; children: React.Re
 
 /**
  * Every chart the library draws — bar, line, area, pie, donut, funnel, radar,
- * scatter, heatmap and treemap — on ECharts (`EChart`).
+ * scatter, heatmap, treemap, sunburst, graph and map — on ECharts (`EChart`).
  *
  * Schema accepts `props.data` as either an inline array OR a Mustache
  * binding string (`"{{stats.daily}}"`). When the binding hasn't been resolved
