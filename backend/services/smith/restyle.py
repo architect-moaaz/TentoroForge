@@ -50,9 +50,14 @@ def palette_decision(doc: dict) -> dict | None:
     whose reason names the palette question — the one discovery asked."""
     ds = doc.get("designSystem") or {}
     evidence = " ".join(str(ds.get(k) or "") for k in ("visualPersonality", "paletteEvidence")).lower()
+    # A decision another one supersedes is no longer binding: the second
+    # restyle said it superseded the ORIGINAL palette, skipping the first
+    # restyle, and briefed the design agent with the wrong "earlier" palette.
+    replaced = {str(d.get("supersedes")) for d in doc.get("decisions") or []
+                if isinstance(d, dict) and d.get("supersedes")}
     best = None
     for d in doc.get("decisions") or []:
-        if not isinstance(d, dict) or d.get("status") not in (None, "APPROVED"):
+        if not isinstance(d, dict) or d.get("status") not in (None, "APPROVED") or str(d.get("id")) in replaced:
             continue
         text = str(d.get("decision") or "").strip()
         reason = str(d.get("reason") or "").lower()
@@ -71,7 +76,8 @@ def record_decision(svc: Any, change: str) -> dict:
     previous = palette_decision(svc.doc)
     body = {
         "decision": change,
-        "reason": "Asked in conversation after the build; the design system was re-decided against it.",
+        "reason": "Asked in conversation after the build; the design system's palette and theme were "
+                  "re-decided against it.",
         "source": "user",
         "approvedBy": "user",
         "binding": True,

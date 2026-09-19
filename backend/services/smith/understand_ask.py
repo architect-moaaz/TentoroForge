@@ -61,7 +61,12 @@ Return ONLY a JSON object with exactly these keys:
       ONE STEP: "grid view, with the photo, the name as 'Product', the
       description and the area" on Discover is one ask about Discover, not
       four — so a long message fits the list and nothing falls off its end.
-      Data-model changes come before the screens that show them. A long message that is hard to
+      Data-model changes come before the screens that show them. A step is
+      a change still to make: what the Blueprint already has (a field that
+      exists) is not a step. "Good visuals", "look nicer", "with images" on
+      a screen are asks about what that screen SHOWS (photos, cards) — part
+      of that screen's step, not a restyle; a restyle is only for named
+      colours, fonts or an overall look. A long message that is hard to
       follow is still a list of asks; list what you can read and ask about
       the rest, rather than answering that you did not follow.
       WHAT A SCREEN CALLS A THING IS NOT WHAT THE DATA MODEL CALLS IT. "The
@@ -448,7 +453,9 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   "route": as above, and
   "widgets": a JSON array of the sections to add, each naming WHAT IT SHOWS
       ("Upcoming Sessions", "Quorum Status"). Never an empty array — the
-      widgets are the request.
+      widgets are the request. A field the record already has, to show or
+      show more prominently, is its exact field name alone ("fathersName",
+      "description") — that is a value on the screen, not a count or chart.
 
   add_field needs:
   "entity": the name of the existing entity gaining the field, as the Blueprint

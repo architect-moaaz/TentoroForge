@@ -111,3 +111,13 @@ def test_a_restyle_that_breaks_answers_in_plain_words(monkeypatch, tmp_path):
     monkeypatch.setattr(restyle_mod, "restyle", lambda *a, **kw: (_ for _ in ()).throw(ValueError("proposal 0 body")))
     out = restyle_mod.run(str(tmp_path), "orange and charcoal")
     assert not out["applied"] and "ValueError" not in out["reason"] and "nothing in the app was changed" in out["reason"]
+
+
+def test_a_second_restyle_supersedes_the_first_not_the_original():
+    from services.smith.restyle import palette_decision
+    doc = {"designSystem": {}, "decisions": [
+        {"id": "DEC-002", "decision": "sage and sand", "reason": "the palette asked in discovery", "status": "APPROVED"},
+        {"id": "DEC-033", "decision": "darker, moodier", "supersedes": "DEC-002", "status": "APPROVED",
+         "reason": "Asked in conversation after the build; the design system's palette and theme were re-decided"},
+    ]}
+    assert palette_decision(doc)["id"] == "DEC-033"

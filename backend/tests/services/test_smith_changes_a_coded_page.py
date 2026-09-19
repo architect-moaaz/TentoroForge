@@ -229,4 +229,25 @@ def test_a_change_that_names_no_chart_does_not_design_charts(tmp_path):
     a refused edit after four minutes."""
     from services.smith import compose
     src = __import__("inspect").getsource(compose.recode_page)
-    assert "if not wanted and (has_widgets or not numbers_page):" in src
+    assert "if not charted and (wanted or has_widgets or not numbers_page):" in src
+
+
+def test_a_field_to_show_is_not_handed_to_the_chart_author(tmp_path, quiet):
+    """UAT replay 3: "show the product name on Discover" came back as six KPI
+    tiles. A widget ask that IS a field's name is the page code's to show."""
+    svc = _svc(tmp_path)
+    quiet(VIEW.replace("p-6", "p-8"))
+    run = _Run([HEATMAP])
+    out = recode_page(svc, "/dashboard", app_root=str(tmp_path / "app"),
+                      request="show the name more prominently", wanted=["fullName"],
+                      executor=run, client=object())
+    assert out["applied"] and run.specs == [] and not svc.doc.get("widgets")
+
+
+def test_a_one_record_page_is_not_reported_as_missing_from_the_menu(tmp_path):
+    from services.smith.compose import _where
+    svc = _svc(tmp_path)
+    svc.doc["pages"].append({"id": "PAGE-002", "name": "Record Details", "route": "/dashboard/[id]",
+                             "purpose": "x", "data": {"primaryEntity": "ENTITY-001"}})
+    said = _where(svc, "/dashboard/[id]")
+    assert "not in the menu" not in said and "one record's page" in said and "Dashboard" in said

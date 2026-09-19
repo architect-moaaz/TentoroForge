@@ -722,6 +722,13 @@ def _where(svc: Any, route: str) -> str:
     where = f"**{name}** (`{route}`)" if name else f"`{route}`"
     if label:
         return f"{where}, which the menu calls “{label}”"
+    # A ONE-RECORD PAGE IS NOT MISSING FROM THE MENU. "/tools/[id]" is opened
+    # by picking a row on its list; saying it is not in the menu read as a
+    # fault in what had just been done (UAT replay 3).
+    if "[" in route:
+        parent = _page_for_route(svc.doc, route.rsplit("/", 1)[0]) or {}
+        opened = f", opened from **{parent['name']}**" if parent.get("name") else ""
+        return f"{where} — one record's page{opened}"
     return f"{where} — it is not in the menu; open it at `{route}`"
 
 
@@ -755,10 +762,18 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
     has_widgets = any(str(w.get("page")) == str(page.get("id")) and w.get("status") != "DEPRECATED"
                       for w in svc.doc.get("widgets") or [] if isinstance(w, dict))
     numbers_page = str(page.get("pattern") or "") in NUMBERS_PATTERNS
-    if not wanted and (has_widgets or not numbers_page):
+    # A FIELD TO SHOW IS NOT A CHART. "Show the product name", "show the
+    # description more prominently" arrive as widgets that ARE a field's name;
+    # handed to the analytics author they came back as six KPI tiles and a
+    # rentals-over-time chart (UAT replay 3). Only the exact name counts — a
+    # "age × gender heatmap" mentions fields and is still a chart.
+    fields = {str(f.get("name") or "").lower() for e in (svc.doc.get("data") or {}).get("entities") or []
+              if isinstance(e, dict) for f in e.get("fields") or [] if isinstance(f, dict)}
+    charted = [w for w in wanted if w.strip().lower() not in fields]
+    if not charted and (wanted or has_widgets or not numbers_page):
         widgets: list[Any] = []
     else:
-        widgets = _declare_widgets(svc, page, request, wanted, run=run, reasoning=reasoning)
+        widgets = _declare_widgets(svc, page, request, charted, run=run, reasoning=reasoning)
     doc = _with_widgets(svc.doc, widgets)
     root = Path(app_root)
     try:
