@@ -704,6 +704,8 @@ def page_findings(doc: dict) -> list[dict]:
         # two places and only one of them learned.
         for finding in search_findings(doc, page, layout):
             out.append({"rule": finding[0], "page": pid, "detail": f"{route}: {finding[1]}"})
+        for finding in similar_findings(doc, page, layout):
+            out.append({"rule": finding[0], "page": pid, "detail": f"{route}: {finding[1]}"})
         for detail in dependent_option_findings(doc, page, layout):
             out.append({"rule": "dependent-options-unsatisfied", "page": pid, "detail": f"{route}: {detail}"})
         for detail in form_field_findings(doc, page, layout):
@@ -1290,6 +1292,8 @@ def search_findings(doc: dict, page: dict, layout: dict) -> list[tuple[str, str]
     if not boxes:
         return []
     lists = _list_sources(layout)
+    if not lists and _similar_sources(layout):
+        return []                          # the box is a similar source's text query
     if not lists:
         return [("search-without-source",
                  "has a search box and no list source — nothing on this page can be "
@@ -1306,6 +1310,61 @@ def search_findings(doc: dict, page: dict, layout: dict) -> list[tuple[str, str]
                         f"searches {name}, which has no text column to search "
                         f"(its fields: {', '.join(map(str, fields))}) — a text field "
                         f"on {name} is what a search needs"))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# A "FIND SIMILAR" RANKS BY AN EMBEDDING THE ENTITY HAS, AND SOMETHING ASKS.
+#
+# An op:"similar" source ranks records by distance to the URL's `image` or
+# `q`. It needs an embedding field on its entity to rank by, and the page needs
+# a box that writes the query — a FileUpload with `search` for an image, an
+# Input of type "search" for text. An image box with no similar source finds
+# nothing; a similar source with nothing asking is always empty.
+# ---------------------------------------------------------------------------
+
+def _similar_sources(layout: dict) -> list[dict]:
+    return [s for s in (layout.get("dataSources") or [])
+            if isinstance(s, dict) and s.get("op") == "similar"]
+
+
+def similar_findings(doc: dict, page: dict, layout: dict) -> list[tuple[str, str]]:
+    from services.blueprint.embeddings import entity_embeddings
+
+    nodes = list(_walk(layout.get("root")))
+    image_boxes = [n for n in nodes if n.get("type") == "FileUpload"
+                   and (n.get("props") or {}).get("search")]
+    text_boxes = [n for n in nodes if n.get("type") == "Input"
+                  and (n.get("props") or {}).get("type") == "search"]
+    sources = _similar_sources(layout)
+    out: list[tuple[str, str]] = []
+    if image_boxes and not sources:
+        out.append(("similar-without-source",
+                    "has an image search box and no similar source — give the page an "
+                    "op:\"similar\" source over the entity whose images it searches"))
+    for src in sources:
+        ent = _entity_by_ref(doc, str(src.get("entity") or ""))
+        name = (ent or {}).get("name") or str(src.get("entity") or "")
+        embedded = entity_embeddings(ent or {})
+        wanted = str(src.get("field") or "")
+        match = [e for e in embedded if not wanted or e["property"] == wanted]
+        if not match:
+            have = ", ".join(e["property"] for e in embedded) or "none"
+            out.append(("similar-without-embedding",
+                        f"source {src.get('name')!r} ranks {name} by "
+                        f"{wanted or 'an embedding'}, and {name} has no such embedding "
+                        f"field (embedding fields: {have}) — declare one on {name}, "
+                        f"e.g. {{\"name\": \"photoEmbedding\", \"type\": \"vector\", "
+                        f"\"embedding\": {{\"of\": \"photo\"}}}}"))
+            continue
+        # CLIP puts images and text in one space, so either box can ask.
+        kind = match[0]["source"]
+        if not (image_boxes or text_boxes):
+            box = ('a FileUpload with `search: true`' if kind == "image"
+                   else 'an Input of type "search"')
+            out.append(("similar-without-query",
+                        f"source {src.get('name')!r} ranks {name} by its {kind} embedding "
+                        f"and nothing on the page asks for a query — add {box}"))
     return out
 
 

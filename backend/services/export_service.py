@@ -80,7 +80,9 @@ def generate_docker_compose(app_name: str = "app") -> str:
 
         services:
           db:
-            image: postgres:16-alpine
+            # postgres 16 with pgvector: an embedding field is a vector column.
+            # Same major version and data layout, so an existing volume still mounts.
+            image: pgvector/pgvector:pg16
             restart: unless-stopped
             environment:
               POSTGRES_DB: ${{POSTGRES_DB:-{safe_name}}}

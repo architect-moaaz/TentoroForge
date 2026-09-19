@@ -2522,8 +2522,8 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     """
     from services.blueprint.projection import (
         apply_data_projection, project_append_only_entities,
-        project_ownership_rules, project_searchable_columns,
-        project_sensitive_columns,
+        project_embedding_columns, project_ownership_rules,
+        project_searchable_columns, project_sensitive_columns,
     )
 
     apply_data_projection(svc, app_root)
@@ -2531,6 +2531,7 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     project_business_rules(svc.doc, app_root)
     project_sensitive_columns(svc.doc, app_root)
     project_searchable_columns(svc.doc, app_root)
+    project_embedding_columns(svc.doc, app_root)
     project_append_only_entities(svc.doc, app_root)
     project_ownership_rules(svc.doc, app_root)
 

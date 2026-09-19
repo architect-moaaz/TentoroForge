@@ -8,7 +8,7 @@
 
 import type { DataEngine } from "@tentoroforge/renderer";
 import * as engine from "./data-engine";
-import { resolveAggregate as _resolveAggregate, resolveSeries as _resolveSeries, resolveQuery as _resolveQuery } from "./data-engine";
+import { resolveAggregate as _resolveAggregate, resolveSeries as _resolveSeries, resolveQuery as _resolveQuery, resolveSimilar as _resolveSimilar } from "./data-engine";
 // SSR data path: the entity registry is otherwise only populated on the first API
 // request, so server-side renders saw "Unknown entity". Initialise it here too.
 import { ensureDataEngineInitialized } from "./data-init";
@@ -88,6 +88,19 @@ export async function resolveQuery(source: unknown, ctx?: ActorCtx): Promise<Arr
     console.warn(`[data-engine-bridge] query run failed:`, err);
     return [];
   }
+}
+
+/** Resolve an op:"similar" dataSource: records ranked by how close their
+ *  embedding is to the page's query image or text. Unlike the others this one
+ *  does not degrade quietly — an unreachable embedding service throws, so the
+ *  page says the search is not connected instead of "no matches". */
+export async function resolveSimilar(
+  source: unknown,
+  query: { image?: string; text?: string },
+  ctx?: ActorCtx,
+): Promise<Array<Record<string, unknown>>> {
+  await ensureDataEngineInitialized();
+  return await _resolveSimilar(source as any, query, ctx as any);
 }
 
 // Scalar aggregate ops that resolve to a single number via resolveAggregate.

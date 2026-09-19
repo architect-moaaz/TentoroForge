@@ -30,6 +30,7 @@ const noop = "export default {}; export const __noop = true;";
 installHarness({
   stubs: {
     "@/db": "export const db = { insert: (t) => ({ values: async (v) => { globalThis.__persisted.push(v); return [v]; } }), execute: async () => ({ rows: [] }) };",
+    "./embedding-columns": "export const EMBEDDING_DIMENSIONS = 512;\nexport const embeddingColumnsFor = () => [];\n",
     "@/db/schema": "export const forgeNotifications = { __name: 'forge_notifications' };",
     "drizzle-orm": "export const getTableName = (t) => t.__name || 'x'; export const is = (v) => !!(v && v.__name); export class Table {}; export const eq = () => ({}); export const and = () => ({}); export const sql = (...a) => ({ __sql: a });",
     "@/lib/error_reporter": "export const reportFromError = () => {};",

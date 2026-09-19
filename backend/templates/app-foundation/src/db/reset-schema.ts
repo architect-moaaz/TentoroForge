@@ -32,6 +32,7 @@
  * failed deployment is recoverable; an emptied database is not.
  */
 import postgres from "postgres";
+import { ensureExtensions } from "./extensions";
 
 /** Tables the scaffold owns. Rows here are not the user's work. */
 const SCAFFOLD_TABLES = new Set([
@@ -94,7 +95,13 @@ async function main() {
     await sql.unsafe("CREATE SCHEMA public");
     console.log("[reset-schema] done");
   } finally {
-    await sql.end();
+    // Every path, including the reset: dropping `public` drops the
+    // extensions installed in it, and push needs them before it runs.
+    try {
+      await ensureExtensions(sql);
+    } finally {
+      await sql.end();
+    }
   }
 }
 

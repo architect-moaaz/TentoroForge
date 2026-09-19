@@ -685,7 +685,14 @@ export const PageDataSource = z.object({
    * Blueprint requires name+entity+op and does not carry the mutation ops —
    * so the two are not merged, but the read ops must agree.
    */
-  op: z.enum(["list", "get", "aggregate", "series"]),
+  op: z.enum(["list", "get", "aggregate", "series", "similar"]),
+  /**
+   * op:"similar" — the embedding field to rank by. The query comes from the
+   * page's URL: `image` (a stored file id, written by a FileUpload with
+   * `search`) or `q` (text, written by an Input of type "search"). With no
+   * query the source is empty.
+   */
+  field: z.string().optional(),
   filter: z.record(z.unknown()).optional(),
   metrics: z.record(z.unknown()).optional(),
   limit: z.number().int().optional(),
@@ -1156,6 +1163,25 @@ export const Widget = z.object({
 // §11 · data — entities, relationships, constraints
 // ===========================================================================
 
+/**
+ * A field that holds the embedding of another field on the same record, so
+ * records can be found by what they look like or mean rather than by the
+ * words they contain.
+ *
+ * `of` names the source: an `image` field (a stored file id) or a text field.
+ * The platform fills the vector whenever the source is written, through
+ * whichever path wrote it (a form, a workflow, an import), and an
+ * `op: "similar"` page source ranks records by distance to a query image or
+ * query text.
+ *
+ * There are no dimensions here on purpose. How long the vector is depends on
+ * the embedding model the platform runs, not on the application, so a
+ * Blueprint cannot be asked for a number it has no way to know.
+ */
+export const FieldEmbedding = z.object({
+  of: z.string().min(1),
+});
+
 export const Field = z.object({
   name: z.string(),
   type: z.string(),
@@ -1181,6 +1207,8 @@ export const Field = z.object({
    * all currently guess at too.
    */
   references: EntityId.optional(),
+  /** Declared on a `type: "vector"` field; see FieldEmbedding. */
+  embedding: FieldEmbedding.optional(),
   description: z.string().default(""),
 });
 

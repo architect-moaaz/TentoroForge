@@ -28,6 +28,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from services.blueprint.embeddings import (
+    EMBEDDING_DIMENSIONS, embedding_columns, is_embedding_field, is_image_field,
+)
 from services.catalog import WorkflowNodeCatalog, workflow_nodes
 from services.workflow_nodes import workflow_node
 logger = logging.getLogger(__name__)
@@ -44,6 +47,8 @@ _TYPES: dict[str, str] = {
     "uuid": "uuid", "guid": "uuid",
     "text": "text", "string": "text", "str": "text", "email": "text",
     "url": "text", "enum": "text", "file": "text",
+    # An image is a stored file: the column holds its forge_files id.
+    "image": "text", "photo": "text", "picture": "text",
     "int": "integer", "integer": "integer", "number": "integer",
     "decimal": "numeric", "numeric": "numeric", "float": "numeric",
     "money": "numeric", "currency": "numeric",
@@ -92,6 +97,14 @@ def is_list_type(type_name: Any) -> bool:
 def drizzle_column(field: dict) -> tuple[str, str]:
     """One column line and the builder it needs imported."""
     type_name = str(field.get("type") or "").lower()
+    # AN EMBEDDING IS FILLED BY THE PLATFORM, SO IT IS ALWAYS NULLABLE. The
+    # vector arrives after the row does (the Data Engine embeds the source once
+    # it is written), and a row whose image the model could not read must
+    # still save. Its length is the platform model's, not the Blueprint's.
+    if is_embedding_field(field):
+        col = to_snake(field.get("name") or "embedding")
+        return (f'{field.get("name")}: vector("{col}", '
+                f'{{ dimensions: {EMBEDDING_DIMENSIONS} }}),'), "vector"
     # A LIST IS JSON. `string[]` fell through to the text default, so the
     # column held whatever shape reached it: the fixture's JSON text, the
     # create form's comma string. jsonb holds the array the tags field submits.
@@ -102,7 +115,9 @@ def drizzle_column(field: dict) -> tuple[str, str]:
         line += ".primaryKey()"
         if builder == "uuid":
             line += ".defaultRandom()"
-    if field.get("required") and not field.get("primaryKey"):
+    # A required image is required of the FORM. The column stays nullable so
+    # the seeded demo rows, which have no pictures, can still be written.
+    if field.get("required") and not field.get("primaryKey") and not is_image_field(field):
         line += ".notNull()"
     # A PRIMARY KEY IS ALREADY UNIQUE, AND SAYING SO TWICE STOPS A DEPLOY.
     #
@@ -315,6 +330,16 @@ def emit_entity_module(entity: dict, doc: dict) -> str:
         lines.append("  " + line)
         builders.add(builder)
 
+    # Nearest-neighbour search over an embedding reads an HNSW index; without
+    # one every `op: "similar"` query is a sequential scan of the table.
+    vector_indexes = [
+        f'  index("{entity.get("table")}_{to_snake(f.get("name") or "")}_hnsw")'
+        f'.using("hnsw", t.{f.get("name")}.op("vector_cosine_ops")),'
+        for f in fields if is_embedding_field(f)
+    ]
+    if vector_indexes:
+        builders.add("index")
+
     # Foreign keys, from declared relationships — the reason relationships had
     # to become writable: without them a foreign key is only prose in a
     # description, and the data engine has nothing to join on.
@@ -349,7 +374,7 @@ def emit_entity_module(entity: dict, doc: dict) -> str:
         f'export const {_var_name(entity)} = pgTable("{entity.get("table")}", {{',
         *lines,
         *fk_lines,
-        "});",
+        *(["}, (t) => [", *vector_indexes, "]);"] if vector_indexes else ["});"]),
         "",
     ])
 
@@ -2261,6 +2286,10 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, An
                     continue
                 if _is_credential_field(field.get("name")):
                     continue
+                # No picture to seed, and a made-up file id is a broken image
+                # plus an embedding that fails; the vector is the platform's.
+                if is_image_field(field) or is_embedding_field(field):
+                    continue
                 record[field.get("name")] = _seed_value(field, name, row, tables_by_id)
             out_rows.append(record)
         seed[table] = out_rows
@@ -2482,6 +2511,40 @@ def project_searchable_columns(doc: dict, app_root: str | Path) -> dict[str, Any
         "utf-8",
     )
     return {"files": ["src/lib/searchable-columns.ts"],
+            "entities": len({k.lower() for k in manifest})}
+
+
+def project_embedding_columns(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/embedding-columns.ts`` — which column the Data Engine
+    fills from which field, on every write path.
+
+    Always written, even when empty, for the same reason as the search
+    manifest: the runtime imports it statically.
+    """
+    manifest = embedding_columns(doc)
+    out = Path(app_root) / "src" / "lib"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "embedding-columns.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "//\n"
+        "// Keys are every reachable form of the entity name and its table;\n"
+        "// `property` is the column's key on the Drizzle table, `of` the field\n"
+        "// it embeds, `source` whether that field holds an image or text.\n\n"
+        "export type EmbeddingColumn = {\n"
+        "  property: string; column: string; of: string; source: \"image\" | \"text\";\n"
+        "};\n\n"
+        f"export const EMBEDDING_DIMENSIONS = {EMBEDDING_DIMENSIONS};\n\n"
+        "export const EMBEDDING_COLUMNS: Record<string, EmbeddingColumn[]> = "
+        f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"
+        "export function embeddingColumnsFor(entity: string): EmbeddingColumn[] {\n"
+        "  if (!entity) return [];\n"
+        "  return EMBEDDING_COLUMNS[entity]\n"
+        "    ?? EMBEDDING_COLUMNS[entity.toLowerCase()]\n"
+        "    ?? [];\n"
+        "}\n",
+        "utf-8",
+    )
+    return {"files": ["src/lib/embedding-columns.ts"],
             "entities": len({k.lower() for k in manifest})}
 
 

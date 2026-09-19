@@ -231,6 +231,19 @@ export async function renderSchemaPage(
         }
       } else if (s.op === "series") {
         previewData[s.name] = await resolveSeries(s as any, engineCtx);      // → [{ label, value }, …] for charts
+      } else if (s.op === "similar") {
+        // Ranked by embedding distance to the URL's query: `image` (a stored
+        // file id a FileUpload with `search` wrote) or `q` (a search box).
+        // Looked up rather than imported: this file is refreshed into apps
+        // whose bridge predates it, and a missing named import fails the build.
+        const first = (k: string) => {
+          const v = searchParams?.[k];
+          return (Array.isArray(v) ? v[0] : v) || undefined;
+        };
+        const bridge = (await import("./data-engine-bridge")) as any;
+        previewData[s.name] = typeof bridge.resolveSimilar === "function"
+          ? await bridge.resolveSimilar(s, { image: first("image"), text: first("q") }, engineCtx)
+          : [];
       } else {
         const res = await dataEngine.run(s as any, { request, user });  // → array
         // Detail/get sources name a SINGLE record (bound as {{project.name}}), so

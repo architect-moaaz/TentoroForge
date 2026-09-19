@@ -12,6 +12,7 @@ import { useDensity } from "../../theme/tokens-context";
 import { fallbackDispatch } from "../../util/fallbackDispatch";
 import type { ColumnDef, RowActionDef } from "./Table.schema";
 import { SCROLL_X, scrollEdgeStyle } from "../../style/scroll";
+import { fileSrc } from "../FileUpload/fileSrc";
 
 /**
  * Modern, interactive data table.
@@ -290,7 +291,7 @@ function Cell({ value, fmt }: { value: unknown; fmt: NonNullable<ColumnDef["form
   if (fmt === "image") {
     // Small thumbnail. Same click-stopPropagation as URLs.
     return (
-      <img src={String(value)} alt=""
+      <img src={fileSrc(value)} alt=""
         onClick={(e) => e.stopPropagation()}
         className="h-10 w-10 rounded-md object-cover border border-border/60" />
     );

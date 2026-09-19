@@ -10,6 +10,7 @@ const noop = "export default {}; export const __noop = true;";
 installHarness({
   stubs: {
     "@/db": "export const db = { insert: () => ({ values: (v) => ({ returning: async () => [{ id: 'row-1', ...v }] }) }) };",
+    "./embedding-columns": "export const EMBEDDING_DIMENSIONS = 512;\nexport const embeddingColumnsFor = () => [];\n",
     "@/db/schema": "export const cases = { __name: 'cases', id: { columnType: 'PgUUID', dataType: 'string' }, title: { columnType: 'PgText', dataType: 'string' }, caseNumber: { columnType: 'PgText', dataType: 'string' } };",
     "drizzle-orm": "export const getTableName = (t) => t.__name || 'cases'; export const is = (v) => !!(v && v.__name); export class Table {}; export const eq = () => ({}); export const and = () => ({}); export const sql = () => ({});",
     "@/lib/error_reporter": "export const reportFromError = () => {};",

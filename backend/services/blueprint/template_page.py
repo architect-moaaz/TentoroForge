@@ -29,6 +29,9 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from services.blueprint.embeddings import (
+    entity_embeddings, is_embedding_field, is_image_field,
+)
 from services.blueprint.functional_completeness import (
     _live, _workflow_db_ops, _workflow_targets_entity, page_family,
 )
@@ -64,6 +67,8 @@ def _fields(entity: Mapping[str, Any]) -> list[dict]:
         if not isinstance(f, dict) or not f.get("name"):
             continue
         if str(f["name"]).lower() in _MANAGED or f.get("references") or f.get("foreignKey"):
+            continue
+        if is_embedding_field(f):          # the platform fills it; nobody reads a vector
             continue
         out.append(f)
     return out
@@ -105,7 +110,10 @@ def _field_kind(f: Mapping[str, Any]) -> dict:
     opts = f.get("enumValues") or f.get("enum") or f.get("options")   # `enumValues` is the Blueprint's key
     spec: dict[str, Any] = {"name": str(f["name"]), "label": _humanise(str(f["name"])),
                             "required": bool(f.get("required", False))}
-    if t.endswith("[]") or t in ("array", "list"):
+    if is_image_field(f):
+        spec["kind"] = "file"                   # uploaded, submitted as the stored file's id
+        spec["accept"] = "image/*"
+    elif t.endswith("[]") or t in ("array", "list"):
         spec["kind"] = "tags"                   # several values, submitted as an array
     elif isinstance(opts, list) and opts:
         spec["kind"] = "select"
@@ -132,7 +140,9 @@ def _field_kind(f: Mapping[str, Any]) -> dict:
 def _column(f: Mapping[str, Any]) -> dict:
     t = str(f.get("type") or "").lower()
     col = {"key": str(f["name"]), "label": _humanise(str(f["name"]))}
-    if t in ("date",):
+    if is_image_field(f):
+        col["format"] = "image"
+    elif t in ("date",):
         col["format"] = "date"
     elif t in ("timestamp", "datetime"):
         col["format"] = "datetime"
@@ -141,6 +151,40 @@ def _column(f: Mapping[str, Any]) -> dict:
     elif t in ("integer", "int", "number", "decimal", "float", "numeric"):
         col["format"] = "number"
     return col
+
+
+def _similar_section(entity: Mapping[str, Any], ename: str, src: str,
+                     table: Mapping[str, Any], sources: list[dict]) -> dict | None:
+    """"Find similar" over the entity's embedding, when it declares one.
+
+    The query box is the one that matches what was embedded: an upload for an
+    image, a search box for text. Either writes the page URL (`image`, `q`),
+    and the `similar` source reads it, so the results are a link.
+    """
+    embedded = entity_embeddings(dict(entity))
+    if not embedded:
+        return None
+    emb = embedded[0]
+    name = f"{src}Similar"
+    sources.append({"name": name, "entity": ename, "op": "similar",
+                    "field": emb["property"], "limit": 12})
+    if emb["source"] == "image":
+        query = {"type": "FileUpload", "props": {
+            "name": "image", "label": f"Find {ename.lower()} records that look like an image",
+            "accept": "image/*", "search": True}, "children": []}
+    else:
+        query = {"type": "Input", "props": {
+            "type": "search", "name": "q",
+            "placeholder": f"Describe the {ename.lower()} you are looking for"}, "children": []}
+    # Closest first, and no score column: CLIP's text-to-image cosine peaks
+    # near 0.3, so a correct match would read as "34%". The order is the
+    # answer; `similarity` stays on each row for a page that wants it.
+    results = {**table, "data": f"{{{{{name}}}}}",
+               "searchable": False,
+               "emptyText": "Search to see the closest matches."}
+    return {"type": "Card", "props": {"title": "Find similar"}, "children": [
+        {"type": "Stack", "props": {"direction": "vertical", "gap": "md"}, "children": [
+            query, {"type": "Table", "props": results, "children": []}]}]}
 
 
 def template_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict:
@@ -198,12 +242,14 @@ def _family_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict | No
                                  "emptyText": f"No {ename.lower()} records yet."}
         if row_actions:
             table["rowActions"] = row_actions
+        sources = [{"name": src, "entity": ename, "op": "list"}]
+        similar = _similar_section(entity, ename, src, table, sources)
         root = {"type": "Stack", "props": {"direction": "vertical", "gap": "lg"}, "children": [
             {"type": "Row", "props": {"justify": "between", "align": "center"}, "children": header},
             *([para(purpose)] if purpose else []),
+            *([similar] if similar else []),
             {"type": "Table", "props": table, "children": []},
         ]}
-        sources = [{"name": src, "entity": ename, "op": "list"}]
 
     elif family == "form":
         if not create:

@@ -37,6 +37,8 @@ import {
 } from "./engine";
 import { registerAIActions } from "./ai";
 import { registerOcrActions } from "./ocr";
+// A workflow write fills embedding columns exactly as a form write does.
+import { embedWrittenRow } from "../embeddings";
 // emit_event node factory — pure module; the durable bus (events/bus.ts)
 // is injected lazily below so loading the workflow runtime never drags in
 // the event tables on apps that predate them.
@@ -1041,7 +1043,7 @@ export function registerDefaultActions(): void {
           try {
             const rows = await (db as any).insert(table).values(values).returning();
             const row = Array.isArray(rows) ? rows[0] : rows;
-            if (row) inserted.push(row);
+            if (row) inserted.push(await embedWrittenRow(table, row));
           } catch (err) {
             console.warn(`[workflow] db_insert (row-fanout): row failed —`, err);
           }
@@ -1064,6 +1066,7 @@ export function registerDefaultActions(): void {
       const values = _finalizeInsert(table, raw, ctx);
       const rows = await (db as any).insert(table).values(values).returning();
       const row = Array.isArray(rows) ? rows[0] : rows;
+      if (row && typeof row === "object") await embedWrittenRow(table, row);
       if (row && typeof row === "object") {
         // Legacy flat aliases (`scan_sessions_id`) — kept for
         // backward-compat with older plans.
@@ -1122,6 +1125,9 @@ export function registerDefaultActions(): void {
       const where = _buildWhere(table, (config as any).where, ctx);
       _requireWhereOrThrow("db_update", config, where);
       const rows = await q.where(where).returning();
+      if (Array.isArray(rows)) {
+        for (const r of rows) await embedWrittenRow(table, r, null, Object.keys(raw));
+      }
       const count = Array.isArray(rows) ? rows.length : 1;
       // `updated` (the legacy scalar) + contract-declared `updated: {count, rows}`.
       // Split naming — top-level `updated` used to be a plain number, so
