@@ -727,3 +727,39 @@ def test_a_key_added_to_a_typed_load_is_declared_and_its_fallback_kept():
     back = adapter.patch_load(out, [{"op": "removeReturnKey", "file": "load", "key": "byCountry"}])
     assert "byCountry" not in back
     assert "  error: string | null;\n}" in back
+
+
+def test_the_canvas_gives_a_record_page_a_sample_row_so_it_is_not_empty(tmp_path, monkeypatch):
+    """A `[id]` page built with no param reached `record(entity, undefined)`,
+    which the sample server answers null, so `load()` returned null and the
+    canvas showed the not-found state — every record page empty (036farqu's
+    Open a Dispute). build() now fills the param with a sample id."""
+    from services.react_editor import jit
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Desk", domain="ops")
+    svc.doc["data"] = {"entities": [{"id": "ENTITY-006", "name": "Dispute", "table": "disputes",
+                                     "fields": [{"name": "id", "type": "uuid"}]}], "relationships": []}
+    svc.doc["pages"] = [{"id": "PAGE-015", "name": "Open a Dispute", "route": "/rentals/[id]/dispute",
+                         "pattern": "form", "data": {"primaryEntity": "ENTITY-006"}}]
+    svc.doc["pageCode"] = [{"page": "PAGE-015", "load": LOAD, "view": VIEW}]
+    svc.save()
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "package.json").write_text("{}")
+    proj = service.locate(tmp_path)
+
+    seen = {}
+    monkeypatch.setattr(jit, "vendor", lambda project, fresh=False, timeout=180.0: {"key": "v", "specifiers": [], "candidates": ""})
+    monkeypatch.setattr(jit, "_require_toolchain", lambda project: None)
+    monkeypatch.setattr(jit.adapter, "annotate", lambda view, app_root=None: view)
+    def fake_run(project, payload, *, timeout):
+        seen.update(payload)
+        return {"js": "", "css": ""}
+    monkeypatch.setattr(jit, "_run", fake_run)
+
+    # No param given (the canvas's default): it is filled from the primary entity.
+    jit.build(proj, "PAGE-015", params={}, fresh=True)
+    assert seen["params"] == {"id": "sample-dispute-1"}, "an unfilled [id] gets a sample row"
+
+    # An explicit param still wins.
+    jit.build(proj, "PAGE-015", params={"id": "real-123"}, fresh=True)
+    assert seen["params"] == {"id": "real-123"}

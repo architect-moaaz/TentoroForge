@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -150,6 +151,18 @@ def build(project: Project, page_id: str, *, params: dict[str, str] | None = Non
     view, load = str(row.get("view") or ""), str(row.get("load") or "")
     revision = adapter.revision_of(view, load)
     params, search = dict(params or {}), dict(search or {})
+    # A RECORD PAGE PREVIEWS ON A SAMPLE ROW. The canvas builds every page with
+    # empty params; a `[id]` route then reaches `record(entity, undefined)`,
+    # which the sample server answers null, so `load()` returns null and the
+    # page renders its not-found state — an empty canvas for every record page.
+    # Any `[param]` the caller left out is filled with a sample id (the first
+    # sample row of the page's primary entity, whose id the sampler makes
+    # `sample-<entity>-1`); an explicit value from the param UI still wins.
+    for name in re.findall(r"\[+\.{0,3}([^\].]+)\]+", str(page.get("route") or "")):
+        if not params.get(name):
+            ent = next((e for e in _live((doc.get("data") or {}).get("entities"))
+                        if str(e.get("id")) == str((page.get("data") or {}).get("primaryEntity") or "")), None)
+            params[name] = f"sample-{str(ent.get('name')).lower()}-1" if ent and ent.get("name") else "sample-1"
     shared = vendor(project, fresh=fresh)
     key = _cache_key(page_id, revision, params, search, shared["key"], _live(doc.get("widgets")))
     cache = project.editor_dir / "jit" / f"{key}.json"
