@@ -175,3 +175,15 @@ def test_the_brief_and_the_prompts_carry_the_plan():
     assert "SAY WHAT EACH PAGE SAYS" in NODE_TASKS["page_details"]
     assert "never invent a price" in NODE_TASKS["page_details"]
     assert "LOOKS AT to decide" in NODE_TASKS["entity_fields"]
+
+
+def test_the_last_attempt_keeps_what_resolves_and_the_contract():
+    from services.blueprint.page_content import drop_unresolved_content
+
+    bad = _item("Loans", kind="count", entity=RENTAL, via="nope")
+    result = AgentResult(task_id="T", agent="page_design", confidence=1.0, proposals=[
+        ArtifactProposal(section="pages", natural_key="PAGE:/tools/[id]", body=_page(GOOD[0], bad))])
+    dropped = drop_unresolved_content(result, _doc())
+    assert len(dropped) == 1 and "`via` must be" in dropped[0]
+    assert [c["label"] for c in result.proposals[0].body["content"]] == ["Name"]
+    check_page_content(result, _doc())          # now accepted

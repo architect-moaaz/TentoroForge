@@ -201,3 +201,29 @@ def test_the_sdk_and_the_editor_samples_can_look_up_related_records():
 
 def test_the_contract_file_is_still_json():
     json.loads((_ROOT / "packages/library/src/theme/token-contract.json").read_text())
+
+
+def test_a_style_finding_asks_again_but_never_costs_the_page(monkeypatch, tmp_path):
+    import json as _json
+
+    from services.blueprint import ui_engineer as ue
+
+    monkeypatch.setattr(ue, "typecheck", lambda *a, **k: [])
+    monkeypatch.setattr(ue, "system_prompt", lambda doc: "s")
+    monkeypatch.setattr(ue, "user_prompt", lambda *a, **k: "u")
+    calls, client_view = [], []
+
+    def client(*, system, user, schema):
+        calls.append(user)
+        return _json.dumps({"rationale": "r", "load": "export async function load() { return {}; }",
+                            "view": client_view[0]})
+
+    from services.blueprint.app_sdk import workflow_keys
+    doc = {"workflows": [{"id": "FLOW-1", "name": "Request to borrow", "launchedFrom": ["PAGE-1"]}]}
+    key = workflow_keys(doc)["FLOW-1"]
+    view = ('"use client";\nexport default function View() { return <WorkflowForm '
+            f'workflow={{workflows.{key}}} fields={{{{}}}} />; }}')
+    client_view.append(view)
+    body, _ = ue.compose_page(doc, _page(), tmp_path, client)
+    assert len(calls) == ue.COMPILE_ROUNDS, "asked again each round"
+    assert body["view"], "and kept on the last"

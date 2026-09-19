@@ -132,7 +132,7 @@ def _proposed_colors(proposals: list) -> dict:
 def restyle(svc: Any, change: str, *, app_root: str | None = None,
             executor: Any = None, reasoning: Any = None) -> dict:
     """Re-decide the design system for `change`, commit it, re-project the tokens."""
-    from services.blueprint.agent_contract import InvalidPatternTemplate
+    from services.blueprint.agent_contract import InvalidPatternTemplate, AuthorRefusal
     from services.blueprint.executors import RunUsage, make_executor, tiered_router
     from services.blueprint.orchestrator import DAG, TaskSpec
     from services.blueprint.projection import project_design_tokens
@@ -186,7 +186,7 @@ def restyle(svc: Any, change: str, *, app_root: str | None = None,
             out = apply_change(svc, change, proposals=proposals,
                                interpretation=f"restyle the design system: {change}",
                                agent=agent, app_root=app_root, regenerate=False)
-        except (BlueprintInvalid, InvalidPatternTemplate) as exc:
+        except (BlueprintInvalid, AuthorRefusal) as exc:
             out = None
             feedback = f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
         if out is not None and out.applied:

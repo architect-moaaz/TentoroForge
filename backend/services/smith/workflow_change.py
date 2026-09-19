@@ -224,7 +224,7 @@ def _apply(svc: Any, request: str, proposals: list, *, interpretation: str, agen
            app_root: str | None) -> tuple[Any, str]:
     """`apply_change` without the whole-DAG regeneration; returns (result,
     refusal) where refusal is "" on success."""
-    from services.blueprint.agent_contract import InvalidPatternTemplate, InvalidWorkflowStep
+    from services.blueprint.agent_contract import InvalidPatternTemplate, InvalidWorkflowStep, AuthorRefusal
     from services.blueprint.service import BlueprintInvalid
     from services.smith.change import apply_change
     from services.smith.smith import bootstrap as _bind_ids
@@ -232,7 +232,7 @@ def _apply(svc: Any, request: str, proposals: list, *, interpretation: str, agen
     try:
         out = apply_change(svc, request, proposals=list(proposals), interpretation=interpretation,
                            agent=agent, app_root=app_root, regenerate=False)
-    except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep) as exc:
+    except (BlueprintInvalid, AuthorRefusal) as exc:
         # The contract's refusal — an unknown node, a value the engine would
         # never hold — is the feedback the next attempt is told.
         return None, f"{type(exc).__name__}: {exc}".replace("\n", " ")[:500]

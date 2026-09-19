@@ -63,6 +63,15 @@ class UnknownAgent(KeyError):
     pass
 
 
+class AuthorRefusal(ValueError):
+    """An agent's proposal refused by a check on what it wrote — an outcome the
+    author is asked again about, never a crash. Every such check raises a
+    subclass, so a caller catching this cannot miss a new one: the entity-field
+    and page-content checks were added on 2026-09-19 and neither was in the
+    orchestrator's retry list, which is how InvalidBusinessRule once took a
+    whole build down."""
+
+
 class ContractViolation(ValueError):
     """The result does not satisfy the §29 output contract."""
 
@@ -437,7 +446,7 @@ def check_capability(result: AgentResult) -> None:
             )
 
 
-class InvalidWorkflowStep(ValueError):
+class InvalidWorkflowStep(AuthorRefusal):
     """A proposed workflow uses a step the node catalog does not offer, or
     leaves a node's declared configuration empty."""
 
@@ -474,7 +483,7 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None) -> None
         raise InvalidWorkflowStep(_all_of(problems))
 
 
-class InvalidEntityFields(ValueError):
+class InvalidEntityFields(AuthorRefusal):
     """An entity's fields cannot be stored as proposed."""
 
 
@@ -531,7 +540,7 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
         raise InvalidEntityFields(_all_of(problems))
 
 
-class InvalidPageContent(ValueError):
+class InvalidPageContent(AuthorRefusal):
     """A page's content plan names a source the data model does not have."""
 
 
@@ -552,7 +561,7 @@ def check_page_content(result: "AgentResult", doc: dict | None) -> None:
         raise InvalidPageContent(_all_of(problems[:12]))
 
 
-class InvalidBusinessRule(ValueError):
+class InvalidBusinessRule(AuthorRefusal):
     """A rule the engine could not evaluate as written."""
 
 
@@ -611,7 +620,7 @@ def prerequisite_findings(rule: dict, doc: dict) -> list[str]:
     return out
 
 
-class InvalidPatternTemplate(ValueError):
+class InvalidPatternTemplate(AuthorRefusal):
     """A2UI proposed a template the component registry cannot render."""
 
 

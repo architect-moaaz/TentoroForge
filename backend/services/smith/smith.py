@@ -59,7 +59,7 @@ from services.blueprint.orchestrator import (
     transition,
 )
 from services.blueprint.orchestrator import run as run_dag
-from services.blueprint.agent_contract import InvalidPatternTemplate, InvalidWorkflowStep
+from services.blueprint.agent_contract import InvalidPatternTemplate, InvalidWorkflowStep, AuthorRefusal
 from services.blueprint.service import BlueprintInvalid, BlueprintService
 from services.smith import clarification, decisions as decision_log, greeting
 from services.smith.change import ChangeResult, PreviewContext, apply_change, resolve_preview
@@ -766,7 +766,7 @@ class Smith:
                         observer_agent=self.observer_agent,
                     )
                     break
-                except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep) as exc:
+                except (BlueprintInvalid, AuthorRefusal) as exc:
                     if attempt == 0:
                         try:
                             plan = interpret(

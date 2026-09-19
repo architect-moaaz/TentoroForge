@@ -719,9 +719,17 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             note = f"Your reply was not valid JSON ({exc}). Return the object only."
             continue
         load, view = str(body.get("load") or ""), str(body.get("view") or "")
+        design = _design_findings(doc, page, view)
         errors = (_static_findings(load, view) + _unwired_actions(doc, page, view)
-                  + _design_findings(doc, page, view)
                   + typecheck(doc, app_root, str(page.get("id")), load, view))
+        # THE STYLE RULES ASK AGAIN; THEY NEVER COST A PAGE. A page that
+        # compiles and runs is kept on the last round whatever its design
+        # findings — losing the page is worse than an unaccented button.
+        if design and not errors and round_ == COMPILE_ROUNDS:
+            logger.warning("[ui_engineer] %s accepted with design findings: %s",
+                           page.get("id"), "; ".join(design)[:400])
+        else:
+            errors += design
         if not errors:
             return ({"page": str(page.get("id")), "rationale": str(body.get("rationale") or ""),
                      "load": load, "view": view,

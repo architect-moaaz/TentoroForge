@@ -66,3 +66,47 @@ def test_the_run_asks_again_instead_of_dying(svc):
     assert "application_model" in report.completed
     assert "product.capabilities" in calls[1], "the retry is told what was refused"
     assert (svc.doc.get("product") or {}).get("capabilities")
+
+
+# --- every refusal an author can earn is one the run survives ---------------
+
+def test_every_author_refusal_shares_the_base_the_run_catches():
+    """2026-09-19: the entity-field and page-content checks raised classes no
+    handler listed. One base now, caught everywhere an agent result is applied."""
+    import inspect
+    import pathlib
+
+    from services.blueprint import agent_contract as ac
+
+    refusals = [c for n, c in vars(ac).items()
+                if inspect.isclass(c) and n.startswith("Invalid") and issubclass(c, ValueError)]
+    assert {c.__name__ for c in refusals} >= {"InvalidEntityFields", "InvalidPageContent",
+                                              "InvalidBusinessRule", "InvalidWorkflowStep"}
+    assert all(issubclass(c, ac.AuthorRefusal) for c in refusals)
+    root = pathlib.Path(__file__).resolve().parents[2] / "services"
+    for f in [root / "blueprint/orchestrator.py", *sorted((root / "smith").glob("*.py"))]:
+        for line in f.read_text().splitlines():
+            if line.strip().startswith("except (") and "BlueprintInvalid" in line:
+                assert "AuthorRefusal" in line, f"{f.name}: {line.strip()}"
+
+
+def test_a_refused_entity_is_asked_again(svc):
+    """The defect itself, on a check added after the list was written."""
+    svc.upsert("data.entities", {"name": "Tool", "table": "tools", "fields": []}, natural_key="Tool")
+    calls = []
+
+    def model(*, system, user, schema=None):
+        calls.append(user)
+        vector = {"name": "embedding", "type": "vector"}          # no `embedding.of`: refused
+        fields = [{"name": "id", "type": "uuid", "primaryKey": True},
+                  {"name": "name", "type": "string", "required": True}]
+        body = {"name": "Tool", "table": "tools", "fields": fields + ([vector] if len(calls) == 1 else [])}
+        return json.dumps({"entities": [body], "relationships": [], "confidence": 0.9,
+                           "assumptions": [], "issues": [], "change_requests": []})
+
+    report = run(svc, make_executor(svc, model), plan=["entity_fields"])
+
+    assert len(calls) == 2, "the refused entity was retried, not fatal"
+    assert "entity_fields" in report.completed
+    tool = next(e for e in svc.doc["data"]["entities"] if e["name"] == "Tool")
+    assert [f["name"] for f in tool["fields"]] == ["id", "name"]

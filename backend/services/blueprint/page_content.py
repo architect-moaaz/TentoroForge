@@ -150,6 +150,27 @@ def content_findings(page: dict, doc: dict) -> list[str]:
             for e in item_findings(item, page, doc)]
 
 
+def drop_unresolved_content(result: Any, doc: dict) -> list[str]:
+    """On the author's last attempt: keep every fact that resolves and drop the
+    rest, so one bad source never costs a feature its page contracts. Returns
+    what was dropped, for the log."""
+    dropped: list[str] = []
+    for proposal in getattr(result, "proposals", None) or []:
+        if proposal.section != "pages" or not isinstance(proposal.body, dict):
+            continue
+        body = proposal.body
+        kept = []
+        for item in body.get("content") or []:
+            faults = item_findings(item, body, doc) if isinstance(item, dict) else ["not an object"]
+            if faults:
+                dropped.extend(f"{body.get('route')}: {f}" for f in faults)
+            else:
+                kept.append(item)
+        if "content" in body:
+            body["content"] = kept
+    return dropped
+
+
 # ---------------------------------------------------------------------------
 # Fields a page asks for
 # ---------------------------------------------------------------------------
@@ -266,5 +287,5 @@ def process_grounding(doc: dict, page: dict) -> list[str]:
     return out[:12]
 
 
-__all__ = ["FIELD_TYPES", "content_brief", "content_findings", "entity_bodies_with_requested_fields",
+__all__ = ["FIELD_TYPES", "content_brief", "content_findings", "drop_unresolved_content", "entity_bodies_with_requested_fields",
            "item_findings", "process_grounding", "requested_fields"]

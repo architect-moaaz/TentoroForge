@@ -3573,6 +3573,13 @@ def make_executor(
             elif spec.node == "page_details":
                 with svc.lock:
                     pin_page_identity(svc, spec.subject, parsed)
+                    if spec.attempt >= 2:
+                        # The last attempt keeps the facts that resolve: a
+                        # content plan with one bad source must not cost the
+                        # feature its contracts.
+                        from services.blueprint.page_content import drop_unresolved_content
+                        for fault in drop_unresolved_content(parsed, svc.doc):
+                            logger.warning("[page_details] %s: dropped content — %s", spec.subject, fault)
             elif spec.node == "data_model":
                 pin_entity_set(parsed)
             elif spec.node == "entity_fields":

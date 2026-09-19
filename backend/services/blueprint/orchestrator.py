@@ -50,7 +50,7 @@ from services.blueprint.agent_contract import (
     ArtifactProposal,
     ContractViolation,
     InvalidPatternTemplate,
-    InvalidWorkflowStep, InvalidBusinessRule,
+    InvalidWorkflowStep, InvalidBusinessRule, AuthorRefusal,
     apply_agent_result,
     capability_for,
 )
@@ -1887,8 +1887,7 @@ def _repair_apply(
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
-    except (BlueprintInvalid, InvalidPatternTemplate,
-            InvalidWorkflowStep, InvalidBusinessRule) as exc:
+    except (BlueprintInvalid, AuthorRefusal) as exc:
         return _reason(exc), None
     if application.applied:
         return None, application
@@ -2285,8 +2284,7 @@ def _apply_subject(
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
-    except (BlueprintInvalid, InvalidPatternTemplate,
-                InvalidWorkflowStep, InvalidBusinessRule, ContractViolation) as exc:
+    except (BlueprintInvalid, AuthorRefusal, ContractViolation) as exc:
         # The author's refusals are outcomes here too. InvalidBusinessRule
         # escaped this path on 2026-09-06 and took a whole build down with
         # no end event written. ContractViolation — the §29 output contract,
@@ -2482,8 +2480,7 @@ def _run_agent_subject(
             application = apply_agent_result(
                 svc, result, commit=commit, user_request=user_request,
             )
-        except (BlueprintInvalid, InvalidPatternTemplate,
-                InvalidWorkflowStep, InvalidBusinessRule) as exc:
+        except (BlueprintInvalid, AuthorRefusal) as exc:
             feedback = accumulate_refusals(feedback, attempt, str(exc))
             # A rejected proposal is an outcome, not a crash. This used to
             # escape and kill the whole run: one page whose tree failed

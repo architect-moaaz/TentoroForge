@@ -55,14 +55,14 @@ def executor_for(svc: Any, executor: Any, reasoning: Any) -> Any:
 def apply(svc: Any, request: str, proposals: list, *, interpretation: str, agent: str,
           app_root: str | None) -> tuple[Any, str]:
     """`apply_change` without the whole-DAG regeneration; (result, refusal)."""
-    from services.blueprint.agent_contract import InvalidPatternTemplate, InvalidWorkflowStep
+    from services.blueprint.agent_contract import InvalidPatternTemplate, InvalidWorkflowStep, AuthorRefusal
     from services.blueprint.service import BlueprintInvalid
     from services.smith.change import apply_change
     bind_ids(svc)
     try:
         out = apply_change(svc, request, proposals=list(proposals), interpretation=interpretation,
                            agent=agent, app_root=app_root, regenerate=False)
-    except (BlueprintInvalid, InvalidPatternTemplate, InvalidWorkflowStep) as exc:
+    except (BlueprintInvalid, AuthorRefusal) as exc:
         return None, f"{type(exc).__name__}: {exc}".replace("\n", " ")[:500]
     if not getattr(out, "applied", False):
         return None, str(getattr(out, "reason", "") or "refused")

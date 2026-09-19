@@ -183,7 +183,7 @@ def compose_route(
     §102: a retry that is not told what went wrong is the same request again,
     so the feedback rides on the TaskSpec exactly as it does in a run.
     """
-    from services.blueprint.agent_contract import InvalidPatternTemplate
+    from services.blueprint.agent_contract import InvalidPatternTemplate, AuthorRefusal
     from services.blueprint.executors import make_executor, tiered_router, RunUsage
     from services.blueprint.orchestrator import TaskSpec
     from services.blueprint.service import BlueprintInvalid
@@ -243,7 +243,7 @@ def compose_route(
                 app_root=app_root,
                 executor=_traced(run, reasoning),
             )
-        except (BlueprintInvalid, InvalidPatternTemplate) as exc:
+        except (BlueprintInvalid, AuthorRefusal) as exc:
             feedback = f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
             from services.blueprint.refusals import record_refusal
             record_refusal(svc.output_dir, page["id"], attempt,
