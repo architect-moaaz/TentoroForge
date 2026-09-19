@@ -72,8 +72,8 @@ export function pageForPath(path: string, pages: { id: string; route: string }[]
   return null;
 }
 
-function frameHtml(css: string, js: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body><div id="root"></div><script>${js}</script></body></html>`;
+function frameHtml(css: string, vendorUrl: string, js: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body><div id="root"></div><script src="${vendorUrl}"></script><script>${js}</script></body></html>`;
 }
 
 export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) {
@@ -108,6 +108,7 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
   const source = useEditorStore((s) => s.source);
   const setSource = useEditorStore((s) => s.setSource);
   const frameDoc = useEditorStore((s) => s.frameDoc);
+  const vendor = useEditorStore((s) => s.vendor);
   const frameTarget = useEditorStore((s) => s.frameTarget);
   const frameLoading = useEditorStore((s) => s.frameLoading);
   const frameBuildError = useEditorStore((s) => s.frameBuildError);
@@ -129,9 +130,9 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
 
   // The instant page lives at a blob URL of the parent's origin.
   const jitUrl = useMemo(() => {
-    if (!jit || !frameDoc) return null;
-    return URL.createObjectURL(new Blob([frameHtml(frameDoc.css, frameDoc.js)], { type: "text/html" }));
-  }, [jit, frameDoc]);
+    if (!jit || !frameDoc || !vendor) return null;
+    return URL.createObjectURL(new Blob([frameHtml(frameDoc.css, vendor.url, frameDoc.js)], { type: "text/html" }));
+  }, [jit, frameDoc, vendor]);
   useEffect(() => () => { if (jitUrl) URL.revokeObjectURL(jitUrl); }, [jitUrl]);
   const src = jit ? jitUrl : appSrc;
 
@@ -294,7 +295,7 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
   const shownPage = shownPageId ? pages.find((p) => p.id === shownPageId) : null;
   const lastAction = actions[actions.length - 1];
   const scale = zoom;
-  const ready = jit ? !!frameDoc : !!preview.port;
+  const ready = jit ? !!frameDoc && !!vendor : !!preview.port;
 
   const frame = (
     <div className="relative origin-top" style={{ transform: `scale(${scale})`, width, height }}>

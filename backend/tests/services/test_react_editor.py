@@ -421,9 +421,16 @@ def test_the_jit_bundles_a_page_with_sample_data_and_no_dev_server(tmp_path, mon
     svc.save()
     _jit_app(tmp_path)
     project = service.locate(tmp_path)
+    shared = jit.vendor(project)
+    assert shared["cached"] is False and "react" in shared["specifiers"] and "react/jsx-runtime" in shared["specifiers"]
+    assert "sonner" in shared["specifiers"] and "next/link" not in shared["specifiers"], "Next's modules are shimmed, never vendored"
+    assert "window.__forgeVendor" in shared["js"] and len(shared["js"]) > 100_000, "one script carries React and the rest"
+    assert jit.vendor(project)["cached"] is True
+
     out = jit.build(project, "PAGE-001")
-    assert out["cached"] is False and out["data"] == "sample"
+    assert out["cached"] is False and out["data"] == "sample" and out["vendorKey"] == shared["key"]
     js = out["js"]
+    assert len(js) < 60_000 and "react.development" not in js and "__forgeVendor" in js, "the page carries its own code and reads React from the shared script"
     assert "All cases" in js and "Home" in js, "the page and its public frame are in the bundle"
     assert '"Quarterly review 1"' in js and '"Open"' in js and '"sample-case-1"' in js, "sample rows come from the entity's fields"
     assert "forge-editor:navigate" in js and "forge-editor:action" in js, "moves and workflow runs are reported to the editor"

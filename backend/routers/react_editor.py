@@ -101,6 +101,15 @@ async def apply_transaction(project_id: uuid.UUID, page_id: str, req: ApplyReque
                       label=req.label[:120])
 
 
+@router.get("/api/projects/{project_id}/react-editor/vendor")
+async def vendor_script(project_id: uuid.UUID, fresh: bool = Query(default=False),
+                        user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """The shared script every instant page runs on — fetched once per app."""
+    project = await _project(project_id, user, db)
+    out = await _run(jit.vendor, project, fresh=fresh)
+    return {k: v for k, v in out.items() if k != "candidates"}
+
+
 @router.get("/api/projects/{project_id}/react-editor/pages/{page_id}/jit")
 async def render_page(project_id: uuid.UUID, page_id: str, params: str | None = Query(default=None),
                       search: str | None = Query(default=None), fresh: bool = Query(default=False),

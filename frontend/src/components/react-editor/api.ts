@@ -68,13 +68,24 @@ export interface JitBundle {
   js: string;
   css: string;
   revision: string;
+  vendorKey: string;
   ms: number;
   cached: boolean;
   data: "sample";
   warnings: string[];
 }
 
+export interface VendorBundle {
+  key: string;
+  js: string;
+  specifiers: string[];
+  ms: number;
+  cached: boolean;
+}
+
 export const editorApi = {
+  vendor: (projectId: string, opts: { fresh?: boolean } = {}, signal?: AbortSignal) =>
+    call<VendorBundle>(`${base(projectId)}/vendor${opts.fresh ? "?fresh=true" : ""}`, { signal }),
   jit: (projectId: string, pageId: string, opts: { params?: Record<string, string>; search?: Record<string, string>; fresh?: boolean } = {}, signal?: AbortSignal) => {
     const q = new URLSearchParams();
     if (opts.params && Object.keys(opts.params).length) q.set("params", JSON.stringify(opts.params));

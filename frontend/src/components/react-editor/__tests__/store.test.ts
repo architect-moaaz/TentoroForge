@@ -11,7 +11,7 @@ vi.mock("sonner", () => ({ toast: { warning: vi.fn(), error: vi.fn(), info: vi.f
 const calls: { name: string; args: unknown[] }[] = [];
 const api = {
   pages: vi.fn(), open: vi.fn(), apply: vi.fn(), restore: vi.fn(), check: vi.fn(), propose: vi.fn(),
-  applyProposal: vi.fn(), discardProposal: vi.fn(), history: vi.fn(), jit: vi.fn(),
+  applyProposal: vi.fn(), discardProposal: vi.fn(), history: vi.fn(), jit: vi.fn(), vendor: vi.fn(),
 };
 vi.mock("../api", async () => {
   const real = await vi.importActual<typeof import("../api")>("../api");
@@ -44,7 +44,8 @@ beforeEach(async () => {
   Object.values(api).forEach((f) => f.mockReset());
   api.pages.mockResolvedValue({ entryPage: "PAGE-001", pages: [{ id: "PAGE-001", name: "Records", route: "/records", purpose: "", pattern: null, access: "authenticated", coded: true, module: null, navigatesTo: [] }] });
   api.open.mockResolvedValue(doc("rev1", "Records"));
-  api.jit.mockImplementation(async (_p: string, pageId: string) => ({ js: `js-${pageId}-${calls.filter((c) => c.name === "jit").length}`, css: "", revision: "rev1", ms: 5, cached: false, data: "sample", warnings: [] }));
+  api.jit.mockImplementation(async (_p: string, pageId: string) => ({ js: `js-${pageId}-${calls.filter((c) => c.name === "jit").length}`, css: "", revision: "rev1", vendorKey: "v1", ms: 5, cached: false, data: "sample", warnings: [] }));
+  api.vendor.mockResolvedValue({ key: "v1", js: "window.__forgeVendor = {}", specifiers: ["react"], ms: 9, cached: false });
   await useEditorStore.getState().init("project-1");
 });
 
@@ -146,5 +147,17 @@ describe("the instant canvas", () => {
     useEditorStore.getState().previewBack();
     await new Promise((r) => setTimeout(r, 0));
     expect(useEditorStore.getState().frameTarget?.pageId).toBe("PAGE-001");
+    // The shared script was fetched once for all of those pages.
+    expect(calls.filter((c) => c.name === "vendor")).toHaveLength(1);
+    expect(useEditorStore.getState().vendor?.key).toBe("v1");
+  });
+
+  it("fetches the shared script again only when a page was built against a newer one", async () => {
+    expect(calls.filter((c) => c.name === "vendor")).toHaveLength(1);
+    api.jit.mockResolvedValue({ js: "js", css: "", revision: "rev1", vendorKey: "v2", ms: 5, cached: false, data: "sample", warnings: [] });
+    api.vendor.mockResolvedValue({ key: "v2", js: "window.__forgeVendor = {}", specifiers: ["react"], ms: 9, cached: false });
+    await useEditorStore.getState().loadFrame({ pageId: "PAGE-001", params: {}, search: {} });
+    expect(calls.filter((c) => c.name === "vendor")).toHaveLength(2);
+    expect(useEditorStore.getState().vendor?.key).toBe("v2");
   });
 });

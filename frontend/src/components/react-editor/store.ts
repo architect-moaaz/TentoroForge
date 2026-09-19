@@ -28,7 +28,10 @@ export type CanvasSource = "jit" | "app";
 
 export interface FrameTarget { pageId: string; params: Record<string, string>; search: Record<string, string> }
 
-export interface FrameDoc extends FrameTarget { js: string; css: string; revision: string; ms: number; cached: boolean; warnings: string[] }
+export interface FrameDoc extends FrameTarget { js: string; css: string; revision: string; vendorKey: string; ms: number; cached: boolean; warnings: string[] }
+
+/** The shared script every instant page runs on, held once per app as a blob URL. */
+export interface VendorScript { key: string; url: string; bytes: number }
 
 export interface ActionTrace {
   at: number;
@@ -93,6 +96,7 @@ export interface EditorState {
   /** The page the frame shows: the open page, or where the app-wide preview has moved to. */
   frameTarget: FrameTarget | null;
   frameDoc: FrameDoc | null;
+  vendor: VendorScript | null;
   frameLoading: boolean;
   frameBuildError: string | null;
   previewStack: FrameTarget[];
@@ -245,6 +249,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   source: "jit",
   frameTarget: null,
   frameDoc: null,
+  vendor: null,
   frameLoading: false,
   frameBuildError: null,
   previewStack: [],
@@ -275,8 +280,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   init: async (projectId) => {
     const prefs = readPrefs(projectId);
+    // Another project has another shared script; let this one's go.
+    const old = get().vendor;
+    if (old && typeof URL.revokeObjectURL === "function" && old.url.startsWith("blob:")) URL.revokeObjectURL(old.url);
     set({ projectId, ...prefs, pages: [], pageId: null, doc: null, selection: [], undoStack: [], redoStack: [],
-          smith: emptySmith(), mode: "design", previewApp: false, loadError: null });
+          smith: emptySmith(), mode: "design", previewApp: false, loadError: null,
+          vendor: null, frameTarget: null, frameDoc: null, frameBuildError: null, previewStack: [], actions: [] });
     await get().loadPages();
     const { pages, entryPage } = get();
     const first = pages.find((p) => p.coded && p.id === entryPage) ?? pages.find((p) => p.coded) ?? pages[0];
@@ -582,10 +591,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ frameTarget: t, frameLoading: true, frameBuildError: null });
     try {
       const bundle: JitBundle = await editorApi.jit(projectId, t.pageId, { params: t.params, search: t.search, fresh: opts.fresh });
+      // The shared script is fetched once per app and kept as a blob URL; a
+      // page built against a newer vendor brings the new one along.
+      if (get().vendor?.key !== bundle.vendorKey) {
+        const v = await editorApi.vendor(projectId, { fresh: opts.fresh });
+        const old = get().vendor;
+        if (old && typeof URL.revokeObjectURL === "function") URL.revokeObjectURL(old.url);
+        const url = typeof URL.createObjectURL === "function" ? URL.createObjectURL(new Blob([v.js], { type: "text/javascript" })) : `vendor:${v.key}`;
+        set({ vendor: { key: v.key, url, bytes: v.js.length } });
+      }
       // A later request may have superseded this one.
       const now = get().frameTarget;
       if (!now || now.pageId !== t.pageId || JSON.stringify(now.params) !== JSON.stringify(t.params)) return;
-      set({ frameDoc: { ...t, js: bundle.js, css: bundle.css, revision: bundle.revision, ms: bundle.ms, cached: bundle.cached, warnings: bundle.warnings },
+      set({ frameDoc: { ...t, js: bundle.js, css: bundle.css, revision: bundle.revision, vendorKey: bundle.vendorKey, ms: bundle.ms, cached: bundle.cached, warnings: bundle.warnings },
             frameLoading: false });
     } catch (err) {
       const f = failureOf(err);
