@@ -597,6 +597,13 @@ def _field_named(svc: Any, route: str, widget: str) -> tuple[dict, dict] | None:
 
 WIDGET_ATTEMPTS = 2
 
+#: Pages the analytics agent's own rule gives no widgets: "a form, a wizard, a
+#: settings page or a tool carries none". Told only "Open A Dispute page has
+#: nothing in it", the agent filled a dispute FORM with three dashboard charts
+#: (036farqu) — so on these pages it is not asked at all unless the person
+#: named a number or a chart themselves.
+NO_ANALYTICS_PATTERNS = frozenset({"form", "wizard", "settings", "configuration"})
+
 
 def code_row(doc: dict, page_id: str) -> dict | None:
     """The page's React code, or None when it renders from its layout."""
@@ -607,11 +614,15 @@ def code_row(doc: dict, page_id: str) -> dict | None:
 
 def _widget_brief(page: dict, request: str, wanted: Sequence[str]) -> str:
     asks = "".join(f"\n- {w}" for w in wanted)
-    return (f"The person asked, about the page {page.get('route')} ({page.get('id')}): "
+    return (f"The person asked, about the page {page.get('route')} ({page.get('id')}, a "
+            f"`{page.get('pattern') or 'page'}` page — {page.get('purpose') or 'no stated purpose'}): "
             f"\"{request}\"{asks}\n\n"
             f"Declare ONLY the widgets this ask adds or changes, all on page {page.get('id')} — "
-            "a KPI, a chart, a breakdown. Every other widget stays exactly as it is and is not "
-            "returned. When the ask needs nothing counted or charted, return no proposal.")
+            "a KPI, a chart, a breakdown — and only when the ask is for something counted or "
+            "charted. A page that looks empty or wrong is the page's code to fix, not a place "
+            "to put charts: never add a widget to fill space. Every other widget stays exactly "
+            "as it is and is not returned. When the ask needs nothing counted or charted, "
+            "return no proposal.")
 
 
 def _declare_widgets(svc: Any, page: dict, request: str, wanted: Sequence[str], *,
@@ -684,7 +695,10 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
         raise ComposeError(f"{route} is not a page written as code.")
     usage = RunUsage.for_app(svc, phase="change")
     run = executor or make_executor(svc, tiered_router(reasoning=reasoning), usage=usage, reasoning=reasoning)
-    widgets = _declare_widgets(svc, page, request, wanted, run=run, reasoning=reasoning)
+    if str(page.get("pattern") or "") in NO_ANALYTICS_PATTERNS and not wanted:
+        widgets: list[Any] = []
+    else:
+        widgets = _declare_widgets(svc, page, request, wanted, run=run, reasoning=reasoning)
     doc = _with_widgets(svc.doc, widgets)
     root = Path(app_root)
     try:

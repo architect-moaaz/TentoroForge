@@ -179,3 +179,33 @@ def test_the_data_engine_groups_a_number_into_its_ranges():
     proc = subprocess.run(["bash", str(script)], capture_output=True, text=True, timeout=180)
     assert proc.returncode == 0, (proc.stdout + proc.stderr)[-1500:]
     assert "orders per band" in proc.stdout
+
+
+def test_a_form_page_is_not_filled_with_charts(tmp_path, quiet):
+    """036farqu: "Open A Dispute page has nothing in it" gave a dispute FORM
+    three dashboard charts. The analytics rule is that a form carries none,
+    so on a form the analytics agent is not asked unless charts were named."""
+    svc = _svc(tmp_path)
+    svc.doc["pages"][0]["pattern"] = "form"
+    svc.save()
+    quiet(VIEW.replace("p-6", "p-8"))
+    run = _Run([HEATMAP])
+    out = recode_page(svc, "/dashboard", app_root=str(tmp_path / "app"),
+                      request="this page has nothing in it", executor=run, client=object())
+    assert out["applied"] and run.specs == [] and not svc.doc.get("widgets")
+    # A chart asked for by name on a form is still honoured.
+    run = _Run([HEATMAP])
+    recode_page(svc, "/dashboard", app_root=str(tmp_path / "app"),
+                request="add a heatmap", wanted=["age × gender heatmap"], executor=run, client=object())
+    assert len(run.specs) == 1
+
+
+def test_the_analytics_agent_is_told_what_kind_of_page_it_is(tmp_path, quiet):
+    svc = _svc(tmp_path)
+    svc.doc["pages"][0]["pattern"] = "dashboard"
+    svc.save()
+    quiet(VIEW)
+    run = _Run([])
+    recode_page(svc, "/dashboard", app_root=str(tmp_path / "app"),
+                request="it looks empty", executor=run, client=object())
+    assert "`dashboard` page" in run.specs[0].brief and "never add a widget to fill space" in run.specs[0].brief

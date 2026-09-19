@@ -214,3 +214,18 @@ def test_the_alias_is_not_in_the_scoped_subsets():
     assert "revert" not in TOOL_SUBSETS["undo"]
     assert "revert" not in TOOL_TAGS
     assert set(TOOL_SUBSETS["undo"]) <= advertised
+
+
+def test_an_undo_writes_a_coded_page_back_too(tmp_path, monkeypatch):
+    """036farqu: undoing a rewrite restored the page's code in the Blueprint,
+    but the app kept serving the newer view.tsx — the re-projection never
+    wrote React pages or their SDK."""
+    from services.smith import reproject
+    from services.blueprint import app_sdk, ui_engineer
+
+    calls = []
+    monkeypatch.setattr(ui_engineer, "ensure_sdk", lambda doc, root: calls.append("sdk"))
+    monkeypatch.setattr(app_sdk, "project_code_pages", lambda doc, root: calls.append("pages") or ["src/app/x/view.tsx"])
+    svc = type("S", (), {"doc": {"pageCode": []}})()
+    assert reproject._code_pages(svc, str(tmp_path))["files"] == ["src/app/x/view.tsx"]
+    assert calls == ["sdk", "pages"], "the SDK first, then the pages that compile against it"

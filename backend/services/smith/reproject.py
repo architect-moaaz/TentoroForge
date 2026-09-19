@@ -25,6 +25,16 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _code_pages(svc: Any, app_root: str) -> dict:
+    from pathlib import Path
+
+    from services.blueprint.app_sdk import project_code_pages
+    from services.blueprint.ui_engineer import ensure_sdk
+
+    ensure_sdk(svc.doc, Path(app_root))
+    return {"files": list(project_code_pages(svc.doc, app_root) or [])}
+
+
 def everything(svc: Any, app_root: str | None) -> list[str]:
     """Re-project every part of the application from `svc.doc`."""
     if not app_root:
@@ -56,6 +66,12 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
     _run("integrations", lambda: _project_integration(svc, app_root))
     files += ["src/lib/workflows/definitions", "src/lib/integrations/connected.ts"]
     _run("frontend", lambda: apply_frontend_projection(svc, app_root))
+    # THE DESIGNED PAGES. `apply_frontend_projection` writes page schemas, not
+    # a page's React code or the SDK it compiles against: an undo that put a
+    # page's earlier code back into the document left the app serving the
+    # newer view.tsx, charts and all (036farqu's Open a Dispute). The same two
+    # calls the build's frontend projection makes, in the same order.
+    _run("code_pages", lambda: _code_pages(svc, app_root))
     _run("business_rules", lambda: project_business_rules(svc.doc, app_root))
     for name, fn in (("middleware", project_middleware),
                      ("public_resources", project_public_resources),
