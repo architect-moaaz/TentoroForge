@@ -57,7 +57,11 @@ Return ONLY a JSON object with exactly these keys:
       does everything.
       EVERY ask, the layout ones too: "grid view with images", "make it
       scrollable", "a home page listing the tools" are asks, each about a
-      screen — name the screen in the ask. A long message that is hard to
+      screen — name the screen in the ask. SEVERAL ASKS ABOUT ONE SCREEN ARE
+      ONE STEP: "grid view, with the photo, the name as 'Product', the
+      description and the area" on Discover is one ask about Discover, not
+      four — so a long message fits the list and nothing falls off its end.
+      Data-model changes come before the screens that show them. A long message that is hard to
       follow is still a list of asks; list what you can read and ask about
       the rest, rather than answering that you did not follow.
       WHAT A SCREEN CALLS A THING IS NOT WHAT THE DATA MODEL CALLS IT. "The
