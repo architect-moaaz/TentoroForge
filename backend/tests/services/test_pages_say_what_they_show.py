@@ -173,7 +173,7 @@ def test_the_brief_and_the_prompts_carry_the_plan():
     assert "content" not in _page_brief(doc, _page())
     assert "THE CONTENT PLAN IS THE PAGE" in DESIGN_PRINCIPLES
     assert "SAY WHAT EACH PAGE SAYS" in NODE_TASKS["page_details"]
-    assert "never invent a price" in NODE_TASKS["page_details"]
+    assert "never invent a figure" in NODE_TASKS["page_details"]
     assert "LOOKS AT to decide" in NODE_TASKS["entity_fields"]
 
 

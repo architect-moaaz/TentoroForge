@@ -15,6 +15,7 @@ import {
   Stethoscope, Tag, Target, Ticket, TrendingUp, Truck, User, UserCheck,
   UserCog, Users, Wallet, Wrench, Zap,
 } from "lucide-react";
+import { icons as lucideIcons } from "lucide-react";
 import { ShellStateProvider } from "@tentoroforge/renderer";
 import { MobileNav } from "./MobileNav";
 import { NotificationBell } from "./NotificationBell";
@@ -73,12 +74,6 @@ function isDetailPage(title: string | undefined, route: string): boolean {
 // item is icon-less. Only used by the nav-flow fallback below (a shell-provided
 // SideNav already carries its own icons).
 const ICON_MAP: [RegExp, string][] = [
-  [/discover|browse|explore|search|find/, "search"],
-  [/dispute|issue|problem|complaint/, "flag"],
-  [/review|rating|feedback/, "star"],
-  [/rental|loan|borrow|lend|swap/, "arrow-left-right"],
-  [/community|neighbo|group/, "users"],
-  [/tool|repair|equipment/, "wrench"],
   [/dash|home|overview/, "layout-dashboard"],
   [/user|member|guest|customer|client|contact|people|staff|employee/, "users"],
   [/room|unit|property|space/, "door-open"],
@@ -652,8 +647,18 @@ const GLYPHS: Record<string, React.ComponentType<{ size?: number; strokeWidth?: 
   wrench: Wrench, zap: Zap,
 };
 
+// Any lucide icon the Blueprint names ("map-pin", "hammer"), not only the
+// ones listed above: the architect picks the icon that depicts a destination
+// in this product. Resolved here, on the server, so no icon set ships to the
+// browser.
+function lucideByName(name: string): React.ComponentType<{ size?: number; strokeWidth?: number }> | undefined {
+  const pascal = name.split(/[-_\s]+/).filter(Boolean).map((w) => w[0]!.toUpperCase() + w.slice(1)).join("");
+  return (lucideIcons as Record<string, React.ComponentType<{ size?: number; strokeWidth?: number }>>)[pascal];
+}
+
 function RailGlyph({ name, size = 17 }: { name?: string; size?: number }) {
-  const C = GLYPHS[(name || "circle").toLowerCase()] ?? Circle;
+  const key = (name || "circle").toLowerCase();
+  const C = GLYPHS[key] ?? lucideByName(key) ?? Circle;
   return <C size={size} strokeWidth={2} />;
 }
 

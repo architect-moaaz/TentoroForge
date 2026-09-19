@@ -520,6 +520,7 @@ export type NavNodeT = {
   label: string;
   page?: string;
   icon?: string;
+  tab?: boolean;
   roles?: string[];
   children?: NavNodeT[];
 };
@@ -529,6 +530,8 @@ export const NavNode: z.ZodType<NavNodeT> = z.lazy(() =>
     label: z.string(),
     page: PageId.optional(),
     icon: z.string().optional(),
+    /** One of the bottom tab bar's destinations, when `navigation.mobile` is `tabs`. */
+    tab: z.boolean().optional(),
     /** Visible only to these roles; empty means all authenticated roles. */
     roles: z.array(RoleId).default([]).optional(),
     children: z.array(NavNode).default([]).optional(),
@@ -541,10 +544,10 @@ export const Navigation = z.object({
   /** Landing route per role — resolved deterministically, never guessed. */
   initialRoute: z.record(z.string(), z.string()).default({}),
   /**
-   * How a phone navigates: `tabs` is a bottom tab bar of the main
-   * destinations (a mobile-first product), `drawer` the menu behind a
-   * hamburger. Unset, the projection decides from the pages: tabs when most
-   * say a phone is their primary device.
+   * How a phone navigates: `tabs` is a bottom tab bar of the destinations
+   * the architect marks `tab: true` (a mobile-first product), `drawer` the menu
+   * behind a hamburger. Unset, it follows the pages' own declarations: tabs
+   * when most say a phone is their primary device.
    */
   mobile: z.enum(["tabs", "drawer"]).optional(),
 });

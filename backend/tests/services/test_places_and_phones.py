@@ -147,3 +147,17 @@ def test_the_sdk_the_editor_and_the_prompts_carry_places():
     assert "export async function near(" in samples and "export async function whereAmI(" in samples
     assert "`location`" in NODE_TASKS["entity_fields"] and "`distance`" in NODE_TASKS["page_details"]
     assert "PLACES ARE DISTANCES" in DESIGN_PRINCIPLES and "whereAmI(ctx)" in SDK_GUIDE
+
+
+def test_the_architect_chooses_the_tabs_and_their_icons():
+    groups = [{"label": "Home", "route": "/"}, {"label": "Find", "route": "/find", "icon": "map-pin", "tab": True},
+              {"label": "Work", "items": [{"label": "Jobs", "route": "/jobs", "icon": "hammer", "tab": True},
+                                          {"label": "Quotes", "route": "/quotes"}]},
+              {"label": "Me", "route": "/me", "tab": True}]
+    tabs = mobile_tabs({"navigation": {"mobile": "tabs"}}, groups)
+    assert tabs == [{"label": "Find", "route": "/find", "icon": "map-pin"},
+                    {"label": "Jobs", "route": "/jobs", "icon": "hammer"},
+                    {"label": "Me", "route": "/me"}]
+    assert "`tab: true`" in NODE_TASKS["ux_architecture"] and "`icon`" in NODE_TASKS["ux_architecture"]
+    layout = (_SHELL / "layout.tsx").read_text()
+    assert "lucideByName(key)" in layout, "any lucide icon the architect names renders"

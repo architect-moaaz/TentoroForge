@@ -255,7 +255,7 @@ What a finished page looks like:
   shows the one primary action for the page on the right. Secondary actions are
   outline or ghost buttons, never a row of equal primaries.
 - THE ACCENT MARKS WHAT TO DO NOW — once per screen. The one action this screen is
-  for (Start return, Submit report, Request to borrow) is the accent:
+  for (Submit claim, Book appointment, Send request) is the accent:
   <Button variant="accent">, <WorkflowButton variant="accent">, or
   <WorkflowForm submitVariant="accent">. The active status or the selected filter
   chip is its tint: bg-accent-subtle text-accent-subtle-foreground. Everything
@@ -268,25 +268,25 @@ What a finished page looks like:
   `writeProcessCopyFrom`: plain sentences for the reader, true to those rules and
   steps. Add nothing the data cannot produce.
 - LEAD WITH WHAT MATTERS NOW. Before the list, decide what this person came to see
-  first — the rental that is due, the request waiting on them, the step not yet
-  done — and give it one card of its own at the top in the dark surface
+  first — the appointment that is next, the request waiting on them, the step
+  not yet done — and give it one card of its own at the top in the dark surface
   (bg-inverse text-inverse-foreground, supporting text text-inverse-foreground/70)
-  with its facts in words ("Due back in 1 day 6 hrs · Mon 18:00") and its action.
-  Then the rest, grouped by what the reader does with it (Active · Upcoming ·
-  Past), not by table.
+  with its facts in words ("Due in 1 day 6 hrs · Mon 18:00") and its action.
+  Then the rest, grouped by what the reader does with it (e.g. Active · Upcoming
+  · Past), not by table.
 - PLACES ARE DISTANCES. A `location` is never shown as numbers or a map pin of
   someone's home: show how far it is (formatDistance → "0.4 mi"), rank lists with
   near(…, await whereAmI(ctx)), offer <NearMe /> beside the search on a list of
   nearby things, and in a form it is { label, kind: "location" } — the person
   shares an approximate position with a button.
-- NAMES, NEVER IDS. A reader never sees an id or a shortened one ("Tool #a1b2…"). A
+- NAMES, NEVER IDS. A reader never sees an id or a shortened one ("Order #a1b2…"). A
   foreign key is shown as the record it points at — its name, its owner, its
-  picture: load them with recordsById(Entity, rows.map(r => r.toolId)) in load.ts
-  and show `tools[r.toolId]?.name`. A row that says "Borrowing a tool" says which.
-- SAY WHAT HAPPENS NEXT. Before an action with consequences (a dispute, a deposit,
+  picture: load them with recordsById(Entity, rows.map(r => r.customerId)) in load.ts
+  and show `customers[r.customerId]?.name`. A row that names a thing says which one.
+- SAY WHAT HAPPENS NEXT. Before an action with consequences (a complaint, a payment,
   a cancellation) say plainly what it does and what follows — a short numbered
-  "What happens next", or one reassuring line ("Your $40 deposit is released
-  within 24 hours"). Copy is written for the person, in the domain's words.
+  "What happens next", or one reassuring line drawn from the app's own rules and
+  steps. Copy is written for the person, in the domain's words.
 - HIERARCHY BEFORE DECORATION. Size, weight and spacing carry the structure; colour
   is for meaning (status, priority, money in/out). Use tabular-nums for figures.
 - REAL CONTENT, REAL STATES. Every list has an empty state that says what to do next

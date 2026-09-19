@@ -769,6 +769,9 @@
               "icon": {
                 "type": "string"
               },
+              "tab": {
+                "type": "boolean"
+              },
               "roles": {
                 "type": "array",
                 "items": {

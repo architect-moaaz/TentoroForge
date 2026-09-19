@@ -865,10 +865,20 @@ def mobile_style(doc: dict) -> str:
 
 
 def mobile_tabs(doc: dict, groups: list[dict]) -> list[dict]:
-    """The bottom tab bar of a mobile-first application: its first main
-    destinations, in rail order — a group contributes its first item."""
+    """The bottom tab bar of a mobile-first application: the destinations the
+    architect marked `tab: true`, in rail order. Only when it marked none, the
+    first main destinations stand in (a group contributes its first item)."""
     if mobile_style(doc) != "tabs":
         return []
+    marked = [it for g in groups for it in [g, *(g.get("items") or [])] if it.get("tab") and it.get("route")]
+    if marked:
+        out = []
+        for it in marked[:MOBILE_TABS]:
+            tab = {"label": str(it.get("label") or ""), "route": it["route"]}
+            if it.get("icon"):
+                tab["icon"] = str(it["icon"])
+            out.append(tab)
+        return out
     out: list[dict] = []
     for g in groups:
         first = g if g.get("route") else next((i for i in g.get("items") or [] if i.get("route")), None)
@@ -934,6 +944,8 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             out["route"] = route
         if node.get("icon"):
             out["icon"] = str(node["icon"])
+        if node.get("tab"):
+            out["tab"] = True
         return out
 
     groups: list[dict[str, Any]] = []
@@ -943,6 +955,8 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             group: dict[str, Any] = {"label": str(node.get("label") or "")}
             if node.get("icon"):
                 group["icon"] = str(node["icon"])
+            if node.get("tab"):
+                group["tab"] = True
             group["items"] = [it for it in (item(k) for k in kids) if it is not None]
             if group["items"]:
                 groups.append(group)
