@@ -1742,7 +1742,8 @@ async def smith_chat(
             turn_result = handle_chat_v2(ChatV2Request(
                 project_id=str(project_id), output_dir=str(output_dir),
                 message=req.message,
-                history=[(t.role, t.text) for t in req.history if t.text],
+                # The recent exchange only — Smith reads the last few turns.
+                history=[(t.role, t.text) for t in req.history if t.text][-10:],
                 reasoning_fn=lambda text, kind="reasoning", node="": emit(
                     "thought", {"text": text, "kind": kind, "node": node}),
             ))

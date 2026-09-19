@@ -87,6 +87,9 @@ type Greeting = {
  * A present participle says the machine is working on something specific,
  * which is the difference between waiting and wondering whether it hung.
  */
+/** Messages sent with each turn — Smith reads the last six; a little slack. */
+const SENT_HISTORY = 10;
+
 const STAGE_VERB: Record<string, string> = {
   requirements: "Reading what you asked for",
   application_model: "Modelling the product",
@@ -689,7 +692,11 @@ export function SmithPanel({
       // Taken BEFORE the new turn is appended: the history is what came before
       // this message, and including the message in its own history would have
       // Smith read the question as its own answer.
-      const prior = messages.map((m) => ({ role: m.role, text: m.text }));
+      // Only the recent exchange travels: Smith reads the last few turns (a
+      // question and its answer are adjacent), and an ask it could not act on
+      // is carried on the server (`pending_ask`). The whole transcript went
+      // with every message and was dropped there.
+      const prior = messages.slice(-SENT_HISTORY).map((m) => ({ role: m.role, text: m.text }));
       setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
       void start({ description: text, evidence, history: prior });
     },
