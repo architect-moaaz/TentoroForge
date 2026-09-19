@@ -61,6 +61,21 @@ def test_a_credential_is_never_typed_or_returned():
     assert "password" not in readable[:readable.index("};")]
 
 
+def test_an_entity_named_like_a_global_type_does_not_shadow_it():
+    """An entity `Record` must not become `interface Record` — schema.ts itself
+    types its constants as `Record<string, …>`, which would stop being generic."""
+    doc = _doc()
+    doc["data"]["entities"].append(
+        {"id": "ENTITY-003", "name": "Record", "table": "records", "fields": [
+            {"name": "title", "type": "string", "required": True}]})
+    schema = sdk_files(doc)["src/sdk/schema.ts"]
+    assert "export interface Record " not in schema
+    assert "export interface RecordRow {" in schema
+    assert '  "Record": RecordRow;' in schema                    # the SDK still reads it by name
+    assert "READABLE_FIELDS: Record<string, readonly string[]>" in schema
+    assert "LABEL_FIELD: Record<string, string>" in schema
+
+
 def test_a_workflow_is_typed_by_its_inputs():
     wf = sdk_files(_doc())["src/sdk/workflows.ts"]
     assert "closeCase: wf<{" in wf

@@ -46,6 +46,35 @@ _RESERVED = frozenset({
 })
 
 
+# Type names an entity's interface may not take. A global it would shadow breaks
+# the SDK's own code (an entity `Record` turns every `Record<string, …>` in
+# schema.ts into "Type 'Record' is not generic"); a name the SDK itself exports
+# makes index.ts's `export *` ambiguous.
+_TAKEN_TYPES = frozenset({
+    # TypeScript / ECMAScript
+    "Record", "Partial", "Required", "Readonly", "Pick", "Omit", "Exclude", "Extract",
+    "NonNullable", "ReturnType", "Parameters", "InstanceType", "Awaited", "Uppercase",
+    "Lowercase", "Capitalize", "Uncapitalize", "ReadonlyArray", "PropertyKey",
+    "Map", "Set", "WeakMap", "WeakSet", "WeakRef", "Date", "Error", "TypeError",
+    "RangeError", "SyntaxError", "Promise", "Array", "Object", "Function", "String",
+    "Number", "Boolean", "Symbol", "BigInt", "RegExp", "Math", "JSON", "Intl",
+    "Proxy", "Reflect", "Iterator", "Iterable", "Generator", "ArrayBuffer",
+    "DataView", "Infinity", "NaN",
+    # DOM / web platform
+    "Event", "Node", "Element", "Document", "Window", "Request", "Response", "File",
+    "Blob", "URL", "Image", "Text", "Location", "Storage", "Headers", "Comment",
+    "Attr", "Range", "Selection", "History", "Navigator", "Screen", "Notification",
+    "Option", "Audio", "Worker", "Crypto", "Performance", "Animation", "FormData",
+    "Credential", "Report", "Plugin", "Touch", "Clipboard", "Cache", "Lock",
+    "Permissions", "Position", "Geolocation", "MessageEvent", "WebSocket", "Console",
+    # React / Next.js (JSX namespace and common ambient names)
+    "React", "JSX", "Component", "Fragment",
+    # The SDK's own exports (schema.ts, workflows.ts, pages.ts)
+    "Entities", "EntityName", "NumericField", "Workflow", "WorkflowKey", "InputOf",
+    "PageRef", "PageContext",
+})
+
+
 def _words(text: str) -> list[str]:
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(text or ""))
     return [w for w in re.split(r"[^A-Za-z0-9]+", spaced) if w]
@@ -125,10 +154,15 @@ def _numeric(field: dict) -> bool:
     return not is_list_type(type_name) and _TYPES.get(type_name, _DEFAULT_TYPE) in ("integer", "numeric")
 
 
+def _type_name(text: str) -> str:
+    name = pascal(text)
+    return name + "Row" if name in _TAKEN_TYPES else name
+
+
 def entity_type_names(doc: dict) -> dict[str, str]:
     """Entity id -> its TypeScript type name (also the SDK's entity key)."""
     ents = _live((doc.get("data") or {}).get("entities"))
-    names = _unique(pascal(e.get("name") or e.get("id")) for e in ents)
+    names = _unique(_type_name(e.get("name") or e.get("id")) for e in ents)
     return {str(e.get("id")): n for e, n in zip(ents, names)}
 
 
