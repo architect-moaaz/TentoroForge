@@ -62,15 +62,83 @@
   function isOurs(el) {
     return !!(el && el.closest && el.closest("[data-forge-editor]"));
   }
-  function fidEl(el) {
-    if (!el || !el.closest) return null;
-    var f = el.closest("[data-fid]");
-    return f && !isOurs(f) ? f : null;
+  // --- which source node a DOM node belongs to ------------------------------
+  // The editor stamps `data-fid` on every JSX element of the page. An HTML
+  // element renders it as an attribute; a COMPONENT receives it as a prop and
+  // most never pass it on — WidgetView, Chart, WorkflowForm drew a chart with
+  // no `data-fid` anywhere in it, so a click on the chart selected the grid
+  // around it. React still knows: every DOM node points at its fiber, and a
+  // component's fiber keeps its props. So ownership is read off the fiber
+  // tree — the innermost element OR component carrying `data-fid` — and a
+  // component's outline is the union of the DOM it rendered. The DOM lookup
+  // stays as the fallback when there is no fiber to read.
+  function fiberOf(el) {
+    if (!el) return null;
+    for (var k in el) if (k.indexOf("__reactFiber$") === 0) return el[k];
+    return null;
   }
-  function byFid(fid) {
-    if (!fid) return null;
-    var els = document.querySelectorAll('[data-fid="' + fid.replace(/"/g, '\\"') + '"]');
-    return els.length ? els[0] : null;
+  function fidOfFiber(f) {
+    var p = f && f.memoizedProps;
+    return p && typeof p === "object" && typeof p["data-fid"] === "string" ? p["data-fid"] : null;
+  }
+  /** The fid that owns a DOM node, or null. */
+  function ownerFid(node) {
+    if (!node || isOurs(node)) return null;
+    var el = node.nodeType === 1 ? node : node.parentElement;
+    // A library draws some of its own DOM (ECharts makes its <canvas> and
+    // the divs around it): climb to the nearest node React made.
+    var start = el;
+    while (start && !fiberOf(start)) start = start.parentElement;
+    for (var f = fiberOf(start); f; f = f.return) {
+      var fid = fidOfFiber(f);
+      if (fid) return fid;
+    }
+    var d = el && el.closest ? el.closest("[data-fid]") : null;
+    return d && !isOurs(d) ? d.getAttribute("data-fid") : null;
+  }
+  var fidIndex = null;   // fid -> fiber, rebuilt after the page changes
+  function fiberForFid(fid) {
+    if (!fidIndex) {
+      fidIndex = {};
+      var all = document.body.getElementsByTagName("*");
+      for (var i = 0; i < all.length; i++) {
+        if (isOurs(all[i])) continue;
+        for (var f = fiberOf(all[i]); f; f = f.return) {
+          var id = fidOfFiber(f);
+          if (id && !fidIndex[id]) fidIndex[id] = f;
+        }
+      }
+    }
+    return fidIndex[fid] || null;
+  }
+  /** The top-level DOM nodes a fid rendered, in order. */
+  function nodesOf(fid) {
+    if (!fid) return [];
+    var f = fiberForFid(fid);
+    if (!f) {
+      var el = document.querySelector('[data-fid="' + fid.replace(/"/g, '\\"') + '"]');
+      return el ? [el] : [];
+    }
+    if (f.stateNode && f.stateNode.nodeType === 1) return [f.stateNode];
+    var out = [];
+    (function walk(c) {
+      for (; c; c = c.sibling) {
+        if (c.stateNode && c.stateNode.nodeType === 1) out.push(c.stateNode);
+        else walk(c.child);
+      }
+    })(f.child);
+    return out;
+  }
+  function byFid(fid) { return nodesOf(fid)[0] || null; }
+  function rectOfFid(fid) {
+    var els = nodesOf(fid);
+    var t = Infinity, l = Infinity, b = -Infinity, r = -Infinity;
+    for (var i = 0; i < els.length; i++) {
+      var x = els[i].getBoundingClientRect();
+      if (!x.width && !x.height) continue;
+      t = Math.min(t, x.top); l = Math.min(l, x.left); b = Math.max(b, x.bottom); r = Math.max(r, x.right);
+    }
+    return t === Infinity ? null : { top: t, left: l, width: r - l, height: b - t };
   }
   function rectOf(el) {
     var r = el.getBoundingClientRect();
@@ -85,9 +153,8 @@
     if (mode === "preview") return;
     var rects = {};
     for (var i = 0; i < selected.length; i++) {
-      var el = byFid(selected[i]);
-      if (!el) continue;
-      var r = rectOf(el);
+      var r = rectOfFid(selected[i]);
+      if (!r) continue;
       rects[selected[i]] = r;
       var b = box("rgba(37,99,235,0.06)", "2px solid #2563eb");
       place(b, r);
@@ -109,10 +176,11 @@
   // --- pointer -------------------------------------------------------------
   document.addEventListener("mousemove", function (e) {
     if (mode !== "design") return;
-    var el = fidEl(e.target);
-    if (el !== hovered) {
-      hovered = el;
-      if (el) { place(hoverBox, rectOf(el)); send("hover", { fid: el.getAttribute("data-fid"), rect: rectOf(el) }); }
+    var fid = ownerFid(e.target);
+    if (fid !== hovered) {
+      hovered = fid;
+      var hr = fid && rectOfFid(fid);
+      if (hr) { place(hoverBox, hr); send("hover", { fid: fid, rect: hr }); }
       else { hoverBox.style.display = "none"; send("hover", { fid: null }); }
     }
   }, true);
@@ -123,15 +191,15 @@
     if (mode === "preview") return;
     swallow(e);
     if (mode !== "design") return;
-    var el = fidEl(e.target);
-    send("select", { fid: el ? el.getAttribute("data-fid") : null, rect: el ? rectOf(el) : null,
+    var fid = ownerFid(e.target);
+    send("select", { fid: fid, rect: fid ? rectOfFid(fid) : null,
                      shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
   }, true);
   document.addEventListener("dblclick", function (e) {
     if (mode !== "design") return;
     swallow(e);
-    var el = fidEl(e.target);
-    if (el) send("edit-text", { fid: el.getAttribute("data-fid"), rect: rectOf(el) });
+    var fid = ownerFid(e.target);
+    if (fid) send("edit-text", { fid: fid, rect: rectOfFid(fid) });
   }, true);
   // In design mode nothing in the app should run from a pointer.
   ["mousedown", "mouseup", "pointerdown", "pointerup", "submit", "change", "input"].forEach(function (evt) {
@@ -175,17 +243,21 @@
     drag = null;
     regionBox.style.display = "none";
     // Fully enclosed elements, reduced to the topmost of them (CANVAS-003).
-    var all = document.querySelectorAll("[data-fid]");
-    var inside = [];
-    for (var i = 0; i < all.length; i++) {
-      var b = all[i].getBoundingClientRect();
-      if (b.width === 0 && b.height === 0) continue;
-      if (b.left >= r.left && b.right <= r.right && b.top >= r.top && b.bottom <= r.bottom) inside.push(all[i]);
-    }
-    var top = inside.filter(function (el) {
-      return !inside.some(function (other) { return other !== el && other.contains(el); });
+    // Components count too (a chart has no `data-fid` of its own in the DOM):
+    // every fid the page rendered, by the outline it draws. Fids are paths,
+    // so "inside another enclosed one" is a prefix.
+    fiberForFid("");
+    var fids = Object.keys(fidIndex || {});
+    var dom = document.querySelectorAll("[data-fid]");
+    for (var j = 0; j < dom.length; j++) if (fids.indexOf(dom[j].getAttribute("data-fid")) < 0) fids.push(dom[j].getAttribute("data-fid"));
+    var inside = fids.filter(function (fid) {
+      var b = rectOfFid(fid);
+      return b && b.left >= r.left && b.left + b.width <= r.right && b.top >= r.top && b.top + b.height <= r.bottom;
     });
-    send("region", { fids: top.map(function (el) { return el.getAttribute("data-fid"); }),
+    var top = inside.filter(function (fid) {
+      return !inside.some(function (other) { return other !== fid && fid.indexOf(other + ".") === 0; });
+    });
+    send("region", { fids: top,
                      rect: { top: r.top, left: r.left, width: r.right - r.left, height: r.bottom - r.top } });
   }, true);
 
@@ -195,10 +267,11 @@
   var dragAt = null;
   function hideDrop() { dropBox.style.display = "none"; dropBar.style.display = "none"; }
   function dropTarget(e) {
-    var el = fidEl(e.target) || document.querySelector("[data-fid]");
-    if (!el) return { fid: null, y: 1 };
-    var r = el.getBoundingClientRect();
-    return { fid: el.getAttribute("data-fid"), y: r.height ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 1 };
+    var fid = ownerFid(e.target);
+    if (!fid) { var first = document.querySelector("[data-fid]"); fid = first ? first.getAttribute("data-fid") : null; }
+    var r = fid && rectOfFid(fid);
+    if (!r) return { fid: null, y: 1 };
+    return { fid: fid, y: r.height ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 1 };
   }
   document.addEventListener("dragover", function (e) {
     if (mode !== "design") return;
@@ -253,8 +326,8 @@
         reportRects();
         break;
       case "hover": {
-        var el = byFid(p.fid);
-        if (el) place(hoverBox, rectOf(el)); else hoverBox.style.display = "none";
+        var hr2 = rectOfFid(p.fid);
+        if (hr2) place(hoverBox, hr2); else hoverBox.style.display = "none";
         break;
       }
       case "scroll-to": {
@@ -264,9 +337,8 @@
       }
       case "drop-hint": {
         hideDrop();
-        var d = byFid(p.fid);
-        if (!d || !p.where) break;
-        var dr = rectOf(d);
+        var dr = rectOfFid(p.fid);
+        if (!dr || !p.where) break;
         if (p.where === "inside") place(dropBox, dr);
         else place(dropBar, { top: (p.where === "before" ? dr.top : dr.top + dr.height) - 1.5, left: dr.left, width: dr.width, height: 3 });
         break;
@@ -278,7 +350,7 @@
   });
 
   // --- keep outlines honest ------------------------------------------------
-  var mo = new MutationObserver(function () { reportRects(); });
+  var mo = new MutationObserver(function () { fidIndex = null; reportRects(); });
   mo.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
   window.addEventListener("scroll", reportRects, true);
   window.addEventListener("resize", reportRects);

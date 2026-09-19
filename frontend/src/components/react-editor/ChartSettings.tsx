@@ -48,7 +48,10 @@ export function ChartSettings({ node, doc }: { node: ModelNode; doc: PageDoc }) 
   if (!widget) {
     return <p className="px-3 py-2 text-[11px] text-muted-foreground">This chart's definition could not be found — ask Smith about it.</p>;
   }
-  const src = widget.source.op === "query" ? widget.source as Extract<WidgetRef["source"], { op: "query" }> : null;
+  // A metric's query carries no `dimensions` (and may carry no measures yet):
+  // read as empty, never as undefined — selecting a KPI tile crashed the editor.
+  const query = widget.source.op === "query" ? widget.source as Extract<WidgetRef["source"], { op: "query" }> : null;
+  const src = query ? { ...query, measures: query.measures ?? [], dimensions: query.dimensions ?? [] } : null;
   const entity = doc.entities.find((e) => e.name === widget.source.entity) ?? null;
   const measure = src?.measures[0];
   const dimension = src?.dimensions[0] ?? null;
