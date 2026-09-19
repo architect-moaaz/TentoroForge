@@ -1,0 +1,194 @@
+import { describe, expect, it } from "vitest";
+
+import { breakpointForWidth, effectiveValue, getGroupValue, getVisibility, groupOf, setGroupValue, setVisibility } from "../lib/classes";
+import { breadcrumb, mainRoot, plainName, plainType, topmost } from "../lib/plain";
+import { checkModel, findingsByNode, groupFindings } from "../lib/readiness";
+import { buttonAction, buttonActionOps, entityColumns, formJsx, pageHref, tableJsx, workflowButtonJsx } from "../lib/templates";
+import type { ModelNode, PageDoc, PageModel, PageRef, Registry, WorkflowRef } from "../types";
+
+// ---------------------------------------------------------------------------
+// Class families
+// ---------------------------------------------------------------------------
+
+describe("class families", () => {
+  it("claims each class for one family, narrow text families before the colour catch-all", () => {
+    expect(groupOf("text-sm")?.key).toBe("textSize");
+    expect(groupOf("text-center")?.key).toBe("textAlign");
+    expect(groupOf("text-muted-foreground")?.key).toBe("textColor");
+    expect(groupOf("md:grid-cols-2")?.key).toBe("gridCols");
+    expect(groupOf("hover:bg-muted")).toBeNull();
+    expect(groupOf("whitespace-nowrap")).toBeNull();
+  });
+
+  it("sets one family at one breakpoint and leaves every other class in place", () => {
+    const classes = "flex items-center gap-4 p-6 md:p-8 text-sm";
+    expect(setGroupValue(classes, "padding", "", "p-2")).toBe("flex items-center gap-4 p-2 md:p-8 text-sm");
+    expect(setGroupValue(classes, "padding", "md", null)).toBe("flex items-center gap-4 p-6 text-sm");
+    expect(setGroupValue(classes, "rounded", "", "rounded-lg")).toBe("flex items-center gap-4 p-6 md:p-8 text-sm rounded-lg");
+    expect(setGroupValue(classes, "padding", "lg", "p-10")).toBe("flex items-center gap-4 p-6 md:p-8 text-sm lg:p-10");
+  });
+
+  it("tells an inherited value from an override", () => {
+    const classes = "p-4 lg:p-8";
+    expect(getGroupValue(classes, "padding", "md")).toBeNull();
+    expect(effectiveValue(classes, "padding", "md")).toEqual({ value: "p-4", from: "" });
+    expect(effectiveValue(classes, "padding", "lg")).toEqual({ value: "p-8", from: "lg" });
+    expect(effectiveValue(classes, "padding", "xl")).toEqual({ value: "p-8", from: "lg" });
+  });
+
+  it("maps a viewport width to Tailwind's breakpoint", () => {
+    expect(breakpointForWidth(375)).toBe("");
+    expect(breakpointForWidth(768)).toBe("md");
+    expect(breakpointForWidth(1280)).toBe("xl");
+  });
+
+  it("expresses screen-size visibility as hidden / md:block pairs, both ways", () => {
+    expect(setVisibility("p-4", "wide-only")).toBe("p-4 hidden md:block");
+    expect(getVisibility("p-4 hidden md:block")).toBe("wide-only");
+    expect(setVisibility("p-4 flex gap-2", "narrow-only")).toBe("p-4 flex gap-2 md:hidden");
+    expect(getVisibility("p-4 flex gap-2 md:hidden")).toBe("narrow-only");
+    expect(setVisibility("p-4 hidden md:flex", "all")).toBe("p-4");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A small page model
+// ---------------------------------------------------------------------------
+
+function node(id: string, type: string, extra: Partial<ModelNode> = {}): ModelNode {
+  return {
+    id, parent: id.includes(".") ? id.slice(0, id.lastIndexOf(".")) : null, index: 0, type,
+    kind: /^[a-z]/.test(type) ? "element" : "component", props: [], text: null, textEditable: false,
+    inner: null, innerSpan: null, selfClosing: false, span: [0, 0], wrapperSpan: null, line: 1, endLine: 1,
+    context: null, children: [], ...extra,
+  };
+}
+
+const registry: Registry = {
+  version: "1",
+  components: [
+    { id: "button", label: "Button", category: "Actions", description: "", search: [], match: { types: ["Button"] }, jsx: "", imports: [],
+      container: false, settings: [], events: [], guide: null, status: "ready" },
+    { id: "heading", label: "Heading", category: "Content", description: "", search: [], match: { types: ["h1", "h2"] }, jsx: "", imports: [],
+      container: false, settings: [], events: [], guide: null, status: "ready" },
+  ],
+};
+
+const model: PageModel = {
+  ok: true, roots: [{ id: "r0", owner: "sortIcon" }, { id: "r1", owner: "View" }], imports: [], loadKeys: ["rows"], viewProps: ["rows"],
+  nodes: {
+    r0: node("r0", "ArrowUp"),
+    r1: node("r1", "div", { children: ["r1.0", "r1.1", "r1.2", "r1.3", "r1.4"], props: [{ name: "className", kind: "string", value: "p-6", span: [0, 0], valueSpan: null }] }),
+    "r1.0": node("r1.0", "h1", { text: "Records", textEditable: true, line: 5 }),
+    "r1.1": node("r1.1", "Button", { text: "Add", textEditable: true, line: 6 }),
+    "r1.2": node("r1.2", "img", { line: 7, props: [{ name: "src", kind: "string", value: "https://placehold.co/1", span: [0, 0], valueSpan: null }] }),
+    "r1.3": node("r1.3", "Link", { text: "Open", textEditable: true, line: 8, props: [{ name: "href", kind: "string", value: "/nowhere", span: [0, 0], valueSpan: null }] }),
+    "r1.4": node("r1.4", "CardHeader", { children: ["r1.4.0"], line: 9 }),
+    "r1.4.0": node("r1.4.0", "Input", { line: 10, props: [{ name: "id", kind: "string", value: "email", span: [0, 0], valueSpan: null }] }),
+  },
+};
+
+const doc: PageDoc = {
+  page: { id: "PAGE-001", name: "Records", route: "/records", purpose: "" },
+  coded: true, revision: "abc", model, source: { view: "<div/>", load: "" }, registry,
+  pages: [{ id: "PAGE-001", key: "records", name: "Records", route: "/records", params: [] },
+          { id: "PAGE-002", key: "record", name: "Record", route: "/records/[id]", params: ["id"] }],
+  workflows: [{ id: "FLOW-001", key: "closeCase", name: "Close Case", description: "", inputs: [], launchedFrom: ["PAGE-001"] }],
+  entities: [], theme: {}, history: [],
+};
+
+describe("plain names", () => {
+  it("speaks in kinds and text, never tags", () => {
+    expect(plainType(model.nodes["r1"], registry)).toBe("Section");
+    expect(plainName(model.nodes["r1.0"], registry)).toBe("Heading “Records”");
+    expect(plainName(model.nodes["r1.1"], registry)).toBe("Button “Add”");
+    expect(plainType(model.nodes["r1.4"], registry)).toBe("Card header");
+    expect(breadcrumb(model, "r1.4.0", registry).map((b) => b.label)).toEqual(["Section", "Card header", "Field"]);
+  });
+
+  it("finds the View's root among helper roots and the topmost of a selection", () => {
+    expect(mainRoot(model)).toBe("r1");
+    expect(topmost(model, ["r1.4", "r1.4.0", "r1.0"])).toEqual(["r1.4", "r1.0"]);
+  });
+});
+
+describe("readiness", () => {
+  it("finds broken links, unlabelled fields, silent buttons, placeholders and unwired workflows", () => {
+    const codes = checkModel(doc).map((f) => f.code).sort();
+    expect(codes).toEqual(["broken-link", "idle-button", "no-alt", "no-label", "placeholder", "unwired-workflow"]);
+    const link = checkModel(doc).find((f) => f.code === "broken-link")!;
+    expect(link.plain).toBe("Link “Open” opens “/nowhere”, which is not a page of this app.");
+    expect(link.nodeId).toBe("r1.3");
+  });
+
+  it("accepts a parameterised route and groups by severity", () => {
+    const ok = { ...doc, model: { ...model, nodes: { ...model.nodes,
+      "r1.3": node("r1.3", "Link", { props: [{ name: "href", kind: "string", value: "/records/42", span: [0, 0], valueSpan: null }] }) } } };
+    expect(checkModel(ok).some((f) => f.code === "broken-link")).toBe(false);
+    const groups = groupFindings(doc, [{ file: "view.tsx", line: 3, code: "TS2322", raw: "x", plain: "Line 3 of the page: not accepted", severity: "must-fix" }]);
+    expect(groups.mustFix[0].code).toBe("TS2322");
+    expect(groups.mustFix.map((f) => f.code).sort()).toEqual(["TS2322", "broken-link", "no-alt", "no-label", "unwired-workflow"]);
+    expect(groups.recommended.map((f) => f.code)).toEqual(["idle-button", "placeholder"]);
+    expect(groups.ready).toEqual([]);
+  });
+
+  it("marks a finding on the node and on every ancestor for the layer tree", () => {
+    const marks = findingsByNode(model, checkModel(doc));
+    expect(marks["r1.4.0"]).toBe(1);
+    expect(marks["r1.4"]).toBe(1);
+    expect(marks["r1"]).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("templates", () => {
+  const wf: WorkflowRef = {
+    id: "FLOW-001", key: "createRecord", name: "Create Record", description: "", launchedFrom: [],
+    inputs: [
+      { name: "fullName", kind: "field", type: "string", required: true, description: "Full name", entity: null, options: [] },
+      { name: "gender", kind: "field", type: "enum", required: true, description: "", entity: null, options: ["Male", "Female"] },
+      { name: "age", kind: "field", type: "integer", required: false, description: "", entity: null, options: [] },
+      { name: "record", kind: "record", type: "string", required: true, description: "", entity: "Record", options: [] },
+    ],
+  };
+
+  it("writes a form from a workflow's inputs against the SDK", () => {
+    const jsx = formJsx(wf, { fixed: { record: "props.record.id" }, columns: 2 });
+    expect(jsx).toContain("workflow={workflows.createRecord}");
+    expect(jsx).toContain('fullName: { label: "Full Name", help: "Full name" },');
+    expect(jsx).toContain('gender: { label: "Gender", kind: "select", options: [{ label: "Male", value: "Male" }, { label: "Female", value: "Female" }] },');
+    expect(jsx).toContain('age: { label: "Age (optional)", kind: "number" },');
+    expect(jsx).toContain("record: { value: props.record.id },");
+    expect(jsx).toContain("columns={2}");
+  });
+
+  it("writes a table over the page's data with an empty state", () => {
+    const jsx = tableJsx("rows", entityColumns({ id: "E", name: "Record", typeName: "Record",
+      fields: [{ name: "id", type: "uuid", required: true, label: "Id", options: [] },
+               { name: "fullName", type: "string", required: true, label: "Full Name", options: [] },
+               { name: "createdAt", type: "timestamp", required: true, label: "", options: [] }] }));
+    expect(jsx).toContain("<TableHead>Full Name</TableHead>");
+    expect(jsx).not.toContain("<TableHead>Id</TableHead>");
+    expect(jsx).toContain('{String(row.fullName ?? "")}');
+    expect(jsx).toContain("Nothing here yet.");
+  });
+
+  it("turns a button into one that opens a page or runs a workflow, keeping its text and colour", () => {
+    const btn = node("r1.1", "Button", { text: "Add", textEditable: true, props: [{ name: "variant", kind: "string", value: "outline", span: [0, 0], valueSpan: null }] });
+    const page: PageRef = { id: "PAGE-003", key: "newRecord", name: "New Record", route: "/records/new", params: [] };
+    const ops = buttonActionOps(btn, { kind: "page", page });
+    const replace = ops.find((o) => o.op === "replaceNode") as { jsx: string };
+    expect(replace.jsx).toBe('<Button asChild variant="outline">\n  <Link href={href(pages.newRecord)}>Add</Link>\n</Button>');
+    expect(ops.filter((o) => o.op === "addImport")).toHaveLength(3);
+    const run = buttonActionOps(btn, { kind: "workflow", workflow: wf }).find((o) => o.op === "replaceNode") as { jsx: string };
+    expect(run.jsx).toBe(workflowButtonJsx(wf, { label: "Add" }));
+    expect(pageHref({ id: "P", key: "record", name: "Record", route: "/records/[id]", params: ["id"] })).toEqual({ expr: 'href(pages.record, { id: "" })', needsParams: true });
+  });
+
+  it("reads what a button does from its shape", () => {
+    expect(buttonAction(model.nodes["r1.1"], model).kind).toBe("none");
+    const wfBtn = node("x", "WorkflowButton", { props: [{ name: "workflow", kind: "expr", value: "workflows.closeCase", span: [0, 0], valueSpan: null }] });
+    expect(buttonAction(wfBtn, model)).toEqual({ kind: "workflow", detail: "closeCase" });
+    const linkBtn = node("y", "Button", { children: ["r1.3"] });
+    expect(buttonAction(linkBtn, model)).toEqual({ kind: "page", detail: "/nowhere" });
+  });
+});

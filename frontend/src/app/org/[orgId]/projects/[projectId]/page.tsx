@@ -43,6 +43,7 @@ import { VisualEditor } from "@/components/visual-editor/VisualEditor";
 import { IREditor } from "@/components/ir-editor/IREditor";
 import { DesignEditor } from "@/components/design-editor/DesignEditor";
 import { VisualEditorWorkspace } from "@/components/visual-editor/VisualEditorWorkspace";
+import { ReactEditor } from "@/components/react-editor/ReactEditor";
 import { NavigationPanel } from "@/components/navigation/NavigationPanel";
 import { AgentBuilderPanel } from "@/components/agent-builder/AgentBuilderPanel";
 import { AIFeaturesPanel } from "@/components/ai-features/AIFeaturesPanel";
@@ -59,7 +60,7 @@ import { VirtualOffice } from "@/components/virtual-office";
 import type { Project, ChatMessage } from "@/types/project";
 import type { CommandItem } from "@/types/portal";
 
-type Tab = "chat" | "preview" | "code" | "data" | "rules" | "business-rules" | "decisions" | "workflows" | "editor" | "design" | "design-editor" | "ir-editor" | "navigation" | "agents" | "ai" | "monitoring" | "versions" | "office";
+type Tab = "chat" | "preview" | "code" | "data" | "rules" | "business-rules" | "decisions" | "workflows" | "editor" | "schema-editor" | "design" | "design-editor" | "ir-editor" | "navigation" | "agents" | "ai" | "monitoring" | "versions" | "office";
 
 // Tooltip component — positioned to the right of the icon
 function Tooltip({ children, label, shortcut }: { children: React.ReactNode; label: string; shortcut?: string }) {
@@ -226,6 +227,7 @@ function ProjectWorkspace({
     { id: "decisions" as Tab, label: "Decisions", icon: Table2 },
     { id: "workflows" as Tab, label: "Workflows", icon: Workflow },
     { id: "design" as Tab, label: "Design", icon: PaintBucket },
+    { id: "schema-editor" as Tab, label: "Schema Editor (legacy)", icon: Layout },
     { id: "design-editor" as Tab, label: "AHTML Editor", icon: Table2 },
     { id: "ir-editor" as Tab, label: "IR Editor", icon: Building2 },
     { id: "navigation" as Tab, label: "Nav", icon: Map },
@@ -545,7 +547,11 @@ function ProjectWorkspace({
         {activeTab === "workflows" && (
           <WorkflowPanel projectId={projectId} orgId={orgId} />
         )}
-        {activeTab === "editor" && project?.short_id && (
+        {/* The Editor tab is the visual React editor over the Blueprint's coded
+            pages. The schema-JSON editor stays reachable as "schema-editor"
+            for apps built before pages were written as React. */}
+        {activeTab === "editor" && <ReactEditor projectId={projectId} />}
+        {activeTab === "schema-editor" && project?.short_id && (
           <VisualEditorWorkspace projectId={project.short_id} />
         )}
         {/* Legacy individual editors — accessible via command palette */}

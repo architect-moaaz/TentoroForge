@@ -1,0 +1,639 @@
+/**
+ * The editor's document engine on the client: the open page at a revision,
+ * the selection, the mode, and a history of transactions that undo as wholes.
+ *
+ * Every edit goes to the backend as one transaction against the revision the
+ * page was loaded at; the backend checks it and answers with the committed
+ * revision and model, which replace what is held here. Nothing is edited
+ * optimistically — the canvas is the running app, and it reloads from the
+ * saved source — so what the editor shows is always what is saved (UX-007).
+ */
+import { create } from "zustand";
+import { toast } from "sonner";
+
+import { editorApi, failureOf } from "./api";
+import { breakpointForWidth } from "./lib/classes";
+import { mainRoot, plainName, topmost } from "./lib/plain";
+import type { Breakpoint, Device, Finding, HistoryEntry, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, Rect } from "./types";
+
+export interface Snapshot { revision: string; view: string; load: string }
+export interface HistoryOp { label: string; before: Snapshot; after: Snapshot }
+
+export type SaveState = "saved" | "saving" | "checking" | "failed";
+export type Mode = "design" | "preview";
+export type ViewLevel = "simple" | "advanced";
+export type LeftTab = "pages" | "add" | "layers";
+
+export const DEVICE_WIDTHS: Record<Exclude<Device, "custom">, { w: number; h: number }> = {
+  desktop: { w: 1280, h: 800 },
+  tablet: { w: 768, h: 1024 },
+  mobile: { w: 390, h: 844 },
+};
+
+export interface SmithState {
+  open: boolean;
+  pinned: boolean;
+  expanded: boolean;
+  prompt: string;
+  annotation: string;
+  proposal: Proposal | null;
+  /** The selection a pending proposal was made for — a new selection never inherits it (SMITH-001). */
+  proposalFor: string[];
+  busy: boolean;
+  error: string | null;
+  controller: AbortController | null;
+  log: Proposal[];
+}
+
+export interface EditorState {
+  projectId: string | null;
+  pages: PageListItem[];
+  entryPage: string | null;
+  pageId: string | null;
+  doc: PageDoc | null;
+  loading: boolean;
+  loadError: string | null;
+
+  selection: string[];
+  hovered: string | null;
+  rects: Record<string, Rect>;
+  frameScrollY: number;
+  frameReady: boolean;
+  frameError: string | null;
+  previewPath: string | null;
+
+  mode: Mode;
+  previewApp: boolean;
+  regionSelect: boolean;
+  viewLevel: ViewLevel;
+  device: Device;
+  customWidth: number;
+  landscape: boolean;
+  zoom: number;
+  routeParams: Record<string, string>;
+
+  saveState: SaveState;
+  saveError: string | null;
+  lastFindings: Finding[];
+  serverFindings: Finding[];
+  checkedRevision: string | null;
+  checking: boolean;
+  undoStack: HistoryOp[];
+  redoStack: HistoryOp[];
+  busy: boolean;
+
+  leftTab: LeftTab;
+  leftOpen: boolean;
+  rightOpen: boolean;
+  drawerTab: string;
+  showCode: boolean;
+  showHistory: boolean;
+  showReadiness: boolean;
+  editingTextId: string | null;
+
+  smith: SmithState;
+
+  // --- lifecycle
+  init: (projectId: string) => Promise<void>;
+  loadPages: () => Promise<void>;
+  openPage: (pageId: string) => Promise<void>;
+  reload: () => Promise<void>;
+
+  // --- selection
+  select: (ids: string[], opts?: { extend?: boolean; toggle?: boolean }) => void;
+  clearSelection: () => void;
+  setHovered: (id: string | null) => void;
+  setRects: (rects: Record<string, Rect>, scrollY: number) => void;
+  selectParent: () => void;
+  selectChild: () => void;
+  selectSibling: (dir: 1 | -1) => void;
+
+  // --- editing
+  applyOps: (ops: Op[], label: string, opts?: { reselect?: (model: PageModel) => string[] }) => Promise<boolean>;
+  setText: (id: string, text: string) => Promise<boolean>;
+  setProp: (id: string, name: string, value: PropValue | null) => Promise<boolean>;
+  setClasses: (id: string, classes: string) => Promise<boolean>;
+  removeSelected: () => Promise<boolean>;
+  duplicateSelected: () => Promise<boolean>;
+  insertJsx: (jsx: string, imports: Op[], opts?: { parentId?: string; index?: number | null; afterId?: string; label?: string }) => Promise<boolean>;
+  moveNode: (id: string, parentId: string, index: number | null) => Promise<boolean>;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
+  restore: (revision: string) => Promise<void>;
+  runCheck: () => Promise<void>;
+
+  // --- view
+  setMode: (mode: Mode) => void;
+  setPreviewApp: (on: boolean) => void;
+  setRegionSelect: (on: boolean) => void;
+  setViewLevel: (level: ViewLevel) => void;
+  setDevice: (device: Device) => void;
+  setCustomWidth: (w: number) => void;
+  setLandscape: (on: boolean) => void;
+  setZoom: (z: number) => void;
+  setRouteParam: (name: string, value: string) => void;
+  setLeftTab: (tab: LeftTab) => void;
+  setLeftOpen: (open: boolean) => void;
+  setRightOpen: (open: boolean) => void;
+  setDrawerTab: (tab: string) => void;
+  setShowCode: (on: boolean) => void;
+  setShowHistory: (on: boolean) => void;
+  setShowReadiness: (on: boolean) => void;
+  setEditingTextId: (id: string | null) => void;
+  setFrame: (patch: Partial<Pick<EditorState, "frameReady" | "frameError" | "previewPath">>) => void;
+
+  // --- smith
+  setSmith: (patch: Partial<SmithState>) => void;
+  askSmith: (prompt: string, annotation?: string, prior?: { question: string; choice: string }) => Promise<void>;
+  cancelSmith: () => void;
+  applyProposal: (allowScopeExpansion?: boolean) => Promise<void>;
+  discardProposal: () => Promise<void>;
+
+  // --- derived helpers
+  frameWidth: () => number;
+  breakpoint: () => Breakpoint;
+  labelsFor: (ids: string[]) => Record<string, string>;
+}
+
+const PREFS_KEY = (projectId: string) => `react-editor:prefs:${projectId}`;
+
+function readPrefs(projectId: string): Partial<Pick<EditorState, "viewLevel" | "device" | "customWidth" | "leftTab" | "rightOpen" | "zoom">> {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY(projectId));
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function writePrefs(state: EditorState) {
+  if (!state.projectId) return;
+  try {
+    localStorage.setItem(PREFS_KEY(state.projectId), JSON.stringify({
+      viewLevel: state.viewLevel, device: state.device, customWidth: state.customWidth,
+      leftTab: state.leftTab, rightOpen: state.rightOpen, zoom: state.zoom,
+    }));
+  } catch { /* private mode */ }
+}
+
+function snapshotOf(doc: PageDoc): Snapshot {
+  return { revision: doc.revision, view: doc.source?.view ?? "", load: doc.source?.load ?? "" };
+}
+
+const emptySmith = (): SmithState => ({
+  open: false, pinned: false, expanded: false, prompt: "", annotation: "", proposal: null, proposalFor: [],
+  busy: false, error: null, controller: null, log: [],
+});
+
+export const useEditorStore = create<EditorState>((set, get) => ({
+  projectId: null,
+  pages: [],
+  entryPage: null,
+  pageId: null,
+  doc: null,
+  loading: false,
+  loadError: null,
+
+  selection: [],
+  hovered: null,
+  rects: {},
+  frameScrollY: 0,
+  frameReady: false,
+  frameError: null,
+  previewPath: null,
+
+  mode: "design",
+  previewApp: false,
+  regionSelect: false,
+  viewLevel: "simple",
+  device: "desktop",
+  customWidth: 1024,
+  landscape: false,
+  zoom: 1,
+  routeParams: {},
+
+  saveState: "saved",
+  saveError: null,
+  lastFindings: [],
+  serverFindings: [],
+  checkedRevision: null,
+  checking: false,
+  undoStack: [],
+  redoStack: [],
+  busy: false,
+
+  leftTab: "pages",
+  leftOpen: true,
+  rightOpen: true,
+  drawerTab: "settings",
+  showCode: false,
+  showHistory: false,
+  showReadiness: false,
+  editingTextId: null,
+
+  smith: emptySmith(),
+
+  // ------------------------------------------------------------------ lifecycle
+
+  init: async (projectId) => {
+    const prefs = readPrefs(projectId);
+    set({ projectId, ...prefs, pages: [], pageId: null, doc: null, selection: [], undoStack: [], redoStack: [],
+          smith: emptySmith(), mode: "design", previewApp: false, loadError: null });
+    await get().loadPages();
+    const { pages, entryPage } = get();
+    const first = pages.find((p) => p.coded && p.id === entryPage) ?? pages.find((p) => p.coded) ?? pages[0];
+    if (first) await get().openPage(first.id);
+  },
+
+  loadPages: async () => {
+    const { projectId } = get();
+    if (!projectId) return;
+    try {
+      const out = await editorApi.pages(projectId);
+      set({ pages: out.pages, entryPage: out.entryPage });
+    } catch (err) {
+      set({ loadError: failureOf(err).message });
+    }
+  },
+
+  openPage: async (pageId) => {
+    const { projectId } = get();
+    if (!projectId) return;
+    set({ loading: true, loadError: null, pageId, selection: [], hovered: null, rects: {}, undoStack: [], redoStack: [],
+          smith: emptySmith(), serverFindings: [], checkedRevision: null, lastFindings: [], editingTextId: null,
+          mode: "design", previewApp: false, regionSelect: false, routeParams: {} });
+    try {
+      const doc = await editorApi.open(projectId, pageId);
+      set({ doc, loading: false, saveState: "saved", saveError: null });
+    } catch (err) {
+      set({ loading: false, loadError: failureOf(err).message, doc: null });
+    }
+  },
+
+  reload: async () => {
+    const { projectId, pageId, selection } = get();
+    if (!projectId || !pageId) return;
+    try {
+      const doc = await editorApi.open(projectId, pageId);
+      set({ doc, saveState: "saved", saveError: null, undoStack: [], redoStack: [],
+            selection: selection.filter((id) => doc.model?.nodes[id]) });
+    } catch (err) {
+      set({ loadError: failureOf(err).message });
+    }
+  },
+
+  // ------------------------------------------------------------------ selection
+
+  select: (ids, opts = {}) => {
+    const { doc, selection, smith } = get();
+    const model = doc?.model;
+    const valid = ids.filter((id) => model?.nodes[id]);
+    let next: string[];
+    if (opts.toggle) next = selection.includes(valid[0]) ? selection.filter((x) => x !== valid[0]) : [...selection, ...valid];
+    else if (opts.extend) next = Array.from(new Set([...selection, ...valid]));
+    else next = valid;
+    if (model) next = topmost(model, next);
+    const changed = next.join("|") !== selection.join("|");
+    // A proposal made for another selection is never applied to this one.
+    const smithPatch: Partial<SmithState> = changed && smith.proposal && smith.proposalFor.join("|") !== next.join("|")
+      ? { proposal: null, proposalFor: [] } : {};
+    set({ selection: next, editingTextId: null, smith: { ...smith, ...smithPatch, open: next.length ? smith.open : smith.pinned && smith.open } });
+  },
+
+  clearSelection: () => get().select([]),
+  setHovered: (id) => set({ hovered: id }),
+  setRects: (rects, scrollY) => set({ rects, frameScrollY: scrollY }),
+
+  selectParent: () => {
+    const { doc, selection } = get();
+    const node = doc?.model?.nodes[selection[0]];
+    if (node?.parent) get().select([node.parent]);
+  },
+  selectChild: () => {
+    const { doc, selection } = get();
+    const node = doc?.model?.nodes[selection[0]];
+    if (node?.children[0]) get().select([node.children[0]]);
+  },
+  selectSibling: (dir) => {
+    const { doc, selection } = get();
+    const model = doc?.model;
+    const node = model?.nodes[selection[0]];
+    if (!model || !node?.parent) return;
+    const sibs = model.nodes[node.parent].children;
+    const at = sibs.indexOf(node.id) + dir;
+    if (sibs[at]) get().select([sibs[at]]);
+  },
+
+  // ------------------------------------------------------------------ editing
+
+  applyOps: async (ops, label, opts = {}) => {
+    const { projectId, pageId, doc, busy } = get();
+    if (!projectId || !pageId || !doc?.model || busy) return false;
+    const structural = ops.some((o) => ["insert", "move", "remove", "duplicate", "replaceNode"].includes(o.op));
+    set({ busy: true, saveState: structural || ops.some((o) => o.op === "setProp" || o.op === "addImport") ? "checking" : "saving", saveError: null });
+    const before = snapshotOf(doc);
+    try {
+      const out = await editorApi.apply(projectId, pageId, doc.revision, ops, label);
+      const nextDoc: PageDoc = { ...doc, revision: out.revision, model: out.model, source: out.source,
+                                 history: out.history ? [...doc.history, out.history] : doc.history };
+      const after = snapshotOf(nextDoc);
+      const reselect = opts.reselect ? opts.reselect(out.model) : get().selection.filter((id) => out.model.nodes[id]);
+      set((s) => ({
+        doc: nextDoc, busy: false, saveState: "saved", lastFindings: [],
+        undoStack: out.unchanged ? s.undoStack : [...s.undoStack, { label, before, after }].slice(-100),
+        redoStack: out.unchanged ? s.redoStack : [],
+        selection: topmost(out.model, reselect),
+        serverFindings: out.checked ? [] : s.serverFindings,
+        checkedRevision: out.checked ? out.revision : s.checkedRevision,
+      }));
+      return true;
+    } catch (err) {
+      const f = failureOf(err);
+      if (f.code === "stale") {
+        toast.warning("The page changed elsewhere — reloaded it. Try your change again.");
+        set({ busy: false, saveState: "saved" });
+        await get().reload();
+        return false;
+      }
+      if (f.status === 422) {
+        set({ busy: false, saveState: "saved", lastFindings: f.findings ?? [] });
+        const first = f.findings?.[0]?.plain;
+        toast.error(f.message, { description: first ?? undefined, duration: 8000 });
+        return false;
+      }
+      set({ busy: false, saveState: "failed", saveError: f.message });
+      toast.error("Couldn't save that change.", { description: f.message });
+      return false;
+    }
+  },
+
+  setText: (id, text) => get().applyOps([{ op: "setText", id, text }], "Change text"),
+  setProp: (id, name, value) => get().applyOps([{ op: "setProp", id, name, value }], `Change ${name}`),
+  setClasses: (id, classes) => get().applyOps([{ op: "setClasses", id, classes }], "Change look"),
+
+  removeSelected: async () => {
+    const { doc, selection } = get();
+    const model = doc?.model;
+    if (!model || !selection.length) return false;
+    const ids = selection.filter((id) => model.nodes[id]?.parent);
+    if (!ids.length) { toast.info("The page itself cannot be removed."); return false; }
+    const parent = model.nodes[ids[0]].parent!;
+    const names = ids.map((id) => plainName(model.nodes[id], doc?.registry)).join(", ");
+    return get().applyOps([{ op: "remove", ids }], `Remove ${names}`, { reselect: (m) => (m.nodes[parent] ? [parent] : []) });
+  },
+
+  duplicateSelected: async () => {
+    const { doc, selection } = get();
+    const model = doc?.model;
+    const node = model?.nodes[selection[0]];
+    if (!model || !node?.parent) return false;
+    const parent = node.parent;
+    const at = node.index + 1;
+    return get().applyOps([{ op: "duplicate", id: node.id }], `Duplicate ${plainName(node, doc?.registry)}`,
+                          { reselect: (m) => [m.nodes[parent]?.children[at]].filter(Boolean) as string[] });
+  },
+
+  insertJsx: async (jsx, imports, opts = {}) => {
+    const { doc, selection } = get();
+    const model = doc?.model;
+    if (!model) return false;
+    let op: Op;
+    let locate: (m: PageModel) => string[];
+    if (opts.afterId) {
+      const ref = model.nodes[opts.afterId];
+      const parent = ref?.parent ?? mainRoot(model)!;
+      const at = (ref?.index ?? -1) + 1;
+      op = { op: "insert", afterId: opts.afterId, jsx };
+      locate = (m) => [m.nodes[parent]?.children[at]].filter(Boolean) as string[];
+    } else {
+      const parentId = opts.parentId ?? selection[0] ?? mainRoot(model)!;
+      const parent = model.nodes[parentId];
+      const index = opts.index ?? null;
+      const at = index ?? parent?.children.length ?? 0;
+      op = { op: "insert", parentId, index, jsx };
+      locate = (m) => [m.nodes[parentId]?.children[at]].filter(Boolean) as string[];
+    }
+    return get().applyOps([...imports, op], opts.label ?? "Add", { reselect: locate });
+  },
+
+  moveNode: async (id, parentId, index) => {
+    const { doc } = get();
+    const model = doc?.model;
+    const node = model?.nodes[id];
+    if (!model || !node) return false;
+    let at = index ?? model.nodes[parentId]?.children.length ?? 0;
+    if (node.parent === parentId && index != null && index > node.index) at -= 1;
+    return get().applyOps([{ op: "move", id, parentId, index }], `Move ${plainName(node, doc?.registry)}`,
+                          { reselect: (m) => [m.nodes[parentId]?.children[at]].filter(Boolean) as string[] });
+  },
+
+  undo: async () => {
+    const { projectId, pageId, doc, undoStack, busy } = get();
+    const op = undoStack[undoStack.length - 1];
+    if (!projectId || !pageId || !doc || !op || busy) return;
+    if (op.after.revision !== doc.revision) {
+      toast.info("The page moved on since that change — use History to go back further.");
+      set({ undoStack: [], redoStack: [] });
+      return;
+    }
+    set({ busy: true, saveState: "saving" });
+    try {
+      const out = await editorApi.restore(projectId, pageId, op.before.revision, doc.revision);
+      set((s) => ({
+        doc: { ...doc, revision: out.revision, model: out.model, source: out.source, history: out.history ? [...doc.history, out.history] : doc.history },
+        undoStack: s.undoStack.slice(0, -1), redoStack: [...s.redoStack, op], busy: false, saveState: "saved",
+        selection: s.selection.filter((id) => out.model.nodes[id]),
+      }));
+    } catch (err) {
+      const f = failureOf(err);
+      set({ busy: false, saveState: f.status ? "saved" : "failed", saveError: f.message });
+      toast.error("Couldn't undo.", { description: f.message });
+      if (f.code === "stale") await get().reload();
+    }
+  },
+
+  redo: async () => {
+    const { projectId, pageId, doc, redoStack, busy } = get();
+    const op = redoStack[redoStack.length - 1];
+    if (!projectId || !pageId || !doc || !op || busy) return;
+    if (op.before.revision !== doc.revision) { set({ redoStack: [] }); return; }
+    set({ busy: true, saveState: "saving" });
+    try {
+      const out = await editorApi.restore(projectId, pageId, op.after.revision, doc.revision);
+      set((s) => ({
+        doc: { ...doc, revision: out.revision, model: out.model, source: out.source, history: out.history ? [...doc.history, out.history] : doc.history },
+        redoStack: s.redoStack.slice(0, -1), undoStack: [...s.undoStack, op], busy: false, saveState: "saved",
+        selection: s.selection.filter((id) => out.model.nodes[id]),
+      }));
+    } catch (err) {
+      const f = failureOf(err);
+      set({ busy: false, saveState: f.status ? "saved" : "failed", saveError: f.message });
+      toast.error("Couldn't redo.", { description: f.message });
+    }
+  },
+
+  restore: async (revision) => {
+    const { projectId, pageId, doc, busy } = get();
+    if (!projectId || !pageId || !doc || busy) return;
+    set({ busy: true, saveState: "saving" });
+    const before = snapshotOf(doc);
+    try {
+      const out = await editorApi.restore(projectId, pageId, revision, doc.revision);
+      const nextDoc = { ...doc, revision: out.revision, model: out.model, source: out.source, history: out.history ? [...doc.history, out.history] : doc.history };
+      set((s) => ({
+        doc: nextDoc, busy: false, saveState: "saved", showHistory: false,
+        undoStack: [...s.undoStack, { label: "Restore version", before, after: snapshotOf(nextDoc) }], redoStack: [],
+        selection: s.selection.filter((id) => out.model.nodes[id]),
+      }));
+      toast.success("Restored that version.");
+    } catch (err) {
+      const f = failureOf(err);
+      set({ busy: false, saveState: "saved" });
+      toast.error("Couldn't restore that version.", { description: f.message });
+      if (f.code === "stale") await get().reload();
+    }
+  },
+
+  runCheck: async () => {
+    const { projectId, pageId, doc } = get();
+    if (!projectId || !pageId || !doc) return;
+    set({ checking: true });
+    try {
+      const out = await editorApi.check(projectId, pageId);
+      set({ serverFindings: out.findings, checkedRevision: out.revision, checking: false });
+    } catch (err) {
+      set({ checking: false });
+      toast.error("Couldn't check the page.", { description: failureOf(err).message });
+    }
+  },
+
+  // ------------------------------------------------------------------ view
+
+  setMode: (mode) => set({ mode, regionSelect: false, editingTextId: null, previewApp: mode === "preview" ? get().previewApp : false }),
+  setPreviewApp: (on) => set({ previewApp: on, mode: on ? "preview" : get().mode }),
+  setRegionSelect: (on) => set({ regionSelect: on }),
+  setViewLevel: (viewLevel) => { set({ viewLevel }); writePrefs(get()); },
+  setDevice: (device) => { set({ device }); writePrefs(get()); },
+  setCustomWidth: (customWidth) => { set({ customWidth: Math.max(320, Math.min(2560, Math.round(customWidth))), device: "custom" }); writePrefs(get()); },
+  setLandscape: (landscape) => set({ landscape }),
+  setZoom: (zoom) => { set({ zoom: Math.max(0.25, Math.min(2, zoom)) }); writePrefs(get()); },
+  setRouteParam: (name, value) => set((s) => ({ routeParams: { ...s.routeParams, [name]: value } })),
+  setLeftTab: (leftTab) => { set({ leftTab, leftOpen: true }); writePrefs(get()); },
+  setLeftOpen: (leftOpen) => set({ leftOpen }),
+  setRightOpen: (rightOpen) => { set({ rightOpen }); writePrefs(get()); },
+  setDrawerTab: (drawerTab) => set({ drawerTab }),
+  setShowCode: (showCode) => set({ showCode }),
+  setShowHistory: (showHistory) => set({ showHistory }),
+  setShowReadiness: (showReadiness) => set({ showReadiness }),
+  setEditingTextId: (editingTextId) => set({ editingTextId }),
+  setFrame: (patch) => set(patch),
+
+  // ------------------------------------------------------------------ smith
+
+  setSmith: (patch) => set((s) => ({ smith: { ...s.smith, ...patch } })),
+
+  askSmith: async (prompt, annotation = "", prior) => {
+    const { projectId, pageId, doc, selection, smith } = get();
+    if (!projectId || !pageId || !doc || !selection.length || !prompt.trim()) return;
+    smith.controller?.abort();
+    const controller = new AbortController();
+    set({ smith: { ...smith, busy: true, error: null, prompt, annotation, controller, proposalFor: [...selection],
+                   proposal: prior ? smith.proposal : null } });
+    try {
+      const proposal = await editorApi.propose(projectId, pageId, {
+        baseRevision: doc.revision, prompt, annotation,
+        selection: { type: selection.length > 1 ? "region" : "component", nodeIds: selection },
+        breakpoint: get().breakpoint() || "base",
+        proposalId: prior ? smith.proposal?.id : undefined,
+        prior: prior ?? null,
+      }, controller.signal);
+      set((s) => ({ smith: { ...s.smith, busy: false, controller: null, proposal, proposalFor: [...selection], log: [...s.smith.log, proposal] } }));
+    } catch (err) {
+      const f = failureOf(err);
+      if (f.code === "cancelled") { set((s) => ({ smith: { ...s.smith, busy: false, controller: null } })); return; }
+      set((s) => ({ smith: { ...s.smith, busy: false, controller: null, error: f.message } }));
+      if (f.code === "stale") await get().reload();
+    }
+  },
+
+  cancelSmith: () => {
+    const { smith } = get();
+    smith.controller?.abort();
+    set({ smith: { ...smith, busy: false, controller: null } });
+  },
+
+  applyProposal: async (allowScopeExpansion = false) => {
+    const { projectId, pageId, doc, smith } = get();
+    const proposal = smith.proposal;
+    if (!projectId || !pageId || !doc || !proposal || !proposal.valid || get().busy) return;
+    if (proposal.baseRevision !== doc.revision) {
+      set({ smith: { ...smith, error: "The page changed since this was proposed — ask again." } });
+      return;
+    }
+    set({ busy: true, saveState: "saving" });
+    const before = snapshotOf(doc);
+    try {
+      const out = await editorApi.applyProposal(projectId, pageId, proposal.id, doc.revision, allowScopeExpansion);
+      const nextDoc = { ...doc, revision: out.revision, model: out.model, source: out.source, history: out.history ? [...doc.history, out.history] : doc.history };
+      set((s) => ({
+        doc: nextDoc, busy: false, saveState: "saved",
+        undoStack: [...s.undoStack, { label: `Smith: ${proposal.summary}`, before, after: snapshotOf(nextDoc) }], redoStack: [],
+        selection: s.selection.filter((id) => out.model.nodes[id]),
+        smith: { ...s.smith, proposal: out.proposal, log: s.smith.log.map((p) => (p.id === out.proposal.id ? out.proposal : p)) },
+      }));
+      toast.success("Applied.", { description: proposal.summary });
+    } catch (err) {
+      const f = failureOf(err);
+      set((s) => ({ busy: false, saveState: "saved", smith: { ...s.smith, error: f.code === "scope" ? null : f.message } }));
+      if (f.code === "scope") {
+        set((s) => ({ smith: { ...s.smith, proposal: s.smith.proposal ? { ...s.smith.proposal, expandsScope: f.expandsScope ?? s.smith.proposal.expandsScope } : null } }));
+      } else if (f.code === "stale") {
+        toast.warning("The page changed since Smith proposed this — ask again.");
+        await get().reload();
+      } else {
+        toast.error("Couldn't apply Smith's change.", { description: f.message });
+      }
+    }
+  },
+
+  discardProposal: async () => {
+    const { projectId, pageId, smith } = get();
+    if (!smith.proposal) return;
+    const id = smith.proposal.id;
+    set({ smith: { ...smith, proposal: null, proposalFor: [], error: null } });
+    if (projectId && pageId && smith.proposal.status !== "applied") {
+      try { await editorApi.discardProposal(projectId, pageId, id); } catch { /* already gone */ }
+    }
+  },
+
+  // ------------------------------------------------------------------ derived
+
+  frameWidth: () => {
+    const { device, customWidth, landscape } = get();
+    if (device === "custom") return customWidth;
+    const d = DEVICE_WIDTHS[device];
+    return landscape && device !== "desktop" ? d.h : d.w;
+  },
+  breakpoint: () => breakpointForWidth(get().frameWidth()),
+  labelsFor: (ids) => {
+    const { doc } = get();
+    const out: Record<string, string> = {};
+    for (const id of ids) {
+      const node = doc?.model?.nodes[id];
+      if (node) out[id] = plainName(node, doc?.registry);
+    }
+    return out;
+  },
+}));
+
+/** The revision-aware label for the save state, for the top bar and status bar. */
+export function saveLabel(state: SaveState, error: string | null): { text: string; tone: "ok" | "busy" | "bad" } {
+  switch (state) {
+    case "saving": return { text: "Saving…", tone: "busy" };
+    case "checking": return { text: "Checking…", tone: "busy" };
+    case "failed": return { text: error ? `Not saved — ${error}` : "Not saved", tone: "bad" };
+    default: return { text: "Saved", tone: "ok" };
+  }
+}
+
+export function historyLabel(entry: HistoryEntry): string {
+  return entry.kind === "baseline" ? "Built by Forge" : entry.label;
+}

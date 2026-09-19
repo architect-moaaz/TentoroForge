@@ -487,12 +487,17 @@ def typecheck(doc: dict, app_root: Path, page_id: str, load: str, view: str,
         }))
         proc = subprocess.run([str(tsc), "-p", str(check / "tsconfig.json"), "--pretty", "false"],
                               cwd=str(app_root), capture_output=True, text=True, timeout=timeout)
-        rel_dir = str(check.relative_to(app_root))
+        # tsc prints paths relative to its own idea of the cwd — under a
+        # symlinked root (`/tmp` on macOS) that is `../../../../tmp/…/<check>/`,
+        # so the check directory is looked for anywhere in the path, not at
+        # the start; a prefix match dropped every error there.
+        marker = check.name + "/"
         errors: list[str] = []
         ours = False
         for line in (proc.stdout + proc.stderr).splitlines():
-            if line.startswith(rel_dir + "/"):
-                errors.append(line[len(rel_dir) + 1:])
+            where = line.split("(", 1)[0]
+            if marker in where:
+                errors.append(line[line.index(marker) + len(marker):])
                 ours = True
             elif ours and line.startswith(" "):
                 errors[-1] += " " + line.strip()          # continuation of OUR last error

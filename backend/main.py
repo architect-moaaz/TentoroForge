@@ -81,6 +81,7 @@ from routers.files import router as files_router
 from routers.environments import router as environments_router
 from routers.webhooks import router as webhooks_router
 from routers.visual_editor import router as visual_editor_router
+from routers.react_editor import router as react_editor_router
 from routers.modules import router as modules_router
 from routers.export import router as export_router
 from routers.ir import router as ir_router
@@ -211,6 +212,8 @@ app.include_router(exports_router)
 app.include_router(environments_router)
 app.include_router(webhooks_router)
 app.include_router(visual_editor_router)
+# The visual React editor — the Editor tab over a Blueprint's coded pages.
+app.include_router(react_editor_router)
 app.include_router(modules_router)
 app.include_router(export_router)
 app.include_router(ir_router)
