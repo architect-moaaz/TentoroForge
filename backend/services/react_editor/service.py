@@ -105,8 +105,13 @@ def pages(doc: dict) -> dict[str, Any]:
             "navigatesTo": [str(x) for x in (p.get("navigatesTo") or [])],
         })
     if not entry:
+        initial = nav.get("initialRoute")
+        route = initial.get("default") if isinstance(initial, dict) else initial
+        entry = next((p["id"] for p in out if route and p["route"] == route), "")
+    if not entry:
         entry = next((p["id"] for p in out if p["route"] == "/"), out[0]["id"] if out else "")
-    return {"entryPage": entry, "pages": out}
+    from services.react_editor.pages import navigation
+    return {"entryPage": entry, "pages": out, "navigation": navigation(doc)}
 
 
 def _page(doc: dict, page_id: str) -> dict:

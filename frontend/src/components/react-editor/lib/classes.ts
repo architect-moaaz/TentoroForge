@@ -86,11 +86,14 @@ export const CLASS_GROUPS: ClassGroup[] = [
 
 export const GROUP_BY_KEY: Record<string, ClassGroup> = Object.fromEntries(CLASS_GROUPS.map((g) => [g.key, g]));
 
-const BP_RE = /^(sm|md|lg|xl|2xl):(.+)$/;
+const BP_RE = /^(sm|md|lg|xl|2xl|hover|focus):(.+)$/;
 
-export function splitClass(cls: string): { bp: Breakpoint | "2xl"; base: string } {
+/** A slot a class family can be set in: a screen size, or a state (hover, focus). */
+export type Slot = Breakpoint | "2xl" | "hover" | "focus";
+
+export function splitClass(cls: string): { bp: Slot; base: string } {
   const m = BP_RE.exec(cls);
-  return m ? { bp: m[1] as Breakpoint | "2xl", base: m[2] } : { bp: "", base: cls };
+  return m ? { bp: m[1] as Slot, base: m[2] } : { bp: "", base: cls };
 }
 
 export function parseClasses(classes: string | null | undefined): string[] {
@@ -99,13 +102,13 @@ export function parseClasses(classes: string | null | undefined): string[] {
 
 export function groupOf(cls: string): ClassGroup | null {
   const { base } = splitClass(cls);
-  // Variant-prefixed classes (hover:, focus:, dark:) belong to no family we edit.
-  if (/^(hover|focus|active|dark|group-hover|disabled|data-\[)/.test(base)) return null;
+  // Other variants (dark:, disabled:, data-[…]) belong to no family we edit.
+  if (/^(active|dark|group-hover|disabled|data-\[)/.test(base)) return null;
   return CLASS_GROUPS.find((g) => g.test.test(base)) ?? null;
 }
 
 /** The family's value at exactly this breakpoint slot, or null. */
-export function getGroupValue(classes: string, group: string, bp: Breakpoint): string | null {
+export function getGroupValue(classes: string, group: string, bp: Slot): string | null {
   const g = GROUP_BY_KEY[group];
   if (!g) return null;
   for (const cls of parseClasses(classes)) {
@@ -127,7 +130,7 @@ export function effectiveValue(classes: string, group: string, bp: Breakpoint): 
 }
 
 /** Replace the family's class at this slot (null removes it). Every other class stays, in order. */
-export function setGroupValue(classes: string, group: string, bp: Breakpoint, value: string | null): string {
+export function setGroupValue(classes: string, group: string, bp: Slot, value: string | null): string {
   const g = GROUP_BY_KEY[group];
   if (!g) return classes;
   const prefix = bp ? `${bp}:` : "";

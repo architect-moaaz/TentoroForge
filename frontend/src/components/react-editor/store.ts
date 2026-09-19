@@ -15,7 +15,7 @@ import { editorApi, failureOf, type JitBundle } from "./api";
 import { breakpointForWidth } from "./lib/classes";
 import { dropPosition, type DropWhere } from "./lib/drop";
 import { mainRoot, plainName, topmost } from "./lib/plain";
-import type { Breakpoint, Device, Finding, HistoryEntry, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, Rect } from "./types";
+import type { Breakpoint, Device, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, Rect } from "./types";
 
 export interface Snapshot { revision: string; view: string; load: string }
 export interface HistoryOp { label: string; before: Snapshot; after: Snapshot }
@@ -69,6 +69,7 @@ export interface SmithState {
 export interface EditorState {
   projectId: string | null;
   pages: PageListItem[];
+  navigation: Navigation | null;
   entryPage: string | null;
   pageId: string | null;
   doc: PageDoc | null;
@@ -228,6 +229,7 @@ const emptySmith = (): SmithState => ({
 export const useEditorStore = create<EditorState>((set, get) => ({
   projectId: null,
   pages: [],
+  navigation: null,
   entryPage: null,
   pageId: null,
   doc: null,
@@ -304,7 +306,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!projectId) return;
     try {
       const out = await editorApi.pages(projectId);
-      set({ pages: out.pages, entryPage: out.entryPage });
+      set({ pages: out.pages, entryPage: out.entryPage, navigation: out.navigation ?? null });
     } catch (err) {
       set({ loadError: failureOf(err).message });
     }

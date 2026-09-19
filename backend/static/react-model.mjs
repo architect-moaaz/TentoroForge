@@ -127,6 +127,14 @@ function collectFrom(node, container, context, out, repeat = null) {
     for (const arg of node.arguments) collectFrom(arg, container, "repeat", out, repeat);
     return;
   }
+  if (node.type === "LogicalExpression" && node.operator === "&&") {
+    // `{cond && <X/>}`: X is shown when cond holds.
+    const cond = SRC.slice(node.left.start, node.left.end);
+    const before = out.length;
+    collectFrom(node.right, container, context ?? "conditional", out, repeat);
+    for (let i = before; i < out.length; i++) if (!out[i].condition) out[i].condition = cond;
+    return;
+  }
   if (node.type === "LogicalExpression" || node.type === "ConditionalExpression") {
     for (const c of children(node)) collectFrom(c, container, context ?? "conditional", out, repeat);
     return;
@@ -172,7 +180,7 @@ function directText(source, node) {
 }
 
 function buildNode(source, entry, id, parentId, nodes, index) {
-  const { node, container, context, repeat } = entry;
+  const { node, container, context, repeat, condition } = entry;
   const isFragment = node.type === "JSXFragment";
   const opening = isFragment ? node.openingFragment : node.openingElement;
   const closing = isFragment ? node.closingFragment : node.closingElement;
@@ -218,6 +226,7 @@ function buildNode(source, entry, id, parentId, nodes, index) {
     endLine: node.loc.end.line,
     context: context ?? null,
     repeat: repeat ?? null,
+    condition: condition ?? null,
     exprOnly,
     objects,
     children: [],
@@ -768,7 +777,34 @@ function opSetObjectProp(source, m, op) {
   return opSetProp(source, m, { id: op.id, name: op.name, value: { kind: "expr", value: literal } });
 }
 
+function opWrapCondition(source, m, op) {
+  // Show the element only when `expr` holds: `{expr && (<X/>)}`; a wrapped one
+  // gets its condition replaced.
+  const n = need(m, op.id);
+  if (n.parent == null) throw new PatchError("no-parent", "The page itself is always shown.");
+  if (n.wrapperSpan && n.condition) {
+    const [ws] = n.wrapperSpan;
+    const condStart = ws + 1;
+    const condEnd = condStart + n.condition.length;
+    return splice(source, condStart, condEnd, op.expr);
+  }
+  if (n.wrapperSpan) throw new PatchError("in-expression", "This is part of a list or a choice already — ask Smith to add a condition to it.");
+  const indent = lineIndent(source, n.span[0]);
+  const body = indentSnippet(source.slice(n.span[0], n.span[1]), indent + "  ");
+  return splice(source, n.span[0], n.span[1], `{${op.expr} && (\n${indent}  ${body}\n${indent})}`);
+}
+
+function opUnwrapCondition(source, m, op) {
+  const n = need(m, op.id);
+  if (!n.wrapperSpan || !n.condition) return source;
+  const [ws, we] = n.wrapperSpan;
+  const indent = lineIndent(source, ws);
+  return splice(source, ws, we, indentSnippet(source.slice(n.span[0], n.span[1]), indent));
+}
+
 const OPS = {
+  wrapCondition: opWrapCondition,
+  unwrapCondition: opUnwrapCondition,
   setChildren: opSetChildren,
   setObjectProp: opSetObjectProp,
   setText: opSetText,

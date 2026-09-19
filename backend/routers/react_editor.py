@@ -22,7 +22,7 @@ from database import get_db
 from models.auth import PlatformUser
 from services.project_paths import project_root
 from services.project_service import get_project_with_auth
-from services.react_editor import jit, service, smith, widgets
+from services.react_editor import jit, pages, service, smith, widgets
 from services.react_editor.service import EditorError, Project
 
 router = APIRouter(tags=["react-editor"])
@@ -78,6 +78,14 @@ class WidgetRequest(BaseModel):
     pageRevision: str | None = None
 
 
+class PageRequest(BaseModel):
+    spec: dict[str, Any]
+
+
+class NavigationRequest(BaseModel):
+    spec: dict[str, Any]
+
+
 class SmithApplyRequest(BaseModel):
     baseRevision: str
     allowScopeExpansion: bool = False
@@ -89,6 +97,51 @@ async def list_pages(project_id: uuid.UUID, user: PlatformUser = Depends(get_cur
     project = await _project(project_id, user, db)
     svc = await _run(service.load_blueprint, project)
     return service.pages(svc.doc)
+
+
+@router.post("/api/projects/{project_id}/react-editor/pages")
+async def create_page(project_id: uuid.UUID, req: PageRequest, user: PlatformUser = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)):
+    """A new blank page in the Blueprint, in the menu when asked, written out."""
+    project = await _project(project_id, user, db)
+    return await _run(pages.create, project, req.spec)
+
+
+@router.patch("/api/projects/{project_id}/react-editor/pages/{page_id}")
+async def update_page(project_id: uuid.UUID, page_id: str, req: PageRequest,
+                      user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    return await _run(pages.update, project, page_id, req.spec)
+
+
+@router.get("/api/projects/{project_id}/react-editor/pages/{page_id}/consequences")
+async def page_consequences(project_id: uuid.UUID, page_id: str, user: PlatformUser = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)):
+    """What removing the page takes with it — said before it is done."""
+    project = await _project(project_id, user, db)
+    return await _run(pages.consequences, project, page_id)
+
+
+@router.delete("/api/projects/{project_id}/react-editor/pages/{page_id}")
+async def delete_page(project_id: uuid.UUID, page_id: str, user: PlatformUser = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    return await _run(pages.remove, project, page_id)
+
+
+@router.get("/api/projects/{project_id}/react-editor/navigation")
+async def get_navigation(project_id: uuid.UUID, user: PlatformUser = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    svc = await _run(service.load_blueprint, project)
+    return pages.navigation(svc.doc)
+
+
+@router.put("/api/projects/{project_id}/react-editor/navigation")
+async def put_navigation(project_id: uuid.UUID, req: NavigationRequest, user: PlatformUser = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    return await _run(pages.set_navigation, project, req.spec)
 
 
 @router.get("/api/projects/{project_id}/react-editor/pages/{page_id}")

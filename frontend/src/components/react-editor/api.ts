@@ -7,7 +7,7 @@
  * a status text, which is exactly the wording (UX-004) the editor exists to
  * show.
  */
-import type { ApplyResult, Finding, HistoryEntry, Op, PageDoc, PageListItem, Proposal, WidgetRef, WidgetSpec } from "./types";
+import type { ApplyResult, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, Proposal, WidgetRef, WidgetSpec } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -64,6 +64,8 @@ const post = <T>(path: string, body?: unknown, signal?: AbortSignal) =>
 
 const base = (projectId: string) => `/api/projects/${projectId}/react-editor`;
 
+export interface NavItemSpec { label: string; page?: string | null; icon?: string | null; children?: NavItemSpec[] }
+
 export interface JitBundle {
   js: string;
   css: string;
@@ -94,7 +96,18 @@ export const editorApi = {
     const qs = q.toString();
     return call<JitBundle>(`${base(projectId)}/pages/${pageId}/jit${qs ? `?${qs}` : ""}`, { signal });
   },
-  pages: (projectId: string) => call<{ entryPage: string; pages: PageListItem[] }>(`${base(projectId)}/pages`),
+  pages: (projectId: string) => call<{ entryPage: string; pages: PageListItem[]; navigation?: Navigation }>(`${base(projectId)}/pages`),
+  createPage: (projectId: string, spec: { name: string; route?: string; access?: "public" | "authenticated"; menu?: boolean; purpose?: string }) =>
+    post<{ page: { id: string; name: string; route: string; access: string; key: string | null } }>(`${base(projectId)}/pages`, { spec }),
+  updatePage: (projectId: string, pageId: string, spec: { name?: string; route?: string; access?: "public" | "authenticated"; purpose?: string }) =>
+    call<{ page: { id: string; name: string; route: string }; renamed: { from: string; to: string } | null }>(`${base(projectId)}/pages/${pageId}`, { method: "PATCH", body: JSON.stringify({ spec }) }),
+  pageConsequences: (projectId: string, pageId: string) =>
+    call<{ refusal: string | null; links?: unknown[]; menu?: unknown[]; widgets?: number; landing?: boolean; [k: string]: unknown }>(`${base(projectId)}/pages/${pageId}/consequences`),
+  deletePage: (projectId: string, pageId: string) =>
+    call<{ removed: boolean; name: string; links: unknown[]; menu: unknown[]; opensOn: string }>(`${base(projectId)}/pages/${pageId}`, { method: "DELETE" }),
+  navigation: (projectId: string) => call<Navigation>(`${base(projectId)}/navigation`),
+  setNavigation: (projectId: string, spec: { tree?: NavItemSpec[]; style?: string; initialRoute?: string | null }) =>
+    call<{ navigation: Navigation }>(`${base(projectId)}/navigation`, { method: "PUT", body: JSON.stringify({ spec }) }),
   open: (projectId: string, pageId: string) => call<PageDoc>(`${base(projectId)}/pages/${pageId}`),
   apply: (projectId: string, pageId: string, baseRevision: string, ops: Op[], label: string) =>
     post<ApplyResult>(`${base(projectId)}/pages/${pageId}/apply`, { baseRevision, ops, label }),

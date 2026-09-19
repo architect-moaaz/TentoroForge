@@ -29,6 +29,8 @@ export interface ModelNode {
   context: "repeat" | "conditional" | null;
   /** For an element inside `source.map((variable) => …)`: what is repeated and what each row is called. */
   repeat?: { source: string; variable: string | null } | null;
+  /** When the element is shown only under a condition: `{cond && …}` — the condition. */
+  condition?: string | null;
   /** The element's content when it is exactly one expression: `record.fullName`. */
   exprOnly?: string | null;
   /** Object-literal props (`fields={{…}}`, `input={{…}}`) as entries. */
@@ -207,6 +209,9 @@ export interface PageDoc {
   toolchain?: { typecheck: boolean };
 }
 
+export interface NavItem { label: string; page?: string | null; icon?: string | null; route?: string | null; children?: NavItem[] }
+export interface Navigation { style: "sidebar" | "topbar" | "hybrid"; tree: NavItem[]; initialRoute: string | null }
+
 export interface PageListItem {
   id: string;
   name: string;
@@ -277,6 +282,8 @@ export type Op =
   | { op: "addImport"; source: string; names: string[]; file?: "load" }
   | { op: "ensureProp"; name: string }
   | { op: "setChildren"; id: string; jsx: string }
+  | { op: "wrapCondition"; id: string; expr: string }
+  | { op: "unwrapCondition"; id: string }
   | { op: "setObjectProp"; id: string; name: string; entries: ObjectEntry[] }
   | { op: "addReturnKey"; file: "load"; key: string; expr: string }
   | { op: "removeReturnKey"; file: "load"; key: string };

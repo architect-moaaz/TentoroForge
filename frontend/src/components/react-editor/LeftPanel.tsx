@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertCircle, ChevronDown, ChevronRight, Copy, Eye, FileText, GitBranch, GripVertical, Lock, Plus, Repeat, Search, Star,
+  AlertCircle, ChevronDown, ChevronRight, Copy, Eye, GitBranch, GripVertical, Lock, Plus, Repeat, Search,
   Trash2, X, Zap,
 } from "lucide-react";
 
@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import { ChartDialog } from "./ChartDialog";
+import { PagesPanel } from "./PagesPanel";
 import { VOID, dropPosition } from "./lib/drop";
 import { isDescendant, mainRoot, plainName, plainType } from "./lib/plain";
 import { checkModel, findingsByNode } from "./lib/readiness";
@@ -53,7 +54,7 @@ export function LeftPanel({ onClose }: { onClose: () => void }) {
         <button type="button" className="mr-1 rounded p-1 text-muted-foreground hover:bg-muted lg:hidden" onClick={onClose} aria-label="Close panel"><X className="h-3.5 w-3.5" /></button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {leftTab === "pages" && <PagesTab />}
+        {leftTab === "pages" && <PagesPanel />}
         {leftTab === "add" && <AddTab />}
         {leftTab === "layers" && <LayersTab />}
       </div>
@@ -64,54 +65,6 @@ export function LeftPanel({ onClose }: { onClose: () => void }) {
 // ---------------------------------------------------------------------------
 // Pages
 // ---------------------------------------------------------------------------
-
-function PagesTab() {
-  const pages = useEditorStore((s) => s.pages);
-  const entryPage = useEditorStore((s) => s.entryPage);
-  const pageId = useEditorStore((s) => s.pageId);
-  const openPage = useEditorStore((s) => s.openPage);
-  const [q, setQ] = useState("");
-  const shown = pages.filter((p) => !q || `${p.name} ${p.route} ${p.purpose}`.toLowerCase().includes(q.toLowerCase()));
-  const groups = useMemo(() => {
-    const byModule = new Map<string, typeof shown>();
-    for (const p of shown) {
-      const key = p.module ?? "";
-      byModule.set(key, [...(byModule.get(key) ?? []), p]);
-    }
-    return [...byModule.entries()];
-  }, [shown]);
-  return (
-    <div className="p-2">
-      <div className="relative mb-2">
-        <Search className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
-        <Input className="h-8 pl-7 text-xs" placeholder="Find a page" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a page" />
-      </div>
-      {!pages.length && <p className="p-2 text-xs text-muted-foreground">No pages yet — build the application first.</p>}
-      {groups.map(([mod, list]) => (
-        <div key={mod || "_"} className="mb-2">
-          {groups.length > 1 && <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{mod || "Other"}</div>}
-          {list.map((p) => (
-            <button key={p.id} type="button" onClick={() => void openPage(p.id)} title={p.purpose}
-              className={cn("flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted", pageId === p.id && "bg-primary/10")}>
-              <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1 text-xs font-medium">
-                  <span className="truncate">{p.name}</span>
-                  {entryPage === p.id && <Star className="h-3 w-3 fill-amber-400 text-amber-400" aria-label="First page people see" />}
-                </span>
-                <span className="block truncate text-[11px] text-muted-foreground">{p.route}{p.access === "public" ? " · public" : ""}</span>
-              </span>
-              {!p.coded && <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground" title="Laid out automatically; ask Smith to design it">auto</span>}
-            </button>
-          ))}
-        </div>
-      ))}
-      <p className="mt-3 px-2 text-[11px] text-muted-foreground">
-        To add, rename or remove a page, ask Smith in the chat — pages are part of the application's definition, and Smith keeps the menu and links in step.
-      </p>
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Add

@@ -608,3 +608,80 @@ def test_the_model_knows_the_shape_of_what_the_page_loads_and_the_row_a_cell_sit
     assert 'label: "Your note"' in out and 'kind: "textarea"' in out and 'options: [{ label: "A", value: "A" }]' in out
     assert "case: { value: props.current?.id }" in out
     assert adapter.model(out)["nodes"][form["id"]]["objects"]["fields"][0]["entries"][0]["value"] == "Your note", "rewritten fields read back"
+
+
+# ---------------------------------------------------------------------------
+# Pages and the menu, from the editor
+# ---------------------------------------------------------------------------
+
+def _pages_project(tmp_path, monkeypatch):
+    from services.react_editor import pages
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Desk", domain="ops")
+    svc.doc["pages"] = [{"id": "PAGE-001", "name": "Home", "route": "/", "purpose": "Start.", "access": "public"},
+                        {"id": "PAGE-002", "name": "Cases", "route": "/cases", "purpose": "Every case.", "access": "public"}]
+    svc.doc["pageCode"] = [{"page": "PAGE-002", "load": LOAD, "view": VIEW.replace(">Records</h1>", "><Link href={href(pages.home)}>Home</Link></h1>")}]
+    svc.doc["navigation"] = {"style": "topbar", "tree": [{"label": "Home", "page": "PAGE-001"}, {"label": "Cases", "page": "PAGE-002"}]}
+    svc.save()
+    (tmp_path / "app/src/app").mkdir(parents=True)
+    (tmp_path / "app/package.json").write_text("{}")
+    monkeypatch.setattr(service, "_check", lambda *a: [])
+    projected = []
+    monkeypatch.setattr(pages, "_reproject", lambda svc, project: projected.append(1) or [])
+    monkeypatch.setattr("services.smith.page_change._project", lambda svc, app_root: [])
+    return service.locate(tmp_path), projected
+
+
+def test_a_page_is_made_blank_in_the_menu_and_written_out(tmp_path, monkeypatch):
+    from services.react_editor import pages
+    project, projected = _pages_project(tmp_path, monkeypatch)
+    out = pages.create(project, {"name": "Team members", "menu": True, "access": "public"})
+    p = out["page"]
+    assert p["id"] == "PAGE-003" and p["route"] == "/team-members" and p["key"] == "teamMembers"
+    doc = service.load_blueprint(project).doc
+    assert [n["page"] for n in doc["navigation"]["tree"]] == ["PAGE-001", "PAGE-002", "PAGE-003"]
+    row = next(r for r in doc["pageCode"] if r["page"] == "PAGE-003")
+    assert "Team members" in row["view"] and "export async function load" in row["load"]
+    assert projected == [1] and doc["version"] > 1
+    opened = service.open_page(project, "PAGE-003")
+    assert opened["coded"] and opened["model"]["nodes"]["r0.0.0"]["text"] == "Team members"
+    with pytest.raises(EditorError) as e:
+        pages.create(project, {"name": "Other", "route": "/cases"})
+    assert e.value.code == "route-taken" and "Cases" in str(e.value)
+    with pytest.raises(EditorError) as e:
+        pages.create(project, {"name": "Bad", "route": "/Not Valid"})
+    assert e.value.code == "bad-route"
+    listing = service.pages(doc)
+    assert listing["navigation"]["tree"][2]["label"] == "Team members"
+
+
+def test_renaming_a_page_follows_its_handle_across_pages_and_the_menu(tmp_path, monkeypatch):
+    from services.react_editor import pages
+    project, _ = _pages_project(tmp_path, monkeypatch)
+    out = pages.update(project, "PAGE-001", {"name": "Start here"})
+    assert out["page"]["key"] == "startHere" and out["renamed"]["from"] == "home"
+    doc = service.load_blueprint(project).doc
+    assert "pages.startHere" in doc["pageCode"][0]["view"] and "pages.home" not in doc["pageCode"][0]["view"]
+    assert doc["navigation"]["tree"][0]["label"] == "Start here"
+    with pytest.raises(EditorError) as e:
+        pages.update(project, "PAGE-002", {"route": "/"})
+    assert e.value.code == "route-taken"
+
+
+def test_the_menu_is_arranged_and_validated_and_a_page_is_removed_with_its_links(tmp_path, monkeypatch):
+    from services.react_editor import pages
+    project, _ = _pages_project(tmp_path, monkeypatch)
+    out = pages.set_navigation(project, {"tree": [{"label": "All cases", "page": "PAGE-002"}, {"label": "Home", "page": "PAGE-001"}], "initialRoute": "/cases"})
+    assert [n["label"] for n in out["navigation"]["tree"]] == ["All cases", "Home"] and out["navigation"]["initialRoute"] == "/cases"
+    doc = service.load_blueprint(project).doc
+    assert next(p for p in doc["pages"] if p["id"] == "PAGE-002")["entry"] is True
+    with pytest.raises(EditorError) as e:
+        pages.set_navigation(project, {"tree": [{"label": "Ghost", "page": "PAGE-009"}]})
+    assert e.value.code == "bad-menu" and "not a page" in str(e.value)
+
+    c = pages.consequences(project, "PAGE-001")
+    assert c["refusal"] is None
+    out = pages.remove(project, "PAGE-001")
+    assert out["removed"] is True
+    doc = service.load_blueprint(project).doc
+    assert next(p for p in doc["pages"] if p["id"] == "PAGE-001")["status"] == "DEPRECATED"
+    assert [n["page"] for n in doc["navigation"]["tree"]] == ["PAGE-002"], "its menu entry went with it"

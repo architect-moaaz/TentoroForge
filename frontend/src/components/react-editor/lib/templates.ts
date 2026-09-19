@@ -150,9 +150,26 @@ export function buttonLabel(node: ModelNode): string {
 export function buttonActionOps(node: ModelNode, choice:
   | { kind: "none" }
   | { kind: "page"; page: PageRef }
-  | { kind: "workflow"; workflow: WorkflowRef }): Op[] {
+  | { kind: "workflow"; workflow: WorkflowRef }
+  | { kind: "dialog" }
+  | { kind: "message"; text: string }): Op[] {
   const label = buttonLabel(node);
   const variant = node.props.find((p) => p.name === "variant" && p.kind === "string")?.value ?? undefined;
+  const v = variant && variant !== "default" ? ` variant=${q(variant)}` : "";
+  if (choice.kind === "dialog") {
+    return [
+      { op: "addImport", source: "@/components/ui/button", names: ["Button"] },
+      { op: "addImport", source: "@/components/ui/dialog", names: ["Dialog", "DialogTrigger", "DialogContent", "DialogHeader", "DialogTitle", "DialogDescription"] },
+      { op: "replaceNode", id: node.id, jsx: `<Dialog>\n  <DialogTrigger asChild>\n    <Button${v}>${label}</Button>\n  </DialogTrigger>\n  <DialogContent>\n    <DialogHeader>\n      <DialogTitle>${label}</DialogTitle>\n      <DialogDescription>What this dialog is for.</DialogDescription>\n    </DialogHeader>\n  </DialogContent>\n</Dialog>` },
+    ];
+  }
+  if (choice.kind === "message") {
+    return [
+      { op: "addImport", source: "@/components/ui/button", names: ["Button"] },
+      { op: "addImport", source: "sonner", names: ["toast"] },
+      { op: "replaceNode", id: node.id, jsx: `<Button${v} onClick={() => toast(${q(choice.text)})}>${label}</Button>` },
+    ];
+  }
   if (choice.kind === "page") {
     return [...pageButtonImports(), { op: "replaceNode", id: node.id, jsx: pageButtonJsx(choice.page, label, variant) }];
   }
@@ -160,13 +177,17 @@ export function buttonActionOps(node: ModelNode, choice:
     return [...workflowButtonImports(),
             { op: "replaceNode", id: node.id, jsx: workflowButtonJsx(choice.workflow, { label }) }];
   }
-  const v = variant && variant !== "default" ? ` variant=${q(variant)}` : "";
   return [{ op: "addImport", source: "@/components/ui/button", names: ["Button"] },
           { op: "replaceNode", id: node.id, jsx: `<Button${v}>${label}</Button>` }];
 }
 
 /** What a button currently does, read from its shape. */
-export function buttonAction(node: ModelNode, model: { nodes: Record<string, ModelNode> }): { kind: "none" | "page" | "workflow" | "custom"; detail: string } {
+export function buttonAction(node: ModelNode, model: { nodes: Record<string, ModelNode> }): { kind: "none" | "page" | "workflow" | "dialog" | "message" | "custom"; detail: string } {
+  const onClick = node.props.find((p) => p.name === "onClick")?.value ?? "";
+  const msg = /^\(\)\s*=>\s*toast\((".*")\)$/.exec(onClick.trim());
+  if (msg) return { kind: "message", detail: JSON.parse(msg[1]) };
+  const parent = node.parent ? model.nodes[node.parent] : null;
+  if (parent?.type === "DialogTrigger") return { kind: "dialog", detail: "Opens a dialog" };
   if (node.type === "WorkflowButton") {
     const wf = node.props.find((p) => p.name === "workflow")?.value ?? "";
     return { kind: "workflow", detail: wf.replace(/^workflows\./, "") };

@@ -16,7 +16,8 @@ describe("class families", () => {
     expect(groupOf("text-center")?.key).toBe("textAlign");
     expect(groupOf("text-muted-foreground")?.key).toBe("textColor");
     expect(groupOf("md:grid-cols-2")?.key).toBe("gridCols");
-    expect(groupOf("hover:bg-muted")).toBeNull();
+    expect(groupOf("hover:bg-muted")?.key).toBe("background"); // a hover slot of the same family
+    expect(groupOf("dark:bg-muted")).toBeNull();
     expect(groupOf("whitespace-nowrap")).toBeNull();
   });
 
@@ -253,5 +254,47 @@ describe("charts", () => {
     expect(measureLabel({ aggregation: "count" }, "Order")).toBe("How many order records");
     expect(measureLabel({ aggregation: "sum", field: "total" }, "Order")).toBe("Total total");
     expect(measureLabel({ aggregation: "avg", field: "unitPrice" }, "Order")).toBe("Average unit price");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Interactions and conditions
+// ---------------------------------------------------------------------------
+
+import { conditionExpr, parseCondition } from "../GenericSettings";
+import { getGroupValue as getSlot, setGroupValue as setSlot } from "../lib/classes";
+
+describe("interactions", () => {
+  it("turns a button into one that opens a dialog or shows a message, and reads it back", () => {
+    const btn = node("r1.1", "Button", { text: "Add", textEditable: true });
+    const dialog = buttonActionOps(btn, { kind: "dialog" }).find((o) => o.op === "replaceNode") as { jsx: string };
+    expect(dialog.jsx).toContain("<DialogTrigger asChild>\n    <Button>Add</Button>");
+    expect(dialog.jsx).toContain("<DialogTitle>Add</DialogTitle>");
+    const msg = buttonActionOps(btn, { kind: "message", text: "Saved!" }).find((o) => o.op === "replaceNode") as { jsx: string };
+    expect(msg.jsx).toBe('<Button onClick={() => toast("Saved!")}>Add</Button>');
+    const withMsg = node("x", "Button", { props: [{ name: "onClick", kind: "expr", value: '() => toast("Saved!")', span: [0, 0], valueSpan: null }] });
+    expect(buttonAction(withMsg, model)).toEqual({ kind: "message", detail: "Saved!" });
+    const trigger = node("r1.4", "DialogTrigger"); const inside = node("r1.4.0", "Button");
+    expect(buttonAction(inside, { nodes: { ...model.nodes, "r1.4": trigger } })).toEqual({ kind: "dialog", detail: "Opens a dialog" });
+  });
+
+  it("keeps a hover colour in its own slot", () => {
+    const classes = setSlot("rounded-md bg-card", "background", "hover", "bg-muted");
+    expect(classes).toBe("rounded-md bg-card hover:bg-muted");
+    expect(getSlot(classes, "background", "")).toBe("bg-card");
+    expect(getSlot(classes, "background", "hover")).toBe("bg-muted");
+    expect(setSlot(classes, "background", "hover", null)).toBe("rounded-md bg-card");
+  });
+
+  it("reads and writes a plain-words condition", () => {
+    const d: PageDoc = { ...doc, model: { ...model, viewParam: { kind: "identifier", name: "props" }, loadKeys: ["current"], loadShapes: { current: { kind: "record", entity: "Record" } } } };
+    const shown = node("r1.9", "Badge", { condition: 'props.current?.gender === "Female"' });
+    const c = parseCondition(d, shown)!;
+    expect([c.source.id, c.field, c.op, c.value]).toEqual(["current", "gender", "is", "Female"]);
+    expect(conditionExpr(c)).toBe('props.current?.gender === "Female"');
+    const has = parseCondition(d, node("r1.9", "Badge", { condition: "props.current" }))!;
+    expect(has.op).toBe("has");
+    expect(conditionExpr({ ...c, op: "empty" })).toBe("!props.current?.gender");
+    expect(parseCondition(d, node("r1.9", "Badge", { condition: "isAdmin(props.user)" }))).toBeNull();
   });
 });

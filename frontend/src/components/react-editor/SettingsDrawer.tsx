@@ -21,6 +21,7 @@ import { checkModel } from "./lib/readiness";
 import { buttonAction, buttonActionOps, pageHref, widgetOfNode } from "./lib/templates";
 import { ChartSettings } from "./ChartSettings";
 import { FormFieldsEditor, ShowsControl, WorkflowInputEditor } from "./DataMapping";
+import { LookSection, ShowWhenControl, ValuesSection, coveredProps } from "./GenericSettings";
 import { useEditorStore } from "./store";
 import type { Breakpoint, ModelNode, Op, PageDoc, PropValue, SettingSpec } from "./types";
 
@@ -140,6 +141,7 @@ export function SettingsDrawer({ onClose }: { onClose: () => void }) {
           </Section>
         )}
         <SimpleSettings nodes={nodes} doc={doc} def={def} />
+        <Section title="Look" defaultOpen={false}><LookSection nodes={nodes} doc={doc} /></Section>
         {viewLevel === "advanced" ? (
           <>
             <LayoutSettings nodes={nodes} />
@@ -225,6 +227,8 @@ function SimpleSettings({ nodes, doc, def }: { nodes: ModelNode[]; doc: PageDoc;
           <WorkflowInputEditor node={node} doc={doc} workflow={doc.workflows.find((w) => w.key && node.props.find((p) => p.name === "workflow")?.value?.includes(`workflows.${w.key}`)) ?? null} />
         </Field>
       )}
+      <ValuesSection nodes={nodes} doc={doc} covered={coveredProps(specs)} />
+      {!multi && <ShowWhenControl node={node} doc={doc} />}
       {isButton && !multi && <ButtonAction node={node} doc={doc} />}
       {!multi && (
         <Field label="Show on" help={dynamic ? "This item's look is decided by code; ask Smith to change it." : undefined}>
@@ -369,12 +373,16 @@ function ButtonAction({ node, doc }: { node: ModelNode; doc: PageDoc }) {
         <Select value={choice} onValueChange={(v) => {
           setChoice(v);
           if (v === "none") void applyOps(buttonActionOps(node, { kind: "none" }), "Button does nothing");
+          if (v === "dialog") void applyOps(buttonActionOps(node, { kind: "dialog" }), "Button opens a dialog");
+          if (v === "message") void applyOps(buttonActionOps(node, { kind: "message", text: "Done!" }), "Button shows a message");
         }}>
           <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="none">Nothing yet</SelectItem>
             <SelectItem value="page">Opens a page</SelectItem>
             <SelectItem value="workflow">Runs a workflow (save, approve, delete…)</SelectItem>
+            <SelectItem value="dialog">Opens a dialog</SelectItem>
+            <SelectItem value="message">Shows a message</SelectItem>
             {action.kind === "custom" && <SelectItem value="custom">{action.detail}</SelectItem>}
           </SelectContent>
         </Select>
@@ -409,6 +417,10 @@ function ButtonAction({ node, doc }: { node: ModelNode; doc: PageDoc }) {
           {!doc.workflows.length && <p className="mt-1 text-[10px] text-muted-foreground">No workflows yet — ask Smith to add one.</p>}
         </Field>
       )}
+      {choice === "message" && action.kind === "message" && (
+        <Field label="The message"><DebouncedInput value={action.detail} ariaLabel="Message" onCommit={(v) => void applyOps(buttonActionOps(node, { kind: "message", text: v }), "Change the message")} /></Field>
+      )}
+      {choice === "dialog" && action.kind === "dialog" && <p className="mb-3 text-[11px] text-muted-foreground">Select the dialog in Layers to change its title and contents.</p>}
       {choice === "custom" && (
         <p className="mb-3 text-[11px] text-muted-foreground">This button runs something written for this page. <button type="button" className="text-primary hover:underline" onClick={() => setSmith({ open: true, expanded: true, prompt: "Explain what this button does and " })}>Ask Smith about it</button>.</p>
       )}
