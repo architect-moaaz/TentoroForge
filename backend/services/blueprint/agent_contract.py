@@ -532,7 +532,14 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
         if body.get("account") and other is not None:
             problems.append(f"{name}: `account: true` is already on {other.get('name')} — one entity is the "
                             "person behind a login")
+        from services.blueprint.projection import _is_credential_field
         for f in body.get("fields") or []:
+            # THE LOGIN HOLDS THE PASSWORD. 0l133sp2's Member carried a required
+            # `passwordHash`; signup creates the row without one, so every
+            # signup would have been refused by the database.
+            if isinstance(f, dict) and _is_credential_field(f.get("name")):
+                problems.append(f"{name}.{f.get('name')}: the person's login already holds their password — "
+                                "remove this field; the account entity never stores a credential")
             if isinstance(f, dict) and f.get("references") and f.get("required"):
                 problems.append(f"{name}.{f.get('name')}: the account entity's row is created at signup, when no "
                                 "other record exists to point at — make this reference optional")

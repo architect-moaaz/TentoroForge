@@ -260,3 +260,17 @@ def test_rules_are_written_when_there_are_workflows_to_gate():
     assert "workflows" in DAG["business_rules"].depends_on
     at = {k: i for i, level in enumerate(levels()) for k in level}
     assert at["workflows"] < at["business_rules"] < at["integration"]
+
+
+def test_the_person_behind_a_login_never_stores_a_password():
+    """0l133sp2's Member had a required passwordHash; signup creates the row
+    without one, so every signup would have failed."""
+    import pytest
+    from services.blueprint.agent_contract import InvalidEntityFields, check_entity_fields
+    from services.blueprint.executors import NODE_TASKS
+
+    result = _entities({"name": "Member", "account": True, "fields": [
+        {"name": "id", "type": "uuid"}, {"name": "passwordHash", "type": "string", "required": True}]})
+    with pytest.raises(InvalidEntityFields, match="login already holds their password"):
+        check_entity_fields(result, {"data": {"entities": []}})
+    assert "never has a password" in NODE_TASKS["entity_fields"]

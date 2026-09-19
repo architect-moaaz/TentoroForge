@@ -7,4 +7,6 @@ export default {
   dbCredentials: {
     url: process.env.DATABASE_URL!,
   },
+  // The seed's bookkeeping table lives outside the schema (see assembly.py).
+  tablesFilter: ["!_forge_seed_meta"],
 } satisfies Config;

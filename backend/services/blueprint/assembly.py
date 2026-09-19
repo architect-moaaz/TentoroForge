@@ -157,6 +157,10 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: { url: process.env.DATABASE_URL! },
+  // The seed's own bookkeeping table is created with raw SQL, outside the
+  // schema; seen by push it turned every new table into a "created or renamed
+  // from _forge_seed_meta?" prompt that no-one could answer (0l133sp2).
+  tablesFilter: ["!_forge_seed_meta"],
 });
 '''
 
