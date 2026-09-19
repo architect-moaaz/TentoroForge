@@ -24,7 +24,7 @@ def _doc():
         ], "relationships": []},
         "workflows": [{"id": "FLOW-001", "name": "Refund Case Intake", "status": "PROPOSED", "steps": [],
                        "trigger": {"kind": "manual"}, "launchedFrom": ["PAGE-007"],
-                       "inputs": [{"name": "property", "kind": "record", "entity": "ENTITY-001", "required": True},
+                       "inputs": [{"name": "propertyId", "kind": "field", "type": "uuid", "required": True},
                                   {"name": "guestName", "kind": "field", "type": "string", "required": True}]}],
         "pages": [{"id": "PAGE-007", "route": "/refund-cases/new", "pattern": "form",
                    "data": {"primaryEntity": "ENTITY-003"}}],
@@ -70,26 +70,15 @@ def test_a_list_the_layout_already_reads_is_reused():
 
 
 def test_the_translated_form_passes_the_contract_and_the_record_rule():
-    """STILL FAILING, AND IT NEEDS A DECISION ABOUT THE FIXTURE'S WORKFLOW.
+    """A CREATE form choosing a property from a select sends a foreign key.
 
-    Translation does its job — the three tests around this one pass. What
-    refuses the form is `dispatch_contract.dispatch_findings`, which arrived
-    after this fixture: `FLOW-001` declares an input `property` of
-    `kind: "record"`, and `_on_the_wire` treats a record input as satisfied
-    only when the control's payload carries an `id` key. This form sends
-    `{guestName, propertyId}`.
-
-    The refusal suggests `args: {property: "{{<the property in scope>.id}}"}`,
-    and that cannot be written here: a form field's value is not a data source,
-    so the binding check refuses `{{propertyId}}` next ("binds {{propertyId}},
-    which no data source provides"). Tried, and reverted rather than left in.
-
-    The likelier reading is that the FIXTURE is wrong, not the form: a record
-    input means "the record this control is acting on", which fits a Delete
-    button on a record page, and this is a CREATE form choosing a property
-    from a select — a foreign key, `kind: "field"`. Changing it would make
-    this pass, and it would also change what the test is a fixture FOR, so it
-    is left to whoever owns the dispatch contract.
+    The fixture's FLOW-001 declared that input as `property`, `kind: "record"`
+    — "the record this control acts on", which fits a Delete button on a
+    record page and cannot be written on a create form: a field's value is not
+    a data source, so `args: {property: "{{propertyId}}"}` is refused by the
+    binding check. `dispatch_contract.dispatch_findings`, which arrived after
+    the fixture, refused the form for it. The input is `propertyId`, a field,
+    which is what the form sends.
     """
     result = _result(_refused_form())
     doc = _doc()
