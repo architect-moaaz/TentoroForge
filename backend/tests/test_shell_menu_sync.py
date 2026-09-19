@@ -13,15 +13,21 @@ from pathlib import Path
 import pytest
 
 from services.shell_menu_sync import derive_shell_groups, sync_shell_menu
-
+from tests.sample_apps import require
 
 _FIXTURE = Path("/Users/m/Work/code/poc/design2ui-forge-v3/output/bpxr6hsv")
 
 
 @pytest.fixture
 def app_root(tmp_path: Path) -> Path:
-    if not _FIXTURE.exists():
-        pytest.skip("bpxr6hsv fixture app not present")
+    # `_FIXTURE` EXISTS AND IS EMPTY on a machine whose copy of the
+    # sample app was cleaned, so `.exists()` on the directory let the
+    # copy below run and raise FileNotFoundError in setup. The guard
+    # asks for the files it is about to read.
+    require(
+            _FIXTURE / "src/contracts/nav-flow.json",
+            _FIXTURE / "src/schemas/shell.json",
+    )
     (tmp_path / "src" / "contracts").mkdir(parents=True)
     (tmp_path / "src" / "schemas").mkdir(parents=True)
     shutil.copy(_FIXTURE / "src/contracts/nav-flow.json",

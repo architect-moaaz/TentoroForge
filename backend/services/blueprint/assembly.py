@@ -153,8 +153,32 @@ export default defineConfig({
 '''
 
 
-#: Directories that are build output or dependencies, never scaffold.
-_SKIP_DIRS = frozenset({"node_modules", ".next", "dist", ".git", "drizzle"})
+#: Directories inside a template that are never part of a generated
+#: application: build output, dependencies, and the scaffold's OWN tests.
+#:
+#: `__tests__` IS THE SCAFFOLD TESTING ITSELF, NOT THE APP TESTING ITSELF.
+#: `src/hooks/__tests__/useAgentChat.test.tsx` was copied into every generated
+#: app, and `tsconfig.json` excludes only `node_modules` — so `next build`
+#: type-checked a file importing `vitest` and `@testing-library/react`, which
+#: the standalone `package.json.tmpl` does not declare and never should. A
+#: generated app gets its test suite from `services.test_suite_emitter`, which
+#: writes `src/__tests__/generated/` AND injects the `vitest` devDependency
+#: alongside it. That is the path by which an application comes to have tests;
+#: the scaffold's own are for the scaffold.
+_SKIP_DIRS = frozenset({"node_modules", ".next", "dist", ".git", "drizzle",
+                        "__tests__"})
+
+
+def skipped_by_scaffold(path: str | Path) -> bool:
+    """True when nothing at `path` is copied into a generated application.
+
+    Public because two callers outside this module have to agree with it: a
+    test that reads the floor to work out which packages a generated app
+    imports must skip exactly what the copy skips, or it reports a dependency
+    the application never has. A second copy of the rule is a second copy that
+    drifts.
+    """
+    return any(part in _SKIP_DIRS for part in Path(path).parts)
 
 
 def _template_dirs() -> list[Path]:
@@ -218,7 +242,7 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
         if not layer.is_dir():
             continue
         for src in layer.rglob("*"):
-            if src.is_dir() or any(part in _SKIP_DIRS for part in src.parts):
+            if src.is_dir() or skipped_by_scaffold(src):
                 continue
             rel = src.relative_to(layer)
             dst_rel = rel.with_suffix("") if rel.suffix == _TMPL_SUFFIX else rel
@@ -807,7 +831,7 @@ def scaffold_tokens() -> frozenset[str]:
         if not layer.is_dir():
             continue
         for f in layer.rglob("*"):
-            if f.is_dir() or any(part in _SKIP_DIRS for part in f.parts):
+            if f.is_dir() or skipped_by_scaffold(f):
                 continue
             if f.suffix not in _TEXT_SUFFIXES and f.suffix != ".tmpl":
                 continue
@@ -1169,6 +1193,23 @@ def _env_file(root: Path) -> dict[str, str]:
     except Exception:  # noqa: BLE001
         pass
     return env
+
+
+def app_database_url(app_root: str | Path) -> str:
+    """The database THIS application opens, as its own ``.env.local`` says.
+
+    Not :func:`default_database_url`. That is the value assembly WRITES; the
+    file is the value the application READS, and `run.sh` rewrites it when it
+    picks a free port, so the two differ on any machine running more than one
+    app. Anything that wants to look at an application's records has to open
+    the database the application itself opened, or it is reading someone
+    else's — which is the whole of the defect
+    `test_each_application_gets_its_own_database` exists for.
+
+    Empty string when the file is absent or names no url: the caller says so
+    rather than falling back to a guess at somebody's database.
+    """
+    return _env_file(Path(app_root)).get("DATABASE_URL", "").strip()
 
 
 def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:

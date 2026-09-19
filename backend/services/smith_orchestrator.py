@@ -29,6 +29,7 @@ Prod defaults wire the real services.
 """
 from __future__ import annotations
 
+import functools
 import logging
 import os
 from dataclasses import dataclass, field, asdict
@@ -92,7 +93,14 @@ def run(
 
     Never raises. Any unexpected exception is caught and converted to
     ``status='rolled_back'`` with an honest error message."""
-    _smith  = smith_fn  or _default_smith
+    # BOUND, NOT ADDED TO THE SEAM. `project_id` was accepted by this
+    # function and read by nothing. The tools that hand an owner a file need
+    # it — their download url is authorised against the project row — but the
+    # seam contract above is what injected fakes implement, so widening the
+    # call would break every one of them. The id is closed over in the DEFAULT
+    # seam instead; an injected `smith_fn` keeps the signature it always had.
+    _smith  = smith_fn  or functools.partial(
+        _default_smith, project_id=str(project_id or ""))
     _guards = guard_fn  or _default_guards
     _diff   = diff_fn   or _default_diff
     _commit = commit_fn or _default_commit
@@ -749,7 +757,8 @@ def _apply_proposed_fix(
 # Default seam implementations — wired lazily so tests don't pay import cost
 # --------------------------------------------------------------------------- #
 
-def _default_smith(*, user_message, output_dir, recall_block, memory_block, max_iters):
+def _default_smith(*, user_message, output_dir, recall_block, memory_block,
+                   max_iters, project_id: str = ""):
     from agents.smith_agent import run_smith_agent
     return run_smith_agent(
         user_message=user_message,
@@ -757,6 +766,7 @@ def _default_smith(*, user_message, output_dir, recall_block, memory_block, max_
         recall_block=recall_block,
         memory_block=memory_block,
         max_iters=max_iters,
+        project_id=project_id,
     )
 
 

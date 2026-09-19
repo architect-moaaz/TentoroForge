@@ -26,7 +26,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -91,6 +91,16 @@ async def download_export(
     project = await _project(project_id, user, db)
 
     path = data_export.path_of(project.output_dir, name)
+    if path is None or path.suffix.lower() not in _MEDIA:
+        # A backup (`services.smith.records_out`) is an opaque id with a
+        # sidecar naming its type and filename, in the same directory.
+        from services import project_exports
+
+        found = project_exports.read_export(project.output_dir, name)
+        if found is not None:
+            data, media_type, filename = found
+            return Response(content=data, media_type=media_type,
+                            headers={"Content-Disposition": f'attachment; filename="{filename}"'})
     if path is None:
         # 404 for a traversal attempt as well as for a name that is simply
         # gone: the answer must not say which of the two it was.

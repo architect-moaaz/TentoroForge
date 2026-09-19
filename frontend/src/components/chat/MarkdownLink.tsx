@@ -53,7 +53,9 @@ export function MarkdownLink({
       const url = URL.createObjectURL(await resp.blob());
       const a = document.createElement("a");
       a.href = url;
-      a.download = name;
+      // A backup's URL is an opaque id; the server names the file it is.
+      a.download =
+        /filename="([^"]+)"/.exec(resp.headers.get("content-disposition") ?? "")?.[1] ?? name;
       a.click();
       URL.revokeObjectURL(url);
     } catch {

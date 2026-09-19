@@ -343,7 +343,9 @@ _VERB_NOTES: dict[str, str] = {
     'import_data':
         "load the data they ALREADY HAVE from the spreadsheet they attached: 'here's our customer spreadsheet, load it in'. Needs only which kind of record the file holds; never pass rows or a filename. The first call writes nothing and returns the dry run to show them.",
     'export_data':
-        "give them their data back as a spreadsheet: 'can I get all this out as a spreadsheet?', 'back it up somewhere'. One kind of record, or all of them in a zip when no entity is named. Reads only — nothing to confirm, nothing to undo.",
+        "give them their data back as a spreadsheet: 'can I get all this out as a spreadsheet?'. One kind of record, or all of them in a zip when no entity is named. Reads only — nothing to confirm, nothing to undo.",
+    'back_up':
+        "an archive of the records AND the definition, which the owner downloads and keeps: 'back it up somewhere', 'what if I lose all this?'. Takes no fields. The reply says plainly that nothing is scheduled and that there is no restore button — do not promise either.",
     'rebuild':
         'regenerate the whole application from its definition.',
     'rename':
@@ -1096,16 +1098,38 @@ TOOL_CATALOG: list[dict] = [
              "Settings → Integrations; missing pieces surface as a clear "
              "error in the return."},
 
+    # The ask under "can I trust this?". It hands over a FILE, which is
+    # why it is a tool and not an `answer` (the spreadsheet itself is
+    # `export_data`) — a sentence saying the records
+    # exist is what this replaces.
+    {"name": "back_up",
+     "signature": "back_up() -> {applied, url, filename, counts, summary}",
+     "desc": "An archive of the records AND the definition, which the owner "
+             "downloads and keeps: 'back it up somewhere', 'what if I lose "
+             "all this?', 'is this stored anywhere else?'. Takes no "
+             "arguments. NOTHING IS SCHEDULED and there is no restore "
+             "button — do not promise either. RELAY `summary` as written; it "
+             "says so, and it carries the link."},
+
+    # NAMED FOR A MECHANISM THAT IS ONLY HALF TRUE. This said "reverse the
+    # most recent commit", which is what it does on a legacy project and not
+    # what it does on a Blueprint one, where the history is the document's
+    # own versions and the repo has no commits. A description that teaches
+    # the wrong mental model is how "undo that" came to be answered with a
+    # git error on applications that HAD a working undo. The tool is
+    # described by what the user gets; the handler picks the store.
     {"name": "revert_last_patch",
-     "signature": "revert_last_patch() -> "
-                  "{ok, reverted_sha, files, summary}",
-     "desc": "Reverse the most recent commit as a NEW commit — the "
-             "underlying seam for 'undo that' / 'actually no, don't do "
-             "that'. History-preserving (original commit stays in git "
-             "log). Use ONLY when the user asks to undo or the previous "
-             "patch was wrong. Does not touch anything else. Never call "
-             "speculatively — a revert IS a mutation and shows up in "
-             "the app's git history."},
+     "signature": "revert_last_patch() -> {ok, summary, …}",
+     "desc": "UNDO THE LAST CHANGE — the seam for 'undo that', 'undo', "
+             "'put it back', 'no, that was wrong'. The application returns "
+             "to how it stood before the most recent change, and said again "
+             "it goes back another. Nothing is destroyed: the undo is "
+             "itself recorded, so it can be undone too. Works on every "
+             "project — it reverses a commit where the history is git, and "
+             "restores the definition where the history is the Blueprint, "
+             "without you having to know which. `revert` is the same tool "
+             "under the name understand_ask uses. Use ONLY when the user "
+             "asks to undo; never speculatively — an undo IS a mutation."},
 
     {"name": "add_role",
      "signature": "add_role(role_name) -> {ok, added, actors}",
@@ -1516,6 +1540,56 @@ READONLY_HANDLERS = {
     "remove_role":              lambda output_dir, args: _smith_remove_role(output_dir, args),
     "restrict_page_to_role":    lambda output_dir, args: _smith_restrict_page_to_role(output_dir, args),
 }
+
+
+#: Tools that cannot be served by an `output_dir` alone: they answer with a
+#: download url, and that url is project-scoped —
+#: `/api/projects/<project_id>/exports/<export_id>`, authorised against the
+#: project row before a byte is read.
+#:
+#: A SEPARATE TABLE RATHER THAN AN INJECTED ARG. Threading the id through
+#: `args` would put a key nobody declared into every handler's dict, and
+#: several of them (`_smith_add_page`, the seam wrappers) copy `args` straight
+#: into a patch — an id would have ridden into recorded payloads that have no
+#: business holding one. A second table says which tools need to know whose
+#: project this is, in one place, where it can be read.
+#:
+#: The signature is `(output_dir, args, project_id)`. An empty `project_id`
+#: is refused by the handler rather than papered over: a link with no project
+#: in it would be a link to nobody's records.
+PROJECT_HANDLERS = {
+    "back_up":                  lambda output_dir, args, project_id: _smith_records_out(
+        output_dir, project_id, "backup", args),
+}
+
+
+def _smith_records_out(output_dir: str, project_id: str, kind: str,
+                       args: dict) -> dict:
+    """The owner's records out, or a backup they keep.
+
+    Returns the same dict the chat dispatcher gets, plus `summary` — the model
+    composes its reply from tool results, so the sentence naming what this does
+    NOT do (nothing scheduled, no restore button, credentials left out) has to
+    be IN the result. A model left to summarise `{"applied": true}` in its own
+    words will promise a backup service nobody built.
+    """
+    from services.smith.records_out import run as _records_run
+
+    if not str(project_id or "").strip():
+        return {
+            "applied": False, "edited_paths": [],
+            "reason": ("I cannot hand over a file here: this turn is running "
+                       "without a project to serve it from, and a download "
+                       "link with no project in it reaches nobody's records. "
+                       "Ask me again from the project's own chat."),
+        }
+    out = _records_run(output_dir, str(project_id), kind=kind,
+                       entity=str((args or {}).get("entity") or ""))
+    if out.get("applied"):
+        # Named `summary` to match what every other mutating handler returns,
+        # so the loop's own trace summariser reads it without a special case.
+        out["summary"] = out.get("diff_summary") or ""
+    return out
 
 
 def _check_data_source_tool(output_dir: str, path: str) -> dict:
@@ -2772,11 +2846,32 @@ def _smith_restrict_page_to_role(output_dir: str, args: dict) -> dict:
 
 
 def _smith_revert_last_patch(output_dir: str, args: dict) -> dict:
-    """Reverse the most recent commit in the app repo (Phase 1b).
+    """Undo the last change, by whichever record this project actually keeps.
 
-    Delegates to :func:`services.patch_history.revert_last_patch`. See
-    the tool catalog entry for user-facing rules.
+    TWO STORES, ONE ASK. A legacy project's history is its git log, and
+    `patch_history.revert_last_patch` reverses the top commit. A Blueprint
+    project's history is `changeHistory` plus the `versions/vN.json`
+    snapshot `BlueprintService.commit` writes before every change — and its
+    repo has no commits at all, so the git path found nothing to reverse and
+    "undo that" was answered with an error on every Blueprint application.
+
+    `services.smith.revert` was written for that and wired into the chat
+    verb, but this table is the other way the ask arrives and it still went
+    to git. The branch is the same one `add_field`, `remove_field` and the
+    rest of the seams already take: ask the project which kind it is.
     """
+    if _is_blueprint_app(output_dir):
+        from services.smith.revert import run as _revert_run
+        out = _revert_run(output_dir)
+        # `summary` and `ok` as well as the seam's own keys: this handler has
+        # two branches with two shapes, and the model reading the result
+        # should not have to know which branch ran to find out whether the
+        # undo happened and what it undid.
+        out["ok"] = bool(out.get("applied"))
+        out["summary"] = str(out.get("diff_summary") or out.get("reason") or "")
+        if not out["ok"]:
+            out["error"] = str(out.get("reason") or "")
+        return out
     from services.patch_history import revert_last_patch
     return revert_last_patch(output_dir)
 

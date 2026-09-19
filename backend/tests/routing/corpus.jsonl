@@ -168,7 +168,6 @@
 {"say": "can you put our existing bookings in", "verb": "import_data"}
 {"say": "can I get all this out as a spreadsheet?", "verb": "export_data"}
 {"say": "export the customers", "verb": "export_data"}
-{"say": "back it up somewhere", "verb": "export_data"}
 {"say": "it crashed", "verb": "explain_crash"}
 {"say": "it broke when I clicked save", "verb": "explain_crash"}
 {"say": "something went wrong", "verb": "explain_crash"}
@@ -260,3 +259,11 @@
 {"say": "how do I explain this to my team?", "verb": "write_guide", "note": "a question in form, a request for the guide"}
 {"say": "how do I explain this to the people using it?", "verb": "write_guide", "note": "same ask, said about the users"}
 {"say": "a cheat sheet for the drivers", "verb": "write_guide", "note": "names a role; the guide is per role anyway"}
+{"say": "export the nurses to excel", "verb": "export_data"}
+{"say": "I want a copy of my data", "verb": "export_data"}
+{"say": "can i get the customers in a csv", "verb": "export_data"}
+{"say": "download all the records", "verb": "export_data"}
+{"say": "back it up somewhere", "verb": "back_up"}
+{"say": "what happens if I lose all this?", "verb": "back_up"}
+{"say": "can I take a backup?", "verb": "back_up"}
+{"say": "is any of this stored anywhere else?", "verb": "back_up"}

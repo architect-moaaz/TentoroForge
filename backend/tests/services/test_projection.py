@@ -346,8 +346,12 @@ def test_the_platform_declaration_is_parsed_not_transcribed():
     from services.blueprint.projection import parse_platform_table, platform_table
 
     declared = {f["name"]: f for f in platform_table("users")}
+    # `accountType` joined the scaffold's users table — the account type the
+    # user picked at signup, which auth folds into the session role so the menu
+    # can gate on it. Parsing is what makes this a one-line acknowledgement
+    # instead of a fourth hand-copy drifting off the original.
     assert set(declared) == {"id", "email", "password", "name",
-                             "isActive", "createdAt"}
+                             "accountType", "isActive", "createdAt"}
     assert declared["email"] == {"name": "email", "type": "text",
                                  "required": True, "unique": True}
     # The default `authorize()` depends on — a falsy isActive rejects the login.
@@ -920,3 +924,50 @@ def test_a_retired_workflows_definition_is_removed(tmp_path):
     doc["workflows"][1]["status"] = "DEPRECATED"
     project_workflows(doc, tmp_path)
     assert sorted(p.name for p in defs.glob("*.json")) == ["delete-thing.json"]
+
+
+# ---------------------------------------------------------------------------
+# reading a projected module back — what a spreadsheet of the records needs
+# ---------------------------------------------------------------------------
+
+def test_a_projected_module_reads_back_as_field_and_column_pairs():
+    """`services.smith.records_out` has to SELECT what the database has and
+    head the column with what the owner calls it. Both are in the declaration
+    this emits, so neither is re-derived anywhere."""
+    from services.blueprint.projection import emit_entity_module, parse_table_columns
+
+    entity = {"id": "ENTITY-001", "name": "Nurse", "table": "nurses",
+              "fields": [{"name": "id", "type": "uuid", "primaryKey": True},
+                         {"name": "fullName", "type": "string", "required": True},
+                         {"name": "yearsOfExperience", "type": "int"}]}
+    doc = {"data": {"entities": [entity], "relationships": []}}
+
+    table, columns = parse_table_columns(emit_entity_module(entity, doc))
+    assert table == "nurses"
+    assert columns == (("id", "id"), ("fullName", "full_name"),
+                       ("yearsOfExperience", "years_of_experience"))
+
+
+def test_a_foreign_key_column_is_read_back_too():
+    """A relationship adds a column no entity field declares. It is data, and
+    an export that dropped it would lose which job a part was used on."""
+    from services.blueprint.projection import emit_entity_module, parse_table_columns
+
+    part = {"id": "ENTITY-002", "name": "PartUsage", "table": "part_usages",
+            "fields": [{"name": "id", "type": "uuid", "primaryKey": True}]}
+    job = {"id": "ENTITY-003", "name": "Job", "table": "jobs",
+           "fields": [{"name": "id", "type": "uuid", "primaryKey": True}]}
+    doc = {"data": {"entities": [part, job],
+                    "relationships": [{"from": "ENTITY-002", "to": "ENTITY-003",
+                                       "kind": "one_to_many", "fromField": "jobId"}]}}
+
+    _table, columns = parse_table_columns(emit_entity_module(part, doc))
+    assert ("jobId", "job_id") in columns
+
+
+def test_a_module_with_no_table_declares_nothing():
+    """The barrel re-exports and declares no columns; a reader must not
+    invent a table for it."""
+    from services.blueprint.projection import parse_table_columns
+
+    assert parse_table_columns('export * from "./nurse";\n') == ("", ())

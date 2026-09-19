@@ -183,5 +183,15 @@ def test_missing_everything_is_empty_but_valid(tmp_path):
     assert ctx.roles == []
     block = ctx.to_prompt_block()
     assert isinstance(block, str)
-    assert len(block) < 120
+    # SAYS NOTHING IS THERE, RATHER THAN BEING SHORT. This asserted the block
+    # was under 120 characters; the APP MAP section joined it and carries a
+    # fixed header and a short reading guide, so an app with nothing on disk
+    # now produces ~900 characters of "(not known)" and "(no entities …)".
+    # That header is injected on every turn, which is a cost worth knowing —
+    # but it is boilerplate, not content, and what this test is for is that
+    # the block is HONEST about the app being empty.
     assert "recall" in block.lower()
+    assert "(not known)" in block or "no generation recall" in block.lower()
+    for absent in ("entities:", "pages:"):
+        assert absent in block          # the sections exist…
+    assert "(no entities" in block      # …and say they are empty

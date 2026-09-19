@@ -69,14 +69,34 @@ def test_defaults_missing_assignee():
     assert wf2["definition"]["nodes"][1]["data"]["config"]["assigneeRole"] == "admin"
 
 
-def test_drops_unreachable_nodes():
-    wf = _wf(
+def _orphaned():
+    return _wf(
         [_n("trigger", "trigger"), _n("s0", "action", {"actionType": "db_query"}), _n("orphan", "action", {"actionType": "db_query"}), _n("end", "end")],
         [{"source": "trigger", "target": "s0"}, {"source": "s0", "target": "end"}],  # orphan has no incoming edge
     )
-    wf2, rep = validate_and_repair(wf)
+
+
+def test_drops_unreachable_nodes():
+    """Generation prunes a graph it considers final — and says so explicitly.
+
+    This called `validate_and_repair(wf)` and expected the drop. The default
+    flipped to KEEP: deleting an unreachable node was itself the defect
+    (register T3-4, A16-1), because adding a node and not yet wiring it is the
+    normal middle of an edit, and dropping it deletes work the author just did.
+    `run_workflow_gate` passes `drop_unreachable=True`, so the pruning this
+    test is for still exists — it has to be asked for.
+    """
+    wf2, rep = validate_and_repair(_orphaned(), drop_unreachable=True)
     assert any("unreachable" in f for f in rep["fixed"])
     assert all(n["id"] != "orphan" for n in wf2["definition"]["nodes"])
+
+
+def test_an_unwired_node_is_kept_and_reported_by_default():
+    """The other side of that flip, and the reason for it: an editor saving a
+    half-wired graph gets its node back, with a warning rather than a hole."""
+    wf2, rep = validate_and_repair(_orphaned())
+    assert any(n["id"] == "orphan" for n in wf2["definition"]["nodes"])
+    assert any("reachable" in w for w in rep["warnings"]), rep
 
 
 def test_clean_workflow_is_idempotent():

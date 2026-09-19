@@ -855,8 +855,8 @@ sentences:
   #
   # Added 2026-09-18. Three of the closing list's sentences went with it:
   # loading a spreadsheet, getting the records out, and a backup — which is
-  # `export_data` with no kind of record named, so every kind goes into one
-  # zip.
+  # `back_up`: the records AND the definition in one archive the owner keeps
+  # (merged from claude/recursing-shamir, 2026-09-19).
 
   - id: data-customer-spreadsheet
     say: "here's our customer spreadsheet, load it in"
@@ -910,7 +910,13 @@ sentences:
     say: "back it up somewhere"
     checked: {colour: acts, via: handler}
     source: code
-    reaches: {verb: export_data, states: []}
+    reaches: {verb: back_up, states: []}
+
+  - id: data-what-if-i-lose-this
+    say: "what happens if I lose all this?"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: back_up, states: []}
 
   - id: data-bookings-out-as-a-spreadsheet
     say: "Can I get all the bookings out as a spreadsheet?"

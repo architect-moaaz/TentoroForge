@@ -27,4 +27,9 @@ def test_taxonomy_has_no_unexpected_drift():
         "validation", "access", "business", "computed", "state_machine", "trigger",
         "content_moderation", "similarity_check", "ai_validation", "ai_enrichment",
         "condition_action", "decision_table",
+        # `row_access` decides which ROWS a query returns at all, where
+        # `access` decides who may call it — a separate kind, added
+        # deliberately. This test exists to make that an acknowledgement
+        # rather than a surprise, and acknowledging it is the maintenance.
+        "row_access",
     }

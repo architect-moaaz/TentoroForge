@@ -3,6 +3,17 @@
 All four collaborators are injected as fakes — NO real LLM / pipeline runs.
 Covers: small-app one-shot, large-app two-stage, two-stage-failure fallback,
 and shape-identity of the returned plan across both paths.
+
+WHAT IS COUNTED, AND WHY IT IS NOT AN EXACT NUMBER. These asserted the one-shot
+planner ran EXACTLY once, and `produce_plan` has grown two retry layers since —
+a deterministic structural validator and an IRF revise — each of which calls it
+again when the plan it got back is incomplete. The minimal `_plan()` below is
+incomplete by those rules (no field types, no nav, no submit), so it retried
+twice and three tests reported a routing bug that was not there.
+
+Routing is what these are for: WHICH planner runs, not how many times the
+router had to ask it. `app_map` and `author` are still counted exactly, because
+zero and one are the whole assertion on that side.
 """
 
 import asyncio
@@ -53,17 +64,27 @@ def test_small_app_uses_oneshot_only():
     )
 
     assert plan["source"] == "oneshot"
-    assert calls == {"oneshot": 1, "app_map": 0, "author": 0}
+    assert calls["oneshot"] >= 1          # ran; retries are the router's business
+    assert calls["app_map"] == 0 and calls["author"] == 0
 
 
 def test_large_app_uses_two_stage():
-    """should_decompose True → app_map THEN author called; oneshot NOT called."""
+    """should_decompose True → app_map THEN author PRODUCE the plan.
+
+    The one-shot planner is no longer untouched on this path, and that is
+    worth knowing rather than asserting away: when the assembled two-stage
+    plan trips the structural validator, the retry layer asks `_run_oneshot`
+    for a revision — the retries go through the one-shot planner whichever
+    path produced the candidate. Here that planner raises, the retry swallows
+    it, and the two-stage plan is what comes back. What this test pins is that
+    the two-stage path RAN and its plan is the answer.
+    """
     calls = {"oneshot": 0, "app_map": 0, "author": 0}
     order = []
 
     def oneshot(prompt):
         calls["oneshot"] += 1
-        raise AssertionError("oneshot must not run for a decomposed large app")
+        raise AssertionError("oneshot must not PRODUCE the plan for a large app")
 
     def app_map(prompt, domain_context):
         calls["app_map"] += 1
@@ -89,7 +110,7 @@ def test_large_app_uses_two_stage():
     )
 
     assert plan["source"] == "two-stage"
-    assert calls == {"oneshot": 0, "app_map": 1, "author": 1}
+    assert calls["app_map"] == 1 and calls["author"] == 1
     assert order == ["app_map", "author"]
 
 
@@ -119,7 +140,7 @@ def test_two_stage_appmap_failure_falls_back_to_oneshot():
     )
 
     assert plan["source"] == "oneshot-fallback"
-    assert calls["oneshot"] == 1
+    assert calls["oneshot"] >= 1
 
 
 def test_two_stage_author_failure_falls_back_to_oneshot():
@@ -148,7 +169,7 @@ def test_two_stage_author_failure_falls_back_to_oneshot():
     )
 
     assert plan["source"] == "oneshot-fallback"
-    assert calls["oneshot"] == 1
+    assert calls["oneshot"] >= 1
 
 
 def test_async_oneshot_seam_is_awaited():

@@ -171,6 +171,9 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # what crashed, and asking them would be the whole problem again.
     "explain_crash": set(),
     "explain_slowness": set(),
+    # A copy of the whole thing — records AND the definition — that the owner
+    # keeps. Needs nothing; there is only ever one application to copy.
+    "back_up": set(),
     # THE ASKS THAT REACH NOTHING, GIVEN SOMEWHERE TO LAND. Each of these is a
     # thing people ask for that Smith genuinely cannot do. Without a verb they
     # were classified as whatever was nearest — "delete the Wards page" as a
@@ -416,6 +419,12 @@ VERB_HELP: dict[str, str] = {
         "what has been taking too long, and I say plainly that I cannot make "
         "it faster on its own. Needs nothing."
     ),
+    "back_up": (
+        "A copy of the whole application the owner keeps: \"back it up "
+        "somewhere\", \"what if I lose all this?\", \"can I take a backup?\". "
+        "The records and the definition in one archive, downloaded now. Says "
+        "plainly that nothing is scheduled and there is no restore button."
+    ),
     "revert": (
         "Undo the last change: \"undo that\", \"undo\", \"put it back\", "
         "\"that was wrong, revert it\", \"go back\". The application is "
@@ -436,10 +445,10 @@ VERB_HELP: dict[str, str] = {
     "export_data": (
         "Give them their data back as a spreadsheet: \"can I get all this out "
         "as a spreadsheet?\", \"export the customers\", \"download the "
-        "bookings\", \"back it up somewhere\". Reads the records out of the "
+        "bookings\". Reads the records out of the "
         "application's own database and produces the file on this turn. "
         "`entity` narrows it to one kind of record; with none, every kind goes "
-        "into one zip, which is what a backup is. Changes nothing — the "
+        "into one zip. A backup of records AND definition is `back_up`. Changes nothing — the "
         "application is untouched and there is nothing to undo."
     ),
     "rebuild": (

@@ -1,4 +1,16 @@
-"""Verify design_agent populates entityPhotos on the saved design spec."""
+"""Verify design_agent populates entityPhotos on the saved design spec.
+
+THE FAKES HAD TO GROW A PARAMETER. `pick_photo_for` gained `project_seed` — so
+two projects with the same (entity, domain) pair get different photos — and
+`_populate_entity_photos` passes it by keyword. These fakes did not accept it,
+every call raised TypeError, and `_populate_entity_photos`'s per-entity
+`except Exception` swallowed all of them: the result was an empty dict and
+three tests read as the picker never being called.
+
+Worth knowing, because it is what made this hard to see: that best-effort
+catch is deliberate — Unsplash being unreachable must not fail a generation —
+and it cannot tell a network error from a signature that no longer matches.
+"""
 from __future__ import annotations
 import json
 import tempfile
@@ -14,7 +26,7 @@ def test_populate_entity_photos_calls_picker_per_entity():
         {"name": "Property", "kind": "thing"},
     ]
     calls = []
-    def fake_picker(entity_name, domain, size="1600x900"):
+    def fake_picker(entity_name, domain, size="1600x900", project_seed=None):
         calls.append((entity_name, domain))
         return f"https://images.unsplash.com/photo-{entity_name.lower()}"
     with patch("agents.design_agent.pick_photo_for", side_effect=fake_picker):
@@ -34,7 +46,7 @@ def test_populate_entity_photos_handles_empty_list():
 def test_populate_entity_photos_skips_on_picker_error():
     """If the picker raises for one entity, others should still succeed."""
     entities = [{"name": "User"}, {"name": "BadEntity"}, {"name": "Property"}]
-    def fake_picker(entity_name, domain, size="1600x900"):
+    def fake_picker(entity_name, domain, size="1600x900", project_seed=None):
         if entity_name == "BadEntity":
             raise RuntimeError("network down")
         return f"https://images.unsplash.com/photo-{entity_name.lower()}"
@@ -49,9 +61,25 @@ def test_populate_entity_photos_dedups_by_entity_name():
     """Duplicate entity names in the plan should only fire one picker call."""
     entities = [{"name": "User"}, {"name": "User"}]
     calls = []
-    def fake_picker(entity_name, domain, size="1600x900"):
+    def fake_picker(entity_name, domain, size="1600x900", project_seed=None):
         calls.append(entity_name)
         return "https://images.unsplash.com/photo-x"
     with patch("agents.design_agent.pick_photo_for", side_effect=fake_picker):
         _populate_entity_photos(entities, domain="saas")
     assert calls.count("User") == 1
+
+
+def test_the_project_seed_reaches_the_picker():
+    """Two projects sharing an (entity, domain) pair must not get the same
+    photo, which is what the seed is for. Untested until now, and its absence
+    from the fakes above is exactly what made them fail."""
+    seeds = []
+
+    def fake_picker(entity_name, domain, size="1600x900", project_seed=None):
+        seeds.append(project_seed)
+        return "https://images.unsplash.com/photo-x"
+
+    with patch("agents.design_agent.pick_photo_for", side_effect=fake_picker):
+        _populate_entity_photos([{"name": "User"}], domain="saas",
+                                project_seed="proj-abc")
+    assert seeds == ["proj-abc"]

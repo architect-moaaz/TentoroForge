@@ -199,8 +199,8 @@ Return ONLY a JSON object with exactly these keys:
                         of record), not add_field (that is a new column).
       "export_data"   — GIVE THEM THEIR DATA BACK as a spreadsheet: "can I
                         get all this out as a spreadsheet?", "export the
-                        customers", "download all the bookings", "back it up
-                        somewhere", "I need this in Excel". Fill "entity" with
+                        customers", "download all the bookings", "I need this in
+                        Excel". A copy of EVERYTHING to keep safe is back_up. Fill "entity" with
                         which kind of record they named, or leave it "" when
                         they asked for everything or named none — that is a
                         backup of the whole application and is a legitimate
@@ -224,6 +224,11 @@ Return ONLY a JSON object with exactly these keys:
                         "why is it so slow", "loading takes ages".
                         I answer with what the application timed. Not
                         restyle, which is how it LOOKS.
+      "back_up"       — they are asking whether their work is safe: "back it
+                        up somewhere", "what happens if I lose all this?",
+                        "can I take a backup?", "is this stored anywhere
+                        else?". An archive of the records AND the definition,
+                        which they download and keep. Needs no fields.
       "revert"        — UNDO the last change: "undo that", "undo", "put it
                         back", "that's not what I wanted, revert", "go back",
                         "reverse that". Restores the application as it stood
@@ -311,6 +316,8 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   remove_requirement needs "requirement": which one.
 
   edit_product needs "change": what should be different, in the user's words.
+
+  back_up needs nothing.
 
   add_api needs "api": the endpoint in the user's words; remove_api needs
       "api": which one (method and path, or its id).

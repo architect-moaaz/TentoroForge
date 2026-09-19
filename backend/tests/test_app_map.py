@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from services.app_map import build_app_map
-
+from tests.sample_apps import require
 
 _FIXTURE_SRC = Path("/Users/m/Work/code/poc/design2ui-forge-v3/output/bpxr6hsv")
 
@@ -26,8 +26,17 @@ def app_root(tmp_path: Path) -> Path:
     no db, no vendored packages — so the fixture stays small and the
     tests fail loudly if the extractor starts reading anything else.
     """
-    if not _FIXTURE_SRC.exists():
-        pytest.skip("bpxr6hsv fixture app not present")
+    # `_FIXTURE_SRC` EXISTS AND IS EMPTY on a machine whose copy of the
+    # sample app was cleaned, so `.exists()` on the directory let the
+    # copy below run and raise FileNotFoundError in setup. The guard
+    # asks for the files it is about to read.
+    require(
+            _FIXTURE_SRC / "contracts" / "resource-registry.json",
+            _FIXTURE_SRC / "contracts" / "action-contract.json",
+            _FIXTURE_SRC / "contracts" / "generation-dossier.json",
+            _FIXTURE_SRC / "registry.json",
+            _FIXTURE_SRC / "src" / "schemas",
+    )
     (tmp_path / "contracts").mkdir()
     for name in (
         "resource-registry.json",
@@ -179,7 +188,12 @@ def test_intent_carries_prompt_first_line(app_root):
 
 def test_missing_contracts_returns_empty_map(tmp_path):
     m = build_app_map(str(tmp_path))
-    assert m == {"intent": "", "entities": {}, "pages": [], "workflows": {}}
+    # EMPTY, NOT A LITERAL. This pinned the exact four-key dict and the map
+    # has since grown `detail_gaps` and `peer_shape_inconsistencies`, so a
+    # richer empty map read as a wrong one. What "no contracts" means is that
+    # every section is empty, whatever sections there are.
+    assert set(m) >= {"intent", "entities", "pages", "workflows"}
+    assert not any(v for v in m.values()), m
 
 
 def test_missing_dossier_still_extracts_entities(app_root):

@@ -15,6 +15,8 @@ import pytest
 from services import fix_applier
 
 
+from tests.sample_apps import require
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REAL_WORKFLOW = REPO_ROOT / "output" / "mc2xgclv" / "workflows" / "assessmentschedulingworkflow.json"
 
@@ -50,6 +52,9 @@ def _minimal_registry() -> dict:
 def app_dir(tmp_path: Path) -> Path:
     """A temp output dir carrying a copy of the real scheduling workflow + a
     minimal registry."""
+    # `output/` is gitignored build product: present on a machine that has
+    # generated this app, absent everywhere else — including every worktree.
+    require(REAL_WORKFLOW)
     out = tmp_path / "app"
     (out / "workflows").mkdir(parents=True)
     (out / "contracts").mkdir(parents=True)
@@ -336,7 +341,13 @@ def test_page_schema_patch_applies(tmp_path, spy_post_generate):
     patched = json.loads(schema_path.read_text())
     assert patched["root"]["props"]["title"] == "All Candidates"
     assert result["verify"]["resolved"] is True
-    assert spy_post_generate == [str(out)]
+    # THE WHOLE-APP HEAL MUST NOT RUN ON THIS PATH, and this asserted that it
+    # does. The post-gen suite includes `form_scaffold`, which re-adds any
+    # field it thinks a form is missing — so "remove the duplicate CV Url" was
+    # removed by Smith, re-added by the heal, and committed re-added, with the
+    # user watching the field stay put (BUG-APPLY-1, live on xoiz4i97). Smith's
+    # edit is authoritative; `fix_applier` says so where it declines to call it.
+    assert spy_post_generate == []
 
 
 # --------------------------------------------------------------------------- #

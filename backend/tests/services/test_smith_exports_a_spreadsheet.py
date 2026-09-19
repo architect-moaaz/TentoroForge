@@ -231,12 +231,15 @@ def test_the_exported_file_is_one_the_import_will_read(svc, tmp_path, db):
 # the verb
 # --------------------------------------------------------------------------- #
 
-def test_the_verb_needs_nothing_because_a_backup_names_no_entity():
+def test_the_verb_needs_nothing_because_all_of_them_names_no_entity():
     from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP, missing_fields
 
     assert REQUIRED_BY_VERB["export_data"] == set()
     assert missing_fields({"verb": "export_data"}) == []
-    assert "back it up somewhere" in VERB_HELP["export_data"]
+    # "back it up somewhere" is `back_up` — records AND definition — not a
+    # spreadsheet; the two helps must not both claim it.
+    assert "back it up somewhere" not in VERB_HELP["export_data"]
+    assert "back it up somewhere" in VERB_HELP["back_up"]
     assert "Changes nothing" in VERB_HELP["export_data"]
 
 

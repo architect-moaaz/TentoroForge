@@ -30,7 +30,15 @@ def test_record_and_read(ledger):
 
 def test_estimate_pricing_by_model_family():
     usage = {"input_tokens": 1_000_000, "output_tokens": 0}
-    assert build_usage.estimate_cost_usd("claude-opus-4", usage) == 15.0
+    # $5/Mtok, not $15. The $15/$75 row belongs to Claude 3 Opus; pricing the
+    # modern family by it overstated every Opus call threefold, which is the
+    # bug the substring table's own comment records. This test asserted the
+    # overstatement, so the number every cost report is read against was
+    # guarded at three times its real value.
+    assert build_usage.estimate_cost_usd("claude-opus-4", usage) == 5.0
+    assert build_usage.estimate_cost_usd("claude-opus-5", usage) == 5.0
+    # …and the old row is still exact for the model it actually applies to.
+    assert build_usage.estimate_cost_usd("claude-3-opus-20240229", usage) == 15.0
     assert build_usage.estimate_cost_usd("claude-sonnet-4-5", usage) == 3.0
     assert build_usage.estimate_cost_usd("claude-haiku-4-5", usage) == 1.0
     # unknown model → sonnet-class default

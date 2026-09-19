@@ -100,11 +100,21 @@ class TestFigmaColorToTailwind:
         assert result == "blue-500"
 
     def test_arbitrary_color(self):
-        # A color not close to any Tailwind shade
-        result = figma_color_to_tailwind(
-            {"r": 0.5, "g": 0.3, "b": 0.1}
-        )
-        assert result.startswith("[#")
+        """A colour far from every Tailwind shade keeps its own hex.
+
+        The colour this used, (128, 77, 26), is not far any more — it lands
+        within the 30-unit match radius of `yellow-800`, so the test asserted
+        a fallback on an input that now has a name. A deep navy still has
+        none: the palette's blues are all lighter than this.
+        """
+        result = figma_color_to_tailwind({"r": 0, "g": 0, "b": 68 / 255})
+        assert result == "[#000044]"
+
+    def test_a_colour_the_palette_does_name_is_not_hexed(self):
+        """The other half, so the test above cannot pass by the matcher
+        breaking and hexing everything."""
+        assert not figma_color_to_tailwind(
+            {"r": 0.5, "g": 0.3, "b": 0.1}).startswith("[#")
 
 
 # ---------------------------------------------------------------------------

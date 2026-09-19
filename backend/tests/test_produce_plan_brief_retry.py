@@ -4,6 +4,19 @@ We stub the LLM to return a violating plan on turn 1 and a passing plan
 on turn 2. When ``FORGE_PLANNER_V2`` is on, the router's Layer-A gate
 must detect the authoritative-brief violation, retry, and emit the
 clean plan.
+
+WHY THE CALL COUNT IS NOT THE ASSERTION ANY MORE. `produce_plan` carries three
+retry layers, and the brief gate is one of them: the same Layer A also runs a
+deterministic structural validator, and an IRF revise follows it. The fixture
+plans here are written to exercise the BRIEF contract and are incomplete by
+those other rules — eight violations on the "honoring" plan (no field types, no
+nav, no submit) — so a clean-brief plan still took two extra turns and the
+count read as the gate misfiring. Filling the fixtures in to satisfy every
+structural rule would make them rot again the next time one is added.
+
+So each test asserts what its gate DOES: which plan comes back, and whether a
+retry prompt carried a brief hint. `_brief_hints` is the observable the gate
+owns; the other layers cannot produce one.
 """
 from __future__ import annotations
 
@@ -65,6 +78,30 @@ def _honoring_plan(brief: StructuredBrief) -> dict:
     }
 
 
+#: The rules only the brief gate emits. Matched by NAME, not by the word
+#: "authoritative": every prompt carries an "AUTHORITATIVE INPUTS" block of its
+#: own, so a substring test counts the original prompt as a violation hint.
+_BRIEF_RULES = (
+    "authoritative_actor_missing",
+    "authoritative_actor_role_mismatch",
+    "authoritative_actor_inviter_mismatch",
+    "authoritative_actor_onboarding_mismatch",
+    "authoritative_journey_page_missing",
+    "authoritative_journey_workflow_missing",
+)
+
+
+def _brief_hints(prompts: list[str]) -> list[str]:
+    """RETRY prompts carrying a brief violation, in the order they were sent.
+
+    Only the brief gate names these rules, so this counts ITS retries and
+    ignores the structural validator's and the IRF revise's, which run on the
+    same plans for their own reasons. The first prompt is the original ask and
+    is never a retry.
+    """
+    return [p for p in prompts[1:] if any(r in p for r in _BRIEF_RULES)]
+
+
 class _RetryStub:
     """Returns violating plan first, honoring plan on the second call.
     Records every prompt so we can assert the retry prompt contains
@@ -92,9 +129,8 @@ def test_v2_gate_retries_on_authoritative_violation(monkeypatch, tmp_path):
         _should_decompose=lambda p: False,
         _oneshot=stub,
     ))
-    # Two LLM calls happened: initial + retry
-    assert stub.calls == 2, f"expected 2 calls (initial + retry), got {stub.calls}"
-    # The retry prompt contains a hint referencing the violations
+    # The gate retried, and the retry carried the brief violation with it.
+    assert stub.calls >= 2, f"expected a retry, got {stub.calls} call(s)"
     retry_prompt = stub.prompts[1]
     assert "validation errors" in retry_prompt or "authoritative_" in retry_prompt
     # Final plan is the honoring one
@@ -108,8 +144,11 @@ def test_v2_gate_noop_when_plan_honors_brief(monkeypatch, tmp_path):
     brief = _brief()
 
     class _CleanStub:
-        def __init__(self): self.calls = 0
+        def __init__(self):
+            self.calls = 0
+            self.prompts: list[str] = []
         async def __call__(self, prompt):
+            self.prompts.append(prompt)
             self.calls += 1
             return _honoring_plan(brief)
 
@@ -121,15 +160,24 @@ def test_v2_gate_noop_when_plan_honors_brief(monkeypatch, tmp_path):
         _should_decompose=lambda p: False,
         _oneshot=stub,
     ))
-    assert stub.calls == 1, "no retry expected for a clean plan"
+    # The BRIEF gate found nothing to say. Other layers may still have asked
+    # for a revision — this plan is thin by their rules — but none of their
+    # prompts can carry a brief violation.
+    assert _brief_hints(stub.prompts) == [], stub.prompts
     assert plan.get("module_name") == "good"
 
 
 def test_v2_gate_disabled_lets_bad_plan_through(monkeypatch, tmp_path):
-    """When both FORGE_PLANNER_V2 and _CRITIC are off, validation
-    is skipped entirely (legacy behaviour). Ensures we don't turn on
-    validation by accident."""
-    monkeypatch.delenv("FORGE_PLANNER_V2", raising=False)
+    """With the gate off, a plan that dishonours the brief is returned as-is.
+
+    UNSETTING THE VARIABLE NO LONGER TURNS IT OFF. `FORGE_PLANNER_V2` defaults
+    to "on" now — `os.getenv("FORGE_PLANNER_V2", "on")` — so `delenv` left the
+    gate running, it found the brief violations it is supposed to find, the
+    stub answered the retry with the honoring plan, and this test read "good"
+    where it wanted "bad". Off is now something you say, not something you
+    omit; the line that reads the flag says `Set FORGE_PLANNER_V2=off`.
+    """
+    monkeypatch.setenv("FORGE_PLANNER_V2", "off")
     monkeypatch.delenv("FORGE_PLANNER_CRITIC", raising=False)
     brief = _brief()
     stub = _RetryStub(brief)
@@ -140,6 +188,6 @@ def test_v2_gate_disabled_lets_bad_plan_through(monkeypatch, tmp_path):
         _should_decompose=lambda p: False,
         _oneshot=stub,
     ))
-    assert stub.calls == 1, "no retry when V2 gate is off"
-    # Bad plan flowed through
+    assert _brief_hints(stub.prompts) == [], "the gate is off and must say nothing"
+    # And the bad plan flowed through, which is what "off" means.
     assert plan.get("module_name") == "bad"
