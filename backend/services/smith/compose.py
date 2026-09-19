@@ -679,6 +679,23 @@ def _with_widgets(doc: dict, props: Sequence[Any]) -> dict:
     return out
 
 
+def _into_menu(svc: Any, page: dict, app_root: str | None = None) -> None:
+    """A page the owner asked for is somewhere they expect to find: first in
+    the menu, and — at "/" — where the application opens."""
+    nav = svc.doc.setdefault("navigation", {})
+    tree = nav.setdefault("tree", [])
+    if not any(isinstance(n, dict) and str(n.get("page")) == str(page.get("id")) for n in tree):
+        tree.insert(0, {"label": str(page.get("name") or page.get("route")), "page": page.get("id"),
+                        "icon": "home" if page.get("route") == "/" else "layout-grid"})
+    if page.get("route") == "/":
+        init = nav.get("initialRoute") if isinstance(nav.get("initialRoute"), dict) else {}
+        nav["initialRoute"] = {**init, "default": "/", "authenticated": "/"}
+    svc.save()
+    if app_root:
+        from services.blueprint.projection import project_shell
+        project_shell(svc.doc, app_root)
+
+
 def coded_app(doc: dict) -> bool:
     """Whether this application's pages are written as React code."""
     return any(isinstance(r, dict) and r.get("view") for r in doc.get("pageCode") or [])
@@ -856,6 +873,13 @@ def run(output_dir: str, verb: str, *, route: str = "",
         ([f"; declared {', '.join(prepared['declared'])} on it"] if prepared["declared"] else [])
         + ([f"; created the edit screen {', '.join(prepared['created'])}"] if prepared["created"] else []))
     page = _page_for_route(svc.doc, route)
+    # A NEW PAGE IN A CODED APP IS WRITTEN AS CODE TOO. It went to the layout
+    # composer (seven minutes), whose tree the frontend then dropped — "I laid
+    # out Home" about a page that was not served: "built the discover page it
+    # is not there" (UAT jubyt8jk). Declared, put in the menu, then written.
+    if page is None and verb == "compose_route" and coded_app(svc.doc):
+        page = _ensure_page(svc, route, request)
+        _into_menu(svc, page, app_root)
     if page is not None and (code_row(svc.doc, str(page.get("id"))) is not None or coded_app(svc.doc)):
         try:
             out = recode_page(svc, route, app_root=app_root, request=request, wanted=wanted,

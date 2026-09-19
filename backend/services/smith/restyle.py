@@ -240,7 +240,11 @@ def run(output_dir: str, change: str, *, reasoning: Any = None) -> dict:
         return {"applied": False, "edited_paths": [], "reason": str(exc)}
     except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
         logger.exception("[smith] restyle failed")
-        return {"applied": False, "edited_paths": [], "reason": f"{type(exc).__name__}: {exc}"}
+        # The owner reads this; "MalformedEnvelope: design_system: proposal 0
+        # body was not JSON" told a non-technical owner nothing (UAT replay).
+        return {"applied": False, "edited_paths": [],
+                "reason": ("I could not change the colours this time — the design step's answer came back "
+                           "unreadable, so nothing in the app was changed. Ask again and I will retry.")}
     return {"applied": True, "edited_paths": out["edited_paths"],
             "diff_summary": summary_of(out, change), "version": out["version"],
             "changed": out["changed"], "decision": out["decision"], "reason": ""}

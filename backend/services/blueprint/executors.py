@@ -2835,7 +2835,10 @@ def parse_envelope(raw: str, *, task_id: str, agent: str,
     for i, p in enumerate(data.get("proposals") or []):
         body_raw = p.get("body")
         try:
-            body = json.loads(body_raw) if isinstance(body_raw, str) else body_raw
+            # strict=False: a raw newline inside a string value is what a model
+            # writes in a long description, and it failed a whole restyle
+            # ("Invalid control character") twice over (UAT replay).
+            body = json.loads(body_raw, strict=False) if isinstance(body_raw, str) else body_raw
         except json.JSONDecodeError as exc:
             raise MalformedEnvelope(f"proposal {i} body was not JSON: {exc}") from exc
         if not isinstance(body, dict):

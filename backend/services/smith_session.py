@@ -1108,7 +1108,10 @@ class SmithSession:
         # THE PLAN STAYS IN VIEW. A step that asked a question finished on the
         # answer's turn, which is an ordinary turn — and it said nothing of the
         # steps still waiting, so they were never done (UAT jubyt8jk).
-        elif result.status == "resolved":
+        # An answer counts too: a step that could only be answered ("the app
+        # cannot fetch images from the internet") ended the plan in silence,
+        # and the area and current-location steps after it were never done.
+        elif result.status in ("resolved", "no_op"):
             note = _plan_mod.remaining_note(_plan_mod.peek(self.output_dir))
             if note and note.strip() not in (result.answer or ""):
                 result.answer = (result.answer or "") + note

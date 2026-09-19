@@ -63,3 +63,51 @@ def test_the_accounts_are_in_smiths_context(tmp_path):
            "navigation": {"initialRoute": {"default": "/tools"}}, "data": {"entities": []}}
     acc = to_smith_fields(doc)["accounts"]
     assert acc["sign_in_page"] == "/login" and acc["after_sign_in"] == "/tools"
+
+
+def test_a_new_page_in_a_coded_app_is_declared_put_in_the_menu_and_written_as_code(tmp_path, monkeypatch):
+    """UAT: "a home page listing the tools" went to the layout composer for
+    seven minutes, the frontend dropped its tree, and Smith said it was done."""
+    from services.blueprint.service import BlueprintService
+    from services.smith import compose
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="T", domain="d")
+    svc.upsert("pages", {"name": "Tools", "route": "/tools", "purpose": "x"}, natural_key="PAGE:/tools")
+    tools = svc.doc["pages"][0]["id"]
+    svc.doc["pageCode"] = [{"page": tools, "load": "", "view": "x"}]
+    svc.doc["navigation"] = {"tree": [{"label": "Discover", "page": tools}], "initialRoute": {"default": "/tools"}}
+    svc.save()
+    monkeypatch.setattr(compose, "prepare_capabilities", lambda *a, **k: {"declared": [], "created": []})
+    calls = []
+    monkeypatch.setattr(compose, "recode_page", lambda svc, route, **k: calls.append(route) or
+                        {"applied": True, "committed": [], "version": 2, "reason": "", "missing": [], "widgets": []})
+    monkeypatch.setattr(compose, "compose_route", lambda *a, **k: calls.append("LAYOUT"))
+    out = compose.run(str(tmp_path), "compose_route", route="/", request="a home page listing the tools")
+    assert calls == ["/"] and out["applied"]
+    doc = BlueprintService.load(output_dir=tmp_path).doc
+    home = next(p for p in doc["pages"] if p["route"] == "/")
+    assert doc["navigation"]["tree"][0]["page"] == home["id"]
+    assert doc["navigation"]["initialRoute"]["default"] == "/"
+    assert "the menu calls" in out["diff_summary"]
+
+
+def test_a_raw_newline_inside_a_proposal_body_is_still_read():
+    import json
+
+    from services.blueprint.executors import parse_envelope
+    body = '{"name": "Orange\n and charcoal"}'
+    raw = json.dumps({"proposals": [{"section": "design.designSystem", "natural_key": "x", "body": body}]})
+    result = parse_envelope(raw, task_id="T", agent="a", node="design_system")
+    assert result.proposals[0].body["name"] == "Orange\n and charcoal"
+
+
+def test_a_restyle_that_breaks_answers_in_plain_words(monkeypatch, tmp_path):
+    from services.smith import restyle as restyle_mod
+
+    class _Svc:
+        doc = {}
+
+    monkeypatch.setattr("services.blueprint.service.BlueprintService.load", classmethod(lambda cls, **kw: _Svc()))
+    monkeypatch.setattr(restyle_mod, "restyle", lambda *a, **kw: (_ for _ in ()).throw(ValueError("proposal 0 body")))
+    out = restyle_mod.run(str(tmp_path), "orange and charcoal")
+    assert not out["applied"] and "ValueError" not in out["reason"] and "nothing in the app was changed" in out["reason"]
