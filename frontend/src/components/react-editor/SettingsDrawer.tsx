@@ -20,6 +20,7 @@ import { breadcrumb, componentFor, plainName, plainType } from "./lib/plain";
 import { checkModel } from "./lib/readiness";
 import { buttonAction, buttonActionOps, pageHref, widgetOfNode } from "./lib/templates";
 import { ChartSettings } from "./ChartSettings";
+import { FormFieldsEditor, ShowsControl, WorkflowInputEditor } from "./DataMapping";
 import { useEditorStore } from "./store";
 import type { Breakpoint, ModelNode, Op, PageDoc, PropValue, SettingSpec } from "./types";
 
@@ -207,13 +208,23 @@ function SimpleSettings({ nodes, doc, def }: { nodes: ModelNode[]; doc: PageDoc;
 
   return (
     <Section title="Settings">
-      {!hasTextSpec && node.textEditable && !multi && (
+      {!multi && !isButton && node.kind === "element" && (node.textEditable || node.exprOnly) && !node.children.length && (
+        <ShowsControl node={node} doc={doc} />
+      )}
+      {!multi && !isButton && !(node.kind === "element" && (node.textEditable || node.exprOnly) && !node.children.length) && !hasTextSpec && node.textEditable && !node.selfClosing && (
         <Field label="Text"><DebouncedInput value={node.text ?? ""} ariaLabel="Text" onCommit={(v) => void setText(node.id, v)} /></Field>
       )}
-      {!hasTextSpec && !node.textEditable && node.text && !multi && (
-        <Field label="Text" help="This text comes from data. Ask Smith to change what it shows."><Input className="h-8 text-xs" value={node.text} readOnly aria-label="Text from data" /></Field>
+      {specs.filter((spec) => !(spec.target.kind === "text" && node.kind === "element" && !node.children.length)).map((spec) => <SettingControl key={spec.key} spec={spec} nodes={nodes} doc={doc} />)}
+      {!multi && node.type === "WorkflowForm" && (
+        <Field label="Fields" help="What the person fills in, and what the page fills in for them.">
+          <FormFieldsEditor node={node} doc={doc} workflow={doc.workflows.find((w) => w.key && node.props.find((p) => p.name === "workflow")?.value?.includes(`workflows.${w.key}`)) ?? null} />
+        </Field>
       )}
-      {specs.map((spec) => <SettingControl key={spec.key} spec={spec} nodes={nodes} doc={doc} />)}
+      {!multi && node.type === "WorkflowButton" && (
+        <Field label="What it sends" help="What the workflow needs, and where each value comes from.">
+          <WorkflowInputEditor node={node} doc={doc} workflow={doc.workflows.find((w) => w.key && node.props.find((p) => p.name === "workflow")?.value?.includes(`workflows.${w.key}`)) ?? null} />
+        </Field>
+      )}
       {isButton && !multi && <ButtonAction node={node} doc={doc} />}
       {!multi && (
         <Field label="Show on" help={dynamic ? "This item's look is decided by code; ask Smith to change it." : undefined}>

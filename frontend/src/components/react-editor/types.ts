@@ -27,8 +27,32 @@ export interface ModelNode {
   line: number;
   endLine: number;
   context: "repeat" | "conditional" | null;
+  /** For an element inside `source.map((variable) => …)`: what is repeated and what each row is called. */
+  repeat?: { source: string; variable: string | null } | null;
+  /** The element's content when it is exactly one expression: `record.fullName`. */
+  exprOnly?: string | null;
+  /** Object-literal props (`fields={{…}}`, `input={{…}}`) as entries. */
+  objects?: Record<string, ObjectEntry[]>;
   children: string[];
 }
+
+export interface ObjectEntry {
+  key: string;
+  code: string;
+  kind: "string" | "number" | "boolean" | "object" | "objects" | "strings" | "expr" | "spread" | "method";
+  value?: string | number | boolean | string[];
+  entries?: ObjectEntry[];
+  items?: ObjectEntry[][];
+}
+
+/** What a key `load()` returns holds. */
+export type LoadShape =
+  | { kind: "rows"; entity: string | null }
+  | { kind: "page"; entity: string | null }
+  | { kind: "record"; entity: string | null }
+  | { kind: "query"; entity: string | null }
+  | { kind: "widget"; widget: string | null }
+  | { kind: "number" } | { kind: "string" } | { kind: "boolean" } | { kind: "list" } | { kind: "series" } | { kind: "user" } | { kind: "context" } | { kind: "unknown" };
 
 export interface PageModel {
   ok: boolean;
@@ -36,6 +60,7 @@ export interface PageModel {
   nodes: Record<string, ModelNode>;
   imports: { source: string; names: string[]; typeOnly: boolean }[];
   loadKeys: string[];
+  loadShapes?: Record<string, LoadShape>;
   viewProps: string[];
   viewParam?: { kind: "identifier"; name: string } | { kind: "pattern"; names: string[]; span: [number, number] } | { kind: "none" } | null;
 }
@@ -151,6 +176,7 @@ export interface WidgetSpec {
   limit?: number | null;
   sort?: { by: string; order?: "asc" | "desc" } | null;
   timeField?: string | null;
+  filter?: Record<string, string | string[] | number | boolean>;
 }
 
 export interface HistoryEntry {
@@ -174,6 +200,8 @@ export interface PageDoc {
   workflows: WorkflowRef[];
   entities: EntityRef[];
   widgets?: WidgetRef[];
+  /** Example rows per entity — what the instant canvas shows. */
+  samples?: Record<string, Record<string, unknown>[]>;
   theme: Record<string, unknown>;
   history: HistoryEntry[];
   toolchain?: { typecheck: boolean };
@@ -248,6 +276,8 @@ export type Op =
   | { op: "replaceNode"; id: string; jsx: string }
   | { op: "addImport"; source: string; names: string[]; file?: "load" }
   | { op: "ensureProp"; name: string }
+  | { op: "setChildren"; id: string; jsx: string }
+  | { op: "setObjectProp"; id: string; name: string; entries: ObjectEntry[] }
   | { op: "addReturnKey"; file: "load"; key: string; expr: string }
   | { op: "removeReturnKey"; file: "load"; key: string };
 

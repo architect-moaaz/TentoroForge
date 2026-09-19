@@ -78,6 +78,14 @@ def patch_load(load: str, ops: list[dict[str, Any]], *, app_root: Path | None = 
     return str(run("patchLoad", {"load": load, "ops": ops}, app_root=app_root)["load"])
 
 
+def samples(entities: list[dict[str, Any]], *, app_root: Path | None = None) -> dict[str, list[dict]]:
+    """Example rows per entity — the same ones the instant canvas shows."""
+    try:
+        return dict(run("samples", {"entities": entities}, app_root=app_root).get("rows") or {})
+    except AdapterError:
+        return {}
+
+
 def annotate(view: str, *, app_root: Path | None = None) -> str:
     return str(run("annotate", {"view": view}, app_root=app_root)["view"])
 

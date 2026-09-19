@@ -569,3 +569,42 @@ def test_changing_a_chart_edits_its_definition_and_renaming_it_follows_the_page(
     assert widgets.remove(project, w["id"])["removed"] is True
     live = [x for x in service.load_blueprint(project).doc["widgets"] if x.get("status") != "DEPRECATED"]
     assert live == [] and "statusMix" not in (project.app_root / "src/sdk/widgets.ts").read_text()
+
+
+# ---------------------------------------------------------------------------
+# Visual data mapping — shapes, rows, and content written from a choice
+# ---------------------------------------------------------------------------
+
+def test_the_model_knows_the_shape_of_what_the_page_loads_and_the_row_a_cell_sits_in():
+    load = ('import { listPage, record, count, runWidget, type PageContext } from "@/sdk/server";\nimport { widgets } from "@/sdk";\n'
+            'export async function load(ctx: PageContext) {\n  const page = await listPage("Case", { page: 1 });\n'
+            '  const [open, current] = await Promise.all([count("Case", { status: "Open" }), record("Case", ctx.params.id)]);\n'
+            '  const male = await runWidget(widgets.male);\n  return { rows: page.rows, total: page.total, open, current, male, q: ctx.searchParams.q ?? "" };\n}\n')
+    view = ('"use client";\nexport default function View(props: Props) {\n  return (\n    <div>\n      <h1>{props.current?.title ?? ""}</h1>\n'
+            '      <table><tbody>{props.rows.map((row) => (<tr key={row.id}><td>{String(row.amount ?? "")}</td></tr>))}</tbody></table>\n'
+            '      <WorkflowForm workflow={workflows.close} fields={{ note: { label: "Note", kind: "textarea" }, case: { value: props.current?.id } }} />\n    </div>\n  );\n}\n')
+    m = adapter.model(view, load)
+    assert m["loadShapes"] == {"rows": {"kind": "rows", "entity": "Case"}, "total": {"kind": "number"}, "open": {"kind": "number"},
+                               "current": {"kind": "record", "entity": "Case"}, "male": {"kind": "widget", "widget": "male"}, "q": {"kind": "string"}}
+    assert m["viewParam"] == {"kind": "identifier", "name": "props"}
+    cell = next(n for n in m["nodes"].values() if n["type"] == "td")
+    assert cell["exprOnly"] == 'String(row.amount ?? "")'
+    row = m["nodes"][cell["parent"]]
+    assert row["repeat"] == {"source": "props.rows", "variable": "row"}
+    form = next(n for n in m["nodes"].values() if n["type"] == "WorkflowForm")
+    fields = form["objects"]["fields"]
+    assert [f["key"] for f in fields] == ["note", "case"]
+    assert fields[0]["entries"][0] == {"key": "label", "code": '"Note"', "kind": "string", "value": "Note"}
+    assert fields[1]["entries"][0]["kind"] == "expr" and fields[1]["entries"][0]["code"] == "props.current?.id"
+
+    out = adapter.patch(view, [
+        {"op": "setChildren", "id": next(n["id"] for n in m["nodes"].values() if n["type"] == "h1"), "jsx": "{props.current?.owner ?? \"\"}"},
+        {"op": "setObjectProp", "id": form["id"], "name": "fields", "entries": [
+            {"key": "note", "kind": "object", "entries": [{"key": "label", "kind": "string", "value": "Your note"}, {"key": "kind", "kind": "string", "value": "textarea"},
+                                                          {"key": "options", "kind": "objects", "items": [[{"key": "label", "kind": "string", "value": "A"}, {"key": "value", "kind": "string", "value": "A"}]]}]},
+            {"key": "case", "kind": "object", "entries": [{"key": "value", "kind": "expr", "code": "props.current?.id"}]}]},
+    ])
+    assert '<h1>{props.current?.owner ?? ""}</h1>' in out
+    assert 'label: "Your note"' in out and 'kind: "textarea"' in out and 'options: [{ label: "A", value: "A" }]' in out
+    assert "case: { value: props.current?.id }" in out
+    assert adapter.model(out)["nodes"][form["id"]]["objects"]["fields"][0]["entries"][0]["value"] == "Your note", "rewritten fields read back"

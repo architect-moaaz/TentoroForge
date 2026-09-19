@@ -46,6 +46,7 @@ def _plain(findings: list[str]) -> str:
     for f in findings:
         f = re.sub(r"measure '[^']*': ", "", f)
         f = f.replace("needs a field", "needs a field to add up")
+        f = re.sub(r"'(\w+)', which is not a column on (\w+)", r"“\1”, which is not a field of \2", f)
         f = re.sub(r"'(\w+)' is not a column on (\w+)", r"“\1” is not a field of \2", f)
         f = re.sub(r"(sum|avg) over '(\w+)', which is not a number on (\w+)", r"“\2” is not a number, so it cannot be added up", f)
         f = re.sub(r"dimension '(\w+)' is bucketed by (\w+) but is not a date", r"“\1” is not a date, so it cannot be grouped by \2", f)
@@ -62,6 +63,10 @@ def _validate(doc: dict, widget: dict) -> None:
         raise EditorError(422, "no-entity", "Choose which kind of record the chart is about.")
     src = widget_query(doc, widget)
     findings = _query_findings(widget, src or {}, entity) if src else ["the chart's query could not be read"]
+    fields = {f.get("name") for f in entity.get("fields") or []}
+    for k in (widget["dataSource"].get("filter") or {}):
+        if fields and k not in fields:
+            findings.append(f"filters on '{k}', which is not a column on {entity.get('name')}")
     if findings:
         raise EditorError(422, "bad-widget", _plain(findings), findings=findings)
 
@@ -134,6 +139,13 @@ def _from_spec(doc: dict, page_id: str, spec: dict[str, Any], base: dict | None 
         if len(dims) > 2:
             raise EditorError(422, "too-many-dimensions", "A chart can group by at most two things.")
         src["dimensions"] = dims
+    if "filter" in spec:
+        filt: dict[str, Any] = {}
+        for k, v in (spec.get("filter") or {}).items():
+            if v in (None, "", []):
+                continue
+            filt[str(k)] = [str(x) for x in v] if isinstance(v, list) else v
+        src["filter"] = filt
     for k in ("timeField", "sort", "limit"):
         if k in spec:
             if spec[k] in (None, "", {}):

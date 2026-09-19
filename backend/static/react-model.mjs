@@ -22,6 +22,7 @@
  * protect what it must not restructure.
  */
 import { parse } from "@babel/parser";
+import { sampleRow } from "./jit-samples.mjs";
 
 // ---------------------------------------------------------------------------
 // Parsing and the model
@@ -104,36 +105,42 @@ function jsxChildrenOf(node) {
 
 // Descend a non-JSX expression looking for JSX, remembering the container it
 // sat in and the context (repeat / conditional) it came through.
-function collectFrom(node, container, context, out) {
+let SRC = "";
+function collectFrom(node, container, context, out, repeat = null) {
   if (node.type === "JSXElement" || node.type === "JSXFragment") {
-    out.push({ node, container, context });
+    out.push({ node, container, context, repeat });
     return;
   }
   if (node.type === "JSXText" || node.type === "JSXEmptyExpression") return;
   if (node.type === "JSXExpressionContainer") {
-    collectFrom(node.expression, node, context, out);
+    collectFrom(node.expression, node, context, out, repeat);
     return;
   }
   if (node.type === "JSXSpreadChild") return;
   if (node.type === "CallExpression" && node.callee.type === "MemberExpression"
       && node.callee.property.type === "Identifier" && REPEAT_CALLS.has(node.callee.property.name)) {
-    for (const arg of node.arguments) collectFrom(arg, container, "repeat", out);
+    // `source.map((row) => …)`: what is repeated, and what each row is called.
+    const fn = node.arguments[0];
+    const param = fn && fn.params && fn.params[0];
+    const repeat = { source: SRC.slice(node.callee.object.start, node.callee.object.end),
+                     variable: param && param.type === "Identifier" ? param.name : null };
+    for (const arg of node.arguments) collectFrom(arg, container, "repeat", out, repeat);
     return;
   }
   if (node.type === "LogicalExpression" || node.type === "ConditionalExpression") {
-    for (const c of children(node)) collectFrom(c, container, context ?? "conditional", out);
+    for (const c of children(node)) collectFrom(c, container, context ?? "conditional", out, repeat);
     return;
   }
   if (node.type === "ArrowFunctionExpression" || node.type === "FunctionExpression") {
-    collectFrom(node.body, container, context, out);
+    collectFrom(node.body, container, context, out, repeat);
     return;
   }
   if (node.type === "BlockStatement") {
-    for (const s of node.body) if (s.type === "ReturnStatement" && s.argument) collectFrom(s.argument, container, context, out);
+    for (const s of node.body) if (s.type === "ReturnStatement" && s.argument) collectFrom(s.argument, container, context, out, repeat);
     return;
   }
   if (node.type === "ParenthesizedExpression" || node.type === "TSAsExpression" || node.type === "TSNonNullExpression") {
-    collectFrom(node.expression, container, context, out);
+    collectFrom(node.expression, container, context, out, repeat);
     return;
   }
   // Anything else (a plain `{row.name}`, a call) holds no editable JSX child.
@@ -165,7 +172,7 @@ function directText(source, node) {
 }
 
 function buildNode(source, entry, id, parentId, nodes, index) {
-  const { node, container, context } = entry;
+  const { node, container, context, repeat } = entry;
   const isFragment = node.type === "JSXFragment";
   const opening = isFragment ? node.openingFragment : node.openingElement;
   const closing = isFragment ? node.closingFragment : node.closingElement;
@@ -177,8 +184,19 @@ function buildNode(source, entry, id, parentId, nodes, index) {
     const v = attrValue(source, a);
     return { name: attrName(a), ...v, span: [a.start, a.end] };
   });
+  SRC = source;
   const kids = jsxChildrenOf(node);
   const own = directText(source, node);
+  const meaningful = node.children.filter((c) => !(c.type === "JSXText" && !c.value.trim()));
+  const only = meaningful.length === 1 && meaningful[0].type === "JSXExpressionContainer" && meaningful[0].expression.type !== "JSXEmptyExpression" ? meaningful[0] : null;
+  const exprOnly = only ? source.slice(only.expression.start, only.expression.end) : null;
+  const objects = {};
+  if (!isFragment) {
+    for (const a of opening.attributes) {
+      if (a.type !== "JSXAttribute" || !a.value || a.value.type !== "JSXExpressionContainer") continue;
+      if (a.value.expression.type === "ObjectExpression") objects[attrName(a)] = objectEntries(source, a.value.expression);
+    }
+  }
   // A child reached through an expression (`{rows.map(...)}`) is a child, not text.
   const hasElementChild = own.hasElementChild || kids.length > 0;
   const { text, mixed } = own;
@@ -199,6 +217,9 @@ function buildNode(source, entry, id, parentId, nodes, index) {
     line: node.loc.start.line,
     endLine: node.loc.end.line,
     context: context ?? null,
+    repeat: repeat ?? null,
+    exprOnly,
+    objects,
     children: [],
   };
   nodes[id] = rec;
@@ -302,7 +323,131 @@ function loadKeys(load) {
   return [...keys];
 }
 
+/** An object literal prop (`fields={{ … }}`, `input={{ … }}`) as entries the editor can show and rewrite. */
+function objectEntries(source, obj) {
+  const out = [];
+  for (const p of obj.properties) {
+    if (p.type === "SpreadElement") { out.push({ key: `...${source.slice(p.argument.start, p.argument.end)}`, code: source.slice(p.start, p.end), kind: "spread" }); continue; }
+    if (p.type !== "ObjectProperty") { out.push({ key: source.slice(p.key ? p.key.start : p.start, p.key ? p.key.end : p.end), code: source.slice(p.start, p.end), kind: "method" }); continue; }
+    const key = p.key.type === "Identifier" ? p.key.name : p.key.type === "StringLiteral" ? p.key.value : source.slice(p.key.start, p.key.end);
+    const v = p.value;
+    const entry = { key, code: source.slice(v.start, v.end), kind: "expr" };
+    if (v.type === "StringLiteral") { entry.kind = "string"; entry.value = v.value; }
+    else if (v.type === "NumericLiteral") { entry.kind = "number"; entry.value = v.value; }
+    else if (v.type === "BooleanLiteral") { entry.kind = "boolean"; entry.value = v.value; }
+    else if (v.type === "ObjectExpression") { entry.kind = "object"; entry.entries = objectEntries(source, v); }
+    else if (v.type === "ArrayExpression" && v.elements.every((e) => e && e.type === "ObjectExpression")) { entry.kind = "objects"; entry.items = v.elements.map((e) => objectEntries(source, e)); }
+    else if (v.type === "ArrayExpression" && v.elements.every((e) => e && e.type === "StringLiteral")) { entry.kind = "strings"; entry.value = v.elements.map((e) => e.value); }
+    out.push(entry);
+  }
+  return out;
+}
+
+//: The server SDK's reads and what each returns, for `loadShapes`.
+const READS = {
+  list: (a) => ({ kind: "rows", entity: a[0] }),
+  listPage: (a) => ({ kind: "page", entity: a[0] }),
+  record: (a) => ({ kind: "record", entity: a[0] }),
+  count: () => ({ kind: "number" }),
+  total: () => ({ kind: "number" }),
+  series: () => ({ kind: "series" }),
+  query: (a) => ({ kind: "query", entity: a[0] }),
+  runWidget: (a, raw) => ({ kind: "widget", widget: (/^widgets\.(\w+)/.exec(raw[0] || "") || [])[1] || null }),
+  currentUser: () => ({ kind: "user" }),
+};
+
+function shapeOf(expr, vars, source) {
+  // Unwrap `await`, parentheses, `as`, `!`.
+  while (expr && (expr.type === "AwaitExpression" || expr.type === "ParenthesizedExpression" || expr.type === "TSAsExpression" || expr.type === "TSNonNullExpression")) expr = expr.argument ?? expr.expression;
+  if (!expr) return { kind: "unknown" };
+  if (expr.type === "CallExpression" && expr.callee.type === "Identifier" && READS[expr.callee.name]) {
+    const args = expr.arguments.map((a) => (a.type === "StringLiteral" ? a.value : null));
+    const raw = expr.arguments.map((a) => source.slice(a.start, a.end));
+    return READS[expr.callee.name](args, raw);
+  }
+  if (expr.type === "Identifier") return vars.get(expr.name) ?? { kind: "unknown" };
+  if (expr.type === "MemberExpression" && expr.object.type === "Identifier" && expr.property.type === "Identifier") {
+    const base = vars.get(expr.object.name);
+    if (base && base.kind === "page") return expr.property.name === "rows" ? { kind: "rows", entity: base.entity } : expr.property.name === "total" ? { kind: "number" } : { kind: "unknown" };
+    if (base && base.kind === "widget") return expr.property.name === "value" ? { kind: "number" } : { kind: "unknown" };
+    if (expr.object.name === "ctx" || (base && base.kind === "context")) return { kind: "string" };
+  }
+  if (expr.type === "StringLiteral" || expr.type === "TemplateLiteral") return { kind: "string" };
+  if (expr.type === "NumericLiteral") return { kind: "number" };
+  if (expr.type === "BooleanLiteral") return { kind: "boolean" };
+  if (expr.type === "LogicalExpression" || expr.type === "ConditionalExpression") {
+    const a = shapeOf(expr.left ?? expr.consequent, vars, source);
+    return a.kind === "unknown" ? shapeOf(expr.right ?? expr.alternate, vars, source) : a;
+  }
+  if (expr.type === "ArrayExpression") return { kind: "list" };
+  return { kind: "unknown" };
+}
+
+/** What each key `load()` returns holds: rows of an entity, one record, a number… */
+function loadShapes(load) {
+  if (!load) return {};
+  let ast;
+  try { ast = parseTsx(load); } catch { return {}; }
+  const m = loadModelFromAst(ast);
+  if (!m.fn) return {};
+  const vars = new Map();
+  const walk = (n) => {
+    if (n.type === "VariableDeclarator" && n.init) {
+      if (n.id.type === "Identifier") vars.set(n.id.name, shapeOf(n.init, vars, load));
+      else if (n.id.type === "ArrayPattern") {
+        // const [a, b] = await Promise.all([list(…), count(…)])
+        let init = n.init;
+        while (init && (init.type === "AwaitExpression" || init.type === "ParenthesizedExpression")) init = init.argument ?? init.expression;
+        const arr = init && init.type === "CallExpression" && init.arguments[0] && init.arguments[0].type === "ArrayExpression" ? init.arguments[0] : null;
+        n.id.elements.forEach((el, i) => { if (el && el.type === "Identifier") vars.set(el.name, arr && arr.elements[i] ? shapeOf(arr.elements[i], vars, load) : { kind: "unknown" }); });
+      } else if (n.id.type === "ObjectPattern") {
+        const base = shapeOf(n.init, vars, load);
+        for (const p of n.id.properties) if (p.type === "ObjectProperty" && p.value.type === "Identifier") vars.set(p.value.name, base.kind === "page" && p.key.name === "rows" ? { kind: "rows", entity: base.entity } : base.kind === "page" && p.key.name === "total" ? { kind: "number" } : { kind: "unknown" });
+      }
+    }
+    if ((n.type === "ArrowFunctionExpression" || n.type === "FunctionExpression" || n.type === "FunctionDeclaration") && n !== m.fn) return;
+    for (const c of children(n)) walk(c);
+  };
+  for (const p of m.fn.params || []) if (p.type === "Identifier") vars.set(p.name, { kind: "context" });
+  walk(m.fn.body);
+  const shapes = {};
+  for (const { obj } of m.returns) {
+    for (const p of obj.properties) {
+      if (p.type !== "ObjectProperty") continue;
+      const key = p.key.name ?? p.key.value;
+      const shape = p.shorthand || (p.value.type === "Identifier") ? (vars.get(p.value.name) ?? shapeOf(p.value, vars, load)) : shapeOf(p.value, vars, load);
+      if (!shapes[key] || shapes[key].kind === "unknown") shapes[key] = shape;
+    }
+  }
+  return shapes;
+}
+
+function loadModelFromAst(ast) {
+  let fn = null;
+  for (const s of ast.program.body) {
+    const d = s.type === "ExportNamedDeclaration" ? s.declaration : s;
+    if (d && d.type === "FunctionDeclaration" && d.id && d.id.name === "load") fn = d;
+    if (d && d.type === "VariableDeclaration") for (const v of d.declarations) if (v.id.type === "Identifier" && v.id.name === "load" && v.init && /Function/.test(v.init.type)) fn = v.init;
+  }
+  const returns = [];
+  if (fn) {
+    const walk = (n) => {
+      if (n.type === "ReturnStatement" && n.argument) {
+        let arg = n.argument;
+        while (arg.type === "TSAsExpression" || arg.type === "ParenthesizedExpression" || arg.type === "TSSatisfiesExpression") arg = arg.expression;
+        if (arg.type === "ObjectExpression") returns.push({ stmt: n, obj: arg });
+        return;
+      }
+      if ((n.type === "ArrowFunctionExpression" || n.type === "FunctionExpression" || n.type === "FunctionDeclaration") && n !== fn) return;
+      for (const c of children(n)) walk(c);
+    };
+    walk(fn.body);
+  }
+  return { fn, returns };
+}
+
 function model(view, load) {
+  SRC = view;
   const ast = parseTsx(view);
   const nodes = {};
   const roots = jsxRoots(ast).map((r, i) => {
@@ -310,7 +455,7 @@ function model(view, load) {
     buildNode(view, { node: r.node, container: null, context: null }, id, null, nodes, i);
     return { id, owner: r.owner ?? null };
   });
-  return { ok: true, roots, nodes, imports: importsOf(view, ast), loadKeys: loadKeys(load), viewProps: viewProps(ast), viewParam: viewParam(ast) };
+  return { ok: true, roots, nodes, imports: importsOf(view, ast), loadKeys: loadKeys(load), loadShapes: loadShapes(load), viewProps: viewProps(ast), viewParam: viewParam(ast) };
 }
 
 // ---------------------------------------------------------------------------
@@ -587,7 +732,45 @@ function describe(tag) {
   return { input: "field", img: "image", br: "line break", hr: "divider", textarea: "text area", select: "dropdown" }[tag] ?? tag;
 }
 
+function opSetChildren(source, m, op) {
+  // The element's content as raw JSX — text with data in it, or a single expression.
+  const n = need(m, op.id);
+  if (n.innerSpan == null) {
+    const open = source.slice(n.span[0], n.span[1]).replace(/\s*\/>$/, ">");
+    return splice(source, n.span[0], n.span[1], `${open}${op.jsx}</${n.type}>`);
+  }
+  return splice(source, n.innerSpan[0], n.innerSpan[1], op.jsx);
+}
+
+function objectSource(entries, indent) {
+  // Entries back to a literal: short ones on a line, nested ones spread out.
+  const inner = indent + "  ";
+  const parts = entries.map((e) => {
+    if (e.kind === "spread") return `${inner}${e.code}`;
+    const key = /^[A-Za-z_$][\w$]*$/.test(e.key) ? e.key : JSON.stringify(e.key);
+    if (e.kind === "object") return `${inner}${key}: ${objectSource(e.entries || [], inner)}`;
+    if (e.kind === "objects") return `${inner}${key}: [${(e.items || []).map((it) => objectSource(it, inner)).join(", ")}]`;
+    if (e.kind === "string") return `${inner}${key}: ${JSON.stringify(e.value ?? "")}`;
+    if (e.kind === "strings") return `${inner}${key}: [${(e.value || []).map((v) => JSON.stringify(v)).join(", ")}]`;
+    if (e.kind === "number" || e.kind === "boolean") return `${inner}${key}: ${String(e.value)}`;
+    return `${inner}${key}: ${e.code}`;
+  });
+  if (!parts.length) return "{}";
+  const oneLine = parts.map((p) => p.trim()).join(", ");
+  if (oneLine.length < 70 && !parts.some((p) => p.includes("\n"))) return `{ ${oneLine} }`;
+  return `{\n${parts.join(",\n")},\n${indent}}`;
+}
+
+function opSetObjectProp(source, m, op) {
+  const n = need(m, op.id);
+  const indent = lineIndent(source, n.span[0]);
+  const literal = objectSource(op.entries || [], indent + "  ");
+  return opSetProp(source, m, { id: op.id, name: op.name, value: { kind: "expr", value: literal } });
+}
+
 const OPS = {
+  setChildren: opSetChildren,
+  setObjectProp: opSetObjectProp,
   setText: opSetText,
   setProp: opSetProp,
   setClasses: opSetClasses,
@@ -606,29 +789,7 @@ const OPS = {
 
 function loadModel(source) {
   const ast = parseTsx(source);
-  let fn = null;
-  for (const s of ast.program.body) {
-    const d = s.type === "ExportNamedDeclaration" ? s.declaration : s;
-    if (d && d.type === "FunctionDeclaration" && d.id && d.id.name === "load") fn = d;
-    if (d && d.type === "VariableDeclaration") {
-      for (const v of d.declarations) if (v.id.type === "Identifier" && v.id.name === "load" && v.init && /Function/.test(v.init.type)) fn = v.init;
-    }
-  }
-  const returns = [];
-  if (fn) {
-    const walk = (n) => {
-      if (n.type === "ReturnStatement" && n.argument) {
-        let arg = n.argument;
-        while (arg.type === "TSAsExpression" || arg.type === "ParenthesizedExpression" || arg.type === "TSSatisfiesExpression") arg = arg.expression;
-        if (arg.type === "ObjectExpression") returns.push({ stmt: n, obj: arg });
-        return;
-      }
-      if ((n.type === "ArrowFunctionExpression" || n.type === "FunctionExpression" || n.type === "FunctionDeclaration") && n !== fn) return;
-      for (const c of children(n)) walk(c);
-    };
-    walk(fn.body);
-  }
-  return { imports: importsOf(source, ast), fn, returns };
+  return { imports: importsOf(source, ast), ...loadModelFromAst(ast) };
 }
 
 function needLoad(m) {
@@ -747,6 +908,7 @@ async function main() {
     else if (cmd === "patch") out = patch(input.view ?? "", input.ops ?? []);
     else if (cmd === "patchLoad") out = patchLoad(input.load ?? "", input.ops ?? []);
     else if (cmd === "annotate") out = annotate(input.view ?? "");
+    else if (cmd === "samples") out = { ok: true, rows: Object.fromEntries((input.entities || []).map((e) => [e.name, Array.from({ length: 8 }, (_, i) => sampleRow(e, i, input.entities))])) };
     else throw new PatchError("usage", `unknown command ${cmd}`);
     process.stdout.write(JSON.stringify(out));
   } catch (e) {

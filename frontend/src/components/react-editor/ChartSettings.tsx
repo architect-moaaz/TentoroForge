@@ -17,6 +17,8 @@ import { Switch } from "@/components/ui/switch";
 
 import { editorApi, failureOf } from "./api";
 import { groupableFields, numericFields } from "./ChartDialog";
+import { ChartPreview, FilterEditor } from "./DataMapping";
+import { sampleQuery } from "./lib/data";
 import { MARKS, humanise, measureLabel, widgetOfNode, widgetRemovalOps } from "./lib/templates";
 import { useEditorStore } from "./store";
 import type { ModelNode, PageDoc, WidgetMeasure, WidgetRef, WidgetSpec } from "./types";
@@ -79,6 +81,10 @@ export function ChartSettings({ node, doc }: { node: ModelNode; doc: PageDoc }) 
   const measureId = measure ? `${measure.aggregation}:${measure.field ?? ""}` : NONE;
   const groups = entity ? groupableFields(entity) : [];
   const disabled = saving || busy;
+  const split = src?.dimensions[1] ?? null;
+  const filter = (src?.filter ?? {}) as Record<string, string | string[] | number | boolean>;
+  const preview = entity && src ? sampleQuery(doc.samples?.[entity.name] ?? [], { measures: src.measures, dimensions: widget.kind === "chart" ? src.dimensions : [], filter, sort: src.sort ?? null, limit: src.limit ?? null }) : [];
+  const sortValue = !src?.sort ? "auto" : src.sort.by === measure?.key ? (src.sort.order === "asc" ? "smallest" : "biggest") : "name";
 
   return (
     <div className="px-3 pb-2">
@@ -134,6 +140,36 @@ export function ChartSettings({ node, doc }: { node: ModelNode; doc: PageDoc }) 
             )}
           </div>
         </Field>
+      )}
+      {entity && widget.kind === "chart" && dimension && (
+        <Field label="Also split by">
+          <Select value={split?.field ?? NONE} disabled={disabled} onValueChange={(v) => void change({ dimensions: v === NONE ? [dimension] : [dimension, { field: v }], stacked: v !== NONE ? true : widget.chart?.stacked })}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>Nothing</SelectItem>
+              {groups.filter((g) => g.name !== dimension.field && !g.isDate).map((g) => <SelectItem key={g.name} value={g.name}>{g.label || humanise(g.name)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
+      {entity && (
+        <Field label="Only include">
+          <FilterEditor entity={entity} samples={doc.samples?.[entity.name] ?? []} value={filter} disabled={disabled} onChange={(next) => void change({ filter: next })} />
+        </Field>
+      )}
+      {widget.kind === "chart" && measure && (
+        <Field label="Order">
+          <Select value={sortValue} disabled={disabled} onValueChange={(v) => void change({ sort: v === "auto" ? null : v === "name" && dimension ? { by: dimension.field, order: "asc" } : { by: measure.key, order: v === "smallest" ? "asc" : "desc" } })}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="auto">{dimension?.bucket ? "By date" : "Biggest first"}</SelectItem><SelectItem value="biggest">Biggest first</SelectItem><SelectItem value="smallest">Smallest first</SelectItem><SelectItem value="name">By name</SelectItem></SelectContent>
+          </Select>
+        </Field>
+      )}
+      {entity && measure && (
+        <div className="mb-3 rounded-md border border-border p-2">
+          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">With sample data</p>
+          <ChartPreview rows={preview} mark={widget.kind === "chart" ? widget.chart?.mark ?? "bar" : "metric"} dimension={widget.kind === "chart" ? dimension?.field ?? null : null} measureKey={measure.key} />
+        </div>
       )}
       {widget.kind === "chart" && (
         <Field label="Show at most" help="Leave empty to show everything.">

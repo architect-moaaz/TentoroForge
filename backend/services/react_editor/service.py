@@ -167,6 +167,11 @@ def _entity_refs(doc: dict) -> list[dict]:
     return out
 
 
+def _entities_for_samples(doc: dict) -> list[dict]:
+    return [{"name": e["name"], "fields": [{"name": f["name"], "type": f["type"], "enumValues": f["options"]} for f in e["fields"]]}
+            for e in _entity_refs(doc)]
+
+
 def _widget_refs(doc: dict) -> list[dict]:
     from services.react_editor.widgets import refs
     return refs(doc)
@@ -288,6 +293,7 @@ def open_page(project: Project, page_id: str, *, annotate: bool = True) -> dict[
             "workflows": _workflow_refs(doc),
             "entities": _entity_refs(doc),
             "widgets": _widget_refs(doc),
+            "samples": adapter.samples(_entities_for_samples(doc), app_root=project.app_root),
             "theme": _theme(doc),
             "history": history(project, page_id)[-30:],
             "toolchain": {"typecheck": (project.app_root / "node_modules/.bin/tsc").exists()},

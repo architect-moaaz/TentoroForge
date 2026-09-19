@@ -181,11 +181,8 @@ def build(project: Project, page_id: str, *, params: dict[str, str] | None = Non
 
 
 def _entities_for_samples(doc: dict) -> list[dict]:
-    out = []
-    for e in _entity_refs(doc):
-        out.append({"name": e["name"], "fields": [{"name": f["name"], "type": f["type"], "enumValues": f["options"]}
-                                                    for f in e["fields"]]})
-    return out
+    from services.react_editor.service import _entities_for_samples as shared
+    return shared(doc)
 
 
 def _plain_build_error(message: str) -> str:

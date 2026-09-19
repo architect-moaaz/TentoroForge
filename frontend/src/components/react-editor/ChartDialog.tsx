@@ -15,7 +15,9 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import { editorApi, failureOf } from "./api";
+import { ChartPreview, FilterEditor } from "./DataMapping";
 import { insertionTarget } from "./LeftPanel";
+import { sampleQuery } from "./lib/data";
 import { MARKS, humanise, measureLabel, widgetOps } from "./lib/templates";
 import { useEditorStore } from "./store";
 import type { ChartMark, ComponentDef, EntityRef, WidgetDimension, WidgetMeasure, WidgetSpec } from "./types";
@@ -56,6 +58,10 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
   const [horizontal, setHorizontal] = useState(false);
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState<Record<string, string | string[] | number | boolean>>({});
+  const [split, setSplit] = useState<string | null>(null);
+  const [sort, setSort] = useState<"biggest" | "smallest" | "name" | "auto">("auto");
+  const [limit, setLimit] = useState<number | null>(null);
   const entity = doc.entities.find((e) => e.id === entityId) ?? null;
   const nums = entity ? numericFields(entity) : [];
   const groups = entity ? groupableFields(entity) : [];
@@ -65,6 +71,10 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
     for (const f of nums) out.push({ key: `total_${f.name}`, aggregation: "sum", field: f.name }, { key: `average_${f.name}`, aggregation: "avg", field: f.name });
     return out;
   }, [nums]);
+
+  const dimensions = [...(dimension ? [dimension] : []), ...(split && split !== dimension?.field ? [{ field: split }] : [])];
+  const sortSpec = sort === "biggest" ? { by: measure.key, order: "desc" as const } : sort === "smallest" ? { by: measure.key, order: "asc" as const } : sort === "name" && dimension ? { by: dimension.field, order: "asc" as const } : null;
+  const preview = entity ? sampleQuery(doc.samples?.[entity.name] ?? [], { measures: [measure], dimensions: kind === "metric" ? [] : dimensions, filter, sort: sortSpec, limit }) : [];
 
   const defaultTitle = entity
     ? (kind === "metric" ? measureLabel(measure, entity.name) : `${measureLabel(measure, entity.name)} by ${dimension ? humanise(dimension.field).toLowerCase() : "…"}`)
@@ -101,6 +111,37 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
         : <p className="text-sm text-muted-foreground">{entity?.name} has nothing to group by yet — a status, a category or a date field. Ask Smith to add one, or add a number tile instead.</p>,
     });
     steps.push({
+      title: "Only some of them?", ok: true,
+      body: (
+        <div className="space-y-2">
+          <FilterEditor entity={entity} samples={doc.samples?.[entity?.name ?? ""] ?? []} value={filter} onChange={setFilter} />
+          <p className="text-[11px] text-muted-foreground">Leave empty to include every {entity?.name.toLowerCase() ?? "record"}.</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <p className="mb-1 text-[11px] font-medium text-muted-foreground">Also split by</p>
+              <select className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs" value={split ?? ""} onChange={(e) => setSplit(e.target.value || null)} aria-label="Also split by">
+                <option value="">Nothing</option>
+                {groups.filter((g) => g.name !== dimension?.field && !g.isDate).map((g) => <option key={g.name} value={g.name}>{g.label || humanise(g.name)}</option>)}
+              </select>
+            </div>
+            <div>
+              <p className="mb-1 text-[11px] font-medium text-muted-foreground">Order</p>
+              <select className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Order">
+                <option value="auto">{dimension?.bucket ? "By date" : "Biggest first"}</option>
+                <option value="biggest">Biggest first</option><option value="smallest">Smallest first</option><option value="name">By name</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 text-[11px] font-medium text-muted-foreground">Show at most</p>
+            <select className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs" value={limit ?? ""} onChange={(e) => setLimit(e.target.value ? Number(e.target.value) : null)} aria-label="Show at most">
+              <option value="">Everything</option><option value="5">Top 5</option><option value="10">Top 10</option><option value="20">Top 20</option>
+            </select>
+          </div>
+        </div>
+      ),
+    });
+    steps.push({
       title: "How should it look?", ok: true,
       body: (
         <div>
@@ -117,6 +158,9 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
       ),
     });
   }
+  if (kind === "metric") {
+    steps.push({ title: "Only some of them?", ok: true, body: <div className="space-y-2"><FilterEditor entity={entity} samples={doc.samples?.[entity?.name ?? ""] ?? []} value={filter} onChange={setFilter} /><p className="text-[11px] text-muted-foreground">Leave empty to count every {entity?.name.toLowerCase() ?? "record"}.</p></div> });
+  }
   steps.push({ title: "What should it be called?", ok: !!title, body: <Input value={label} placeholder={defaultTitle} onChange={(e) => setLabel(e.target.value)} aria-label="Title" /> });
 
   const last = step >= steps.length - 1;
@@ -127,8 +171,9 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
     setBusy(true);
     const spec: WidgetSpec = {
       label: title, kind, entity: entity.name, measures: [{ ...measure, label: measureLabel(measure, entity.name) }],
-      dimensions: dimension ? [dimension] : [], unit: "number", size: kind === "metric" ? "sm" : "md",
-      ...(kind === "chart" ? { mark, stacked, horizontal } : {}),
+      dimensions: kind === "metric" ? [] : dimensions, unit: "number", size: kind === "metric" ? "sm" : "md",
+      filter, sort: sortSpec, limit,
+      ...(kind === "chart" ? { mark, stacked: stacked || dimensions.length > 1, horizontal } : {}),
     };
     let created: { id: string } | null = null;
     try {
@@ -157,6 +202,12 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
           <DialogDescription>Step {step + 1} of {steps.length} — {def.description.toLowerCase()}. Drawn from the app's real data.</DialogDescription>
         </DialogHeader>
         <div className="max-h-[50vh] overflow-auto">{steps[step]?.body}</div>
+        {entity && step > 0 && (
+          <div className="rounded-md border border-border p-2">
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Preview with sample data</p>
+            <ChartPreview rows={preview} mark={kind === "metric" ? "metric" : mark} dimension={kind === "metric" ? null : dimension?.field ?? null} measureKey={measure.key} />
+          </div>
+        )}
         {summary && <p className="rounded-md bg-muted p-2 text-xs text-muted-foreground">You will get: {summary}</p>}
         <DialogFooter className="gap-2 sm:justify-between">
           <Button variant="ghost" size="sm" onClick={() => (step ? setStep(step - 1) : onClose())} disabled={busy}>{step ? "Back" : "Cancel"}</Button>
