@@ -18,7 +18,7 @@ import { editorApi, failureOf } from "./api";
 import { ChartPreview, FilterEditor } from "./DataMapping";
 import { insertionTarget } from "./LeftPanel";
 import { sampleQuery } from "./lib/data";
-import { MARKS, humanise, measureLabel, widgetOps } from "./lib/templates";
+import { MARKS, humanise, markProblem, measureLabel, widgetOps } from "./lib/templates";
 import { useEditorStore } from "./store";
 import type { ChartMark, ComponentDef, EntityRef, WidgetDimension, WidgetMeasure, WidgetSpec } from "./types";
 
@@ -52,6 +52,7 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
   const [step, setStep] = useState(0);
   const [entityId, setEntityId] = useState(doc.entities[0]?.id ?? "");
   const [measure, setMeasure] = useState<WidgetMeasure>({ key: "count", aggregation: "count" });
+  const [second, setSecond] = useState<WidgetMeasure | null>(null);
   const [dimension, setDimension] = useState<WidgetDimension | null>(null);
   const [mark, setMark] = useState<ChartMark>("bar");
   const [stacked, setStacked] = useState(false);
@@ -74,7 +75,9 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
 
   const dimensions = [...(dimension ? [dimension] : []), ...(split && split !== dimension?.field ? [{ field: split }] : [])];
   const sortSpec = sort === "biggest" ? { by: measure.key, order: "desc" as const } : sort === "smallest" ? { by: measure.key, order: "asc" as const } : sort === "name" && dimension ? { by: dimension.field, order: "asc" as const } : null;
-  const preview = entity ? sampleQuery(doc.samples?.[entity.name] ?? [], { measures: [measure], dimensions: kind === "metric" ? [] : dimensions, filter, sort: sortSpec, limit }) : [];
+  const allMeasures = second && second.key !== measure.key ? [measure, second] : [measure];
+  const preview = entity ? sampleQuery(doc.samples?.[entity.name] ?? [], { measures: allMeasures, dimensions: kind === "metric" ? [] : dimensions, filter, sort: sortSpec, limit }) : [];
+  const problem = kind === "chart" ? markProblem(mark, dimensions.length, allMeasures.length) : null;
 
   const defaultTitle = entity
     ? (kind === "metric" ? measureLabel(measure, entity.name) : `${measureLabel(measure, entity.name)} by ${dimension ? humanise(dimension.field).toLowerCase() : "…"}`)
@@ -92,8 +95,21 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
     },
     {
       title: kind === "metric" ? "Which number?" : "What should the chart measure?", ok: !!measure,
-      body: <div className="space-y-1">{measures.map((m) => (
-        <Choice key={m.key} name="m" checked={measure.key === m.key} onChange={() => setMeasure(m)}>{entity ? measureLabel(m, entity.name) : m.key}</Choice>))}</div>,
+      body: (
+        <div className="space-y-1">
+          {measures.map((m) => (
+            <Choice key={m.key} name="m" checked={measure.key === m.key} onChange={() => { setMeasure(m); if (second?.key === m.key) setSecond(null); }}>{entity ? measureLabel(m, entity.name) : m.key}</Choice>))}
+          {kind === "chart" && measures.length > 1 && (
+            <div className="pt-2">
+              <p className="mb-1 text-[11px] font-medium text-muted-foreground">And also (a second number — for bars side by side, or a scatter's other axis)</p>
+              <select className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs" value={second?.key ?? ""} onChange={(e) => setSecond(measures.find((m) => m.key === e.target.value) ?? null)} aria-label="And also">
+                <option value="">Nothing</option>
+                {measures.filter((m) => m.key !== measure.key).map((m) => <option key={m.key} value={m.key}>{entity ? measureLabel(m, entity.name) : m.key}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
+      ),
     },
   ];
   if (kind === "chart") {
@@ -142,12 +158,17 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
       ),
     });
     steps.push({
-      title: "How should it look?", ok: true,
+      title: "How should it look?", ok: !problem,
       body: (
         <div>
-          <div className="grid grid-cols-4 gap-1">{MARKS.map((m) => (
-            <button key={m.value} type="button" onClick={() => setMark(m.value)}
-              className={cn("rounded-md border p-2 text-xs", mark === m.value ? "border-primary bg-primary/5 font-medium" : "border-border hover:bg-muted")}>{m.label}</button>))}</div>
+          <div className="grid grid-cols-5 gap-1">{MARKS.map((m) => {
+            const why = markProblem(m.value, dimensions.length, allMeasures.length);
+            return (
+              <button key={m.value} type="button" onClick={() => setMark(m.value)} title={why ? `${m.label} ${why}` : m.about}
+                className={cn("rounded-md border p-2 text-xs", mark === m.value ? "border-primary bg-primary/5 font-medium" : "border-border hover:bg-muted", why && "opacity-50")}>{m.label}</button>
+            );
+          })}</div>
+          <p className="mt-1 text-[11px] text-muted-foreground">{MARKS.find((m) => m.value === mark)?.about}.{problem ? <span className="text-amber-700"> This one {problem} — go back to change it, or pick another.</span> : ""}</p>
           {["bar", "area", "line"].includes(mark) && (
             <div className="mt-2 flex gap-4 text-xs">
               {mark !== "line" && <label className="flex items-center gap-1"><input type="checkbox" checked={stacked} onChange={(e) => setStacked(e.target.checked)} /> Stacked</label>}
@@ -170,7 +191,7 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
     if (!entity || !doc.model) return;
     setBusy(true);
     const spec: WidgetSpec = {
-      label: title, kind, entity: entity.name, measures: [{ ...measure, label: measureLabel(measure, entity.name) }],
+      label: title, kind, entity: entity.name, measures: allMeasures.map((m) => ({ ...m, label: measureLabel(m, entity.name) })),
       dimensions: kind === "metric" ? [] : dimensions, unit: "number", size: kind === "metric" ? "sm" : "md",
       filter, sort: sortSpec, limit,
       ...(kind === "chart" ? { mark, stacked: stacked || dimensions.length > 1, horizontal } : {}),

@@ -298,3 +298,18 @@ describe("interactions", () => {
     expect(parseCondition(d, node("r1.9", "Badge", { condition: "isAdmin(props.user)" }))).toBeNull();
   });
 });
+
+import { MARKS, markProblem } from "../lib/templates";
+
+describe("every chart the app draws", () => {
+  it("offers all ten marks and says what each needs", () => {
+    expect(MARKS.map((m) => m.value)).toEqual(["bar", "line", "area", "pie", "donut", "funnel", "radar", "treemap", "heatmap", "scatter"]);
+    expect(markProblem("bar", 1, 1)).toBeNull();
+    expect(markProblem("heatmap", 1, 1)).toBe("needs a second grouping (“also split by”)");
+    expect(markProblem("scatter", 1, 1)).toBe("needs a second number (“and also”)");
+    expect(markProblem("scatter", 1, 2)).toBeNull();
+    expect(markProblem("pie", 2, 1)).toBe("groups by one thing only — remove the split");
+    expect(markProblem("pie", 1, 2)).toBe("shows one number only — remove the extra");
+    expect(markProblem("bar", 2, 2)).toBe("with a split, shows one number only");
+  });
+});

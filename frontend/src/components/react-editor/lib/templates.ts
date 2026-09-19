@@ -4,7 +4,7 @@
  * here is composed from the app SDK and the UI kit the page already compiles
  * against, so what a guide inserts is what the compiler accepts.
  */
-import type { EntityRef, ModelNode, Op, PageModel, PageRef, WidgetRef, WorkflowInput, WorkflowRef } from "../types";
+import type { ChartMark, EntityRef, ModelNode, Op, PageModel, PageRef, WidgetRef, WorkflowInput, WorkflowRef } from "../types";
 
 const q = (s: string) => JSON.stringify(s);
 
@@ -258,13 +258,31 @@ export function measureLabel(m: { aggregation: string; field?: string }, entityN
   return m.aggregation;
 }
 
-export const MARKS: { value: WidgetRef["chart"] extends infer C ? (C extends { mark: infer M } ? M : never) : never; label: string; needs: "one" | "two" | "any" }[] = [
-  { value: "bar", label: "Bars", needs: "any" },
-  { value: "line", label: "Line", needs: "any" },
-  { value: "area", label: "Area", needs: "any" },
-  { value: "pie", label: "Pie", needs: "one" },
-  { value: "donut", label: "Donut", needs: "one" },
-  { value: "funnel", label: "Funnel", needs: "one" },
-  { value: "radar", label: "Radar", needs: "any" },
-  { value: "treemap", label: "Treemap", needs: "one" },
+/** Every chart the app's Chart draws, and the shape each needs — mirrors the
+ *  verifier's `_MARK_SHAPE`: [groupings min,max], [numbers min,max]. */
+export const MARKS: { value: ChartMark; label: string; dims: [number, number]; measures: [number, number]; about: string }[] = [
+  { value: "bar", label: "Bars", dims: [1, 2], measures: [1, 8], about: "One bar per group; several numbers side by side" },
+  { value: "line", label: "Line", dims: [1, 2], measures: [1, 8], about: "How numbers move over a sequence, usually dates" },
+  { value: "area", label: "Area", dims: [1, 2], measures: [1, 8], about: "A line with the space under it filled" },
+  { value: "pie", label: "Pie", dims: [1, 1], measures: [1, 1], about: "Each group's share of one number" },
+  { value: "donut", label: "Donut", dims: [1, 1], measures: [1, 1], about: "A pie with a hole" },
+  { value: "funnel", label: "Funnel", dims: [1, 1], measures: [1, 1], about: "Stages narrowing from first to last" },
+  { value: "radar", label: "Radar", dims: [1, 2], measures: [1, 8], about: "Several numbers around a wheel" },
+  { value: "treemap", label: "Treemap", dims: [1, 2], measures: [1, 1], about: "Rectangles sized by one number" },
+  { value: "heatmap", label: "Heatmap", dims: [2, 2], measures: [1, 1], about: "A grid of two groupings, coloured by one number" },
+  { value: "scatter", label: "Scatter", dims: [1, 2], measures: [2, 3], about: "A dot per group placed by two numbers (a third sets its size)" },
 ];
+
+/** Why a mark cannot be drawn from these choices, in plain words — or null when it can. */
+export function markProblem(mark: ChartMark, dims: number, measures: number): string | null {
+  const m = MARKS.find((x) => x.value === mark);
+  if (!m) return "Unknown chart";
+  const [dlo, dhi] = m.dims; const [mlo, mhi] = m.measures;
+  if (dims < dlo) return dlo === 2 ? "needs a second grouping (“also split by”)" : "needs something to group by";
+  if (dims > dhi) return dhi === 1 ? "groups by one thing only — remove the split" : "too many groupings";
+  if (measures < mlo) return mlo === 2 ? "needs a second number (“and also”)" : "needs a number";
+  if (measures > mhi) return mhi === 1 ? "shows one number only — remove the extra" : "too many numbers";
+  if (["bar", "line", "area", "radar"].includes(mark) && dims === 2 && measures > 1) return "with a split, shows one number only";
+  return null;
+}
+

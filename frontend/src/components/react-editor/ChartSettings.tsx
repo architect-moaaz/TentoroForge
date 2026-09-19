@@ -19,7 +19,7 @@ import { editorApi, failureOf } from "./api";
 import { groupableFields, numericFields } from "./ChartDialog";
 import { ChartPreview, FilterEditor } from "./DataMapping";
 import { sampleQuery } from "./lib/data";
-import { MARKS, humanise, measureLabel, widgetOfNode, widgetRemovalOps } from "./lib/templates";
+import { MARKS, humanise, markProblem, measureLabel, widgetOfNode, widgetRemovalOps } from "./lib/templates";
 import { useEditorStore } from "./store";
 import type { ModelNode, PageDoc, WidgetMeasure, WidgetRef, WidgetSpec } from "./types";
 
@@ -106,10 +106,11 @@ export function ChartSettings({ node, doc }: { node: ModelNode; doc: PageDoc }) 
       </Field>
       {widget.kind === "chart" && (
         <>
-          <Field label="Chart type">
+          <Field label="Chart type" help={MARKS.find((m) => m.value === (widget.chart?.mark ?? "bar"))?.about}>
             <Select value={widget.chart?.mark ?? "bar"} disabled={disabled} onValueChange={(v) => void change({ mark: v as WidgetSpec["mark"] })}>
               <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>{MARKS.map((m) => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}</SelectContent>
+              <SelectContent>{MARKS.map((m) => { const why = markProblem(m.value, src?.dimensions.length ?? 0, src?.measures.length ?? 0); return (
+                <SelectItem key={m.value} value={m.value} disabled={!!why}>{m.label}{why ? <span className="text-muted-foreground"> — {why}</span> : ""}</SelectItem>); })}</SelectContent>
             </Select>
           </Field>
           {["bar", "area", "line"].includes(widget.chart?.mark ?? "bar") && (
@@ -142,6 +143,18 @@ export function ChartSettings({ node, doc }: { node: ModelNode; doc: PageDoc }) 
               </Select>
             )}
           </div>
+        </Field>
+      )}
+      {entity && widget.kind === "chart" && measure && (
+        <Field label="And also" help="A second number: bars side by side, or a scatter's other axis.">
+          <Select value={src?.measures[1] ? `${src.measures[1].aggregation}:${src.measures[1].field ?? ""}` : NONE} disabled={disabled} onValueChange={(v) => {
+            const m = measures.find((x) => `${x.aggregation}:${x.field ?? ""}` === v);
+            const first = { ...measure, label: measure.label ?? measureLabel(measure, entity.name) };
+            void change({ measures: m ? [first, { ...m, label: measureLabel(m, entity.name) }] : [first] });
+          }}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Nothing" /></SelectTrigger>
+            <SelectContent><SelectItem value={NONE}>Nothing</SelectItem>{measures.filter((m) => `${m.aggregation}:${m.field ?? ""}` !== measureId).map((m) => <SelectItem key={`${m.aggregation}:${m.field ?? ""}`} value={`${m.aggregation}:${m.field ?? ""}`}>{measureLabel(m, entity.name)}</SelectItem>)}</SelectContent>
+          </Select>
         </Field>
       )}
       {entity && widget.kind === "chart" && dimension && (

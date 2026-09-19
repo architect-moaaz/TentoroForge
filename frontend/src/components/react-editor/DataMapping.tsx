@@ -326,6 +326,15 @@ export function ChartPreview({ rows, mark, dimension, measureKey }: { rows: Reco
   if (!dimension) {
     return <p className="py-2 text-center text-2xl font-semibold tabular-nums">{rows[0][measureKey]}</p>;
   }
+  if (mark === "heatmap" || mark === "scatter") {
+    const keys = Object.keys(rows[0]);
+    return (
+      <table className="w-full text-[10px]">
+        <thead><tr>{keys.map((k) => <th key={k} className="pb-1 text-left font-medium text-muted-foreground">{k}</th>)}</tr></thead>
+        <tbody>{rows.slice(0, 6).map((r, i) => <tr key={i}>{keys.map((k) => <td key={k} className="py-0.5 pr-2 tabular-nums">{String(r[k] ?? "")}</td>)}</tr>)}</tbody>
+      </table>
+    );
+  }
   if (mark === "pie" || mark === "donut" || mark === "funnel" || mark === "treemap") {
     return (
       <div>
