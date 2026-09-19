@@ -1490,7 +1490,7 @@ def _execute(
         with svc.lock:
             snapshot = copy.deepcopy(svc.doc)
         fut = pool.submit(
-            observer_agent.observe, key, agent=DAG[key].agent,
+            _observe_with_database, observer_agent, key, app_root, agent=DAG[key].agent,
             subjects=list(subjects), doc=snapshot,
             pending=_pending_sections(in_plan, finished),
             planned=_planned_sections(in_plan), user_request=user_request,
@@ -1819,6 +1819,26 @@ def _applied(state: _NodeRun) -> list[str]:
     """The subjects a node actually authored: given, not failed. A blocked
     subject is in ``failed`` too."""
     return [s for s in state.subjects if s not in state.failed]
+
+
+#: The nodes whose outcome is also proven in a real database when judged.
+DATABASE_CHECKED_NODES = frozenset({"entity_fields"})
+
+
+def _observe_with_database(observer_agent: Any, key: str, app_root: str | None, **kw: Any) -> Any:
+    """The observer's verdict, plus — for the data model — what a throwaway
+    database said about its tables (`data_gate`). Filed like any finding, so a
+    table the database refuses goes back to the entity's author with the
+    database's own words, while nothing downstream is built on it yet."""
+    obs = observer_agent.observe(key, **kw)
+    if key in DATABASE_CHECKED_NODES and app_root:
+        from services.blueprint.data_gate import early_findings
+        try:
+            for f in early_findings(kw["doc"], app_root):
+                observer_agent._file(obs, f, kw.get("subject_of"))
+        except Exception as exc:  # noqa: BLE001 — a gate that cannot look says so
+            logger.warning("[%s] database check could not run: %s", key, exc)
+    return obs
 
 
 def _watchable(key: str, state: _NodeRun, order: Sequence[str],
@@ -2760,8 +2780,18 @@ def _project_assemble(svc: BlueprintService, app_root: str) -> None:
         settle_code_pages(svc, app_root, tiered_router().for_task("page_code", "ui_engineer"),
                           usage=RunUsage.for_app(svc, phase="build"))
     check_route_tree(app_root)
-    result = verify_build(app_root, install=not (_P(app_root) / "node_modules").is_dir())
+    # COMPILE, THEN PROVE — AND REPAIR WHAT THE PROOF FINDS. A compile or boot
+    # failure is no app and stays fatal; a control that would refuse its first
+    # click, or a table the database refuses, goes back to the step that owns
+    # it (`build_repair`) and, if still wrong, is recorded as an issue while
+    # the app ships — 0l133sp2 lost thirty minutes of generation to one form.
+    from services.blueprint.build_repair import database_with_repair, dispatches_with_repair
+    usage = RunUsage.for_app(svc, phase="build")
+    issues: list[dict] = []
+    result = verify_build(app_root, install=not (_P(app_root) / "node_modules").is_dir(), dispatches=False)
     result.setdefault("install", 0)
+    result["dispatches"] = dispatches_with_repair(svc, app_root, issues, usage=usage)
+    database = database_with_repair(svc, app_root, issues, usage=usage)
 
     # AND THEN IT HAS TO START. `next build` does not catch a route collision:
     # an app with two files resolving to "/" built clean, exit 0, full route
@@ -2782,7 +2812,9 @@ def _project_assemble(svc: BlueprintService, app_root: str) -> None:
     runtime = dict(svc.doc.get("runtime") or {})
     runtime["boot"] = boot
     runtime["build"] = {"install": result["install"], "build": result["build"],
-                        "status": "passed"}
+                        "status": "passed" if not issues else "passed_with_issues"}
+    runtime["issues"] = issues
+    runtime["database"] = {k: v for k, v in database.items() if k in ("ok", "skipped", "rebuilt", "push", "seed")}
     # An unsubstituted placeholder does fail the build above — but as a
     # prerender error in a file nobody edited, which reads as a compiler
     # problem rather than as a substitution pass that did not run. Recorded

@@ -3284,6 +3284,17 @@
             "type": "string"
           }
         },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "database": {
+          "type": "object",
+          "additionalProperties": {}
+        },
         "pages": {
           "type": "object",
           "properties": {

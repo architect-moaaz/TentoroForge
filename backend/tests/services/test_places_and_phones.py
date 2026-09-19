@@ -182,3 +182,22 @@ def test_a_view_of_a_page_is_its_own_destination(tmp_path):
     assert "glyph: <RailGlyph name={g.icon} size={20} />" in layout and "<React.Suspense" in layout
     side = (_BACKEND.parent / "packages/library/src/components/SideNav/SideNav.tsx").read_text()
     assert "item.glyph ??" in side and "routes.includes(active)" in side
+
+
+def test_two_menu_entries_at_one_address_are_refused_when_written():
+    import pytest
+    from services.blueprint.agent_contract import (
+        AgentResult, ArtifactProposal, AuthorRefusal, InvalidNavigation, check_navigation,
+    )
+    doc = {"pages": [{"id": "P1", "route": "/tools"}, {"id": "P2", "route": "/rentals"}]}
+
+    def nav(*tree):
+        return AgentResult(task_id="T", agent="solution_architecture", confidence=1.0, proposals=[
+            ArtifactProposal(section="navigation", natural_key="navigation", body={"tree": list(tree)})])
+
+    with pytest.raises(InvalidNavigation, match='"Discover" and "My Listings" both lead to /tools'):
+        check_navigation(nav({"label": "Discover", "page": "P1"},
+                             {"label": "Mine", "children": [{"label": "My Listings", "page": "P1"}]}), doc)
+    assert issubclass(InvalidNavigation, AuthorRefusal), "the run asks again, it does not die"
+    check_navigation(nav({"label": "Discover", "page": "P1"}, {"label": "My Listings", "page": "P1", "view": "mine"},
+                         {"label": "Rentals", "page": "P2"}), doc)

@@ -2114,6 +2114,15 @@ export const Runtime = z.object({
    */
   placeholders: z.array(z.string()).optional(),
   /**
+   * What the build proved wrong and could not repair (`build_repair`): a
+   * control that would refuse its first click, a table or demo row the
+   * database refused. The app ships with these said, rather than the run
+   * ending with nothing.
+   */
+  issues: z.array(z.record(z.string(), z.unknown())).optional(),
+  /** The throwaway-database check at the build (`data_gate`): ok, skipped, rebuilt, push, seed. */
+  database: z.record(z.string(), z.unknown()).optional(),
+  /**
    * Planned pages against pages the application actually serves (§72).
    *
    * A run that plans N pages and ships fewer reports success: composition

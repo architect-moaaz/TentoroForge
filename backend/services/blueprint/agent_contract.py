@@ -568,6 +568,43 @@ def check_page_content(result: "AgentResult", doc: dict | None) -> None:
         raise InvalidPageContent(_all_of(problems[:12]))
 
 
+class InvalidNavigation(AuthorRefusal):
+    """Two menu entries lead to the same address."""
+
+
+def check_navigation(result: "AgentResult", doc: dict | None = None) -> None:
+    """Every menu entry is its own address: a page, or a view of it. 0l133sp2's
+    "My Listings" and "Discover" both named the tools page — both lit at once
+    and the phone's tab bar drew two tabs keyed `/tools`. Refused here, naming
+    both, so the architect points one at the view it meant (`view`)."""
+    pages = {str(p.get("id")): p for p in ((doc or {}).get("pages") or []) if isinstance(p, dict)}
+    problems: list[str] = []
+    for proposal in (p for p in result.proposals if p.section == "navigation"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        seen: dict[tuple[str, str], str] = {}
+
+        def walk(nodes: Any) -> None:
+            for node in nodes or []:
+                if not isinstance(node, dict):
+                    continue
+                page = str(node.get("page") or "")
+                if page:
+                    key = (page, str(node.get("view") or ""))
+                    label = str(node.get("label") or page)
+                    if key in seen:
+                        route = str((pages.get(page) or {}).get("route") or page)
+                        problems.append(f"navigation: \"{seen[key]}\" and \"{label}\" both lead to {route}"
+                                        f"{'?view=' + key[1] if key[1] else ''} — point one at a view of the page "
+                                        f"(`view`: a key of its `views`) or at another page, or drop one")
+                    else:
+                        seen[key] = label
+                walk(node.get("children"))
+
+        walk(body.get("tree"))
+    if problems:
+        raise InvalidNavigation(_all_of(problems))
+
+
 class InvalidBusinessRule(AuthorRefusal):
     """A rule the engine could not evaluate as written."""
 
@@ -829,6 +866,7 @@ def apply_agent_result(
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)
+    check_navigation(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
     #

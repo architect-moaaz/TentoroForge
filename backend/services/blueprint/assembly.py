@@ -764,6 +764,16 @@ class BuildFailed(RuntimeError):
     """The assembled application does not compile."""
 
 
+class DispatchesRefused(BuildFailed):
+    """Controls the dry run proved would refuse their first click; `problems`
+    carries each one (route, control, label, workflow, input, node, actionType,
+    problem) for the build's repair round."""
+
+    def __init__(self, message: str, problems: list[dict]):
+        super().__init__(message)
+        self.problems = problems
+
+
 def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Planned pages against pages the application actually serves.
 
@@ -1136,7 +1146,7 @@ def check_route_tree(app_root: str | Path) -> None:
 
 
 def verify_build(app_root: str | Path, *, timeout: int = 900,
-                 install: bool = True, build: bool = True) -> dict[str, Any]:
+                 install: bool = True, build: bool = True, dispatches: bool = True) -> dict[str, Any]:
     """Install and build the assembled app; raise if it does not compile.
 
     ``install=False`` skips the install when the `install` node already ran
@@ -1180,7 +1190,7 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
                 f"npm {name} failed ({proc.returncode}):\n"
                 + build_message(proc.stdout, proc.stderr)
             )
-    if build:
+    if build and dispatches:
         out["dispatches"] = verify_dispatches(root, timeout=timeout)
     return out
 
@@ -1256,6 +1266,7 @@ def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
         raise BuildFailed(f"the dispatch dry run could not run ({proc.returncode}):\n"
                           + build_message(proc.stdout, proc.stderr))
     lines = []
+    problems: list[dict] = []
     for r in report.get("results") or []:
         if r.get("ok"):
             continue
@@ -1263,8 +1274,12 @@ def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
             lines.append(f"{r.get('route')}: {r.get('control')} {r.get('label')!r} runs "
                          f"{r.get('workflow')} — step {pr.get('node')!r} ({pr.get('actionType')}): "
                          f"{pr.get('problem')}")
-    raise BuildFailed("a control the app ships would refuse at first click:\n"
-                      + "\n".join(lines[:12]))
+            problems.append({"route": r.get("route"), "page": r.get("page"), "control": r.get("control"),
+                             "label": r.get("label"), "workflow": r.get("workflow"), "input": r.get("input"),
+                             "node": pr.get("node"), "actionType": pr.get("actionType"),
+                             "problem": pr.get("problem")})
+    raise DispatchesRefused("a control the app ships would refuse at first click:\n"
+                            + "\n".join(lines[:12]), problems)
 
 
 #: Where a verification build writes, beside — never inside — the served app.
