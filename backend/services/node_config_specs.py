@@ -382,6 +382,29 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
         ),
     ],
 
+    # --- Embeddings (image / semantic search) ------------------------ #
+    # Synthetic "action type": no workflow node calls it, but every app
+    # whose Blueprint declares an embedding field (`{type: "vector",
+    # embedding: {of: ...}}`) fills and queries it through the CLIP sidecar
+    # (sidecars/clip) — see templates/runtime/embeddings.ts. URL is what
+    # connects it; the key is only for a sidecar behind a bearer token.
+    "__embeddings__": [
+        ConfigKey(
+            key="EMBEDDINGS_URL",
+            provider="embeddings",
+            label="Embedding service URL (sidecars/clip)",
+            kind="url",
+            required=True,
+        ),
+        ConfigKey(
+            key="EMBEDDINGS_API_KEY",
+            provider="embeddings",
+            label="Embedding service API key (optional)",
+            kind="password",
+            required=False,
+        ),
+    ],
+
     # --- MCP servers (Agent Builder tool_type=mcp) ------------------- #
     # Synthetic "action type": individual MCP server secrets are
     # dynamic (one env var per server row in platform_mcp_servers),

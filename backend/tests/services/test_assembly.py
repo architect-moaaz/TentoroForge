@@ -149,7 +149,8 @@ def test_everything_a_projection_writes_is_protected_from_the_scaffold(tmp_path)
     for fn in (projection.project_nav_flow, projection.project_design_tokens,
                projection.project_middleware, projection.project_seed,
                projection.project_sensitive_columns,
-               projection.project_searchable_columns):
+               projection.project_searchable_columns,
+               projection.project_embedding_columns):
         written.update(fn(doc, app).get("files") or [])
 
     unprotected = [f for f in written

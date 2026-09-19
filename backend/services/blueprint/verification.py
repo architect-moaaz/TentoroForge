@@ -282,6 +282,16 @@ def check_api_database(doc: dict) -> list[Finding]:
                 artifact_id=con.get("entity"),
                 detail=f"constraint names unknown entity {con['entity']}",
             ))
+
+    # An embedding is filled from the field it names; one that names nothing
+    # embeddable is a column no row will ever have a value in.
+    from services.blueprint.embeddings import unfillable_embeddings
+    for ent in entities.values():
+        for problem in unfillable_embeddings(ent):
+            out.append(Finding(
+                "API↔Database", section="data.entities",
+                artifact_id=ent.get("id"), detail=problem,
+            ))
     return out
 
 

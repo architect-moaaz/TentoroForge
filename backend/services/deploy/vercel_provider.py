@@ -142,6 +142,8 @@ _TEMPLATE_FOUNDATION_DIR = (
 # scripts, deploy-time DB reset, etc.).
 _PLATFORM_REFRESH_FOUNDATION_FILES = (
     "src/db/reset-schema.ts",
+    # reset-schema.ts imports it, so the two travel together.
+    "src/db/extensions.ts",
     # schema-page.tsx is fully platform-authored (per-app logic lives in the
     # files it imports). Refreshing it on every publish lets fixes to SSR
     # error handling / data-source resolution reach existing apps without a

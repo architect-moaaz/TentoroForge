@@ -11,7 +11,7 @@
  */
 
 import { db } from "@/db";
-import { eq, ilike, or, and, desc, asc, count, countDistinct, sum, avg, min, max, gte, lt, inArray, sql, getTableName, type SQL } from "drizzle-orm";
+import { eq, ilike, or, and, desc, asc, count, countDistinct, sum, avg, min, max, gte, lt, inArray, sql, getTableName, getTableColumns, type SQL } from "drizzle-orm";
 // FK-role authority — decides which columns to auto-fill from the current user.
 // A `domain` FK (target != users) is NEVER user-filled; only `actor` columns are.
 // Absent-table (registry-less app) → legacy name-based fallback below.
@@ -29,6 +29,10 @@ import { encryptSensitive, decryptSensitive, mask, looksMasked } from "./sensiti
 // each entity carries. Empty for apps with no `search: true` columns, so
 // resolveSearch fast-paths to [] on the miss.
 import { searchableColumnsFor } from "./searchable-columns";
+// Embedding columns: filled from their source field on every write, stripped
+// from every read, ranked by op:"similar". Empty manifest → all three no-op.
+import { embeddingColumnsFor } from "./embedding-columns";
+import { embedQuery, embedWrittenRow, stripEmbeddings } from "./embeddings";
 // What to do with a column that names the acting user. Projected from the
 // Blueprint's `security.ownershipRules`: a kind:"scope" column decides who may
 // reach the row, a kind:"attribution" column only records who acted. Both are
@@ -209,6 +213,12 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
   record: T,
   ctx: DataEngineContext,
 ): Promise<T> {
+  // Every read passes through here, so this is also where the vectors leave
+  // the row: they are the engine's to rank by, not anyone's to read.
+  if (record != null) {
+    const t = getEntity(entityName)?.table;
+    stripEmbeddings(t ? getTableName(t as any) : entityName, record);
+  }
   const specs = sensitiveColumnsFor(entityName);
   const keys = Object.keys(specs);
   if (keys.length === 0 || record == null) return record;
@@ -827,6 +837,7 @@ export async function create(
   // Insert
   stringifyDatesForStringColumns(entity.table, validated);
   const [record] = await db.insert(entity.table).values(validated as any).returning();
+  await embedWrittenRow(entity.table, record);
   const event = `${entityName.toLowerCase()}_created`;
 
   // Emit event for workflow engine
@@ -895,6 +906,7 @@ export async function update(
 
   stringifyDatesForStringColumns(entity.table, updateData);
   const [record] = await db.update(entity.table).set(updateData).where(where).returning();
+  await embedWrittenRow(entity.table, record, existing);
   const event = `${entityName.toLowerCase()}_updated`;
 
   emit(event, { entityId: record.id, entity: record, previousEntity: existing, user: ctx.user }).catch(console.error);
@@ -1730,6 +1742,72 @@ export async function resolveSearch(
   const merged = perEntityRows.flat();
   merged.sort((a, b) => b.rank - a.rank);
   return merged.slice(0, limit);
+}
+
+// ─── Similarity Resolver (op:"similar") ───
+
+/** An op:"similar" dataSource: records of `entity` ranked by the distance of
+ *  their `field` embedding to the query. Projected from the Blueprint's
+ *  PageDataSource; the query comes from the page URL, not the source. */
+export type SimilarSource = {
+  op: "similar";
+  entity: string;
+  /** The embedding field to rank by; the entity's first when omitted. */
+  field?: string;
+  limit?: number;
+};
+
+export type SimilarQuery = { image?: unknown; text?: unknown };
+
+const _SIMILAR_DEFAULT_LIMIT = 12;
+const _SIMILAR_MAX_LIMIT = 100;
+
+/**
+ * Nearest neighbours by cosine distance over the entity's HNSW index. Each row
+ * comes back as the record the caller may read (scoped, masked, FK-labelled,
+ * vectors removed) plus `similarity`, 0–100.
+ *
+ * No query → []. The embedding service unreachable → EmbeddingUnavailable,
+ * because an empty result would read as "nothing looks like this".
+ */
+export async function resolveSimilar(
+  source: SimilarSource,
+  query: SimilarQuery,
+  ctx: DataEngineContext = {},
+): Promise<Array<Record<string, any>>> {
+  const entity = getEntity(source.entity);
+  if (!entity) throw new Error(`Unknown entity: ${source.entity}`);
+  const cols = embeddingColumnsFor(getTableName(entity.table as any));
+  const col = source.field ? cols.find((c) => c.property === source.field) : cols[0];
+  if (!col) {
+    throw new Error(`${source.entity} has no embedding field${source.field ? ` "${source.field}"` : ""} to rank by`);
+  }
+  const vector = await embedQuery(query);
+  if (!vector) return [];
+
+  const column = (entity.table as any)[col.property];
+  const literal = `[${vector.join(",")}]`;
+  const distance = sql<number>`(${column} <=> ${literal}::vector)`;
+  const where = allOf([sql`${column} IS NOT NULL`,
+                       ...await accessConditions(source.entity, entity, ctx)]);
+  const limit = Math.min(Math.max(Number(source.limit) || _SIMILAR_DEFAULT_LIMIT, 1), _SIMILAR_MAX_LIMIT);
+
+  const _db = _testDb ?? db;
+  const rows: any[] = await (_db as any)
+    .select({ ...getTableColumns(entity.table as any), __distance: distance })
+    .from(entity.table)
+    .where(where)
+    .orderBy(distance)
+    .limit(limit);
+
+  const out = rows.map(({ __distance, ...row }) => ({
+    ...row,
+    // Cosine distance is 0 for the same direction and 2 for the opposite one.
+    similarity: Math.max(0, Math.min(100, Math.round((1 - Number(__distance)) * 100))),
+  }));
+  await Promise.all(out.map((r) => _maskOrUnmaskOnRead(source.entity, r, ctx)));
+  await attachFkLabels(source.entity, entity, out);
+  return out;
 }
 
 // ─── Error Classes ───

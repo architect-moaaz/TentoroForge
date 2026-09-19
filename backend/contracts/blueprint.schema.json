@@ -1141,6 +1141,19 @@
                       "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
                       "description": "Stable ENTITY identifier (§12)"
                     },
+                    "embedding": {
+                      "type": "object",
+                      "properties": {
+                        "of": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "of"
+                      ],
+                      "additionalProperties": false
+                    },
                     "description": {
                       "type": "string",
                       "default": ""
@@ -2371,8 +2384,12 @@
                     "list",
                     "get",
                     "aggregate",
-                    "series"
+                    "series",
+                    "similar"
                   ]
+                },
+                "field": {
+                  "type": "string"
                 },
                 "filter": {
                   "type": "object",

@@ -144,6 +144,7 @@ export const min = (c) => ({ __agg: "min", c });
 export const max = (c) => ({ __agg: "max", c });
 export const inArray = (col, vals) => ({ op: "in", col: col.__col, vals });
 export const getTableName = (t) => t.__name;
+export const getTableColumns = (t) => ({ ...t });
 export function sql(strings, ...values) {
   return { op: "raw", text: strings.raw.join("?"), values };
 }
@@ -154,6 +155,7 @@ sql.join = (parts) => ({ op: "raw", text: "join", parts });
 installHarness({
   stubs: {
     "@/db": "export const db = globalThis.__FAKE_DB__;",
+    "./embedding-columns": "export const EMBEDDING_DIMENSIONS = 512;\nexport const embeddingColumnsFor = () => [];\n",
     "drizzle-orm": DRIZZLE,
     "./fk-roles": "export const FK_ROLES = {};\nexport const fkRole = () => undefined;\nexport const isDomainFk = () => false;\n",
     "./sensitive-columns": "export const sensitiveColumnsFor = () => ({});\n",

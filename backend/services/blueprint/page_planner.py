@@ -36,6 +36,8 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from services.blueprint.embeddings import is_embedding_field
+
 #: Emitted by ``npm run emit:catalog --workspace=packages/library``.
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "contracts" / "component-catalog.json"
 
@@ -54,6 +56,8 @@ FORM_KINDS: dict[str, str] = {
     "date": "date", "datetime": "date", "timestamp": "date",
     "enum": "select",
     "json": "object", "jsonb": "object", "object": "object",
+    # Uploaded, stored, and submitted as the stored file's id.
+    "image": "file", "photo": "file", "picture": "file",
 }
 
 #: Fields no user edits and no list shows by default.
@@ -102,8 +106,10 @@ def _entities(doc: dict) -> dict[str, dict]:
 
 
 def _visible_fields(entity: dict) -> list[dict]:
+    # An embedding is the platform's: nobody reads a vector or types one.
     return [f for f in (entity.get("fields") or [])
-            if f.get("name") not in INTERNAL_FIELDS]
+            if f.get("name") not in INTERNAL_FIELDS
+            and not is_embedding_field(f)]
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +282,8 @@ def form_fields_for(entity: dict, *, creating: bool = False) -> list[dict]:
             if not field["options"]:
                 field["kind"] = "text"
                 field.pop("options")
+        if kind == "file":
+            field["accept"] = "image/*"
         out.append(field)
     return out
 

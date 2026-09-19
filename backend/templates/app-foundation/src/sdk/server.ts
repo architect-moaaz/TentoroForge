@@ -8,7 +8,7 @@
 
 import { auth } from "@/auth";
 import * as engine from "@/lib/data-engine";
-import { actorCtx, resolveAggregate, resolveQuery, resolveSeries } from "@/lib/data-engine-bridge";
+import { actorCtx, resolveAggregate, resolveQuery, resolveSeries, resolveSimilar } from "@/lib/data-engine-bridge";
 import { ensureDataEngineInitialized } from "@/lib/data-init";
 import { NUMERIC_FIELDS, READABLE_FIELDS } from "./schema";
 import type { Entities, EntityName, NumericField } from "./schema";
@@ -200,6 +200,52 @@ export async function series<E extends EntityName>(
     groupBy: opts.groupBy, bucket: opts.bucket,
     agg: { fn: opts.fn ?? "count", field: opts.field },
   }, await actor());
+}
+
+export interface SimilarOptions {
+  /** A stored image's id — `ctx.searchParams.image`, written by <ImageSearch>. */
+  image?: string;
+  /** Words describing what to find — `ctx.searchParams.q`. Images and text
+   *  share one space, so a sentence finds pictures too. */
+  text?: string;
+  /** The embedding field to rank by; the entity's first when omitted. */
+  field?: string;
+  /** At most this many, closest first (default 12, at most 100). */
+  limit?: number;
+}
+
+export interface Similar<T> {
+  /** Closest first. `similarity` is 0–100 and only means something relative to
+   *  the other rows: a correct text match can sit near 30. Order, don't grade. */
+  rows: Array<T & { similarity: number }>;
+  /** Why there are no rows when it is not "nothing is alike" — the embedding
+   *  service is not connected. Show it; null otherwise. */
+  error: string | null;
+}
+
+/** Records ranked by how alike they are to an image or a description — an
+ *  entity with an embedding field (`findable by likeness` in its type). No
+ *  image and no text is no rows. */
+export async function similar<E extends EntityName>(
+  entity: E, opts: SimilarOptions,
+): Promise<Similar<Entities[E]>> {
+  const empty = { rows: [], error: null };
+  if (!opts.image && !opts.text?.trim()) return empty;
+  if (await reviewingEmpty()) return empty;
+  try {
+    const rows = await resolveSimilar(
+      { name: "similar", entity, op: "similar", field: opts.field, limit: opts.limit },
+      { image: opts.image, text: opts.text }, await actor());
+    return {
+      rows: rows.map((r) => ({ ...plain(entity, r), similarity: Number(r.similarity ?? 0) })),
+      error: null,
+    };
+  } catch (err) {
+    const e = err as Error;
+    if (e?.name === "EmbeddingUnavailable") return { rows: [], error: e.message };
+    console.warn(`[sdk] similar ${entity} failed:`, err);
+    return empty;
+  }
 }
 
 /** One row of a query: each dimension's value under its field name (a date

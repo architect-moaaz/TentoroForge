@@ -5414,6 +5414,9 @@
           "mimeTypeField": {
             "type": "string"
           },
+          "search": {
+            "type": "boolean"
+          },
           "resumable": {
             "type": "boolean"
           },
@@ -7118,6 +7121,140 @@
                     "name",
                     "label",
                     "fields"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "file"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "hint": {
+                      "type": "string"
+                    },
+                    "placeholder": {
+                      "type": "string"
+                    },
+                    "interaction": {
+                      "type": "object",
+                      "properties": {
+                        "computed": {
+                          "type": "object",
+                          "properties": {
+                            "formula": {
+                              "type": "string"
+                            },
+                            "readOnly": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "formula"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "optionsFrom": {
+                          "type": "object",
+                          "properties": {
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "filter": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "source",
+                            "value",
+                            "label"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "dependsOn": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "onChange": {
+                          "type": "object",
+                          "properties": {
+                            "fetch": {
+                              "type": "object",
+                              "properties": {
+                                "resource": {
+                                  "type": "string"
+                                },
+                                "by": {
+                                  "type": "string"
+                                },
+                                "from": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "resource",
+                                "by",
+                                "from"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "set": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "fetch",
+                            "set"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "visibleIf": {
+                          "type": "string"
+                        },
+                        "requiredIf": {
+                          "type": "string"
+                        },
+                        "enabledIf": {
+                          "type": "string"
+                        },
+                        "readOnlyIf": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "accept": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name",
+                    "label"
                   ],
                   "additionalProperties": false
                 },

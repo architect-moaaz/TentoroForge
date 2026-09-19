@@ -1077,7 +1077,14 @@ NODE_TASKS: dict[str, str] = {
         "cannot see this section to second-guess it. The foreign keys are "
         "the declared relationships: give each one its column here, named as "
         "the relationship's `fromField`. Add `constraints` for uniqueness and "
-        "checks the columns cannot express on their own, for this entity only."
+        "checks the columns cannot express on their own, for this entity only. "
+        "A picture a person uploads is a field of `type: \"image\"`. When the "
+        "application finds these records by what they look like or mean — "
+        "search by photo, \"find similar\", \"show me ones like this\" — add a "
+        "field `{\"name\": \"photoEmbedding\", \"type\": \"vector\", "
+        "\"embedding\": {\"of\": \"photo\"}}` whose `of` names the image or "
+        "text field it is taken of; the platform computes it, so it is never "
+        "required and never asked of a person."
     ),
     "ux_architecture": (
         "Organise the application into modules and a navigation tree. Every list "
@@ -2062,6 +2069,17 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                 "enumValues": {
                                     "type": "array",
                                     "items": {"type": "string"},
+                                },
+                                "embedding": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "required": ["of"],
+                                    "description": (
+                                        "Only on a `type: \"vector\"` field: the "
+                                        "image or text field on this entity it "
+                                        "embeds. The platform fills it."
+                                    ),
+                                    "properties": {"of": {"type": "string"}},
                                 },
                             },
                         },

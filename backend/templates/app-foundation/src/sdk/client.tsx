@@ -9,6 +9,7 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { Workflow } from "./workflows";
+import { fileUrl } from "./files";
 
 export { WidgetView, chartPropsFor, type WidgetViewData, type WidgetViewProps } from "./widget-view";
 export type { ChartSelection } from "@tentoroforge/library";
@@ -98,7 +99,7 @@ export type FieldSpec<V> =
         : V extends string[]
           ? { label: string; kind: "tags" | "multiselect"; options?: Option[]; help?: string }
           : { label: string;
-              kind?: "text" | "textarea" | "email" | "date" | "datetime" | "select" | "password" | "url" | "tel";
+              kind?: "text" | "textarea" | "email" | "date" | "datetime" | "select" | "password" | "url" | "tel" | "image";
               options?: Option[]; placeholder?: string; help?: string });
 
 type RequiredKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? never : K }[keyof T];
@@ -155,6 +156,8 @@ function Field({ name, spec, value, required, onChange }: {
         {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     );
+  } else if (kind === "image") {
+    control = <ImageUpload id={id} required={required} value={(value as string) ?? ""} onChange={onChange} />;
   } else if (kind === "tags") {
     control = <input id={id} required={required} className={inputClass} placeholder="Comma separated"
       value={Array.isArray(value) ? (value as string[]).join(", ") : ""}
@@ -174,6 +177,103 @@ function Field({ name, spec, value, required, onChange }: {
   return (
     <div className={"grid gap-2" + (kind === "textarea" ? " sm:col-span-2" : "")}>
       {label}{control}{help}
+    </div>
+  );
+}
+
+/** Store a picked image through the app's upload route; its id, or null. */
+async function storeImage(file: File): Promise<string | null> {
+  const body = new FormData();
+  body.append("file", file);
+  try {
+    const res = await fetch("/api/files/upload", { method: "POST", body });
+    const ref = res.ok ? ((await res.json()) as { id?: string }) : null;
+    return ref?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** An `image` input: pick a picture, it is stored at once, and the input's
+ *  value is the stored file's id — what the column holds. */
+function ImageUpload({ id, required, value, onChange }: {
+  id: string; required: boolean; value: string; onChange: (v: unknown) => void;
+}) {
+  const [busy, setBusy] = React.useState(false);
+  const [failed, setFailed] = React.useState(false);
+  const src = fileUrl(value);
+  return (
+    <div className="flex items-center gap-3">
+      {src && <img src={src} alt="" className="h-16 w-16 rounded-md border object-cover" />}
+      <div className="grid gap-1">
+        {/* The file input only picks; the value the form sends is the id. It
+            holds `required` while nothing is stored, so the browser asks. */}
+        <input id={id} type="file" accept="image/*" required={required && !value} disabled={busy}
+          className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setBusy(true);
+            setFailed(false);
+            const stored = await storeImage(file);
+            setBusy(false);
+            if (stored) onChange(stored); else setFailed(true);
+          }} />
+        {busy && <p className="text-xs text-muted-foreground">Uploading…</p>}
+        {failed && <p className="text-xs text-destructive">That image could not be uploaded.</p>}
+      </div>
+    </div>
+  );
+}
+
+/** Search by picture: pick or drop an image, and the page's `?image=` becomes
+ *  its stored id, so `load` can pass `ctx.searchParams.image` to `similar()`.
+ *  Shows the image being searched for, and clears it. */
+export function ImageSearch({ label = "Search by image", param = "image", className }: {
+  label?: string; param?: string; className?: string;
+}) {
+  const router = useRouter();
+  const [current, setCurrent] = React.useState<string>("");
+  const [busy, setBusy] = React.useState(false);
+  const [failed, setFailed] = React.useState(false);
+  const [over, setOver] = React.useState(false);
+  const input = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    setCurrent(new URLSearchParams(window.location.search).get(param) ?? "");
+  }, [param]);
+  const go = (next: string) => {
+    const q = new URLSearchParams(window.location.search);
+    if (next) q.set(param, next); else q.delete(param);
+    setCurrent(next);
+    router.replace(`${window.location.pathname}${q.toString() ? "?" + q.toString() : ""}`, { scroll: false });
+  };
+  const take = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    setFailed(false);
+    const stored = await storeImage(file);
+    setBusy(false);
+    if (stored) go(stored); else setFailed(true);
+  };
+  const src = fileUrl(current);
+  return (
+    <div className={"flex items-center gap-3 " + (className ?? "")}>
+      {src && <img src={src} alt="The image being searched for" className="h-14 w-14 rounded-md border object-cover" />}
+      <button type="button" onClick={() => input.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files?.[0]); }}
+        className={"flex flex-1 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-dashed px-4 py-3 text-sm "
+          + (over ? "border-primary bg-primary/5" : "border-input text-muted-foreground hover:bg-muted")}>
+        <span>{busy ? "Uploading…" : current ? "Search with a different image" : label}</span>
+        {failed && <span className="text-xs text-destructive">That image could not be uploaded.</span>}
+      </button>
+      <input ref={input} type="file" accept="image/*" className="hidden"
+        onChange={(e) => take(e.target.files?.[0])} />
+      {current && (
+        <button type="button" onClick={() => go("")}
+          className="text-sm text-muted-foreground underline-offset-2 hover:underline">Clear</button>
+      )}
     </div>
   );
 }

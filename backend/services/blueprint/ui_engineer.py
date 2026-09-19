@@ -120,6 +120,10 @@ query(entity, { measures: { [key]: { fn: "count" } | { fn: "count_distinct" | "m
 runWidget(widgets.x, { range?, where? }): Promise<WidgetData>      // WidgetData = { rows: QueryRow[]; value: number | null }
    Reads one of the page's declared widgets exactly as the Blueprint defines it. `value` is the number of a
    metric or gauge. `where` narrows it (a record page passes its own id: { customerId: params.id }).
+similar(entity, { image?: ctx.searchParams.image, text?: ctx.searchParams.q, limit? }): Promise<{ rows: (Row & { similarity })[]; error: string | null }>
+   Only for an entity whose type says "Findable by likeness". Rows closest first to the picture (or the
+   words — they share one space). No image and no text is no rows. `error` is set when the service that
+   compares pictures is not connected: show it. Show the order, not `similarity` — it is relative.
    `entity` is the entity's name as a string literal: list("Case", …). Rows are typed (Entities["Case"]).
    Dates arrive as ISO strings, numbers as numbers, optional fields as null.
 
@@ -142,11 +146,15 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
      number   → "number" (min?, max?, step?)
      boolean  → "checkbox" | "switch"
      string[] → "tags" | "multiselect"
+     an image field → "image" (picks, uploads, and sends the stored file's id)
    A record input (an id of another entity) is { label, kind: "select", options } with the
    options loaded in load.ts. Every REQUIRED input must have an entry — the compiler checks.
 
 <WorkflowButton workflow={workflows.x} input={{ … }} variant?="primary" | "secondary" | "outline" | "ghost" | "danger"
                 size?="sm" | "md" confirm?="Delete this case?" redirectTo? successMessage?>Label</WorkflowButton>
+
+<ImageSearch label?="Find products that look like this" />
+   The search box for similar(): an upload that sets ?image= to the picked picture (and clears it).
 
 <WidgetView widget={widgets.x} data={props.x} height?={260} currency?="GBP" action?={<Link …/>}
             onSelect?={(s) => router.push(href(pages.list, {}, { status: s.category }))} />
@@ -154,6 +162,7 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
 
 // ---- @/sdk — anywhere ----
 Entity types (Case, User, …), `workflows`, `pages`, `href(page, params?, query?)`,
+`fileUrl(row.photo)` — the src for an image field (a stored file's id), or null when it is empty,
 e.g. href(pages.caseRecord, { id }) or href(pages.allCases, {}, { q: "late", status: "OPEN" }).
 """
 
@@ -235,6 +244,10 @@ What a finished page looks like:
 - LISTS THAT WORK. Search box (writes ?q=), filter chips for the key enum (write
   ?status=), sortable columns where it matters, a row that opens the record
   (href(pages.x, { id })), row actions for the workflows that act on one record.
+- PICTURES ARE SHOWN, NOT NAMED. An image field is a thumbnail (fileUrl) in a list
+  and a real image on its record — never the id. The list of an entity that is
+  "Findable by likeness" offers "Find similar": <ImageSearch /> beside the search
+  box, and while ?image= (or ?q=) is set, the rows are similar()'s, closest first.
 - RECORD PAGES TELL THE STORY. Title with its status badge, key facts in a
   definition grid, the related records (notes, activity) as a timeline or table,
   and the actions available in the record's current state — nothing that cannot
@@ -256,7 +269,7 @@ TECH_RULES = """\
 You write exactly two files for the page.
 
 load.ts — server only.
-  import { … } from "@/sdk/server";   (reads: list, listPage, record, count, total, series, currentUser)
+  import { … } from "@/sdk/server";   (reads: list, listPage, record, count, total, series, similar, currentUser)
   export async function load(ctx: PageContext) { … return { …props } }
   - Return a plain object: the view's props. Return null for a record that does not
     exist (the route answers 404).
@@ -274,8 +287,8 @@ view.tsx — "use client" on the first line.
   Imports allowed, and only these:
     react, next/link, next/navigation (useRouter, useSearchParams, usePathname),
     lucide-react (icons), the UI kit and library below,
-    "@/sdk" (entity types, workflows, pages, widgets, href), "@/sdk/client" (useWorkflow,
-    WorkflowForm, WorkflowButton, WidgetView), and
+    "@/sdk" (entity types, workflows, pages, widgets, href, fileUrl), "@/sdk/client" (useWorkflow,
+    WorkflowForm, WorkflowButton, WidgetView, ImageSearch), and
     `import type { Page, SeriesPoint, QueryRow, WidgetData } from "@/sdk/server"`.
   - Links: <Link href={href(pages.someKey, { id: row.id })}> — never a hand-written path.
   - Changing data: only through a workflow — <WorkflowForm workflow={workflows.x} fields={…} />,

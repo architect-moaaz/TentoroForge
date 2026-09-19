@@ -28,6 +28,7 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from services.blueprint.embeddings import entity_embeddings, is_embedding_field, is_image_field
 from services.blueprint.projection import (
     _TYPES, _DEFAULT_TYPE, _is_credential_field, _live, is_list_type,
     reconcile_platform_table,
@@ -123,7 +124,10 @@ def entity_columns(entity: dict, doc: dict) -> list[dict]:
     it is never something a screen shows, and the SDK returns only what is
     typed here, so leaving it out keeps it off the wire as well."""
     fields, _ = reconcile_platform_table(entity)
-    fields = [dict(f) for f in fields if f.get("name") and not _is_credential_field(str(f["name"]))]
+    # An embedding is the engine's to rank by and never leaves it, so it is no
+    # column a page can read.
+    fields = [dict(f) for f in fields if f.get("name") and not _is_credential_field(str(f["name"]))
+              and not is_embedding_field(f)]
     if not any(f.get("primaryKey") for f in fields):
         fields.insert(0, {"name": "id", "type": "uuid", "primaryKey": True})
     names = {f["name"] for f in fields}
@@ -174,12 +178,19 @@ def emit_schema(doc: dict) -> str:
     for e in ents:
         name = types[str(e.get("id"))]
         desc = str(e.get("description") or "").strip().replace("*/", "")
+        likeness = entity_embeddings(e)
+        if likeness:
+            desc = (desc + " " if desc else "") + (
+                "Findable by likeness: similar(" + json.dumps(str(e.get("name"))) + ", { image | text }) ranks it by "
+                + ", ".join(f"{c['property']} (of its {c['source']} {c['of']})" for c in likeness) + ".")
         out.append(f"/** {e.get('name')}{' — ' + desc if desc else ''} */")
         out.append(f"export interface {name} {{")
         cols = entity_columns(e, doc)
         for f in cols:
             required = bool(f.get("required") or f.get("primaryKey"))
             note = str(f.get("description") or "").strip().replace("*/", "")
+            if is_image_field(f):
+                note = (note + " " if note else "") + "A stored image's id — show it with <img src={fileUrl(row." + str(f["name"]) + ")} />."
             if note:
                 out.append(f"  /** {note[:160]} */")
             out.append(f"  {_prop(f['name'])}: {ts_type(f)}{'' if required else ' | null'};")
@@ -482,7 +493,8 @@ def emit_index() -> str:
             'export * from "./schema";\n'
             'export * from "./workflows";\n'
             'export * from "./pages";\n'
-            'export * from "./widgets";\n')
+            'export * from "./widgets";\n'
+            'export * from "./files";\n')
 
 
 def sdk_files(doc: dict) -> dict[str, str]:

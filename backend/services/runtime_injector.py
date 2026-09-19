@@ -298,6 +298,37 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
         except Exception as e:
             errors.append(f"Failed to copy sensitive-crypto: {e}")
 
+    # Embedding fill + query client. The data engine and the workflow runtime
+    # import it unconditionally; with no embedding field in the app's
+    # manifest every call is a no-op.
+    embeddings_src = _TEMPLATE_DIR / "embeddings.ts"
+    embeddings_dst = src_lib / "embeddings.ts"
+    if embeddings_src.exists():
+        try:
+            shutil.copy2(embeddings_src, embeddings_dst)
+            copied.append("src/lib/embeddings.ts")
+        except Exception as e:
+            errors.append(f"Failed to copy embeddings: {e}")
+
+    # The manifest embeddings.ts reads is projected from the Blueprint; an app
+    # built on another path has none, and the import would fail the build. An
+    # empty manifest is the truth for it: no field is embedded.
+    manifest_dst = src_lib / "embedding-columns.ts"
+    if not manifest_dst.exists():
+        manifest_dst.write_text(
+            "// No embedding fields. Projected from the Blueprint when there are.\n"
+            "export type EmbeddingColumn = {\n"
+            "  property: string; column: string; of: string; source: \"image\" | \"text\";\n"
+            "};\n"
+            "export const EMBEDDING_DIMENSIONS = 512;\n"
+            "export const EMBEDDING_COLUMNS: Record<string, EmbeddingColumn[]> = {};\n"
+            "export function embeddingColumnsFor(_entity: string): EmbeddingColumn[] {\n"
+            "  return [];\n"
+            "}\n",
+            "utf-8",
+        )
+        copied.append("src/lib/embedding-columns.ts")
+
     # Copy the file-storage module (pluggable disk/S3 backend for uploads)
     storage_src = _TEMPLATE_DIR / "storage.ts"
     storage_dst = src_lib / "storage.ts"

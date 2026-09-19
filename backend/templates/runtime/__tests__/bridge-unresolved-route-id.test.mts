@@ -24,6 +24,7 @@ installHarness({
       "export async function resolveAggregate() { return {}; }\n" +
       "export async function resolveSeries() { return []; }\n" +
       "export async function resolveQuery() { return []; }\n" +
+      "export async function resolveSimilar() { return []; }\n" +
       "export function getEntity() { return undefined; }\n" +
       "export function registerEntity() {}\n",
     "./data-init": "export async function ensureDataEngineInitialized() {}\n",
