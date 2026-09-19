@@ -353,6 +353,14 @@ export interface WorkflowExecutionResult {
    * well instead of a success the owner has to disprove.
    */
   notices?: string[];
+  /**
+   * The run ended on a refused `end` — it stopped without doing what it was
+   * asked (a check failed). `status` is "failed" and `error` is the end's
+   * message, the sentence the person is shown; this says it was the rules
+   * saying no rather than something breaking, so nothing reports it as a
+   * crash or retries it.
+   */
+  refused?: boolean;
   error?: string;
   /** If paused: which node and what task is pending */
   pausedAt?: string;

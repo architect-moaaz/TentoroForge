@@ -170,6 +170,26 @@ export async function executeWorkflow(
     const lastLog = pausedLog;
     const isPaused = Boolean(pausedLog);
 
+    // A run that ended on a REFUSED end did not do what it was asked. It is a
+    // failure to every caller — the execute route answers 422, the SDK shows
+    // the message as an error — and `refused` tells it apart from a crash, so
+    // nothing reports it as one or retries it.
+    const refusedLog = isPaused ? undefined : ctx.log.find((l) => (l as any)?.output?.refused === true);
+    if (refusedLog) {
+      return {
+        workflowId: workflow.id,
+        workflowName: workflow.name,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        status: "failed",
+        refused: true,
+        log: ctx.log,
+        output: ctx.variables,
+        notices: noticesOf(ctx.log),
+        error: String((refusedLog as any).output.message),
+      };
+    }
+
     return {
       workflowId: workflow.id,
       workflowName: workflow.name,
@@ -850,10 +870,23 @@ async function executeNode(
       }
 
       case "end":
-      case "end_event":
-        // Terminal node — workflow complete
+      case "end_event": {
+        // Terminal node — workflow complete. A REFUSED end is the run
+        // stopping without doing what it was asked (a validation branch):
+        // recorded here, reported by `executeWorkflow` as a failure carrying
+        // the end's message. Both ends used to complete alike, so an empty
+        // form was told "Record added successfully." (h7gmi93x).
+        const endCfg = (node.data.config ?? {}) as Record<string, unknown>;
+        if (endCfg.refused === true) {
+          logEntry.output = {
+            refused: true,
+            message: String(interpolateValue(String(endCfg.message ?? ""), ctx.variables) ?? "")
+              || "This could not be done.",
+          };
+        }
         nextEdges = [];
         break;
+      }
 
       default:
         // Unknown node type — log and skip

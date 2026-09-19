@@ -183,7 +183,8 @@ def test_a_branch_must_name_both_of_its_targets():
 
     steps = [{"key": "check", "type": "condition", "config": {"expression": "age >= 1"}},
              {"key": "save", "type": "action", "config": {"actionType": "db_insert", "table": "t"}},
-             {"key": "ok", "type": "end"}, {"key": "bad", "type": "end"}]
+             {"key": "ok", "type": "end", "config": {"refused": False}},
+             {"key": "bad", "type": "end", "config": {"refused": True, "message": "Age is required."}}]
     errs = workflow_nodes().flow_errors({"steps": steps})
     assert len(errs) == 1 and "check" in errs[0] and "else-step" in errs[0]
     steps[0]["next"] = ["save", "bad"]
@@ -191,6 +192,39 @@ def test_a_branch_must_name_both_of_its_targets():
     assert workflow_nodes().flow_errors({"steps": steps}) == []
     steps[1]["next"] = ["nowhere"]
     assert "not a step of this workflow" in workflow_nodes().flow_errors({"steps": steps})[0]
+
+
+def test_every_end_of_a_branching_workflow_says_whether_it_was_refused():
+    """h7gmi93x: an empty Add Data form took the validation branch, saved
+    nothing, and was told "Record added successfully." — both ends completed
+    alike. With two ends each says which it is; a refused one says why."""
+    from services.catalog import workflow_nodes
+
+    steps = [{"key": "check", "type": "condition", "config": {"expression": "age >= 1"},
+              "next": ["save", "bad"]},
+             {"key": "save", "type": "action", "config": {"actionType": "db_insert", "table": "t"},
+              "next": ["ok"]},
+             {"key": "ok", "type": "end"}, {"key": "bad", "type": "end"}]
+    errs = workflow_nodes().flow_errors({"steps": steps})
+    assert len(errs) == 2 and all("config.refused" in e for e in errs)
+    steps[2]["config"] = {"refused": False}
+    steps[3]["config"] = {"refused": True}
+    (err,) = workflow_nodes().flow_errors({"steps": steps})
+    assert err.startswith("bad:") and "config.message" in err
+    steps[3]["config"]["message"] = "Age must be between 1 and 120."
+    assert workflow_nodes().flow_errors({"steps": steps}) == []
+    steps[3]["config"]["refused"] = "yes"
+    assert "true or false" in workflow_nodes().flow_errors({"steps": steps})[0]
+
+
+def test_one_end_needs_no_outcome_and_a_free_outcome_label_is_left_alone():
+    """A single end is the run finishing. `outcome` is the agents' own label
+    (`not_found`, an approval's `rejected`) and is not what decides."""
+    from services.catalog import workflow_nodes
+
+    steps = [{"key": "save", "type": "action", "config": {"actionType": "db_insert", "table": "t"}},
+             {"key": "done", "type": "end", "config": {"outcome": "created"}}]
+    assert workflow_nodes().flow_errors({"steps": steps}) == []
 
 
 def test_a_straight_line_never_flows_out_of_an_end(tmp_path):

@@ -1431,6 +1431,12 @@
                           "null"
                         ]
                       }
+                    },
+                    "refused": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
                     }
                   },
                   "additionalProperties": {},

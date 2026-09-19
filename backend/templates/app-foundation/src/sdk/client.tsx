@@ -53,7 +53,12 @@ export function useWorkflow<I extends Json>(
       if (failed) {
         const message = humanError(result, res.status);
         setError(message);
-        if (!options.silent) toast.error(`${workflow.name} failed`, { description: message });
+        // REFUSED is the workflow's rules saying no — its end says why, in the
+        // person's words, so that sentence IS the toast. Anything else broke.
+        if (!options.silent) {
+          if (result.refused === true) toast.error(message);
+          else toast.error(`${workflow.name} failed`, { description: message });
+        }
         return { ok: false, result, error: message };
       }
       if (!options.silent) toast.success(options.successMessage ?? `${workflow.name} — done`);
@@ -109,15 +114,22 @@ const inputClass =
   "placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
   "focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
-function Field({ name, spec, value, onChange }: {
+function Field({ name, spec, value, required, onChange }: {
   name: string; spec: Exclude<FieldSpec<unknown>, { value: unknown }> & Record<string, unknown>;
-  value: unknown; onChange: (v: unknown) => void;
+  value: unknown; required: boolean; onChange: (v: unknown) => void;
 }) {
   const id = `f-${name}`;
   const kind = (spec.kind as string | undefined) ?? "text";
   const options = (spec.options as Option[] | undefined) ?? [];
   const help = spec.help ? <p className="text-xs text-muted-foreground">{String(spec.help)}</p> : null;
-  const label = <label htmlFor={id} className="text-sm font-medium leading-none">{String(spec.label)}</label>;
+  // Required is the WORKFLOW's word (`workflow.required`), not the page's:
+  // marked, and held by the browser before anything is sent.
+  const label = (
+    <label htmlFor={id} className="text-sm font-medium leading-none">
+      {String(spec.label)}
+      {required && <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>}
+    </label>
+  );
 
   if (kind === "checkbox" || kind === "switch") {
     return (
@@ -130,12 +142,12 @@ function Field({ name, spec, value, onChange }: {
   }
   let control: React.ReactNode;
   if (kind === "textarea") {
-    control = <textarea id={id} rows={4} className={inputClass + " h-auto min-h-[96px]"}
+    control = <textarea id={id} rows={4} required={required} className={inputClass + " h-auto min-h-[96px]"}
       placeholder={spec.placeholder as string | undefined}
       value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />;
   } else if (kind === "select" || kind === "multiselect") {
     control = (
-      <select id={id} className={inputClass} multiple={kind === "multiselect"}
+      <select id={id} required={required} className={inputClass} multiple={kind === "multiselect"}
         value={(value as string | string[]) ?? (kind === "multiselect" ? [] : "")}
         onChange={(e) => onChange(kind === "multiselect"
           ? Array.from(e.target.selectedOptions).map((o) => o.value) : e.target.value)}>
@@ -144,18 +156,18 @@ function Field({ name, spec, value, onChange }: {
       </select>
     );
   } else if (kind === "tags") {
-    control = <input id={id} className={inputClass} placeholder="Comma separated"
+    control = <input id={id} required={required} className={inputClass} placeholder="Comma separated"
       value={Array.isArray(value) ? (value as string[]).join(", ") : ""}
       onChange={(e) => onChange(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} />;
   } else if (kind === "number") {
-    control = <input id={id} type="number" className={inputClass}
+    control = <input id={id} type="number" required={required} className={inputClass}
       min={spec.min as number | undefined} max={spec.max as number | undefined} step={(spec.step as number | undefined) ?? "any"}
       placeholder={spec.placeholder as string | undefined}
       value={value === undefined || value === null ? "" : String(value)}
       onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))} />;
   } else {
     const type = kind === "datetime" ? "datetime-local" : kind;
-    control = <input id={id} type={type} className={inputClass}
+    control = <input id={id} type={type} required={required} className={inputClass}
       placeholder={spec.placeholder as string | undefined}
       value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />;
   }
@@ -185,6 +197,7 @@ export function WorkflowForm<I extends Json>({
 }) {
   const router = useRouter();
   const specs = fields as Record<string, Record<string, unknown>>;
+  const required = new Set(workflow.required ?? []);
   const [values, setValues] = React.useState<Record<string, unknown>>(() => ({ ...(initial ?? {}) }));
   const { run, pending, error } = useWorkflow(workflow, { redirectTo, successMessage });
 
@@ -196,6 +209,10 @@ export function WorkflowForm<I extends Json>({
       else if (values[name] !== undefined && values[name] !== "") input[name] = values[name];
     }
     const out = await run(input as I);
+    // A create form that stays put is ready for the next record; the values
+    // just saved still sitting in it read as "not saved yet". A form editing
+    // a record (`initial`) keeps what it now holds.
+    if (out.ok && !redirectTo && !initial) setValues({});
     onDone?.(out);
   };
 
@@ -205,6 +222,7 @@ export function WorkflowForm<I extends Json>({
         {Object.entries(specs).map(([name, spec]) =>
           spec && !("value" in spec) ? (
             <Field key={name} name={name} spec={spec as never} value={values[name]}
+              required={required.has(name) && !["checkbox", "switch"].includes(String(spec.kind))}
               onChange={(v) => setValues((cur) => ({ ...cur, [name]: v }))} />
           ) : null)}
       </div>

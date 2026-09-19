@@ -1278,8 +1278,12 @@ NODE_TASKS: dict[str, str] = {
         "step missing a required key is refused. Connect steps with `next` "
         "(a branching node's first target is the then-branch, its second the "
         "else-branch); the workflow's `trigger` is the start, and an `end` "
-        "step is the terminal. Any step that mutates an entity must name a "
-        "real one.\n\n"
+        "step is the terminal. Where a check refuses the input, its branch "
+        "ends on an `end` with `config.refused: true` and `config.message` — "
+        "the sentence the person is shown, saying what to correct — and every "
+        "other end says `config.refused: false`; a refused run is reported "
+        "to the person as a failure, never as the success message. Any step "
+        "that mutates an entity must name a real one.\n\n"
         + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
     ),
     "business_rules": (

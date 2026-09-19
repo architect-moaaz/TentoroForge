@@ -50,10 +50,12 @@ function deniedFor(entity: string | undefined, session: { user?: { role?: unknow
   const access = ENTITY_ACCESS[entity];
   if (!access) return false;
   const roles = access[op] ?? [];
-  if (roles.includes("*") && op === "read") return false;
-  const role = String(session?.user?.role ?? "");
-  if (!session?.user) return !roles.includes("*");
-  return !roles.includes(role);
+  // "*" is a public page: open to everyone, signed in or not. A write used to
+  // be open only to a caller who was signed OUT, so signing in refused what
+  // an anonymous visitor could do.
+  if (roles.includes("*")) return false;
+  if (!session?.user) return true;
+  return !roles.includes(String(session.user.role ?? ""));
 }
 
 // Auto-register all entities on first request

@@ -127,9 +127,14 @@ runWidget(widgets.x, { range?, where? }): Promise<WidgetData>      // WidgetData
 useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
    → { run(input): Promise<{ ok: boolean; result: Record<string, unknown>; error: string | null }>, pending: boolean, error: string | null }
    On success the page's data refreshes (or it navigates to redirectTo) and a toast is shown.
+   When the workflow's own rules refuse the input, `ok` is false and `error` is the workflow's
+   sentence, shown as an error toast — `successMessage` is only ever shown for a real success.
 
 <WorkflowForm workflow={workflows.x} fields={{ …one entry per input… }} initial?={partial input}
               submitLabel? cancelHref? redirectTo? successMessage? columns?={1 | 2} onDone?={(r) => …} />
+   The form marks the workflow's required inputs itself (an asterisk, and the browser holds an
+   empty one back), shows the workflow's refusal, and clears after a create that stays on the
+   page — do not add your own asterisks, required markers or reset logic.
    Each entry is either { value: … } (fixed — the record's id, a decided value; renders nothing)
    or a field: { label, kind?, options?, placeholder?, help? }, where kind follows the input's type:
      string   → "text" (default) | "textarea" | "email" | "date" | "datetime" | "select" | "password" | "url" | "tel"

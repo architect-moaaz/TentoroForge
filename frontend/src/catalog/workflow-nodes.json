@@ -1,5 +1,5 @@
 {
-  "$comment": "Forge workflow node catalog \u2014 the components a workflow is built from. Source of truth: packages/catalog/workflow-nodes.json. The copies at backend/contracts/workflow-node-catalog.json and frontend/src/catalog/workflow-nodes.json are emitted by packages/catalog/scripts/emit.mjs; backend/tests/services/test_workflow_node_catalog.py fails when they drift. Every `type` is a runtime NodeType and every action variant has a registered handler.",
+  "$comment": "Forge workflow node catalog — the components a workflow is built from. Source of truth: packages/catalog/workflow-nodes.json. The copies at backend/contracts/workflow-node-catalog.json and frontend/src/catalog/workflow-nodes.json are emitted by packages/catalog/scripts/emit.mjs; backend/tests/services/test_workflow_node_catalog.py fails when they drift. Every `type` is a runtime NodeType and every action variant has a registered handler.",
   "catalogVersion": 1,
   "categories": [
     {
@@ -561,7 +561,7 @@
       "label": "End",
       "icon": "Square",
       "gradient": "bg-gradient-to-br from-red-400 to-red-600",
-      "description": "Workflow end",
+      "description": "Workflow end. A workflow with more than one end says on EVERY end whether it was refused: config.refused true where the run stopped without doing what was asked (a check failed) — with config.message, the sentence the person is shown — and false where it did it",
       "handles": {
         "in": true,
         "out": false,

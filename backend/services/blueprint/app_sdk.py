@@ -269,11 +269,13 @@ def emit_workflows(doc: dict) -> str:
            "export interface Workflow<I> {",
            "  id: string;",
            "  name: string;",
+           "  /** The inputs it cannot run without — what a form marks required. */",
+           "  required?: readonly string[];",
            "  readonly __input?: I;",
            "}",
            "",
-           "function wf<I>(id: string, name: string): Workflow<I> {",
-           "  return { id, name };",
+           "function wf<I>(id: string, name: string, required: readonly string[] = []): Workflow<I> {",
+           "  return { id, name, required };",
            "}",
            ""]
     body = []
@@ -298,7 +300,13 @@ def emit_workflows(doc: dict) -> str:
         typ = ("{\n" + "\n".join(props) + "\n  }") if props else "Record<string, never>"
         if purpose:
             body.append(f"  /** {w.get('name')} — {purpose[:200]} */")
-        body.append(f"  {keys[wid]}: wf<{typ}>({json.dumps(wid)}, {json.dumps(str(w.get('name') or wid))}),")
+        # The required names travel as a VALUE too: the type says which inputs
+        # a form must have, and only a value can reach the rendered form — an
+        # "asterisk marks required" card with no asterisk anywhere (h7gmi93x).
+        required = [str(i["name"]) for i in w.get("inputs") or []
+                    if isinstance(i, dict) and i.get("name") and i.get("required", True)]
+        body.append(f"  {keys[wid]}: wf<{typ}>({json.dumps(wid)}, {json.dumps(str(w.get('name') or wid))}"
+                    + (f", {json.dumps(required)}" if required else "") + "),")
     out.append("export const workflows = {")
     out.extend(body)
     out.append("} as const;")

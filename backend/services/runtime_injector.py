@@ -1400,9 +1400,12 @@ export async function POST(
     // A LAUNCH IS GATED BY THE ROLES ITS PAGES DECLARE. The Blueprint names
     // the pages a workflow launches from and the roles those pages serve;
     // Reception could post a refund through the API because nothing here
-    // compared the two. "*" admits an anonymous caller (a public page).
+    // compared the two. "*" is a public page: it admits EVERYONE. It used to
+    // admit only a caller who was signed OUT, so signing in locked a person
+    // out of every workflow a public page runs — the seeded admin got 403 on
+    // Add Data while an anonymous visitor could save (h7gmi93x).
     const allowed = LAUNCH_ROLES[id] ?? null;
-    if (allowed && !allowed.includes(String(user?.role ?? "")) && !(allowed.includes("*") && !su?.id)) {
+    if (allowed && !allowed.includes("*") && !allowed.includes(String(user?.role ?? ""))) {
       return NextResponse.json({ error: "This action is not available to your role" }, { status: 403 });
     }
     let taskId = body.taskId;

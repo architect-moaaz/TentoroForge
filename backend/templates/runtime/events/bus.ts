@@ -206,7 +206,9 @@ async function _dispatchEvent(
     // triggerWorkflow persists a pending task itself if the run pauses.
     const result = await wfmod.triggerWorkflow(wf.id, input, user);
     started += 1;
-    if (result?.status === "failed") {
+    // A refused run is the rules saying no to this event — retrying it
+    // asks the same question again. Only a run that broke is retried.
+    if (result?.status === "failed" && !result.refused) {
       throw new Error(`workflow ${wf.id} failed: ${result.error ?? "unknown"}`);
     }
   }
@@ -284,7 +286,7 @@ async function _resumeWaiters(
       }
     }
     resumed += 1;
-    if (result?.status === "failed") {
+    if (result?.status === "failed" && !result.refused) {
       throw new Error(
         `resume of ${task.workflow_id} (task ${task.id}) failed: ${result.error ?? "unknown"}`,
       );

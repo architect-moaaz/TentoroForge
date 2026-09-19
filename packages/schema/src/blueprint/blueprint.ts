@@ -1314,6 +1314,18 @@ export const WorkflowStep = z.object({
           z.union([z.string(), z.number(), z.boolean(), z.null()]),
         )
         .optional(),
+      /**
+       * On an `end`: the run stopped WITHOUT doing what it was asked — a
+       * validation branch. Reported to the caller as a failure carrying
+       * `message`. Both ends of a validate-then-save workflow used to complete
+       * alike, so an empty form was told "Record added successfully."
+       * (h7gmi93x). Not `outcome`: agents already write that as a free label
+       * (`not_found`, `created`, an approval's `rejected`), which is theirs.
+       */
+      refused: z.boolean().optional(),
+      /** On a refused `end`: the sentence the person is shown. Also a
+       *  notification's text on `send_notification`. */
+      message: z.string().optional(),
     })
     .catchall(z.unknown())
     .default({}),
