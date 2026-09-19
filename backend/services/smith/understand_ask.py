@@ -55,6 +55,24 @@ Return ONLY a JSON object with exactly these keys:
       "rename the delete button to archive" is one ask, not two. Never put
       the whole message in as the first item — that reads as a step that
       does everything.
+      EVERY ask, the layout ones too: "grid view with images", "make it
+      scrollable", "a home page listing the tools" are asks, each about a
+      screen — name the screen in the ask. A long message that is hard to
+      follow is still a list of asks; list what you can read and ask about
+      the rest, rather than answering that you did not follow.
+      WHAT A SCREEN CALLS A THING IS NOT WHAT THE DATA MODEL CALLS IT. "The
+      title should be named as product", "call them products on the page"
+      are the WORDING on screens — never a rename of the entity, which
+      rewrites the data, the processes and every page. Only an explicit "the
+      records should be called X in the data" is that.
+      WHAT THE APPLICATION CANNOT DO IS SAID, NOT DROPPED. It cannot fetch
+      pictures or facts from the internet: photos come from the people who
+      list things (an image field they upload to). Say so in
+      `clarification_needed` and offer the nearest thing; do not silently
+      leave the ask out. It CAN take a person's current location: a
+      `location` field ({{lat, lng}}, shared from the browser) and distances
+      ("0.4 mi away") in place of coordinates — latitude and longitude
+      fields are replaced by one `location` field plus an area name.
   "clarification_options": when the question offers CHOICES, the choices as
       short labels, 2 to 5, each a complete answer on its own that they can
       pick with one click — ["A new page of its own", "A panel on the screen
@@ -219,6 +237,17 @@ Return ONLY a JSON object with exactly these keys:
                         answer with it. Not "remove" or any other edit,
                         however much the sentence sounds like a complaint
                         about one control.
+                        WRONG BEHAVIOUR IS NOT A CRASH. "After login it takes
+                        me to the signup page", "the button goes to the wrong
+                        screen", "the list is empty" — the app did something
+                        other than they expected, without an error. That is
+                        NOT explain_crash: put in `answer` what the application
+                        is defined to do there (the Accounts section says
+                        where signing in and signing up land; the workflows
+                        say what each button runs), whether that matches what
+                        they saw, and what can be changed — and if the
+                        definition is right but they saw otherwise, say that
+                        a page review ("verify & fix") signs in and checks it.
       "explain_slowness" — the RUNNING application is slow and they are
                         saying so: "it's really slow", "this takes forever",
                         "why is it so slow", "loading takes ages".
@@ -405,6 +434,11 @@ Then fill in ONLY the fields that verb needs. Leave the others "".
   compose_route needs:
   "route": the path of the screen, as it appears in the Blueprint ("/",
       "/sessions"). The screen's name works too if that is how they said it.
+  "change": what should be different on that screen, as one instruction a
+      designer could act on WITHOUT this conversation — resolve "it", "that",
+      "what I asked for" from the exchange above. "Built the discover page it
+      is not there", after they asked for a photo grid, is "show the tools on
+      Discover as a grid of cards, each with its photo, name and description".
 
   add_widgets needs:
   "route": as above, and

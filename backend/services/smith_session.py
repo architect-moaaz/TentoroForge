@@ -715,8 +715,14 @@ class SmithSession:
         # `understand_ask` used means the wait carries the model's reasoning
         # instead of a spinner — and it is the same sink, so a turn reads as
         # one continuous train of thought rather than two disconnected ones.
+        # WHAT TO CHANGE, SAID SO THE PAGE WRITER CAN ACT ON IT ALONE. It was
+        # handed the last message, so "built the discover page it is not
+        # there" reached it with no "it" (UAT jubyt8jk). The understanding
+        # restates the change; their words ride along.
+        change = str(understanding.get("change") or "").strip()
+        request = f"{change}\n\n(In their words: \"{user_message}\")" if change else user_message
         out = compose_run(str(self.output_dir), verb, route=route,
-                          widgets=widgets, request=user_message,
+                          widgets=widgets, request=request,
                           reasoning=self._reasoning)
 
         if not out.get("applied"):
@@ -773,7 +779,11 @@ class SmithSession:
         """
         self._ask = step
         self._last_message = step
-        return self._iterate(step, None)
+        self._in_plan_step = True
+        try:
+            return self._iterate(step, None)
+        finally:
+            self._in_plan_step = False
 
     def _revert(self) -> "TurnResult":
         """Undo the last change (§91/§93).
@@ -1095,6 +1105,13 @@ class SmithSession:
             # Still unanswered: keep it for the turn that answers. The
             # question itself is not kept — it is Smith's, not the ask.
             pending_ask.remember(self.output_dir, self._ask)
+        # THE PLAN STAYS IN VIEW. A step that asked a question finished on the
+        # answer's turn, which is an ordinary turn — and it said nothing of the
+        # steps still waiting, so they were never done (UAT jubyt8jk).
+        elif result.status == "resolved":
+            note = _plan_mod.remaining_note(_plan_mod.peek(self.output_dir))
+            if note and note.strip() not in (result.answer or ""):
+                result.answer = (result.answer or "") + note
         return result
 
     def _iterate(self, user_message: str,
@@ -1162,7 +1179,16 @@ class SmithSession:
             if not _confirm.granted(self.output_dir, self._last_message, "plan", " | ".join(steps)):
                 _confirm.remember(self.output_dir, _confirm.fingerprint("plan", " | ".join(steps)))
                 planned, over = _plan.split(steps)
-                _plan.remember(self.output_dir, planned)
+                # A STEP THAT SPLITS KEEPS THE PLAN IT IS PART OF. Its sub-steps
+                # go in front of what was still to do; they used to replace it,
+                # and "show the area" and "take the current location" vanished
+                # after "next" split the step before them (UAT jubyt8jk).
+                if getattr(self, "_in_plan_step", False):
+                    rest = [r for r in _plan.peek(self.output_dir) if r not in planned]
+                    _plan.remember_all(self.output_dir, planned + over + rest)
+                    over = over + rest
+                else:
+                    _plan.remember(self.output_dir, planned)
                 return TurnResult(status="asked",
                                   answer=_plan.as_question(planned, over),
                                   options=[_plan.ALL_LABEL, _plan.FIRST_LABEL,

@@ -679,6 +679,35 @@ def _with_widgets(doc: dict, props: Sequence[Any]) -> dict:
     return out
 
 
+def coded_app(doc: dict) -> bool:
+    """Whether this application's pages are written as React code."""
+    return any(isinstance(r, dict) and r.get("view") for r in doc.get("pageCode") or [])
+
+
+def _where(svc: Any, route: str) -> str:
+    """A page as a person finds it: its name, its address, and whether the
+    menu leads there. "composed /" was the whole reply once, and the person
+    looked for the change on the page they thought of — "built the discover
+    page it is not there" (UAT jubyt8jk)."""
+    page = _page_for_route(svc.doc, route) or {}
+    name = str(page.get("name") or "").strip()
+    label = ""
+
+    def walk(nodes: Any) -> None:
+        nonlocal label
+        for n in nodes or []:
+            if isinstance(n, dict):
+                if str(n.get("page") or "") == str(page.get("id") or "-") and not label:
+                    label = str(n.get("label") or "")
+                walk(n.get("children"))
+
+    walk(((svc.doc.get("navigation") or {}).get("tree")))
+    where = f"**{name}** (`{route}`)" if name else f"`{route}`"
+    if label:
+        return f"{where}, which the menu calls “{label}”"
+    return f"{where} — it is not in the menu; open it at `{route}`"
+
+
 def recode_page(svc: Any, route: str, *, app_root: str, request: str,
                 wanted: Sequence[str] = (), executor: Any = None, client: Any = None,
                 reasoning: Any = None) -> dict:
@@ -694,7 +723,10 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
 
     page = _page_for_route(svc.doc, route)
     row = code_row(svc.doc, str((page or {}).get("id")))
-    if page is None or row is None:
+    # In an application whose pages are code, a page with none yet is WRITTEN
+    # as code (no current version) — it went to the layout composer, took
+    # seven minutes for "/", and came back a layout in a coded app.
+    if page is None or (row is None and not coded_app(svc.doc)):
         raise ComposeError(f"{route} is not a page written as code.")
     usage = RunUsage.for_app(svc, phase="change")
     run = executor or make_executor(svc, tiered_router(reasoning=reasoning), usage=usage, reasoning=reasoning)
@@ -764,9 +796,20 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
     declared = {str(w.body.get("label")) for w in widgets}
     missing = [str(w.get("label")) for w in svc.doc.get("widgets") or []
                if str(w.get("label")) in declared and f"widgets.{keys.get(str(w.get('id')))}" not in view]
-    hay = view.lower()
-    missing += [w for w in wanted if (word := _distinctive(w)) and word not in hay
-                and not any(word in d.lower() for d in declared)]
+    # A FIELD ASKED FOR IS CHECKED BY ITS NAME; a layout ask is not guessed
+    # at. The check took a "distinctive" word from each ask and searched the
+    # code for it: "Tools grid — nearby available tools…" was reported as not
+    # shown on a page rewritten as a grid, because "nearby" is not in its
+    # source (UAT replay). What cannot be checked is not claimed missing.
+    def norm(x: Any) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(x or "").lower())
+
+    fields = {norm(f.get("name")): str(f.get("name")) for e in (svc.doc.get("data") or {}).get("entities") or []
+              for f in e.get("fields") or [] if isinstance(f, dict) and f.get("name")}
+    for w in wanted:
+        name = fields.get(norm(w))
+        if name and name not in view:
+            missing.append(w)
     return {"applied": True, "committed": committed, "version": version,
             "reason": "", "missing": missing, "widgets": sorted(declared)}
 
@@ -813,7 +856,7 @@ def run(output_dir: str, verb: str, *, route: str = "",
         ([f"; declared {', '.join(prepared['declared'])} on it"] if prepared["declared"] else [])
         + ([f"; created the edit screen {', '.join(prepared['created'])}"] if prepared["created"] else []))
     page = _page_for_route(svc.doc, route)
-    if page is not None and code_row(svc.doc, str(page.get("id"))) is not None:
+    if page is not None and (code_row(svc.doc, str(page.get("id"))) is not None or coded_app(svc.doc)):
         try:
             out = recode_page(svc, route, app_root=app_root, request=request, wanted=wanted,
                               reasoning=reasoning)
@@ -823,7 +866,7 @@ def run(output_dir: str, verb: str, *, route: str = "",
             logger.exception("[smith] rewriting %s failed", route)
             return {"applied": False, "edited_paths": [], "reason": f"{type(exc).__name__}: {exc}"}
         added = out.get("widgets") or []
-        did = (f"I rewrote **{route}**{extra}"
+        did = (f"I rewrote {_where(svc, route)}{extra}"
                + (f", adding {', '.join(added)}" if added else "")
                + (f", but the new screen does not show {', '.join(out['missing'])}" if out["missing"] else "")
                + ".")
@@ -872,11 +915,11 @@ def run(output_dir: str, verb: str, *, route: str = "",
         if verb == "add_widgets":
             result = add_widgets(svc, route, wanted, app_root=app_root,
                                  request=request, reasoning=reasoning)
-            did = f"added {', '.join(wanted)} to {route}{extra}"
+            did = f"I added {', '.join(wanted)} to {_where(svc, route)}{extra}"
         elif verb == "compose_route":
             result = compose_route(svc, route, app_root=app_root,
                                    request=request, reasoning=reasoning)
-            did = f"composed {route}{extra}"
+            did = f"I laid out {_where(svc, route)} again{extra}"
     except ComposeError as exc:
         # The composer declining is a real outcome and says so.
         return {"applied": False, "edited_paths": [], "reason": str(exc)}

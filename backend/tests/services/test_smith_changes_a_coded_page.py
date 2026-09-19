@@ -156,7 +156,17 @@ def test_smith_routes_a_coded_page_to_its_code_and_a_laid_out_one_to_the_compose
                         type("C", (), {"applied": True, "committed": [], "version": 2, "reason": ""})())
     compose.run(str(tmp_path), "compose_route", route="/dashboard", request="add a heatmap")
     compose.run(str(tmp_path), "compose_route", route="/plain", request="add a heatmap")
-    assert calls == [("code", "/dashboard"), ("layout", "/plain")]
+    # In an app whose pages are code, a page with none yet is written as code
+    # too (UAT: "/" went to the layout composer for seven minutes).
+    assert calls == [("code", "/dashboard"), ("code", "/plain")]
+    # An app of layouts still goes to the composer.
+    calls.clear()
+    from services.blueprint.service import BlueprintService
+    s = BlueprintService.load(output_dir=tmp_path)
+    s.doc["pageCode"] = []
+    s.save()
+    compose.run(str(tmp_path), "compose_route", route="/plain", request="add a heatmap")
+    assert calls == [("layout", "/plain")]
 
 
 # --- a number grouped into ranges --------------------------------------------

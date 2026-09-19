@@ -193,8 +193,12 @@ def crash_answer(output_dir: str, doc: dict) -> tuple[str, list[str]]:
             "part-way, a button whose action throws — and none have come in.\n\n"
             "If you are looking at one right now, it may not have reached me "
             "yet: reports only come from a *built and running* application, "
-            "and never from a preview that has not been started.",
-            [])
+            "and never from a preview that has not been started.\n\n"
+            "If something behaves wrongly rather than failing — a page that "
+            "opens the wrong screen, a list that stays empty — tell me what "
+            "you expected to happen and I will check it against how the app "
+            "is set up, or I can sign in and read every page as it renders.",
+            ["Verify & fix"])
 
     shown, rest = found[:SHOWN], found[SHOWN:]
     lines = ["Here is what has been failing."]

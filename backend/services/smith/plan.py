@@ -67,6 +67,21 @@ def remember(output_dir: str | Path, steps: list[str]) -> None:
         logger.warning("[smith] could not record the plan: %s", exc)
 
 
+def remember_all(output_dir: str | Path, steps: list[str]) -> None:
+    """Keep every step still to do, in order — a plan whose step split into
+    sub-steps holds those AND the rest, however many that is."""
+    tidy = [" ".join(str(s).split()) for s in (steps or []) if str(s or "").strip()]
+    if not tidy:
+        clear(output_dir)
+        return
+    try:
+        path = _path(output_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"steps": tidy}, indent=2), "utf-8")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[smith] could not record the plan: %s", exc)
+
+
 def peek(output_dir: str | Path) -> list[str]:
     """The steps still waiting, without consuming them."""
     try:

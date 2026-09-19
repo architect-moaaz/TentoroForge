@@ -135,7 +135,9 @@ def test_nothing_reported_says_so_and_says_why_it_might_not_have_arrived(tmp_pat
     answer, options = incidents.crash_answer(str(tmp_path), DOC)
     assert "Nothing has been reported as crashing" in answer
     assert "built and running" in answer
-    assert options == []
+    # Not a dead end: wrong behaviour is not a crash, and there is a next step.
+    assert "tell me what you expected" in answer
+    assert options == ["Verify & fix"]
 
 
 def test_the_answer_names_the_screen_and_the_process_in_the_owners_words(tmp_path):

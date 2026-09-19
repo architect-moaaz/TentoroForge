@@ -48,6 +48,40 @@ def _live(items: Any) -> list[dict]:
             if isinstance(i, dict) and i.get("status") != "SUPERSEDED"]
 
 
+def _accounts(doc: dict[str, Any], role_names: dict[str, str]) -> dict[str, Any]:
+    """Who signs in and where they land — read off the same functions the
+    projection uses, so Smith says what the application actually does. Asked
+    "after login it takes me to the signup page", Smith had no way to say
+    where signing in is meant to go."""
+    try:
+        from services.blueprint.account_model import (
+            account_entity, admin_role, after_signup_route, auth_page_bodies, home_route,
+            prerequisites, signup_role,
+        )
+    except Exception:  # noqa: BLE001 — an older tree without the account model
+        return {}
+    pages = _live(doc.get("pages"))
+    auth = {str(p.get("auth")): str(p.get("route")) for p in pages if p.get("pattern") == "auth"}
+    ent = account_entity(doc) or {}
+    rules = []
+    wf_names = {str(w.get("id")): str(w.get("name")) for w in _live(doc.get("workflows"))}
+    page_routes = {str(p.get("id")): str(p.get("route")) for p in pages}
+    for r in prerequisites(doc):
+        rules.append({"rule": r.get("name"),
+                      "gates": [wf_names.get(str(g), str(g)) for g in r.get("gates") or []],
+                      "done_on": page_routes.get(str(r.get("page") or ""), "")})
+    return {
+        "sign_in_page": auth.get("login") or ("/login" if not auth_page_bodies(doc) else ""),
+        "sign_up_page": auth.get("signup") or "",
+        "after_sign_in": home_route(doc),
+        "after_sign_up": after_signup_route(doc),
+        "person_record": ent.get("name") or "",
+        "sign_up_role": signup_role(doc) or "",
+        "admin_role": admin_role(doc) or "",
+        "must_first": rules,
+    }
+
+
 def _step_lines(w: dict[str, Any], role_names: dict[str, str]) -> list[str]:
     """A workflow's steps as one short line each — what it changes, who it
     tells, who it asks, when it refuses. The engine's own step graph is the
@@ -108,6 +142,7 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "domain": domain,
+        "accounts": _accounts(doc, role_names),
         # WHAT THE APP MUST DO, AND WHERE EACH LINE CAME FROM. Smith answers
         # questions from this context, and "which requirements came from the
         # document I uploaded?" has its answer in `requirements[].evidence`

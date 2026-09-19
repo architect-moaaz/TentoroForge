@@ -107,14 +107,15 @@ def blueprint_to_context(
     workflows = _render_workflows(bp)
     pages = _render_pages(bp)
     integrations = _render_integrations(bp)
+    accounts = _render_accounts(bp)
     decisions = _render_design_decisions(bp)
 
     # WHAT SURVIVES A SMALL BUDGET is what Smith answers and edits from: the
     # entities, workflows and pages. Requirements, rules, the domain prose and
     # the decisions are shortened first — the cap used to cut the END, which
     # was the pages and integrations.
-    sections = [header, domain, requirements, entities, rules, workflows, pages, integrations, decisions]
-    keep_whole = {id(header), id(entities), id(workflows), id(pages), id(integrations)}
+    sections = [header, domain, requirements, entities, rules, workflows, pages, integrations, decisions, accounts]
+    keep_whole = {id(header), id(entities), id(workflows), id(pages), id(integrations), id(accounts)}
     over = sum(len(x) for x in sections if x) - (budget.max_chars - 200)
     if over > 0:
         for i in (8, 2, 4, 1):          # decisions, requirements, rules, domain
@@ -377,6 +378,27 @@ def _render_pages(bp: Blueprint) -> str:
                 why = c.get("why") or ""
                 if choice:
                     lines.append(f"  · {choice}" + (f"  ({why})" if why else ""))
+    return "\n".join(lines)
+
+
+def _render_accounts(bp: Blueprint) -> str:
+    """Who signs in and where each kind of person lands."""
+    a = getattr(bp, "accounts", None) or {}
+    if not isinstance(a, dict) or not a:
+        return ""
+    lines = ["## Accounts"]
+    if a.get("sign_in_page"):
+        lines.append(f"- Sign in at `{a['sign_in_page']}`; after signing in a person lands on `{a.get('after_sign_in') or '/'}`")
+    if a.get("sign_up_page"):
+        lines.append(f"- Sign up at `{a['sign_up_page']}`; a new account lands on `{a.get('after_sign_up') or '/'}`"
+                     + (f" with the role {a['sign_up_role']}" if a.get("sign_up_role") else ""))
+    if a.get("person_record"):
+        lines.append(f"- Each person's own record is a **{a['person_record']}**, created with their login")
+    if a.get("admin_role"):
+        lines.append(f"- The built-in admin account holds the role {a['admin_role']}")
+    for r in a.get("must_first") or []:
+        lines.append(f"- Must be done first: **{r.get('rule')}** — before {', '.join(r.get('gates') or [])}"
+                     + (f" (done on `{r['done_on']}`)" if r.get("done_on") else ""))
     return "\n".join(lines)
 
 

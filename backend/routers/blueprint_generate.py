@@ -1747,8 +1747,13 @@ async def smith_chat(
                 reasoning_fn=lambda text, kind="reasoning", node="": emit(
                     "thought", {"text": text, "kind": kind, "node": node}),
             ))
+            # A TURN ALWAYS ANSWERS. An empty answer posted an empty bubble —
+            # or, read back from the transcript, no reply at all.
+            answer_text = (turn_result.answer or "").strip() or (
+                "I could not work out what to change from that. Tell me which screen "
+                "(for example /tools) and what should be different on it.")
             emit("message", {
-                "text": turn_result.answer,
+                "text": answer_text,
                 "options": turn_result.options,
                 "diffSummary": turn_result.diff_summary,
                 "status": turn_result.status,
@@ -1780,7 +1785,11 @@ async def smith_chat(
             # A build is a very long turn with its own steady progress stream,
             # so its bound is generous (a genuinely dead build, not a slow one);
             # a compose/define/answer that runs past ten minutes is stuck.
-            _turn_timeout = 3600.0 if req.approved else 600.0
+            # A page review ("Verify & fix") reads every page in a browser —
+            # fifteen to twenty-five minutes on thirteen pages — and was cut
+            # loose at ten with "Still building", its result never said.
+            _reviewing = _is_verify_consent(req.message)
+            _turn_timeout = 3600.0 if (req.approved or _reviewing) else 600.0
             # Shielded so the timeout does not cancel the executor future — the
             # background thread cannot be cancelled anyway, and shielding lets it
             # set its result cleanly (no "set result on cancelled future" noise).
@@ -1805,10 +1814,13 @@ async def smith_chat(
                 # actually happening — still working, tracking it, will report —
                 # not "reload in a moment", which read as "something went wrong".
                 emit("message", {
-                    "text": "Still building — this one's taking a while, but it's "
-                            "moving, not stuck. I'm tracking it and I'll post the "
-                            "result here the moment it's done; you don't need to "
-                            "do anything.",
+                    "text": ("Still checking the pages — it's moving, not stuck. I'll post what I "
+                             "found and fixed here the moment it's done; you don't need to do anything."
+                             if _reviewing else
+                             "Still working on it — this one's taking a while, but it's "
+                             "moving, not stuck. I'm tracking it and I'll post the "
+                             "result here the moment it's done; you don't need to "
+                             "do anything."),
                 })
                 emit("done", {"status": "timeout"})
                 # WHEN THE BACKGROUND BUILD ACTUALLY FINISHES, SAY SO. The panel
@@ -1825,6 +1837,16 @@ async def smith_chat(
                 _inner.add_done_callback(_late_done)
         except Exception as exc:  # noqa: BLE001 - the client needs the reason
             logger.exception("smith turn failed for %s", project_id)
+            # SAID IN THE CONVERSATION, NOT ONLY AS AN EVENT. Only `message` is
+            # written to the transcript, so a turn that failed left the user's
+            # message unanswered for good — "built the discover page it is not
+            # there" got no reply at all (UAT jubyt8jk, 18 Sep).
+            emit("message", {
+                "text": ("Something went wrong on my side while working on that, and I stopped "
+                         f"({type(exc).__name__}). Please send it again — if it fails twice, "
+                         "tell me which screen it is about and I will take a smaller step."),
+                "status": "error",
+            })
             emit("error", {"message": str(exc)})
         finally:
             # ONE LINE, ALWAYS. Whatever happened — answered, asked, ran the
