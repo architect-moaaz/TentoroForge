@@ -11,7 +11,7 @@ vi.mock("sonner", () => ({ toast: { warning: vi.fn(), error: vi.fn(), info: vi.f
 const calls: { name: string; args: unknown[] }[] = [];
 const api = {
   pages: vi.fn(), open: vi.fn(), apply: vi.fn(), restore: vi.fn(), check: vi.fn(), propose: vi.fn(),
-  applyProposal: vi.fn(), discardProposal: vi.fn(), history: vi.fn(),
+  applyProposal: vi.fn(), discardProposal: vi.fn(), history: vi.fn(), jit: vi.fn(),
 };
 vi.mock("../api", async () => {
   const real = await vi.importActual<typeof import("../api")>("../api");
@@ -44,6 +44,7 @@ beforeEach(async () => {
   Object.values(api).forEach((f) => f.mockReset());
   api.pages.mockResolvedValue({ entryPage: "PAGE-001", pages: [{ id: "PAGE-001", name: "Records", route: "/records", purpose: "", pattern: null, access: "authenticated", coded: true, module: null, navigatesTo: [] }] });
   api.open.mockResolvedValue(doc("rev1", "Records"));
+  api.jit.mockImplementation(async (_p: string, pageId: string) => ({ js: `js-${pageId}-${calls.filter((c) => c.name === "jit").length}`, css: "", revision: "rev1", ms: 5, cached: false, data: "sample", warnings: [] }));
   await useEditorStore.getState().init("project-1");
 });
 
@@ -117,5 +118,33 @@ describe("the store's transactions", () => {
     await useEditorStore.getState().applyProposal();
     expect(calls.some((c) => c.name === "applyProposal")).toBe(false);
     expect(useEditorStore.getState().smith.error).toContain("changed since");
+  });
+});
+
+
+describe("the instant canvas", () => {
+  it("builds the open page on open, rebuilds it after a saved change, and follows the app-wide preview", async () => {
+    let st = useEditorStore.getState();
+    expect(st.source).toBe("jit");
+    expect(st.frameDoc?.pageId).toBe("PAGE-001");
+    expect(calls.filter((c) => c.name === "jit")).toHaveLength(1);
+
+    api.apply.mockResolvedValue({ revision: "rev2", model: model("Cases"), source: { view: "<h1>Cases</h1>", load: "" }, checked: false, unchanged: false, version: 3 });
+    await st.setText("r0.0", "Cases");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls.filter((c) => c.name === "jit")).toHaveLength(2);
+
+    useEditorStore.setState({ pages: [...useEditorStore.getState().pages, { id: "PAGE-002", name: "One", route: "/records/[id]", purpose: "", pattern: null, access: "authenticated", coded: true, module: null, navigatesTo: [] }] });
+    useEditorStore.getState().previewNavigate("PAGE-002", { id: "sample-record-2" }, {});
+    await new Promise((r) => setTimeout(r, 0));
+    st = useEditorStore.getState();
+    expect(st.frameTarget).toEqual({ pageId: "PAGE-002", params: { id: "sample-record-2" }, search: {} });
+    expect(st.previewStack.map((t) => t.pageId)).toEqual(["PAGE-001"]);
+    const last = calls.filter((c) => c.name === "jit").pop()!;
+    expect(last.args.slice(1, 3)).toEqual(["PAGE-002", { params: { id: "sample-record-2" }, search: {}, fresh: undefined }]);
+    expect(st.pageId).toBe("PAGE-001");
+    useEditorStore.getState().previewBack();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(useEditorStore.getState().frameTarget?.pageId).toBe("PAGE-001");
   });
 });

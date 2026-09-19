@@ -9,10 +9,11 @@ directory only.
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +22,7 @@ from database import get_db
 from models.auth import PlatformUser
 from services.project_paths import project_root
 from services.project_service import get_project_with_auth
-from services.react_editor import service, smith
+from services.react_editor import jit, service, smith
 from services.react_editor.service import EditorError, Project
 
 router = APIRouter(tags=["react-editor"])
@@ -98,6 +99,22 @@ async def apply_transaction(project_id: uuid.UUID, page_id: str, req: ApplyReque
     project = await _project(project_id, user, db)
     return await _run(service.apply, project, page_id, base_revision=req.baseRevision, ops=req.ops,
                       label=req.label[:120])
+
+
+@router.get("/api/projects/{project_id}/react-editor/pages/{page_id}/jit")
+async def render_page(project_id: uuid.UUID, page_id: str, params: str | None = Query(default=None),
+                      search: str | None = Query(default=None), fresh: bool = Query(default=False),
+                      user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """The page bundled on demand with sample data — no dev server needed."""
+    project = await _project(project_id, user, db)
+
+    def _dict(raw: str | None) -> dict[str, str]:
+        try:
+            out = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            out = {}
+        return {str(k): str(v) for k, v in out.items()} if isinstance(out, dict) else {}
+    return await _run(jit.build, project, page_id, params=_dict(params), search=_dict(search), fresh=fresh)
 
 
 @router.get("/api/projects/{project_id}/react-editor/pages/{page_id}/history")

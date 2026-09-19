@@ -192,3 +192,28 @@ describe("templates", () => {
     expect(buttonAction(linkBtn, model)).toEqual({ kind: "page", detail: "/nowhere" });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Preview navigation — a path the app moved to, back to the page it is
+// ---------------------------------------------------------------------------
+
+import { matchRoute, pageForPath } from "../Canvas";
+
+describe("preview navigation", () => {
+  const pages = [
+    { id: "list", route: "/records" }, { id: "new", route: "/records/new" }, { id: "one", route: "/records/[id]" },
+    { id: "edit", route: "/records/[id]/edit" }, { id: "home", route: "/" },
+  ];
+  it("reads a route's parameters from a path", () => {
+    expect(matchRoute("/records/42", "/records/[id]")).toEqual({ id: "42" });
+    expect(matchRoute("/records/42/edit", "/records/[id]/edit")).toEqual({ id: "42" });
+    expect(matchRoute("/records/42/edit", "/records/[id]")).toBeNull();
+    expect(matchRoute("/", "/")).toEqual({});
+  });
+  it("prefers a static page over a parameterised one and keeps the query", () => {
+    expect(pageForPath("/records/new", pages)?.id).toBe("new");
+    expect(pageForPath("/records/sample-record-2?tab=history", pages)).toEqual({ id: "one", params: { id: "sample-record-2" }, search: { tab: "history" } });
+    expect(pageForPath("/records/", pages)?.id).toBe("list");
+    expect(pageForPath("/nowhere", pages)).toBeNull();
+  });
+});

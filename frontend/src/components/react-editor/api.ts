@@ -64,7 +64,25 @@ const post = <T>(path: string, body?: unknown, signal?: AbortSignal) =>
 
 const base = (projectId: string) => `/api/projects/${projectId}/react-editor`;
 
+export interface JitBundle {
+  js: string;
+  css: string;
+  revision: string;
+  ms: number;
+  cached: boolean;
+  data: "sample";
+  warnings: string[];
+}
+
 export const editorApi = {
+  jit: (projectId: string, pageId: string, opts: { params?: Record<string, string>; search?: Record<string, string>; fresh?: boolean } = {}, signal?: AbortSignal) => {
+    const q = new URLSearchParams();
+    if (opts.params && Object.keys(opts.params).length) q.set("params", JSON.stringify(opts.params));
+    if (opts.search && Object.keys(opts.search).length) q.set("search", JSON.stringify(opts.search));
+    if (opts.fresh) q.set("fresh", "true");
+    const qs = q.toString();
+    return call<JitBundle>(`${base(projectId)}/pages/${pageId}/jit${qs ? `?${qs}` : ""}`, { signal });
+  },
   pages: (projectId: string) => call<{ entryPage: string; pages: PageListItem[] }>(`${base(projectId)}/pages`),
   open: (projectId: string, pageId: string) => call<PageDoc>(`${base(projectId)}/pages/${pageId}`),
   apply: (projectId: string, pageId: string, baseRevision: string, ops: Op[], label: string) =>

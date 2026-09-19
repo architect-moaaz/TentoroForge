@@ -2,7 +2,7 @@
 import { useState } from "react";
 import {
   Check, ClipboardCheck, Code2, Eye, History, Loader2, Monitor, MousePointer2, PanelLeft, PanelRight,
-  Pencil, Play, Redo2, RotateCcw, Smartphone, SquareDashedMousePointer, Tablet, Undo2, X,
+  Pencil, Play, Redo2, RotateCcw, Server, Smartphone, SquareDashedMousePointer, Tablet, Undo2, X, Zap,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -62,6 +62,8 @@ export function TopBar({ preview }: { preview: ReturnType<typeof usePreview> }) 
   const setShowHistory = useEditorStore((s) => s.setShowHistory);
   const setShowReadiness = useEditorStore((s) => s.setShowReadiness);
   const runCheck = useEditorStore((s) => s.runCheck);
+  const source = useEditorStore((s) => s.source);
+  const setSource = useEditorStore((s) => s.setSource);
   const [widthDraft, setWidthDraft] = useState<string | null>(null);
 
   const save = saveLabel(saveState, saveError);
@@ -128,7 +130,11 @@ export function TopBar({ preview }: { preview: ReturnType<typeof usePreview> }) 
       <Button size="sm" variant="outline" className="h-7 shrink-0 gap-1 text-xs" onClick={() => { setShowReadiness(true); void runCheck(); }} title="Check whether this page is ready to publish">
         <ClipboardCheck className="h-3.5 w-3.5" /><span className="hidden xl:inline">Ready to publish?</span><span className="xl:hidden">Check</span>
       </Button>
-      {!preview.port && (
+      <div className="flex items-center rounded-md bg-muted p-0.5" role="group" aria-label="Where the page comes from">
+        <Seg active={source === "jit"} onClick={() => setSource("jit")} title="Instant: the page is built on the spot with sample data — nothing to start"><Zap className="h-3.5 w-3.5" /><span className="hidden xl:inline">Instant</span></Seg>
+        <Seg active={source === "app"} onClick={() => setSource("app")} title="Live app: your running application with its real data"><Server className="h-3.5 w-3.5" /><span className="hidden xl:inline">Live app</span></Seg>
+      </div>
+      {source === "app" && !preview.port && (
         <Button size="sm" className="h-7 shrink-0 text-xs" disabled={preview.isStarting} onClick={() => void preview.startPreview()}>
           {preview.isStarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />} Start the app
         </Button>

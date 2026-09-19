@@ -192,7 +192,7 @@ async def list_project_files(
         return {"project_id": str(project.id), "files": []}
 
     files = []
-    skip_dirs = {"node_modules", ".next", ".git", "__pycache__"}
+    skip_dirs = {"node_modules", ".next", ".git", "__pycache__", ".forge-jit", ".forge-check"}
     for path in sorted(project_dir.rglob("*")):
         if path.is_file() and not any(part in skip_dirs for part in path.parts):
             rel = str(path.relative_to(project_dir))
@@ -233,7 +233,8 @@ async def download_project(
     if not project_dir or not project_dir.exists():
         raise HTTPException(status_code=404, detail="Project directory not found")
 
-    skip_dirs = {"node_modules", ".next", ".git"}
+    # .forge-jit / .forge-check are the editor's and the compiler's scratch — never part of the app.
+    skip_dirs = {"node_modules", ".next", ".git", ".forge-jit", ".forge-check"}
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(project_dir.rglob("*")):

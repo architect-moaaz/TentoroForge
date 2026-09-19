@@ -44,17 +44,8 @@ export function ReactEditor({ projectId }: ReactEditorProps) {
 
   useEffect(() => { void init(projectId); }, [projectId, init]);
 
-  // The canvas is the running app: make sure its dev server is up.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      await preview.checkStatus();
-      if (cancelled) return;
-      if (!useEditorStore.getState().doc) return;
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  // The live-app source needs the dev server; learn whether it is up already.
+  useEffect(() => { void preview.checkStatus(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keyboard shortcuts that belong to the editor shell (the canvas forwards its own).
   useEffect(() => {

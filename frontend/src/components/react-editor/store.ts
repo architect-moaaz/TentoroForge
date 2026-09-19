@@ -11,7 +11,7 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 
-import { editorApi, failureOf } from "./api";
+import { editorApi, failureOf, type JitBundle } from "./api";
 import { breakpointForWidth } from "./lib/classes";
 import { mainRoot, plainName, topmost } from "./lib/plain";
 import type { Breakpoint, Device, Finding, HistoryEntry, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, Rect } from "./types";
@@ -23,6 +23,23 @@ export type SaveState = "saved" | "saving" | "checking" | "failed";
 export type Mode = "design" | "preview";
 export type ViewLevel = "simple" | "advanced";
 export type LeftTab = "pages" | "add" | "layers";
+/** Where the canvas gets the page: bundled on demand with sample data, or the app's own dev server. */
+export type CanvasSource = "jit" | "app";
+
+export interface FrameTarget { pageId: string; params: Record<string, string>; search: Record<string, string> }
+
+export interface FrameDoc extends FrameTarget { js: string; css: string; revision: string; ms: number; cached: boolean; warnings: string[] }
+
+export interface ActionTrace {
+  at: number;
+  workflow: string;
+  input: Record<string, unknown>;
+  ok: boolean;
+  status: number;
+  elapsedMs: number;
+  mocked: boolean;
+  output?: unknown;
+}
 
 export const DEVICE_WIDTHS: Record<Exclude<Device, "custom">, { w: number; h: number }> = {
   desktop: { w: 1280, h: 800 },
@@ -71,6 +88,15 @@ export interface EditorState {
   landscape: boolean;
   zoom: number;
   routeParams: Record<string, string>;
+
+  source: CanvasSource;
+  /** The page the frame shows: the open page, or where the app-wide preview has moved to. */
+  frameTarget: FrameTarget | null;
+  frameDoc: FrameDoc | null;
+  frameLoading: boolean;
+  frameBuildError: string | null;
+  previewStack: FrameTarget[];
+  actions: ActionTrace[];
 
   saveState: SaveState;
   saveError: string | null;
@@ -141,6 +167,12 @@ export interface EditorState {
   setShowReadiness: (on: boolean) => void;
   setEditingTextId: (id: string | null) => void;
   setFrame: (patch: Partial<Pick<EditorState, "frameReady" | "frameError" | "previewPath">>) => void;
+  setSource: (source: CanvasSource) => void;
+  loadFrame: (target?: FrameTarget, opts?: { fresh?: boolean }) => Promise<void>;
+  previewNavigate: (pageId: string, params: Record<string, string>, search: Record<string, string>, replace?: boolean) => void;
+  previewBack: () => void;
+  recordAction: (action: ActionTrace) => void;
+  clearActions: () => void;
 
   // --- smith
   setSmith: (patch: Partial<SmithState>) => void;
@@ -157,7 +189,7 @@ export interface EditorState {
 
 const PREFS_KEY = (projectId: string) => `react-editor:prefs:${projectId}`;
 
-function readPrefs(projectId: string): Partial<Pick<EditorState, "viewLevel" | "device" | "customWidth" | "leftTab" | "rightOpen" | "zoom">> {
+function readPrefs(projectId: string): Partial<Pick<EditorState, "viewLevel" | "device" | "customWidth" | "leftTab" | "rightOpen" | "zoom" | "source">> {
   try {
     const raw = localStorage.getItem(PREFS_KEY(projectId));
     return raw ? JSON.parse(raw) : {};
@@ -169,7 +201,7 @@ function writePrefs(state: EditorState) {
   try {
     localStorage.setItem(PREFS_KEY(state.projectId), JSON.stringify({
       viewLevel: state.viewLevel, device: state.device, customWidth: state.customWidth,
-      leftTab: state.leftTab, rightOpen: state.rightOpen, zoom: state.zoom,
+      leftTab: state.leftTab, rightOpen: state.rightOpen, zoom: state.zoom, source: state.source,
     }));
   } catch { /* private mode */ }
 }
@@ -209,6 +241,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   landscape: false,
   zoom: 1,
   routeParams: {},
+
+  source: "jit",
+  frameTarget: null,
+  frameDoc: null,
+  frameLoading: false,
+  frameBuildError: null,
+  previewStack: [],
+  actions: [],
 
   saveState: "saved",
   saveError: null,
@@ -259,9 +299,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!projectId) return;
     set({ loading: true, loadError: null, pageId, selection: [], hovered: null, rects: {}, undoStack: [], redoStack: [],
           smith: emptySmith(), serverFindings: [], checkedRevision: null, lastFindings: [], editingTextId: null,
-          mode: "design", previewApp: false, regionSelect: false, routeParams: {} });
+          mode: "design", previewApp: false, regionSelect: false, routeParams: {},
+          frameTarget: null, frameDoc: null, frameBuildError: null, previewStack: [], actions: [] });
     try {
       const doc = await editorApi.open(projectId, pageId);
+      // The revision subscription below builds the instant canvas from it.
       set({ doc, loading: false, saveState: "saved", saveError: null });
     } catch (err) {
       set({ loading: false, loadError: failureOf(err).message, doc: null });
@@ -526,6 +568,49 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setEditingTextId: (editingTextId) => set({ editingTextId }),
   setFrame: (patch) => set(patch),
 
+  setSource: (source) => {
+    set({ source, frameDoc: null, frameBuildError: null });
+    writePrefs(get());
+    const { pageId } = get();
+    if (source === "jit" && pageId) void get().loadFrame({ pageId, params: {}, search: {} });
+  },
+
+  loadFrame: async (target, opts = {}) => {
+    const { projectId, pageId, frameTarget } = get();
+    const t = target ?? frameTarget ?? (pageId ? { pageId, params: {}, search: {} } : null);
+    if (!projectId || !t) return;
+    set({ frameTarget: t, frameLoading: true, frameBuildError: null });
+    try {
+      const bundle: JitBundle = await editorApi.jit(projectId, t.pageId, { params: t.params, search: t.search, fresh: opts.fresh });
+      // A later request may have superseded this one.
+      const now = get().frameTarget;
+      if (!now || now.pageId !== t.pageId || JSON.stringify(now.params) !== JSON.stringify(t.params)) return;
+      set({ frameDoc: { ...t, js: bundle.js, css: bundle.css, revision: bundle.revision, ms: bundle.ms, cached: bundle.cached, warnings: bundle.warnings },
+            frameLoading: false });
+    } catch (err) {
+      const f = failureOf(err);
+      set({ frameLoading: false, frameBuildError: f.message });
+    }
+  },
+
+  previewNavigate: (pageId, params, search, replace = false) => {
+    const { frameTarget } = get();
+    const next = { pageId, params, search };
+    set((s) => ({ previewStack: replace || !frameTarget ? s.previewStack : [...s.previewStack, frameTarget].slice(-50) }));
+    void get().loadFrame(next);
+  },
+
+  previewBack: () => {
+    const { previewStack } = get();
+    const prev = previewStack[previewStack.length - 1];
+    if (!prev) return;
+    set({ previewStack: previewStack.slice(0, -1) });
+    void get().loadFrame(prev);
+  },
+
+  recordAction: (action) => set((s) => ({ actions: [...s.actions, action].slice(-50) })),
+  clearActions: () => set({ actions: [] }),
+
   // ------------------------------------------------------------------ smith
 
   setSmith: (patch) => set((s) => ({ smith: { ...s.smith, ...patch } })),
@@ -637,3 +722,11 @@ export function saveLabel(state: SaveState, error: string | null): { text: strin
 export function historyLabel(entry: HistoryEntry): string {
   return entry.kind === "baseline" ? "Built by Forge" : entry.label;
 }
+
+// A saved change is a new revision; the instant canvas rebuilds the open page
+// from it (the app-wide preview keeps showing where it went).
+useEditorStore.subscribe((s, prev) => {
+  if (s.doc?.revision === prev.doc?.revision || !s.doc?.coded || s.source !== "jit" || !s.pageId) return;
+  if (s.previewApp && s.frameTarget && s.frameTarget.pageId !== s.pageId) return;
+  void s.loadFrame({ pageId: s.pageId, params: s.frameTarget?.params ?? {}, search: s.frameTarget?.search ?? {} });
+});

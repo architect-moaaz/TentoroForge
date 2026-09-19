@@ -379,3 +379,77 @@ def test_a_deleted_target_is_reported_not_guessed(tmp_path, monkeypatch):
         smith.propose(project, "PAGE-001", base_revision=rev0, prompt="x", selection={"nodeIds": ["r0.99"]},
                       client=_Client(_reply()))
     assert e.value.code == "deleted-target"
+
+
+# ---------------------------------------------------------------------------
+# The JIT renderer — a page bundled against a small app, no dev server
+# ---------------------------------------------------------------------------
+
+def _jit_app(tmp_path):
+    """A minimal generated app: the SDK's fixed files, a kit-less page, and the
+    repository's node_modules (esbuild, react, sonner) standing in for the
+    app's own."""
+    import os
+    from services.react_editor import jit
+    app = tmp_path / "app"
+    (app / "src/sdk").mkdir(parents=True)
+    (app / "src/components").mkdir(parents=True)
+    (app / "src/app/cases").mkdir(parents=True)
+    (app / "package.json").write_text('{"name": "t", "private": true}')
+    (app / "tsconfig.json").write_text('{"compilerOptions": {"jsx": "preserve", "paths": {"@/*": ["./src/*"]}, "baseUrl": "."}}')
+    os.symlink(jit.SCRIPT.parents[2] / "node_modules", app / "node_modules")
+    (app / "src/sdk/schema.ts").write_text("export interface Case { id: string; title: string; status: string; amount: number }\n"
+                                           "export interface Entities { Case: Case }\nexport type EntityName = keyof Entities & string;\n")
+    (app / "src/sdk/frame.tsx").write_text('"use client";\nimport type { ReactNode } from "react";\nimport { useRouter } from "next/navigation";\n'
+                                           "export function PageFrame({ entities, children }: { entities: string[]; children: ReactNode }) { useRouter(); return <main id=\"main\">{children}</main>; }\n")
+    (app / "src/components/PublicPageFrame.tsx").write_text('import Link from "next/link";\nimport type * as React from "react";\n'
+                                                            'export function PublicPageFrame({ children }: { children: React.ReactNode }) { return <><header><Link href="/">Home</Link></header>{children}</>; }\n')
+    return app
+
+
+def test_the_jit_bundles_a_page_with_sample_data_and_no_dev_server(tmp_path, monkeypatch):
+    from services.react_editor import jit
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Desk", domain="ops")
+    svc.doc["pages"] = [{"id": "PAGE-001", "name": "Cases", "route": "/cases", "purpose": "x", "access": "public"}]
+    svc.doc["data"] = {"entities": [{"id": "ENTITY-001", "name": "Case", "table": "cases", "fields": [
+        {"name": "id", "type": "uuid"}, {"name": "title", "type": "string"},
+        {"name": "status", "type": "string", "enumValues": ["Open", "Closed"]}, {"name": "amount", "type": "decimal"}]}]}
+    svc.doc["pageCode"] = [{"page": "PAGE-001",
+        "load": 'import { list, count, type PageContext } from "@/sdk/server";\nexport async function load(ctx: PageContext) { return { rows: await list("Case", { sort: "title" }), open: await count("Case", { status: "Open" }) }; }\n',
+        "view": '"use client";\nimport Link from "next/link";\nimport type { load } from "./load";\ntype Props = NonNullable<Awaited<ReturnType<typeof load>>>;\n'
+                'export default function View({ rows, open }: Props) { return <div className="p-6"><h1>All cases ({open} open)</h1><ul>{rows.map((r) => <li key={r.id}><Link href={`/cases/${r.id}`}>{r.title}</Link> {r.amount}</li>)}</ul></div>; }\n'}]
+    svc.save()
+    _jit_app(tmp_path)
+    project = service.locate(tmp_path)
+    out = jit.build(project, "PAGE-001")
+    assert out["cached"] is False and out["data"] == "sample"
+    js = out["js"]
+    assert "All cases" in js and "Home" in js, "the page and its public frame are in the bundle"
+    assert '"Quarterly review 1"' in js and '"Open"' in js and '"sample-case-1"' in js, "sample rows come from the entity's fields"
+    assert "forge-editor:navigate" in js and "forge-editor:action" in js, "moves and workflow runs are reported to the editor"
+    assert "pushState" not in js.split("__forgeGo")[1][:2000], "the shims never touch the History API"
+    assert (project.app_root / "src/app/cases/view.tsx").read_text().count("data-fid") == 5, "the bundled copy carries the ids"
+    again = jit.build(project, "PAGE-001")
+    assert again["cached"] is True and again["js"] == js
+    # A new revision is a new build.
+    service.open_page(project, "PAGE-001", annotate=False)
+    rev = service.open_page(project, "PAGE-001")["revision"]
+    service.apply(project, "PAGE-001", base_revision=rev, ops=[{"op": "setClasses", "id": "r0.0", "classes": "text-3xl font-bold"}])
+    fresh = jit.build(project, "PAGE-001")
+    assert fresh["cached"] is False and "text-3xl font-bold" in fresh["js"]
+
+
+def test_a_page_without_code_or_toolchain_is_refused_plainly(tmp_path, monkeypatch):
+    from services.react_editor import jit
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Desk", domain="ops")
+    svc.doc["pages"] = [{"id": "PAGE-001", "name": "Cases", "route": "/cases", "purpose": "x"}]
+    svc.doc["pageCode"] = [{"page": "PAGE-001", "load": LOAD, "view": VIEW}]
+    svc.save()
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app/package.json").write_text("{}")
+    with pytest.raises(EditorError) as e:
+        jit.build(service.locate(tmp_path), "PAGE-001")
+    assert e.value.status == 503 and "not installed" in str(e.value)
+    with pytest.raises(EditorError) as e:
+        jit.build(service.locate(tmp_path), "PAGE-999")
+    assert e.value.code == "no-page"
