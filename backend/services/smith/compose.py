@@ -603,6 +603,9 @@ WIDGET_ATTEMPTS = 2
 #: (036farqu) — so on these pages it is not asked at all unless the person
 #: named a number or a chart themselves.
 NO_ANALYTICS_PATTERNS = frozenset({"form", "wizard", "settings", "configuration"})
+#: Pages whose job IS numbers: rebuilt with none yet, their charts are designed
+#: even when the ask names none ("this dashboard looks empty").
+NUMBERS_PATTERNS = frozenset({"dashboard", "analytics", "command_center"})
 
 
 def code_row(doc: dict, page_id: str) -> dict | None:
@@ -695,7 +698,15 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
         raise ComposeError(f"{route} is not a page written as code.")
     usage = RunUsage.for_app(svc, phase="change")
     run = executor or make_executor(svc, tiered_router(reasoning=reasoning), usage=usage, reasoning=reasoning)
-    if str(page.get("pattern") or "") in NO_ANALYTICS_PATTERNS and not wanted:
+    # CHARTS ONLY WHEN CHARTS WERE ASKED FOR. Understanding the ask names the
+    # widgets it wants (`wanted`); with none, the analytics author was still
+    # asked what the page "should count" — "change the heading" came back as
+    # four new KPI tiles, or as charts for other pages that were refused and
+    # failed the edit after four minutes (0l133sp2).
+    has_widgets = any(str(w.get("page")) == str(page.get("id")) and w.get("status") != "DEPRECATED"
+                      for w in svc.doc.get("widgets") or [] if isinstance(w, dict))
+    numbers_page = str(page.get("pattern") or "") in NUMBERS_PATTERNS
+    if not wanted and (has_widgets or not numbers_page):
         widgets: list[Any] = []
     else:
         widgets = _declare_widgets(svc, page, request, wanted, run=run, reasoning=reasoning)

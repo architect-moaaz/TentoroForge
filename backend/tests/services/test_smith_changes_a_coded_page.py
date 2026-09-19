@@ -80,7 +80,8 @@ def test_a_heatmap_on_a_coded_page_is_a_widget_and_the_code_that_draws_it(tmp_pa
     written = quiet(VIEW.replace('className="p-6" />', f'className="p-6">{{widgets.{keys_after["W"]}.id}}</div>'))
     run = _Run([HEATMAP])
     out = recode_page(svc, "/dashboard", app_root=str(tmp_path / "app"),
-                      request="add the heatmap: age group × gender", executor=run, client=object())
+                      request="add the heatmap: age group × gender", wanted=["age group × gender heatmap"],
+                      executor=run, client=object())
 
     assert out["applied"] and out["missing"] == []
     assert run.specs[0].node == "analytics" and "age group × gender" in run.specs[0].brief
@@ -112,7 +113,7 @@ def test_a_widget_the_new_code_does_not_draw_is_reported_missing(tmp_path, quiet
     svc = _svc(tmp_path)
     quiet(VIEW)
     out = recode_page(svc, "/dashboard", app_root=str(tmp_path / "app"),
-                      request="add the heatmap", executor=_Run([HEATMAP]), client=object())
+                      request="add the heatmap", wanted=["heatmap"], executor=_Run([HEATMAP]), client=object())
     assert out["missing"] == [HEATMAP["label"]]
 
 
@@ -126,7 +127,7 @@ def test_code_that_never_compiles_changes_nothing(tmp_path, monkeypatch, quiet):
     before = svc.snapshot()
     with pytest.raises(ComposeError, match="did not compile"):
         recode_page(svc, "/dashboard", app_root=str(tmp_path / "app"),
-                    request="add the heatmap", executor=_Run([HEATMAP]), client=object())
+                    request="add the heatmap", wanted=["heatmap"], executor=_Run([HEATMAP]), client=object())
     assert svc.doc == before
 
 
@@ -138,7 +139,7 @@ def test_a_refused_chart_is_asked_again_then_refused(tmp_path, quiet):
     run = _Run([bad], [bad])
     with pytest.raises(ComposeError):
         recode_page(svc, "/dashboard", app_root=str(tmp_path / "app"),
-                    request="add the heatmap", executor=run, client=object())
+                    request="add the heatmap", wanted=["heatmap"], executor=run, client=object())
     assert len(run.specs) == 2 and "not a number" in (run.specs[1].feedback or "")
     assert not svc.doc.get("widgets")
 
@@ -209,3 +210,13 @@ def test_the_analytics_agent_is_told_what_kind_of_page_it_is(tmp_path, quiet):
     recode_page(svc, "/dashboard", app_root=str(tmp_path / "app"),
                 request="it looks empty", executor=run, client=object())
     assert "`dashboard` page" in run.specs[0].brief and "never add a widget to fill space" in run.specs[0].brief
+
+
+
+def test_a_change_that_names_no_chart_does_not_design_charts(tmp_path):
+    """0l133sp2: "change the Discover page heading" came back as four new KPI
+    tiles, or — when the analytics author proposed another page's charts — as
+    a refused edit after four minutes."""
+    from services.smith import compose
+    src = __import__("inspect").getsource(compose.recode_page)
+    assert "if not wanted and (has_widgets or not numbers_page):" in src
