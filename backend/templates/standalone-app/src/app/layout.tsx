@@ -1,6 +1,7 @@
 import "./globals.css";
 import { EngineProvider } from "@tentoroforge/engine";
 import { LiveRegion, SkipLink } from "@tentoroforge/library";
+import { Providers } from "./providers";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
@@ -49,7 +50,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           // black text. Tokens still flow to the component context above.
           semanticVars={false}
         >
-          {children}
+          {/* The Toaster every `useWorkflow` success and failure is said
+              through, the session, the query client and the browser crash
+              reporter. This layout replaced app-foundation's without it, so
+              every toast since was called into nothing. */}
+          <Providers>{children}</Providers>
         </EngineProvider>
       </body>
     </html>
