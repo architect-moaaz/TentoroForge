@@ -77,3 +77,17 @@ def test_a_reloaded_page_gets_the_rows_and_the_ledgers_count():
         {"key": "page_layouts", "state": "running", "calls": 4, "subject": "4 of 15"},
     ]
     run_registry.finish(project, "complete")
+
+
+def test_pages_that_land_out_of_order_count_up():
+    """0l133sp2: the panel showed each page's place in the list — "11 of 15",
+    then "3 of 15" — while thirteen were done. It shows how many are done."""
+    events, emit = _stream()
+    progress = Progress(emit, total=1)
+    progress({"event": "node:start", "node": "page_code", "subjects": 15})
+    for page, index, ok in (("PAGE-011", 11, True), ("PAGE-003", 3, True),
+                            ("PAGE-005", 5, False), ("PAGE-003", 3, True)):
+        progress({"event": "node:subject", "node": "page_code", "subject": page,
+                  "index": index, "total": 15, "ok": ok})
+    assert [d["done"] for e, d in events if e == "node:subject"] == [1, 2, 2, 2]
+    assert [d["index"] for e, d in events if e == "node:subject"] == [11, 3, 5, 3], "which one is still said"

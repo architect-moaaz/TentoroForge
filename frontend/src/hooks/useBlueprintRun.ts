@@ -616,9 +616,11 @@ export function reduce(
                 ...n,
                 state: "running",
                 calls: n.calls + 1,
+                // How many are finished — `index` is which one finished, and
+                // subjects land out of order ("11 of 15", then "3 of 15").
                 subject:
-                  data.index != null && data.total
-                    ? `${data.index} of ${data.total}`
+                  data.total && (data.done != null || data.index != null)
+                    ? `${Math.min(Number(data.done ?? data.index), Number(data.total))} of ${data.total}`
                     : (data.subject as string | undefined),
               }
             : n,

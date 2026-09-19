@@ -602,7 +602,10 @@ def test_a_presentational_change_does_not_re_author_the_rule_catalogue(ats):
     assert "businessRules" not in sections_of(ats, {"CMP-033", "PAGE-009"})
 
     plan = incremental_plan(ats, ["CMP-033", "PAGE-009"])
-    assert "business_rules" not in plan
+    # Rules are not seeded by the component. They run again only as a
+    # consequence of `workflows` running again (a prerequisite names the
+    # workflows it gates) — never on their own account.
+    assert ("business_rules" in plan) == ("workflows" in plan)
 
 
 def test_an_entity_change_does_re_author_the_rules(ats):

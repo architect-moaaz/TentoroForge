@@ -15,7 +15,7 @@ that; so does this. One reader per audience, one source.
 EVENTS EMITTED, the panel's vocabulary:
 
 - ``node:start``   {node, subjects}
-- ``node:subject`` {node, subject, index, total, ok, nodesDone, nodesTotal, callsDone}
+- ``node:subject`` {node, subject, index, total, done, ok, nodesDone, nodesTotal, callsDone}
 - ``node:done``    {node, nodesDone, nodesTotal, callsDone}
 - ``node:retry`` / ``node:failed`` / ``node:blocked`` / ``node:skipped``
   are forwarded as the ledger wrote them.
@@ -50,6 +50,7 @@ class Progress:
         self.calls_done = 0
         #: node key -> how many subject lines it has produced.
         self._subjects_seen: dict[str, int] = {}
+        self._subjects_done: dict[str, set[str]] = {}
 
     def __call__(self, line: dict[str, Any]) -> None:
         event = str(line.get("event") or "")
@@ -64,10 +65,18 @@ class Progress:
             with self._lock:
                 self.calls_done += 1
                 self._subjects_seen[node] = self._subjects_seen.get(node, 0) + 1
+                # HOW MANY ARE FINISHED, NOT WHICH ONE FINISHED. `index` is the
+                # subject's place in the node's list; subjects run in parallel
+                # and land in any order, so showing it read "11 of 15" and
+                # then "3 of 15" while thirteen were done.
+                finished = self._subjects_done.setdefault(node, set())
+                if line.get("ok"):
+                    finished.add(str(line.get("subject") or ""))
+                done = len(finished)
                 counts = self._counts()
             self._emit("node:subject", {
                 "node": node, "subject": line.get("subject"),
-                "index": line.get("index"), "total": line.get("total"),
+                "index": line.get("index"), "total": line.get("total"), "done": done,
                 "ok": bool(line.get("ok")), **counts})
             return
 

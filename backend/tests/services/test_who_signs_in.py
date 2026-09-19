@@ -251,3 +251,12 @@ def test_an_embedding_on_an_ordinary_field_is_dropped_not_refused(tmp_path):
     fields = {f["name"]: f for f in result.proposals[0].body["fields"]}
     assert "embedding" not in fields["status"]
     assert fields["photoEmbedding"]["embedding"] == {"of": "photo"}, "a vector field keeps what it embeds"
+
+
+def test_rules_are_written_when_there_are_workflows_to_gate():
+    """0l133sp2: rules ran before workflows existed, the KYC prerequisite could
+    name nothing in `gates`, was refused, and was dropped on the retry."""
+    from services.blueprint.orchestrator import DAG, levels
+    assert "workflows" in DAG["business_rules"].depends_on
+    at = {k: i for i, level in enumerate(levels()) for k in level}
+    assert at["workflows"] < at["business_rules"] < at["integration"]

@@ -386,7 +386,12 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("workflow_steps", "workflow", ("workflows",), ("workflows",),
        fanout="workflows",
        note="§107 step 16; one authored step graph per declared workflow"),
-    _n("business_rules", "business_rules", ("entity_fields",), ("businessRules",),
+    # AFTER THE WORKFLOWS ARE DECLARED: a prerequisite ("verified before
+    # listing or buying") names the workflows it gates, and before `workflows`
+    # there were none to name — 0l133sp2's KYC rule was refused for empty
+    # `gates` and dropped on the retry, so nothing was enforced. Nothing waits
+    # on rules but `integration` and `memory`, so this costs no time.
+    _n("business_rules", "business_rules", ("entity_fields", "workflows"), ("businessRules",),
        note="§107 step 16; not a distinct box in §28"),
     _n("security", "security", ("entity_fields",), ("security", "roles", "permissions"),
        note="§100; placed after the data model because permissions guard entities"),

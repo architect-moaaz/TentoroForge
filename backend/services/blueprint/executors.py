@@ -1264,6 +1264,9 @@ NODE_TASKS: dict[str, str] = {
         "which — the rule or the workflow's steps, in the reader's terms "
         "(what is checked before approval, what happens after a complaint is "
         "raised).\n"
+        "Choose, do not list: a page's content is what the reader weighs, "
+        "usually five to ten facts — a record page is not every field of the "
+        "record, and the rest stays one click away. "
         "A list page's content is what each row shows (a name and the facts "
         "that let a reader pick one — never an id). A form's content is the "
         "reassurance around it. Only what the application actually keeps or "
@@ -3087,8 +3090,30 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     "workflows": 32000,
     # One page's thinking plus two whole files — a record workspace's view
     # runs to several hundred lines — and a compile round re-sends the code.
-    "page_code": 48000,
+    # 48k ran out on a fifteen-fact record page (0l133sp2); headroom is free.
+    "page_code": 64000,
 }
+
+
+#: The budget a retry gets after a reply that was all reasoning and no answer.
+NO_ANSWER_RETRY_TOKENS = 64000
+
+
+def after_no_answer(client: Any, feedback: str) -> Any:
+    """The client for a retry of a call that thought until its budget ran
+    out and wrote nothing: less effort and more room. Asking again at the same
+    effort and budget got the same nothing (UAT twice; 0l133sp2's /rentals/[id],
+    a record page with fifteen facts and ten workflows, spent 48,000 tokens
+    reasoning). Any other retry, or a client that has no effort to lower, is
+    returned as it is."""
+    import dataclasses
+
+    if not str(feedback or "").startswith("NoAnswer") or not dataclasses.is_dataclass(client) \
+            or not hasattr(client, "effort"):
+        return client
+    lower = {"max": "high", "xhigh": "high", "high": "medium", "medium": "low"}.get(str(client.effort), client.effort)
+    return dataclasses.replace(client, effort=lower,
+                               max_tokens=max(int(getattr(client, "max_tokens", 0) or 0), NO_ANSWER_RETRY_TOKENS))
 
 
 def tiered_router(
@@ -3485,8 +3510,8 @@ def make_executor(
         from services.blueprint import ui_engineer
         from services.llm_client import tell
 
-        client = (model.for_task(spec.node, spec.agent)
-                  if isinstance(model, ModelRouter) else model)
+        client = after_no_answer(model.for_task(spec.node, spec.agent)
+                                 if isinstance(model, ModelRouter) else model, spec.feedback)
         project = str((svc.doc.get("application") or {}).get("id", ""))
 
         def record(u: Any, elapsed: float) -> None:
@@ -3544,10 +3569,11 @@ def make_executor(
             composed = _compose_via_a2ui(spec)
             if composed is not None:
                 return composed
-        client = (
+        client = after_no_answer(
             model.for_task(spec.node, spec.agent)
             if isinstance(model, ModelRouter)
-            else model
+            else model,
+            spec.feedback,
         )
         # §5 — an application can be described by showing as well as by
         # telling. Resolved per call rather than threaded through `run`,
