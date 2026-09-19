@@ -257,6 +257,13 @@ What a finished page looks like:
   <WorkflowForm submitVariant="accent">. The active status or the selected filter
   chip is its tint: bg-accent-subtle text-accent-subtle-foreground. Everything
   else stays in the primary and the neutrals; an accent on every row is no accent.
+- THE CONTENT PLAN IS THE PAGE. When the brief carries `content`, every fact in it
+  is on the page, in its prominence: `lead` leads the screen, `key` facts sit with
+  the title, `supporting` further down, `reassurance` beside the main action. Each
+  comes with its `read` — do it in load.ts (in parallel) and show the value in
+  words, labelled as the plan labels it. `process` facts are copy you write from
+  `writeProcessCopyFrom`: plain sentences for the reader, true to those rules and
+  steps. Add nothing the data cannot produce.
 - LEAD WITH WHAT MATTERS NOW. Before the list, decide what this person came to see
   first — the rental that is due, the request waiting on them, the step not yet
   done — and give it one card of its own at the top in the dark surface
@@ -482,7 +489,20 @@ def _page_brief(doc: dict, page: dict) -> dict:
                                    "trigger": (w.get("trigger") or {}).get("detail")} for w in launched],
         "roles": [r.get("name") for r in doc.get("roles") or [] if r.get("id") in (page.get("users") or [])],
         "widgets": page_widget_brief(doc, page),
+        **_content_part(doc, page),
     }
+
+
+def _content_part(doc: dict, page: dict) -> dict:
+    """The page's content plan, each fact with the read that produces it, and
+    the rules and steps its `process` facts are written from."""
+    from services.blueprint.page_content import content_brief, process_grounding
+
+    content = content_brief(doc, page)
+    if not content:
+        return {}
+    grounding = process_grounding(doc, page)
+    return {"content": content, **({"writeProcessCopyFrom": grounding} if grounding else {})}
 
 
 def page_widget_brief(doc: dict, page: dict) -> list[dict]:

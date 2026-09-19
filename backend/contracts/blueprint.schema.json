@@ -498,18 +498,130 @@
             },
             "default": []
           },
+          "content": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "answers": {
+                  "type": "string",
+                  "default": ""
+                },
+                "prominence": {
+                  "type": "string",
+                  "enum": [
+                    "lead",
+                    "key",
+                    "supporting",
+                    "reassurance"
+                  ],
+                  "default": "key"
+                },
+                "source": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "field",
+                        "related",
+                        "count",
+                        "total",
+                        "process"
+                      ]
+                    },
+                    "entity": {
+                      "type": "string",
+                      "pattern": "^ENTITY-\\d{3,}$",
+                      "description": "Stable ENTITY identifier (§12)"
+                    },
+                    "field": {
+                      "type": "string"
+                    },
+                    "via": {
+                      "type": "string"
+                    },
+                    "of": {
+                      "type": "string"
+                    },
+                    "where": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean"
+                        ]
+                      }
+                    },
+                    "fn": {
+                      "type": "string",
+                      "enum": [
+                        "sum",
+                        "avg",
+                        "min",
+                        "max"
+                      ]
+                    },
+                    "about": {
+                      "type": "string"
+                    },
+                    "newField": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string",
+                          "default": ""
+                        },
+                        "enumValues": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "required": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "label",
+                "source"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
           "data": {
             "type": "object",
             "properties": {
               "primaryEntity": {
-                "type": "string",
-                "pattern": "^ENTITY-\\d{3,}$",
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
                 "description": "Stable ENTITY identifier (§12)"
               },
               "supportingEntities": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
                 },
                 "default": []
               }
@@ -772,7 +884,7 @@
                     "const": "list"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
                   },
                   "fields": {
                     "type": "array",
@@ -808,7 +920,7 @@
                     "const": "single"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
                   },
                   "filter": {
                     "type": "object",
@@ -830,7 +942,7 @@
                     "const": "aggregate"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
                   },
                   "aggregation": {
                     "type": "string",
@@ -867,7 +979,7 @@
                     "const": "series"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
                   },
                   "aggregation": {
                     "$ref": "#/properties/widgets/items/properties/dataSource/anyOf/2/properties/aggregation"
@@ -900,7 +1012,7 @@
                     "const": "query"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
                   },
                   "measures": {
                     "type": "array",
@@ -1123,7 +1235,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
               },
               "name": {
                 "type": "string"
@@ -1169,7 +1281,7 @@
                       "default": false
                     },
                     "references": {
-                      "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+                      "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
                       "description": "Stable ENTITY identifier (§12)"
                     },
                     "embedding": {
@@ -1235,10 +1347,10 @@
             "type": "object",
             "properties": {
               "from": {
-                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
               },
               "to": {
-                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
               },
               "kind": {
                 "type": "string",
@@ -1279,7 +1391,7 @@
             "type": "object",
             "properties": {
               "entity": {
-                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
               },
               "kind": {
                 "type": "string",
@@ -1316,7 +1428,7 @@
                 "type": "string"
               },
               "entity": {
-                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
               },
               "table": {
                 "type": "string"
@@ -1455,7 +1567,7 @@
                   ]
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "next": {
@@ -1523,7 +1635,7 @@
                   ]
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "type": {
@@ -1617,7 +1729,7 @@
             "type": "object",
             "properties": {
               "entity": {
-                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
               },
               "account": {
                 "type": "string"
@@ -1648,7 +1760,7 @@
             "description": "Stable PAGE identifier (§12)"
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           },
           "when": {
@@ -1805,7 +1917,7 @@
             "default": ""
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           },
           "permission": {
@@ -3380,7 +3492,7 @@
             "default": []
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           }
         },

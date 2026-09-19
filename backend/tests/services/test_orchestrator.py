@@ -1566,18 +1566,21 @@ def _declared_pages(svc):
     return case, note
 
 
-def test_workflows_are_declared_against_the_page_set_and_contracts_run_beside_them():
-    """A workflow needs a page's id and route to say where it launches; a
-    contract's tasks and states it never reads. The two longest declarations
-    of a build used to run one after the other."""
+def test_workflows_are_declared_after_the_fields_the_pages_need():
+    """They ran side by side, because a workflow reads a page's id and route
+    and never its tasks. The contracts now also say what each page SHOWS, and
+    a fact a page needs may add a field to its entity (`content_fields`);
+    `workflows` fixes each form's inputs, so it waits for those fields — the
+    form that creates a tool must ask for what the tool page shows. Measured
+    on 036farqu, that costs up to the length of `page_details` (~6-7 min)."""
     assert DAG["page_details"].depends_on == frozenset({"page_contracts"})
     assert DAG["page_details"].fanout == "page_features"
     assert "page_contracts" in DAG["workflows"].depends_on
-    assert "page_details" not in DAG["workflows"].depends_on
+    assert "content_fields" in DAG["workflows"].depends_on
     assert "page_details" in DAG["page_layouts"].depends_on
     assert "page_details" in DAG["apis"].depends_on
     at = {k: i for i, level in enumerate(levels()) for k in level}
-    assert at["page_details"] == at["workflows"]
+    assert at["page_details"] < at["content_fields"] < at["workflows"]
 
 
 def test_a_feature_is_an_entitys_pages_and_an_orphan_page_is_its_own(svc):

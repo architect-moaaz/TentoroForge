@@ -531,6 +531,27 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
         raise InvalidEntityFields(_all_of(problems))
 
 
+class InvalidPageContent(ValueError):
+    """A page's content plan names a source the data model does not have."""
+
+
+def check_page_content(result: "AgentResult", doc: dict | None) -> None:
+    """Every fact a page's content plan shows resolves — a field its entity
+    has (or proposes in `newField`), a foreign key that points where it says,
+    a count over a real relationship. Refused at the page's author, naming the
+    fault, rather than discovered by the UI engineer as a page with nothing to
+    show."""
+    from services.blueprint.page_content import content_findings
+
+    problems: list[str] = []
+    for proposal in (p for p in result.proposals if p.section == "pages"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        if body.get("content"):
+            problems.extend(content_findings(body, doc or {}))
+    if problems:
+        raise InvalidPageContent(_all_of(problems[:12]))
+
+
 class InvalidBusinessRule(ValueError):
     """A rule the engine could not evaluate as written."""
 
@@ -791,6 +812,7 @@ def apply_agent_result(
     check_workflow_steps(result, svc.doc)
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
+    check_page_content(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
     #

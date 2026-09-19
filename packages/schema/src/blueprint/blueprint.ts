@@ -209,6 +209,59 @@ export const PagePattern = z.enum([
 ]);
 
 /** §33 — every page has a structured contract *before* implementation. */
+/**
+ * WHAT A READER DECIDES ON, AND WHERE EACH FACT COMES FROM.
+ *
+ * A page contract listed the tasks a page is for and nothing about what it
+ * says. Tool Share's tool page was "Review a tool's photos and description,
+ * view the owner's profile, request to borrow" — and the Tool entity had two
+ * columns, so the page showed an id. A borrower deciding whether to ask for a
+ * drill weighs what it is and what comes with it, who owns it and whether
+ * they are verified, how often it has been lent, and what happens at
+ * handover; every one of those is a field, a related record, a count over a
+ * relationship, or a rule — and the contract now says which.
+ *
+ * `kind`:
+ * - `field` — `field` of the page's record (or of `entity`). A field the
+ *   entity does not have yet is proposed in `newField` and added to the data
+ *   model before workflows are written, so the form that creates the record
+ *   asks for it.
+ * - `related` — the record the page's record points at through its foreign
+ *   key `via`, shown by `field` of that record (`entity`).
+ * - `count` / `total` — rows of `entity` whose foreign key `via` points at the
+ *   page's record (or, with `of`, at the record the page's record points at
+ *   through `of`), narrowed by `where`; `total` applies `fn` to `field`.
+ * - `process` — what a rule or a workflow means for the reader (`about`):
+ *   reassurance beside an action, or what happens next.
+ */
+export const PageContentSource = z.object({
+  kind: z.enum(["field", "related", "count", "total", "process"]),
+  entity: EntityId.optional(),
+  field: z.string().optional(),
+  via: z.string().optional(),
+  of: z.string().optional(),
+  where: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  fn: z.enum(["sum", "avg", "min", "max"]).optional(),
+  about: z.string().optional(),
+  newField: z
+    .object({
+      type: z.string(),
+      description: z.string().default(""),
+      enumValues: z.array(z.string()).optional(),
+      required: z.boolean().default(false),
+    })
+    .optional(),
+});
+
+export const PageContentItem = z.object({
+  label: z.string().min(1),
+  /** The reader's question this fact answers ("Is the owner trustworthy?"). */
+  answers: z.string().default(""),
+  /** `lead` lead the screen; `reassurance` sits beside the main action. */
+  prominence: z.enum(["lead", "key", "supporting", "reassurance"]).default("key"),
+  source: PageContentSource,
+});
+
 export const PageContract = z.object({
   id: PageId,
   name: z.string(),
@@ -404,6 +457,9 @@ export const PageContract = z.object({
 
   /** The jobs a user comes here to do — drives composition, not decoration. */
   primaryTasks: z.array(z.string()).default([]),
+
+  /** What the page says, fact by fact, and where each comes from (see PageContentSource). */
+  content: z.array(PageContentItem).default([]),
 
   data: z
     .object({

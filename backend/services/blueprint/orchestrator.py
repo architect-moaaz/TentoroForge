@@ -249,7 +249,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # documents that carry it.
     # Derived, not authored: mutations from workflows, reads from the data
     # engine, analytics from widgets. See services.blueprint.api_derivation.
-    _n("apis", "api", ("entity_fields", "workflow_steps", "page_details", "analytics"), ("apis",),
+    _n("apis", "api", ("entity_fields", "content_fields", "workflow_steps", "page_details", "analytics"), ("apis",),
        kind="service",
        note="endpoints are implied by entities + workflows + widgets"),
     _n("backend", "backend", ("apis",), ("codeMap",), kind="projection"),
@@ -288,6 +288,12 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # app opened on the same sign-in screen. Declared here, from the security
     # section, for every application with a sign-in: no agent decides whether
     # an app has a login page. The UI engineer then writes them like any page.
+    # THE DATA MODEL GROWS TO SERVE THE SCREEN. A page's content plan may need
+    # a field its entity lacks (what comes with a tool, its category); it is
+    # proposed on the page and added here — before `workflows`, so the form
+    # that creates the record asks for it.
+    _n("content_fields", "data_model", ("page_details",), ("data.entities",), kind="service",
+       note="fields the pages' content plans need, added to their entities"),
     _n("auth_pages", "page_design", ("page_details",), ("pages",), kind="service",
        note="the sign-in and create-account pages, declared for every app with a login"),
     # THE ANALYTICS ARE DESIGNED ONCE, WITH THE WHOLE APPLICATION IN VIEW.
@@ -298,7 +304,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # `page_details`, one feature at a time, which is why a dashboard (a page
     # about every feature) so often came out empty. `page_layouts` and
     # `page_code` read what it writes; the Data Engine runs it live.
-    _n("analytics", "analytics", ("page_details", "entity_fields", "workflows"), ("widgets",),
+    _n("analytics", "analytics", ("page_details", "entity_fields", "content_fields", "workflows"), ("widgets",),
        note="KPIs, charts and breakdowns per page, as measures by dimensions"),
     # §47 — the design language the connected file already states, projected
     # onto the Blueprint. Deterministic (§116): published variables *are* the
@@ -330,7 +336,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # After `workflow_steps`, not `workflows`: a Form collects a workflow's
     # inputs, and the inputs are written with the steps.
     _n("page_layouts", "page_template",
-       ("page_details", "auth_pages", "analytics", "workflow_steps", "figma_design_system"),
+       ("page_details", "auth_pages", "content_fields", "analytics", "workflow_steps", "figma_design_system"),
        ("pageLayouts",), kind="service",
        note="§34; one tree per page from its contract, no model call"),
     # §34 — THE DESIGNED PAGE. The layout above is every page's floor; this is
@@ -370,7 +376,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # everything at its level had. A page needs a workflow's identity and
     # contract to wire a button, never its steps; `page_layouts` depends on
     # this node and not on `workflow_steps` for exactly that reason.
-    _n("workflows", "workflow", ("entity_fields", "page_contracts"), ("workflows",),
+    _n("workflows", "workflow", ("entity_fields", "page_contracts", "content_fields"), ("workflows",),
        note="§107 step 16; declares each workflow's identity and contract"),
     # One call per declared workflow, in parallel, each given the node
     # catalog and one workflow to fill in. A step is a catalog node carrying
@@ -2916,6 +2922,28 @@ def _declare_auth_pages(svc: BlueprintService) -> None:
             commit=True)
 
 
+def _add_content_fields(svc: BlueprintService) -> None:
+    """The fields the pages' content plans propose, added to their entities
+    (see `page_content`). Nothing to add is the normal case."""
+    from services.blueprint.ids import IdAllocator
+    from services.blueprint.page_content import entity_bodies_with_requested_fields
+
+    bodies = entity_bodies_with_requested_fields(svc.doc)
+    if not bodies:
+        return
+    try:
+        alloc = IdAllocator.load(output_dir=svc.output_dir)
+    except Exception:  # noqa: BLE001 — the name bound it
+        alloc = None
+    for body in bodies:
+        key = (alloc.key_for(str(body.get("id"))) if alloc else None) or str(body.get("name"))
+        apply_agent_result(svc, AgentResult(
+            task_id=f"TASK-content_fields-{body.get('id')}", agent=DAG["content_fields"].agent,
+            confidence=1.0,
+            proposals=[ArtifactProposal(section="data.entities", natural_key=key, body=body)]),
+            commit=True)
+
+
 def _project_design_reference(svc: BlueprintService) -> None:
     """§47 — the connected design's own tokens. No-op without one."""
     from services.figma.projection import apply_design_reference
@@ -2926,6 +2954,7 @@ def _project_design_reference(svc: BlueprintService) -> None:
 SERVICE_HANDLERS: dict[str, Any] = {
     "page_layouts": _compose_page_layouts,
     "auth_pages": _declare_auth_pages,
+    "content_fields": _add_content_fields,
     "figma_design_system": _project_design_reference,
     "verification": _run_verification,
     "apis": _derive_apis,
