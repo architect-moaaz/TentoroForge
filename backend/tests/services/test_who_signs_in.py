@@ -232,3 +232,22 @@ console.log(JSON.stringify(out));
     none, met = json.loads(proc.stdout.strip().splitlines()[-1])
     assert none == {"status": "failed", "refused": True, "error": KYC["message"]}
     assert met["status"] == "completed"
+
+
+def test_an_embedding_on_an_ordinary_field_is_dropped_not_refused(tmp_path):
+    """0l133sp2: `embedding: {of: ""}` on non-vector fields failed the contract,
+    the retry was blocked for low confidence, and the build stopped."""
+    from services.blueprint.executors import pin_entity_identity
+    from services.blueprint.service import BlueprintService
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="T", domain="ops")
+    svc.upsert("data.entities", {"name": "Tool", "table": "tools", "fields": []}, natural_key="Tool")
+    eid = svc.doc["data"]["entities"][0]["id"]
+    result = _entities({"name": "Tool", "fields": [
+        {"name": "status", "type": "string", "embedding": {"of": ""}},
+        {"name": "photo", "type": "image"},
+        {"name": "photoEmbedding", "type": "vector", "embedding": {"of": "photo"}}]})
+    pin_entity_identity(svc, eid, result)
+    fields = {f["name"]: f for f in result.proposals[0].body["fields"]}
+    assert "embedding" not in fields["status"]
+    assert fields["photoEmbedding"]["embedding"] == {"of": "photo"}, "a vector field keeps what it embeds"

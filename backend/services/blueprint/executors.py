@@ -2223,9 +2223,9 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                     "additionalProperties": False,
                                     "required": ["of"],
                                     "description": (
-                                        "Only on a `type: \"vector\"` field: the "
-                                        "image or text field on this entity it "
-                                        "embeds. The platform fills it."
+                                        "ONLY on a `type: \"vector\"` field — omit it on "
+                                        "every other field: the image or text field on "
+                                        "this entity it embeds. The platform fills it."
                                     ),
                                     "properties": {"of": {"type": "string"}},
                                 },
@@ -2515,6 +2515,17 @@ def pin_entity_identity(svc: Any, entity_id: str, result: AgentResult) -> None:
         body.pop("account", None)
         if row.get("account"):
             body["account"] = True
+        # `embedding` MEANS SOMETHING ONLY ON A VECTOR FIELD. The reply schema
+        # offers it on every field, and the author filled it on ordinary ones
+        # — `kycStatus: {embedding: {of: "none"}}`, `{of: ""}` on two more
+        # (0l133sp2). The empty ones failed the contract with a message about
+        # a field that should not have had the key, the retry lost confidence
+        # and was blocked, and the whole build stopped at the data model.
+        body["fields"] = [
+            ({k: v for k, v in f.items() if k != "embedding"}
+             if isinstance(f, dict) and "embedding" in f and str(f.get("type") or "").lower() != "vector" else f)
+            for f in body.get("fields") or []
+        ]
         proposal.body = body
         kept.append(proposal)
     result.proposals = kept
