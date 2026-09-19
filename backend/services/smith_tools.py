@@ -1485,7 +1485,11 @@ READONLY_HANDLERS = {
     "edit_entity":              lambda output_dir, args: _smith_edit_entity(output_dir, args),
     "remove_workflow":          lambda output_dir, args: _smith_remove_workflow(output_dir, args),
     "add_field":                lambda output_dir, args: _smith_add_field(output_dir, args),
-    "revert":                   lambda output_dir, args: _smith_revert(output_dir),
+    # `revert` is what `understand_ask`'s verb list calls it, so the model
+    # emits that name as often as the catalog's. ONE FUNCTION BEHIND BOTH:
+    # two undos that could disagree about what "the last change" is would be
+    # the worst possible thing to have two of.
+    "revert":                   lambda output_dir, args: _smith_revert_last_patch(output_dir, args),
     "write_guide":              lambda output_dir, args: _smith_write_guide(output_dir),
     "spend":                    lambda output_dir, args: _smith_spend(output_dir),
     "import_data":              lambda output_dir, args: _smith_import_data(output_dir, args),
@@ -2418,13 +2422,6 @@ def _smith_account(output_dir: str, verb: str, args: dict) -> dict:
     return _accounts_run(output_dir, verb, email=email, person=person,
                          name=str(args.get("person_name") or args.get("name") or "").strip(),
                          role=str(args.get("role") or "").strip())
-
-
-def _smith_revert(output_dir: str) -> dict:
-    """Undo the last recorded change and re-project. Takes no arguments: it is
-    always the most recent change."""
-    from services.smith.revert import run as _revert_run
-    return _revert_run(output_dir)
 
 
 def _smith_write_guide(output_dir: str) -> dict:

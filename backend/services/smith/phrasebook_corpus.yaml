@@ -918,6 +918,42 @@ sentences:
     source: code
     reaches: {verb: back_up, states: []}
 
+  - id: data-a-copy-of-my-data
+    say: "I want a copy of my data"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: export_data, states: []}
+
+  - id: data-customers-in-a-csv
+    say: "can i get the customers in a csv"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: export_data, states: []}
+
+  - id: data-download-all-the-records
+    say: "download all the records"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: export_data, states: []}
+
+  - id: data-nurses-to-excel
+    say: "export the nurses to excel"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: export_data, states: []}
+
+  - id: data-can-i-take-a-backup
+    say: "can I take a backup?"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: back_up, states: []}
+
+  - id: data-stored-anywhere-else
+    say: "is any of this stored anywhere else?"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: back_up, states: []}
+
   - id: data-bookings-out-as-a-spreadsheet
     say: "Can I get all the bookings out as a spreadsheet?"
     checked: {colour: acts, via: handler}
