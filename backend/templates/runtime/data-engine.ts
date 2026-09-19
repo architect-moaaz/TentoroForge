@@ -1396,7 +1396,26 @@ export type QueryMeasure = {
 export type QueryDimension = {
   field: string;
   bucket?: "day" | "week" | "month" | "quarter" | "year";
+  /** Number bands, in order: `from` ≤ value < `to`, an open end left out. */
+  ranges?: QueryRange[];
 };
+
+export type QueryRange = { label?: string; from?: number; to?: number };
+
+/** What a band is called on the axis when the Blueprint names none. */
+export function rangeLabel(r: QueryRange): string {
+  if (r.label) return r.label;
+  if (r.from !== undefined && r.to !== undefined) return `${r.from}–${r.to}`;
+  return r.from !== undefined ? `${r.from}+` : `under ${r.to}`;
+}
+
+/** The usable bands: finite ends, at least one of them, lower below upper. */
+function validRanges(d: QueryDimension): QueryRange[] {
+  const fin = (v: unknown) => v === undefined || (typeof v === "number" && Number.isFinite(v));
+  return (d.ranges || []).filter((r) => r && fin(r.from) && fin(r.to)
+    && (r.from !== undefined || r.to !== undefined)
+    && (r.from === undefined || r.to === undefined || r.from < r.to));
+}
 
 /**
  * Shape of an op:"query" dataSource — measures by dimensions, the query every
@@ -1474,12 +1493,23 @@ export async function resolveQuery(
 
   const shape: Record<string, any> = {};
   const groupExprs: any[] = [];
+  const bands = dims.map((d) => validRanges(d));
   dims.forEach((d, i) => {
     const bucket = d.bucket && _QUERY_BUCKETS.has(d.bucket) ? d.bucket : undefined;
     // The bucket is whitelisted above, so it is inlined as a literal: the same
     // expression then appears verbatim in SELECT and GROUP BY, where two bound
     // parameters would read to Postgres as two different expressions.
-    const expr = bucket ? sql`date_trunc('${sql.raw(bucket)}', ${cols[d.field]})` : cols[d.field];
+    // A banded number groups by the INDEX of its band, for the same reason:
+    // the ends are checked finite numbers, inlined; the labels never reach SQL.
+    const expr = bands[i].length
+      ? sql`CASE ${sql.join(bands[i].map((r, k) => {
+          const conds = [
+            r.from !== undefined ? sql`${cols[d.field]} >= ${sql.raw(String(Number(r.from)))}` : null,
+            r.to !== undefined ? sql`${cols[d.field]} < ${sql.raw(String(Number(r.to)))}` : null,
+          ].filter(Boolean) as SQL[];
+          return sql`WHEN ${sql.join(conds, sql` AND `)} THEN ${sql.raw(String(k))}`;
+        }), sql` `)} END`
+      : bucket ? sql`date_trunc('${sql.raw(bucket)}', ${cols[d.field]})` : cols[d.field];
     shape[`d${i}`] = expr;
     groupExprs.push(expr);
   });
@@ -1515,11 +1545,13 @@ export async function resolveQuery(
   const sortBy = source.sort?.by;
   const sortMeasure = measures.findIndex((m) => m.key === sortBy);
   const sortDim = dims.findIndex((d) => d.field === sortBy);
-  const order = source.sort?.order ?? (sortMeasure >= 0 || (!sortBy && !dims[0]?.bucket) ? "desc" : "asc");
+  // A bucketed or banded axis reads in its own order; anything else is a ranking.
+  const ordered0 = !!dims[0]?.bucket || bands[0]?.length > 0;
+  const order = source.sort?.order ?? (sortMeasure >= 0 || (!sortBy && !ordered0) ? "desc" : "asc");
   const sortExpr =
     sortMeasure >= 0 ? shape[`m${sortMeasure}`] :
     sortDim >= 0 ? shape[`d${sortDim}`] :
-    dims[0]?.bucket ? shape.d0 :
+    ordered0 ? shape.d0 :
     dims.length ? shape.m0 : undefined;
   const limit = Math.min(Math.max(source.limit ?? _QUERY_MAX_ROWS, 1), _QUERY_MAX_ROWS);
 
@@ -1537,11 +1569,15 @@ export async function resolveQuery(
     return [];
   }
 
+  // A value in no band is left out: it belongs to no group the chart draws.
+  if (bands.some((b) => b.length)) raw = raw.filter((r: any) => dims.every((_, i) => !bands[i].length || r[`d${i}`] !== null && r[`d${i}`] !== undefined));
+  const bandOrder: Array<Record<string, number>> = bands.map((b) => Object.fromEntries(b.map((r, k) => [rangeLabel(r), k])));
   const rows: Array<QueryRow & { __sort?: number | string | null }> = raw.map((r: any) => {
     const out: QueryRow = {};
     dims.forEach((d, i) => {
       const v = r[`d${i}`];
-      out[keyOf(i)] = d.bucket ? bucketLabel(v, d.bucket)
+      out[keyOf(i)] = bands[i].length ? rangeLabel(bands[i][Number(v)] ?? {})
+        : d.bucket ? bucketLabel(v, d.bucket)
         : v === null || v === undefined ? null
         : v instanceof Date ? v.toISOString()
         : typeof v === "number" ? v : String(v);
@@ -1558,12 +1594,15 @@ export async function resolveQuery(
   // the timestamp's, and this keeps the result right whatever produced it.
   const sortKey = sortMeasure >= 0 ? measures[sortMeasure].key
     : sortDim >= 0 ? keyOf(sortDim)
-    : dims[0]?.bucket ? keyOf(0)
+    : ordered0 ? keyOf(0)
     : dims.length ? measures[0].key : undefined;
   if (sortKey) {
     const dir = order === "asc" ? 1 : -1;
+    // A band sorts by its position, not its label ("under 18" before "18–30").
+    const bandIdx = dims.findIndex((d) => d.field === sortKey);
+    const rank = bandIdx >= 0 && bands[bandIdx].length ? bandOrder[bandIdx] : null;
     rows.sort((a, b) => {
-      const x = a[sortKey], y = b[sortKey];
+      const x = rank ? rank[String(a[sortKey])] : a[sortKey], y = rank ? rank[String(b[sortKey])] : b[sortKey];
       if (x === y) return 0;
       if (x === null) return 1;
       if (y === null) return -1;

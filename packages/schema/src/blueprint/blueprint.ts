@@ -1042,10 +1042,25 @@ export const QueryMeasure = z.object({
 /** Date truncation for a date dimension. */
 export const DateBucket = z.enum(["day", "week", "month", "quarter", "year"]);
 
+/** One band of a numeric dimension: `from` ≤ value < `to`; an open end is
+ *  left out. The label is what the axis says ("18–30"). */
+export const QueryRange = z.object({
+  label: z.string().optional(),
+  from: z.number().optional(),
+  to: z.number().optional(),
+});
+
 export const QueryDimension = z.object({
   field: z.string(),
   /** Set when `field` is a date: rows are grouped by this period. */
   bucket: DateBucket.optional(),
+  /**
+   * Set when `field` is a number: rows are grouped into these bands, in this
+   * order ("age group" over `age`), and a value in none of them is left out.
+   * Without it a number groups by its every distinct value — an age × gender
+   * heatmap had no way to say 18–30 (h7gmi93x).
+   */
+  ranges: z.array(QueryRange).min(1).max(24).optional(),
 });
 
 /**

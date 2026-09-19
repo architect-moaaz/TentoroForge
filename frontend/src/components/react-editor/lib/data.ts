@@ -5,7 +5,7 @@
  * are structured — a source and a field — never typed expressions; the
  * expression is written from the choice.
  */
-import type { EntityRef, LoadShape, ModelNode, ObjectEntry, PageDoc, PageModel, WidgetDimension, WidgetMeasure } from "../types";
+import type { EntityRef, LoadShape, ModelNode, ObjectEntry, PageDoc, PageModel, WidgetDimension, WidgetMeasure, WidgetRange } from "../types";
 import { humanise } from "./templates";
 
 export interface DataSource {
@@ -183,6 +183,21 @@ export interface SampleQuery {
   limit?: number | null;
 }
 
+/** What a band is called on the axis when it has no label — as the Data Engine names it. */
+export function bandLabel(r: WidgetRange): string {
+  if (r.label) return r.label;
+  if (r.from !== undefined && r.to !== undefined) return `${r.from}–${r.to}`;
+  return r.from !== undefined ? `${r.from}+` : `under ${r.to}`;
+}
+
+/** The band a number falls in (from ≤ v < to), or undefined when it is in none. */
+export function bandOf(v: unknown, ranges: WidgetRange[]): string | undefined {
+  const n = Number(v);
+  if (v === null || v === undefined || v === "" || Number.isNaN(n)) return undefined;
+  const hit = ranges.find((r) => (r.from === undefined || n >= r.from) && (r.to === undefined || n < r.to));
+  return hit ? bandLabel(hit) : undefined;
+}
+
 /** Measures by dimensions over sample rows — the same rules the canvas's sample server applies. */
 export function sampleQuery(rows: Record<string, unknown>[], q: SampleQuery): Record<string, string | number | null>[] {
   let src = rows;
@@ -192,7 +207,8 @@ export function sampleQuery(rows: Record<string, unknown>[], q: SampleQuery): Re
   }
   const groups = new Map<string, { vals: unknown[]; rows: Record<string, unknown>[] }>();
   for (const r of src) {
-    const vals = q.dimensions.map((d) => (d.bucket ? bucketOf(r[d.field], d.bucket) : r[d.field] ?? null));
+    const vals = q.dimensions.map((d) => (d.ranges?.length ? bandOf(r[d.field], d.ranges) : d.bucket ? bucketOf(r[d.field], d.bucket) : r[d.field] ?? null));
+    if (vals.some((v) => v === undefined)) continue;
     const k = JSON.stringify(vals);
     if (!groups.has(k)) groups.set(k, { vals, rows: [] });
     groups.get(k)!.rows.push(r);
@@ -215,10 +231,14 @@ export function sampleQuery(rows: Record<string, unknown>[], q: SampleQuery): Re
     for (const m of q.measures) row[m.key] = agg(m, grp);
     return row;
   });
-  const bucketed = q.dimensions.find((d) => d.bucket);
+  const bucketed = q.dimensions.find((d) => d.bucket || d.ranges?.length);
   const by = q.sort?.by ?? (bucketed ? bucketed.field : q.measures[0]?.key);
   const order = q.sort?.order ?? (bucketed && !q.sort ? "asc" : "desc");
-  if (by) out.sort((a, b) => ((a[by] ?? "") > (b[by] ?? "") ? 1 : (a[by] ?? "") < (b[by] ?? "") ? -1 : 0) * (order === "desc" ? -1 : 1));
+  const banded = q.dimensions.find((d) => d.field === by && d.ranges?.length);
+  if (banded) {
+    const rank = Object.fromEntries(banded.ranges!.map((r, i) => [bandLabel(r), i]));
+    out.sort((a, b) => (rank[String(a[by!])] - rank[String(b[by!])]) * (order === "desc" ? -1 : 1));
+  } else if (by) out.sort((a, b) => ((a[by] ?? "") > (b[by] ?? "") ? 1 : (a[by] ?? "") < (b[by] ?? "") ? -1 : 0) * (order === "desc" ? -1 : 1));
   if (q.limit) out = out.slice(0, q.limit);
   return out;
 }

@@ -215,7 +215,9 @@ export type Measure<E extends EntityName> =
 
 export type Dimension<E extends EntityName> =
   | (keyof Entities[E] & string)
-  | { field: keyof Entities[E] & string; bucket?: "day" | "week" | "month" | "quarter" | "year" };
+  | { field: keyof Entities[E] & string; bucket?: "day" | "week" | "month" | "quarter" | "year" }
+  /** A number in bands, in order: from ≤ value < to, an open end left out. */
+  | { field: keyof Entities[E] & string; ranges: readonly { label?: string; from?: number; to?: number }[] };
 
 /** A date window, half-open: `from` inclusive, `to` exclusive. ISO strings. */
 export interface DateRange { from?: string; to?: string }

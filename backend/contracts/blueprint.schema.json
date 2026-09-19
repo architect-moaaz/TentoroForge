@@ -946,6 +946,26 @@
                             "quarter",
                             "year"
                           ]
+                        },
+                        "ranges": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "type": "string"
+                              },
+                              "from": {
+                                "type": "number"
+                              },
+                              "to": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 24
                         }
                       },
                       "required": [

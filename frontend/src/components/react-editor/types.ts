@@ -144,7 +144,8 @@ export interface EntityRef {
 export type ChartMark = "bar" | "line" | "area" | "pie" | "donut" | "funnel" | "radar" | "scatter" | "heatmap" | "treemap";
 
 export interface WidgetMeasure { key: string; aggregation: "count" | "count_distinct" | "sum" | "avg" | "min" | "max"; field?: string; label?: string }
-export interface WidgetDimension { field: string; bucket?: "day" | "week" | "month" | "quarter" | "year" }
+export interface WidgetRange { label?: string; from?: number; to?: number }
+export interface WidgetDimension { field: string; bucket?: "day" | "week" | "month" | "quarter" | "year"; ranges?: WidgetRange[] }
 
 /** A chart or number tile: a Blueprint widget, drawn by `WidgetView` from its `widgets.key` handle. */
 export interface WidgetRef {

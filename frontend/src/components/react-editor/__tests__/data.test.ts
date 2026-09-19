@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bindingExpr, fieldChoices, pageSources, readBinding, rowContext, sampleOf, sampleQuery, withExpr, withString } from "../lib/data";
+import { bandOf, bindingExpr, fieldChoices, pageSources, readBinding, rowContext, sampleOf, sampleQuery, withExpr, withString } from "../lib/data";
 import type { ModelNode, PageDoc, PageModel } from "../types";
 
 function node(id: string, type: string, extra: Partial<ModelNode> = {}): ModelNode {
@@ -95,5 +95,23 @@ describe("the page's data in a person's words", () => {
     expect(sampleQuery(rows, { measures: [{ key: "avg_age", aggregation: "avg", field: "age" }], dimensions: [{ field: "createdAt", bucket: "month" }] })).toEqual([{ createdAt: "2026-09", avg_age: 25.5 }, { createdAt: "2026-10", avg_age: 36 }]);
     expect(sampleQuery(rows, { measures: [{ key: "count", aggregation: "count" }], dimensions: [{ field: "gender" }], filter: { gender: ["Female"] } })).toEqual([{ gender: "Female", count: 1 }]);
     expect(sampleQuery(rows, { measures: [{ key: "total_age", aggregation: "sum", field: "age" }], dimensions: [], limit: 1 })).toEqual([{ total_age: 87 }]);
+  });
+});
+
+describe("a number grouped into ranges", () => {
+  const rows = [{ age: 12 }, { age: 25 }, { age: 30 }, { age: 44 }, { age: 70 }, { age: null }];
+  const ranges = [{ label: "Under 18", to: 18 }, { label: "18–30", from: 18, to: 31 }, { from: 31, to: 61 }, { label: "61+", from: 61 }];
+
+  it("labels each band, keeps the declared order, and drops values in no band", () => {
+    const out = sampleQuery(rows, { measures: [{ key: "n", aggregation: "count" }], dimensions: [{ field: "age", ranges }] });
+    expect(out).toEqual([
+      { age: "Under 18", n: 1 }, { age: "18–30", n: 2 }, { age: "31–61", n: 1 }, { age: "61+", n: 1 },
+    ]);
+  });
+
+  it("reads a value exactly on an edge into the band it starts", () => {
+    expect(bandOf(18, ranges)).toBe("18–30");
+    expect(bandOf(31, ranges)).toBe("31–61");
+    expect(bandOf("x", ranges)).toBeUndefined();
   });
 });

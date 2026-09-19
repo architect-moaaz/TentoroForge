@@ -67,6 +67,17 @@ function evalExpr(expr: any, row: any): unknown {
     if (bucket === "month") return new Date(Date.UTC(y, m, 1));
     return new Date(Date.UTC(y, m, v.getUTCDate()));
   }
+  // CASE WHEN <col> >= a AND <col> < b THEN k … END — a banded number.
+  if (expr?.op === "raw" && /^CASE /.test(expr.text)) {
+    const cond = (c: any) => {
+      const v = row[c.values[0].__col], n = Number(c.values[1].__raw);
+      return v !== null && v !== undefined && (/>=/.test(c.text) ? v >= n : v < n);
+    };
+    for (const when of expr.values[0].parts) {
+      if (when.values[0].parts.every(cond)) return Number(when.values[1].__raw);
+    }
+    return null;
+  }
   throw new Error(`fake db cannot evaluate ${JSON.stringify(expr)}`);
 }
 
@@ -213,6 +224,32 @@ console.log("a trend: a bucketed date reads as a sortable period, oldest first")
   eqJson(q, [{ placedAt: "2026-Q1", orders: 4 }], "a quarter reads as 2026-Q1");
   ok(/date_trunc\('\?', \?\)/.test(lastQuery.shape.d0.text) || lastQuery.shape.d0.text.includes("date_trunc('"),
      "the bucket is inlined, so SELECT and GROUP BY are one expression");
+}
+
+console.log("number bands: a number grouped into ranges, in their own order");
+{
+  const bands = [{ to: 50, label: "small" }, { from: 50, to: 200 }, { from: 200 }];
+  const rows = await engine.resolveQuery(
+    { entity: "orders", op: "query", measures: [count], dimensions: [{ field: "total", ranges: bands }] }, alice);
+  eqJson(rows, [
+    { total: "small", orders: 1 }, { total: "50–200", orders: 2 }, { total: "200+", orders: 1 },
+  ], "orders per band, the bands in the order declared, unlabelled ones named by their ends");
+  ok(/^CASE /.test(lastQuery.shape.d0.text), "the band is one CASE, the same expression in SELECT and GROUP BY");
+  ok(!JSON.stringify(lastQuery.shape.d0).includes("small"), "a label never reaches the SQL");
+  const some = await engine.resolveQuery(
+    { entity: "orders", op: "query", measures: [count], dimensions: [{ field: "total", ranges: [{ from: 50, to: 200 }] }] }, alice);
+  eqJson(some, [{ total: "50–200", orders: 2 }], "a value in no band is left out");
+  const grid = await engine.resolveQuery({
+    entity: "orders", op: "query", measures: [count],
+    dimensions: [{ field: "total", ranges: bands }, { field: "status" }],
+  }, alice);
+  eqJson(grid.map((r: any) => `${r.total}/${r.status}:${r.orders}`).sort(),
+    ["200+/PAID:1", "50–200/OPEN:1", "50–200/PAID:1", "small/PAID:1"], "a heatmap's grid: band × status, one cell per pair");
+  const order: Record<string, number> = { small: 0, "50–200": 1, "200+": 2 };
+  ok(grid.every((r: any, i: number) => i === 0 || order[grid[i - 1].total as string] <= order[r.total as string]), "the grid reads band by band");
+  const bad = await engine.resolveQuery(
+    { entity: "orders", op: "query", measures: [count], dimensions: [{ field: "total", ranges: [{ from: 9, to: 1 }] }] }, alice);
+  ok(bad.length === 4, "a band that cannot hold anything is ignored, not thrown");
 }
 
 console.log("a split: two dimensions give one row per pair");

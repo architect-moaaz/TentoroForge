@@ -874,6 +874,41 @@ _MARK_SHAPE: dict[str, tuple[tuple[int, int], tuple[int, int]]] = {
 _DATE_TYPES = ("date", "time", "timestamp")
 
 
+def range_findings(dim: dict, field: dict | None) -> list[str]:
+    """What is wrong with a numeric dimension's `ranges`: bands over a number,
+    each with an end, lower below upper, not overlapping, labels distinct."""
+    from services.blueprint.app_sdk import _numeric
+
+    out: list[str] = []
+    ranges = dim.get("ranges") or []
+    if dim.get("bucket"):
+        out.append("has both a date bucket and number ranges — a column is one or the other")
+    if field is not None and not _numeric(field):
+        out.append("is grouped into number ranges but is not a number")
+    bands: list[tuple[float, float]] = []
+    labels: list[str] = []
+    for i, r in enumerate(ranges):
+        lo, hi = r.get("from"), r.get("to")
+        if lo is None and hi is None:
+            out.append(f"range {i + 1} has neither `from` nor `to`")
+            continue
+        if not all(v is None or isinstance(v, (int, float)) and not isinstance(v, bool) for v in (lo, hi)):
+            out.append(f"range {i + 1}: `from` and `to` are numbers")
+            continue
+        if lo is not None and hi is not None and lo >= hi:
+            out.append(f"range {i + 1}: `from` ({lo}) must be below `to` ({hi}) — `to` is exclusive")
+            continue
+        bands.append((float("-inf") if lo is None else lo, float("inf") if hi is None else hi))
+        labels.append(str(r.get("label") or ""))
+    ordered = sorted(bands)
+    if any(a[1] > b[0] for a, b in zip(ordered, ordered[1:])):
+        out.append("ranges overlap — a value would be counted twice")
+    named = [l for l in labels if l]
+    if len(set(named)) != len(named):
+        out.append("two ranges share a label")
+    return out
+
+
 def _query_findings(widget: dict, src: dict, entity: dict) -> list[str]:
     """What a `query` source cannot compute, or its chart cannot draw."""
     from services.blueprint.app_sdk import _numeric
@@ -906,6 +941,8 @@ def _query_findings(widget: dict, src: dict, entity: dict) -> list[str]:
         elif d.get("bucket") and fields and not any(
                 t in str(fields[col].get("type") or "").lower() for t in _DATE_TYPES):
             out.append(f"dimension {col!r} is bucketed by {d['bucket']} but is not a date")
+        if d.get("ranges"):
+            out.extend(f"dimension {col!r}: {e}" for e in range_findings(d, fields.get(col) if fields else None))
     for key in ("timeField",):
         col = src.get(key)
         if col and fields and col not in fields:

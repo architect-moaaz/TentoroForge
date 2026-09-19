@@ -62,6 +62,14 @@ function bucketOf(v: any, bucket: string): string {
   if (bucket === "week") { const t = new Date(Date.UTC(y, mo - 1, d.getUTCDate())); const day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day); const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1)); return t.getUTCFullYear() + "-W" + String(Math.ceil((((t.getTime() - y0.getTime()) / 86400000) + 1) / 7)).padStart(2, "0"); }
   return d.toISOString().slice(0, 10);
 }
+// A number in bands — the same rule the Data Engine applies (from ≤ v < to).
+function bandLabel(r: any): string { return r.label || (r.from !== undefined && r.to !== undefined ? r.from + "–" + r.to : r.from !== undefined ? r.from + "+" : "under " + r.to); }
+function bandOf(v: any, ranges: any[]): string | undefined {
+  const n = Number(v);
+  if (v === null || v === undefined || v === "" || isNaN(n)) return undefined;
+  const hit = ranges.find((r) => (r.from === undefined || n >= r.from) && (r.to === undefined || n < r.to));
+  return hit ? bandLabel(hit) : undefined;
+}
 function aggregate(m: any, rows: any[]): number | null {
   const vals = rows.map((r) => r[m.field]).filter((v) => v !== null && v !== undefined);
   const nums = vals.map(Number).filter((n) => !isNaN(n));
@@ -79,7 +87,8 @@ function runQuery(entity: string, q: { measures: any[]; dimensions?: any[]; wher
   const dims = (q.dimensions ?? []).map((d: any) => (typeof d === "string" ? { field: d } : d));
   const groups = new Map<string, { vals: any[]; rows: any[] }>();
   for (const r of filter(entity, { where: q.where })) {
-    const vals = dims.map((d: any) => (d.bucket ? bucketOf(r[d.field], d.bucket) : r[d.field] ?? null));
+    const vals = dims.map((d: any) => (d.ranges?.length ? bandOf(r[d.field], d.ranges) : d.bucket ? bucketOf(r[d.field], d.bucket) : r[d.field] ?? null));
+    if (vals.some((v: any) => v === undefined)) continue;
     const k = JSON.stringify(vals);
     if (!groups.has(k)) groups.set(k, { vals, rows: [] });
     groups.get(k)!.rows.push(r);
@@ -90,9 +99,15 @@ function runQuery(entity: string, q: { measures: any[]; dimensions?: any[]; wher
     for (const m of q.measures) row[m.key] = aggregate(m, rows);
     return row;
   });
-  const bucketed = dims.find((d: any) => d.bucket);
+  const bucketed = dims.find((d: any) => d.bucket || d.ranges?.length);
   const by = q.sort?.by ?? (bucketed ? bucketed.field : q.measures[0]?.key);
   const order = q.sort?.order ?? (bucketed && !q.sort ? "asc" : "desc");
+  const banded = dims.find((d: any) => d.field === by && d.ranges?.length);
+  if (banded) {
+    const rank = Object.fromEntries(banded.ranges.map((r: any, i: number) => [bandLabel(r), i]));
+    out.sort((a: any, b: any) => (rank[a[by]] - rank[b[by]]) * (order === "desc" ? -1 : 1));
+    return q.limit ? out.slice(0, q.limit) : out;
+  }
   if (by) out.sort((a, b) => ((a[by] ?? "") > (b[by] ?? "") ? 1 : (a[by] ?? "") < (b[by] ?? "") ? -1 : 0) * (order === "desc" ? -1 : 1));
   if (q.limit) out = out.slice(0, q.limit);
   return out;

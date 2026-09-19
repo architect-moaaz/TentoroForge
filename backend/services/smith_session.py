@@ -736,7 +736,7 @@ class SmithSession:
             # for a field that is not there.
             return TurnResult(
                 status="needs_user",
-                answer=("I re-composed **" + route + "**, but the new screen does "
+                answer=("I changed **" + route + "**, but the new screen does "
                         "not show what you asked for:\n"
                         + "\n".join(f"- {m}" for m in missing)
                         + "\n\nIf it is a field of the record, ask me to add "
@@ -1337,6 +1337,17 @@ class SmithSession:
 
         from services.smith.engine_blueprint_adapter import load_engine_doc
         doc = load_engine_doc(str(self.output_dir)) or {}
+
+        # A PAGE WRITTEN AS REACT IS CHANGED AS REACT. The move below edits the
+        # page's layout tree by label, and a coded page does not render from
+        # its tree — a rename there changed nothing on screen. The UI engineer
+        # rewrites the page with the ask as its brief instead.
+        if target_file and verb in ("rename", "remove", "reorder"):
+            from services.smith.compose import _page_for_route, code_row
+            coded = _page_for_route(doc, target_file)
+            if coded is not None and code_row(doc, str(coded.get("id"))) is not None:
+                return self._compose("compose_route", {**understanding, "route": coded.get("route")},
+                                     self._ask)
 
         if not target_file:
             # The screens are in the Blueprint; asking for one by name and

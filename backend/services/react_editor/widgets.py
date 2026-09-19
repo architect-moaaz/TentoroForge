@@ -135,6 +135,9 @@ def _from_spec(doc: dict, page_id: str, spec: dict[str, Any], base: dict | None 
             row = {"field": str(d["field"])}
             if d.get("bucket") in BUCKETS:
                 row["bucket"] = d["bucket"]
+            if d.get("ranges"):
+                row["ranges"] = [{k: r[k] for k in ("label", "from", "to") if r.get(k) not in (None, "")}
+                                 for r in d["ranges"] if isinstance(r, dict)]
             dims.append(row)
         if len(dims) > 2:
             raise EditorError(422, "too-many-dimensions", "A chart can group by at most two things.")

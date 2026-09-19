@@ -112,11 +112,14 @@ count(entity, where?): Promise<number>
 total(entity, fn: "sum" | "avg" | "min" | "max", numericField, where?): Promise<number>
 series(entity, { groupBy: field; bucket?: "day" | "week" | "month"; fn?: "count" | "sum" | "avg" | "min" | "max"; field?: numericField }): Promise<SeriesPoint[]>
 query(entity, { measures: { [key]: { fn: "count" } | { fn: "count_distinct" | "min" | "max", field } | { fn: "sum" | "avg", field: numericField } };
-                dimensions?: [field | { field, bucket?: "day" | "week" | "month" | "quarter" | "year" }, …at most 2];
+                dimensions?: [field | { field, bucket?: "day" | "week" | "month" | "quarter" | "year" }
+                              | { field: numericField, ranges: { label?, from?, to? }[] }, …at most 2];
                 where?; range?: { from?: iso; to?: iso }; timeField?; sort?: { by, order? }; limit? }): Promise<QueryRow[]>
    Measures by dimensions, one GROUP BY: query("Order", { measures: { revenue: { fn: "sum", field: "total" } },
    dimensions: [{ field: "placedAt", bucket: "month" }, "region"] }) → [{ placedAt: "2026-01", region: "EU", revenue: 1840 }, …].
    A bucketed date reads "2026-03-02" / "2026-03" / "2026-Q1" / "2026"; a foreign-key dimension also carries `<field>Label`.
+   A number grouped into `ranges` (from ≤ value < to) reads as each band's label, bands in the order given — age groups,
+   price bands; a value in no band is left out.
 runWidget(widgets.x, { range?, where? }): Promise<WidgetData>      // WidgetData = { rows: QueryRow[]; value: number | null }
    Reads one of the page's declared widgets exactly as the Blueprint defines it. `value` is the number of a
    metric or gauge. `where` narrows it (a record page passes its own id: { customerId: params.id }).
