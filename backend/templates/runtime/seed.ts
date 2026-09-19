@@ -120,6 +120,9 @@ function tableFor(name: string): any {
  * transforms a value in ANY table, where `salt` is a real column in a recipe
  * app and would be corrupted.
  */
+/** Tables whose planned rows all failed this run (see seedDomain). */
+let SEED_MISMATCHES = 0;
+
 const _isCredentialColumn = (key: string) => norm(key).includes("password");
 
 /** A valid bcrypt hash whose input nobody holds, so the column is filled and
@@ -776,6 +779,7 @@ async function seedDomain(adminId: string | null, imported: Set<string> = new Se
     }
     if (next.length === pending.length) {
       for (const t of next) {
+        SEED_MISMATCHES += 1;
         console.error(`❌ SEED MISMATCH: ${t.name} planned rows inserted 0`);
         if ((t as any).__firstErr) console.error(`   ↳ first row error: ${(t as any).__firstErr}`);
       }
@@ -926,6 +930,14 @@ async function main(): Promise<void> {
     return;
   }
   await seedDomain(adminId, importedTables);
+  // A SEED THAT FAILED IS NOT A SEED TO SKIP NEXT TIME. The fingerprint was
+  // recorded after every table had refused its rows (0l133sp2: no tables yet),
+  // and each later start saw "shape unchanged + data present" — the admin's
+  // own account row — and never seeded the demo data at all.
+  if (SEED_MISMATCHES > 0) {
+    console.warn(`[seed] ${SEED_MISMATCHES} table(s) took no rows — fingerprint NOT recorded, the next start seeds again.`);
+    return;
+  }
   await recordSeedFingerprint(currentFp);
   console.log(`[seed] complete — fingerprint recorded (${currentFp}).`);
 }

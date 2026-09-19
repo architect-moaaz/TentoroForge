@@ -2420,6 +2420,34 @@ def _is_credential_field(name: str) -> bool:
     return "password" in re.sub(r"[^a-z]", "", str(name or "").lower())
 
 
+def _link_target(doc: dict, entity: dict, field: dict) -> str | None:
+    """The entity a foreign key points at, for seeding a real link rather than
+    the text "Owner Id 1" a uuid column refuses (0l133sp2 seeded nothing but
+    the admin: no field carried `references`, and only five of ten links were
+    in `data.relationships`). The field's own `references`, else the declared
+    relationship, else an entity named by the field (`toolId` → Tool), else —
+    an id naming a person (`ownerId`, `borrowerId`) — the account entity."""
+    name = str(field.get("name") or "")
+    ents = [e for e in (doc.get("data") or {}).get("entities") or [] if e.get("status") != "DEPRECATED"]
+    eid = str(entity.get("id") or "")
+    for r in (doc.get("data") or {}).get("relationships") or []:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("to")) == eid and r.get("toField") == name:
+            return str(r.get("from"))
+        if str(r.get("from")) == eid and r.get("fromField") == name and r.get("toField") in (None, "", "id"):
+            return str(r.get("to"))
+    m = re.match(r"^(.*?)(Id|_id)$", name)
+    if not m or str(field.get("type") or "").lower() not in ("uuid", "string", "text", ""):
+        return None
+    stem = re.sub(r"[^a-z0-9]", "", m.group(1).lower())
+    for e in ents:
+        if re.sub(r"[^a-z0-9]", "", str(e.get("name") or "").lower()) in (stem, stem.rstrip("s")):
+            return str(e.get("id"))
+    account = next((e for e in ents if e.get("account")), None)
+    return str(account.get("id")) if account and str(account.get("id")) != eid else None
+
+
 def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, Any]:
     """Write ``src/db/seed.json`` — a few rows per entity.
 
@@ -2463,6 +2491,10 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, An
                     continue
                 if _is_credential_field(field.get("name")):
                     continue
+                if not field.get("references"):
+                    target = _link_target(doc, entity, field)
+                    if target:
+                        field = {**field, "references": target}
                 # No picture to seed, and a made-up file id is a broken image
                 # plus an embedding that fails; the vector is the platform's.
                 if is_image_field(field) or is_embedding_field(field):

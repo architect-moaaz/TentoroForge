@@ -40,3 +40,27 @@ def test_the_editor_draws_sign_in_without_next_auth():
         assert f"export {'async function' if name in ('signIn', 'signOut', 'getSession') else 'function'} {name}" in shim
     code = [l for l in shim.splitlines() if not l.lstrip().startswith("//")]
     assert not any("process" in l for l in code), "the stub reads nothing from Node"
+
+
+def test_demo_rows_link_to_real_parents_and_a_failed_seed_is_not_remembered():
+    import json
+    import tempfile
+    from services.blueprint.projection import project_seed
+
+    member, tool, rental = "ENTITY-001", "ENTITY-002", "ENTITY-003"
+    doc = {"data": {"entities": [
+        {"id": member, "name": "Member", "table": "members", "account": True, "fields": [{"name": "name", "type": "string"}]},
+        {"id": tool, "name": "Tool", "table": "tools", "fields": [{"name": "ownerId", "type": "uuid"}]},
+        {"id": rental, "name": "Rental", "table": "rentals", "fields": [
+            {"name": "toolId", "type": "uuid"}, {"name": "borrowerId", "type": "uuid"}, {"name": "caseId", "type": "uuid"}]},
+    ], "relationships": [{"from": member, "fromField": "id", "to": tool, "toField": "ownerId", "kind": "one_to_many"}]}}
+    out = Path(tempfile.mkdtemp())
+    project_seed(doc, out)
+    seed = json.loads((out / "src/db/seed.json").read_text())
+    assert seed["tools"][0]["ownerId"] == "ref:members[0]", "from the declared relationship"
+    rental_row = seed["rentals"][0]
+    assert rental_row["toolId"] == "ref:tools[0]", "from the entity the name says"
+    assert rental_row["borrowerId"] == "ref:members[0]", "a person is the account entity"
+    seed_ts = (Path(__file__).resolve().parents[2] / "templates/runtime/seed.ts").read_text()
+    assert "if (SEED_MISMATCHES > 0) {" in seed_ts
+    assert seed_ts.index("if (SEED_MISMATCHES > 0) {") < seed_ts.index("await recordSeedFingerprint(currentFp);")
