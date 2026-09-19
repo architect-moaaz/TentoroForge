@@ -9,8 +9,7 @@ calls and 161 repair calls, and the time went on waiting as much as on calls:
 * the check after a subject's last repair held the node, although its verdict
   could only become a flag.
 
-The fan-out node here is `entity_fields`, whose own rounds are zero in a real
-run; each test gives it rounds back so the loop has something to exercise.
+The fan-out node here is `entity_fields`, watched in a real run.
 """
 import json
 import threading
@@ -30,7 +29,7 @@ ENTITIES = ("ENTITY-001", "ENTITY-002", "ENTITY-003")
 
 @pytest.fixture()
 def svc(tmp_path, monkeypatch):
-    monkeypatch.delitem(orchestrator.OBSERVER_ROUNDS_BY_NODE, "entity_fields")
+    monkeypatch.delitem(orchestrator.OBSERVER_ROUNDS_BY_NODE, "entity_fields", raising=False)
     s = BlueprintService.create(output_dir=tmp_path, app_id="lab",
                                 name="LabConnect", domain="health")
     s.doc["data"] = {"entities": [

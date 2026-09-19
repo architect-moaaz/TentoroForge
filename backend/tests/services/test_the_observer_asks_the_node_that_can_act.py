@@ -108,28 +108,24 @@ def _field_author(svc):
     return author
 
 
-def test_the_field_author_is_not_sent_to_the_observer(svc):
-    """25 sent back across 71 observed runs, 4 passed; the rest were flagged
-    and stayed wrong. Its repair rounds are zero, so the critic is not asked."""
-    critic = _Critic([{"section": "data.entities", "artifact": "ENTITY-001",
-                       "requirement": "REQ-002", "detail": "User has no email column"}])
+def test_the_field_author_is_sent_to_the_observer(svc):
+    """Watched again (2026-09-19): Tool Share shipped Tool with two columns
+    and Member with none, and at zero rounds nothing looked at either."""
+    critic = _Critic([])
     report = run(svc, _field_author(svc), plan=["entity_fields"],
                  observer_agent=Observer(critic=critic, rounds=2))
-    assert critic.calls == []
-    events = [l["event"] for l in read(svc.output_dir, runs(svc.output_dir)[0])]
-    assert not any(e.startswith("observer:") for e in events)
+    assert critic.calls, "the critic is asked about the entities"
     assert "entity_fields" in report.completed
-    assert "entity_fields" not in report.observed
+    assert "entity_fields" in report.observed
 
 
 def test_a_deferred_finding_reaches_the_report_instead_of_disappearing(svc, monkeypatch):
     """Deferred findings used to be counted and dropped. The ones the critic
     raised are the useful kind, so they travel as change requests.
 
-    The field author is not observed in a real run; the routing is the same for
-    any watched fan-out, so the test watches it here to exercise it."""
+    The field author is a watched fan-out, so the routing is exercised on it."""
     from services.blueprint import orchestrator
-    monkeypatch.delitem(orchestrator.OBSERVER_ROUNDS_BY_NODE, "entity_fields")
+    monkeypatch.delitem(orchestrator.OBSERVER_ROUNDS_BY_NODE, "entity_fields", raising=False)
 
     critic = _Critic([_missing_patient()])
     report = run(svc, _field_author(svc), plan=["entity_fields"],
@@ -164,7 +160,7 @@ def test_the_requirements_author_is_not_sent_to_the_observer(tmp_path):
     assert "requirements" in report.completed
 
 
-@pytest.mark.parametrize("node", ["entity_fields", "requirements", "ux_architecture",
+@pytest.mark.parametrize("node", ["requirements", "ux_architecture",
                                   "integrations", "page_code"])
 def test_the_nodes_taken_off_the_observer_have_no_repair_rounds(node):
     """Zero rounds is what keeps a node away from the critic entirely

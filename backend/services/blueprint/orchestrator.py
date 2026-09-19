@@ -2089,12 +2089,13 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 #: Observer repair rounds per node, where the default (the observer's own
 #: `rounds`) is wrong. A node at 0 is NOT JUDGED AT ALL: `finish` does not send
 #: it to the critic, since a verdict nothing can act on only costs a call.
-#: `entity_fields`: 0 — across 71 observed runs (2026-09-10..17) it was sent back
-#: 25 times and passed 4; the other 21 were flagged unrepaired, and none of
-#: those passed in a later run. Its author details the one entity it is handed,
-#: and most findings asked for what only the whole data model can change. The
-#: entity is still held to its contract when it is applied and checked by
-#: `verification` at the end.
+#: `entity_fields` is WATCHED again (2026-09-19, product decision): it was at 0
+#: after 25 of 71 runs' send-backs passed only 4 times, most findings asking
+#: for what only the whole data model can change — those now travel as change
+#: requests (`observer:deferred`) rather than being repaired here. Tool Share
+#: (036farqu) then shipped Tool with two columns and Member with none, and
+#: nothing looked at it; a field author asked again about its own entity is
+#: worth the calls.
 #: `requirements`: 0 — a product decision (2026-09-17), taken for the time and
 #: spend. It was the node the observer repaired best (14 of 15 sent back
 #: passed), so what it caught now reaches later nodes and the terminal
@@ -2110,7 +2111,6 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 #: empty" before any page exists, an empty `initialRoute`, a missing citation),
 #: and it sat on the critical path.
 OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
-    "entity_fields": 0,
     "requirements": 0,
     "integrations": 0,
     "page_code": 0,
