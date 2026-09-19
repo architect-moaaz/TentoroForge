@@ -35,7 +35,7 @@ import { db } from "./index";
 import * as schema from "./schema";
 // Who signs in (projected from the Blueprint by account_model). Relative, not
 // `@/`: the seed runs under tsx, outside Next's path aliases.
-import { ACCOUNT, SIGNUP_ROLE } from "../lib/account";
+import { ACCOUNT, ADMIN_ROLE, SIGNUP_ROLE } from "../lib/account";
 import { accountTable } from "../lib/account-table";
 
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@example.com";
@@ -269,11 +269,14 @@ async function seedAdmin(): Promise<string | null> {
   if (idCol && /uuid/i.test(String(idCol.columnType ?? ""))) row.id = ADMIN_UUID;
   if ("name" in users) row.name = "Admin";
   if ("isActive" in users) row.isActive = true;
-  if ("role" in users) row.role = "admin";
+  // THE ADMIN HOLDS THE APPLICATION'S WIDEST ROLE (ADMIN_ROLE, projected from
+  // the Blueprint). It held the sign-up role, so 0l133sp2's admin was a Member
+  // and could not open the verification queue it was told about.
+  if ("role" in users) row.role = ADMIN_ROLE ?? "admin";
   // No role column: the session role is `accountType`. Without one the admin
   // held the platform's "user", which no page or workflow of the app names,
   // and every role-gated workflow refused them.
-  else if ("accountType" in users && SIGNUP_ROLE) row.accountType = SIGNUP_ROLE;
+  else if ("accountType" in users && (ADMIN_ROLE || SIGNUP_ROLE)) row.accountType = ADMIN_ROLE ?? SIGNUP_ROLE;
   // Satisfy any NOT NULL foreign keys (e.g. workspace_id in multi-tenant schemas)
   // so the admin insert doesn't fail the constraint and leave the app login-less.
   await resolveRequiredFks(users, row);

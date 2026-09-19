@@ -1788,6 +1788,21 @@ def feel_condition(expr: Any) -> Any:
     return "".join(out)
 
 
+#: Step config keys that name a role.
+_ROLE_KEYS = ("recipientRole", "toRole", "assigneeRole", "role")
+
+
+def _roles_by_name(config: dict[str, Any], role_names: dict[str, str]) -> dict[str, Any]:
+    """Role ids in a step's config, as the role names the runtime compares."""
+    for key in _ROLE_KEYS:
+        value = config.get(key)
+        if isinstance(value, str) and value:
+            config[key] = ",".join(role_names.get(v.strip(), v.strip()) for v in value.split(","))
+        elif isinstance(value, list):
+            config[key] = [role_names.get(str(v), v) for v in value]
+    return config
+
+
 def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
                  wf_id: str = "", steps: list[dict] | None = None) -> dict[str, Any]:
     """The node config for one step: the catalog's defaults for that node and
@@ -1971,6 +1986,12 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
     written: list[str] = []
     code_map: list[dict] = []
+    # A step names a role as the Blueprint does (`ROLE-002`); the session,
+    # the inbox and /api/notifications know it by its name ("Admin"). An id
+    # there matched nobody — 0l133sp2's "awaiting KYC verification" was
+    # stored for role "ROLE-002" and no admin ever saw it.
+    role_names = {str(r.get("id")): str(r.get("name")) for r in doc.get("roles") or []
+                  if isinstance(r, dict) and r.get("id") and r.get("name")}
     for wf in workflows:
         slug = to_snake(wf.get("name") or wf.get("id") or "workflow").replace("_", "-")
         declared_trigger = wf.get("trigger") or {}
@@ -2012,7 +2033,8 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             entity = entities.get(s.get("entity")) or {}
             nodes.append(_wf_node(
                 s["key"], s.get("type"), len(chain),
-                _step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
+                _roles_by_name(_step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
+                               role_names),
                 s.get("name") or s["key"],
             ))
             chain.append(s["key"])

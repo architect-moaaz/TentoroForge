@@ -67,6 +67,32 @@ def signup_role(doc: dict) -> str | None:
     return str(roles[0].get("name")) if len(roles) == 1 and roles[0].get("name") else None
 
 
+def admin_role(doc: dict) -> str | None:
+    """The role the built-in admin account holds: the one that opens the
+    back office — the pages the Blueprint restricts to named roles
+    (`access: role_restricted`), then the pages no other role opens, then all
+    it opens. The admin was seeded with the sign-up role, so 0l133sp2's
+    admin@example.com was a Member, and the verification queue and every
+    notification to "Admin" were somebody else's."""
+    roles = _live(doc.get("roles"))
+    if not roles:
+        return None
+    pages = [p for p in _live(doc.get("pages")) if str(p.get("pattern") or "") != "auth"]
+
+    def opens(rid: str) -> list[dict]:
+        return [p for p in pages if not p.get("users") or rid in [str(u) for u in p.get("users")]]
+
+    def rank(role: dict) -> tuple[int, int, int]:
+        rid = str(role.get("id"))
+        mine = opens(rid)
+        restricted = sum(1 for p in mine if str(p.get("access") or "") == "role_restricted")
+        only = sum(1 for p in mine if [str(u) for u in p.get("users") or []] == [rid])
+        return restricted, only, len(mine)
+
+    best = max(roles, key=rank)
+    return str(best.get("name")) if best.get("name") else None
+
+
 def _humanise(name: str) -> str:
     words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name).replace("_", " ").split()
     return " ".join(words).capitalize() if words else name
@@ -176,6 +202,8 @@ def project_account(doc: dict, app_root: str | Path) -> dict[str, Any]:
           "  required: boolean;\n  options?: { label: string; value: string }[];\n}\n\n"
         + f"export const ACCOUNT: null | {{ entity: string; fields: AccountField[]; labelField: string | null; locationField: string | null }} = {account};\n\n"
         + f"export const SIGNUP_ROLE: string | null = {json.dumps(signup_role(doc))};\n\n"
+        + "/** The role the built-in admin account holds: the one that reaches the most of the app. */\n"
+        + f"export const ADMIN_ROLE: string | null = {json.dumps(admin_role(doc))};\n\n"
         + f"export const AFTER_SIGNUP: string = {json.dumps(after_signup_route(doc))};\n\n"
         + f"export const HOME: string = {json.dumps(home_route(doc))};\n", "utf-8")
     if ent is None:
@@ -244,6 +272,6 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
         edge(prev, t, "then")
 
 
-__all__ = ["AUTH_PAGES", "account_entity", "account_fields", "after_signup_route", "auth_page_bodies",
+__all__ = ["AUTH_PAGES", "account_entity", "admin_role", "account_fields", "after_signup_route", "auth_page_bodies",
            "guard_workflow", "has_sign_in", "home_route", "is_auth_page", "prerequisites",
            "project_account", "signup_role"]

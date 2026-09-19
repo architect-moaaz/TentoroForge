@@ -19,6 +19,9 @@ export const ACCOUNT: null | { entity: string; fields: AccountField[]; labelFiel
 /** The role a person who creates their own account gets; null leaves the platform default. */
 export const SIGNUP_ROLE: string | null = null;
 
+/** The role the built-in admin account holds; null leaves the platform default. */
+export const ADMIN_ROLE: string | null = null;
+
 /** Where a new account goes first — the page that satisfies a prerequisite, else home. */
 export const AFTER_SIGNUP: string = "/";
 
