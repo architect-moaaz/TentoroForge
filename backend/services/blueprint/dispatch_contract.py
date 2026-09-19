@@ -333,7 +333,15 @@ def dispatches(doc: Mapping[str, Any]) -> list[dict]:
     control→workflow wire with the payload it sends, sampled per key from the
     workflow's declared input types."""
     out: list[dict] = []
+    # A PAGE THAT SHIPS CODE DOES NOT SHIP ITS LAYOUT. Its controls are in its
+    # `view.tsx`, type-checked against each workflow's required inputs when it
+    # is written; the layout's Form is not in the app. 0l133sp2 failed its
+    # build on /disputes/new's layout Form (no rental in scope) while the page
+    # that shipped sent `run({ rental, reason, description })`.
+    coded = {str(r.get("page")) for r in (doc.get("pageCode") or []) if isinstance(r, dict) and r.get("view")}
     for d in control_dispatches(doc):
+        if d.page_id in coded:
+            continue
         wf = _workflow_by_id(dict(doc), d.workflow_id) or {}
         by_name = {str(i.get("name")): i for i in (wf.get("inputs") or []) if isinstance(i, dict)}
         payload = {}

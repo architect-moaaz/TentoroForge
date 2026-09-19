@@ -187,3 +187,20 @@ def test_the_last_attempt_keeps_what_resolves_and_the_contract():
     assert len(dropped) == 1 and "`via` must be" in dropped[0]
     assert [c["label"] for c in result.proposals[0].body["content"]] == ["Name"]
     check_page_content(result, _doc())          # now accepted
+
+
+def test_the_dry_run_checks_what_ships_not_a_coded_pages_layout():
+    """0l133sp2: the build failed on /disputes/new's layout Form, which the app
+    never shipped — the page's own code ran the workflow with the rental."""
+    from services.blueprint.dispatch_contract import dispatches
+
+    doc = {
+        "pages": [{"id": "PAGE-013", "route": "/disputes/new"}, {"id": "PAGE-014", "route": "/notes/new"}],
+        "workflows": [{"id": "FLOW-013", "name": "Raise", "inputs": [{"name": "reason", "kind": "field", "type": "string"}]}],
+        "pageLayouts": [
+            {"page": pid, "root": {"type": "Form", "props": {"workflow": "FLOW-013", "label": "Create",
+                                                              "fields": [{"name": "reason"}]}, "children": []}}
+            for pid in ("PAGE-013", "PAGE-014")],
+        "pageCode": [{"page": "PAGE-013", "load": "", "view": "run({ rental, reason })"}],
+    }
+    assert [d["page"] for d in dispatches(doc)] == ["PAGE-014"]
