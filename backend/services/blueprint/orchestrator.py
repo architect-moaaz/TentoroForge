@@ -1830,9 +1830,13 @@ def _watchable(key: str, state: _NodeRun, order: Sequence[str],
     if not _applied(state):
         return False
     mine = set(DAG[key].produces)
+    # Only a later AGENT defers the verdict: it is judged in this node's place.
+    # A service node (`auth_pages`, `content_fields`) adds derived rows and is
+    # never judged, so deferring to one judged nothing — adding `auth_pages`
+    # silently took `page_details`, the observer's busiest node, off its watch.
     return not any(
         other != key and other in in_plan and other not in finished
-        and DAG[other].produces & mine
+        and DAG[other].kind == "agent" and DAG[other].produces & mine
         for other in order
     )
 

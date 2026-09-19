@@ -1741,3 +1741,22 @@ def test_the_fan_out_path_accumulates_too(svc):
     fb = accumulate_refusals("", 1, "first")
     fb = accumulate_refusals(fb, 2, "second")
     assert fb.splitlines()[1:] == ["- attempt 1: first", "- attempt 2: second"]
+
+
+def test_a_service_node_writing_the_same_section_does_not_hide_a_node_from_the_observer():
+    """`auth_pages` writes `pages` after `page_details`; it is never judged, so
+    deferring to it meant the page contracts were judged by no one."""
+    from services.blueprint import orchestrator as o
+
+    order = [k for level in levels() for k in level]
+    applied = o._applied
+    o._applied = lambda state: True
+    try:
+        def judged(key):
+            return o._watchable(key, None, order, set(order), set(order[:order.index(key) + 1]))
+        assert judged("page_details")
+        assert judged("workflow_steps")
+        assert not judged("workflows"), "judged through workflow_steps, an agent"
+        assert not judged("data_model"), "judged through entity_fields, an agent"
+    finally:
+        o._applied = applied
