@@ -162,6 +162,19 @@ export async function record<E extends EntityName>(
   }
 }
 
+/** The records a set of foreign keys point at, keyed by id — for showing a
+ *  rental's tool and its owner by name, never by id. Nulls and repeats are
+ *  skipped; an id this user cannot see is simply absent from the map. */
+export async function recordsById<E extends EntityName>(
+  entity: E, ids: ReadonlyArray<string | null | undefined>,
+): Promise<Record<string, Entities[E]>> {
+  const unique = [...new Set(ids.filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 200);
+  const rows = await Promise.all(unique.map((id) => record(entity, id)));
+  const out: Record<string, Entities[E]> = {};
+  unique.forEach((id, i) => { const row = rows[i]; if (row) out[id] = row; });
+  return out;
+}
+
 /** The signed-in person's own record: the account entity's row whose id IS
  *  their login's id. Null when signed out, or when the application has no
  *  account entity. */

@@ -16,10 +16,14 @@
 
     { "token": "primary",             "role": ["primary"],                        "light": "243 75% 59%",  "dark": "243 75% 68%" },
     { "token": "primary-foreground",  "contrastOf": "primary",                    "light": "0 0% 100%",    "dark": "222 84% 5%" },
-    { "token": "secondary",           "role": ["secondary", "accent"],            "light": "38 92% 50%",   "dark": "38 92% 55%" },
+    { "token": "secondary",           "role": ["secondary", "surfaceAlt", "primarySubtle"], "light": "220 14% 96%", "dark": "217 33% 17%" },
     { "token": "secondary-foreground","contrastOf": "secondary",                  "light": "222 84% 5%",   "dark": "222 84% 5%" },
     { "token": "accent",              "role": ["accent"],                         "light": "38 92% 50%",   "dark": "38 92% 55%" },
     { "token": "accent-foreground",   "contrastOf": "accent",                     "light": "222 84% 5%",   "dark": "222 84% 5%" },
+    { "token": "accent-subtle",       "role": ["accentSubtle"],                   "light": "48 100% 96%",  "dark": "32 60% 15%" },
+    { "token": "accent-subtle-foreground", "role": ["accentStrong", "accentHover", "accent"], "light": "31 92% 30%", "dark": "48 96% 85%" },
+    { "token": "inverse",             "role": ["inverse", "surfaceInverse"],      "light": "222 47% 11%",  "dark": "217 33% 17%" },
+    { "token": "inverse-foreground",  "contrastOf": "inverse",                    "light": "210 20% 98%",  "dark": "210 20% 98%" },
 
     { "token": "destructive",                  "role": ["danger", "destructive"], "light": "0 74% 42%",   "dark": "0 74% 55%" },
     { "token": "destructive-foreground",       "contrastOf": "destructive",       "light": "0 0% 100%",   "dark": "0 0% 100%" },

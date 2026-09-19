@@ -1191,7 +1191,37 @@ def triplet_luminance(triplet: str) -> float | None:
     return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
 
 
-def _readable_on(triplet: str) -> str:
+def _deepen_to_read(fg: str, bg: str, ratio: float = 4.5) -> str:
+    """`fg` darkened (or, on a dark `bg`, lightened) in its own hue until it
+    reads on `bg`. The accent's text on the accent's tint is the case: a
+    terracotta on its own peach is 3.5:1, and the chip should say it in a
+    deeper terracotta, not in black."""
+    try:
+        h, sat, light = fg.split()
+        lum_bg = triplet_luminance(bg)
+        L = float(light.rstrip("%"))
+    except (ValueError, AttributeError):
+        return fg
+    if lum_bg is None:
+        return fg
+    step = -2.0 if lum_bg > 0.179 else 2.0
+    for _ in range(50):
+        cand = f"{h} {sat} {max(0.0, min(100.0, L)):g}%"
+        lf = triplet_luminance(cand)
+        if lf is not None and (max(lf, lum_bg) + 0.05) / (min(lf, lum_bg) + 0.05) >= ratio:
+            return cand
+        if not 0 < L < 100:
+            break
+        L += step
+    return _readable_on(bg)
+
+
+#: Role tokens whose colour is the design's accent reused as text on the
+#: accent's own tint — deepened until they read rather than refused.
+_DEEPEN_ON = {"accent-subtle-foreground": "accent-subtle"}
+
+
+def _readable_on(triplet: str, ink: str | None = None, paper: str | None = None) -> str:
     """A near-black or near-white foreground for a background triplet, chosen by
     WCAG luminance (not HSL lightness — a saturated amber reads bright at L=50%
     and needs DARK text, which a lightness threshold gets wrong). 0.179 is the
@@ -1201,7 +1231,28 @@ def _readable_on(triplet: str) -> str:
     lum = triplet_luminance(triplet)
     if lum is None:
         return "0 0% 100%"
-    return "222 84% 5%" if lum > 0.179 else "0 0% 100%"
+    # THE PALETTE'S OWN INK AND PAPER FIRST. A computed foreground was always
+    # the scaffold's blue-black or pure white, so a forest-green design wrote
+    # its card text in navy and its buttons in a white the page never uses.
+    # The design's text colour (dark) or page ground (light) is used whenever
+    # it reads on this base; the neutral pair only when it does not.
+    def reads(candidate: str | None) -> bool:
+        cl = triplet_luminance(candidate) if candidate else None
+        if cl is None:
+            return False
+        hi, lo = max(lum, cl), min(lum, cl)
+        return (hi + 0.05) / (lo + 0.05) >= 4.5
+    if lum > 0.179:
+        return ink if reads(ink) else "222 84% 5%"
+    return paper if reads(paper) and (triplet_luminance(paper) or 0) > 0.8 else "0 0% 100%"
+
+
+def _ink_and_paper(colors: dict) -> tuple[str | None, str | None]:
+    """The design's own text colour and page ground, as triplets — only what
+    the Blueprint states, never a contract default."""
+    ink = _resolve_role(colors, ["textPrimary", "foreground", "text"])
+    paper = _resolve_role(colors, ["background"])
+    return (_as_triplet(ink) if ink else None), (_as_triplet(paper) if paper else None)
 
 
 def _resolve_role(colors: dict, roles: list[str]) -> str | None:
@@ -1240,10 +1291,14 @@ def resolved_palette(doc: dict, theme: str = "light") -> dict[str, str]:
     # 2. Foregrounds: ALWAYS computed for readability against the RESOLVED base,
     #    never a hand-set default that could disagree with a base the design
     #    changed (a white default over an amber accent is the bug this avoids).
+    ink, paper = _ink_and_paper(colors)
     for spec in contract:
         base = spec.get("contrastOf")
         if base and out.get(base):
-            out[str(spec["token"])] = _readable_on(out[base])
+            out[str(spec["token"])] = _readable_on(out[base], ink, paper)
+    for tok, base in _DEEPEN_ON.items():
+        if out.get(tok) and out.get(base):
+            out[tok] = _deepen_to_read(out[tok], out[base])
     return {k: v for k, v in out.items() if v}
 
 
@@ -1273,10 +1328,17 @@ def _project_contract_colors(colors: dict) -> list[str]:
         trip = _as_triplet(raw)
         if trip is not None:
             emitted[str(spec["token"])] = trip
+    ink, paper = _ink_and_paper(colors)
     for spec in color_tokens:
         base = spec.get("contrastOf")
         if base and base in emitted:
-            emitted[str(spec["token"])] = _readable_on(emitted[base])
+            emitted[str(spec["token"])] = _readable_on(emitted[base], ink, paper)
+    for tok, base in _DEEPEN_ON.items():
+        if tok in emitted:
+            against = emitted.get(base) or next((str(t.get("light")) for t in color_tokens
+                                                 if t.get("token") == base), None)
+            if against:
+                emitted[tok] = _deepen_to_read(emitted[tok], against)
     lines = [f"  --{spec['token']}: {emitted[spec['token']]};"
              for spec in color_tokens if spec["token"] in emitted]
 
@@ -1347,6 +1409,52 @@ _TOKEN_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("--destructive", ("destructive", "danger")),
     ("--ring", ("focusRing", "primary")),
 )
+
+
+#: Families every machine has; asking Google Fonts for them is a wasted request.
+_SYSTEM_FAMILIES = {"system-ui", "ui-sans-serif", "ui-serif", "ui-monospace", "sans-serif", "serif",
+                    "monospace", "-apple-system", "blinkmacsystemfont", "arial", "helvetica",
+                    "georgia", "times new roman", "inherit"}
+
+#: WHAT THE DESIGNER CALLS A FONT. The projector read `fontFamilyBase` and
+#: `fontFamilyHeading`; Tool Share's design system said `fontFamily: "Inter,
+#: system-ui, sans-serif"`, so no family was written, none was loaded, and the
+#: pages' `font-serif` headings rendered in the browser's Times.
+_FONT_ALIASES = {
+    "fontFamilyBase": ("fontFamilyBase", "fontFamilyBody", "bodyFontFamily", "fontBody", "fontFamily"),
+    "fontFamilyHeading": ("fontFamilyHeading", "fontFamilyDisplay", "headingFontFamily",
+                          "displayFontFamily", "fontHeading", "fontDisplay"),
+    "fontFamilyNumeric": ("fontFamilyNumeric", "fontFamilyMono", "monoFontFamily", "fontMono"),
+}
+
+
+def _font_roles(typography: dict) -> dict:
+    """`typography` with its font families under the names the projector
+    reads, whatever the designer called them."""
+    out = dict(typography)
+    for role, names in _FONT_ALIASES.items():
+        for name in names:
+            v = typography.get(name)
+            if isinstance(v, str) and v.strip():
+                out[role] = v.strip()
+                break
+    return out
+
+
+def _first_family(value: str) -> str:
+    """`"Fraunces", Georgia, serif` → `Fraunces`."""
+    return value.split(",")[0].strip().strip("'\"").strip()
+
+
+def _font_stack(value: str) -> str:
+    """A family or a stack, each multi-word family quoted, as CSS reads it."""
+    parts = []
+    for raw in value.split(","):
+        name = raw.strip().strip("'\"").strip()
+        if not name:
+            continue
+        parts.append(f'"{name}"' if " " in name and name.lower() not in _SYSTEM_FAMILIES else name)
+    return ", ".join(parts)
 
 
 def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
@@ -1433,7 +1541,7 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 lines.append(f"  --radius: {radius[key]};")
                 break
 
-    typography = design.get("typography") or {}
+    typography = _font_roles(design.get("typography") or {})
     for key, token in (("fontFamilyBase", "--font-family-base"),
                        ("fontFamilyNumeric", "--font-family-numeric"),
                        # The names the scaffold's Tailwind config and its sign-in
@@ -1447,7 +1555,7 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
                        ("lineHeightBase", "--line-height-base")):
         value = typography.get(key)
         if isinstance(value, str) and value:
-            lines.append(f"  {token}: {value};")
+            lines.append(f"  {token}: {_font_stack(value) if key.startswith('fontFamily') else value};")
 
     spacing = design.get("spacing")
     if isinstance(spacing, dict):
@@ -1466,8 +1574,9 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # requested from Google Fonts (Inter, Fraunces, JetBrains Mono all live
     # there; a family that does not is simply not served and falls back), and
     # the body is set in the base family with the system sans behind it.
-    families = [str(v).strip() for k, v in (typography or {}).items()
+    families = [_first_family(str(v)) for k, v in (typography or {}).items()
                 if k in ("fontFamilyBase", "fontFamilyHeading", "fontFamilyNumeric") and v]
+    families = [f for f in families if f and f.lower() not in _SYSTEM_FAMILIES]
     fonts_import = ""
     if families:
         query = "&".join("family=" + f.replace(" ", "+") + ":wght@400;500;600;700"
@@ -1476,6 +1585,10 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     body_rule = ""
     if (typography or {}).get("fontFamilyBase"):
         body_rule = "body {\n  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;\n}\n"
+    if (typography or {}).get("fontFamilyHeading"):
+        # Headings in the display face without every page having to ask.
+        body_rule += ("h1, h2, h3, .font-heading {\n  font-family: var(--font-heading), "
+                      "var(--font-body), ui-sans-serif, system-ui, sans-serif;\n}\n")
     body = (fonts_import + "html:root {\n" + "\n".join(lines) + "\n}\n" + body_rule) if lines else (
         "/* designSystem states no colour roles yet — the scaffold's own\n"
         "   defaults stand rather than inventing a palette here. */\n")

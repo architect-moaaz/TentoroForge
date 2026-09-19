@@ -39,7 +39,19 @@ const config: Config = {
         card: { DEFAULT: "hsl(var(--card))", foreground: "hsl(var(--card-foreground))" },
         popover: { DEFAULT: "hsl(var(--popover))", foreground: "hsl(var(--popover-foreground))" },
         muted: { DEFAULT: "hsl(var(--muted))", foreground: "hsl(var(--muted-foreground))" },
-        accent: { DEFAULT: "hsl(var(--accent))", foreground: "hsl(var(--accent-foreground))" },
+        // The accent is the ONE thing to act on now; `subtle` is its tint for a
+        // selected chip or a highlighted item, read with `subtle-foreground`.
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+          subtle: "hsl(var(--accent-subtle, var(--muted)))",
+          "subtle-foreground": "hsl(var(--accent-subtle-foreground, var(--foreground)))",
+        },
+        // The dark surface for the one card that leads a screen.
+        inverse: {
+          DEFAULT: "hsl(var(--inverse, 222 47% 11%))",
+          foreground: "hsl(var(--inverse-foreground, 210 20% 98%))",
+        },
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
@@ -79,6 +91,12 @@ const config: Config = {
         },
       },
       spacing: tailwindTokens.spacing,
+      // The design's families (tokens.css). `font-heading` is the display face
+      // for page and card titles; `font-sans` is the body.
+      fontFamily: {
+        sans: ["var(--font-body)", "ui-sans-serif", "system-ui", "sans-serif"],
+        heading: ["var(--font-heading)", "var(--font-body)", "ui-sans-serif", "system-ui", "sans-serif"],
+      },
       fontSize: tailwindTokens.fontSize,
       borderRadius: {
         ...tailwindTokens.borderRadius,

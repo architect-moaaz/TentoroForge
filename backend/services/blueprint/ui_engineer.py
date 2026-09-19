@@ -108,6 +108,7 @@ currentUser(): Promise<SessionUser | null>
 list(entity, opts?: ListOptions): Promise<Row[]>
 listPage(entity, opts?: ListOptions): Promise<Page<Row>>
 record(entity, id: string | undefined): Promise<Row | null>
+recordsById(entity, ids: (string | null | undefined)[]): Promise<Record<id, Row>>   // the rows foreign keys point at — show a related record by NAME
 count(entity, where?): Promise<number>
 total(entity, fn: "sum" | "avg" | "min" | "max", numericField, where?): Promise<number>
 series(entity, { groupBy: field; bucket?: "day" | "week" | "month"; fn?: "count" | "sum" | "avg" | "min" | "max"; field?: numericField }): Promise<SeriesPoint[]>
@@ -250,6 +251,27 @@ What a finished page looks like:
 - ONE JOB, OBVIOUS. The page header says where you are (small eyebrow + title) and
   shows the one primary action for the page on the right. Secondary actions are
   outline or ghost buttons, never a row of equal primaries.
+- THE ACCENT MARKS WHAT TO DO NOW — once per screen. The one action this screen is
+  for (Start return, Submit report, Request to borrow) is the accent:
+  <Button variant="accent">, <WorkflowButton variant="accent">, or
+  <WorkflowForm submitVariant="accent">. The active status or the selected filter
+  chip is its tint: bg-accent-subtle text-accent-subtle-foreground. Everything
+  else stays in the primary and the neutrals; an accent on every row is no accent.
+- LEAD WITH WHAT MATTERS NOW. Before the list, decide what this person came to see
+  first — the rental that is due, the request waiting on them, the step not yet
+  done — and give it one card of its own at the top in the dark surface
+  (bg-inverse text-inverse-foreground, supporting text text-inverse-foreground/70)
+  with its facts in words ("Due back in 1 day 6 hrs · Mon 18:00") and its action.
+  Then the rest, grouped by what the reader does with it (Active · Upcoming ·
+  Past), not by table.
+- NAMES, NEVER IDS. A reader never sees an id or a shortened one ("Tool #a1b2…"). A
+  foreign key is shown as the record it points at — its name, its owner, its
+  picture: load them with recordsById(Entity, rows.map(r => r.toolId)) in load.ts
+  and show `tools[r.toolId]?.name`. A row that says "Borrowing a tool" says which.
+- SAY WHAT HAPPENS NEXT. Before an action with consequences (a dispute, a deposit,
+  a cancellation) say plainly what it does and what follows — a short numbered
+  "What happens next", or one reassuring line ("Your $40 deposit is released
+  within 24 hours"). Copy is written for the person, in the domain's words.
 - HIERARCHY BEFORE DECORATION. Size, weight and spacing carry the structure; colour
   is for meaning (status, priority, money in/out). Use tabular-nums for figures.
 - REAL CONTENT, REAL STATES. Every list has an empty state that says what to do next
@@ -280,10 +302,15 @@ What a finished page looks like:
   375px; wide tables scroll horizontally inside their card.
 - ACCESSIBLE. Real <button>/<a>, labels on inputs, aria-label on icon-only buttons,
   visible focus (the kit handles it), sufficient contrast (use the tokens).
-- TOKENS, NOT HEX. Only the semantic classes: bg-background, bg-card, bg-muted,
-  text-foreground, text-muted-foreground, border, bg-primary, text-primary-foreground,
-  bg-secondary, bg-accent, ring-ring, and the success / warning / destructive / info
+- TOKENS, NOT HEX. Only the semantic classes, each for its job: bg-background (the
+  ground), bg-card (panels), bg-muted / bg-secondary (quiet fills), text-foreground,
+  text-muted-foreground, border, bg-primary / text-primary (brand, default button,
+  links), bg-accent / bg-accent-subtle (what to do now, see above), bg-inverse (the
+  one leading card), ring-ring, and the success / warning / destructive / info
   families. Never a hex colour or an arbitrary palette like bg-blue-500.
+- TYPE IN TWO VOICES. Page titles and card titles are `font-heading` (the design's
+  display face; h1–h3 get it by default); everything else is the body face. Never
+  `font-serif` or `font-mono` for a title — they are the browser's, not the design's.
 """
 
 
@@ -291,7 +318,7 @@ TECH_RULES = """\
 You write exactly two files for the page.
 
 load.ts — server only.
-  import { … } from "@/sdk/server";   (reads: list, listPage, record, count, total, series, similar, currentUser)
+  import { … } from "@/sdk/server";   (reads: list, listPage, record, recordsById, count, total, series, similar, currentUser, myAccount)
   export async function load(ctx: PageContext) { … return { …props } }
   - Return a plain object: the view's props. Return null for a record that does not
     exist (the route answers 404).
@@ -343,6 +370,28 @@ def _about(doc: dict) -> str:
     return "\n".join(x for x in out if x)
 
 
+def _look(doc: dict) -> str:
+    """The design system as the page author uses it: the personality, each
+    colour role with the class that draws it, and the two type faces."""
+    design = doc.get("designSystem") or {}
+    colors = design.get("colors") or {}
+    typo = design.get("typography") or {}
+    classes = {"background": "bg-background", "surface": "bg-card", "textPrimary": "text-foreground",
+               "textSecondary": "text-muted-foreground", "primary": "bg-primary / text-primary",
+               "accent": "bg-accent / variant=\"accent\"", "accentSubtle": "bg-accent-subtle",
+               "inverse": "bg-inverse"}
+    from services.blueprint.verification import PALETTE_ROLES
+    lines = [str(design.get("visualPersonality") or "")[:600]]
+    for role, job in PALETTE_ROLES.items():
+        value = colors.get(role)
+        lines.append(f"- {classes[role]}{f' ({value})' if value else ''}: {job}")
+    head = typo.get("fontFamilyHeading") or typo.get("fontFamilyDisplay") or typo.get("headingFontFamily")
+    body = typo.get("fontFamilyBase") or typo.get("fontFamily") or typo.get("fontFamilyBody")
+    if head or body:
+        lines.append(f"- font-heading: {head or body}; body: {body or head}")
+    return "\n".join(x for x in lines if x)
+
+
 def system_prompt(doc: dict) -> str:
     """Identical for every page of one application — the cached prefix."""
     comp = doc.get("composition") or {}
@@ -361,6 +410,9 @@ beautiful and correct: it is shipped as you write it.
 # Its direction — follow it on every page
 {comp.get('vision') or '(no vision stated — choose a calm, professional, information-dense style)'}
 {conventions}
+
+# Its look — what each colour class means here
+{_look(doc)}
 
 # Rules
 {TECH_RULES}
@@ -588,6 +640,41 @@ def _static_findings(load: str, view: str) -> list[str]:
     return out
 
 
+#: An id shown to a reader: a helper that shortens one, a `#` before a
+#: foreign key, a key sliced for display, or a key as the whole of an
+#: element's text. Keys in `href`, `key=` and `input` are not text and do
+#: not match.
+_ID_AS_TEXT = (
+    re.compile(r"\{\s*short[A-Z]?[a-z]*Id\s*\("),
+    re.compile(r"#\$?\{[^}]*(?:\.id\b|[a-z]Id\b)[^}]*\}"),
+    re.compile(r"\.(?:id|[a-z]\w*Id)\s*\.\s*slice\("),
+    re.compile(r">\s*\{\s*[\w?.]+\.(?:id|[a-z]\w*Id)\s*\}\s*<"),
+)
+#: A class that draws in the accent (hover and focus states do not count).
+_ACCENT_USE = re.compile(r'(?<![:\w-])(?:bg|text|border|ring)-accent\b|variant="accent"|submitVariant="accent"')
+
+
+def _design_findings(doc: dict, page: dict, view: str) -> list[str]:
+    """What the design principles make checkable in the source."""
+    out = []
+    for rx in _ID_AS_TEXT:
+        m = rx.search(view)
+        if m:
+            out.append(f"view.tsx: shows an id to the reader (`{m.group(0).strip()[:60]}`) — show the "
+                       f"record it points at by name instead: load it with recordsById(...) in load.ts.")
+            break
+    if re.search(r"(?<![:\w-])font-(?:serif|mono)\b", view):
+        out.append("view.tsx: `font-serif`/`font-mono` are the browser's faces, not the design's — "
+                   "titles use `font-heading`, the rest the body face.")
+    launches = any(str(page.get("id")) in [str(x) for x in (w.get("launchedFrom") or [])]
+                   for w in doc.get("workflows") or [] if w.get("status") != "DEPRECATED")
+    if launches and not _ACCENT_USE.search(view) and str(page.get("pattern") or "") != "auth":
+        out.append("view.tsx: nothing on this page is in the accent — the one action this screen is "
+                   "for (or its active state) is variant=\"accent\" / submitVariant=\"accent\" / "
+                   "bg-accent-subtle.")
+    return out
+
+
 def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                  feedback: str = "", brief: str = "", current: dict | None = None,
                  usage: Any = None, node: str = "page_code") -> tuple[dict, list[Any]]:
@@ -613,6 +700,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             continue
         load, view = str(body.get("load") or ""), str(body.get("view") or "")
         errors = (_static_findings(load, view) + _unwired_actions(doc, page, view)
+                  + _design_findings(doc, page, view)
                   + typecheck(doc, app_root, str(page.get("id")), load, view))
         if not errors:
             return ({"page": str(page.get("id")), "rationale": str(body.get("rationale") or ""),

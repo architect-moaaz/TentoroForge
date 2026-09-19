@@ -69,7 +69,10 @@ def test_a_foreground_is_computed_for_readability(tmp_path):
     # A dark solid gets white text; a light tint gets dark text — never left to
     # a template default that a tinted palette would render unreadable.
     css = _css(tmp_path)
-    assert "--primary-foreground: 0 0% 100%;" in css     # on indigo → white
+    # on indigo → light text: the palette's own paper (#F8FAFC) where it reads,
+    # not a white the page never uses
+    from services.blueprint.projection import _as_triplet
+    assert f"--primary-foreground: {_as_triplet('#F8FAFC')};" in css
     lines = {l.split(":")[0].strip(): l for l in css.splitlines() if l.strip().startswith("--")}
     assert "--destructive-foreground" in lines
 

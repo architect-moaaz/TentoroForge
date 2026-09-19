@@ -58,6 +58,7 @@ from services.blueprint.agent_contract import (
 from services.blueprint import references
 from services.blueprint.orchestrator import DAG, TaskSpec
 from services.blueprint.references import addendum as reference_addendum
+from services.blueprint.verification import PALETTE_ROLES
 from services.blueprint.service import ARTIFACT_SECTIONS, BlueprintService
 
 logger = logging.getLogger(__name__)
@@ -1006,7 +1007,26 @@ NODE_TASKS: dict[str, str] = {
         "Decide from the domain and who uses it. A recruiter working a "
         "pipeline all day and a customer buying once a year want different "
         "densities and different levels of visual quiet. Say why each choice "
-        "follows from the product, not from taste."
+        "follows from the product, not from taste.\n\n"
+        "EVERY COLOUR HAS A JOB, AND `colors` NAMES EACH ONE by these keys "
+        "(add status colours and hover/subtle variants beside them):\n"
+        + "\n".join(f"- `{role}`: {job}" for role, job in PALETTE_ROLES.items())
+        + "\n"
+        "Pages are written against these jobs, so a colour with no job is a "
+        "colour no page uses: a terracotta named only `accent` shipped three "
+        "times in a whole application while every button stayed green. The "
+        "accent is scarce on purpose — one element per screen — which is what "
+        "makes it read as \"do this\". Choose it dark enough to carry the page's "
+        "own light text on a button. The ground is a decision too: a warm "
+        "paper, a cool slate, a soft sage — pure `#FFFFFF` only when the "
+        "product is stark by intent, never because white is the default. "
+        "When the personality you describe is warm, the neutrals are warm.\n\n"
+        "TYPE IS TWO DECISIONS. Name `typography.fontFamilyBase` (the body, a "
+        "highly legible face) and `typography.fontFamilyHeading` (page and card "
+        "titles — a display serif or a characterful sans when the personality "
+        "calls for one; the body face again only when the product is quiet by "
+        "intent). Both are Google Fonts families, written as the family name "
+        "with a fallback stack: `\"Fraunces\", Georgia, serif`."
     ),
     "requirements": (
         "Extract the application's requirements from the description. Each is one "

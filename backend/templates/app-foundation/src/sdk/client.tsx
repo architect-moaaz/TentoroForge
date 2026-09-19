@@ -282,13 +282,15 @@ export function ImageSearch({ label = "Search by image", param = "image", classN
 /** A form that runs a workflow. `fields` has one entry per workflow input,
  *  keyed by the input's name. */
 export function WorkflowForm<I extends Json>({
-  workflow, fields, initial, submitLabel, cancelHref, redirectTo, successMessage, columns = 2, className, onDone,
+  workflow, fields, initial, submitLabel, submitVariant = "primary", cancelHref, redirectTo, successMessage, columns = 2, className, onDone,
 }: {
   workflow: Workflow<I>;
   fields: FieldMap<I>;
   /** Starting values — the record being edited. */
   initial?: Partial<I>;
   submitLabel?: string;
+  /** `accent` when submitting is the one thing this screen is for. */
+  submitVariant?: "primary" | "accent";
   cancelHref?: string;
   redirectTo?: string;
   successMessage?: string;
@@ -336,7 +338,8 @@ export function WorkflowForm<I extends Json>({
           </button>
         )}
         <button type="submit" disabled={pending}
-          className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-5 text-sm font-medium text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:opacity-60">
+          className={"inline-flex h-10 items-center gap-2 rounded-md px-5 text-sm font-medium shadow-sm transition disabled:opacity-60 "
+            + (submitVariant === "accent" ? "bg-accent text-accent-foreground hover:bg-accent/90" : "bg-primary text-primary-foreground hover:bg-primary/90")}>
           {pending && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
           {submitLabel ?? workflow.name}
         </button>
@@ -345,10 +348,11 @@ export function WorkflowForm<I extends Json>({
   );
 }
 
-type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "danger";
+type ButtonVariant = "primary" | "accent" | "secondary" | "outline" | "ghost" | "danger";
 
 const buttonVariants: Record<ButtonVariant, string> = {
   primary: "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90",
+  accent: "bg-accent text-accent-foreground shadow-sm hover:bg-accent/90",
   secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
   outline: "border border-input bg-background hover:bg-muted",
   ghost: "hover:bg-muted",

@@ -39,6 +39,11 @@ export async function record(entity: string, id: string | undefined): Promise<an
   if (!id || /[[\\]]/.test(id)) return null;
   return (ROWS[entity] ?? []).find((r) => r.id === id) ?? (ROWS[entity] ?? [])[0] ?? null;
 }
+export async function recordsById(entity: string, ids: ReadonlyArray<string | null | undefined>): Promise<Record<string, any>> {
+  const out: Record<string, any> = {};
+  for (const id of ids) { if (id && !(id in out)) { const r = await record(entity, id); if (r) out[id] = r; } }
+  return out;
+}
 export async function count(entity: string, where?: any): Promise<number> { await wait(); return filter(entity, { where }).length; }
 export async function total(entity: string, fn: string, field: string, where?: any): Promise<number> {
   await wait();

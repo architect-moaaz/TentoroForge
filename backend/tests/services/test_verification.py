@@ -99,7 +99,10 @@ def test_a_coherent_blueprint_produces_no_findings():
                           {"type": "Table",
                            "props": {"rows": "{{candidates}}"},
                            "children": []}]}}],
-        designSystem={"colors": {"primary": "#125E8A"},
+        designSystem={"colors": {"primary": "#125E8A", "background": "#F6F8FA",
+                                 "surface": "#FFFFFF", "textPrimary": "#1A1A1A",
+                                 "textSecondary": "#5B6570", "accent": "#B4541A",
+                                 "accentSubtle": "#FCEBDD", "inverse": "#0F2F45"},
                       "spacing": {"unit": "4px"},
                       "typography": {"baseSize": "16px"},
                       "radius": {"md": "10px"}},
@@ -196,6 +199,9 @@ def test_workflow_launched_from_a_missing_page_is_caught():
     assert any("PAGE-404" in h.detail for h in hits)
 
 
+from services.blueprint.verification import PALETTE_ROLES  # noqa: E402
+
+
 def test_a_design_system_too_thin_to_compose_against_is_caught():
     """This checked `components` against `uiRegistry` — one LLM section
     against another, both authored by a node that no longer exists. The
@@ -205,7 +211,8 @@ def test_a_design_system_too_thin_to_compose_against_is_caught():
     """
     d = doc(designSystem={"colors": {"primary": "#125E8A"}})
     hits = verify(d, edges=("Design↔DesignSystem",)).findings
-    assert {h.artifact_id for h in hits} == {"spacing", "typography", "radius"}
+    assert {h.artifact_id for h in hits} == {"spacing", "typography", "radius"} | {
+        f"colors.{role}" for role in PALETTE_ROLES if role != "primary"}
 
     d = doc(designSystem={})
     hits = verify(d, edges=("Design↔DesignSystem",)).findings

@@ -464,8 +464,43 @@ def check_design_system(doc: dict) -> list[Finding]:
         for group in ("colors", "spacing", "typography", "radius")
         if not (design.get(group) or {})
     ]
+    out.extend(check_palette_roles(doc))
     out.extend(check_palette_contrast(doc))
     return out
+
+
+#: THE JOBS A PALETTE DOES, each a role the pages are written against. Tool
+#: Share (036farqu) named a forest green and a terracotta and shipped a
+#: white-and-green app: no role said what the terracotta was FOR, so pages used
+#: it three times, and with no tint and no dark surface declared, a selected
+#: chip or a "happening now" card had no colour to be drawn in.
+PALETTE_ROLES: dict[str, str] = {
+    "background": "the page ground — a considered neutral, warm or cool, not a default white",
+    "surface": "cards and panels, one step off the ground",
+    "textPrimary": "body text, the palette's ink",
+    "textSecondary": "supporting text",
+    "primary": "the brand anchor: navigation, the default button, links",
+    "accent": "the ONE thing to act on now: the main call to action, the active status, the selected option",
+    "accentSubtle": "a tint of the accent for selected chips and highlighted items, with accent-toned text",
+    "inverse": "a dark surface for the one card that leads a screen (what is happening now), with light text",
+}
+
+
+def check_palette_roles(doc: dict) -> list[Finding]:
+    """An authored palette states every role pages are written against. A
+    palette read off a Figma file carries what the file declares and is not
+    held to this — the file is the authority there."""
+    design = doc.get("designSystem") or {}
+    if design.get("derivedFromFigma"):
+        return []
+    colors = design.get("colors") or {}
+    if not colors:
+        return []
+    from services.blueprint.projection import _kebab
+    have = {_kebab(k) for k, v in colors.items() if isinstance(v, str) and v}
+    return [Finding("Design↔DesignSystem", section="designSystem", artifact_id=f"colors.{role}",
+                    detail=f"colors.{role} is missing — {job}")
+            for role, job in PALETTE_ROLES.items() if _kebab(role) not in have]
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +560,9 @@ def check_palette_contrast(doc: dict) -> list[Finding]:
     for role in ("primary", "secondary", "accent", *_STATUS_ROLES):
         pairs.append((f"{role}-foreground", role,
                       f"label on a {role} fill", _AA_LARGE))
+    pairs.append(("accent-subtle-foreground", "accent-subtle",
+                  "a selected chip's text on the accent tint", _AA_TEXT))
+    pairs.append(("inverse-foreground", "inverse", "text on the dark hero card", _AA_TEXT))
 
     out: list[Finding] = []
     for fg, bg, what, threshold in pairs:
