@@ -10,6 +10,9 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { Workflow } from "./workflows";
 
+export { WidgetView, chartPropsFor, type WidgetViewData, type WidgetViewProps } from "./widget-view";
+export type { ChartSelection } from "@tentoroforge/library";
+
 type Json = Record<string, unknown>;
 
 export interface RunResult {

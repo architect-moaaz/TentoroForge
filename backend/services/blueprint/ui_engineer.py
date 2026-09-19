@@ -111,6 +111,15 @@ record(entity, id: string | undefined): Promise<Row | null>
 count(entity, where?): Promise<number>
 total(entity, fn: "sum" | "avg" | "min" | "max", numericField, where?): Promise<number>
 series(entity, { groupBy: field; bucket?: "day" | "week" | "month"; fn?: "count" | "sum" | "avg" | "min" | "max"; field?: numericField }): Promise<SeriesPoint[]>
+query(entity, { measures: { [key]: { fn: "count" } | { fn: "count_distinct" | "min" | "max", field } | { fn: "sum" | "avg", field: numericField } };
+                dimensions?: [field | { field, bucket?: "day" | "week" | "month" | "quarter" | "year" }, …at most 2];
+                where?; range?: { from?: iso; to?: iso }; timeField?; sort?: { by, order? }; limit? }): Promise<QueryRow[]>
+   Measures by dimensions, one GROUP BY: query("Order", { measures: { revenue: { fn: "sum", field: "total" } },
+   dimensions: [{ field: "placedAt", bucket: "month" }, "region"] }) → [{ placedAt: "2026-01", region: "EU", revenue: 1840 }, …].
+   A bucketed date reads "2026-03-02" / "2026-03" / "2026-Q1" / "2026"; a foreign-key dimension also carries `<field>Label`.
+runWidget(widgets.x, { range?, where? }): Promise<WidgetData>      // WidgetData = { rows: QueryRow[]; value: number | null }
+   Reads one of the page's declared widgets exactly as the Blueprint defines it. `value` is the number of a
+   metric or gauge. `where` narrows it (a record page passes its own id: { customerId: params.id }).
    `entity` is the entity's name as a string literal: list("Case", …). Rows are typed (Entities["Case"]).
    Dates arrive as ISO strings, numbers as numbers, optional fields as null.
 
@@ -134,6 +143,10 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
 <WorkflowButton workflow={workflows.x} input={{ … }} variant?="primary" | "secondary" | "outline" | "ghost" | "danger"
                 size?="sm" | "md" confirm?="Delete this case?" redirectTo? successMessage?>Label</WorkflowButton>
 
+<WidgetView widget={widgets.x} data={props.x} height?={260} currency?="GBP" action?={<Link …/>}
+            onSelect?={(s) => router.push(href(pages.list, {}, { status: s.category }))} />
+   Draws a declared widget as its card: a KPI tile, a gauge, a chart with a table toggle, or a list.
+
 // ---- @/sdk — anywhere ----
 Entity types (Case, User, …), `workflows`, `pages`, `href(page, params?, query?)`,
 e.g. href(pages.caseRecord, { id }) or href(pages.allCases, {}, { q: "late", status: "OPEN" }).
@@ -148,11 +161,16 @@ import { Chart, MetricTile, Sparkline, Gauge, Kanban, Timeline, ActivityFeed, Ca
 Every one of these renders on its own with plain props; pass resolved data, never
 `{{binding}}` strings. Verified shapes:
 
-  <Chart chartType="bar" | "line" | "area" | "pie" data={points} xKey="label"
-         series={[{ name: "Cases", dataKey: "value", color: "hsl(var(--primary))" }]}
-         height={240} showLegend={false} />
-      `points` is SeriesPoint[] from `series()` or any array of objects. For pie charts
-      give every slice a colour via series[].color or prefer a bar chart.
+  <Chart chartType="bar" | "line" | "area" | "pie" | "donut" | "funnel" | "radar" | "scatter" | "heatmap" | "treemap"
+         data={rows} xKey="placedAt" series={[{ name: "Revenue", dataKey: "revenue" }]}
+         colorKey?="region" yKey? valueKey? sizeKey? labelKey? format?="number" | "currency" | "percent" | "duration"
+         currency?="GBP" encoding?={{ stacked?, horizontal?, sorted?: "asc" | "desc", topN?, valueLabels? }}
+         height={260} onSelect?={(s: ChartSelection) => …} />
+      ECharts, themed from the app's tokens; colours come from a validated palette — do not pass them.
+      Rows are QueryRow[] from `query()` (or SeriesPoint[] with xKey="label", dataKey "value").
+      colorKey splits long-format rows into one series per value (a line per status); heatmap takes
+      xKey + yKey + valueKey; scatter takes xKey + yKey (two measures), sizeKey for bubbles.
+      One value axis only — never plot two measures of different scale on one chart.
   <MetricTile label="Open cases" value={42} format="number" | "currency" | "percent"
               delta={{ value: 0.12, direction: "up" }} trend={[3, 5, 4, 7]} />
       delta.value is a FRACTION (0.12 = 12%). Omit delta when you have no comparison.
@@ -250,9 +268,10 @@ view.tsx — "use client" on the first line.
     type Props = NonNullable<Awaited<ReturnType<typeof load>>>;
   Imports allowed, and only these:
     react, next/link, next/navigation (useRouter, useSearchParams, usePathname),
-    lucide-react (icons), recharts, the UI kit and library below,
-    "@/sdk" (entity types, workflows, pages, href), "@/sdk/client" (useWorkflow,
-    WorkflowForm, WorkflowButton), and `import type { Page, SeriesPoint } from "@/sdk/server"`.
+    lucide-react (icons), the UI kit and library below,
+    "@/sdk" (entity types, workflows, pages, widgets, href), "@/sdk/client" (useWorkflow,
+    WorkflowForm, WorkflowButton, WidgetView), and
+    `import type { Page, SeriesPoint, QueryRow, WidgetData } from "@/sdk/server"`.
   - Links: <Link href={href(pages.someKey, { id: row.id })}> — never a hand-written path.
   - Changing data: only through a workflow — <WorkflowForm workflow={workflows.x} fields={…} />,
     <WorkflowButton workflow={workflows.x} input={{ … }} />, or useWorkflow(workflows.x).run(input).
@@ -324,7 +343,19 @@ This application's entities, workflows and pages:
 Button variants: default | secondary | outline | ghost | destructive | link; sizes: default | sm | lg | icon.
 Badge variants: default | secondary | destructive | outline | success | warning | muted.
 Icons: any lucide-react icon, e.g. `import {{ Plus, Search, Filter }} from "lucide-react"`.
-Charts: the library's Chart, or recharts directly for anything it cannot draw.
+Charts: the library's Chart (ECharts) — every chart the page draws goes through it.
+
+# Analytics
+A page's brief lists the widgets the Blueprint attaches to it — its KPIs, charts and breakdowns. Every one
+of them appears on the page: read each in `load.ts` with `runWidget(widgets.x)` (in parallel, with
+Promise.all) and draw it with `<WidgetView widget={{widgets.x}} data={{…}} />`, or with `Chart` when the page
+needs a custom arrangement of the same rows. Lead with the metrics as a row of tiles, then the charts in a
+responsive grid (`size`: sm = a quarter, md = a half, lg = two thirds, full = the whole row); on a record
+page, narrow each widget to the record with `where`. A dashboard with widgets over dates gets a date range
+filter in the URL (`?from=&to=`, presets such as last 30 days / 90 days / 12 months) passed to every
+`runWidget` as `range`, and a chart whose category is a status, a type or a record links to the list it
+summarises through `onSelect`. You may add a chart the brief does not list when the page's job calls for it
+(use `query()`), never a number the data cannot produce.
 
 # The component library
 ```ts
@@ -358,7 +389,36 @@ def _page_brief(doc: dict, page: dict) -> dict:
                                    "purpose": w.get("purpose"),
                                    "trigger": (w.get("trigger") or {}).get("detail")} for w in launched],
         "roles": [r.get("name") for r in doc.get("roles") or [] if r.get("id") in (page.get("users") or [])],
+        "widgets": page_widget_brief(doc, page),
     }
+
+
+def page_widget_brief(doc: dict, page: dict) -> list[dict]:
+    """The analytics the Blueprint attaches to this page, by their SDK key,
+    in the order the page shows them."""
+    from services.blueprint.app_sdk import widget_keys, widget_query
+
+    keys = widget_keys(doc)
+    mine = sorted((w for w in doc.get("widgets") or []
+                   if str(w.get("page")) == str(page.get("id")) and w.get("status") != "DEPRECATED"),
+                  key=lambda w: w.get("order") or 0)
+    out = []
+    for w in mine:
+        src = widget_query(doc, w)
+        if src is None:
+            continue
+        item = {"sdkKey": keys.get(str(w.get("id"))), "label": w.get("label"), "kind": w.get("kind"),
+                "unit": w.get("unit") or "number"}
+        for k in ("description", "chart", "size"):
+            if w.get(k):
+                item[k] = w[k]
+        if src.get("op") == "query":
+            item["reads"] = {"entity": src["entity"],
+                             "measures": [m["key"] for m in src.get("measures") or []],
+                             "by": [d["field"] + (f" per {d['bucket']}" if d.get("bucket") else "")
+                                    for d in src.get("dimensions") or []]}
+        out.append(item)
+    return out
 
 
 def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "",

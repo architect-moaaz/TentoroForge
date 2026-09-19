@@ -398,7 +398,8 @@ export * from "./components/variants";
 export { Sparkline, type SparklineProps } from "./components/Sparkline/Sparkline";
 export { SparklineProps as SparklinePropsSchema } from "./components/Sparkline/Sparkline.schema";
 
-export { Chart, type ChartProps } from "./components/Chart/Chart";
+export { Chart, type ChartProps, type ChartSelection } from "./components/Chart/Chart";
+export { buildChartOption, formatValue as formatChartValue, type ChartTheme } from "./components/Chart/chartOption";
 export { ChartProps as ChartPropsSchema } from "./components/Chart/Chart.schema";
 
 export { DataGrid, type DataGridProps } from "./components/DataGrid/DataGrid";

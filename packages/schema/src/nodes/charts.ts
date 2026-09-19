@@ -33,7 +33,10 @@ export const ChartNode = z.object({
   id: z.string().optional(),
   type: z.literal("Chart"),
   props: z.object({
-    chartType: z.enum(["line", "bar", "area", "pie", "donut", "funnel", "radar"]),
+    chartType: z.enum([
+      "line", "bar", "area", "pie", "donut", "funnel", "radar",
+      "scatter", "heatmap", "treemap",
+    ]),
     // Either an inline array of row objects OR a Mustache binding string
     // like `"{{stats.dailyUsers}}"` that the runtime resolves to a real
     // array. Same pattern as Form-C: schema accepts both shapes; the
@@ -45,12 +48,31 @@ export const ChartNode = z.object({
     data: z.preprocess(
       (v) => (v == null ? [] : v),
       z.union([
-        z.array(z.record(z.union([z.string(), z.number()]))),
+        // null: a query row's empty group or a record's unset field.
+        z.array(z.record(z.union([z.string(), z.number(), z.null()]))),
         z.string().min(1),
       ]),
     ),
     xKey: z.string().optional(),
     series: z.preprocess((v) => (v == null ? [] : v), z.array(ChartSeries)),
+    // ── Long-format encoding (tidy rows from a measures × dimensions query) ──
+    // colorKey — the split: one series per distinct value of this key, the
+    //   value read from the first series' dataKey. Rows `{month, status,
+    //   count}` with xKey "month" and colorKey "status" draw a line per status.
+    // yKey — the second axis field: the heatmap's row, the scatter's y value.
+    // valueKey — the number a heatmap cell, a slice or a treemap node shows
+    //   (default: the first series' dataKey, then "value").
+    // sizeKey — a scatter point's area (a bubble chart).
+    // labelKey — what names a scatter point in its tooltip.
+    colorKey: z.string().optional(),
+    yKey: z.string().optional(),
+    valueKey: z.string().optional(),
+    sizeKey: z.string().optional(),
+    labelKey: z.string().optional(),
+    // How values read on the axis and in the tooltip. `percent` takes a
+    // fraction (0.12 → 12%), as MetricTile does.
+    format: z.enum(["number", "currency", "percent", "duration"]).optional(),
+    currency: z.string().optional(),
     height: z.number().optional(),
     showGrid: z.boolean().optional(),
     showLegend: z.boolean().optional(),
@@ -73,7 +95,8 @@ export const ChartNode = z.object({
       data: z.preprocess(
         (v) => (v == null ? [] : v),
         z.union([
-          z.array(z.record(z.union([z.string(), z.number()]))),
+          // null: a query row's empty group or a record's unset field.
+        z.array(z.record(z.union([z.string(), z.number(), z.null()]))),
           z.string().min(1),
         ]),
       ),
@@ -87,6 +110,7 @@ export const ChartNode = z.object({
     // renderer forwards.
     encoding: z.object({
       leaderboard:  z.boolean().optional(),
+      horizontal:   z.boolean().optional(),
       stacked:      z.boolean().optional(),
       sorted:       z.enum(["asc", "desc"]).optional(),
       topN:         z.number().int().positive().optional(),

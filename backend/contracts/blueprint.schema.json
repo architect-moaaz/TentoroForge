@@ -883,6 +883,119 @@
                   "groupBy"
                 ],
                 "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "const": "query"
+                  },
+                  "entity": {
+                    "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                  },
+                  "measures": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "aggregation": {
+                          "type": "string",
+                          "enum": [
+                            "count",
+                            "count_distinct",
+                            "sum",
+                            "avg",
+                            "min",
+                            "max"
+                          ]
+                        },
+                        "field": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "aggregation"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1
+                  },
+                  "dimensions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "type": "string"
+                        },
+                        "bucket": {
+                          "type": "string",
+                          "enum": [
+                            "day",
+                            "week",
+                            "month",
+                            "quarter",
+                            "year"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "field"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 2,
+                    "default": []
+                  },
+                  "filter": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "default": {}
+                  },
+                  "timeField": {
+                    "type": "string"
+                  },
+                  "sort": {
+                    "type": "object",
+                    "properties": {
+                      "by": {
+                        "type": "string"
+                      },
+                      "order": {
+                        "type": "string",
+                        "enum": [
+                          "asc",
+                          "desc"
+                        ],
+                        "default": "desc"
+                      }
+                    },
+                    "required": [
+                      "by"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1000
+                  }
+                },
+                "required": [
+                  "op",
+                  "entity",
+                  "measures"
+                ],
+                "additionalProperties": false
               }
             ]
           },
@@ -897,6 +1010,51 @@
               "text"
             ],
             "default": "number"
+          },
+          "description": {
+            "type": "string"
+          },
+          "chart": {
+            "type": "object",
+            "properties": {
+              "mark": {
+                "type": "string",
+                "enum": [
+                  "bar",
+                  "line",
+                  "area",
+                  "pie",
+                  "donut",
+                  "funnel",
+                  "radar",
+                  "scatter",
+                  "heatmap",
+                  "treemap"
+                ]
+              },
+              "stacked": {
+                "type": "boolean"
+              },
+              "horizontal": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "mark"
+            ],
+            "additionalProperties": false
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "sm",
+              "md",
+              "lg",
+              "full"
+            ]
+          },
+          "order": {
+            "type": "integer"
           },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"

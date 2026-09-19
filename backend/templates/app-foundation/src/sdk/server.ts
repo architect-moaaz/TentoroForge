@@ -8,10 +8,11 @@
 
 import { auth } from "@/auth";
 import * as engine from "@/lib/data-engine";
-import { actorCtx, resolveAggregate, resolveSeries } from "@/lib/data-engine-bridge";
+import { actorCtx, resolveAggregate, resolveQuery, resolveSeries } from "@/lib/data-engine-bridge";
 import { ensureDataEngineInitialized } from "@/lib/data-init";
 import { NUMERIC_FIELDS, READABLE_FIELDS } from "./schema";
 import type { Entities, EntityName, NumericField } from "./schema";
+import type { WidgetRef } from "./widgets";
 
 export type { Entities, EntityName } from "./schema";
 
@@ -199,4 +200,96 @@ export async function series<E extends EntityName>(
     groupBy: opts.groupBy, bucket: opts.bucket,
     agg: { fn: opts.fn ?? "count", field: opts.field },
   }, await actor());
+}
+
+/** One row of a query: each dimension's value under its field name (a date
+ *  bucket as "2026-03", "2026-Q1"…), each measure under its key, and — for a
+ *  dimension that points at another record — its name under `<field>Label`. */
+export type QueryRow = Record<string, string | number | null>;
+
+export type Measure<E extends EntityName> =
+  | { fn: "count" }
+  | { fn: "count_distinct"; field: keyof Entities[E] & string }
+  | { fn: "sum" | "avg"; field: NumericField<E> }
+  | { fn: "min" | "max"; field: keyof Entities[E] & string };
+
+export type Dimension<E extends EntityName> =
+  | (keyof Entities[E] & string)
+  | { field: keyof Entities[E] & string; bucket?: "day" | "week" | "month" | "quarter" | "year" };
+
+/** A date window, half-open: `from` inclusive, `to` exclusive. ISO strings. */
+export interface DateRange { from?: string; to?: string }
+
+export interface QueryOptions<E extends EntityName, M extends string> {
+  measures: Record<M, Measure<E>>;
+  /** At most two: the axis, then the split. None for a single number. */
+  dimensions?: Dimension<E>[];
+  /** Equality filters; an array means "any of". */
+  where?: Partial<{ [K in keyof Entities[E]]: string | number | boolean | (string | number)[] }>;
+  /** Narrows `timeField` (default: the bucketed dimension) to a date window. */
+  range?: DateRange;
+  timeField?: keyof Entities[E] & string;
+  // NoInfer: the measure keys are what `measures` declares; a sort naming
+  // one must not narrow them to itself.
+  sort?: { by: NoInfer<M> | (keyof Entities[E] & string); order?: "asc" | "desc" };
+  /** Top-N (at most 1000). */
+  limit?: number;
+}
+
+/** Measures by dimensions — the query behind every chart and KPI, run by the
+ *  Data Engine as one GROUP BY over the rows this user may read.
+ *
+ *    query("Order", { measures: { revenue: { fn: "sum", field: "total" } },
+ *                     dimensions: [{ field: "placedAt", bucket: "month" }, "region"] })
+ *    → [{ placedAt: "2026-01", region: "EU", revenue: 1840 }, …]
+ */
+export async function query<E extends EntityName, M extends string>(
+  entity: E, opts: QueryOptions<E, M>,
+): Promise<QueryRow[]> {
+  if (await reviewingEmpty()) return [];
+  const measures = Object.entries(opts.measures).map(([key, m]) => {
+    const spec = m as { fn: string; field?: string };
+    return { key, aggregation: spec.fn, field: spec.field };
+  });
+  const dimensions = (opts.dimensions ?? []).map((d) => (typeof d === "string" ? { field: d } : d));
+  return resolveQuery({
+    name: "query", entity, op: "query", measures, dimensions,
+    filter: opts.where ?? {}, range: opts.range, timeField: opts.timeField,
+    sort: opts.sort, limit: opts.limit,
+  }, await actor());
+}
+
+/** What a widget's read returns: its rows, and — for a single number (a
+ *  metric or gauge, a query with no dimension) — that number. */
+export interface WidgetData {
+  rows: QueryRow[];
+  value: number | null;
+}
+
+/** Read one of the page's widgets (`widgets` from "@/sdk"), exactly as the
+ *  Blueprint declares it. `range` narrows it to a date window (the page's
+ *  date filter); `where` adds equality filters (a record page's own id). */
+export async function runWidget(
+  widget: WidgetRef,
+  opts: { range?: DateRange; where?: Record<string, string | number | boolean | (string | number)[]> } = {},
+): Promise<WidgetData> {
+  const src = widget.source;
+  if (await reviewingEmpty()) return { rows: [], value: src.op === "query" && !src.dimensions.length ? 0 : null };
+  if (src.op === "list") {
+    const rows = await list(src.entity, {
+      where: { ...src.filter, ...opts.where } as Where<typeof src.entity>,
+      sort: src.sort as never, order: "desc", limit: src.limit,
+    });
+    return { rows: rows as unknown as QueryRow[], value: null };
+  }
+  const rows = await resolveQuery({
+    name: widget.id, entity: src.entity, op: "query",
+    measures: src.measures, dimensions: src.dimensions,
+    filter: { ...src.filter, ...opts.where }, timeField: src.timeField,
+    range: opts.range, sort: src.sort, limit: src.limit,
+  }, await actor());
+  const single = src.dimensions.length === 0;
+  const first = src.measures[0]?.key;
+  const v = single && first ? rows[0]?.[first] : null;
+  return { rows, value: single ? Number(v ?? 0) : null };
 }

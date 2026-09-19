@@ -81,7 +81,7 @@ SECTION_OWNER: dict[str, str] = {
     # every one of those repair tasks was addressed to "unassigned".
     "pageLayouts": "page_template",
     "components": "frontend",
-    "widgets": "page_design",
+    "widgets": "analytics",
     "designSystem": "accessibility",
     "data.entities": "data_model",
     "data.relationships": "data_model",
@@ -814,7 +814,7 @@ def check_widget_datasource(doc: dict) -> list[Finding]:
             continue
 
         columns = {f.get("name") for f in entity.get("fields") or []}
-        for key in ("field", "groupBy", "sort"):
+        for key in ("field", "groupBy", "sort") if src.get("op") != "query" else ():
             col = src.get(key)
             if col and columns and col not in columns:
                 out.append(Finding(
@@ -828,6 +828,17 @@ def check_widget_datasource(doc: dict) -> list[Finding]:
                     detail=f"displays {col!r}, not a column on {entity.get('name')}",
                 ))
 
+        if src.get("op") == "query":
+            for detail in _query_findings(w, src, entity):
+                out.append(Finding("Widget↔DataSource", section="widgets",
+                                   artifact_id=wid, detail=detail))
+        elif w.get("kind") == "chart" and src.get("op") not in ("series",):
+            out.append(Finding(
+                "Widget↔DataSource", section="widgets", artifact_id=wid,
+                detail=f"a chart over a {src.get('op')!r} source has nothing to "
+                       "draw — give it a query with a dimension",
+            ))
+
         agg = src.get("aggregation")
         if w.get("unit") == "percent" and agg in MAGNITUDE_AGGREGATIONS:
             out.append(Finding(
@@ -840,6 +851,87 @@ def check_widget_datasource(doc: dict) -> list[Finding]:
                 "Widget↔DataSource", section="widgets", artifact_id=wid,
                 detail=f"{agg!r} needs a field to aggregate over",
             ))
+    return out
+
+
+#: How many dimensions and measures each chart mark can draw. A type
+#: statement about the mark, not a taste: a pie has one set of slices, a
+#: heatmap needs a row and a column, a scatter needs an x and a y value.
+_MARK_SHAPE: dict[str, tuple[tuple[int, int], tuple[int, int]]] = {
+    #          dimensions  measures
+    "bar":     ((1, 2), (1, 8)),
+    "line":    ((1, 2), (1, 8)),
+    "area":    ((1, 2), (1, 8)),
+    "radar":   ((1, 2), (1, 8)),
+    "pie":     ((1, 1), (1, 1)),
+    "donut":   ((1, 1), (1, 1)),
+    "funnel":  ((1, 1), (1, 1)),
+    "treemap": ((1, 2), (1, 1)),
+    "heatmap": ((2, 2), (1, 1)),
+    "scatter": ((1, 2), (2, 3)),
+}
+
+_DATE_TYPES = ("date", "time", "timestamp")
+
+
+def _query_findings(widget: dict, src: dict, entity: dict) -> list[str]:
+    """What a `query` source cannot compute, or its chart cannot draw."""
+    from services.blueprint.app_sdk import _numeric
+
+    fields = {f.get("name"): f for f in entity.get("fields") or []}
+    name = entity.get("name")
+    out: list[str] = []
+    measures = src.get("measures") or []
+    dims = src.get("dimensions") or []
+    for m in measures:
+        agg, col = m.get("aggregation"), m.get("field")
+        if agg != "count" and not col:
+            out.append(f"measure {m.get('key')!r}: {agg!r} needs a field")
+            continue
+        if col and fields and col not in fields:
+            out.append(f"measure {m.get('key')!r}: {col!r} is not a column on {name}")
+        elif col and agg in ("sum", "avg") and fields and not _numeric(fields[col]):
+            out.append(f"measure {m.get('key')!r}: {agg} over {col!r}, which is "
+                       f"not a number on {name}")
+        if widget.get("unit") == "percent" and agg in MAGNITUDE_AGGREGATIONS + ("count_distinct",):
+            out.append(f"unit 'percent' over a {agg!r} measure — a magnitude shown "
+                       "as a ratio is a fabricated number")
+    keys = [m.get("key") for m in measures]
+    if len(set(keys)) != len(keys):
+        out.append("two measures share a key")
+    for d in dims:
+        col = d.get("field")
+        if fields and col not in fields:
+            out.append(f"dimension {col!r} is not a column on {name}")
+        elif d.get("bucket") and fields and not any(
+                t in str(fields[col].get("type") or "").lower() for t in _DATE_TYPES):
+            out.append(f"dimension {col!r} is bucketed by {d['bucket']} but is not a date")
+    for key in ("timeField",):
+        col = src.get(key)
+        if col and fields and col not in fields:
+            out.append(f"{key} {col!r} is not a column on {name}")
+    sort_by = (src.get("sort") or {}).get("by")
+    if sort_by and sort_by not in keys and sort_by not in [d.get("field") for d in dims]:
+        out.append(f"sorts by {sort_by!r}, which is neither a measure nor a dimension")
+
+    kind, chart = widget.get("kind"), widget.get("chart") or {}
+    if kind == "chart":
+        mark = chart.get("mark")
+        if not mark:
+            out.append("a chart widget without `chart.mark` — say how it is drawn")
+        elif mark in _MARK_SHAPE:
+            (dlo, dhi), (mlo, mhi) = _MARK_SHAPE[mark]
+            if not dlo <= len(dims) <= dhi:
+                want = str(dlo) if dlo == dhi else f"{dlo}–{dhi}"
+                out.append(f"a {mark} draws {want} dimension(s); this query has {len(dims)}")
+            if not mlo <= len(measures) <= mhi:
+                want = str(mlo) if mlo == mhi else f"{mlo}–{mhi}"
+                out.append(f"a {mark} draws {want} measure(s); this query has {len(measures)}")
+            if mark in ("bar", "line", "area", "radar") and len(dims) == 2 and len(measures) > 1:
+                out.append(f"a {mark} split by a second dimension draws one measure; "
+                           f"this query has {len(measures)}")
+    elif kind in ("metric", "gauge") and dims:
+        out.append(f"a {kind} is one number; this query groups by {len(dims)} dimension(s)")
     return out
 
 

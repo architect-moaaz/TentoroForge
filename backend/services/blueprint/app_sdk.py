@@ -325,11 +325,122 @@ def emit_pages(doc: dict) -> str:
     return "\n".join(out) + "\n"
 
 
+# ---------------------------------------------------------------------------
+# Widgets — the analytics the Blueprint attaches to pages
+# ---------------------------------------------------------------------------
+
+def widget_keys(doc: dict) -> dict[str, str]:
+    widgets = _live(doc.get("widgets"))
+    keys = _unique(camel(w.get("label") or w.get("id")) for w in widgets)
+    return {str(w.get("id")): k for w, k in zip(widgets, keys)}
+
+
+def widget_query(doc: dict, widget: dict) -> dict | None:
+    """A widget's data source as the Data Engine runs it: `query` (measures by
+    dimensions) for every analytic, `list` for rows. The older `aggregate` and
+    `series` shapes are the same query with one measure, so they are written
+    as one here rather than carried as three code paths into every app."""
+    ents = {str(e.get("id")): e for e in _live((doc.get("data") or {}).get("entities"))}
+    src = widget.get("dataSource") or {}
+    entity = ents.get(str(src.get("entity")))
+    if entity is None:
+        return None
+    name = str(entity.get("name"))
+    filt = dict(src.get("filter") or {})
+    op = src.get("op")
+
+    def measure(agg: str | None, field: str | None, key: str = "value") -> dict:
+        # `ratio` names what the column already holds; its average is the ratio.
+        agg = "avg" if agg == "ratio" else (agg or "count")
+        m = {"key": key, "label": widget.get("label") or key, "aggregation": agg}
+        if field and agg != "count":
+            m["field"] = field
+        return m
+
+    if op == "query":
+        out = {"op": "query", "entity": name,
+               "measures": [{k: v for k, v in m.items() if v is not None}
+                            for m in src.get("measures") or []],
+               "dimensions": [{k: v for k, v in d.items() if v is not None}
+                              for d in src.get("dimensions") or []],
+               "filter": filt}
+        for k in ("timeField", "sort", "limit"):
+            if src.get(k) is not None:
+                out[k] = src[k]
+        return out
+    if op == "aggregate":
+        return {"op": "query", "entity": name, "filter": filt, "dimensions": [],
+                "measures": [measure(src.get("aggregation"), src.get("field"))]}
+    if op == "series":
+        return {"op": "query", "entity": name, "filter": filt,
+                "dimensions": [{"field": src.get("groupBy")}],
+                "measures": [measure(src.get("aggregation"), src.get("field"))]}
+    if op in ("list", "single"):
+        out = {"op": "list", "entity": name, "filter": filt,
+               "fields": list(src.get("fields") or []),
+               "limit": 1 if op == "single" else int(src.get("limit") or 10)}
+        if src.get("sort"):
+            out["sort"] = src["sort"]
+        return out
+    return None
+
+
+def emit_widgets(doc: dict) -> str:
+    keys = widget_keys(doc)
+    out = [HEADER,
+           'import type { EntityName } from "./schema";',
+           "",
+           "export type WidgetUnit = \"number\" | \"currency\" | \"percent\" | \"duration\" | \"date\" | \"text\";",
+           "export type ChartMark = \"bar\" | \"line\" | \"area\" | \"pie\" | \"donut\" | \"funnel\" | \"radar\" | \"scatter\" | \"heatmap\" | \"treemap\";",
+           "export type WidgetSource =",
+           "  | { op: \"query\"; entity: EntityName;",
+           "      measures: readonly { key: string; label?: string; aggregation: \"count\" | \"count_distinct\" | \"sum\" | \"avg\" | \"min\" | \"max\"; field?: string }[];",
+           "      dimensions: readonly { field: string; bucket?: \"day\" | \"week\" | \"month\" | \"quarter\" | \"year\" }[];",
+           "      filter: Readonly<Record<string, unknown>>; timeField?: string;",
+           "      sort?: { by: string; order?: \"asc\" | \"desc\" }; limit?: number }",
+           "  | { op: \"list\"; entity: EntityName; fields: readonly string[];",
+           "      filter: Readonly<Record<string, unknown>>; sort?: string; limit: number };",
+           "",
+           "/** An analytic the Blueprint attaches to a page. Read it in `load.ts` with",
+           " *  `runWidget(widgets.x)` and draw it in `view.tsx` with",
+           " *  `<WidgetView widget={widgets.x} data={…} />`. */",
+           "export interface WidgetRef {",
+           "  id: string;",
+           "  page: string;",
+           "  label: string;",
+           "  description?: string;",
+           "  kind: \"metric\" | \"chart\" | \"list\" | \"table\" | \"feed\" | \"gauge\" | \"text\";",
+           "  unit: WidgetUnit;",
+           "  size?: \"sm\" | \"md\" | \"lg\" | \"full\";",
+           "  chart?: { mark: ChartMark; stacked?: boolean; horizontal?: boolean };",
+           "  source: WidgetSource;",
+           "}",
+           "",
+           "export const widgets = {"]
+    ordered = sorted(_live(doc.get("widgets")),
+                     key=lambda w: (str(w.get("page") or ""), w.get("order") or 0))
+    for w in ordered:
+        source = widget_query(doc, w)
+        if source is None:
+            continue
+        ref = {"id": str(w.get("id")), "page": str(w.get("page") or ""),
+               "label": str(w.get("label") or ""), "kind": w.get("kind") or "metric",
+               "unit": w.get("unit") or "number"}
+        for k in ("description", "size", "chart"):
+            if w.get(k):
+                ref[k] = w[k]
+        ref["source"] = source
+        out.append(f"  {keys[str(w.get('id'))]}: {json.dumps(ref)} as const satisfies WidgetRef,")
+    out.append("} as const;")
+    return "\n".join(out) + "\n"
+
+
 def emit_index() -> str:
     return (HEADER + "// What a view may import: the types and handles, never the server reads.\n"
             'export * from "./schema";\n'
             'export * from "./workflows";\n'
-            'export * from "./pages";\n')
+            'export * from "./pages";\n'
+            'export * from "./widgets";\n')
 
 
 def sdk_files(doc: dict) -> dict[str, str]:
@@ -338,6 +449,7 @@ def sdk_files(doc: dict) -> dict[str, str]:
         f"{SDK_DIR}/schema.ts": emit_schema(doc),
         f"{SDK_DIR}/workflows.ts": emit_workflows(doc),
         f"{SDK_DIR}/pages.ts": emit_pages(doc),
+        f"{SDK_DIR}/widgets.ts": emit_widgets(doc),
         f"{SDK_DIR}/index.ts": emit_index(),
     }
 

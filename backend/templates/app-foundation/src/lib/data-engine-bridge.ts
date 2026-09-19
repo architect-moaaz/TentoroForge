@@ -8,7 +8,7 @@
 
 import type { DataEngine } from "@tentoroforge/renderer";
 import * as engine from "./data-engine";
-import { resolveAggregate as _resolveAggregate, resolveSeries as _resolveSeries } from "./data-engine";
+import { resolveAggregate as _resolveAggregate, resolveSeries as _resolveSeries, resolveQuery as _resolveQuery } from "./data-engine";
 // SSR data path: the entity registry is otherwise only populated on the first API
 // request, so server-side renders saw "Unknown entity". Initialise it here too.
 import { ensureDataEngineInitialized } from "./data-init";
@@ -78,6 +78,18 @@ export async function resolveSeries(source: unknown, ctx?: ActorCtx): Promise<Ar
   }
 }
 
+/** Resolve an op:"query" dataSource — measures by dimensions — to tidy rows.
+ *  Degrades to [] so an analytic shows its empty state, never a broken page. */
+export async function resolveQuery(source: unknown, ctx?: ActorCtx): Promise<Array<Record<string, string | number | null>>> {
+  try {
+    await ensureDataEngineInitialized();
+    return await _resolveQuery(source as any, ctx as any);
+  } catch (err) {
+    console.warn(`[data-engine-bridge] query run failed:`, err);
+    return [];
+  }
+}
+
 // Scalar aggregate ops that resolve to a single number via resolveAggregate.
 // Written by the planner as `{op: "max", entity, field}` — the ergonomic
 // shorthand — but resolveAggregate expects the richer
@@ -103,6 +115,11 @@ export const dataEngine: DataEngine = {
 
     try {
       await ensureDataEngineInitialized();
+
+      // op:"query" — measures by dimensions → tidy rows for charts and KPIs.
+      if (src.op === "query") {
+        return await resolveQuery(src, userCtx);
+      }
 
       // op:"series" — grouped aggregate → [{label, value}] for charts.
       if (src.op === "series") {

@@ -28,6 +28,7 @@
     "class-variance-authority": "^0.7.0",
     "cmdk": "^1.0.0",
     "dompurify": "^3.2.7",
+    "echarts": "^6.1.0",
     "qrcode.react": "^4.1.0",
     "react-hook-form": "^7.54.0",
     "recharts": "^2.13.0",

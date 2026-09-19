@@ -11,7 +11,7 @@
  */
 
 import { db } from "@/db";
-import { eq, ilike, or, and, desc, asc, count, sum, avg, min, max, gte, lt, inArray, sql, getTableName, type SQL } from "drizzle-orm";
+import { eq, ilike, or, and, desc, asc, count, countDistinct, sum, avg, min, max, gte, lt, inArray, sql, getTableName, type SQL } from "drizzle-orm";
 // FK-role authority — decides which columns to auto-fill from the current user.
 // A `domain` FK (target != users) is NEVER user-filled; only `actor` columns are.
 // Absent-table (registry-less app) → legacy name-based fallback below.
@@ -1381,6 +1381,198 @@ export async function resolveSeries(
   } catch {
     return [];
   }
+}
+
+// ─── Query Resolver (op:"query") ───
+
+/** One number per row of a query: an aggregation over a column (or rows). */
+export type QueryMeasure = {
+  key: string;
+  aggregation: "count" | "count_distinct" | "sum" | "avg" | "min" | "max";
+  field?: string;
+};
+
+/** A grouping column; a date column may be truncated to a period. */
+export type QueryDimension = {
+  field: string;
+  bucket?: "day" | "week" | "month" | "quarter" | "year";
+};
+
+/**
+ * Shape of an op:"query" dataSource — measures by dimensions, the query every
+ * chart and KPI reads. The Blueprint declares the same shape (`QuerySource`).
+ *
+ * `filter` is equality on the entity's own columns; an array value means "any
+ * of". `range` narrows `timeField` (or the bucketed dimension) to a half-open
+ * [from, to) window — the dashboard's date range.
+ */
+export type QuerySource = {
+  name?: string;
+  entity: string;
+  op: "query";
+  measures: QueryMeasure[];
+  dimensions?: QueryDimension[];
+  filter?: Record<string, unknown>;
+  timeField?: string;
+  range?: { from?: string | Date | null; to?: string | Date | null };
+  sort?: { by: string; order?: "asc" | "desc" };
+  limit?: number;
+};
+
+export type QueryRow = Record<string, string | number | null>;
+
+const _QUERY_BUCKETS = new Set(["day", "week", "month", "quarter", "year"]);
+const _QUERY_MAX_ROWS = 1000;
+
+/** A truncated date as a label that also sorts: 2026-03-02, 2026-03, 2026-Q1, 2026. */
+function bucketLabel(v: unknown, bucket: string): string | null {
+  if (v === null || v === undefined) return null;
+  const d = v instanceof Date ? v : new Date(v as any);
+  if (isNaN(d.getTime())) return String(v);
+  const iso = d.toISOString();
+  if (bucket === "year") return iso.slice(0, 4);
+  if (bucket === "quarter") return `${iso.slice(0, 4)}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+  if (bucket === "month") return iso.slice(0, 7);
+  return iso.slice(0, 10);
+}
+
+function asDate(v: string | Date | null | undefined): Date | null {
+  if (v === null || v === undefined || v === "") return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Resolve an op:"query" dataSource into tidy rows — one per combination of
+ * dimension values, keyed by each dimension's field and each measure's key:
+ *
+ *   { measures: [{ key: "count", aggregation: "count" }],
+ *     dimensions: [{ field: "createdAt", bucket: "month" }, { field: "status" }] }
+ *   → [{ createdAt: "2026-01", status: "OPEN", count: 4 }, …]
+ *
+ * One GROUP BY, under the same access conditions as a list: a chart over every
+ * tenant's rows leaks what the list would, aggregated into a harmless shape. A
+ * foreign-key dimension gains a `<field>Label` companion, as list rows do, so
+ * an axis reads names rather than ids.
+ *
+ * A measure or dimension naming a column the entity lacks is dropped rather
+ * than failing the page; a query left with no measure resolves to [].
+ */
+export async function resolveQuery(
+  source: QuerySource,
+  ctx: DataEngineContext = {},
+): Promise<QueryRow[]> {
+  const entity = getEntity(source.entity);
+  if (!entity) return [];
+  const cols = entity.table as any;
+  const conds: SQL[] = await accessConditions(source.entity, entity, ctx);
+
+  const measures = (source.measures || []).filter((m) =>
+    m && m.key && (m.aggregation === "count" || (m.field && cols[m.field] !== undefined)));
+  if (!measures.length) return [];
+  const dims = (source.dimensions || []).slice(0, 2).filter((d) => d && cols[d.field] !== undefined);
+
+  const shape: Record<string, any> = {};
+  const groupExprs: any[] = [];
+  dims.forEach((d, i) => {
+    const bucket = d.bucket && _QUERY_BUCKETS.has(d.bucket) ? d.bucket : undefined;
+    // The bucket is whitelisted above, so it is inlined as a literal: the same
+    // expression then appears verbatim in SELECT and GROUP BY, where two bound
+    // parameters would read to Postgres as two different expressions.
+    const expr = bucket ? sql`date_trunc('${sql.raw(bucket)}', ${cols[d.field]})` : cols[d.field];
+    shape[`d${i}`] = expr;
+    groupExprs.push(expr);
+  });
+  measures.forEach((m, i) => {
+    const c = m.field ? cols[m.field] : undefined;
+    shape[`m${i}`] =
+      m.aggregation === "count" ? (c ? count(c) : count()) :
+      m.aggregation === "count_distinct" ? countDistinct(c) :
+      m.aggregation === "sum" ? sum(c) :
+      m.aggregation === "avg" ? avg(c) :
+      m.aggregation === "min" ? min(c) :
+                                max(c);
+  });
+
+  for (const [k, v] of Object.entries(source.filter || {})) {
+    if (cols[k] === undefined || v === undefined) continue;
+    if (Array.isArray(v)) { if (v.length) conds.push(inArray(cols[k], v as any[])); }
+    else conds.push(eq(cols[k], v as any));
+  }
+  const timeField = source.timeField && cols[source.timeField] !== undefined
+    ? source.timeField
+    : dims.find((d) => d.bucket)?.field;
+  if (timeField && source.range) {
+    const from = asDate(source.range.from);
+    const to = asDate(source.range.to);
+    if (from) conds.push(gte(cols[timeField], from));
+    if (to) conds.push(lt(cols[timeField], to));
+  }
+
+  // Sort: an explicit measure key or dimension field; else chronological on a
+  // bucketed axis; else the first measure, largest first (a ranking).
+  const keyOf = (i: number) => dims[i].field;
+  const sortBy = source.sort?.by;
+  const sortMeasure = measures.findIndex((m) => m.key === sortBy);
+  const sortDim = dims.findIndex((d) => d.field === sortBy);
+  const order = source.sort?.order ?? (sortMeasure >= 0 || (!sortBy && !dims[0]?.bucket) ? "desc" : "asc");
+  const sortExpr =
+    sortMeasure >= 0 ? shape[`m${sortMeasure}`] :
+    sortDim >= 0 ? shape[`d${sortDim}`] :
+    dims[0]?.bucket ? shape.d0 :
+    dims.length ? shape.m0 : undefined;
+  const limit = Math.min(Math.max(source.limit ?? _QUERY_MAX_ROWS, 1), _QUERY_MAX_ROWS);
+
+  let raw: any[];
+  try {
+    const _db = _testDb ?? db;
+    let q = (_db as any).select(shape).from(entity.table);
+    if (conds.length) q = q.where(conds.length === 1 ? conds[0] : and(...conds));
+    if (groupExprs.length) q = q.groupBy(...groupExprs);
+    if (sortExpr) q = q.orderBy(order === "asc" ? asc(sortExpr) : desc(sortExpr));
+    q = q.limit(limit);
+    raw = await q;
+  } catch (err) {
+    console.warn(`[data-engine] query ${source.entity} failed:`, err);
+    return [];
+  }
+
+  const rows: Array<QueryRow & { __sort?: number | string | null }> = raw.map((r: any) => {
+    const out: QueryRow = {};
+    dims.forEach((d, i) => {
+      const v = r[`d${i}`];
+      out[keyOf(i)] = d.bucket ? bucketLabel(v, d.bucket)
+        : v === null || v === undefined ? null
+        : v instanceof Date ? v.toISOString()
+        : typeof v === "number" ? v : String(v);
+    });
+    // sum/avg arrive as numeric strings from the driver; a missing group is 0.
+    measures.forEach((m, i) => {
+      const v = Number(r[`m${i}`] ?? 0);
+      out[m.key] = Number.isFinite(v) ? v : 0;
+    });
+    return out;
+  });
+
+  // The same order again in JS: the driver's order for a bucketed label is
+  // the timestamp's, and this keeps the result right whatever produced it.
+  const sortKey = sortMeasure >= 0 ? measures[sortMeasure].key
+    : sortDim >= 0 ? keyOf(sortDim)
+    : dims[0]?.bucket ? keyOf(0)
+    : dims.length ? measures[0].key : undefined;
+  if (sortKey) {
+    const dir = order === "asc" ? 1 : -1;
+    rows.sort((a, b) => {
+      const x = a[sortKey], y = b[sortKey];
+      if (x === y) return 0;
+      if (x === null) return 1;
+      if (y === null) return -1;
+      return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y))) * dir;
+    });
+  }
+  const out = rows.slice(0, limit);
+  await attachFkLabels(source.entity, entity, out);
+  return out;
 }
 
 // ─── Search Resolver (op:"search") ───

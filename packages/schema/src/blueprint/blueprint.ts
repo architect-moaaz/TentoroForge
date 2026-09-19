@@ -1024,12 +1024,82 @@ export const SeriesSource = z.object({
   filter: z.record(z.string(), z.unknown()).default({}),
 });
 
+/** What a query measure computes. `count_distinct` counts the distinct values
+ *  of `field` (customers who ordered, not orders). `ratio` is not here: a ratio
+ *  is two measures, and the page divides them where it can say what over what. */
+export const QueryAggregation = z.enum(["count", "count_distinct", "sum", "avg", "min", "max"]);
+
+export const QueryMeasure = z.object({
+  /** The column this number arrives under in each row — `count`, `revenue`. */
+  key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  /** How a reader names it: the axis title, the legend, the tooltip. */
+  label: z.string().optional(),
+  aggregation: QueryAggregation,
+  /** The column aggregated. Required for everything but `count`. */
+  field: z.string().optional(),
+});
+
+/** Date truncation for a date dimension. */
+export const DateBucket = z.enum(["day", "week", "month", "quarter", "year"]);
+
+export const QueryDimension = z.object({
+  field: z.string(),
+  /** Set when `field` is a date: rows are grouped by this period. */
+  bucket: DateBucket.optional(),
+});
+
+/**
+ * Measures by dimensions — the query every analytic reads.
+ *
+ * One row per combination of dimension values, one column per measure: a
+ * status breakdown is one dimension and one measure, revenue by month split by
+ * region is two dimensions, a scatter is one dimension and two measures, a KPI
+ * is no dimension at all. The Data Engine resolves it as one GROUP BY, scoped
+ * to the reader's rows like every other read.
+ */
+export const QuerySource = z.object({
+  op: z.literal("query"),
+  entity: EntityId,
+  measures: z.array(QueryMeasure).min(1),
+  /** At most two: the axis, and the split (series, stack or heatmap row). */
+  dimensions: z.array(QueryDimension).max(2).default([]),
+  filter: z.record(z.string(), z.unknown()).default({}),
+  /** The date column a dashboard's date range narrows. Defaults to the
+   *  bucketed dimension when there is one. */
+  timeField: z.string().optional(),
+  /** A measure key or a dimension field; the default is chronological for a
+   *  bucketed axis and the first measure, largest first, otherwise. */
+  sort: z.object({
+    by: z.string(),
+    order: z.enum(["asc", "desc"]).default("desc"),
+  }).optional(),
+  /** Top-N. */
+  limit: z.number().int().positive().max(1000).optional(),
+});
+
 export const DataSource = z.discriminatedUnion("op", [
   ListSource,
   SingleSource,
   AggregateSource,
   SeriesSource,
+  QuerySource,
 ]);
+
+/** How a chart widget draws its query. The encoding is the query's own shape:
+ *  the first dimension is the axis (or the slice, the node, the heatmap
+ *  column), the second the split, the measures the values. */
+export const ChartMark = z.enum([
+  "bar", "line", "area", "pie", "donut", "funnel", "radar",
+  "scatter", "heatmap", "treemap",
+]);
+
+export const ChartSpec = z.object({
+  mark: ChartMark,
+  /** Bar/area with a split dimension or several measures: stack them. */
+  stacked: z.boolean().optional(),
+  /** Bars run left to right — a ranking with long category names. */
+  horizontal: z.boolean().optional(),
+});
 
 export const WidgetKind = z.enum([
   "metric", "chart", "list", "table", "feed", "gauge", "text",
@@ -1054,6 +1124,14 @@ export const Widget = z.object({
    */
   dataSource: DataSource,
   unit: DisplayUnit.default("number"),
+  /** What the reader learns from it, in a sentence — the card's subtitle. */
+  description: z.string().optional(),
+  /** Required on a `chart` widget: how its data is drawn. */
+  chart: ChartSpec.optional(),
+  /** How much of the page's width it takes. */
+  size: z.enum(["sm", "md", "lg", "full"]).optional(),
+  /** Its position among the page's widgets, lowest first. */
+  order: z.number().int().optional(),
   ...artifactBase,
 });
 
@@ -2065,6 +2143,8 @@ export type Entity = z.infer<typeof Entity>;
 export type Workflow = z.infer<typeof Workflow>;
 export type Widget = z.infer<typeof Widget>;
 export type DataSource = z.infer<typeof DataSource>;
+export type QuerySource = z.infer<typeof QuerySource>;
+export type ChartSpec = z.infer<typeof ChartSpec>;
 export type PatternTemplate = z.infer<typeof PatternTemplate>;
 export type PageLayout = z.infer<typeof PageLayout>;
 export type ClientStateValue = z.infer<typeof ClientStateValue>;

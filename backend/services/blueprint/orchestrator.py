@@ -242,7 +242,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # documents that carry it.
     # Derived, not authored: mutations from workflows, reads from the data
     # engine, analytics from widgets. See services.blueprint.api_derivation.
-    _n("apis", "api", ("entity_fields", "workflow_steps", "page_details"), ("apis",),
+    _n("apis", "api", ("entity_fields", "workflow_steps", "page_details", "analytics"), ("apis",),
        kind="service",
        note="endpoints are implied by entities + workflows + widgets"),
     _n("backend", "backend", ("apis",), ("codeMap",), kind="projection"),
@@ -276,6 +276,16 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("page_details", "page_design", ("page_contracts",), ("pages",),
        fanout="page_features",
        note="the contracts: tasks, states, views, actions, widgets, per feature"),
+    # THE ANALYTICS ARE DESIGNED ONCE, WITH THE WHOLE APPLICATION IN VIEW.
+    # Every page's contract is written and every entity has its fields, so one
+    # call can decide which pages carry numbers — the dashboard, a list's
+    # summary strip, a record's history — and write each as a query of
+    # measures by dimensions over columns that exist. It was a side effect of
+    # `page_details`, one feature at a time, which is why a dashboard (a page
+    # about every feature) so often came out empty. `page_layouts` and
+    # `page_code` read what it writes; the Data Engine runs it live.
+    _n("analytics", "analytics", ("page_details", "entity_fields", "workflows"), ("widgets",),
+       note="KPIs, charts and breakdowns per page, as measures by dimensions"),
     # §47 — the design language the connected file already states, projected
     # onto the Blueprint. Deterministic (§116): published variables *are* the
     # colour system and type scale, so a model asked to "extract" them can only
@@ -306,7 +316,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # After `workflow_steps`, not `workflows`: a Form collects a workflow's
     # inputs, and the inputs are written with the steps.
     _n("page_layouts", "page_template",
-       ("page_details", "workflow_steps", "figma_design_system"),
+       ("page_details", "analytics", "workflow_steps", "figma_design_system"),
        ("pageLayouts",), kind="service",
        note="§34; one tree per page from its contract, no model call"),
     # §34 — THE DESIGNED PAGE. The layout above is every page's floor; this is

@@ -201,7 +201,7 @@ def derive_apis(doc: dict) -> list[dict]:
     for widget in _live(doc.get("widgets")):
         src = widget.get("dataSource") or {}
         eid = src.get("entity")
-        if src.get("op") not in ("aggregate", "series") or eid not in entities:
+        if src.get("op") not in ("aggregate", "series", "query") or eid not in entities:
             continue
         slug = _slug(entities[eid].get("name") or "")
         # The catch-all's aggregate endpoint is `stats`. It counts; a

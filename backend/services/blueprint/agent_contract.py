@@ -150,6 +150,12 @@ _READS: dict[str, set[str]] = {
     "workflow": {"requirements", "data", "pages", "businessRules", "roles"},
     "business_rules": {"requirements", "data", "workflows"},
 
+    # The analytics each page carries, over the data the pages show and the
+    # processes that move it — the states a workflow changes are what a
+    # dashboard counts.
+    "analytics": {"requirements", "product", "data", "pages", "roles",
+                  "workflows", "security"},
+
     # §100 — permissions guard entities, pages and workflow execution.
     "security": {"requirements", "data", "pages", "workflows"},
 
@@ -188,7 +194,7 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # business rules, database schema, security rules or role permissions.
     "page_design": _cap(
         "page_design",
-        {"pages", "widgets", "navigation"},
+        {"pages", "navigation"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "mcp:a2ui"},
     ),
@@ -243,6 +249,11 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         tools={"blueprint:data", "schema:write", "migration:write"},
     ),
     "api": _cap("api", {"apis"}),
+    # The KPIs, charts and breakdowns attached to each page, each a query of
+    # measures by dimensions over declared columns. Split from page design so
+    # the analytics are designed with every page and every entity in view —
+    # a dashboard summarises what the other pages hold.
+    "analytics": _cap("analytics", {"widgets"}, tools={"blueprint:read"}),
     "backend": _cap("backend", {"apis", "codeMap"}),
     "frontend": _cap("frontend", {"components", "codeMap"}),
     "workflow": _cap("workflow", {"workflows"}),

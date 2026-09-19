@@ -61,6 +61,7 @@ ROOM_OF: dict[str, str] = {
     "accessibility": "design_studio",
     "figma_intelligence": "design_studio",
     "page_design": "design_studio",
+    "analytics": "design_studio",
     # Data — entities, the schema they become, the endpoints they imply (§28)
     "data_model": "data",
     "api": "data",
@@ -105,6 +106,7 @@ NODE_LABEL: dict[str, str] = {
     "design_system": "Setting the design language",
     "page_contracts": "Deciding the page set",
     "page_details": "Writing each feature's page contracts",
+    "analytics": "Designing each page's analytics",
     "page_layouts": "Laying out each page",
     "ui_direction": "Setting the app's look and conventions",
     "page_code": "Writing each page in React",

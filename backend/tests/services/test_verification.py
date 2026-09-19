@@ -493,9 +493,78 @@ def test_non_count_aggregation_without_a_field_is_caught():
     assert any("needs a field" in h.detail for h in hits)
 
 
-def test_widget_findings_route_to_page_design():
+def test_widget_findings_route_to_analytics():
+    """The analytics agent writes widgets, so it is who a finding goes back to."""
     tasks = verify(widget_doc(unit="percent")).repair_tasks()
-    assert tasks["page_design"][0].artifact_id == "WIDGET-001"
+    assert tasks["analytics"][0].artifact_id == "WIDGET-001"
+
+
+# --- query widgets: measures by dimensions -----------------------------------
+
+def query_doc(chart=None, kind="chart", **src):
+    fields = [{"name": "days", "type": "integer"},
+              {"name": "status", "type": "string", "enumValues": ["OPEN", "DONE"]},
+              {"name": "team", "type": "string"},
+              {"name": "note", "type": "text"},
+              {"name": "requestedAt", "type": "timestamp"}]
+    source = {"op": "query", "entity": "ENTITY-001",
+              "measures": [{"key": "count", "aggregation": "count"}],
+              "dimensions": [{"field": "status"}], **src}
+    d = widget_doc(kind=kind, dataSource=source, **({"chart": chart} if chart else {}))
+    d["data"]["entities"][0]["fields"] = fields
+    return d
+
+
+def _query_hits(d):
+    return [h.detail for h in verify(d, edges=("Widget↔DataSource",)).findings]
+
+
+def test_a_well_formed_query_chart_passes():
+    d = query_doc({"mark": "line", "stacked": False},
+                  dimensions=[{"field": "requestedAt", "bucket": "month"}, {"field": "status"}],
+                  timeField="requestedAt", sort={"by": "count", "order": "desc"}, limit=10)
+    assert _query_hits(d) == []
+
+
+def test_a_query_over_a_missing_column_is_caught():
+    d = query_doc({"mark": "bar"}, measures=[{"key": "hrs", "aggregation": "sum", "field": "hours"}],
+                  dimensions=[{"field": "region"}])
+    hits = _query_hits(d)
+    assert any("'hours' is not a column" in h for h in hits)
+    assert any("'region' is not a column" in h for h in hits)
+
+
+def test_summing_a_text_column_is_caught():
+    d = query_doc({"mark": "bar"}, measures=[{"key": "n", "aggregation": "sum", "field": "note"}])
+    assert any("not a number" in h for h in _query_hits(d))
+
+
+def test_bucketing_a_non_date_is_caught():
+    d = query_doc({"mark": "line"}, dimensions=[{"field": "status", "bucket": "month"}])
+    assert any("is not a date" in h for h in _query_hits(d))
+
+
+def test_a_chart_needs_its_mark_and_the_mark_its_shape():
+    assert any("chart.mark" in h for h in _query_hits(query_doc()))
+    # a heatmap draws a row and a column; one dimension cannot fill it
+    assert any("heatmap draws 2 dimension" in h for h in _query_hits(query_doc({"mark": "heatmap"})))
+    # a scatter plots two measures against each other
+    assert any("scatter draws 2–3 measure" in h for h in _query_hits(query_doc({"mark": "scatter"})))
+    # a split line draws one measure
+    d = query_doc({"mark": "line"}, measures=[{"key": "a", "aggregation": "count"},
+                                             {"key": "b", "aggregation": "sum", "field": "days"}],
+                  dimensions=[{"field": "requestedAt", "bucket": "week"}, {"field": "team"}])
+    assert any("split by a second dimension draws one measure" in h for h in _query_hits(d))
+
+
+def test_a_metric_is_one_number():
+    assert any("is one number" in h for h in _query_hits(query_doc(kind="metric")))
+
+
+def test_a_query_count_shown_as_percent_is_caught():
+    d = query_doc(kind="metric", dimensions=[])
+    d["widgets"][0]["unit"] = "percent"
+    assert any("fabricated number" in h for h in _query_hits(d))
 
 
 # --- relationships: reachable since data_model was widened ------------------

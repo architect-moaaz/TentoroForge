@@ -3,64 +3,61 @@
 // packages/library/src/components/Chart/Chart.tsx
 import * as React from "react";
 import type { ChartPropsType } from "./Chart.schema";
-import { LineChartImpl } from "./LineChart";
-import { BarChartImpl } from "./BarChart";
-import { AreaChartImpl } from "./AreaChart";
-import { PieChartImpl } from "./PieChart";
-import { FunnelChartImpl } from "./FunnelChart";
-import { RadarChartImpl } from "./RadarChart";
+import { EChart, type ChartSelection } from "./EChart";
 
-export interface ChartProps extends ChartPropsType {}
+export type { ChartSelection } from "./EChart";
+
+export interface ChartProps extends ChartPropsType {
+  // A click on a bar, point, slice or cell — drill down or cross-filter.
+  onSelect?: (selection: ChartSelection) => void;
+  className?: string;
+}
+
+function Placeholder({ height, children }: { height?: number; children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        width: "100%",
+        height: height ?? 240,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "hsl(var(--muted-foreground))",
+        fontSize: 12,
+      }}
+      data-chart-placeholder
+      // Canonical marker the render-truth probe reads. The legacy
+      // data-chart-placeholder stays for anything already keying on it.
+      data-forge-empty="chart"
+    >
+      {children}
+    </div>
+  );
+}
 
 /**
- * Chart dispatcher.
+ * Every chart the library draws — bar, line, area, pie, donut, funnel, radar,
+ * scatter, heatmap and treemap — on ECharts (`EChart`).
  *
  * Schema accepts `props.data` as either an inline array OR a Mustache
- * binding string (the LLM commonly emits `"{{stats.daily}}"` for live-data
- * bindings). When the binding hasn't been resolved by the runtime data
- * pipeline, `data` arrives as a string and recharts blows up with
- * `displayedData.map is not a function`. Guard with an empty-state.
+ * binding string (`"{{stats.daily}}"`). When the binding hasn't been resolved
+ * by the runtime data pipeline, `data` arrives as a string; that, and an empty
+ * array, render a quiet empty state instead of blank axes.
  */
 export function Chart(props: ChartProps) {
   if (!Array.isArray(props.data)) {
     return (
-      <div
-        style={{
-          width: "100%",
-          height: props.height ?? 240,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "hsl(var(--muted-foreground))",
-          fontSize: 12,
-          fontStyle: "italic",
-        }}
-        data-chart-placeholder
-        // Canonical marker the render-truth probe reads. The legacy
-        // data-chart-placeholder stays for anything already keying on it.
-        data-forge-empty="chart"
-      >
-        {typeof props.data === "string"
-          ? `Chart data binding ${props.data} — no fixture data available`
-          : "Chart data unavailable"}
-      </div>
+      <Placeholder height={props.height}>
+        <span style={{ fontStyle: "italic" }}>
+          {typeof props.data === "string"
+            ? `Chart data binding ${props.data} — no fixture data available`
+            : "Chart data unavailable"}
+        </span>
+      </Placeholder>
     );
   }
-  switch (props.chartType) {
-    case "line":
-      return <LineChartImpl {...props} />;
-    case "bar":
-      return <BarChartImpl {...props} />;
-    case "area":
-      return <AreaChartImpl {...props} />;
-    case "pie":
-    case "donut":
-      return <PieChartImpl {...props} />;
-    case "funnel":
-      return <FunnelChartImpl {...props} />;
-    case "radar":
-      return <RadarChartImpl {...props} />;
-    default:
-      return <BarChartImpl {...props} />;
+  if (props.data.length === 0) {
+    return <Placeholder height={props.height}>No data for this period yet</Placeholder>;
   }
+  return <EChart {...props} />;
 }

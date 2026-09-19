@@ -2667,7 +2667,7 @@
       "name": "Chart",
       "category": "data",
       "acceptsChildren": false,
-      "doc": "Chart dispatcher.\n\nSchema accepts `props.data` as either an inline array OR a Mustache\nbinding string (the LLM commonly emits `\"{{stats.daily}}\"` for live-data\nbindings). When the binding hasn't been resolved by the runtime data\npipeline, `data` arrives as a string and recharts blows up with\n`displayedData.map is not a function`. Guard with an empty-state.",
+      "doc": "Every chart the library draws — bar, line, area, pie, donut, funnel, radar,\nscatter, heatmap and treemap — on ECharts (`EChart`).\n\nSchema accepts `props.data` as either an inline array OR a Mustache\nbinding string (`\"{{stats.daily}}\"`). When the binding hasn't been resolved\nby the runtime data pipeline, `data` arrives as a string; that, and an empty\narray, render a quiet empty state instead of blank axes.",
       "props": {
         "type": "object",
         "properties": {
@@ -2680,7 +2680,10 @@
               "pie",
               "donut",
               "funnel",
-              "radar"
+              "radar",
+              "scatter",
+              "heatmap",
+              "treemap"
             ]
           },
           "data": {
@@ -2692,7 +2695,8 @@
                   "additionalProperties": {
                     "type": [
                       "string",
-                      "number"
+                      "number",
+                      "null"
                     ]
                   }
                 }
@@ -2727,6 +2731,33 @@
               ],
               "additionalProperties": false
             }
+          },
+          "colorKey": {
+            "type": "string"
+          },
+          "yKey": {
+            "type": "string"
+          },
+          "valueKey": {
+            "type": "string"
+          },
+          "sizeKey": {
+            "type": "string"
+          },
+          "labelKey": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "number",
+              "currency",
+              "percent",
+              "duration"
+            ]
+          },
+          "currency": {
+            "type": "string"
           },
           "height": {
             "type": "number"
@@ -2766,7 +2797,8 @@
                       "additionalProperties": {
                         "type": [
                           "string",
-                          "number"
+                          "number",
+                          "null"
                         ]
                       }
                     }
@@ -2816,6 +2848,9 @@
             "type": "object",
             "properties": {
               "leaderboard": {
+                "type": "boolean"
+              },
+              "horizontal": {
                 "type": "boolean"
               },
               "stacked": {

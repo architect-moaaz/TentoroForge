@@ -239,3 +239,67 @@ def test_the_root_page_is_rendered_by_the_catch_all_and_its_stub_comes_back(tmp_
     assert not (tmp_path / "src/app/_root/load.ts").exists()
     from services.blueprint.assembly import route_collisions
     assert route_collisions(tmp_path) == []                  # a private folder is not a route
+
+
+# --- widgets: the analytics a page carries -----------------------------------
+
+def _analytics_doc():
+    d = _doc()
+    d["widgets"] = [
+        {"id": "WIDGET-001", "page": "PAGE-003", "kind": "metric", "label": "Open cases",
+         "unit": "number", "order": 1,
+         "dataSource": {"op": "aggregate", "entity": "ENTITY-001", "aggregation": "count",
+                        "filter": {"status": "OPEN"}}},
+        {"id": "WIDGET-002", "page": "PAGE-003", "kind": "chart", "label": "Cases by status",
+         "unit": "number", "order": 3, "chart": {"mark": "donut"},
+         "dataSource": {"op": "series", "entity": "ENTITY-001", "aggregation": "count",
+                        "groupBy": "status"}},
+        {"id": "WIDGET-003", "page": "PAGE-003", "kind": "chart", "label": "Amount by month",
+         "unit": "currency", "order": 2, "size": "lg", "chart": {"mark": "area", "stacked": True},
+         "description": "What was opened, by value.",
+         "dataSource": {"op": "query", "entity": "ENTITY-001",
+                        "measures": [{"key": "amount", "label": "Amount", "aggregation": "sum",
+                                      "field": "amount"}],
+                        "dimensions": [{"field": "openedAt", "bucket": "month"}, {"field": "status"}],
+                        "timeField": "openedAt"}},
+        {"id": "WIDGET-004", "page": "PAGE-001", "kind": "chart", "label": "Gone",
+         "unit": "number", "status": "DEPRECATED",
+         "dataSource": {"op": "series", "entity": "ENTITY-001", "aggregation": "count",
+                        "groupBy": "status"}},
+    ]
+    return d
+
+
+def test_every_widget_is_one_query_shape():
+    """aggregate and series are a query with one measure; the app runs one path."""
+    from services.blueprint.app_sdk import widget_query
+
+    d = _analytics_doc()
+    kpi, pie, area = (widget_query(d, w) for w in d["widgets"][:3])
+    assert kpi == {"op": "query", "entity": "Case", "filter": {"status": "OPEN"}, "dimensions": [],
+                   "measures": [{"key": "value", "label": "Open cases", "aggregation": "count"}]}
+    assert pie["dimensions"] == [{"field": "status"}]
+    assert area["measures"][0] == {"key": "amount", "label": "Amount", "aggregation": "sum", "field": "amount"}
+    assert area["timeField"] == "openedAt"
+
+
+def test_widgets_are_typed_handles_in_the_sdk():
+    files = sdk_files(_analytics_doc())
+    widgets = files["src/sdk/widgets.ts"]
+    assert 'export * from "./widgets";' in files["src/sdk/index.ts"]
+    assert "openCases: {" in widgets and "casesByStatus: {" in widgets
+    assert "amountByMonth: {" in widgets and '"mark": "area"' in widgets
+    assert "as const satisfies WidgetRef" in widgets
+    assert "gone:" not in widgets                                   # a retired widget is not emitted
+
+
+def test_a_page_brief_lists_its_widgets_in_order():
+    from services.blueprint.ui_engineer import _page_brief
+
+    d = _analytics_doc()
+    brief = _page_brief(d, d["pages"][2])
+    assert [w["sdkKey"] for w in brief["widgets"]] == ["openCases", "amountByMonth", "casesByStatus"]
+    area = brief["widgets"][1]
+    assert area["reads"] == {"entity": "Case", "measures": ["amount"], "by": ["openedAt per month", "status"]}
+    assert area["size"] == "lg" and area["chart"] == {"mark": "area", "stacked": True}
+    assert _page_brief(d, d["pages"][0])["widgets"] == []            # the retired one is gone

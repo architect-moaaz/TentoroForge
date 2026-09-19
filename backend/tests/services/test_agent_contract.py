@@ -99,9 +99,13 @@ def test_figma_intelligence_is_registered_from_section_101():
     # contract, without a model; a2ui_pages remains Smith's screen composer.
     # ui_director, ui_engineer and page_reviewer (§34/§73) write the app's
     # direction, its pages as React, and review them as they render.
+    #
+    # analytics writes each page's widgets — the KPIs and charts, as queries
+    # of measures by dimensions — with every page and entity in view, where
+    # page design wrote them one feature at a time.
     assert extra == {"figma_intelligence", "page_template", "a2ui_pages",
                      "memory", "smith", "observer",
-                     "ui_director", "ui_engineer", "page_reviewer"}
+                     "ui_director", "ui_engineer", "page_reviewer", "analytics"}
     cap = capability_for("figma_intelligence")
     assert "mcp:figma" in cap.tools
     # §48 — Figma is design evidence, not confirmed requirements; it may not
