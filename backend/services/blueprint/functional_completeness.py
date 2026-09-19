@@ -291,6 +291,15 @@ def _acts_on_another_thing(label: str, entity_name: str) -> bool:
     return True
 
 
+#: What a view action calls the record without using the entity's name.
+_RECORD_WORDS = frozenset({"detail", "details", "record", "records", "row", "item", "items", "entry"})
+
+
+def _names_the_record(label: str) -> bool:
+    words = [w for w in re.split(r"[^a-z0-9]+", str(label or "").lower()) if w]
+    return bool(_RECORD_WORDS & set(words[1:]))
+
+
 _VERB_DB_OP: dict[str, str] = {
     "create": "db_insert", "add": "db_insert", "new": "db_insert", "register": "db_insert",
     "edit": "db_update", "update": "db_update",
@@ -559,6 +568,13 @@ def declared_action_findings(doc: dict, page: dict, layout: dict) -> list[str]:
                        f"{_does[op]} a {ent_name} — a control the contract promises is "
                        f"missing, and a page that quietly drops it is not fixed. Add {how}.")
         elif verb in _VIEW_VERBS and "[" not in route and detail_routes:
+            # The same object check the ops take. `view inline validation
+            # errors` on /add-data views ERRORS, not a Record, and demanding a
+            # link to /master-data/[id] refused the create form's every
+            # template — the page kept only its coded view. `view details`
+            # and `open record` still name the record.
+            if _acts_on_another_thing(label, ent_name) and not _names_the_record(label):
+                continue
             if "view" in seen or opens_record():
                 continue
             seen.add("view")
@@ -580,6 +596,11 @@ def page_findings(doc: dict) -> list[dict]:
     actions = _action_props()
     workflows = {str(w["id"]) for w in _live(doc.get("workflows")) if w.get("id")}
     layouts = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
+    # A page the UI engineer wrote renders from its `pageCode` row (its own
+    # route files), whether or not a template tree sits under it — and its
+    # controls were held to the workflows by the compile gate, not here.
+    coded = {str(c.get("page")) for c in doc.get("pageCode") or []
+             if isinstance(c, dict) and str(c.get("view") or "").strip()}
 
     for page in _live(doc.get("pages")):
         pid = str(page.get("id") or "")
@@ -589,6 +610,8 @@ def page_findings(doc: dict) -> list[dict]:
         # A page nothing composed has no schema, so its route 404s. The run
         # reports the composition failure; without this the Blueprint still
         # claims the page exists and every consumer believes it.
+        if not layout and pid in coded:
+            continue
         if not layout:
             out.append({"rule": "page-not-composed", "page": pid,
                         "detail": f"{route} has no composed tree, so the route "

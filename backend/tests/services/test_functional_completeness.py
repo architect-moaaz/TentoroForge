@@ -638,3 +638,29 @@ def test_a_create_is_demanded_only_where_there_is_a_form_to_go_to():
     doc["pages"] = [p for p in doc["pages"] if p["id"] != "PAGE-ADD"]
     doc["pageLayouts"] = [l for l in doc["pageLayouts"] if l["page"] != "PAGE-ADD"]
     assert [d for d in _declared(doc) if "`create`" in d] == []               # nowhere to create → silent
+
+
+def test_a_view_of_something_that_is_not_the_record_asks_for_no_link():
+    """h7gmi93x's /add-data declared `view inline validation errors`; read as
+    "view a Record" it demanded a link to /master-data/[id] and refused the
+    create form's every template. Viewing ERRORS opens no record."""
+    doc = _list_page_doc([{"label": "Delete", "workflow": "FLOW-003"},
+                          {"label": "Edit", "navigate": "/add-data?id={{id}}"}],
+                         actions=("view inline validation errors", "see success confirmation"))
+    assert _declared(doc) == []
+    # The record, however it is called, is still demanded.
+    for label in ("view", "view details", "open record"):
+        doc = _list_page_doc([{"label": "Delete", "workflow": "FLOW-003"}], actions=(label,))
+        assert [d for d in _declared(doc) if f"`{label}`" in d], label
+
+
+def test_a_page_written_as_code_is_not_reported_as_uncomposed():
+    """A pageCode row IS the page: its route files render it. The finding
+    `/add-data has no composed tree` was printed under a build whose /add-data
+    rendered from its own view.tsx."""
+    from services.blueprint.functional_completeness import page_findings
+    doc = _list_page_doc(_FULL_ROW_ACTIONS)
+    doc["pageLayouts"] = [l for l in doc["pageLayouts"] if l["page"] != "PAGE-ADD"]
+    assert [f for f in page_findings(doc) if f["rule"] == "page-not-composed"]
+    doc["pageCode"] = [{"page": "PAGE-ADD", "rationale": "", "load": "", "view": "export default function View() {}"}]
+    assert [f for f in page_findings(doc) if f["rule"] == "page-not-composed"] == []
