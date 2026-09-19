@@ -1138,7 +1138,9 @@ NODE_TASKS: dict[str, str] = {
         "mobile-first product — then mark with `tab: true` the three to five "
         "destinations people open every visit, which become its bottom tab "
         "bar — or `drawer` when phones are occasional and the menu can sit "
-        "behind a hamburger. Give every navigation node an `icon`: the "
+        "behind a hamburger. A destination that is a filtered view of a page "
+        "(\"My listings\" on the listings page) names that page and the view's "
+        "key in `view`, so it is its own address. Give every navigation node an `icon`: the "
         "lucide-react name (kebab-case) that depicts that destination in this "
         "product."
     ),

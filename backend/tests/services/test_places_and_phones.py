@@ -81,8 +81,7 @@ def test_a_location_is_one_jsonb_column_typed_as_a_point(tmp_path):
     module = emit_entity_module(tool, {"data": {"entities": [tool]}})
     assert 'pickup: jsonb("pickup")' in module
     assert ts_type({"type": "location"}) == "{ lat: number; lng: number }"
-    point = _seed_value({"name": "pickup", "type": "location"}, "Tool", 2)
-    assert set(point) == {"lat", "lng"} and point["lat"] == 51.515
+    assert _seed_value({"name": "pickup", "type": "location"}, "Tool", 2) is None, "no invented place"
 
 
 def test_signup_does_not_ask_for_a_location_but_the_sdk_knows_where_home_is(tmp_path):
@@ -161,3 +160,25 @@ def test_the_architect_chooses_the_tabs_and_their_icons():
     assert "`tab: true`" in NODE_TASKS["ux_architecture"] and "`icon`" in NODE_TASKS["ux_architecture"]
     layout = (_SHELL / "layout.tsx").read_text()
     assert "lucideByName(key)" in layout, "any lucide icon the architect names renders"
+
+
+def test_a_view_of_a_page_is_its_own_destination(tmp_path):
+    """0l133sp2: "My Listings" pointed at /tools like "Discover" — both lit,
+    and the tab bar drew two children keyed `/tools`."""
+    doc = {"application": {"name": "T"}, "pages": [{"id": "P1", "route": "/tools"}],
+           "navigation": {"mobile": "tabs", "tree": [
+               {"label": "Discover", "page": "P1", "tab": True},
+               {"label": "My Listings", "page": "P1", "view": "mine", "tab": True},
+               {"label": "Again", "page": "P1", "tab": True}]}}
+    project_shell(doc, tmp_path)
+    shell = json.loads((tmp_path / "src/schemas/shell.json").read_text())
+    rail = shell["children"][0]["props"]
+    assert [g["route"] for g in rail["groups"]] == ["/tools", "/tools?view=mine", "/tools"]
+    assert [t["route"] for t in shell["mobile"]["tabs"]] == ["/tools", "/tools?view=mine"], "one tab per address"
+    assert rail["bg"] == "hsl(var(--inverse))" and rail["accent"] == "hsl(var(--accent))", "painted from the design"
+    bar = (_SHELL / "MobileTabBar.tsx").read_text()
+    assert "key={`${t.route}:${t.label}`}" in bar
+    layout = (_SHELL / "layout.tsx").read_text()
+    assert "glyph: <RailGlyph name={g.icon} size={20} />" in layout and "<React.Suspense" in layout
+    side = (_BACKEND.parent / "packages/library/src/components/SideNav/SideNav.tsx").read_text()
+    assert "item.glyph ??" in side and "routes.includes(active)" in side

@@ -154,7 +154,7 @@ export async function list<E extends EntityName>(
 
 /** Rows of `entity` nearest to `from`, closest first, each with its
  *  `distanceKm` — read as the signed-in user, so only what they may see.
- *  `field` is the entity's `location` field; rows with none are left out.
+ *  `field` is the entity's `location` field; rows with none come last.
  *  Ranked over the first `scan` rows that match `where` (default 200): a
  *  neighbourhood's worth, not a city's. */
 export async function near<E extends EntityName>(
@@ -162,9 +162,12 @@ export async function near<E extends EntityName>(
   opts: { where?: Where<E>; radiusKm?: number; limit?: number; scan?: number } = {},
 ): Promise<(Entities[E] & { distanceKm: number | null })[]> {
   const rows = await list(entity, { where: opts.where, limit: Math.min(opts.scan ?? 200, 200) });
+  // Rows with no location are kept, after the located ones — hidden, a list
+  // of records nobody has placed yet reads as empty. A radius asks for the
+  // located ones only.
   const out = rows
     .map((r) => ({ ...r, distanceKm: from ? distanceKm(from, (r as unknown as Record<string, unknown>)[field]) : null }))
-    .filter((r) => (from ? r.distanceKm !== null && (opts.radiusKm === undefined || r.distanceKm <= opts.radiusKm) : true));
+    .filter((r) => (from && opts.radiusKm !== undefined ? r.distanceKm !== null && r.distanceKm <= opts.radiusKm : true));
   if (from) out.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
   return out.slice(0, opts.limit ?? 50);
 }

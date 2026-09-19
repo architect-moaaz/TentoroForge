@@ -1,4 +1,4 @@
-import type * as React from "react";
+import * as React from "react";
 import { redirect } from "next/navigation";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -838,8 +838,10 @@ export default async function DashboardLayout({
         <>
           {/* Room under the last row for the bar, on a phone only. */}
           <div aria-hidden="true" className="h-20 md:hidden" />
-          <MobileTabBar tabs={mobileTabs.map((t) => ({ label: t.label ?? t.route, route: t.route,
-                                                      icon: <RailGlyph name={t.icon} size={20} /> }))} />
+          <React.Suspense fallback={null}>
+            <MobileTabBar tabs={mobileTabs.map((t) => ({ label: t.label ?? t.route, route: t.route,
+                                                        icon: <RailGlyph name={t.icon} size={20} /> }))} />
+          </React.Suspense>
         </>
       )}
     </>
@@ -850,7 +852,7 @@ export default async function DashboardLayout({
   // A structurally different shell, not just different paint.
   // Highlights the current destination in every rail/dock (server components
   // can't know the URL; this tiny tracker follows soft navigations too).
-  const activeTracker = `(function(){function m(){document.querySelectorAll("[data-nav-item]").forEach(function(a){a.setAttribute("data-active",String(a.getAttribute("href")===location.pathname))})}m();addEventListener("popstate",m);var p=history.pushState;history.pushState=function(){p.apply(this,arguments);m()}})()`;
+  const activeTracker = `(function(){function m(){var here=location.pathname+location.search;var items=document.querySelectorAll("[data-nav-item]");var exact=Array.prototype.some.call(items,function(a){return a.getAttribute("href")===here});items.forEach(function(a){var h=a.getAttribute("href")||"";a.setAttribute("data-active",String(exact?h===here:h===location.pathname))})}m();addEventListener("popstate",m);var p=history.pushState;history.pushState=function(){p.apply(this,arguments);m()}})()`;
   const trackerTag = <script dangerouslySetInnerHTML={{ __html: activeTracker }} />;
   // PB-6: persona-pills frame — the Claude-yoga-demo top-strip. When the
   // deterministic shell picker (services/shell_templates.select_frame) chose
@@ -995,7 +997,13 @@ export default async function DashboardLayout({
     // standard-rail: the classic hover-expand SideNav.
     shell = (
       <div className="flex h-screen overflow-hidden bg-background">
-        <SideNav {...navProps} appName={appName} />
+        {/* Each destination's icon drawn here, where any icon the Blueprint
+            names resolves; the library's own list is short on purpose. */}
+        <SideNav {...navProps} appName={appName}
+          groups={navProps.groups.map((g) => ({
+            ...g, glyph: <RailGlyph name={g.icon} size={20} />,
+            items: g.items?.map((it) => ({ ...it, glyph: <RailGlyph name={it.icon} size={17} /> })),
+          }))} />
         {main}
       </div>
     );

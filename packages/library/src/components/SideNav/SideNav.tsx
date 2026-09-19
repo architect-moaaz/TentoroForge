@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { resolveIcon } from "../../icons";
 import { useTokens } from "../../theme/tokens-context";
 import type { StyleSlotT } from "@tentoroforge/schema";
@@ -21,8 +21,11 @@ import type { StyleSlotT } from "@tentoroforge/schema";
  * navigate via `data-nav-trigger`, which the Engine uses to swap the PageOutlet.
  */
 
-type SubItem = { label: string; route: string; icon?: string };
-type Group = { label?: string; icon?: string; route?: string; items?: SubItem[] };
+// `glyph`: an icon already drawn by the app (its layout can draw any icon by
+// name; this library keeps a short list so its bundle stays small). Wins over
+// `icon` when given.
+type SubItem = { label: string; route: string; icon?: string; glyph?: ReactNode };
+type Group = { label?: string; icon?: string; glyph?: ReactNode; route?: string; items?: SubItem[] };
 
 type Props = {
   groups?: Group[];
@@ -135,13 +138,20 @@ export function SideNav({
 
   const [active, setActive] = useState("");
   useEffect(() => {
-    const sync = () => setActive(window.location.pathname);
+    const sync = () => setActive(window.location.pathname + window.location.search);
     sync();
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
+  // A destination may be a VIEW of a page (`/tools?view=mine`) beside the page
+  // itself (`/tools`). When the current address is exactly one destination,
+  // only that one is lit — both used to light, because one starts the other.
+  const routes = groups.flatMap((g) => [g.route, ...(g.items || []).map((s) => s.route)]).filter(Boolean) as string[];
+  const exact = routes.includes(active);
+  const path = active.split("?")[0];
   const isActive = (route?: string) =>
-    !!route && (active === route || (route !== "/" && active.startsWith(route)));
+    !!route && (exact ? active === route
+      : !route.includes("?") && (path === route || (route !== "/" && path.startsWith(route + "/"))));
 
   function leaf(item: SubItem | Group, sub = false) {
     const route = (item as SubItem).route || "";
@@ -157,7 +167,7 @@ export function SideNav({
         className={`${sub ? "tf-sub" : "tf-row"}${act ? " tf-active" : ""}`}
       >
         <span data-nav-icon="" className="inline-flex">
-          <Glyph name={item.icon} size={sub ? 17 : 20} />
+          {item.glyph ?? <Glyph name={item.icon} size={sub ? 17 : 20} />}
         </span>
         <span className="tf-label" data-nav-label="">{item.label}</span>
       </a>
@@ -258,7 +268,7 @@ export function SideNav({
               <div key={`g:${gi}`}>
                 <div data-nav-group-label="" className={`tf-row${sectionActive ? " tf-active" : ""}`}>
                   <span data-nav-icon="" className="inline-flex">
-                    <Glyph name={g.icon} size={20} />
+                    {g.glyph ?? <Glyph name={g.icon} size={20} />}
                   </span>
                   <span className="tf-label" data-nav-label="">{g.label}</span>
                 </div>

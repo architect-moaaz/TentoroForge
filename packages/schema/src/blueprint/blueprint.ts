@@ -520,6 +520,7 @@ export type NavNodeT = {
   label: string;
   page?: string;
   icon?: string;
+  view?: string;
   tab?: boolean;
   roles?: string[];
   children?: NavNodeT[];
@@ -530,6 +531,12 @@ export const NavNode: z.ZodType<NavNodeT> = z.lazy(() =>
     label: z.string(),
     page: PageId.optional(),
     icon: z.string().optional(),
+    /**
+     * A saved view of the page (a key of its `views`), when the destination is
+     * the page filtered — "My listings" is `/tools?view=mine`, not `/tools`
+     * again. Two entries naming one route lit together and collided.
+     */
+    view: z.string().optional(),
     /** One of the bottom tab bar's destinations, when `navigation.mobile` is `tabs`. */
     tab: z.boolean().optional(),
     /** Visible only to these roles; empty means all authenticated roles. */

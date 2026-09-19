@@ -873,7 +873,11 @@ def mobile_tabs(doc: dict, groups: list[dict]) -> list[dict]:
     marked = [it for g in groups for it in [g, *(g.get("items") or [])] if it.get("tab") and it.get("route")]
     if marked:
         out = []
-        for it in marked[:MOBILE_TABS]:
+        seen: set[str] = set()
+        for it in marked:
+            if it["route"] in seen or len(out) == MOBILE_TABS:
+                continue
+            seen.add(it["route"])
             tab = {"label": str(it.get("label") or ""), "route": it["route"]}
             if it.get("icon"):
                 tab["icon"] = str(it["icon"])
@@ -941,7 +945,8 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             return None
         out: dict[str, Any] = {"label": str(node.get("label") or "")}
         if _navigable(route):
-            out["route"] = route
+            view = str(node.get("view") or "").strip()
+            out["route"] = f"{route}?view={view}" if view else route
         if node.get("icon"):
             out["icon"] = str(node["icon"])
         if node.get("tab"):
@@ -978,7 +983,13 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     if not initial or str(initial) in ("/", "/home") or not _navigable(str(initial)):
         first = next((it for g in groups for it in (g.get("items") or [g]) if it.get("route")), None)
         initial = first.get("route") if first else None
-    rail: dict[str, Any] = {"groups": groups, "appName": app_name, "mode": "dark"}
+    # THE RAIL IS PAINTED FROM THE DESIGN. Without colours here it fell back
+    # to the library's navy and a blue mark, on an app whose design is a warm
+    # paper and a forest green (0l133sp2). The design's dark lead surface, its
+    # text and its accent, as the tokens the page already reads.
+    rail: dict[str, Any] = {"groups": groups, "appName": app_name, "mode": "dark",
+                            "bg": "hsl(var(--inverse))", "text": "hsl(var(--inverse-foreground) / 0.82)",
+                            "muted": "hsl(var(--inverse-foreground) / 0.55)", "accent": "hsl(var(--accent))"}
     # THE OWNER'S MARK GOES WHERE THE APPLICATION'S NAME IS. The rail's brand
     # block draws a square with the first letter of the name in it; given a
     # logo it draws the logo instead. Only the reference is written here —
@@ -2365,8 +2376,11 @@ def _seed_value(field: dict, entity_name: str, row: int,
     kind = str(field.get("type") or "text").lower()
     name = field.get("name") or "field"
     if kind in LOCATION_TYPES:
-        # A few streets apart, so seeded distances read like a neighbourhood.
-        return {"lat": round(51.507 + 0.004 * row, 3), "lng": round(-0.128 + 0.006 * row, 3)}
+        # NO INVENTED PLACE. Demo rows sat a few streets apart in central
+        # London for every application, so a reader in Bangalore saw each
+        # demo tool "4995 mi" away. A place is the people's own, shared from
+        # their browser; demo rows have none.
+        return None
     # Spread across rows on purpose: with three rows and three states, the
     # seeded data holds one record in each, which is what lets a page that only
     # means something once something is submitted be reviewed at all.
