@@ -33,7 +33,11 @@ from services.smith_blueprint import Blueprint
 
 # Default is generous. Only tight budgets force truncation; the
 # common case for a hand-designed ATS-sized app fits comfortably.
-_DEFAULT_MAX_CHARS = 12_000
+# 12,000 characters (~3k tokens) held less than one generated app: the domain
+# and the requirements filled it, and the pages, integrations and most of the
+# workflows were cut off the end — Smith said no one reviewed a verification
+# the Admin's pages approved (0l133sp2). ~10k tokens now.
+_DEFAULT_MAX_CHARS = 40_000
 
 # When rendering the change_log, we start by including the tail this
 # many entries deep and back off if the budget is tight.
@@ -105,10 +109,25 @@ def blueprint_to_context(
     integrations = _render_integrations(bp)
     decisions = _render_design_decisions(bp)
 
-    core_sections = "\n".join(
-        s for s in (header, domain, requirements, entities, rules, workflows,
-                    pages, integrations, decisions) if s
-    )
+    # WHAT SURVIVES A SMALL BUDGET is what Smith answers and edits from: the
+    # entities, workflows and pages. Requirements, rules, the domain prose and
+    # the decisions are shortened first — the cap used to cut the END, which
+    # was the pages and integrations.
+    sections = [header, domain, requirements, entities, rules, workflows, pages, integrations, decisions]
+    keep_whole = {id(header), id(entities), id(workflows), id(pages), id(integrations)}
+    over = sum(len(x) for x in sections if x) - (budget.max_chars - 200)
+    if over > 0:
+        for i in (8, 2, 4, 1):          # decisions, requirements, rules, domain
+            if over <= 0:
+                break
+            text = sections[i]
+            if not text or id(text) in keep_whole:
+                continue
+            cut = min(len(text) - 200, over) if len(text) > 200 else 0
+            if cut > 0:
+                sections[i] = text[: len(text) - cut].rstrip() + "\n… (shortened to fit)"
+                over -= cut
+    core_sections = "\n".join(s for s in sections if s)
 
     remaining = max(0, budget.max_chars - len(core_sections) - 200)
     # Reserve ~200 chars for section headers/newlines around the log.
@@ -169,7 +188,8 @@ def _render_domain(bp: Blueprint) -> str:
     if shape:
         parts.append(f"- Distinctive shape: {shape}")
     why = d.get("why")
-    if why:
+    # The adapter fills both from the description; said once.
+    if why and why != shape:
         parts.append(f"- Why this shape: {why}")
     return "\n".join(parts)
 
@@ -329,9 +349,15 @@ def _render_workflows(bp: Blueprint) -> str:
         s = f"- **{name}**: {purpose}"
         if trigger:
             s += f"  · trigger: {trigger}"
-        if why:
+        if why and why != purpose:
             s += f"  · why: {why}"
         lines.append(s)
+        run_by, run_from = w.get("run_by") or [], w.get("run_from") or []
+        if run_by or run_from:
+            lines.append(f"  · run by {', '.join(run_by) or 'anyone signed in'}"
+                         + (f" from {', '.join(f'`{r}`' for r in run_from)}" if run_from else ""))
+        for step in w.get("steps") or []:
+            lines.append(f"  · {step}")
     return "\n".join(lines)
 
 
@@ -342,7 +368,9 @@ def _render_pages(bp: Blueprint) -> str:
     for p in bp.pages:
         route = p.get("route") or "?"
         role = p.get("role") or ""
-        lines.append(f"- `{route}` — {role}")
+        who = p.get("who") or []
+        lines.append(f"- `{route}` — {role}" + (f"  · for {', '.join(who)}" if who else "")
+                     + ("  · public" if p.get("access") == "public" else ""))
         for c in (p.get("notable_choices") or [])[:3]:
             if isinstance(c, dict):
                 choice = c.get("choice") or ""

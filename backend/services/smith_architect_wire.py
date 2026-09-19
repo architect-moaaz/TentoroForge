@@ -166,7 +166,9 @@ def _build_architect_context_block(bp: Blueprint) -> str:
         from services.smith_blueprint_context import (
             blueprint_to_context, ContextBudget,
         )
-        bp_slice = blueprint_to_context(bp, budget=ContextBudget(max_chars=1200))
+        # 1,200 characters was the app's name and half its description; the
+        # architect edits pages and workflows it could not see.
+        bp_slice = blueprint_to_context(bp, budget=ContextBudget())
         if bp_slice.strip():
             parts.extend(["", "## Blueprint (your memory of what you built)", bp_slice])
     except Exception:  # noqa: BLE001

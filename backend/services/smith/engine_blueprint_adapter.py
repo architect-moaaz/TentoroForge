@@ -48,6 +48,37 @@ def _live(items: Any) -> list[dict]:
             if isinstance(i, dict) and i.get("status") != "SUPERSEDED"]
 
 
+def _step_lines(w: dict[str, Any], role_names: dict[str, str]) -> list[str]:
+    """A workflow's steps as one short line each — what it changes, who it
+    tells, who it asks, when it refuses. The engine's own step graph is the
+    source; nothing here is inferred."""
+    def role(v: Any) -> str:
+        return ", ".join(role_names.get(x.strip(), x.strip()) for x in str(v or "").split(",") if x.strip())
+
+    out: list[str] = []
+    for st in w.get("steps") or []:
+        if not isinstance(st, dict):
+            continue
+        c = st.get("config") if isinstance(st.get("config"), dict) else {}
+        kind, act = str(st.get("type") or ""), str(c.get("actionType") or "")
+        line = ""
+        if act == "send_notification" or act == "send_email":
+            who = role(c.get("recipientRole") or c.get("toRole")) or str(c.get("recipient") or c.get("to") or "")
+            line = f"notifies {who or 'someone'}: \"{str(c.get('message') or c.get('subject') or '')[:90]}\""
+        elif act in ("db_update", "db_insert", "db_delete"):
+            vals = c.get("values") or c.get("sets") or {}
+            shown = ", ".join(f"{k}={v}" for k, v in list(vals.items())[:3]) if isinstance(vals, dict) else ""
+            verb = {"db_update": "updates", "db_insert": "creates a row in", "db_delete": "deletes from"}[act]
+            line = f"{verb} {c.get('table') or 'a record'}" + (f" ({shown})" if shown else "")
+        elif kind in ("approval", "user_task", "assignment", "task_pool"):
+            line = f"asks {role(c.get('assigneeRole') or c.get('assignTarget')) or 'someone'} to {kind.replace('_', ' ')}"
+        elif kind in ("end", "end_event") and c.get("refused"):
+            line = f"refuses: \"{str(c.get('message') or '')[:90]}\""
+        if line:
+            out.append(line)
+    return out[:8]
+
+
 def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
     """The engine's document in the shape Smith's `Blueprint` holds.
 
@@ -59,6 +90,8 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
     app = doc.get("application") or {}
     product = doc.get("product") or {}
     entities = (doc.get("data") or {}).get("entities")
+    role_names = {str(r.get("id")): str(r.get("name")) for r in _live(doc.get("roles")) if r.get("id")}
+    pages_by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
 
     domain = {
         "name": app.get("domain") or product.get("domain") or "",
@@ -115,12 +148,23 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
             }
             for e in _live(entities)
         ],
+        # WHO DOES WHAT, NOT ONLY WHAT IS CALLED WHAT. The workflows reached
+        # Smith as a name and a purpose, so asked where a member's identity
+        # verification goes, it answered — three times — that nothing says,
+        # while the submit step notified the Admin role and the Admin's
+        # verification page ran Approve and Reject (0l133sp2).
         "workflows": [
             {
                 "name": w.get("name"),
                 "purpose": w.get("purpose") or "",
                 "trigger": (w.get("trigger") or {}).get("kind") or "manual",
                 "why": w.get("purpose") or "",
+                "run_from": [str((pages_by_id.get(str(x)) or {}).get("route") or x)
+                             for x in w.get("launchedFrom") or []],
+                "run_by": sorted({role_names.get(str(u), str(u))
+                                  for x in w.get("launchedFrom") or []
+                                  for u in (pages_by_id.get(str(x)) or {}).get("users") or []}),
+                "steps": _step_lines(w, role_names),
             }
             for w in _live(doc.get("workflows"))
         ],
@@ -140,6 +184,9 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
                 # it, so the two agree.
                 "schema_path": _schema_path(str(p.get("route") or "")),
                 "role": p.get("name") or p.get("id") or "",
+                # Who may open it: "Member Verification Detail — Admin only".
+                "who": [role_names.get(str(u), str(u)) for u in p.get("users") or []],
+                "access": p.get("access") or "",
                 "notable_choices": [],
             }
             for p in _live(doc.get("pages"))
