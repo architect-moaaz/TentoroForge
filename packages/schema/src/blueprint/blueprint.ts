@@ -201,6 +201,11 @@ export const PagePattern = z.enum([
   // "not about records" and no way to say what it IS about leaves the same
   // hole.
   "tool",
+  // SIGNING IN AND CREATING AN ACCOUNT. These screens were template files the
+  // build never saw — no contract, no design, not in the editor — so every
+  // app opened on the same sign-in page with the same "Welcome back". As
+  // pages they are written like every other; `auth` says which.
+  "auth",
 ]);
 
 /** §33 — every page has a structured contract *before* implementation. */
@@ -210,6 +215,8 @@ export const PageContract = z.object({
   route: z.string().describe("URL path, e.g. /candidates or /candidates/[id]"),
   purpose: z.string().describe("Why this page exists, in business terms"),
   pattern: PagePattern.optional(),
+  /** On an `auth` page: which of the two it is. */
+  auth: z.enum(["login", "signup"]).optional(),
   module: ModuleId.optional(),
 
   /** Roles for whom this page is meaningful. */
@@ -1220,6 +1227,15 @@ export const Entity = z.object({
   fields: z.array(Field).default([]),
   /** Field used as the human label in pickers, FK columns and breadcrumbs. */
   labelField: z.string().optional(),
+  /**
+   * THE PERSON BEHIND A LOGIN. Each row of this entity IS a signed-in
+   * person: its `id` is their account's id, so `$user.id` names their row in
+   * every workflow and every foreign key, and signup creates the row with
+   * the account. Without it a Tool Share member signed up with a login and
+   * no Member, filled a separate public "Create Profile" form that belonged
+   * to nobody, and their KYC could not be found. At most one entity.
+   */
+  account: z.boolean().optional(),
   ...artifactBase,
 });
 
@@ -1432,6 +1448,18 @@ export const RuleAction = z.object({
   workflow: WorkflowId.optional(),
 });
 
+/**
+ * What satisfies a prerequisite: a row of `entity` belonging to the acting
+ * account (`account` names its field that holds the account's id), matching
+ * every `where` value — "a KycVerification of this member with status
+ * approved".
+ */
+export const PrerequisiteRequirement = z.object({
+  entity: EntityId,
+  account: z.string(),
+  where: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
+});
+
 export const BusinessRule = z.object({
   id: RuleId,
   name: z.string(),
@@ -1448,8 +1476,23 @@ export const BusinessRule = z.object({
    * rule the agent authored fires on the form exactly as one a person
    * authored. A rule with only a statement is prose; it constrains people,
    * not forms.
+   *
+   * `kind: "prerequisite"`: a person must have done something before they may
+   * run `gates` — verified their identity, been approved, paid. Tool Share's
+   * "KYC approval required for listing and borrowing" was a statement, prose
+   * nothing enforced, and anyone could list and borrow. A prerequisite is
+   * enforced: every gated workflow starts by checking `requires` and refuses
+   * with `message` when it is not met.
    */
-  kind: z.enum(["statement", "condition_action"]).default("statement"),
+  kind: z.enum(["statement", "condition_action", "prerequisite"]).default("statement"),
+  /** On a prerequisite: the workflows it gates. */
+  gates: z.array(WorkflowId).default([]),
+  /** On a prerequisite: the record that satisfies it. */
+  requires: PrerequisiteRequirement.optional(),
+  /** On a prerequisite: what the person is told when it is not met. */
+  message: z.string().optional(),
+  /** On a prerequisite: the page where it is done — where a new account is sent first. */
+  page: PageId.optional(),
   entity: EntityId.optional(),
   when: z.string().optional(),
   then: z.array(RuleAction).default([]),
@@ -1584,6 +1627,14 @@ export const Security = z.object({
     .enum(["none", "email_password", "sso", "oauth", "magic_link"])
     .default("email_password"),
   rbac: z.boolean().default(true),
+  /**
+   * The role a person who creates their own account gets. Signup used to
+   * give none, so a self-registered person held the platform's fallback
+   * "user", which no page or workflow of the application names — and every
+   * workflow gated by role refused them. When absent and the application
+   * has exactly one role, that role.
+   */
+  signupRole: RoleId.optional(),
   /**
    * A string states policy and enforces nothing; a {@link RecordScopeRule}
    * is enforced. An entity with no rule is readable by every authenticated

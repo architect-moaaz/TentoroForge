@@ -612,6 +612,8 @@ def page_findings(doc: dict) -> list[dict]:
         # claims the page exists and every consumer believes it.
         if not layout and pid in coded:
             continue
+        if not layout and page.get("pattern") == "auth":
+            continue            # without code it is the template's sign-in page
         if not layout:
             out.append({"rule": "page-not-composed", "page": pid,
                         "detail": f"{route} has no composed tree, so the route "

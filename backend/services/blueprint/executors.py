@@ -1063,7 +1063,17 @@ NODE_TASKS: dict[str, str] = {
         "`kind`, `fromField` and `toField` — `jobId: uuid` explained in "
         "English as \"Job the part was consumed on\" is a relationship no "
         "later stage can read, and the page planner could not tell a row only "
-        "ever written while looking at a job from a top-level record."
+        "ever written while looking at a job from a top-level record.\n\n"
+        "THE PERSON BEHIND A LOGIN. When the people who sign in have a record "
+        "of their own in this application — a Member, a Customer, a Patient, "
+        "a Driver — mark exactly that one entity `account: true`. Each of its "
+        "rows IS a signed-in person: its id is their account's id, it is "
+        "created at signup together with their login, and every other record "
+        "that points at a person points at it (`borrowerId`, `authorId`, "
+        "`memberId` → that entity). Do not model a separate profile or user "
+        "entity beside it, and do not use the platform's own users table. When "
+        "only staff sign in and nobody's record is about themselves, mark "
+        "none."
     ),
     "entity_fields": (
         "Author the fields of ONE entity, the one given below. Its `name` and "
@@ -1119,7 +1129,13 @@ NODE_TASKS: dict[str, str] = {
         "entity, and inventing one to hold a value nobody wants stored is the "
         "mistake this value exists to prevent. Choose it on what the screen is "
         "FOR, never on where it sits: a tool is still a tool at \"/\", and "
-        "`dashboard` means a summary of records someone signs in to read."
+        "`dashboard` means a summary of records someone signs in to read.\n\n"
+        "SIGNING IN IS NOT YOURS TO DECLARE. `/login` and `/signup` are added "
+        "for every application with a sign-in; do not declare them, and do "
+        "not declare a public \"register\" or \"create profile\" page for the "
+        "entity that is the person behind a login (`account: true`) — that "
+        "person's record is created at signup, with their account. A page "
+        "where a signed-in person EDITS their own record is still yours."
     ),
     "page_details": (
         "Write the Page Contracts for the pages of ONE feature, the pages given "
@@ -1319,7 +1335,19 @@ NODE_TASKS: dict[str, str] = {
         "actions — set_visibility, set_required, set_readonly, set_options, "
         "set_field, show_error — each naming a field the entity has. Such a "
         "rule fires on the form as a person types; a rule with only a "
-        "statement constrains people, not forms."
+        "statement constrains people, not forms.\n\n"
+        "A person must have DONE SOMETHING BEFORE they may do something else — "
+        "verified their identity before listing or borrowing, been approved "
+        "before booking, paid before downloading. That is `kind: "
+        "\"prerequisite\"`, never a statement: a statement is prose nothing "
+        "enforces, and anyone could list and borrow. Give `gates` (the "
+        "workflows it blocks, by id), `requires` (the record that satisfies "
+        "it: `entity`, `account` — the field of that entity holding the "
+        "person's account id — and `where`, the values it must have, such as "
+        "`{\"status\": \"approved\"}`), `message` (what the person is told, "
+        "saying what to do first) and `page` (the page where they do it; a "
+        "new account is sent there first). Every gated workflow then starts "
+        "by checking it and refuses with the message when it is not met."
     ),
     "security": (
         "Define roles and the permissions that guard entities and endpoints. "
@@ -1333,7 +1361,11 @@ NODE_TASKS: dict[str, str] = {
         "session carries that column and the engine compares against it. "
         "Where authorisation really "
         "is by role and every holder sees every row, write that as a prose rule "
-        "so the absence of a scoping object reads as a decision."
+        "so the absence of a scoping object reads as a decision.\n\n"
+        "When people create their own accounts, set `signupRole` to the role "
+        "they get — the role whose pages and workflows a new self-registered "
+        "person uses. Without it a new person holds no role the application "
+        "names, and every workflow gated by role refuses them."
     ),
 }
 
@@ -2056,6 +2088,15 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                             "another. Names a field below."
                         ),
                     },
+                    "account": {
+                        "type": "boolean",
+                        "description": (
+                            "True on the ONE entity that is the person behind a login "
+                            "(a Member, a Customer, a Patient): each row IS a signed-in "
+                            "person and is created at signup with their account. Omit "
+                            "it everywhere else."
+                        ),
+                    },
                     "fields": {
                         "type": "array",
                         "items": {
@@ -2372,6 +2413,12 @@ def pin_entity_identity(svc: Any, entity_id: str, result: AgentResult) -> None:
         body["name"] = row.get("name")
         if row.get("table"):
             body["table"] = row["table"]
+        # Whether this is the person behind a login is the entity set's
+        # decision; the field author may not move it (an omitted or false
+        # `account` here would clear it on upsert).
+        body.pop("account", None)
+        if row.get("account"):
+            body["account"] = True
         proposal.body = body
         kept.append(proposal)
     result.proposals = kept

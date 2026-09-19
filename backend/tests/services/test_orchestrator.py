@@ -675,6 +675,18 @@ def _layout_result(spec: TaskSpec) -> AgentResult:
     )
 
 
+@pytest.fixture
+def partial_fanout(monkeypatch):
+    """The partial-tolerance tests below are about a fan-out whose subjects can
+    each be missing (pages, one of which falls back to its floor). They run on
+    `entity_fields` as the harness, which is itself `whole` now — a missing
+    entity is a hole — so for them the node is made partial again."""
+    import dataclasses
+    from services.blueprint import orchestrator as _orch
+    monkeypatch.setitem(_orch.DAG, "entity_fields",
+                        dataclasses.replace(_orch.DAG["entity_fields"], whole=False))
+
+
 def _fanout_svc(svc, pages=3):
     for i in range(1, pages + 1):
         svc.upsert("data.entities", {"name": f"E{i}", "table": f"e{i}s",
@@ -686,7 +698,7 @@ def _fanout_svc(svc, pages=3):
     return svc
 
 
-def test_one_failed_subject_does_not_take_the_whole_node(svc):
+def test_one_failed_subject_does_not_take_the_whole_node(svc, partial_fanout):
     """One page of twenty-four failed on a live run and `page_layouts` failed
     with it, skipping frontend, integration, testing, memory, verification and
     preview. One bad subject cost the entire application.
@@ -709,6 +721,24 @@ def test_one_failed_subject_does_not_take_the_whole_node(svc):
     assert report.failed == ["entity_fields:ENTITY-002"]
 
 
+def test_a_whole_node_fails_on_one_missing_subject_and_stops_what_depends_on_it(svc):
+    """036farqu: `entity_fields` lost Member and ConditionEvidence, reported
+    done, and 22 minutes of pages and workflows were built on entities with no
+    columns before `assemble` refused a form inserting into nothing. The data
+    model is `whole`: one entity missing fails the node, here, naming it."""
+    _fanout_svc(svc)
+
+    def executor(spec):
+        if spec.subject == "ENTITY-002":
+            raise RuntimeError("confidence 0.10 is below the threshold")
+        return _layout_result(spec)
+
+    report = run(svc, executor, plan=["entity_fields", "security"], max_attempts=1)
+    assert "entity_fields" not in report.completed
+    assert report.failed == ["entity_fields:ENTITY-002"]
+    assert "security" not in report.completed, "nothing is built on a hole"
+
+
 def test_a_node_that_authored_nothing_at_all_has_genuinely_failed(svc):
     """Partial results are usable; no result is not."""
     _fanout_svc(svc)
@@ -721,7 +751,7 @@ def test_a_node_that_authored_nothing_at_all_has_genuinely_failed(svc):
     assert len(report.failed) == 3
 
 
-def test_a_partial_node_still_unblocks_what_depends_on_it(svc):
+def test_a_partial_node_still_unblocks_what_depends_on_it(svc, partial_fanout):
     """The point of the change: downstream work proceeds on partial input."""
     _fanout_svc(svc)
 

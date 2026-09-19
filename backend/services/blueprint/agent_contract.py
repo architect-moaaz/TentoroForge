@@ -474,6 +474,63 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None) -> None
         raise InvalidWorkflowStep(_all_of(problems))
 
 
+class InvalidEntityFields(ValueError):
+    """An entity's fields cannot be stored as proposed."""
+
+
+#: What a vector field may be taken of: a picture, or words.
+EMBEDDABLE_TYPES = frozenset({"image", "string", "text"})
+
+
+def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
+    """A `vector` field names the image or text field of the same entity it is
+    taken of. 036farqu: Tool and ConditionEvidence came back with
+    `embedding: {of: ""}`, the contract refused the whole document, and the
+    retry was told only "'' should be non-empty" — ConditionEvidence ended with
+    no columns at all. Refused here instead, naming the fields it could be."""
+    problems: list[str] = []
+    for proposal in (p for p in result.proposals if p.section == "data.entities"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        fields = [f for f in body.get("fields") or [] if isinstance(f, dict)]
+        sources = [str(f.get("name")) for f in fields
+                   if str(f.get("type") or "").lower() in EMBEDDABLE_TYPES and f.get("name")]
+        for f in fields:
+            if str(f.get("type") or "").lower() != "vector":
+                continue
+            of = str(((f.get("embedding") or {}) if isinstance(f.get("embedding"), dict) else {}).get("of") or "").strip()
+            if of and of in sources:
+                continue
+            said = (f"`embedding.of` is {of!r}, which is not an image or text field of this entity"
+                    if of else "has no `embedding.of`")
+            fix = (f"set `of` to one of: {', '.join(sources)}" if sources
+                   else "this entity has no image or text field to embed — remove the vector field, "
+                        "or add the image field it should be taken of")
+            problems.append(f"{body.get('name') or proposal.natural_key}.{f.get('name')}: a vector field {said}; {fix}")
+    # THE ACCOUNT ENTITY: at most one, and signup must be able to create it —
+    # a required reference to another record is a field no one can fill when
+    # the account is made.
+    live = [e for e in ((doc or {}).get("data") or {}).get("entities") or []
+            if isinstance(e, dict) and e.get("status") != "DEPRECATED"]
+    for proposal in (p for p in result.proposals if p.section == "data.entities"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        name = body.get("name") or proposal.natural_key
+        same = lambda e: e.get("name") == name or str(e.get("id")) == str(proposal.natural_key)
+        # The flag is set with the entity set; the fields arrive per entity
+        # later and need not repeat it.
+        if not (body.get("account") or any(e.get("account") and same(e) for e in live)):
+            continue
+        other = next((e for e in live if e.get("account") and not same(e)), None)
+        if body.get("account") and other is not None:
+            problems.append(f"{name}: `account: true` is already on {other.get('name')} — one entity is the "
+                            "person behind a login")
+        for f in body.get("fields") or []:
+            if isinstance(f, dict) and f.get("references") and f.get("required"):
+                problems.append(f"{name}.{f.get('name')}: the account entity's row is created at signup, when no "
+                                "other record exists to point at — make this reference optional")
+    if problems:
+        raise InvalidEntityFields(_all_of(problems))
+
+
 class InvalidBusinessRule(ValueError):
     """A rule the engine could not evaluate as written."""
 
@@ -491,8 +548,46 @@ def check_business_rules(result: "AgentResult", doc: dict | None) -> None:
         "workflows": [],
         "data": (doc or {}).get("data") or {},
     })
-    if findings:
-        raise InvalidBusinessRule("; ".join(f["detail"] for f in findings[:8]))
+    problems = [f["detail"] for f in findings[:8]]
+    problems += [f"{p.body.get('name') or p.natural_key}: {e}"
+                 for p in proposals for e in prerequisite_findings(p.body, doc or {})]
+    if problems:
+        raise InvalidBusinessRule("; ".join(problems))
+
+
+def prerequisite_findings(rule: dict, doc: dict) -> list[str]:
+    """A prerequisite gates workflows the application has, is satisfied by a
+    record of an entity it has — tied to the acting account by a field that
+    entity has — and says what the person is told. Checked at the author, so
+    a gate that could never be met, or never be checked, is re-asked."""
+    if rule.get("kind") != "prerequisite":
+        return []
+    out: list[str] = []
+    live = lambda rows: [r for r in rows or [] if isinstance(r, dict) and r.get("status") != "DEPRECATED"]
+    flows = {str(w.get("id")) for w in live(doc.get("workflows"))}
+    gates = [str(g) for g in rule.get("gates") or []]
+    if not gates:
+        out.append("a prerequisite gates at least one workflow — name them in `gates`")
+    out += [f"`gates` names {g}, which is not a workflow of this application" for g in gates if flows and g not in flows]
+    req = rule.get("requires") or {}
+    ents = {str(e.get("id")): e for e in live((doc.get("data") or {}).get("entities"))}
+    ent = ents.get(str(req.get("entity") or ""))
+    if ent is None:
+        out.append("`requires.entity` must name the entity whose record satisfies it")
+    else:
+        cols = {str(f.get("name")) for f in ent.get("fields") or []}
+        acct = str(req.get("account") or "")
+        if acct not in cols:
+            out.append(f"`requires.account` must be the field of {ent.get('name')} holding the person's "
+                       f"account id (one of: {', '.join(sorted(cols)) or 'none'})")
+        out += [f"`requires.where` names {k}, which {ent.get('name')} does not have"
+                for k in (req.get("where") or {}) if cols and k not in cols]
+    if not str(rule.get("message") or "").strip():
+        out.append("a prerequisite says in `message` what the person must do first")
+    pages = {str(pg.get("id")) for pg in live(doc.get("pages"))}
+    if rule.get("page") and pages and str(rule["page"]) not in pages:
+        out.append(f"`page` names {rule['page']}, which is not a page of this application")
+    return out
 
 
 class InvalidPatternTemplate(ValueError):
@@ -695,6 +790,7 @@ def apply_agent_result(
     check_pattern_templates(result, svc.doc)
     check_workflow_steps(result, svc.doc)
     check_business_rules(result, svc.doc)
+    check_entity_fields(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
     #

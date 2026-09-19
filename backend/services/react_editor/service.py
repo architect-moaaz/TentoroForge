@@ -168,12 +168,13 @@ def _entity_refs(doc: dict) -> list[dict]:
                    "options": list(f.get("enumValues") or [])}
                   for f in (e.get("fields") or []) if isinstance(f, dict) and f.get("name")]
         out.append({"id": str(e.get("id")), "name": e.get("name"), "typeName": pascal(str(e.get("name") or e.get("id"))),
-                    "table": e.get("table"), "fields": fields})
+                    "table": e.get("table"), "fields": fields, "account": bool(e.get("account"))})
     return out
 
 
 def _entities_for_samples(doc: dict) -> list[dict]:
-    return [{"name": e["name"], "fields": [{"name": f["name"], "type": f["type"], "enumValues": f["options"]} for f in e["fields"]]}
+    return [{"name": e["name"], "account": e.get("account", False),
+             "fields": [{"name": f["name"], "type": f["type"], "enumValues": f["options"]} for f in e["fields"]]}
             for e in _entity_refs(doc)]
 
 

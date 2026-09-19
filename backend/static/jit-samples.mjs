@@ -25,6 +25,8 @@ function filter(entity: string, opts: any = {}) {
   return out;
 }
 export async function currentUser(): Promise<SessionUser | null> { await wait(); return ${JSON.stringify(user)}; }
+/** The signed-in person's own record: the account entity's first sample row. */
+export async function myAccount(): Promise<any | null> { await wait(); return ${JSON.stringify((() => { const a = entities.find((e) => e.account); return a ? rows[a.name][0] : null; })())}; }
 export async function listPage(entity: string, opts: any = {}): Promise<Page<any>> {
   await wait();
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200); const page = Math.max(opts.page ?? 1, 1);

@@ -78,6 +78,8 @@ PROJECTED_PATHS: tuple[str, ...] = (
     "src/app/(dashboard)/page.tsx",
     "src/lib/sensitive-columns.ts", "src/lib/searchable-columns.ts",
     "src/lib/embedding-columns.ts",
+    # Who signs in (`account_model.project_account`).
+    "src/lib/account.ts", "src/lib/account-table.ts",
     "src/lib/append-only-entities.ts",
     # The owner's OWN records, loaded from a spreadsheet
     # (`services.smith.data_import`). Nothing in any scaffold layer writes
@@ -119,6 +121,11 @@ SCAFFOLD_OWNED: tuple[str, ...] = ()
 #: The floor is a plain-looking application, not an unbuildable one.
 SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     "src/app/tokens.css",
+    # The account files, when the projection did not run; and the sign-in
+    # pages, which an `auth` page's code replaces — the template only fills
+    # the hole, never overwrites the designed page (`app_sdk._AUTH_FLOORS`).
+    "src/lib/account.ts", "src/lib/account-table.ts",
+    "src/app/login/page.tsx", "src/app/signup/page.tsx",
     # The coded root page the catch-all imports (`app_sdk.ROOT_DIR`). The
     # projection writes it when `/` has code and the stub otherwise; this is
     # the stub for a tree the projection never reached.

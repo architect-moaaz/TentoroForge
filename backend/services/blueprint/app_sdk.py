@@ -224,6 +224,11 @@ def emit_schema(doc: dict) -> str:
     out.extend(numeric)
     out.append("};")
     out.append("")
+    from services.blueprint.account_model import account_entity
+    acct = account_entity(doc)
+    out.append("/** The entity each login IS (`myAccount()` reads it); `never` when there is none. */")
+    out.append(f"export type AccountEntity = {json.dumps(str(acct.get('name'))) if acct else 'never'};")
+    out.append("")
     out.append("/** The display label of each entity's records. */")
     out.append("export const LABEL_FIELD: Record<string, string> = {")
     for e in ents:
@@ -554,6 +559,11 @@ def code_page_dir(page: dict) -> str:
     route = str(page.get("route") or "/").strip("/")
     if not route:
         return ROOT_DIR
+    # `login` and `signup` are reserved segments `public_route_segments` will
+    # not place; an auth page IS the file at that segment, outside the
+    # session gate (inside it, signing in would need a session).
+    if str(page.get("pattern") or "") == "auth":
+        return "src/app/" + route
     public = public_route_segments(page)
     if public:
         return "src/app/" + "/".join(public)
@@ -582,13 +592,17 @@ def page_module(doc: dict, page: dict, row: dict) -> str:
     frame_import = ('import { PublicPageFrame } from "@/components/PublicPageFrame";\n'
                     if public else "")
     root = code_page_dir(page) == ROOT_DIR
+    if str(page.get("pattern") or "") == "auth":
+        # A sign-in screen is the whole screen: no rail, no public header, no
+        # page frame — the view is the page.
+        frame_open, frame_close, frame_import = "<>", "</>", ""
     return (
         f"{CODE_PAGE_MARKER} {page.get('id')}\n"
         f"// {page.get('name')} — generated from the Living Blueprint (pageCode). Edit the\n"
         "// Blueprint, not this file.\n"
         'import { notFound } from "next/navigation";\n'
         'import { currentUser, type PageContext } from "@/sdk/server";\n'
-        'import { PageFrame } from "@/sdk/frame";\n'
+        + ('' if frame_open == "<>" else 'import { PageFrame } from "@/sdk/frame";\n')
         + frame_import +
         'import { load } from "./load";\n'
         'import View from "./view";\n'
@@ -610,7 +624,8 @@ def page_module(doc: dict, page: dict, row: dict) -> str:
         "  const data = await load(ctx);\n"
         "  if (data === null) notFound();\n"
         "  return (\n"
-        f"    {frame_open} entities={{{json.dumps(entities)}}}>\n"
+        + (f"    {frame_open}\n" if frame_open == "<>" else f"    {frame_open} entities={{{json.dumps(entities)}}}>\n")
+        + ""
         "      <View {...data} />\n"
         f"    {frame_close}\n"
         "  );\n"
@@ -629,6 +644,13 @@ def code_page_files(doc: dict, row: dict) -> dict[str, str]:
         f"{base}/load.ts": str(row.get("load") or ""),
         f"{base}/view.tsx": str(row.get("view") or ""),
     }
+
+
+#: The template sign-in pages — each `auth` page's floor when it has no code.
+_AUTH_FLOORS: dict[str, Path] = {
+    f"src/app/{name}": Path(__file__).resolve().parents[2] / f"templates/app-foundation/src/app/{name}/page.tsx"
+    for name in ("login", "signup")
+}
 
 
 def project_code_pages(doc: dict, app_root: str | Path) -> list[str]:
@@ -660,6 +682,20 @@ def project_code_pages(doc: dict, app_root: str | Path) -> list[str]:
                 if page_file.parent == root / ROOT_DIR and _ROOT_STUB.exists():
                     # The catch-all imports it: `/` without code is the stub.
                     page_file.write_text(_ROOT_STUB.read_text())
+                    continue
+                floor = _AUTH_FLOORS.get(str(page_file.parent.relative_to(root)))
+                if floor is not None and floor.exists():
+                    # A sign-in page without code is the template's, which
+                    # still works; an app is never left with no /login. Its
+                    # placeholders filled as assembly fills them.
+                    from services.runtime_injector import (
+                        _substitute_app_name, _substitute_auth_copy, _substitute_auth_image,
+                    )
+                    page_file.write_text(floor.read_text())
+                    app_doc = doc.get("application") or {}
+                    _substitute_app_name(root, app_doc.get("name"), app_doc.get("domain"))
+                    _substitute_auth_image(root, app_doc.get("domain"))
+                    _substitute_auth_copy(root, app_doc.get("name"), app_doc.get("domain"))
                     continue
                 parent = page_file.parent
                 while parent != app and parent.is_dir() and not any(parent.iterdir()):

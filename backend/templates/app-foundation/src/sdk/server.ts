@@ -11,7 +11,8 @@ import * as engine from "@/lib/data-engine";
 import { actorCtx, resolveAggregate, resolveQuery, resolveSeries, resolveSimilar } from "@/lib/data-engine-bridge";
 import { ensureDataEngineInitialized } from "@/lib/data-init";
 import { NUMERIC_FIELDS, READABLE_FIELDS } from "./schema";
-import type { Entities, EntityName, NumericField } from "./schema";
+import type { AccountEntity, Entities, EntityName, NumericField } from "./schema";
+import { ACCOUNT } from "@/lib/account";
 import type { WidgetRef } from "./widgets";
 
 export type { Entities, EntityName } from "./schema";
@@ -159,6 +160,16 @@ export async function record<E extends EntityName>(
   } catch {
     return null;
   }
+}
+
+/** The signed-in person's own record: the account entity's row whose id IS
+ *  their login's id. Null when signed out, or when the application has no
+ *  account entity. */
+export async function myAccount(): Promise<Entities[Extract<AccountEntity, EntityName>] | null> {
+  const user = await currentUser();
+  if (!user || !ACCOUNT) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (await record(ACCOUNT.entity as EntityName, user.id)) as any;
 }
 
 /** How many rows match. */

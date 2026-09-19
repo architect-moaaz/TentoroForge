@@ -120,6 +120,9 @@ query(entity, { measures: { [key]: { fn: "count" } | { fn: "count_distinct" | "m
    A bucketed date reads "2026-03-02" / "2026-03" / "2026-Q1" / "2026"; a foreign-key dimension also carries `<field>Label`.
    A number grouped into `ranges` (from ≤ value < to) reads as each band's label, bands in the order given — age groups,
    price bands; a value in no band is left out.
+myAccount(): Promise<Row | null>
+   The signed-in person's own record — the account entity's row, whose id IS their login's id
+   (`$user.id` in a workflow). Null when signed out or when the application has no account entity.
 runWidget(widgets.x, { range?, where? }): Promise<WidgetData>      // WidgetData = { rows: QueryRow[]; value: number | null }
    Reads one of the page's declared widgets exactly as the Blueprint defines it. `value` is the number of a
    metric or gauge. `where` narrows it (a record page passes its own id: { customerId: params.id }).
@@ -136,6 +139,11 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
    On success the page's data refreshes (or it navigates to redirectTo) and a toast is shown.
    When the workflow's own rules refuse the input, `ok` is false and `error` is the workflow's
    sentence, shown as an error toast — `successMessage` is only ever shown for a real success.
+
+<SignInForm submitLabel? className? />          // an `auth` login page: email, password, signs in, goes home
+<SignUpForm submitLabel? className? columns?={1 | 2} />   // an `auth` signup page: the person's details + login,
+   creates both, signs in, and sends them where a new account goes first. `signupFields` lists what it asks.
+   `useSignIn()` / `useSignUp()` give the same with your own inputs, if the design needs them.
 
 <WorkflowForm workflow={workflows.x} fields={{ …one entry per input… }} initial?={partial input}
               submitLabel? cancelHref? redirectTo? successMessage? columns?={1 | 2} onDone?={(r) => …} />
@@ -220,6 +228,14 @@ any other library component."""
 DESIGN_PRINCIPLES = """\
 What a finished page looks like:
 
+- AN `auth` PAGE IS THE WHOLE SCREEN, and the one exception to the frame below:
+  nothing wraps it, so it carries the product itself — its name, a line on what
+  it is for, the brand's colour — beside or above the form. A `login` page places
+  <SignInForm /> and links to the signup page; a `signup` page places
+  <SignUpForm /> (it already asks for the person's own details and the login)
+  and links to sign in. Both from "@/sdk/client". Never hand-roll the sign-in or
+  the signup request, and never ask again for what the form asks. Its `load`
+  returns `{}` or what the page shows beside the form.
 - THE FRAME IS NOT YOURS. The application wraps every page in its own frame —
   the sidebar for signed-in pages, the top bar for public ones — with the
   app's name or logo, the menu, and sign-in. Never draw a sidebar, a top

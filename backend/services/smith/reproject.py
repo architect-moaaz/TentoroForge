@@ -35,6 +35,12 @@ def _code_pages(svc: Any, app_root: str) -> dict:
     return {"files": list(project_code_pages(svc.doc, app_root) or [])}
 
 
+def _account(svc: Any, app_root: str) -> dict:
+    from services.blueprint.account_model import project_account
+
+    return project_account(svc.doc, app_root)
+
+
 def everything(svc: Any, app_root: str | None) -> list[str]:
     """Re-project every part of the application from `svc.doc`."""
     if not app_root:
@@ -72,6 +78,7 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
     # newer view.tsx, charts and all (036farqu's Open a Dispute). The same two
     # calls the build's frontend projection makes, in the same order.
     _run("code_pages", lambda: _code_pages(svc, app_root))
+    _run("account", lambda: _account(svc, app_root))
     _run("business_rules", lambda: project_business_rules(svc.doc, app_root))
     for name, fn in (("middleware", project_middleware),
                      ("public_resources", project_public_resources),

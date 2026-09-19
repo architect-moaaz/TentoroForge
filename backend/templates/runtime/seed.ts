@@ -33,6 +33,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { db } from "./index";
 import * as schema from "./schema";
+// Who signs in (projected from the Blueprint by account_model). Relative, not
+// `@/`: the seed runs under tsx, outside Next's path aliases.
+import { ACCOUNT, SIGNUP_ROLE } from "../lib/account";
+import { accountTable } from "../lib/account-table";
 
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@example.com";
 // Deterministic admin PK: reseeds/redeploys keep the same admin id, so rows
@@ -228,6 +232,26 @@ async function resolveRequiredFks(table: any, row: Record<string, unknown>): Pro
   }
 }
 
+/**
+ * EVERY SEEDED LOGIN IS A PERSON TOO. When the application has an account
+ * entity, each login has its row — the same id — as signup gives a new
+ * person; otherwise "my Member" was empty for the admin and every invited
+ * login, and whatever they did could not be tied to them.
+ */
+async function ensureAccountRow(id: string | null, email: string, name: string): Promise<void> {
+  if (!ACCOUNT || !accountTable || !id) return;
+  const row: Record<string, unknown> = { id };
+  for (const f of ACCOUNT.fields) if (f.kind === "email" && f.name in accountTable) row[f.name] = email;
+  if (ACCOUNT.labelField && ACCOUNT.labelField in accountTable) row[ACCOUNT.labelField] = name;
+  await resolveRequiredFks(accountTable, row);
+  Object.assign(row, minimalRow(accountTable, name, row, /* skipFk */ true));
+  try {
+    await db.insert(accountTable).values(row as any).onConflictDoNothing();
+  } catch (err) {
+    console.warn(`⚠️  ${ACCOUNT.entity} for ${email} not seeded:`, err);
+  }
+}
+
 async function seedAdmin(): Promise<string | null> {
   const users = tableFor("users");
   if (!users) {
@@ -243,6 +267,10 @@ async function seedAdmin(): Promise<string | null> {
   if ("name" in users) row.name = "Admin";
   if ("isActive" in users) row.isActive = true;
   if ("role" in users) row.role = "admin";
+  // No role column: the session role is `accountType`. Without one the admin
+  // held the platform's "user", which no page or workflow of the app names,
+  // and every role-gated workflow refused them.
+  else if ("accountType" in users && SIGNUP_ROLE) row.accountType = SIGNUP_ROLE;
   // Satisfy any NOT NULL foreign keys (e.g. workspace_id in multi-tenant schemas)
   // so the admin insert doesn't fail the constraint and leave the app login-less.
   await resolveRequiredFks(users, row);
@@ -363,6 +391,7 @@ async function seedAccounts(): Promise<void> {
       Object.assign(row, minimalRow(users, String(entry.name || email), row, /* skipFk */ true));
       const created = await db.insert(users).values(row as any)
         .onConflictDoNothing({ target: (users as any).email }).returning();
+      if (created[0]?.id) await ensureAccountRow(String(created[0].id), email, String(entry.name || email));
 
       const invite = entry.invite;
       const issue = String(invite?.issue || "");
@@ -867,6 +896,7 @@ async function main(): Promise<void> {
   // was impossible. `seedAdmin` upserts on email, so running it every time is
   // idempotent and never clobbers a real admin.
   const adminId = await seedAdmin();
+  await ensureAccountRow(adminId, ADMIN_EMAIL, "Admin");
 
   // AND SO MUST THE PEOPLE THE OWNER ADDED — for the same reason and above the
   // same gates. An app whose staff cannot log in is not in use.

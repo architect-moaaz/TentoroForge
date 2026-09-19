@@ -377,7 +377,15 @@
               "command_center",
               "split_view",
               "document_workspace",
-              "tool"
+              "tool",
+              "auth"
+            ]
+          },
+          "auth": {
+            "type": "string",
+            "enum": [
+              "login",
+              "signup"
             ]
           },
           "module": {
@@ -1193,6 +1201,9 @@
               "labelField": {
                 "type": "string"
               },
+              "account": {
+                "type": "boolean"
+              },
               "status": {
                 "$ref": "#/properties/product/properties/capabilities/items/properties/status"
               },
@@ -1590,9 +1601,51 @@
             "type": "string",
             "enum": [
               "statement",
-              "condition_action"
+              "condition_action",
+              "prerequisite"
             ],
             "default": "statement"
+          },
+          "gates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/properties/pages/items/properties/requires/properties/producedBy"
+            },
+            "default": []
+          },
+          "requires": {
+            "type": "object",
+            "properties": {
+              "entity": {
+                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+              },
+              "account": {
+                "type": "string"
+              },
+              "where": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "default": {}
+              }
+            },
+            "required": [
+              "entity",
+              "account"
+            ],
+            "additionalProperties": false
+          },
+          "message": {
+            "type": "string"
+          },
+          "page": {
+            "$ref": "#/properties/modules/items/properties/pages/items",
+            "description": "Stable PAGE identifier (§12)"
           },
           "entity": {
             "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
@@ -1866,6 +1919,10 @@
         "rbac": {
           "type": "boolean",
           "default": true
+        },
+        "signupRole": {
+          "$ref": "#/properties/roles/items/properties/id",
+          "description": "Stable ROLE identifier (§12)"
         },
         "ownershipRules": {
           "type": "array",

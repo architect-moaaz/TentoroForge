@@ -1846,6 +1846,12 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             chain.append(end_id)
 
         edges = _edges(chain, steps, catalog, end_id)
+        # WHAT A PERSON MUST HAVE DONE FIRST, CHECKED FIRST. A `prerequisite`
+        # rule gating this workflow puts its check between the trigger and
+        # the first step — here, from the rule, so no author can leave it out.
+        from services.blueprint.account_model import guard_workflow
+        guard_workflow(doc, wf, nodes, edges,
+                       lambda k, t, cfg, lbl: _wf_node(k, t, len(nodes), cfg, lbl))
         _check_graph(str(wf.get("name") or wf.get("id")), nodes, edges, catalog)
 
         definition = {
@@ -3352,6 +3358,7 @@ def public_nav(doc: dict) -> dict[str, Any]:
     page, then the order the pages were declared in."""
     pages = [p for p in _live(doc.get("pages"))
              if (p.get("access") or "authenticated") == "public"
+             and str(p.get("pattern") or "") != "auth"      # the header has its own sign-in link
              and not re.search(r"\[[^\]]+\]", str(p.get("route") or ""))
              and str(p.get("route") or "").startswith("/")]
     order: list[str] = []

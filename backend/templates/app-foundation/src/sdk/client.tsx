@@ -12,6 +12,7 @@ import type { Workflow } from "./workflows";
 import { fileUrl } from "./files";
 
 export { WidgetView, chartPropsFor, type WidgetViewData, type WidgetViewProps } from "./widget-view";
+export { SignInForm, SignUpForm, useSignIn, useSignUp, signupFields, type AccountField } from "./auth";
 export type { ChartSelection } from "@tentoroforge/library";
 
 type Json = Record<string, unknown>;

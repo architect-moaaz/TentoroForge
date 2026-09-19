@@ -35,9 +35,16 @@ _CONTRACT = (pathlib.Path(__file__).resolve().parents[2]
 FAMILIES = {"dashboard", "collection", "record", "form", "standalone"}
 
 
+#: `auth` (sign in / create account) is the one declared pattern no floor
+#: judges: its screen is the SDK's form, it is never composed from a layout,
+#: and `page_family("auth") is None` is asserted in test_page_kind_anatomy.
+UNJUDGED = {"auth"}
+
+
 def _declared_patterns() -> list[str]:
     doc = json.loads(_CONTRACT.read_text(encoding="utf-8"))
-    return doc["properties"]["pages"]["items"]["properties"]["pattern"]["enum"]
+    return [p for p in doc["properties"]["pages"]["items"]["properties"]["pattern"]["enum"]
+            if p not in UNJUDGED]
 
 
 @pytest.mark.parametrize("pattern", _declared_patterns())

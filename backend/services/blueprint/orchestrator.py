@@ -193,12 +193,19 @@ class DagNode:
     #: (e.g. `testing`, which is verification, and is the last node to spend
     #: the API — so a low credit balance there should not sink a ready build).
     optional: bool = False
+    #: Every subject must land. A fan-out otherwise counts as done while any
+    #: subject landed — right for pages, one of which can fall back to its
+    #: floor, and wrong for the data model: 036farqu's `entity_fields` lost
+    #: Member and ConditionEvidence, reported done, and the run spent 22
+    #: minutes building pages and workflows on two entities with no columns
+    #: before `assemble` refused a form that inserted into nothing.
+    whole: bool = False
 
 
 def _n(key, agent, depends_on=(), produces=(), note="", kind="agent",
-       fanout="", optional=False) -> DagNode:
+       fanout="", optional=False, whole=False) -> DagNode:
     return DagNode(key, agent, frozenset(depends_on), frozenset(produces),
-                   note, kind, fanout, optional)
+                   note, kind, fanout, optional, whole)
 
 
 #: §28's graph. Tier names follow the PRD's diagram.
@@ -232,7 +239,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # One call per declared entity, in parallel, each given the whole entity
     # set by name so a foreign key can name what it points at.
     _n("entity_fields", "data_model", ("data_model",), ("data.entities",),
-       fanout="entities",
+       fanout="entities", whole=True,
        note="fields, keys, enums, sensitivity and constraints, per entity"),
     # NO `database` NODE. It was one model call that wrote the same four
     # constants every time (`engine: postgres`, `provider: neon`, nothing
@@ -276,6 +283,13 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("page_details", "page_design", ("page_contracts",), ("pages",),
        fanout="page_features",
        note="the contracts: tasks, states, views, actions, widgets, per feature"),
+    # SIGNING IN IS A PAGE. `/login` and `/signup` were template files the
+    # build never saw — no contract, no design, not in the editor — so every
+    # app opened on the same sign-in screen. Declared here, from the security
+    # section, for every application with a sign-in: no agent decides whether
+    # an app has a login page. The UI engineer then writes them like any page.
+    _n("auth_pages", "page_design", ("page_details",), ("pages",), kind="service",
+       note="the sign-in and create-account pages, declared for every app with a login"),
     # THE ANALYTICS ARE DESIGNED ONCE, WITH THE WHOLE APPLICATION IN VIEW.
     # Every page's contract is written and every entity has its fields, so one
     # call can decide which pages carry numbers — the dashboard, a list's
@@ -316,7 +330,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # After `workflow_steps`, not `workflows`: a Form collects a workflow's
     # inputs, and the inputs are written with the steps.
     _n("page_layouts", "page_template",
-       ("page_details", "analytics", "workflow_steps", "figma_design_system"),
+       ("page_details", "auth_pages", "analytics", "workflow_steps", "figma_design_system"),
        ("pageLayouts",), kind="service",
        note="§34; one tree per page from its contract, no model call"),
     # §34 — THE DESIGNED PAGE. The layout above is every page's floor; this is
@@ -454,6 +468,8 @@ def page_features(doc: Mapping[str, Any]) -> list[str]:
         if not isinstance(page, dict) or not page.get("id") \
                 or page.get("status") == "DEPRECATED":
             continue
+        if page.get("pattern") == "auth":
+            continue                  # declared whole by `auth_pages`, no feature of its own
         subject = str((page.get("data") or {}).get("primaryEntity") or "") \
             or str(page["id"])
         if subject not in seen:
@@ -1341,8 +1357,11 @@ def _execute(
     def complete(key: str) -> None:
         state = runs[key]
         # Only a node that authored nothing at all has genuinely failed;
-        # anything less is a partial result its dependents can still use.
-        if state.subjects and len(state.failed) == len(state.subjects):
+        # anything less is a partial result its dependents can still use —
+        # unless the node is `whole`, where one missing subject is a hole
+        # every dependent would build on.
+        if state.subjects and state.failed and (
+                len(state.failed) == len(state.subjects) or DAG[key].whole):
             # Every subject failed: the node authored nothing. Recorded with
             # the reasons, because "which of the eighteen stopped it, and why"
             # is the question the ledger exists to answer.
@@ -1351,8 +1370,8 @@ def _execute(
                 for s in state.failed
             ]
             _note(ledger, "node_failed", key,
-                  "; ".join(r for r in reasons if r)[:600]
-                  or f"all {len(state.subjects)} subjects failed")
+                  "; ".join(f"{s}: {r}" if s and r else r for s, r in zip(state.failed, reasons) if r)[:600]
+                  or f"{len(state.failed)} of {len(state.subjects)} subjects failed")
         else:
             report.completed.append(key)
             _note(ledger, "node_done", key, len(state.subjects or []))
@@ -2573,6 +2592,9 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
 
     ensure_sdk(svc.doc, Path(app_root))
     project_code_pages(svc.doc, app_root)
+    # Who signs in and where a new account goes — read by signup and the SDK.
+    from services.blueprint.account_model import project_account
+    project_account(svc.doc, app_root)
     # A page A2UI authored and the planner cannot render is a defect, not an
     # acceptable loss. This projection wrote 23 schemas from 30 authored trees
     # and reported success: every collection page — /jobs, /customers, /bikes,
@@ -2856,6 +2878,8 @@ def _compose_page_layouts(svc: BlueprintService) -> None:
         pid = str(page.get("id") or "")
         if not pid or page.get("status") == "DEPRECATED" or pid in have:
             continue
+        if page.get("pattern") == "auth":
+            continue            # its floor is the template's sign-in page, not a tree
         body = None
         try:
             drawn = figma_layout.compose(svc, page, app_root=Path(svc.output_dir) / "app")
@@ -2880,6 +2904,18 @@ def _compose_page_layouts(svc: BlueprintService) -> None:
             logger.warning("[page_layouts] %s refused: %s", pid, exc)
 
 
+def _declare_auth_pages(svc: BlueprintService) -> None:
+    """`/login` and `/signup` as `auth` pages, for an application with a
+    sign-in that does not have them yet (see `account_model`)."""
+    from services.blueprint.account_model import auth_page_bodies
+
+    for body in auth_page_bodies(svc.doc):
+        apply_agent_result(svc, AgentResult(
+            task_id=f"TASK-auth_pages-{body['auth']}", agent=DAG["auth_pages"].agent, confidence=1.0,
+            proposals=[ArtifactProposal(section="pages", natural_key=body["route"], body=body)]),
+            commit=True)
+
+
 def _project_design_reference(svc: BlueprintService) -> None:
     """§47 — the connected design's own tokens. No-op without one."""
     from services.figma.projection import apply_design_reference
@@ -2889,6 +2925,7 @@ def _project_design_reference(svc: BlueprintService) -> None:
 
 SERVICE_HANDLERS: dict[str, Any] = {
     "page_layouts": _compose_page_layouts,
+    "auth_pages": _declare_auth_pages,
     "figma_design_system": _project_design_reference,
     "verification": _run_verification,
     "apis": _derive_apis,
