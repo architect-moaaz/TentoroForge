@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * What the discovery read, laid out so a person can correct it.
+ * The whole company profile on one screen — Settings' half of the fields.
  *
  * EVERYTHING IS A DRAFT. The read is a first pass over somebody's own website
  * and it will be wrong about something — a brand colour taken from a
@@ -9,69 +9,67 @@
  * whole point of showing it is that the person who works there can fix it in
  * ten seconds, so every field here is an input rather than a label.
  *
- * Used by the onboarding wizard and by Settings, with the same shape in both:
- * the thing you check the first time is the thing you come back and change.
- * `onSave` is what differs — the wizard saves and moves on, Settings saves and
- * stays.
+ * NOT A WIZARD, deliberately. Onboarding walks a newcomer through the same
+ * fields one question at a time, because somebody meeting this for the first
+ * time is being interviewed about their company. Somebody who came back to
+ * change one colour is not, and making them click Next four times to reach it
+ * would be a worse screen for the more common visit. Same fields
+ * (`./fields`), two shapes.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { BrandDesign, BrandIdentity, BrandProfile, brand } from "@/lib/brand";
 import {
-  BrandDesign,
-  BrandIdentity,
-  BrandProfile,
-  COLOR_ROLES,
-  DISCOVERY_QUESTIONS,
-  brand,
-} from "@/lib/brand";
+  ColorFields,
+  CompanyNameField,
+  DiscoveryQuestionField,
+  HEX,
+  IdentityDetailFields,
+  InvalidColorNote,
+  ReadFromNote,
+  TypeFields,
+  invalidColors,
+  useBrandLogo,
+} from "@/components/brand/fields";
+import { DISCOVERY_QUESTIONS } from "@/lib/brand";
 
 interface Props {
   orgId: string;
   profile: BrandProfile;
   onSaved: (profile: BrandProfile) => void;
   saveLabel?: string;
-  /** Rendered beside the save button — the wizard puts "Skip" there. */
+  /** Rendered beside the save button. */
   secondaryAction?: React.ReactNode;
 }
 
-const HEX = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
-
 /**
- * The company's mark, fetched with the request's credentials.
+ * The profile as the API takes it, with the values that mean nothing removed.
  *
- * The endpoint is authenticated and an `<img src>` sends no Authorization
- * header, so the bytes have to come through `fetch` and reach the element as
- * an object URL. Revoked on unmount and before each refetch, because an
- * object URL holds its blob in memory until something lets go of it.
+ * Blank colours are dropped rather than sent as "": an empty role in the
+ * Blueprint would overwrite the design agent's considered choice with
+ * nothing, which is worse than leaving the role open for it to decide. Shared
+ * with the wizard so both screens save the same shape.
  */
-function useBrandLogo(orgId: string, present: boolean): string | null {
-  const [src, setSrc] = useState<string | null>(null);
-  useEffect(() => {
-    if (!present) {
-      setSrc(null);
-      return;
-    }
-    let url: string | null = null;
-    let cancelled = false;
-    brand.logoObjectUrl(orgId).then((got) => {
-      url = got;
-      if (cancelled) {
-        if (got) URL.revokeObjectURL(got);
-        return;
-      }
-      setSrc(got);
-    });
-    return () => {
-      cancelled = true;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [orgId, present]);
-  return src;
+export function cleanedForSave(
+  name: string,
+  identity: BrandIdentity,
+  design: BrandDesign,
+) {
+  return {
+    company_name: name,
+    identity,
+    design: {
+      ...design,
+      colors: Object.fromEntries(
+        Object.entries(design.colors ?? {}).filter(([, v]) => v && HEX.test(v)),
+      ),
+      typography: Object.fromEntries(
+        Object.entries(design.typography ?? {}).filter(([, v]) => v?.trim()),
+      ),
+    },
+  };
 }
 
 export function BrandProfileEditor({
@@ -89,40 +87,19 @@ export function BrandProfileEditor({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  function setColor(role: string, value: string) {
+  function touch<T>(fn: () => T): T {
     setSaved(false);
-    setDesign((d) => ({
-      ...d,
-      colors: { ...(d.colors ?? {}), [role]: value },
-    }));
-  }
-
-  function setFont(role: string, value: string) {
-    setSaved(false);
-    setDesign((d) => ({
-      ...d,
-      typography: { ...(d.typography ?? {}), [role]: value },
-    }));
+    return fn();
   }
 
   async function handleSave() {
     setSaving(true);
     setError(null);
     try {
-      // Blank colours are removed rather than stored as "": an empty role in
-      // the Blueprint would overwrite the design agent's considered choice
-      // with nothing, which is worse than leaving the role open.
-      const colors = Object.fromEntries(
-        Object.entries(design.colors ?? {}).filter(([, v]) => v && HEX.test(v)),
+      const updated = await brand.update(
+        orgId,
+        cleanedForSave(name, identity, design),
       );
-      const typography = Object.fromEntries(
-        Object.entries(design.typography ?? {}).filter(([, v]) => v?.trim()),
-      );
-      const updated = await brand.update(orgId, {
-        company_name: name,
-        identity,
-        design: { ...design, colors, typography },
-      });
       setSaved(true);
       onSaved(updated);
     } catch (e) {
@@ -132,52 +109,20 @@ export function BrandProfileEditor({
     }
   }
 
-  const invalid = Object.entries(design.colors ?? {}).filter(
-    ([, v]) => v && !HEX.test(v),
-  );
-
   return (
     <div className="space-y-8">
-      {/* Name + mark */}
       <section className="space-y-3">
-        <div className="flex items-end gap-4">
-          {logoSrc && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={logoSrc}
-              alt={`${name || "Company"} logo`}
-              className="h-12 w-12 shrink-0 rounded-lg border border-slate-200 object-contain p-1.5 dark:border-slate-800"
-            />
-          )}
-          <div className="flex-1 space-y-1.5">
-            <Label htmlFor="company-name" className="text-sm font-medium">
-              Company name
-            </Label>
-            <Input
-              id="company-name"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                setSaved(false);
-              }}
-              placeholder="Your company"
-              className="h-10"
-            />
-          </div>
-        </div>
-        {profile.source_url && (
-          <p className="text-xs text-slate-500">
-            Read from{" "}
-            <span className="font-mono text-slate-600 dark:text-slate-400">
-              {profile.source_url}
-            </span>
-            {profile.evidence?.rendered === false &&
-              " — page source only, so the colours are what the markup states outright."}
-          </p>
-        )}
+        <CompanyNameField
+          name={name}
+          logoSrc={logoSrc}
+          onName={(v) => touch(() => setName(v))}
+        />
+        <ReadFromNote
+          sourceUrl={profile.source_url}
+          rendered={profile.evidence?.rendered}
+        />
       </section>
 
-      {/* The three questions */}
       <section className="space-y-4">
         <div>
           <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
@@ -189,50 +134,23 @@ export function BrandProfileEditor({
           </p>
         </div>
         {DISCOVERY_QUESTIONS.map((q) => (
-          <div key={q.key} className="space-y-1.5">
-            <Label htmlFor={q.key} className="text-sm font-medium">
-              {q.label}
-            </Label>
-            <Textarea
-              id={q.key}
-              rows={2}
-              value={(identity[q.key] as string) ?? ""}
-              placeholder={q.hint}
-              onChange={(e) => {
-                setIdentity((i) => ({ ...i, [q.key]: e.target.value }));
-                setSaved(false);
-              }}
-            />
-          </div>
+          <DiscoveryQuestionField
+            key={q.key}
+            which={q.key}
+            value={(identity[q.key] as string) ?? ""}
+            onChange={(v) =>
+              touch(() => setIdentity((i) => ({ ...i, [q.key]: v })))
+            }
+          />
         ))}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {(
-            [
-              ["industry", "Industry"],
-              ["audience", "Who it is for"],
-              ["tone", "How the writing sounds"],
-              ["voice", "Voice"],
-            ] as const
-          ).map(([key, label]) => (
-            <div key={key} className="space-y-1.5">
-              <Label htmlFor={key} className="text-sm font-medium">
-                {label}
-              </Label>
-              <Input
-                id={key}
-                className="h-10"
-                value={(identity[key] as string) ?? ""}
-                onChange={(e) => {
-                  setIdentity((i) => ({ ...i, [key]: e.target.value }));
-                  setSaved(false);
-                }}
-              />
-            </div>
-          ))}
-        </div>
+        <IdentityDetailFields
+          identity={identity}
+          onChange={(key, value) =>
+            touch(() => setIdentity((i) => ({ ...i, [key]: value })))
+          }
+        />
       </section>
 
-      {/* The design language */}
       <section className="space-y-4">
         <div>
           <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
@@ -242,75 +160,32 @@ export function BrandProfileEditor({
             Apps built in this language use these values exactly.
           </p>
         </div>
-
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          {COLOR_ROLES.map((role) => {
-            const value = design.colors?.[role.key] ?? "";
-            const bad = Boolean(value) && !HEX.test(value);
-            return (
-              <div key={role.key} className="space-y-1.5">
-                <Label htmlFor={`c-${role.key}`} className="text-xs font-medium">
-                  {role.label}
-                </Label>
-                <div
-                  className={[
-                    "flex items-center gap-2 rounded-lg border px-2 py-1.5",
-                    bad
-                      ? "border-red-400"
-                      : "border-slate-200 dark:border-slate-800",
-                  ].join(" ")}
-                >
-                  <span
-                    aria-hidden
-                    className="h-6 w-6 shrink-0 rounded border border-slate-200 dark:border-slate-700"
-                    style={{ background: HEX.test(value) ? value : "transparent" }}
-                  />
-                  <input
-                    id={`c-${role.key}`}
-                    value={value}
-                    placeholder="—"
-                    spellCheck={false}
-                    onChange={(e) => setColor(role.key, e.target.value.trim())}
-                    className="w-full bg-transparent font-mono text-xs outline-none"
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {(
-            [
-              ["fontFamilyHeading", "Headings"],
-              ["fontFamilyBase", "Body text"],
-            ] as const
-          ).map(([key, label]) => (
-            <div key={key} className="space-y-1.5">
-              <Label htmlFor={key} className="text-sm font-medium">
-                {label}
-              </Label>
-              <Input
-                id={key}
-                className="h-10"
-                placeholder="Left to the app's own design"
-                value={design.typography?.[key] ?? ""}
-                onChange={(e) => setFont(key, e.target.value)}
-              />
-            </div>
-          ))}
-        </div>
+        <ColorFields
+          design={design}
+          onColor={(role, value) =>
+            touch(() =>
+              setDesign((d) => ({
+                ...d,
+                colors: { ...(d.colors ?? {}), [role]: value },
+              })),
+            )
+          }
+        />
+        <TypeFields
+          design={design}
+          onFont={(role, value) =>
+            touch(() =>
+              setDesign((d) => ({
+                ...d,
+                typography: { ...(d.typography ?? {}), [role]: value },
+              })),
+            )
+          }
+        />
       </section>
 
-      {invalid.length > 0 && (
-        <p className="text-sm text-red-600 dark:text-red-400">
-          {invalid.map(([k]) => k).join(", ")} must be a hex colour like
-          #1B7F5A — anything else is dropped when saving.
-        </p>
-      )}
-      {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-      )}
+      <InvalidColorNote roles={invalidColors(design)} />
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       <div className="flex items-center gap-3">
         <Button onClick={handleSave} disabled={saving} className="h-10">
