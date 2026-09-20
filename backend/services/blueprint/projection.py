@@ -881,6 +881,8 @@ def mobile_tabs(doc: dict, groups: list[dict]) -> list[dict]:
             tab = {"label": str(it.get("label") or ""), "route": it["route"]}
             if it.get("icon"):
                 tab["icon"] = str(it["icon"])
+            if it.get("roles"):
+                tab["roles"] = list(it["roles"])   # the bar hides what the rail hides
             out.append(tab)
         return out
     out: list[dict] = []
@@ -890,6 +892,8 @@ def mobile_tabs(doc: dict, groups: list[dict]) -> list[dict]:
             tab = {"label": str(first.get("label") or g.get("label") or ""), "route": first["route"]}
             if first.get("icon") or g.get("icon"):
                 tab["icon"] = str(first.get("icon") or g.get("icon"))
+            if first.get("roles") or g.get("roles"):
+                tab["roles"] = list(first.get("roles") or g.get("roles"))
             out.append(tab)
         if len(out) == MOBILE_TABS:
             break
@@ -924,6 +928,17 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
     routes = {str(p.get("id")): str(p.get("route") or "")
               for p in (doc.get("pages") or []) if p.get("id")}
+    # WHO THE DESTINATION IS FOR — the menu's half of the gate. A
+    # role-restricted page names the roles that may open it, and the rail
+    # offered it to everyone: a neighbour who had just signed up was shown
+    # "Admin — Dispute Queue, Member Verification" and got a 403 for pressing
+    # it (0l133sp2). Only `role_restricted` is a permission (a page's `users`
+    # is its audience, §100), so only that narrows the rail.
+    role_names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or []
+                  if isinstance(r, dict) and r.get("id")}
+    page_roles = {str(p.get("id")): sorted({role_names.get(str(u), str(u)) for u in p.get("users") or []})
+                  for p in (doc.get("pages") or [])
+                  if p.get("id") and str(p.get("access") or "") == "role_restricted"}
 
     # A DYNAMIC ROUTE IS NOT A RAIL DESTINATION. `/rentals/[id]/return` is
     # reached through a row or an action that fills a concrete id, never from the
@@ -951,6 +966,8 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             out["icon"] = str(node["icon"])
         if node.get("tab"):
             out["tab"] = True
+        if page_roles.get(page_id):
+            out["roles"] = page_roles[page_id]
         return out
 
     groups: list[dict[str, Any]] = []
@@ -963,6 +980,12 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             if node.get("tab"):
                 group["tab"] = True
             group["items"] = [it for it in (item(k) for k in kids) if it is not None]
+            # A group is for whoever its children are for: "Admin" holding two
+            # Admin-only screens is an Admin group, and says so, so the whole
+            # heading goes rather than emptying out.
+            kid_roles = [set(it.get("roles") or []) for it in group["items"]]
+            if kid_roles and all(kid_roles):
+                group["roles"] = sorted(set.union(*kid_roles))
             if group["items"]:
                 groups.append(group)
         else:
@@ -1050,6 +1073,12 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
             "schemaFile": f"src/schemas/{slug}.json",
             "shell": access != "public",
             "access": access,
+            # WHO MAY OPEN IT, for the rail that merges pages the curated menu
+            # does not list: a role-restricted page added later would
+            # otherwise be offered to everyone, which is the fault this file
+            # is read to avoid.
+            **({"roles": sorted({str((roles.get(u) or {}).get("name") or u) for u in page.get("users") or []})}
+               if access == "role_restricted" and page.get("users") else {}),
             "presentation": page.get("presentation") or "page",
             # By route, because that is what a router follows — resolved from
             # the page ids the contract carries, so a rename cannot break it.

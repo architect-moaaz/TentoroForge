@@ -33,8 +33,8 @@ import { schemas } from "@/schemas/registry";
 // carries the dynamically chosen frame, palette, and grouped nav). Falls back to a
 // flat menu built from nav-flow.json if shell.json is absent.
 
-type Sub = { label: string; route: string; icon?: string };
-type Group = { label?: string; icon?: string; route?: string; items?: Sub[] };
+type Sub = { label: string; route: string; icon?: string; roles?: string[] };
+type Group = { label?: string; icon?: string; route?: string; items?: Sub[]; roles?: string[] };
 type NavProps = {
   groups: Group[];
   appName?: string;
@@ -44,7 +44,7 @@ type NavProps = {
   muted?: string;
   accent?: string;
 };
-type NavPage = { route?: string; title?: string; shell?: boolean; params?: string[] };
+type NavPage = { route?: string; title?: string; shell?: boolean; params?: string[]; roles?: string[] };
 
 function humanize(title: string | undefined, route: string): string {
   let raw = (title || "").replace(/(List|Detail|Create|Edit|Index)?Page$/, "");
@@ -108,6 +108,30 @@ function findSideNav(node: unknown): { props?: NavProps } | null {
   return null;
 }
 
+/** The rail as this person may use it.
+ *
+ * A destination carries `roles` when its page is role-restricted (the
+ * projection puts them there). Offering the rest to everyone showed a
+ * neighbour who had just signed up an "Admin" heading with the dispute queue
+ * and the verification queue under it — both of which answer 403 (0l133sp2).
+ * A menu that offers what it will refuse is worse than one that says less.
+ */
+function visibleTo(groups: Group[], role: string): Group[] {
+  const mayOpen = (roles?: string[]) => !roles?.length || roles.includes(role);
+  const out: Group[] = [];
+  for (const group of groups) {
+    if (!mayOpen(group.roles)) continue;
+    if (!group.items?.length) {
+      out.push(group);
+      continue;
+    }
+    const items = group.items.filter((i) => mayOpen(i.roles));
+    // A heading whose every destination is somebody else's goes with them.
+    if (items.length) out.push({ ...group, items });
+  }
+  return out;
+}
+
 const AUTH_ROUTES = new Set(["/login", "/signup"]);
 
 // Every route already represented in a SideNav groups array — walks BOTH flat
@@ -141,7 +165,9 @@ function navFlowShellItems(nf: unknown, have: Set<string>): Group[] {
     if (isDetailPage(p.title, route)) continue;
     seen.add(route);
     const label = route === "/" ? "Dashboard" : humanize(p.title, route);
-    out.push({ label, route, icon: iconFor(label, route) });
+    // A merged page keeps the roles nav-flow records for it, so `visibleTo`
+    // holds it to the same rule as a curated destination.
+    out.push({ label, route, icon: iconFor(label, route), ...(p.roles?.length ? { roles: p.roles } : {}) });
   }
   return out;
 }
@@ -821,12 +847,15 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
 
   const navProps = await loadNavProps();
+  navProps.groups = visibleTo(navProps.groups,
+                              String((session.user as { role?: string } | undefined)?.role ?? ""));
   const identity = await shellIdentity();
   const routeTree = await loadRouteTree();
   // Every frame below renders `body` rather than `children` directly, so
   // the crumb lands above page content in all four shell shapes without
   // four copies of the same JSX.
-  const mobileTabs = await readMobileTabs();
+  const mobileTabs = (await readMobileTabs()).filter(
+    (t) => !t.roles?.length || t.roles.includes(String((session.user as { role?: string } | undefined)?.role ?? "")));
   const body = (
     <>
       {/* The frame's own row: where you are, and what the app told you. */}

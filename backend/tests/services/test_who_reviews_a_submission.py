@@ -213,3 +213,30 @@ def test_an_app_people_sign_in_to_lets_them_sign_out():
     # is how three of the four came to have nothing.
     assert "<AccountMenu" in layout and layout.count("<AccountMenu") == 1
     assert layout.index("<NotificationBell />") < layout.index("<AccountMenu")
+
+
+def test_the_menu_does_not_offer_what_it_will_refuse():
+    """A neighbour who had just signed up was shown an "Admin" heading with
+    the dispute queue and the verification queue under it, and got a 403 for
+    pressing either (0l133sp2). Only `role_restricted` narrows the rail — a
+    page's `users` is its audience, not a permission (§100)."""
+    import tempfile
+
+    from services.blueprint.projection import project_shell
+
+    doc = {**DOC, "navigation": {"tree": [
+        {"label": "Discover", "page": "PAGE-001"},
+        {"label": "Admin", "children": [{"label": "Member Verification", "page": "PAGE-007"}]},
+    ]}}
+    out = Path(tempfile.mkdtemp())
+    project_shell(doc, out)
+    groups = json.loads((out / "src/schemas/shell.json").read_text())["children"][0]["props"]["groups"]
+    admin = next(g for g in groups if g["label"] == "Admin")
+    assert admin["roles"] == ["Admin"] and admin["items"][0]["roles"] == ["Admin"]
+    assert "roles" not in next(g for g in groups if g["label"] == "Discover"), \
+        "a page anyone signed in may open is offered to everyone"
+
+    layout = (Path(__file__).resolve().parents[2]
+              / "templates/app-foundation/src/app/(dashboard)/layout.tsx").read_text()
+    assert "navProps.groups = visibleTo(navProps.groups," in layout
+    assert "if (items.length) out.push({ ...group, items });" in layout, "an emptied heading goes too"
