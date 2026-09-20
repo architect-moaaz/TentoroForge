@@ -98,6 +98,81 @@ def _humanise(name: str) -> str:
     return " ".join(words).capitalize() if words else name
 
 
+def _written_by_workflows(doc: dict, entity_id: str) -> dict[str, dict]:
+    """`{field: {"decided": values a process writes, "typed": bool}}`.
+
+    A field a process DECIDES is the application's, not a question at signup:
+    0l133sp2 asked a new neighbour for their "Kyc status" and "Kyc verified
+    at" — the two things the verification workflow decides — beside "Password
+    hash", which is the login's.
+
+    A field a workflow writes FROM AN INPUT (`{{displayName}}`) is still the
+    person's: "Update Member Profile" saves the display name they typed, and
+    reading that as "the system decides it" took the name and the bio off the
+    signup form.
+    """
+    out: dict[str, dict] = {}
+    for wf in doc.get("workflows") or []:
+        if not isinstance(wf, dict) or wf.get("status") == "DEPRECATED":
+            continue
+        for step in wf.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            config = step.get("config") or {}
+            if str(config.get("actionType") or "") not in ("db_update", "db_insert"):
+                continue
+            if str(step.get("entity") or config.get("entity") or "") != entity_id:
+                continue
+            for field, value in (config.get("values") or {}).items():
+                written = out.setdefault(str(field), {"decided": set(), "typed": False})
+                if isinstance(value, str) and "{{" in value:
+                    written["typed"] = True          # the person's own value, passed through
+                elif isinstance(value, str) and value.startswith("$"):
+                    written["decided"].add(value)    # $now, $user.id — the runtime's
+                elif isinstance(value, str) and value:
+                    written["decided"].add(value)    # a state the process names
+    return out
+
+
+def _system_owned(written: dict[str, dict], name: str) -> bool:
+    """A field only ever written by a process, never from what someone typed."""
+    entry = written.get(name)
+    return bool(entry) and not entry["typed"] and bool(entry["decided"])
+
+
+def account_initial(doc: dict) -> dict[str, Any]:
+    """What the application fills in for the fields it does not ask about.
+
+    A required field the person never types still has to hold something. For
+    a state a workflow moves through, the record starts in the state no
+    workflow writes — `unverified`, when the workflows only ever set pending,
+    verified and rejected — else the first value the field allows.
+    """
+    ent = account_entity(doc)
+    if ent is None:
+        return {}
+    written = _written_by_workflows(doc, str(ent.get("id") or ""))
+    out: dict[str, Any] = {}
+    for f in ent.get("fields") or []:
+        name = str((f or {}).get("name") or "")
+        if not name or not f.get("required") or name in _SYSTEM or f.get("primaryKey"):
+            continue
+        if not _system_owned(written, name) and not _is_credential(name):
+            continue          # the person is asked for it, so they supply it
+        values = [str(v) for v in f.get("enumValues") or []]
+        if values:
+            decided = written.get(name, {}).get("decided") or set()
+            unwritten = [v for v in values if v not in decided]
+            out[name] = unwritten[0] if unwritten else values[0]
+        elif _is_credential(name):
+            # An older Blueprint put a credential on the account entity (new
+            # ones are refused). The column is NOT NULL and the person must
+            # never be asked for it, so the row carries a value nobody can
+            # sign in with — the login itself lives in the platform's table.
+            out[name] = UNUSABLE_CREDENTIAL
+    return out
+
+
 def account_fields(doc: dict) -> list[dict]:
     """What signup asks for the person's own record: the account entity's
     fields a person types — not system columns, not references to other
@@ -105,11 +180,20 @@ def account_fields(doc: dict) -> list[dict]:
     ent = account_entity(doc)
     if ent is None:
         return []
+    # WHAT A PERSON TYPES, AND NOTHING ELSE. Their login holds their password,
+    # and a field a workflow sets is that process's to set — asked at signup
+    # they read as nonsense ("Password hash", "Kyc status", "Kyc verified
+    # at"), and answering them would let a new account claim it was already
+    # verified. New apps cannot declare a credential on the account entity at
+    # all; this is what keeps one off the form when an older Blueprint has it.
+    written = _written_by_workflows(doc, str(ent.get("id") or ""))
     out = []
     for f in ent.get("fields") or []:
         name = str(f.get("name") or "")
         ftype = str(f.get("type") or "string").lower()
         if not name or name in _SYSTEM or f.get("primaryKey") or f.get("references"):
+            continue
+        if _is_credential(name) or _system_owned(written, name):
             continue
         if ftype in ("vector", "image", "file", "json", "jsonb", "uuid") or "[]" in ftype \
                 or ftype in LOCATION_TYPES:
@@ -124,6 +208,17 @@ def account_fields(doc: dict) -> list[dict]:
         out.append(spec)
     # What is required first, as a person fills a form top to bottom.
     return sorted(out, key=lambda s: not s["required"])
+
+
+#: Written into a credential column an older Blueprint declared on the account
+#: entity, so the row inserts and nobody can authenticate with it.
+UNUSABLE_CREDENTIAL = "@unusable"
+
+
+def _is_credential(name: str) -> bool:
+    from services.blueprint.projection import _is_credential_field
+
+    return _is_credential_field(name)
 
 
 def prerequisites(doc: dict) -> list[dict]:
@@ -201,6 +296,8 @@ def project_account(doc: dict, app_root: str | Path) -> dict[str, Any]:
           '  kind: "text" | "textarea" | "email" | "tel" | "url" | "number" | "date" | "select" | "checkbox";\n'
           "  required: boolean;\n  options?: { label: string; value: string }[];\n}\n\n"
         + f"export const ACCOUNT: null | {{ entity: string; fields: AccountField[]; labelField: string | null; locationField: string | null }} = {account};\n\n"
+        + "/** What the app writes on a new account for the fields it does not ask about. */\n"
+        + f"export const ACCOUNT_INITIAL: Record<string, unknown> = {json.dumps(account_initial(doc), indent=2)};\n\n"
         + f"export const SIGNUP_ROLE: string | null = {json.dumps(signup_role(doc))};\n\n"
         + "/** The role the built-in admin account holds: the one that reaches the most of the app. */\n"
         + f"export const ADMIN_ROLE: string | null = {json.dumps(admin_role(doc))};\n\n"
@@ -272,6 +369,6 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
         edge(prev, t, "then")
 
 
-__all__ = ["AUTH_PAGES", "account_entity", "admin_role", "account_fields", "after_signup_route", "auth_page_bodies",
+__all__ = ["AUTH_PAGES", "account_entity", "admin_role", "account_fields", "account_initial", "after_signup_route", "auth_page_bodies",
            "guard_workflow", "has_sign_in", "home_route", "is_auth_page", "prerequisites",
            "project_account", "signup_role"]

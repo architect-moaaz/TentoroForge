@@ -274,3 +274,57 @@ def test_the_person_behind_a_login_never_stores_a_password():
     with pytest.raises(InvalidEntityFields, match="login already holds their password"):
         check_entity_fields(result, {"data": {"entities": []}})
     assert "never has a password" in NODE_TASKS["entity_fields"]
+
+
+# --- what the form asks for, and what the app fills in ----------------------
+
+STATEFUL = _doc(
+    data={"entities": [{
+        "id": "ENTITY-001", "name": "Member", "table": "members", "account": True,
+        "fields": [{"name": "id", "type": "uuid", "primaryKey": True},
+                   {"name": "email", "type": "string", "required": True},
+                   {"name": "passwordHash", "type": "string", "required": True},
+                   {"name": "displayName", "type": "string", "required": True},
+                   {"name": "bio", "type": "text"},
+                   {"name": "kycStatus", "type": "string", "required": True,
+                    "enumValues": ["unverified", "pending", "verified", "rejected"]},
+                   {"name": "kycVerifiedAt", "type": "datetime"}]}]},
+    workflows=[
+        {"id": "FLOW-018", "name": "Submit Identity Verification", "steps": [
+            {"key": "save", "type": "action", "entity": "ENTITY-001",
+             "config": {"actionType": "db_update", "values": {"kycStatus": "pending"}}}]},
+        {"id": "FLOW-016", "name": "Approve Member Verification", "steps": [
+            {"key": "ok", "type": "action", "entity": "ENTITY-001",
+             "config": {"actionType": "db_update", "values": {"kycStatus": "verified", "kycVerifiedAt": "$now"}}}]},
+        {"id": "FLOW-019", "name": "Update Member Profile", "steps": [
+            {"key": "save", "type": "action", "entity": "ENTITY-001",
+             "config": {"actionType": "db_update",
+                        "values": {"displayName": "{{displayName}}", "bio": "{{bio}}"}}}]},
+    ])
+
+
+def test_signup_never_asks_for_what_a_process_decides():
+    """0l133sp2's sign-up asked a new neighbour for "Password hash", "Kyc
+    status" and "Kyc verified at" — their login's, and the verification
+    workflow's. Answering them would let an account claim to be verified."""
+    asked = [f["name"] for f in am.account_fields(STATEFUL)]
+    assert asked == ["email", "displayName", "bio"]
+    assert "passwordHash" not in asked and "kycStatus" not in asked and "kycVerifiedAt" not in asked
+
+
+def test_a_field_a_workflow_saves_from_what_someone_typed_is_still_theirs():
+    """"Update Member Profile" writes `{{displayName}}` — the person's own
+    value passing through. Reading that as "the system decides it" took the
+    display name and the bio off the form."""
+    assert "displayName" in [f["name"] for f in am.account_fields(STATEFUL)]
+
+
+def test_the_app_starts_a_new_account_where_no_process_has_taken_it():
+    """A required state nobody is asked for still has to hold something: the
+    one value the workflows never write is where a record begins."""
+    initial = am.account_initial(STATEFUL)
+    assert initial["kycStatus"] == "unverified"
+    assert initial["passwordHash"] == am.UNUSABLE_CREDENTIAL, "the column is NOT NULL and nobody may sign in with it"
+    assert "kycVerifiedAt" not in initial, "not required, so it starts empty"
+    route = (_ROOT / "backend/templates/app-foundation/src/app/api/auth/signup/route.ts").read_text()
+    assert "const values: Record<string, unknown> = { ...ACCOUNT_INITIAL };" in route

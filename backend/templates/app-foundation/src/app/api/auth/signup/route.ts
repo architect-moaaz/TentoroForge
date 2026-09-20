@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { ACCOUNT, SIGNUP_ROLE } from "@/lib/account";
+import { ACCOUNT, ACCOUNT_INITIAL, SIGNUP_ROLE } from "@/lib/account";
 import { accountTable } from "@/lib/account-table";
 
 // The account types signup offers. Empty by default (single-account app);
@@ -40,7 +40,10 @@ const signupSchema = z.object({
  */
 function accountValues(input: Record<string, unknown>, email: string): { values?: Record<string, unknown>; error?: string } {
   if (!ACCOUNT) return {};
-  const values: Record<string, unknown> = {};
+  // WHERE A NEW ACCOUNT STARTS. The form asks only what a person types, so
+  // the state a process owns — a verification that has not happened yet — is
+  // written here rather than asked for. Anything the person did fill wins.
+  const values: Record<string, unknown> = { ...ACCOUNT_INITIAL };
   for (const f of ACCOUNT.fields) {
     let v = input[f.name];
     if ((v === undefined || v === "") && f.kind === "email") v = email;
