@@ -2108,10 +2108,24 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": written, "workflows": len(written), "codeMap": code_map}
 
 
+#: Everyone with a session, in `launch-roles.ts`. A page open to anyone signed
+#: in admits any of them, and the API has to say so in the same words.
+SIGNED_IN = "@signed-in"
+
+
 def launch_roles(doc: dict) -> dict[str, list[str] | None]:
-    """Each workflow -> the role names allowed to launch it: the union of the
-    roles the pages it launches from serve; "*" when one of them is public;
-    None when the Blueprint names no launching page (unrestricted)."""
+    """Each workflow -> who may launch it: the union over the pages it is
+    launched from. A public page admits everyone ("*"); a page open to anyone
+    SIGNED IN admits any of them ("@signed-in"); a role-restricted page admits
+    the roles it names. None when the Blueprint names no launching page.
+
+    A page's `users` is its AUDIENCE — who it is for — and only
+    `role_restricted` makes that audience a permission: the middleware gates
+    nothing else, so the application shows a page and its controls to anyone
+    signed in. Reading `users` regardless made the API stricter than the app
+    that calls it: 0l133sp2's admin opened "List a Tool", filled it in,
+    uploaded a photo, pressed the button and got 403 from an application that
+    had just offered it."""
     names = {r.get("id"): r.get("name") for r in _live(doc.get("roles")) if r.get("id")}
     pages = {p.get("id"): p for p in _live(doc.get("pages")) if p.get("id")}
     out: dict[str, list[str] | None] = {}
@@ -2124,8 +2138,13 @@ def launch_roles(doc: dict) -> dict[str, list[str] | None]:
             continue
         roles: set[str] = set()
         for pg in launched:
-            if (pg.get("access") or "authenticated") == "public":
+            access = str(pg.get("access") or "authenticated")
+            if access == "public":
                 roles.add("*")
+                continue
+            if access != "role_restricted":
+                roles.add(SIGNED_IN)
+                continue
             for u in pg.get("users") or []:
                 nm = names.get(u, u)
                 roles.add("*" if nm == "Guest" else str(nm))
@@ -2217,7 +2236,8 @@ def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "// Generated from the Living Blueprint. Edit the Blueprint, not this file.",
         "//",
         "// A workflow may be launched by the roles the pages it launches from serve;",
-        '// "*" admits an anonymous caller (a public page); null leaves it open.',
+        '// "*" admits an anonymous caller (a public page), "@signed-in" anyone with',
+        "// a session (a page open to everyone signed in); null leaves it open.",
         "export const LAUNCH_ROLES: Record<string, string[] | null> = {",
     ]
     for wid, allowed in roles.items():

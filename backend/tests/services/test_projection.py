@@ -6,6 +6,7 @@ the translation against the shape `app-foundation` already ships — an emitted
 module that does not match what the data engine expects is worse than no module,
 because it compiles and then behaves wrongly.
 """
+import inspect
 import json
 import pathlib
 from pathlib import Path
@@ -840,7 +841,13 @@ def test_a_select_offers_the_values_the_entity_declares():
 
 def test_launch_roles_come_from_the_pages_a_workflow_launches_from(tmp_path):
     """Reception posted a refund through the API: the posting queue page was
-    Finance's, but nothing compared the caller to it."""
+    Finance's, but nothing compared the caller to it.
+
+    And the other way round: `users` is "roles for whom this page is
+    meaningful", which only `role_restricted` turns into a gate. Reading it
+    on an `authenticated` page made the API stricter than the application —
+    0l133sp2's admin was shown "List a Tool", filled it in, uploaded a photo
+    and got 403 from the page that had just offered it."""
     from services.blueprint.projection import launch_roles, project_launch_roles
 
     doc = {
@@ -857,11 +864,18 @@ def test_launch_roles_come_from_the_pages_a_workflow_launches_from(tmp_path):
             {"id": "FLOW-099", "name": "Nightly sweep", "steps": []},
         ],
     }
-    assert launch_roles(doc) == {"FLOW-008": ["Finance"], "FLOW-002": ["*"], "FLOW-001": ["Reception"], "FLOW-099": None}
+    assert launch_roles(doc) == {"FLOW-008": ["Finance"], "FLOW-002": ["*"],
+                                 "FLOW-001": ["@signed-in"], "FLOW-099": None}
     project_launch_roles(doc, tmp_path / "app")
     text = (tmp_path / "app" / "src" / "lib" / "workflows" / "launch-roles.ts").read_text()
     assert '"FLOW-008": ["Finance"]' in text and '"post-refund": ["Finance"]' in text
     assert '"FLOW-002": ["*"]' in text and '"FLOW-099": null' in text
+    assert '"FLOW-001": ["@signed-in"]' in text, "a page anyone signed in may open admits them all"
+
+    from services import runtime_injector
+    gate = inspect.getsource(runtime_injector)
+    assert 'allowed.includes("@signed-in") && Boolean(user?.id)' in gate, (
+        "the route has to read the same word the projection writes")
 
 
 def test_entity_access_comes_from_the_pages_that_use_an_entity(tmp_path):

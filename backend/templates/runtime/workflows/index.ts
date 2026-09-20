@@ -18,6 +18,7 @@
 import { promises as fs } from "fs";
 import { missingRequiredInputs } from "./required-inputs";
 import { hydrateRecordInputs } from "./record-inputs";
+import { queryResult } from "./query-result";
 import crypto from "node:crypto";
 import path from "path";
 // The app's data layer — used by the default db_* action handlers so workflows
@@ -1252,8 +1253,15 @@ export function registerDefaultActions(): void {
       // _requireWhereOrThrow, so unfiltered writes remain impossible.
       const where = _buildWhere(table, (config as any).where, ctx, { strict: false });
       const rows = await (where ? q.where(where) : q);
-      // Contract declared `count` alongside `rows` — provide both.
-      return { rows, count: Array.isArray(rows) ? rows.length : 0 };
+      // THE ONE ROW A LOOKUP LOOKED UP, READABLE AS ITSELF. A step written to
+      // fetch one record is read as that record — `check_member_verified.
+      // kycStatus`, `fetch_tool_owner.ownerId`. Templates had a fallback for
+      // it; a CONDITION did not, so "list a tool" asked whether the member
+      // was verified, read `undefined` off `{rows, count}`, and answered "you
+      // must complete identity verification" to a verified member — every
+      // member, every time (0l133sp2). The first row's fields ride alongside
+      // `rows`, which keep their own names when a column shares one.
+      return queryResult(rows);
     } catch (err) { console.error("[workflow] db_query failed:", err); return { error: String(err), rows: [], count: 0 }; }
   });
 

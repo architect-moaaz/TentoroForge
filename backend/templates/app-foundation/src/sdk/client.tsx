@@ -460,13 +460,66 @@ export function WorkflowButton<I extends Json>({
   title?: string;
 }) {
   const { run, pending } = useWorkflow(workflow, { redirectTo, successMessage });
+  // ASKED INSIDE THE PAGE, NOT BY THE BROWSER. This was `window.confirm`,
+  // which a browser is free to refuse: an embedded view suppresses it, and
+  // Chrome stops showing it entirely once somebody ticks "prevent this page
+  // from creating additional dialogs". The call then returns false and the
+  // button does nothing, with nothing on screen to say why — measured on
+  // 0l133sp2, where "Approve verification" looked dead. A dialog the page
+  // owns always renders, and it matches the ones beside it.
+  const [asking, setAsking] = React.useState(false);
+  const label = children ?? workflow.name;
+  const go = async () => { setAsking(false); await run(input); };
   return (
-    <button type="button" disabled={pending} title={title}
-      onClick={async () => { if (confirm && !window.confirm(confirm)) return; await run(input); }}
-      className={"inline-flex items-center justify-center gap-2 rounded-md font-medium transition disabled:opacity-60 " +
-        (size === "sm" ? "h-8 px-3 text-xs " : "h-10 px-4 text-sm ") + buttonVariants[variant] + " " + (className ?? "")}>
-      {pending && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
-      {children ?? workflow.name}
-    </button>
+    <>
+      <button type="button" disabled={pending} title={title}
+        onClick={async () => { if (confirm) { setAsking(true); return; } await run(input); }}
+        className={"inline-flex items-center justify-center gap-2 rounded-md font-medium transition disabled:opacity-60 " +
+          (size === "sm" ? "h-8 px-3 text-xs " : "h-10 px-4 text-sm ") + buttonVariants[variant] + " " + (className ?? "")}>
+        {pending && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
+        {label}
+      </button>
+      {asking && confirm && (
+        <ConfirmDialog message={confirm} confirmLabel={label} variant={variant}
+                       onCancel={() => setAsking(false)} onConfirm={go} />
+      )}
+    </>
+  );
+}
+
+/** The question a control asks before it acts. Escape and the backdrop
+ *  cancel; the confirming button takes focus, so Return answers it. */
+function ConfirmDialog({ message, confirmLabel, variant, onCancel, onConfirm }: {
+  message: string;
+  confirmLabel: React.ReactNode;
+  variant: ButtonVariant;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const confirmRef = React.useRef<HTMLButtonElement>(null);
+  React.useEffect(() => {
+    confirmRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  return (
+    <div role="dialog" aria-modal="true" aria-label={message}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="w-full max-w-sm rounded-lg bg-background p-5 shadow-lg">
+        <p className="text-sm text-foreground">{message}</p>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onCancel}
+            className="inline-flex h-9 items-center rounded-md px-3 text-sm font-medium border border-input bg-background hover:bg-muted">
+            Cancel
+          </button>
+          <button type="button" ref={confirmRef} onClick={onConfirm}
+            className={"inline-flex h-9 items-center rounded-md px-3 text-sm font-medium " + buttonVariants[variant]}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

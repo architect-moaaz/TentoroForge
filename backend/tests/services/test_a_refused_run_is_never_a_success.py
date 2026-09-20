@@ -101,8 +101,11 @@ def test_a_public_page_admits_a_signed_in_person_too(tmp_path):
 
     _generate_workflow_api_route(tmp_path)
     route = (tmp_path / "src/app/api/workflows/[id]/execute/route.ts").read_text()
-    assert 'if (allowed && !allowed.includes("*") && !allowed.includes(String(user?.role ?? ""))) {' in route
+    assert 'allowed.includes("*")' in route and 'allowed.includes(String(user?.role ?? ""))' in route
     assert "!su?.id))" not in route
+    # And a page open to everyone signed in admits them — `users` says who a
+    # page is FOR, and only `role_restricted` makes that a permission.
+    assert 'allowed.includes("@signed-in") && Boolean(user?.id)' in route
     data = (_TEMPLATES / "data-api-route.ts").read_text()
     assert '  if (roles.includes("*")) return false;' in data
     assert 'op === "read") return false' not in data

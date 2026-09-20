@@ -188,3 +188,14 @@ def test_a_record_input_is_carried_as_the_record_its_steps_read():
     engine = (Path(__file__).resolve().parents[2] / "templates/runtime/workflows/index.ts").read_text()
     assert "hydrateRecordInputs(workflow" in engine
     assert "executeWorkflow(workflow, hydrated, user)" in engine, "the steps run on the loaded record"
+
+
+def test_a_lookup_of_one_record_is_read_as_that_record():
+    """0l133sp2's "List a Tool" asks `check_member_verified.kycStatus =
+    "verified"` after a db_query. A query answers `{rows, count}`, so the
+    condition read undefined and told a VERIFIED member to verify first —
+    every member, every time. Templates had a fallback; a condition had none."""
+    handler = (Path(__file__).resolve().parents[2] / "templates/runtime/workflows/index.ts").read_text()
+    assert "return queryResult(rows);" in handler
+    helper = (Path(__file__).resolve().parents[2] / "templates/runtime/workflows/query-result.ts").read_text()
+    assert "list.length === 1" in helper, "only a lookup of ONE record is that record"

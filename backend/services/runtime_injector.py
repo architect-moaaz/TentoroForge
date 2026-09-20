@@ -1435,8 +1435,17 @@ export async function POST(
     // admit only a caller who was signed OUT, so signing in locked a person
     // out of every workflow a public page runs — the seeded admin got 403 on
     // Add Data while an anonymous visitor could save (h7gmi93x).
+    // "@signed-in" is a page open to EVERYONE SIGNED IN: its `users` say who
+    // it is for, and nothing in the application gates it, so the API must not
+    // be stricter than the app that offers the control. 0l133sp2's admin
+    // filled in "List a Tool", uploaded a photo and got 403 from a page the
+    // menu had just shown them.
     const allowed = LAUNCH_ROLES[id] ?? null;
-    if (allowed && !allowed.includes("*") && !allowed.includes(String(user?.role ?? ""))) {
+    const admitted = !allowed
+      || allowed.includes("*")
+      || (allowed.includes("@signed-in") && Boolean(user?.id))
+      || allowed.includes(String(user?.role ?? ""));
+    if (!admitted) {
       return NextResponse.json({ error: "This action is not available to your role" }, { status: 403 });
     }
     let taskId = body.taskId;
