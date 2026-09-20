@@ -1966,6 +1966,14 @@ def _check_graph(name: str, nodes: list[dict], edges: list[dict],
         raise WorkflowGraphInvalid(f"workflow {name}: " + "; ".join(problems))
 
 
+def _table_of(doc: dict, entity_id: str) -> str:
+    """The table an entity's rows live in, for a workflow's record input."""
+    for e in (doc.get("data") or {}).get("entities") or []:
+        if isinstance(e, dict) and str(e.get("id")) == entity_id and e.get("status") != "DEPRECATED":
+            return str(e.get("table") or to_snake(str(e.get("name") or "")))
+    return ""
+
+
 def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/lib/workflows/definitions/*.json`` from the Blueprint.
 
@@ -2068,6 +2076,14 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             "requiredInputs": [str(i.get("name")) for i in wf.get("inputs") or []
                                if isinstance(i, dict) and i.get("name")
                                and i.get("required", True)],
+            # AND WHICH OF THEM IS A RECORD. A control sends an id; a step
+            # reads `member.kycStatus`. Nothing loaded the row, so the guard
+            # on "Approve verification" was false for every member who WAS
+            # pending, and `{{member.displayName}}` was stored as "".
+            "recordInputs": [{"name": str(i.get("name")), "table": _table_of(doc, str(i.get("entity") or ""))}
+                             for i in wf.get("inputs") or []
+                             if isinstance(i, dict) and i.get("kind") == "record" and i.get("name")
+                             and _table_of(doc, str(i.get("entity") or ""))],
             "processVariables": [],
             "definition": {"trigger": dict(trigger_cfg),
                            "nodes": nodes, "edges": edges},

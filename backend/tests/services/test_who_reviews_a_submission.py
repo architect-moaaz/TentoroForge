@@ -167,3 +167,24 @@ def test_a_declared_view_that_the_composer_dropped_is_a_finding():
                 {"type": "Table", "props": {"data": "{{member}}", "columns": [{"key": "email"}]}}]}}
     assert not [f for f in page_findings({**doc, "pageLayouts": [kept]})
                 if f["rule"] == "views-not-composed"]
+
+
+def test_a_record_input_is_carried_as_the_record_its_steps_read():
+    """0l133sp2: "Approve verification" refused every pending member. Its
+    guard reads `member.kycStatus`, the control sends the id, and nothing
+    loaded the row — so the guard was false for everyone, and
+    `{{member.displayName}}` was stored as ""."""
+    import tempfile
+
+    out = Path(tempfile.mkdtemp())
+    wf = {**FLOWS[1], "inputs": [{"name": "member", "kind": "record", "entity": "ENTITY-001"},
+                                 {"name": "idDocumentPhoto", "kind": "field", "type": "image"}]}
+    doc = {**DOC, "workflows": [wf],
+           "data": {"entities": [{"id": "ENTITY-001", "name": "Member", "table": "members",
+                                  "fields": [{"name": "kycStatus", "type": "enum"}]}]}}
+    project_workflows(doc, out)
+    defn = json.loads(next(out.rglob("submit-identity-verification.json")).read_text())
+    assert defn["recordInputs"] == [{"name": "member", "table": "members"}]
+    engine = (Path(__file__).resolve().parents[2] / "templates/runtime/workflows/index.ts").read_text()
+    assert "hydrateRecordInputs(workflow" in engine
+    assert "executeWorkflow(workflow, hydrated, user)" in engine, "the steps run on the loaded record"

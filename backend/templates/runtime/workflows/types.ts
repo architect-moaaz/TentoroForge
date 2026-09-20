@@ -284,6 +284,12 @@ export interface WorkflowDefinition {
    * identity photo, so a member's submission was filed with nothing in it.
    */
   requiredInputs?: string[];
+  /**
+   * The inputs that are a RECORD of an entity, and the table each is read
+   * from. A control sends an id; the steps read fields of it, so the row is
+   * loaded before the first one runs (see `record-inputs.ts`).
+   */
+  recordInputs?: { name: string; table: string }[];
   /** Process variables — the data context flowing through the workflow */
   processVariables?: ProcessVariable[];
   /**

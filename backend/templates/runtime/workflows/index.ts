@@ -17,6 +17,7 @@
 
 import { promises as fs } from "fs";
 import { missingRequiredInputs } from "./required-inputs";
+import { hydrateRecordInputs } from "./record-inputs";
 import crypto from "node:crypto";
 import path from "path";
 // The app's data layer — used by the default db_* action handlers so workflows
@@ -193,7 +194,11 @@ export async function triggerWorkflow(
     };
   }
 
-  const result = await executeWorkflow(workflow, input, user);
+  // THE RECORD BEHIND THE ID. A control sends `{ member: "<uuid>" }`; the
+  // steps read `member.kycStatus`. Loaded here, once, before anything runs.
+  const hydrated = await hydrateRecordInputs(workflow, input as Record<string, unknown>, loadRecordRow);
+
+  const result = await executeWorkflow(workflow, hydrated, user);
   await persistPendingTask(result, workflowIdOrName, input, user);
   return result;
 }
@@ -481,6 +486,17 @@ export async function listWorkflows(): Promise<WorkflowDefinition[]> {
 function _canonTable(s: string): string {
   return s.toLowerCase().replace(/[_-]/g, "");
 }
+
+/** One row of `table` by id, for `hydrateRecordInputs`. */
+export async function loadRecordRow(table: string, id: string): Promise<Record<string, unknown> | null> {
+  const resolved = _resolveTable(table);
+  if (!resolved) return null;
+  const idColumn = (resolved as any).id;
+  if (!idColumn) return null;
+  const rows = await (db as any).select().from(resolved).where(eq(idColumn, id)).limit(1);
+  return (rows?.[0] as Record<string, unknown>) ?? null;
+}
+
 
 export function _resolveTable(name?: unknown): any {
   if (typeof name !== "string") return undefined;
