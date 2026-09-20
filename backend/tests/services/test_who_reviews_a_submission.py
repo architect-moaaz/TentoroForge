@@ -199,3 +199,17 @@ def test_a_lookup_of_one_record_is_read_as_that_record():
     assert "return queryResult(rows);" in handler
     helper = (Path(__file__).resolve().parents[2] / "templates/runtime/workflows/query-result.ts").read_text()
     assert "list.length === 1" in helper, "only a lookup of ONE record is that record"
+
+
+def test_an_app_people_sign_in_to_lets_them_sign_out():
+    """Only the persona-pills frame had a way out (an avatar menu). Every app
+    on a rail or a top bar shipped with none, so a second person could not use
+    the same browser and a tester could not change role (0l133sp2)."""
+    dashboard = Path(__file__).resolve().parents[2] / "templates/app-foundation/src/app/(dashboard)"
+    menu = (dashboard / "AccountMenu.tsx").read_text()
+    assert 'signOut({ callbackUrl: "/login" })' in menu
+    layout = (dashboard / "layout.tsx").read_text()
+    # Beside the bell, in the row every frame renders — not per frame, which
+    # is how three of the four came to have nothing.
+    assert "<AccountMenu" in layout and layout.count("<AccountMenu") == 1
+    assert layout.index("<NotificationBell />") < layout.index("<AccountMenu")

@@ -19,6 +19,7 @@ import { icons as lucideIcons } from "lucide-react";
 import { ShellStateProvider } from "@tentoroforge/renderer";
 import { MobileNav } from "./MobileNav";
 import { NotificationBell } from "./NotificationBell";
+import { AccountMenu } from "./AccountMenu";
 import { MobileTabBar } from "./MobileTabBar";
 import { PersonaChrome } from "./PersonaChrome";
 import { RouteBreadcrumb, type RouteNode } from "./RouteBreadcrumb";
@@ -831,7 +832,15 @@ export default async function DashboardLayout({
       {/* The frame's own row: where you are, and what the app told you. */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1"><RouteBreadcrumb routes={routeTree} /></div>
-        {session?.user && <NotificationBell />}
+        {session?.user && (
+          <div className="flex shrink-0 items-center gap-2">
+            <NotificationBell />
+            {/* THE WAY OUT. Only the persona frame had one; every other app
+                shipped with no way to sign out at all. */}
+            <AccountMenu name={session.user.name} email={session.user.email}
+                         role={(session.user as { role?: string }).role} />
+          </div>
+        )}
       </div>
       {children}
       {mobileTabs.length > 0 && (
