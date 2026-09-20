@@ -16,8 +16,11 @@ underspecified is what makes §16's gate real rather than decorative.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 _PROMPT = """You are reading one request from someone changing an application \
 they own, against the part of its Blueprint that seems relevant.
@@ -523,7 +526,13 @@ def _env_name_only(raw: object) -> str:
 def _default_provider(prompt: str, reasoning: Callable[[str], None] | None = None) -> str:
     from services.llm_client import complete
 
-    return complete(content=prompt, max_tokens=1200,
+    # 1200 CUT THE ANSWER OFF, AND THE USER WAS TOLD IT WAS THEIR FAULT. The
+    # understanding is a small JSON object, but a long ask makes a long one —
+    # several ops, each with a route and a value — and the model reasons
+    # before it writes. On UAT (2026-09-18) two sentences of a person's own
+    # words came back as "I did not follow that", which is what an unparseable
+    # reply says, while the same request one message later worked.
+    return complete(content=prompt, max_tokens=4000,
                     reasoning_callback=reasoning)
 
 
@@ -581,10 +590,23 @@ def understand_ask(
             "again and I will try once more."))
 
     data = _parse(raw)
+    if data is None and _looks_cut_off(raw):
+        # The reply ran out of room mid-object. Asking again costs one call;
+        # telling the person they were unclear costs their next three messages.
+        logger.info("[understand] reply did not parse (%d chars, looks cut "
+                    "off) — asking once more", len(raw or ""))
+        try:
+            raw = call(_PROMPT.format(ctx=blueprint_ctx or "(nothing yet)",
+                                      history=_render_history(history),
+                                      message=ask)
+                       + "\n\nReply with the JSON object only — no prose "
+                         "before or after it, and keep it short.")
+        except Exception:  # noqa: BLE001 — a turn degrades, it does not crash
+            raw = ""
+        data = _parse(raw)
     if data is None:
-        return _blank(clarification_needed=(
-            "I did not follow that. Which screen should I change, and "
-            "what on it?"))
+        logger.info("[understand] gave up on a reply of %d chars", len(raw or ""))
+        return _blank(clarification_needed=_did_not_follow(ask))
 
     # ONE FACT UNDER TWO NAMES. `route` and `target_file` both mean "which
     # screen": the composing verbs read one and the editing verbs read the
@@ -731,6 +753,33 @@ def _labels(raw: Any) -> list[str]:
         if text and text not in out:
             out.append(text)
     return out[:5]
+
+
+def _looks_cut_off(raw: str) -> bool:
+    """Whether a reply is an object that stops mid-flight, rather than prose.
+
+    An answer cut off at the token ceiling is the one case worth paying for a
+    second call: the model understood, we did not let it finish.
+    """
+    text = (raw or "").strip()
+    return bool(text) and "{" in text and text.count("{") > text.count("}")
+
+
+def _did_not_follow(ask: str) -> str:
+    """Ask again in the person's own words.
+
+    "I did not follow that. Which screen should I change, and what on it?"
+    was returned for a request that named the screen and the change in the
+    same breath, and the person simply retyped it. Quoting what they said
+    shows what Smith actually has, and asking for one thing at a time is the
+    answer they can give.
+    """
+    said = " ".join((ask or "").split())
+    if len(said) > 120:
+        said = said[:117].rstrip() + "…"
+    return (f"I could not turn that into a change I am sure of. You said: "
+            f"\u201c{said}\u201d. Tell me the first thing to change and the "
+            f"screen it is on, and I will do that one, then we take the next.")
 
 
 def _parse(raw: str) -> dict | None:
