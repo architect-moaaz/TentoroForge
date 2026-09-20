@@ -69,4 +69,4 @@ export const ButtonProps = z.object({
   dataJourney:  z.string().optional(),
 });
 
-export type ButtonPropsType = z.infer<typeof ButtonProps>;
+export type ButtonPropsType = z.input<typeof ButtonProps>;

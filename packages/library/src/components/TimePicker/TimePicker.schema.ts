@@ -10,4 +10,4 @@ export const TimePickerProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type TimePickerPropsType = z.infer<typeof TimePickerProps>;
+export type TimePickerPropsType = z.input<typeof TimePickerProps>;

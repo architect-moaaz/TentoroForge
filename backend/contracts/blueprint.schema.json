@@ -675,7 +675,8 @@
                   "supported",
                   "adaptive",
                   "unsupported"
-                ]
+                ],
+                "default": "primary"
               },
               "tablet": {
                 "type": "string",
@@ -684,7 +685,8 @@
                   "supported",
                   "adaptive",
                   "unsupported"
-                ]
+                ],
+                "default": "supported"
               },
               "mobile": {
                 "type": "string",
@@ -693,14 +695,10 @@
                   "supported",
                   "adaptive",
                   "unsupported"
-                ]
+                ],
+                "default": "adaptive"
               }
             },
-            "required": [
-              "desktop",
-              "tablet",
-              "mobile"
-            ],
             "additionalProperties": false,
             "default": {
               "desktop": "primary",

@@ -6,4 +6,4 @@ export const ContextMenuProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type ContextMenuPropsType = z.infer<typeof ContextMenuProps>;
+export type ContextMenuPropsType = z.input<typeof ContextMenuProps>;

@@ -6,4 +6,4 @@ export const CodeBlockProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type CodeBlockPropsType = z.infer<typeof CodeBlockProps>;
+export type CodeBlockPropsType = z.input<typeof CodeBlockProps>;

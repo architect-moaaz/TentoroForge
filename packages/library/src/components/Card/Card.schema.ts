@@ -21,4 +21,4 @@ export const CardProps = z
   })
   .strict();
 
-export type CardPropsType = z.infer<typeof CardProps>;
+export type CardPropsType = z.input<typeof CardProps>;

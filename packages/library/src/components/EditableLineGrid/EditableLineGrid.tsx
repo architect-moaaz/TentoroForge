@@ -62,7 +62,7 @@ function _formatCurrency(n: number, currency: string): string {
 
 export function EditableLineGrid({
   columns,
-  rows,
+  rows = [],
   rowKey = "id",
   lookupPlaceholder,
   showLookup = false,

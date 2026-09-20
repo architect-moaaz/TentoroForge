@@ -22,4 +22,4 @@ export const ListProps = z.object({
   style:     z.record(z.unknown()).optional(),
 });
 
-export type ListPropsType = z.infer<typeof ListProps>;
+export type ListPropsType = z.input<typeof ListProps>;

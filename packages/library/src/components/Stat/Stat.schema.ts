@@ -8,4 +8,4 @@ export const StatProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type StatPropsType = z.infer<typeof StatProps>;
+export type StatPropsType = z.input<typeof StatProps>;

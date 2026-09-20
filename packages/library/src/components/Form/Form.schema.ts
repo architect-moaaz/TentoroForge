@@ -219,4 +219,4 @@ export const FormProps = z.object({
     .optional(),
 });
 
-export type FormPropsType = z.infer<typeof FormProps>;
+export type FormPropsType = z.input<typeof FormProps>;

@@ -739,6 +739,19 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         else:
             errors += design
         if not errors:
+            # WHAT IT COST, WHERE SOMEBODY CAN COUNT IT. This node is the
+            # longest in a build — 343s of a 616s run on a ONE-PAGE
+            # calculator — and nothing recorded whether that was one round or
+            # three. The run ledger says `ok: true` and a duration; the usage
+            # ledger had no row for it at all. So the only honest answer to
+            # "why is it slow" was to guess, and neither COMPILE_ROUNDS nor
+            # the 36k-character system prompt can be tuned on a guess.
+            #
+            # The loop already knows: one entry in `spent` per model call.
+            logger.info("[ui_engineer] %s composed in %d round(s), %d chars "
+                        "emitted (load %d + view %d)",
+                        page.get("id"), round_, len(load) + len(view),
+                        len(load), len(view))
             return ({"page": str(page.get("id")), "rationale": str(body.get("rationale") or ""),
                      "load": load, "view": view,
                      "requirements": list(page.get("requirements") or [])}, spent)

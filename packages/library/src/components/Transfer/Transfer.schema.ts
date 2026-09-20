@@ -8,4 +8,4 @@ export const TransferProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type TransferPropsType = z.infer<typeof TransferProps>;
+export type TransferPropsType = z.input<typeof TransferProps>;

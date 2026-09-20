@@ -5,4 +5,4 @@ export const LightboxProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type LightboxPropsType = z.infer<typeof LightboxProps>;
+export type LightboxPropsType = z.input<typeof LightboxProps>;

@@ -61,4 +61,4 @@ export const KanbanProps = z.object({
   style: z.record(z.unknown()).optional(),
 });
 
-export type KanbanPropsType = z.infer<typeof KanbanProps>;
+export type KanbanPropsType = z.input<typeof KanbanProps>;

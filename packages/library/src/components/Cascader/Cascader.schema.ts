@@ -10,4 +10,4 @@ export const CascaderProps = z.object({
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),
 });
-export type CascaderPropsType = z.infer<typeof CascaderProps>;
+export type CascaderPropsType = z.input<typeof CascaderProps>;

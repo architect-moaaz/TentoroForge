@@ -28,4 +28,4 @@ export const SplitViewProps = z
   })
   .strict();
 
-export type SplitViewPropsType = z.infer<typeof SplitViewProps>;
+export type SplitViewPropsType = z.input<typeof SplitViewProps>;

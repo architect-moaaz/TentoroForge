@@ -14,7 +14,7 @@ export interface MaskedInputProps extends MaskedInputPropsType {
   onChange?: (value: string) => void;
 }
 
-export function MaskedInput({ name, label, mask = "###", placeholder, disabled, style, value, onChange }: MaskedInputProps) {
+export function MaskedInput({ name = "masked", label, mask = "###", placeholder, disabled, style, value, onChange }: MaskedInputProps) {
   const id = useFieldId(name);
   const display = value !== undefined ? applyMask(value, mask) : undefined;
   return (

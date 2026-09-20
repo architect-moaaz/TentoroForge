@@ -54,7 +54,7 @@ const INPUT_STATIC =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
   "focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
-export function Input({ name, label, type, placeholder, validators, bind: _bind,
+export function Input({ name = "field", label, type = "text", placeholder, validators, bind: _bind,
                        style, value, onChange, iconLeft, iconRight }: InputProps) {
   const id = useInputId(name);
   const required = validators?.required === true;

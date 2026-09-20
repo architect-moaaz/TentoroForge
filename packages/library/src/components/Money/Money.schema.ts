@@ -27,7 +27,7 @@ export const MoneyInputProps = z.object({
   className:         z.string().optional(),
   style:             z.record(z.unknown()).optional(),
 });
-export type MoneyInputPropsType = z.infer<typeof MoneyInputProps>;
+export type MoneyInputPropsType = z.input<typeof MoneyInputProps>;
 
 // ── MoneyDisplay — read-only formatted amount ─────────────────────────────────
 // Renders via `Intl.NumberFormat` — locale + currency aware. `null`/`undefined`
@@ -42,4 +42,4 @@ export const MoneyDisplayProps = z.object({
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),
 });
-export type MoneyDisplayPropsType = z.infer<typeof MoneyDisplayProps>;
+export type MoneyDisplayPropsType = z.input<typeof MoneyDisplayProps>;

@@ -513,11 +513,33 @@ export const PageContract = z.object({
     )
     .default(["loading", "empty", "populated", "error"]),
 
+  /**
+   * Which form factors this page is for.
+   *
+   * EACH KEY CARRIES ITS OWN DEFAULT, and that is load-bearing rather than
+   * tidy. The object-level default below only applies when `responsive` is
+   * absent entirely; an agent that wrote `{desktop: "primary"}` — a perfectly
+   * sensible thing to say about a page — had the WHOLE NODE rejected for
+   * `'tablet' is a required property`, and `page_details` re-ran from
+   * scratch. Measured on a one-page calculator: 74s for the node, about half
+   * of it re-doing work that was never wrong, for two keys whose values the
+   * contract was already willing to assume.
+   *
+   * The defaults were always stated. They just did not apply where the
+   * mistake actually happens, which is a partial object rather than a missing
+   * one.
+   */
   responsive: z
     .object({
-      desktop: z.enum(["primary", "supported", "adaptive", "unsupported"]),
-      tablet: z.enum(["primary", "supported", "adaptive", "unsupported"]),
-      mobile: z.enum(["primary", "supported", "adaptive", "unsupported"]),
+      desktop: z
+        .enum(["primary", "supported", "adaptive", "unsupported"])
+        .default("primary"),
+      tablet: z
+        .enum(["primary", "supported", "adaptive", "unsupported"])
+        .default("supported"),
+      mobile: z
+        .enum(["primary", "supported", "adaptive", "unsupported"])
+        .default("adaptive"),
     })
     .default({ desktop: "primary", tablet: "supported", mobile: "adaptive" }),
 

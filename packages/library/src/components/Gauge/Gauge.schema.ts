@@ -19,4 +19,4 @@ export const GaugeProps = z.object({
   className:  z.string().optional(),
   style:      z.record(z.unknown()).optional(),
 });
-export type GaugePropsType = z.infer<typeof GaugeProps>;
+export type GaugePropsType = z.input<typeof GaugeProps>;

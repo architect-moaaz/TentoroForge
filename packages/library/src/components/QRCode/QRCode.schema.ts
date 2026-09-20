@@ -6,4 +6,4 @@ export const QRCodeProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type QRCodePropsType = z.infer<typeof QRCodeProps>;
+export type QRCodePropsType = z.input<typeof QRCodeProps>;

@@ -11,4 +11,4 @@ export const ComboboxProps = z.object({
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),
 });
-export type ComboboxPropsType = z.infer<typeof ComboboxProps>;
+export type ComboboxPropsType = z.input<typeof ComboboxProps>;

@@ -20,4 +20,4 @@ export const IconButtonProps = z.object({
   style: StyleSlot.optional(),
 });
 
-export type IconButtonPropsType = z.infer<typeof IconButtonProps>;
+export type IconButtonPropsType = z.input<typeof IconButtonProps>;

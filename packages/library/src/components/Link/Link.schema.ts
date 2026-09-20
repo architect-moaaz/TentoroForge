@@ -20,4 +20,4 @@ export const LinkProps = z.object({
   className: z.string().optional(),
 });
 
-export type LinkPropsType = z.infer<typeof LinkProps>;
+export type LinkPropsType = z.input<typeof LinkProps>;

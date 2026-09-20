@@ -23,4 +23,4 @@ export const DescriptionListProps = z.object({
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),
 });
-export type DescriptionListPropsType = z.infer<typeof DescriptionListProps>;
+export type DescriptionListPropsType = z.input<typeof DescriptionListProps>;

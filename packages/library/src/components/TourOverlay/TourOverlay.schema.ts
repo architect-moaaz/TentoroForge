@@ -34,5 +34,5 @@ export const TourOverlayProps = z
   })
   .strict();
 
-export type TourOverlayPropsType = z.infer<typeof TourOverlayProps>;
+export type TourOverlayPropsType = z.input<typeof TourOverlayProps>;
 export type TourStepType = z.infer<typeof TourStep>;

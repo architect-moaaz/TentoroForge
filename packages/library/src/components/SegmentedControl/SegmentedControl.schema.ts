@@ -8,4 +8,4 @@ export const SegmentedControlProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type SegmentedControlPropsType = z.infer<typeof SegmentedControlProps>;
+export type SegmentedControlPropsType = z.input<typeof SegmentedControlProps>;

@@ -14,4 +14,4 @@ export const BadgeProps = z
   })
   .strict();
 
-export type BadgePropsType = z.infer<typeof BadgeProps>;
+export type BadgePropsType = z.input<typeof BadgeProps>;

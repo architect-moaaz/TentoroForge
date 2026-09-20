@@ -14,4 +14,4 @@ export const OverlayCardProps = z
   })
   .strict();
 
-export type OverlayCardPropsType = z.infer<typeof OverlayCardProps>;
+export type OverlayCardPropsType = z.input<typeof OverlayCardProps>;

@@ -9,4 +9,4 @@ export const KeyValueInputProps = z.object({
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),
 });
-export type KeyValueInputPropsType = z.infer<typeof KeyValueInputProps>;
+export type KeyValueInputPropsType = z.input<typeof KeyValueInputProps>;

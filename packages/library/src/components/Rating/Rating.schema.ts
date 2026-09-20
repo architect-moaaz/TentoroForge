@@ -8,4 +8,4 @@ export const RatingProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type RatingPropsType = z.infer<typeof RatingProps>;
+export type RatingPropsType = z.input<typeof RatingProps>;

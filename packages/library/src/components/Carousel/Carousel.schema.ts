@@ -12,4 +12,4 @@ export const CarouselProps = z.object({
   style:     z.record(z.unknown()).optional(),
 });
 
-export type CarouselPropsType = z.infer<typeof CarouselProps>;
+export type CarouselPropsType = z.input<typeof CarouselProps>;

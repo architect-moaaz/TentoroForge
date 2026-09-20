@@ -15,4 +15,4 @@ export const ThemeToggleProps = z
   })
   .strict();
 
-export type ThemeTogglePropsType = z.infer<typeof ThemeToggleProps>;
+export type ThemeTogglePropsType = z.input<typeof ThemeToggleProps>;

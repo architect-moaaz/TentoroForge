@@ -36,4 +36,4 @@ export const FileUploadProps = z.object({
   retryOn5xx: z.boolean().optional(),
   chunkSizeMb: z.number().int().min(1).max(50).optional(),
 });
-export type FileUploadPropsType = z.infer<typeof FileUploadProps>;
+export type FileUploadPropsType = z.input<typeof FileUploadProps>;

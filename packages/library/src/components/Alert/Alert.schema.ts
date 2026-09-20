@@ -17,4 +17,4 @@ export const AlertProps = z
     style: StyleSlot.optional(),
   });
 
-export type AlertPropsType = z.infer<typeof AlertProps>;
+export type AlertPropsType = z.input<typeof AlertProps>;

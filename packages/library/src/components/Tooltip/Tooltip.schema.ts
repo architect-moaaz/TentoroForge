@@ -6,4 +6,4 @@ export const TooltipProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type TooltipPropsType = z.infer<typeof TooltipProps>;
+export type TooltipPropsType = z.input<typeof TooltipProps>;

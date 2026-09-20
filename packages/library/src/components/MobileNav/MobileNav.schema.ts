@@ -15,4 +15,4 @@ export const MobileNavProps = z.object({
    * is always `md:hidden` so this control disappears on desktop. */
   className: z.string().optional(),
 });
-export type MobileNavPropsType = z.infer<typeof MobileNavProps>;
+export type MobileNavPropsType = z.input<typeof MobileNavProps>;

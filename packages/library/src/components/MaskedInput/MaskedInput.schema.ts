@@ -23,4 +23,4 @@ export const MaskedInputProps = z.object({
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),
 });
-export type MaskedInputPropsType = z.infer<typeof MaskedInputProps>;
+export type MaskedInputPropsType = z.input<typeof MaskedInputProps>;

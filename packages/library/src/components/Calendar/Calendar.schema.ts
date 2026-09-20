@@ -26,4 +26,4 @@ export const CalendarProps = z.object({
   style: z.record(z.unknown()).optional(),
 });
 
-export type CalendarPropsType = z.infer<typeof CalendarProps>;
+export type CalendarPropsType = z.input<typeof CalendarProps>;

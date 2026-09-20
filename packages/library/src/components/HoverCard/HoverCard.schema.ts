@@ -6,4 +6,4 @@ export const HoverCardProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type HoverCardPropsType = z.infer<typeof HoverCardProps>;
+export type HoverCardPropsType = z.input<typeof HoverCardProps>;

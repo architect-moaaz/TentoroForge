@@ -8,4 +8,4 @@ export const InputOTPProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type InputOTPPropsType = z.infer<typeof InputOTPProps>;
+export type InputOTPPropsType = z.input<typeof InputOTPProps>;

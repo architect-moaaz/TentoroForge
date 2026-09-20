@@ -7,4 +7,4 @@ export const PopoverProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type PopoverPropsType = z.infer<typeof PopoverProps>;
+export type PopoverPropsType = z.input<typeof PopoverProps>;

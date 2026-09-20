@@ -9,4 +9,4 @@ export const SwitchProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type SwitchPropsType = z.infer<typeof SwitchProps>;
+export type SwitchPropsType = z.input<typeof SwitchProps>;

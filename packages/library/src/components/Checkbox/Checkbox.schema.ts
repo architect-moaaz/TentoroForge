@@ -25,4 +25,4 @@ export const CheckboxProps = z.object({
   style:     z.record(z.unknown()).optional(),
 });
 
-export type CheckboxPropsType = z.infer<typeof CheckboxProps>;
+export type CheckboxPropsType = z.input<typeof CheckboxProps>;

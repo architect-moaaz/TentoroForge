@@ -46,4 +46,4 @@ export const IllustratedEmptyProps = z
   })
   .strict();
 
-export type IllustratedEmptyPropsType = z.infer<typeof IllustratedEmptyProps>;
+export type IllustratedEmptyPropsType = z.input<typeof IllustratedEmptyProps>;

@@ -17,4 +17,4 @@ export const NumberInputProps = z.object({
   tabularNums:  z.boolean().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type NumberInputPropsType = z.infer<typeof NumberInputProps>;
+export type NumberInputPropsType = z.input<typeof NumberInputProps>;

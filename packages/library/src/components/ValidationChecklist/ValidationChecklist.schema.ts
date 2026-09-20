@@ -6,4 +6,4 @@ export const ValidationChecklistProps = z.object({
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),
 });
-export type ValidationChecklistPropsType = z.infer<typeof ValidationChecklistProps>;
+export type ValidationChecklistPropsType = z.input<typeof ValidationChecklistProps>;

@@ -92,3 +92,7 @@ backend/data/build-usage.jsonl
 
 # built on demand from backend/scripts/feel/entry.ts
 backend/scripts/feel/validate.cjs
+
+# Build output of `npm run emit:catalog` (packages/library). Regenerated on
+# demand and swept into commits by `git add -A` when it is not ignored.
+.catalog-emit/

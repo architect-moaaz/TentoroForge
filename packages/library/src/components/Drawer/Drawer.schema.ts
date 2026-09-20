@@ -8,4 +8,4 @@ export const DrawerProps = z.object({
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),
 });
-export type DrawerPropsType = z.infer<typeof DrawerProps>;
+export type DrawerPropsType = z.input<typeof DrawerProps>;
