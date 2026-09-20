@@ -21,6 +21,15 @@
  * returning to change one colour should not be walked through an interview to
  * reach it. Same fields, two shapes.
  *
+ * THE SCREEN WEARS THE BRAND AS IT LEARNS IT. Until the site is read the
+ * accent is Forge's own indigo; from the moment a palette comes back, the
+ * progress rail, the active step, the primary button and every focus ring are
+ * the COMPANY's colour, through one custom property the whole page reads
+ * (`--ob-accent`). This is not decoration — it is the feature, demonstrated
+ * rather than described, and it makes the question the last step asks answer
+ * itself: a brand colour that is wrong is now wearing the entire screen, and
+ * nobody has to check a hex code to notice.
+ *
  * WHY IT CREATES THE WORKSPACE. Signup makes a user and nothing else; the
  * profile belongs to an organisation, so one has to exist to hold it. Naming
  * it is also the one unavoidable step, so it is folded into the step that was
@@ -38,17 +47,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  Globe,
-  Loader2,
-  Sparkles,
-} from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { AuthGuard } from "@/components/auth-guard";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, ApiError } from "@/lib/api";
 import {
@@ -57,7 +58,6 @@ import {
   BrandProfile,
   brand,
   companyNameFromUrl,
-  describeDesign,
   slugFromName,
 } from "@/lib/brand";
 import { cleanedForSave } from "@/components/brand/BrandProfileEditor";
@@ -72,6 +72,11 @@ import {
   invalidColors,
   useBrandLogo,
 } from "@/components/brand/fields";
+import {
+  PaletteStrip,
+  ReadingSequence,
+  TypeSpecimen,
+} from "@/app/onboarding/moments";
 
 interface Org {
   id: string;
@@ -81,17 +86,24 @@ interface Org {
 
 type StepId = "site" | "who" | "what" | "how" | "design";
 
+/** Forge's own accent, worn until the company's is known. */
+const FORGE_ACCENT = "#444ce7";
+
 /**
  * The steps, in order. The three discovery questions each get their own,
  * because each is a question; the design language is one step because its
  * fields are a single decision looked at together — a palette is read across
  * its swatches, not one swatch at a time.
+ *
+ * `title` is the question as a person would be asked it out loud. It is the
+ * hero of its screen and set as one, so the screen reads as an interview
+ * rather than a form with a heading on top.
  */
 const STEPS: { id: StepId; label: string; title: string; blurb: string }[] = [
   {
     id: "site",
     label: "Your site",
-    title: "Tell us about your company",
+    title: "Where can we find you?",
     blurb:
       "Give us your web address and we'll read what your company does and what it looks like — your colours, type and mark. Every app you build here can then be built in that language, or given one of its own.",
   },
@@ -119,9 +131,9 @@ const STEPS: { id: StepId; label: string; title: string; blurb: string }[] = [
   {
     id: "design",
     label: "Design",
-    title: "Your design language",
+    title: "This is how you look",
     blurb:
-      "Read from your site. Correct anything that isn't right — apps built in this language use these values exactly.",
+      "Read from your site. Change anything that isn't right — apps built in this language use these values exactly.",
   },
 ];
 
@@ -139,46 +151,72 @@ const DETAILS_FOR: Partial<Record<StepId, readonly (keyof BrandIdentity)[]>> = {
   how: ["tone", "voice"],
 };
 
-function StepBar({ index }: { index: number }) {
+/**
+ * Where they are, as a rail rather than a row of chips.
+ *
+ * Numbered, which the usual advice warns against — but this content genuinely
+ * IS a sequence, which is the one case numbering earns. The numbers stay
+ * small and quiet; the rail itself carries the progress, and it is painted in
+ * the company's colour once there is one.
+ */
+function StepRail({ index }: { index: number }) {
+  const pct = (index / (STEPS.length - 1)) * 100;
   return (
-    <ol className="mb-10 flex flex-wrap items-center gap-x-2 gap-y-2">
-      {STEPS.map((step, i) => {
-        const done = i < index;
-        const here = i === index;
-        return (
-          <li key={step.id} className="flex items-center gap-2">
-            <span
+    <nav aria-label="Progress" className="mb-12">
+      <div className="relative h-px w-full bg-slate-200 dark:bg-slate-800">
+        <div
+          className="absolute left-0 top-0 h-px bg-[var(--ob-accent)] transition-all duration-700 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {/* On a phone the five labels want every pixel of a 375px screen and
+          fit only by luck. Below `sm` the rail keeps the bar and says the
+          count in words instead — the same orientation, none of the crush. */}
+      <p className="mt-3 text-xs text-slate-500 dark:text-slate-400 sm:hidden">
+        Step {index + 1} of {STEPS.length}
+        <span className="ml-2 font-medium text-slate-900 dark:text-white">
+          {STEPS[index].label}
+        </span>
+      </p>
+      <ol className="mt-3 hidden justify-between sm:flex">
+        {STEPS.map((step, i) => {
+          const done = i < index;
+          const here = i === index;
+          return (
+            <li
+              key={step.id}
               aria-current={here ? "step" : undefined}
-              className={[
-                "flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                here
-                  ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
-                  : done
-                    ? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                    : "text-slate-400",
-              ].join(" ")}
+              className="flex items-baseline gap-1.5"
             >
               <span
                 className={[
-                  "flex h-4 w-4 items-center justify-center rounded-full text-[10px]",
+                  "text-[11px] tabular-nums",
                   here
-                    ? "bg-white/20"
+                    ? "text-[var(--ob-accent)]"
                     : done
-                      ? "bg-slate-300 text-slate-700 dark:bg-slate-600 dark:text-white"
-                      : "border border-slate-300 dark:border-slate-700",
+                      ? "text-slate-400"
+                      : "text-slate-300 dark:text-slate-700",
                 ].join(" ")}
               >
-                {done ? <Check className="h-2.5 w-2.5" /> : i + 1}
+                {done ? "✓" : i + 1}
               </span>
-              {step.label}
-            </span>
-            {i < STEPS.length - 1 && (
-              <span className="h-px w-4 bg-slate-200 dark:bg-slate-800" />
-            )}
-          </li>
-        );
-      })}
-    </ol>
+              <span
+                className={[
+                  "text-xs transition-colors",
+                  here
+                    ? "font-medium text-slate-900 dark:text-white"
+                    : done
+                      ? "text-slate-500 dark:text-slate-400"
+                      : "text-slate-300 dark:text-slate-700",
+                ].join(" ")}
+              >
+                {step.label}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
@@ -189,8 +227,10 @@ function OnboardingInner() {
   const [org, setOrg] = useState<Org | null>(null);
   const [profile, setProfile] = useState<BrandProfile | null>(null);
   const [busy, setBusy] = useState(false);
+  const [reading, setReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
+  const [justRead, setJustRead] = useState(false);
 
   // The answers being edited. Seeded from the read the moment it lands, and
   // held here rather than in each step so moving Back and forward does not
@@ -203,6 +243,17 @@ function OnboardingInner() {
   const question = QUESTION_FOR[step.id];
   const logoSrc = useBrandLogo(org?.id ?? "", Boolean(profile?.has_logo));
   const badColors = useMemo(() => invalidColors(design), [design]);
+
+  // The one value the whole page's accent comes from. Their colour the moment
+  // there is one; Forge's until then.
+  const accent = design.colors?.primary || FORGE_ACCENT;
+  // WHAT IS READABLE ON IT, which is not always white. A company whose brand
+  // is a yellow or a lime gets white-on-yellow if the button hardcodes its
+  // own foreground — and this is the screen wearing their colour at its
+  // largest. The backend already decided this by luminance when it read the
+  // site (`design.readable_on`), and `primaryForeground` is that decision,
+  // so it is reused rather than guessed at a second time.
+  const onAccent = design.colors?.primaryForeground || "#FFFFFF";
 
   // SOMEBODY WHO WAS INVITED IS NOT A NEW COMPANY. They already belong to an
   // organisation that has, or will have, a profile of its own — putting them
@@ -247,6 +298,7 @@ function OnboardingInner() {
     e.preventDefault();
     if (!url.trim()) return;
     setBusy(true);
+    setReading(true);
     setError(null);
     try {
       const workspace = org ?? (await createOrg(companyNameFromUrl(url)));
@@ -256,6 +308,7 @@ function OnboardingInner() {
       setName(read.company_name ?? "");
       setIdentity(read.identity ?? {});
       setDesign(read.design ?? {});
+      setJustRead(true);
       // The real name, now that the site has stated it. The provisional one
       // came off the hostname and nobody should have to live with it.
       if (read.company_name && read.company_name !== workspace.name) {
@@ -279,6 +332,7 @@ function OnboardingInner() {
       );
     } finally {
       setBusy(false);
+      setReading(false);
     }
   }
 
@@ -327,6 +381,7 @@ function OnboardingInner() {
   }
 
   function next() {
+    setJustRead(false);
     if (index < STEPS.length - 1) setIndex(index + 1);
     else void finish();
   }
@@ -340,83 +395,102 @@ function OnboardingInner() {
   }
 
   const onLast = index === STEPS.length - 1;
+  const host = url.trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
 
   return (
-    <div className="mx-auto min-h-screen w-full max-w-3xl px-6 py-16">
-      <div className="mb-10 flex items-center gap-2.5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white dark:bg-white dark:text-slate-900">
-          <Sparkles className="h-4 w-4" />
+    <div
+      // One property, read by the rail, the numbers, the button and every
+      // focus ring below. Set from the company's own primary the moment the
+      // read lands, which is what makes the screen wear their brand.
+      style={{
+        ["--ob-accent" as string]: accent,
+        ["--ob-on-accent" as string]: onAccent,
+      }}
+      className="mx-auto min-h-screen w-full max-w-2xl px-6 py-16 sm:py-20"
+    >
+      <div className="mb-14 flex items-center gap-2.5">
+        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900">
+          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
         </div>
-        <span className="text-lg font-semibold text-slate-900 dark:text-white">
+        <span className="text-sm font-medium tracking-tight text-slate-900 dark:text-white">
           Tentoro Forge
         </span>
       </div>
 
-      <StepBar index={index} />
+      <StepRail index={index} />
 
-      <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">
+      {/* The question is the hero of its screen. */}
+      <h1 className="max-w-[22ch] text-[2rem] font-semibold leading-[1.15] tracking-[-0.02em] text-slate-900 dark:text-white sm:text-[2.5rem]">
         {step.title}
       </h1>
-      <p className="mt-2 max-w-xl text-sm text-slate-500">{step.blurb}</p>
+      <p className="mt-3 max-w-[60ch] text-[15px] leading-relaxed text-slate-500 dark:text-slate-400">
+        {step.blurb}
+      </p>
 
       {/* Step 1 — the address, and the read. */}
-      {step.id === "site" && (
-        <form onSubmit={readSite} className="mt-8 max-w-xl space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="url" className="text-sm font-medium">
+      {step.id === "site" &&
+        (reading ? (
+          <ReadingSequence host={host || "your site"} />
+        ) : (
+          <form onSubmit={readSite} className="mt-10 max-w-xl">
+            <Label htmlFor="url" className="sr-only">
               Company website
             </Label>
-            <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 dark:border-slate-800">
-              <Globe className="h-4 w-4 shrink-0 text-slate-400" />
-              <Input
-                id="url"
-                value={url}
-                onChange={(e) => {
-                  setUrl(e.target.value);
-                  setError(null);
-                }}
-                placeholder="acme.com"
-                autoFocus
-                className="h-11 border-0 px-0 shadow-none focus-visible:ring-0"
-              />
+            <input
+              id="url"
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value);
+                setError(null);
+              }}
+              placeholder="acme.com"
+              autoFocus
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              // Keyboard focus stays visible — it just speaks this input's
+              // own idiom. The global `:focus-visible` rule draws a 2px
+              // rectangle two pixels off the element, which around a wide
+              // borderless underline reads as a stray box rather than as
+              // focus. The rule is suppressed here and replaced by the rule
+              // already doing the work: the underline itself goes accent.
+              // Always 2px so gaining focus never nudges the layout.
+              className="w-full border-0 border-b-2 border-slate-200 bg-transparent px-0 pb-3 text-2xl text-slate-900 transition-colors placeholder:text-slate-300 focus:border-[var(--ob-accent)] focus-visible:border-[var(--ob-accent)] focus-visible:outline-none dark:border-slate-700 dark:text-white dark:placeholder:text-slate-600"
+            />
+            {error && (
+              <p className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p>
+            )}
+            <div className="mt-8 flex items-center gap-2">
+              <Button
+                type="submit"
+                disabled={busy || !url.trim()}
+                className="h-11 bg-[var(--ob-accent)] px-6 text-[var(--ob-on-accent)] hover:bg-[var(--ob-accent)] hover:brightness-110"
+              >
+                Read my site
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={skip}
+                disabled={busy}
+                className="h-11 text-slate-500"
+              >
+                Skip for now
+              </Button>
             </div>
-          </div>
-          {error && (
-            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-          )}
-          <div className="flex items-center gap-3 pt-2">
-            <Button type="submit" disabled={busy || !url.trim()} className="h-11">
-              {busy ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Reading your site…
-                </>
-              ) : (
-                <>
-                  Continue
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </>
-              )}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={skip}
-              disabled={busy}
-              className="h-11 text-slate-500"
-            >
-              Skip for now
-            </Button>
-          </div>
-          <p className="text-xs text-slate-400">
-            You can finish this any time from Settings → Brand.
-          </p>
-        </form>
-      )}
+            <p className="mt-4 text-xs text-slate-400">
+              You can finish this any time from Settings → Brand.
+            </p>
+          </form>
+        ))}
 
       {/* Steps 2–4 — one question each, with its draft answer already in it. */}
       {question && (
-        <div className="mt-8 max-w-xl space-y-5">
+        <div className="mt-10 max-w-xl space-y-6">
           <DiscoveryQuestionField
             which={question}
             value={(identity[question] as string) ?? ""}
@@ -436,62 +510,82 @@ function OnboardingInner() {
 
       {/* Step 5 — the design language, looked at together. */}
       {step.id === "design" && profile && org && (
-        <div className="mt-8 space-y-6">
-          {profile.usable && (
-            <p className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-              <Check className="h-3 w-3" />
-              {describeDesign(design)}
-            </p>
-          )}
-          <CompanyNameField name={name} logoSrc={logoSrc} onName={setName} />
-          <ReadFromNote
-            sourceUrl={profile.source_url}
-            rendered={profile.evidence?.rendered}
-          />
-          <ColorFields
-            design={design}
-            onColor={(role, value) =>
-              setDesign((d) => ({
-                ...d,
-                colors: { ...(d.colors ?? {}), [role]: value },
-              }))
-            }
-          />
-          <TypeFields
-            design={design}
-            onFont={(role, value) =>
-              setDesign((d) => ({
-                ...d,
-                typography: { ...(d.typography ?? {}), [role]: value },
-              }))
-            }
-          />
-          <InvalidColorNote roles={badColors} />
+        <div className="mt-10 space-y-8">
+          <div className="flex items-start gap-5">
+            {logoSrc && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={logoSrc}
+                alt={`${name || "Company"} logo`}
+                className="h-14 w-14 shrink-0 rounded-xl object-contain"
+              />
+            )}
+            <div className="min-w-0 space-y-3">
+              <TypeSpecimen
+                name={name || "Your company"}
+                family={
+                  design.typography?.fontFamilyHeading ||
+                  design.typography?.fontFamilyBase
+                }
+              />
+              <PaletteStrip design={design} animate={justRead} />
+            </div>
+          </div>
+
+          <div className="space-y-6 border-t border-slate-200 pt-8 dark:border-slate-800">
+            <CompanyNameField name={name} logoSrc={null} onName={setName} />
+            <ColorFields
+              design={design}
+              onColor={(role, value) =>
+                setDesign((d) => ({
+                  ...d,
+                  colors: { ...(d.colors ?? {}), [role]: value },
+                }))
+              }
+            />
+            <TypeFields
+              design={design}
+              onFont={(role, value) =>
+                setDesign((d) => ({
+                  ...d,
+                  typography: { ...(d.typography ?? {}), [role]: value },
+                }))
+              }
+            />
+            <ReadFromNote
+              sourceUrl={profile.source_url}
+              rendered={profile.evidence?.rendered}
+            />
+            <InvalidColorNote roles={badColors} />
+          </div>
         </div>
       )}
 
       {/* Back / Continue / Skip — on every step but the first, which has its
           own buttons inside the form so Enter submits the address. */}
       {step.id !== "site" && (
-        <div className="mt-10 flex items-center gap-3">
+        <div className="mt-12 flex items-center gap-2">
           <Button
             type="button"
             variant="outline"
-            onClick={() => setIndex(Math.max(0, index - 1))}
+            onClick={() => {
+              setJustRead(false);
+              setIndex(Math.max(0, index - 1));
+            }}
             disabled={busy}
-            className="h-11"
+            className="h-11 px-5"
           >
-            <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
-          <Button type="button" onClick={next} disabled={busy} className="h-11">
-            {busy ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : onLast ? (
-              <Check className="mr-2 h-4 w-4" />
-            ) : null}
+          <Button
+            type="button"
+            onClick={next}
+            disabled={busy}
+            className="h-11 bg-[var(--ob-accent)] px-6 text-[var(--ob-on-accent)] hover:bg-[var(--ob-accent)] hover:brightness-110"
+          >
+            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {onLast && !busy && <Check className="mr-2 h-4 w-4" />}
             {onLast ? "Save and start building" : "Continue"}
-            {!onLast && <ArrowRight className="ml-2 h-4 w-4" />}
           </Button>
           <Button
             type="button"
@@ -505,7 +599,7 @@ function OnboardingInner() {
         </div>
       )}
       {step.id !== "site" && error && (
-        <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>
+        <p className="mt-4 text-sm text-red-600 dark:text-red-400">{error}</p>
       )}
     </div>
   );
