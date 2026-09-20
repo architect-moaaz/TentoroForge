@@ -8,6 +8,7 @@ the panel went quiet for the part that actually takes the time.
 """
 from __future__ import annotations
 
+import pytest
 from types import SimpleNamespace
 
 import services.llm_client as lc
@@ -125,7 +126,7 @@ def test_the_executor_forwards_thinking_from_the_stream_it_already_opens():
         def get_final_message(self):
             return final
 
-    assert model._stream_reasoning(_Stream()) is final
+    assert model._drain(_Stream()) is final
     # The first sentence went out DURING the stream, not at the end — which is
     # the whole difference between watching it think and reading the transcript.
     assert out == [first.strip(), "Quorum Status is a stat, not a list."]
@@ -151,3 +152,60 @@ def test_compose_hands_the_session_sink_down_to_the_router():
         compose.compose_route)
     assert "reasoning=self._reasoning" in inspect.getsource(
         SmithSession._compose)
+
+
+# ── a reply that never starts ───────────────────────────────────────────
+
+def _stream(*events):
+    """A stream of `("think", text)` / `("write", text)` steps."""
+    class _Stream:
+        def __iter__(self):
+            for kind, text in events:
+                yield SimpleNamespace(delta=SimpleNamespace(
+                    type="thinking_delta" if kind == "think" else "text_delta",
+                    **({"thinking": text} if kind == "think" else {"text": text})))
+
+        def get_final_message(self):
+            return "the assembled reply"
+    return _Stream()
+
+
+def test_a_reply_that_is_still_only_thinking_is_stopped_before_its_budget_is_gone():
+    """A Calculator's one page spent all 64,000 output tokens reasoning at
+    `high` (12m38s), then all 64,000 again at `medium` — two full budgets to
+    learn the same thing twice, and no page at the end of it."""
+    from services.blueprint.executors import AnthropicModel, NoAnswer
+
+    model = AnthropicModel(max_tokens=1000)          # ceiling: 550 tokens of thinking
+    with pytest.raises(NoAnswer) as raised:
+        model._drain(_stream(*[("think", "x" * 400)] * 8))
+    said = str(raised.value)
+    assert "still reasoning" in said and "had not begun an answer" in said
+    assert "less deliberation, not more budget" in said
+
+
+def test_a_long_thinker_that_does_answer_is_left_alone():
+    """The cap is on a reply that never starts, not on thinking as such: a
+    64k page write legitimately reasons for a long time first."""
+    from services.blueprint.executors import AnthropicModel
+
+    model = AnthropicModel(max_tokens=1000)
+    # Reasons a while, starts writing UNDER the ceiling, then keeps going past
+    # it — which is a page being written, not a reply that never arrives.
+    long_write = _stream(("think", "x" * 800), ("write", '{"body":'), *[("think", "x" * 800)] * 5)
+    assert model._drain(long_write) == "the assembled reply"
+
+
+def test_a_retry_after_all_thinking_goes_to_the_floor():
+    """One notch down was measured and is not enough — `medium` spent the
+    whole budget the same way `high` did. A reply that never starts is not
+    improved by thinking slightly less."""
+    from services.blueprint.executors import AnthropicModel, after_no_answer
+
+    for effort in ("max", "xhigh", "high", "medium"):
+        again = after_no_answer(AnthropicModel(effort=effort, max_tokens=64000), "NoAnswer: ...")
+        assert again.effort == "low", effort
+        assert again.max_tokens == 64000
+    # Anything else is left exactly as it was.
+    same = AnthropicModel(effort="high")
+    assert after_no_answer(same, "Refused — the page names no data").effort == "high"

@@ -464,6 +464,283 @@ class AnthropicModel:
         if self.max_tokens == DEFAULT_MAX_TOKENS and self.effort in ("xhigh", "max"):
             self.max_tokens = 64000
 
+    #: A reply that is still only thinking after this much of its budget is not
+    #: going to write an answer. Measured: a Calculator's single page burned
+    #: all 64,000 tokens reasoning at `high` (12m38s), then all 64,000 again at
+    #: `medium` (23m36s in total) — two full budgets to learn the same thing
+    #: twice. Stopping at the mark costs the same lesson at half the price,
+    #: and the retry below gets going sooner.
+    THINKING_ONLY_SHARE = 0.55
+
+    def _drain(self, stream: Any) -> Any:
+        """Consume the stream, forwarding thinking, and give up on a reply
+        that is all reasoning before its budget is gone.
+
+        Iterating consumes the same events `get_final_message` accumulates, so
+        it is still the SDK's assembled message that comes back; nothing here
+        rebuilds a reply out of deltas.
+        """
+        from services.llm_client import ReasoningSink
+
+        sink = ReasoningSink(self.reasoning) if self.reasoning is not None else None
+        ceiling = int(self.max_tokens * self.THINKING_ONLY_SHARE)
+        thinking_chars, answered = 0, False
+        try:
+            for event in stream:
+                kind = getattr(event, "type", "")
+                delta = getattr(event, "delta", None)
+                dtype = getattr(delta, "type", None)
+                if dtype == "thinking_delta":
+                    text = str(getattr(delta, "thinking", "") or "")
+                    thinking_chars += len(text)
+                    if sink is not None:
+                        sink.feed(text)
+                elif dtype == "text_delta" or (
+                        kind == "content_block_start"
+                        and getattr(getattr(event, "content_block", None), "type", "") == "text"):
+                    answered = True
+                # ~4 characters to the token is the rule of thumb everything
+                # else here uses; it only has to be right to the nearest
+                # thousand for this to be worth doing.
+                if not answered and thinking_chars // 4 > ceiling:
+                    raise NoAnswer(
+                        f"the model was still reasoning after {thinking_chars // 4:,} of its "
+                        f"{self.max_tokens:,} output tokens and had not begun an answer, so the "
+                        f"call was stopped — this task needs less deliberation, not more budget",
+                        stop_reason="thinking_only")
+        finally:
+            # The tail is usually the conclusion. Flushed even if the stream
+            # raises, so a failed call still shows how far it got.
+            if sink is not None:
+                sink.close()
+        return stream.get_final_message()
+
+    def __call__(self, *, system: str, user: str, schema: dict[str, Any],
+                 image: str | Path | None = None,
+                 images: Sequence[str | Path] = ()) -> str: ...
+
+
+#: Below this, a prefix is not worth a cache breakpoint. Opus will not cache a
+#: block under ~1024 tokens at all, and a write costs 1.25x what a plain read
+#: does — so tagging a short system prompt is a small guaranteed loss in
+#: exchange for nothing. Estimated at 4 chars/token, which is close enough to
+#: decide a threshold with.
+CACHE_MIN_TOKENS = 2048
+
+#: 5-minute TTL. The fan-out it exists for issues its calls seconds apart.
+_CACHE_CONTROL = {"type": "ephemeral"}
+
+
+def _cacheable(system: str) -> Any:
+    """Return the system prompt as blocks, cache-tagged when it is big enough.
+
+    The page-authoring agent carries the whole component catalog in its system
+    prompt — 8,830 tokens, byte-identical for every page — and the fan-out then
+    re-sent it once per page. On a 34-page application that is 300,220 input
+    tokens per run spent restating the same catalog, uncached, at full price.
+
+    Tagged as a prefix rather than per-request state: the cache is keyed on the
+    block's content, so the first page in a wave writes it and the other
+    thirty-three read it. Retries hit it too — the system prompt does not carry
+    the feedback, so a rejected attempt and its retry share this prefix exactly.
+
+    Returned as a string when it is too short to cache, so short-prompt nodes
+    keep the plain shape and pay no write premium.
+    """
+    if len(system) // 4 < CACHE_MIN_TOKENS:
+        return system
+    return [{"type": "text", "text": system, "cache_control": _CACHE_CONTROL}]
+
+
+#: What a montage may be. Anthropic accepts these; anything else is a file
+#: someone pointed at by mistake, and a 400 from the API is a worse way to
+#: find that out than a refusal here.
+IMAGE_MEDIA_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp",
+}
+
+
+def image_block(path: str | Path) -> dict[str, Any]:
+    """A design montage as a cache-tagged image block.
+
+    A2UI authors against the component catalog and nothing visual, which is
+    why generated apps come back structurally right and looking like nothing:
+    no register, no density, no colour temperature. A montage is the missing
+    input, and it is identical for every page in a thirty-page fan-out — the
+    strongest cache candidate in the pipeline, more so than the catalog.
+
+    Cached and placed first so the prefix is stable: the per-page brief varies
+    and must follow it, or the image is re-billed on every call.
+    """
+    import base64
+
+    p = Path(path)
+    media = IMAGE_MEDIA_TYPES.get(p.suffix.lower())
+    if media is None:
+        raise ValueError(
+            f"{p.name}: not an image Anthropic accepts "
+            f"({', '.join(sorted(IMAGE_MEDIA_TYPES))})"
+        )
+    return {
+        "type": "image",
+        "source": {"type": "base64", "media_type": media,
+                   "data": base64.standard_b64encode(p.read_bytes()).decode()},
+        "cache_control": _CACHE_CONTROL,
+    }
+
+
+def image_blocks(paths: Sequence[str | Path]) -> list[dict[str, Any]]:
+    """Several references as one cache-tagged prefix.
+
+    Only the last block carries ``cache_control``. A breakpoint marks a prefix
+    boundary, not a block: everything ahead of it is cached by being ahead of
+    it, so tagging each image spends four of the request's breakpoints to buy
+    exactly what one buys. Anthropic allows four in total, and the catalog and
+    system prompt want them.
+    """
+    if not paths:
+        return []
+    blocks = [image_block(p) for p in paths]
+    for block in blocks[:-1]:
+        block.pop("cache_control", None)
+    return blocks
+
+
+@dataclass
+class AnthropicModel:
+    """The real client. Uses the official SDK — see the claude-api reference.
+
+    Deliberately omits ``temperature`` / ``top_p`` / ``top_k``: they are removed
+    on Opus 5 and return a 400. Steering is done through the prompt and
+    ``effort``.
+    """
+
+    model: str = DEFAULT_MODEL
+    max_tokens: int = DEFAULT_MAX_TOKENS
+    effort: str = "high"
+    #: output_config.format is a hard constraint, not a request.
+    enforces_schema: bool = True
+    #: The only transport here that carries images. The OpenAI-compatible and
+    #: Gemini clients take (system, user, schema) and would reject the keyword.
+    accepts_images: bool = True
+    _client: Any = None
+
+    #: Brotli is excluded deliberately. `anthropic` >= 1.x vendors `httpx2`,
+    #: whose BrotliDecoder calls `brotli.Decompressor.process(data,
+    #: output_buffer_limit=...)`, and the `brotli` package's `process()` takes
+    #: no keyword arguments. Any brotli-compressed response then fails to
+    #: decode and surfaces as a bare `APIConnectionError` — a network-shaped
+    #: error for a decoder bug, which is a genuinely misleading failure.
+    #: Asking for gzip sidesteps it; drop this once brotli/httpx2 agree.
+    accept_encoding: str = "gzip"
+
+    #: Called with each readable line of the model's reasoning, as it is
+    #: produced. None means nobody is watching — every batch run, every test.
+    #:
+    #: The stream below was already open: `max_tokens` is above STREAM_ABOVE
+    #: for every tuned node, so each call has always been a live event stream
+    #: whose events were discarded in favour of the accumulated message.
+    #: Forwarding the thinking costs nothing but reading them.
+    reasoning: Any = None
+
+    def _anthropic(self) -> Any:
+        if self._client is None:
+            import anthropic
+
+            # WHICH httpx THE SDK SPEAKS IS THE SDK'S CHOICE, NOT OURS. Newer
+            # anthropic releases vendor `httpx2` and reject an `httpx.Timeout`
+            # outright ("this SDK uses httpx2. Use httpx2.Timeout") — a rebuild
+            # that pulls the newer SDK then fails EVERY agent node at construction
+            # time, before a single token is requested.
+            #
+            # Asking "is httpx2 importable" was the wrong question: the package
+            # outlives the SDK that pulled it in. This machine had anthropic
+            # 0.125 (httpx) beside a leftover httpx2, so every call built an
+            # httpx2.Timeout for an httpx client and died inside the SDK as a
+            # bare APIConnectionError ("'Timeout' object cannot be interpreted
+            # as an integer") — a network-shaped error for a type mismatch,
+            # the same disguise the brotli bug wore. The SDK re-exports the
+            # Timeout it speaks as `anthropic.Timeout` on 0.x and 1.x alike.
+            # AN UNBOUNDED WAIT IS NOT PATIENCE, IT IS A HANG. Three runs died
+            # here: a connection stayed ESTABLISHED, delivered 67KB (or 124KB,
+            # or nothing), and then went silent forever. No timeout was set
+            # anywhere, so there was nothing to end it and nothing to retry —
+            # and a stalled run and a slow one look identical from outside.
+            #
+            # `read` is httpx's TIME BETWEEN CHUNKS, not total elapsed, which
+            # is what makes it safe on a stream: a 64k-token generation keeps
+            # arriving and never trips it, while a dead socket trips in five
+            # minutes and the SDK retries. A total-elapsed cap would kill the
+            # long generations we depend on — page_layouts subjects measured
+            # 115-138s each, legitimately.
+            self._client = anthropic.Anthropic(
+                default_headers={"accept-encoding": self.accept_encoding},
+                timeout=anthropic.Timeout(connect=15.0, read=300.0,
+                                          write=60.0, pool=15.0),
+                max_retries=3,
+            )
+        return self._client
+
+    def __post_init__(self) -> None:
+        # Higher effort thinks more, and thinking counts against max_tokens.
+        # At 16k an xhigh run hits the ceiling and returns truncated output —
+        # measured, not theoretical: a sweep at xhigh came back with exactly
+        # 16,000 output tokens and a Blueprint that failed validation.
+        if self.max_tokens == DEFAULT_MAX_TOKENS and self.effort in ("xhigh", "max"):
+            self.max_tokens = 64000
+
+    #: A reply that is still only thinking after this much of its budget is not
+    #: going to write an answer. Measured: a Calculator's single page burned
+    #: all 64,000 tokens reasoning at `high` (12m38s), then all 64,000 again at
+    #: `medium` (23m36s in total) — two full budgets to learn the same thing
+    #: twice. Stopping at the mark costs the same lesson at half the price,
+    #: and the retry below gets going sooner.
+    THINKING_ONLY_SHARE = 0.55
+
+    def _drain(self, stream: Any) -> Any:
+        """Consume the stream, forwarding thinking, and give up on a reply
+        that is all reasoning before its budget is gone.
+
+        Iterating consumes the same events `get_final_message` accumulates, so
+        it is still the SDK's assembled message that comes back; nothing here
+        rebuilds a reply out of deltas.
+        """
+        from services.llm_client import ReasoningSink
+
+        sink = ReasoningSink(self.reasoning) if self.reasoning is not None else None
+        ceiling = int(self.max_tokens * self.THINKING_ONLY_SHARE)
+        thinking_chars, answered = 0, False
+        try:
+            for event in stream:
+                kind = getattr(event, "type", "")
+                delta = getattr(event, "delta", None)
+                dtype = getattr(delta, "type", None)
+                if dtype == "thinking_delta":
+                    text = str(getattr(delta, "thinking", "") or "")
+                    thinking_chars += len(text)
+                    if sink is not None:
+                        sink.feed(text)
+                elif dtype == "text_delta" or (
+                        kind == "content_block_start"
+                        and getattr(getattr(event, "content_block", None), "type", "") == "text"):
+                    answered = True
+                # ~4 characters to the token is the rule of thumb everything
+                # else here uses; it only has to be right to the nearest
+                # thousand for this to be worth doing.
+                if not answered and thinking_chars // 4 > ceiling:
+                    raise NoAnswer(
+                        f"the model was still reasoning after {thinking_chars // 4:,} of its "
+                        f"{self.max_tokens:,} output tokens and had not begun an answer, so the "
+                        f"call was stopped — this task needs less deliberation, not more budget",
+                        stop_reason="thinking_only")
+        finally:
+            # The tail is usually the conclusion. Flushed even if the stream
+            # raises, so a failed call still shows how far it got.
+            if sink is not None:
+                sink.close()
+        return stream.get_final_message()
+
     def _stream_reasoning(self, stream: Any) -> Any:
         """Drain the stream, forwarding thinking as it lands.
 
@@ -514,10 +791,7 @@ class AnthropicModel:
             # ~10 minutes, which any large max_tokens does. Stream and take the
             # accumulated message.
             with client.messages.stream(**kwargs) as stream:
-                if self.reasoning is None:
-                    response = stream.get_final_message()
-                else:
-                    response = self._stream_reasoning(stream)
+                response = self._drain(stream)
         else:
             response = client.messages.create(**kwargs)
         # Check before reading content: a refusal returns HTTP 200 with an
@@ -3125,7 +3399,13 @@ def after_no_answer(client: Any, feedback: str) -> Any:
     if not str(feedback or "").startswith("NoAnswer") or not dataclasses.is_dataclass(client) \
             or not hasattr(client, "effort"):
         return client
-    lower = {"max": "high", "xhigh": "high", "high": "medium", "medium": "low"}.get(str(client.effort), client.effort)
+    # ALL THE WAY DOWN, NOT ONE NOTCH. A notch was measured and is not
+    # enough: a Calculator page spent its whole budget reasoning at `high`,
+    # and the retry — at `medium` — spent the whole budget again. A reply
+    # that never starts is not improved by thinking slightly less; the cure
+    # is to write first. `low` still reasons, it just does not deliberate
+    # its way past the point of writing anything down.
+    lower = "low"
     return dataclasses.replace(client, effort=lower,
                                max_tokens=max(int(getattr(client, "max_tokens", 0) or 0), NO_ANSWER_RETRY_TOKENS))
 

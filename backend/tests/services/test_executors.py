@@ -820,7 +820,12 @@ def test_large_max_tokens_uses_streaming():
     from services.blueprint.executors import AnthropicModel
 
     src = inspect.getsource(AnthropicModel.__call__)
-    assert "messages.stream" in src and "get_final_message" in src
+    assert "messages.stream" in src
+    # The SDK's own assembled message still comes back — `_drain` reads the
+    # events on the way past (forwarding thinking, and giving up on a reply
+    # that is all thinking) rather than rebuilding a reply out of deltas.
+    assert "self._drain(stream)" in src
+    assert "get_final_message" in inspect.getsource(AnthropicModel._drain)
 
 
 def test_unfillable_fields_are_withheld_from_agents():
