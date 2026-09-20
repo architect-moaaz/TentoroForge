@@ -58,3 +58,13 @@ def test_smith_is_shown_the_roles_and_what_a_page_in_its_slice_runs():
     assert [r["name"] for r in ctx.blueprint["roles"]] == ["Member", "Admin"]
     names = {w["name"] for w in ctx.blueprint.get("workflows", [])}
     assert "Submit Identity Verification" in names
+
+
+def test_an_admin_seeded_before_the_role_was_known_is_put_right():
+    """0l133sp2 again, a week later: the app HAD the corrected seed and the
+    admin was still a Member, because `onConflictDoNothing` never revisits
+    the row it skipped. Every seed states the role again."""
+    seed = (Path(__file__).resolve().parents[2] / "templates/runtime/seed.ts").read_text()
+    existing = seed.split("already exists", 1)[1].split("async function", 1)[0]
+    assert "db.update(users" in existing and "roleColumn" in existing
+    assert "ADMIN_PASSWORD" not in existing, "a password is the person's, never restated by a seed"

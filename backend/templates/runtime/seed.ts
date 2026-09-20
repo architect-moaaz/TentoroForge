@@ -293,6 +293,28 @@ async function seedAdmin(): Promise<string | null> {
     // pool. Without this, downstream tables with a NOT NULL user_id FK insert
     // dangling ids on re-runs and Postgres rejects them silently (SEED MISMATCH).
     console.log(`ℹ️  admin ${ADMIN_EMAIL} already exists`);
+    // AND ITS ROLE IS PUT RIGHT. An admin seeded before the Blueprint said
+    // which role opens the back office kept the sign-up role for good:
+    // `onConflictDoNothing` never revisits a row. 0l133sp2's admin stayed a
+    // Member, so the verification queue answered 403 and the "awaiting KYC"
+    // notification addressed to Admin reached nobody. The role is the
+    // application's to decide, not a fact about that row, so every seed
+    // states it again — and nothing else about the account is touched.
+    const roleColumn = "role" in users ? "role" : "accountType" in users ? "accountType" : null;
+    const wanted = roleColumn === "role" ? ADMIN_ROLE ?? "admin" : ADMIN_ROLE ?? SIGNUP_ROLE;
+    if (roleColumn && wanted) {
+      try {
+        const [before] = await db.select().from(users as any)
+          .where(eq((users as any).email, ADMIN_EMAIL));
+        if (before && before[roleColumn] !== wanted) {
+          await db.update(users as any).set({ [roleColumn]: wanted } as any)
+            .where(eq((users as any).email, ADMIN_EMAIL));
+          console.log(`✅ admin role: ${String(before[roleColumn] ?? "none")} → ${wanted}`);
+        }
+      } catch (e) {
+        console.warn("admin role could not be confirmed:", e);
+      }
+    }
     try {
       const existing: any[] = await db
         .select({ id: (users as any).id })
