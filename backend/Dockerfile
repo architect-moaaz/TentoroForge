@@ -38,6 +38,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# WHAT THE EDITOR'S SCRIPTS IMPORT, WHERE NODE LOOKS FOR IT. `static/*.mjs`
+# parse and rewrite a page's React source with @babel/parser; on a developer's
+# machine those resolve from the repo root's node_modules, and in this image
+# there is no repo root — so every attempt to open a page in the editor
+# answered "Cannot find package '@babel/parser'" (UAT, both stacks).
+RUN cd /app/static && npm install --omit=dev --no-audit --no-fund --no-package-lock
+
 # Create output directory
 RUN mkdir -p /app/output
 

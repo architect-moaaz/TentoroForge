@@ -63,6 +63,50 @@ PAGE_CODE_SCHEMA: dict[str, Any] = {
     },
 }
 
+#: What the writer decides BEFORE it writes, in a call of its own.
+#:
+#: Thinking and code come out of one budget (`max_tokens` caps both, and this
+#: model takes no separate thinking budget), so on a page the Blueprint leaves
+#: open — no entity, no workflows, a direction full of interacting conditions —
+#: deliberation takes a share nobody chose. The same Calculator page, same
+#: prompt, same 64,000: once it left room and wrote 3,200 tokens of code; once
+#: it started writing and was cut off mid-string; twice it never began.
+#:
+#: So the deciding is asked for on its own, in a budget that cannot swallow
+#: the page, and its answer is handed to the writer as input. What was
+#: variance becomes two bounded steps.
+PAGE_PLAN_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["state", "sections", "behaviours"],
+    "properties": {
+        "state": {"type": "string",
+                  "description": "The state this page holds and how it changes, in a sentence or two. "
+                                 "'None — it renders what load.ts fetched' is a complete answer."},
+        "sections": {"type": "array", "items": {"type": "string"},
+                     "description": "The parts of the page, top to bottom, each named in a few words."},
+        "behaviours": {"type": "array", "items": {"type": "string"},
+                       "description": "One line per rule the code must satisfy, in the order you will write "
+                                      "them. Say how, not that: 'divide by zero sets display to Error and "
+                                      "leaves the expression', not 'handle errors'."},
+    },
+}
+
+#: The plan is a page's decisions, not its code: a few hundred tokens of
+#: answer. The budget is what stops the deciding running away, so it is small
+#: on purpose — and it is spent whether or not the writing goes well.
+PLAN_MAX_TOKENS = 8000
+
+#: What a page costs to WRITE, once the deciding is done.
+#:
+#: Measured over every page this system has written: the largest — a record
+#: workspace with fifteen facts and ten workflows — is 18,984 characters, and
+#: the median page is 12,400. As a JSON reply that is ~8,000 output tokens,
+#: which is what the Calculator's page came to when it was finally written.
+#: 24,000 is three times the median and still leaves room to think; 64,000 is
+#: room to think INSTEAD of writing, which is what it was used for.
+WRITE_MAX_TOKENS = 24000
+
 DIRECTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -556,9 +600,24 @@ def page_widget_brief(doc: dict, page: dict) -> list[dict]:
     return out
 
 
+def plan_prompt(doc: dict, page: dict) -> str:
+    """Ask for the decisions, not the code."""
+    return ("Decide how to build this page — do not write it yet.\n\n```json\n"
+            + json.dumps(_page_brief(doc, page), indent=2) + "\n```\n\n"
+            "Answer with its state, its sections in order, and one line per behaviour the code must "
+            "satisfy. Short lines. You will be asked for the code next, with this plan in front of you, "
+            "so decide here and write there.")
+
+
 def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "",
-                current: dict | None = None) -> str:
+                current: dict | None = None, plan: dict | None = None) -> str:
     out = ["Write this page.\n\n```json\n" + json.dumps(_page_brief(doc, page), indent=2) + "\n```"]
+    if plan:
+        # THE DECIDING IS DONE. Handed the plan it made a moment ago, the
+        # writer has little left to weigh — which is the point: the budget
+        # below is for the page, not for making up its mind again.
+        out.append("\nYour plan for it — follow it, and write the code now:\n```json\n"
+                   + json.dumps(plan, indent=2) + "\n```")
     if brief:
         out.append(f"\nWhat is wanted of it now:\n{brief}")
     if current:
@@ -718,6 +777,43 @@ def _design_findings(doc: dict, page: dict, view: str) -> list[str]:
     return out
 
 
+def _with(client: Any, **changes: Any) -> Any:
+    """The same client, asked differently — or the same client, when it is
+    not one of ours (a test's stub, a plain callable)."""
+    import dataclasses
+
+    if not dataclasses.is_dataclass(client) or not hasattr(client, "max_tokens"):
+        return client
+    return dataclasses.replace(client, **changes)
+
+
+def _page_plan(doc: dict, page: dict, client: Any, system: str, spent: list[Any]) -> dict | None:
+    """The page's decisions, in a budget that cannot swallow the page.
+
+    A plan that fails is not a page that fails: the writer is asked as it
+    always was, and the run carries on."""
+    t0 = time.monotonic()
+    try:
+        # LOW EFFORT, BECAUSE DECIDING IS NOT THE HARD PART — measured: asked
+        # for this same plan at `high` the model spent all 8,000 tokens
+        # thinking and answered nothing (98s); at `low` it answered in 10-15s
+        # with five sections and a dozen behaviours. Effort buys deliberation,
+        # and deliberation is the thing that was already running away.
+        reply = _with(client, max_tokens=PLAN_MAX_TOKENS, effort="low")(
+            system=system, user=plan_prompt(doc, page), schema=PAGE_PLAN_SCHEMA)
+        if getattr(reply, "usage", None) is not None:
+            spent.append((reply.usage, time.monotonic() - t0))
+        plan = json.loads(getattr(reply, "text", reply))
+        logger.info("[ui_engineer] %s planned in %.0fs: %d section(s), %d behaviour(s)",
+                    page.get("id"), time.monotonic() - t0,
+                    len(plan.get("sections") or []), len(plan.get("behaviours") or []))
+        return plan
+    except Exception as exc:  # noqa: BLE001 — a plan is a help, never a gate
+        logger.warning("[ui_engineer] %s could not be planned (%s: %s); writing it unplanned",
+                       page.get("id"), type(exc).__name__, str(exc)[:160])
+        return None
+
+
 def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                  feedback: str = "", brief: str = "", current: dict | None = None,
                  usage: Any = None, node: str = "page_code") -> tuple[dict, list[Any]]:
@@ -728,10 +824,21 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     spent: list[Any] = []
     note = feedback
     last_errors: list[str] = []
+    # DECIDE, THEN WRITE — in two calls, because one budget holds both and
+    # the deciding will take all of it. Skipped on a repair (the decisions
+    # were made and the code exists; what is wanted now is a fix).
+    plan = None if (current or feedback) else _page_plan(doc, page, client, system, spent)
+    # WITH THE DECIDING DONE, WRITING NEEDS LITTLE DELIBERATION AND NO ROOM
+    # FOR IT. Measured on the page that failed four times: plan at `low` (15s),
+    # then write at `low` in 24,000 — 64s, 12,655 characters. The same page
+    # asked in one call at `high`/64,000 spent 758s, then 867s, and wrote
+    # nothing at all. Without a plan the client is left as it was: that is the
+    # old path, and it is what a repair round uses.
+    writer = _with(client, effort="low", max_tokens=WRITE_MAX_TOKENS) if plan else client
     for round_ in range(1, COMPILE_ROUNDS + 1):
         t0 = time.monotonic()
-        reply = client(system=system, user=user_prompt(doc, page, feedback=note, brief=brief,
-                                                         current=current),
+        reply = writer(system=system, user=user_prompt(doc, page, feedback=note, brief=brief,
+                                                       current=current, plan=plan),
                        schema=PAGE_CODE_SCHEMA)
         text = getattr(reply, "text", reply)
         if getattr(reply, "usage", None) is not None:

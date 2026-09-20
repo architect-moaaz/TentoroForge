@@ -28,12 +28,31 @@ def _doc():
 
 
 class _Client:
-    def __init__(self, replies):
-        self.replies, self.calls = list(replies), []
+    """The writer, and — since the deciding moved into its own call — the
+    planner. A plan is answered from the schema it is asked with, so a test
+    about the code still lists only code replies."""
+    max_tokens = 64000          # a dataclass-less stub: `_with` returns it unchanged
+
+    def __init__(self, replies, plan=None):
+        self.replies, self.calls, self.schemas = list(replies), [], []
+        self.plan = plan if plan is not None else {
+            "state": "None — it renders what load.ts fetched.",
+            "sections": ["Header", "Table of cases"],
+            "behaviours": ["Empty state reads 'No cases yet'"],
+        }
 
     def __call__(self, *, system, user, schema):
         self.calls.append(user)
+        self.schemas.append(schema)
+        if "sections" in (schema.get("properties") or {}):
+            return json.dumps(self.plan)
         return json.dumps(self.replies.pop(0))
+
+    @property
+    def writes(self):
+        """The calls that asked for code — the plan is not one of them."""
+        return [u for u, sc in zip(self.calls, self.schemas)
+                if "load" in (sc.get("properties") or {})]
 
 
 def test_the_prompt_carries_the_sdk_the_kit_and_the_direction():
@@ -68,7 +87,7 @@ def test_a_page_that_compiles_is_accepted(monkeypatch, tmp_path):
     client = _Client([{"rationale": "List first.", "load": GOOD_LOAD, "view": GOOD_VIEW}])
     body, _ = compose_page(_doc(), _doc()["pages"][0], tmp_path, client)
     assert body["page"] == "PAGE-001" and body["view"] == GOOD_VIEW
-    assert len(client.calls) == 1
+    assert len(client.writes) == 1
 
 
 def test_the_compilers_errors_go_back_to_the_author(monkeypatch, tmp_path):
@@ -76,9 +95,9 @@ def test_the_compilers_errors_go_back_to_the_author(monkeypatch, tmp_path):
     monkeypatch.setattr(ui_engineer, "typecheck", lambda *a, **k: next(seen))
     client = _Client([{"rationale": "", "load": GOOD_LOAD, "view": GOOD_VIEW}] * 2)
     compose_page(_doc(), _doc()["pages"][0], tmp_path, client)
-    assert len(client.calls) == 2
-    assert "Property 'cases' does not exist" in client.calls[1]
-    assert GOOD_VIEW.strip() in client.calls[1], "the retry is shown the code it wrote"
+    assert len(client.writes) == 2
+    assert "Property 'cases' does not exist" in client.writes[1]
+    assert GOOD_VIEW.strip() in client.writes[1], "the retry is shown the code it wrote"
 
 
 def test_rules_the_compiler_cannot_see_are_refused_too(monkeypatch, tmp_path):
@@ -257,3 +276,86 @@ def test_verify_and_fix_reviews_coded_pages(monkeypatch, tmp_path):
     said = [p["text"] for k, p in events if k == "message"][-1]
     assert "/cases" in said and "rewrote 1" in said and '"Export" does nothing' in said
     assert ("review", {"phase": "start"}) in events
+
+
+# ── deciding and writing are two calls ──────────────────────────────────
+
+def test_the_page_is_planned_first_and_the_plan_is_handed_to_the_writer(monkeypatch, tmp_path):
+    """Thinking and code come out of one budget, so on a page the Blueprint
+    leaves open the deciding took a share nobody chose: the same Calculator
+    page, same prompt, same 64,000 tokens, once wrote 3,200 tokens of code,
+    once was cut off mid-string, and twice never began. The deciding is now
+    asked for on its own, in a budget that cannot swallow the page."""
+    from services.blueprint.ui_engineer import PLAN_MAX_TOKENS
+
+    monkeypatch.setattr(ui_engineer, "typecheck", lambda *a, **k: [])
+    client = _Client([{"rationale": "", "load": GOOD_LOAD, "view": GOOD_VIEW}],
+                     plan={"state": "The expression being typed.",
+                           "sections": ["Display", "Keypad"],
+                           "behaviours": ["Divide by zero shows Error and keeps the expression"]})
+    compose_page(_doc(), _doc()["pages"][0], tmp_path, client)
+
+    assert client.calls[0].startswith("Decide how to build this page")
+    assert "do not write it yet" in client.calls[0]
+    assert len(client.writes) == 1
+    # What it decided arrives as input, so the writing has little left to weigh.
+    assert "Divide by zero shows Error" in client.writes[0]
+    assert "Your plan for it" in client.writes[0]
+    assert PLAN_MAX_TOKENS < 64000, "the plan's budget is what stops the deciding running away"
+
+
+def test_a_plan_that_fails_still_leaves_a_page(monkeypatch, tmp_path):
+    """A plan is a help, never a gate."""
+    monkeypatch.setattr(ui_engineer, "typecheck", lambda *a, **k: [])
+
+    class _NoPlan(_Client):
+        def __call__(self, *, system, user, schema):
+            if "sections" in (schema.get("properties") or {}):
+                raise RuntimeError("the planner fell over")
+            return super().__call__(system=system, user=user, schema=schema)
+
+    client = _NoPlan([{"rationale": "", "load": GOOD_LOAD, "view": GOOD_VIEW}])
+    body, _ = compose_page(_doc(), _doc()["pages"][0], tmp_path, client)
+    assert body["view"] == GOOD_VIEW
+    assert "Your plan for it" not in client.writes[0], "written unplanned, as it always was"
+
+
+def test_a_repair_is_not_planned_again(monkeypatch, tmp_path):
+    """The decisions were made and the code exists; what is wanted is a fix."""
+    monkeypatch.setattr(ui_engineer, "typecheck", lambda *a, **k: [])
+    client = _Client([{"rationale": "", "load": GOOD_LOAD, "view": GOOD_VIEW}])
+    compose_page(_doc(), _doc()["pages"][0], tmp_path, client,
+                 current={"load": GOOD_LOAD, "view": "old"}, feedback="it did not compile")
+    assert not any(c.startswith("Decide how to build") for c in client.calls)
+
+
+def test_the_writing_is_asked_plainly_once_the_deciding_is_done(monkeypatch, tmp_path):
+    """Plan at `low` (15s), then write at `low` in 24,000: 64s and a page.
+    The same page asked once at `high`/64,000 spent 758s, then 867s, and
+    wrote nothing — the budget went on making up its mind."""
+    import dataclasses
+
+    from services.blueprint.ui_engineer import PLAN_MAX_TOKENS, WRITE_MAX_TOKENS
+
+    @dataclasses.dataclass
+    class _Model:
+        effort: str = "high"
+        max_tokens: int = 64000
+        asked: list = dataclasses.field(default_factory=list)
+
+        def __call__(self, *, system, user, schema):
+            self.asked.append((self.effort, self.max_tokens,
+                               "plan" if "sections" in (schema.get("properties") or {}) else "write"))
+            if "sections" in (schema.get("properties") or {}):
+                return json.dumps({"state": "x", "sections": ["a"], "behaviours": ["b"]})
+            return json.dumps({"rationale": "", "load": GOOD_LOAD, "view": GOOD_VIEW})
+
+    monkeypatch.setattr(ui_engineer, "typecheck", lambda *a, **k: [])
+    asked: list = []
+    model = _Model(asked=asked)
+    compose_page(_doc(), _doc()["pages"][0], tmp_path, model)
+
+    # `dataclasses.replace` makes copies, so every call records into the list
+    # they share: the plan, then the writing, each asked in its own budget.
+    assert asked == [("low", PLAN_MAX_TOKENS, "plan"), ("low", WRITE_MAX_TOKENS, "write")]
+    assert WRITE_MAX_TOKENS < 64000 and PLAN_MAX_TOKENS < WRITE_MAX_TOKENS

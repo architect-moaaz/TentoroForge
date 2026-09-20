@@ -1,9 +1,8 @@
-import { createHash } from "node:crypto";
-
 import type { NextAuthOptions } from "next-auth";
 import { getServerSession } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
+import { sessionCookies } from "@/lib/session-cookie";
 import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
@@ -104,26 +103,13 @@ export const authOptions: NextAuthOptions = {
   //
   // The name is derived from the secret, which is already this app's alone,
   // so nothing new has to be configured or kept in step.
-  cookies: cookieNames(),
+  // NAMED IN ONE PLACE, because `middleware.ts` has to look for the same
+  // name — `withAuth` asks for next-auth's default unless it is told.
+  cookies: sessionCookies(),
 };
 
-/** `next-auth.*` -> `forge-<app>.*`, keeping the platform's secure prefixes. */
-function cookieNames(): NextAuthOptions["cookies"] {
-  const secure = (process.env.NEXTAUTH_URL ?? "").startsWith("https://");
-  const app = createHash("sha256")
-    .update(process.env.NEXTAUTH_SECRET || "dev-secret")
-    .digest("hex")
-    .slice(0, 8);
-  const base = `forge-${app}`;
-  const options = { httpOnly: true, sameSite: "lax" as const, path: "/", secure };
-  return {
-    sessionToken: { name: `${secure ? "__Secure-" : ""}${base}.session-token`, options },
-    callbackUrl: { name: `${secure ? "__Secure-" : ""}${base}.callback-url`,
-                   options: { ...options, httpOnly: false } },
-    csrfToken: { name: `${secure ? "__Host-" : ""}${base}.csrf-token`, options },
-  };
-}
-
+/** The signed-in person, on the server. Every page and route reads through
+ *  this — `getServerSession` with this app's own options. */
 export async function auth() {
   return getServerSession(authOptions);
 }

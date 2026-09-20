@@ -339,7 +339,60 @@ def test_two_apps_on_one_host_do_not_share_a_session_cookie():
     0l133sp2). The name is derived from the secret, which is already the
     app's own, so nothing extra has to be configured."""
     auth = (_ROOT / "backend/templates/app-foundation/src/auth.ts").read_text()
-    assert "cookies: cookieNames()," in auth
-    assert 'update(process.env.NEXTAUTH_SECRET || "dev-secret")' in auth
-    assert '`${secure ? "__Secure-" : ""}${base}.session-token`' in auth, "keeps the secure prefix"
+    shared = (_ROOT / "backend/templates/app-foundation/src/lib/session-cookie.ts").read_text()
+    assert "cookies: sessionCookies()," in auth
+    assert 'NEXTAUTH_SECRET || "dev-secret"' in shared
+    assert '`${isSecure() ? "__Secure-" : ""}${sessionCookiePrefix()}.session-token`' in shared, \
+        "keeps the secure prefix"
     assert '"next-auth.session-token"' not in auth
+
+
+def test_the_middleware_looks_for_the_cookie_the_app_sets():
+    """Naming the session cookie per app stops two apps on one host signing
+    each other out — but `withAuth` asks `getToken` for next-auth's DEFAULT
+    name unless it is told otherwise. Named in auth.ts alone, a signed-in
+    person was bounced to /login by every page while a valid session sat in
+    the browser: sign in, bounce, sign in again (Vercel, 0l133sp2)."""
+    import tempfile
+
+    from services.blueprint.projection import project_middleware
+
+    doc = _doc(pages=[{"id": "PAGE-001", "route": "/tools", "access": "authenticated"}])
+    out = Path(tempfile.mkdtemp())
+    project_middleware(doc, out)
+    middleware = (out / "src" / "middleware.ts").read_text()
+    assert 'import { sessionCookies } from "@/lib/session-cookie";' in middleware
+    assert "cookies: sessionCookies()" in middleware
+
+    # One source for the name, read by both sides.
+    auth = (_ROOT / "backend/templates/app-foundation/src/auth.ts").read_text()
+    assert 'from "@/lib/session-cookie"' in auth and "cookies: sessionCookies()" in auth
+    shared = (_ROOT / "backend/templates/app-foundation/src/lib/session-cookie.ts").read_text()
+    assert "NEXTAUTH_SECRET" in shared
+    assert 'from "node:crypto"' not in shared, "middleware runs on the edge runtime"
+
+
+def test_auth_exports_everything_the_scaffold_imports_from_it():
+    """`auth.ts` is imported by the shell, the SDK, the schema page and the
+    NextAuth route. Editing it near the bottom, I deleted `export async
+    function auth()` along with an old helper — the build warned "'auth' is
+    not exported from '@/auth'" fourteen times, shipped anyway, and every
+    page of the deployed app answered
+
+        TypeError: (0 , j.auth) is not a function
+
+    A warning nobody reads is not a gate; this is."""
+    import re
+
+    root = _ROOT / "backend/templates/app-foundation/src"
+    auth = (root / "auth.ts").read_text()
+    exported = set(re.findall(r"^export (?:async )?(?:function|const) (\w+)", auth, re.M))
+    exported |= set(re.findall(r"^export const (\w+)", auth, re.M))
+
+    wanted: set[str] = set()
+    for path in root.rglob("*.ts*"):
+        for names in re.findall(r'import\s*{([^}]*)}\s*from\s*"@/auth"', path.read_text("utf-8")):
+            wanted |= {n.strip().split(" as ")[0] for n in names.split(",") if n.strip()}
+
+    assert wanted, "nothing imports @/auth — this guard would pass vacuously"
+    assert wanted <= exported, f"imported from @/auth but not exported: {sorted(wanted - exported)}"

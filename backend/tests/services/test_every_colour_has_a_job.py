@@ -214,6 +214,10 @@ def test_a_style_finding_asks_again_but_never_costs_the_page(monkeypatch, tmp_pa
     calls, client_view = [], []
 
     def client(*, system, user, schema):
+        # The deciding is its own call now (`_page_plan`); this test is about
+        # the rounds that ask for CODE, so the plan is answered and not counted.
+        if "sections" in (schema.get("properties") or {}):
+            return _json.dumps({"state": "none", "sections": ["a"], "behaviours": ["b"]})
         calls.append(user)
         return _json.dumps({"rationale": "r", "load": "export async function load() { return {}; }",
                             "view": client_view[0]})

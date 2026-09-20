@@ -3292,6 +3292,12 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     lines += [
         '',
         'import { withAuth } from "next-auth/middleware";',
+        # THE SAME COOKIE THE APP SETS. `withAuth` asks `getToken` for
+        # next-auth's DEFAULT cookie name unless it is told otherwise, and
+        # this application names its own (one browser, two apps on one host).
+        # Unnamed here, a signed-in person was bounced to /login by every
+        # page while a valid session sat in the browser (Vercel, 0l133sp2).
+        'import { sessionCookies } from "@/lib/session-cookie";',
         'import { NextResponse } from "next/server";',
         '',
         '// A role-restricted page names the roles that may open it; the session',
@@ -3312,7 +3318,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         '    }',
         '    return NextResponse.next();',
         '  },',
-        '  { pages: { signIn: "/login" } },',
+        '  { pages: { signIn: "/login" }, cookies: sessionCookies() },',
         ');',
         '',
         'export const config = {',
