@@ -32,7 +32,8 @@ const PREFIX = "forge-editor:";
 let bridgeSource: Promise<string> | null = null;
 
 function loadBridge(): Promise<string> {
-  if (!bridgeSource) bridgeSource = fetch("/forge-editor-bridge.js").then((r) => r.text());
+  // Fetched fresh: a cached bridge from an earlier platform build would talk an older protocol.
+  if (!bridgeSource) bridgeSource = fetch("/forge-editor-bridge.js", { cache: "no-store" }).then((r) => r.text());
   return bridgeSource;
 }
 
@@ -194,7 +195,12 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
         case "select":
           if (s.mode !== "design") break;
           if (!p.fid) { if (!p.shift) s.clearSelection(); break; }
-          s.select([String(p.fid)], { extend: !!p.shift || !!p.meta, toggle: !!p.meta });
+          // A click on one field of a form chooses that field.
+          if (p.field && !p.shift && !p.meta && s.doc?.model?.nodes[String(p.fid)]?.objects?.fields?.some((e) => e.key === String(p.field))) {
+            s.selectField(String(p.fid), String(p.field));
+          } else {
+            s.select([String(p.fid)], { extend: !!p.shift || !!p.meta, toggle: !!p.meta });
+          }
           if (!s.smith.open && !s.smith.pinned) s.setSmith({ open: true });
           // Selecting is how something is configured: its settings come with it.
           // A closed panel whose toggle had scrolled out of the top bar left
@@ -241,6 +247,28 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
         case "move-cancel":
           post("drop-hint", {});
           break;
+        case "field-drop": {
+          // A field of a form let go over another field of the same form.
+          const nodeId = String(p.fid || "");
+          const name = String(p.name || "");
+          if (s.mode !== "design" || !s.doc?.model?.nodes[nodeId]?.objects?.fields) break;
+          const over = p.over ? String(p.over) : null;
+          const fields = s.doc.model.nodes[nodeId].objects!.fields.map((e) => e.key);
+          if (!over || over === name) break;
+          // Above the middle of the field under the pointer: before it; below: after it.
+          const before = Number(p.y ?? 1) < 0.5 ? over : fields[fields.indexOf(over) + 1] ?? null;
+          if (before === name) break;
+          void s.reorderField(nodeId, name, before);
+          break;
+        }
+        case "resize": {
+          // An edge dragged: a field across the row or half of it, an element a share of its parent.
+          const share = Number(p.width) / Math.max(1, Number(p.parentWidth));
+          if (s.mode !== "design" || !Number.isFinite(share)) break;
+          if (p.field) void s.setFieldSpan(String(p.fid), String(p.field), share > 0.75);
+          else void s.resizeNode(String(p.fid), share);
+          break;
+        }
         case "drop": {
           const comp = String(p.component || s.dragComponent || "");
           s.setDragComponent(null);
@@ -312,10 +340,12 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
     if (!frameReady) return;
     post("set-mode", { mode: mode === "preview" ? "preview" : regionSelect ? "region" : "design" });
   }, [mode, regionSelect, frameReady, post]);
+  const fieldSelection = useEditorStore((s) => s.fieldSelection);
   useEffect(() => {
     if (!frameReady) return;
-    post("select", { fids: mode === "design" ? selection : [], labels: labelsFor(selection) });
-  }, [selection, mode, frameReady, post, labelsFor, doc?.revision]);
+    post("select", { fids: mode === "design" ? selection : [], labels: labelsFor(selection),
+                     field: mode === "design" && fieldSelection && selection.includes(fieldSelection.nodeId) ? fieldSelection.name : null });
+  }, [selection, fieldSelection, mode, frameReady, post, labelsFor, doc?.revision]);
 
   // Scroll the frame to a selection made elsewhere (layers, readiness).
   const lastScrolled = useRef<string>("");

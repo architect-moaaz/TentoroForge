@@ -130,7 +130,9 @@ export function LookSection({ nodes, doc }: { nodes: ModelNode[]; doc: PageDoc }
   if (isText) groups.push("textSize", "fontWeight", "textColor", "textAlign");
   if (holds) groups.push("padding", isGrid ? "gridCols" : "gap");
   if (isFlex) groups.push("flexDirection", "justify", "items");
-  groups.push("marginTop", "marginBottom", "background", "rounded", "width");
+  const parentClasses = node.parent ? classesOf(model.nodes[node.parent]) : "";
+  const inGrid = /^grid-cols-\d+$/.test(getGroupValue(parentClasses, "gridCols", "") ?? "");
+  groups.push("marginTop", "marginBottom", "background", "rounded", inGrid ? "colSpan" : "width");
   if (node.type === "img" || node.type === "Image" || node.type === "Skeleton" || /^(div|section)$/.test(node.type) && !node.children.length) groups.push("height");
   const set = (group: string, slot: "" | "hover", v: string | null, label: string) =>
     applyOps(nodes.filter((n) => !classesDynamic(n)).map((n) => ({ op: "setClasses", id: n.id, classes: setGroupValue(classesOf(n), group, slot, v) }) as Op), label);

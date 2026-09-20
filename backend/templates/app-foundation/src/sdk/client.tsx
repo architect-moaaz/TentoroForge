@@ -94,18 +94,19 @@ export interface Option {
 }
 
 /** How one workflow input is collected. `value` fixes it instead (the record
- *  the page is about, the decision a button stands for) and renders nothing. */
+ *  the page is about, the decision a button stands for) and renders nothing.
+ *  `span: "full"` takes the whole row of a two-column form. */
 export type FieldSpec<V> =
   | { value: V }
   | (V extends number
-      ? { label: string; kind?: "number"; placeholder?: string; help?: string; min?: number; max?: number; step?: number }
+      ? { label: string; span?: "full"; kind?: "number"; placeholder?: string; help?: string; min?: number; max?: number; step?: number }
       : V extends boolean
-        ? { label: string; kind?: "checkbox" | "switch"; help?: string }
+        ? { label: string; span?: "full"; kind?: "checkbox" | "switch"; help?: string }
         : V extends string[]
-          ? { label: string; kind: "tags" | "multiselect"; options?: Option[]; help?: string }
+          ? { label: string; span?: "full"; kind: "tags" | "multiselect"; options?: Option[]; help?: string }
           : V extends GeoPoint
-            ? { label: string; kind: "location"; help?: string }
-          : { label: string;
+            ? { label: string; span?: "full"; kind: "location"; help?: string }
+          : { label: string; span?: "full";
               kind?: "text" | "textarea" | "email" | "date" | "datetime" | "select" | "password" | "url" | "tel" | "image";
               options?: Option[]; placeholder?: string; help?: string });
 
@@ -141,7 +142,7 @@ function Field({ name, spec, value, required, onChange }: {
 
   if (kind === "checkbox" || kind === "switch") {
     return (
-      <div className="flex items-start gap-3 sm:col-span-2">
+      <div className="flex items-start gap-3 sm:col-span-2" data-forge-field={name}>
         <input id={id} type="checkbox" className="mt-0.5 h-4 w-4 rounded border-input accent-[hsl(var(--primary))]"
           checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
         <div className="grid gap-1">{label}{help}</div>
@@ -184,7 +185,7 @@ function Field({ name, spec, value, required, onChange }: {
       value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />;
   }
   return (
-    <div className={"grid gap-2" + (kind === "textarea" ? " sm:col-span-2" : "")}>
+    <div className={"grid gap-2" + (kind === "textarea" || spec.span === "full" ? " sm:col-span-2" : "")} data-forge-field={name}>
       {label}{control}{help}
     </div>
   );

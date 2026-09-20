@@ -8,8 +8,10 @@
  * node ids, takes a palette item dropped onto the page (the editor decides
  * where it lands and inserts it), lets a selected element be dragged to a
  * new place on the page (the editor decides where it lands and moves it),
- * reports where the app navigates to, and steps out of the way entirely in
- * Preview mode.
+ * treats one field of a form as a thing of its own (click to choose it, drag
+ * to reorder it, its right edge to widen it), offers a resize edge on the
+ * selected element, reports where the app navigates to, and steps out of the
+ * way entirely in Preview mode.
  *
  * Protocol: messages are `{type: "forge-editor:<name>", payload}`, posted to
  * the parent at the page's own origin.
@@ -25,6 +27,7 @@
   var selected = [];
   var labels = {};
   var hovered = null;
+  var selectedField = null;   // the name of the chosen field of the one selected form
 
   // --- overlays ------------------------------------------------------------
   var layer = document.createElement("div");
@@ -45,6 +48,19 @@
   ghost.style.opacity = "0.85";
   layer.appendChild(ghost);
   var selectBoxes = [];
+  // The chosen field of a form, inside the form's own outline.
+  var fieldBox = box("rgba(37,99,235,0.10)", "2px solid #2563eb");
+  layer.appendChild(fieldBox);
+  // The right edge of what is selected, to drag wider or narrower.
+  var edge = document.createElement("div");
+  edge.setAttribute("data-forge-editor", "edge");
+  edge.style.cssText = "position:fixed;display:none;width:8px;margin-left:-4px;cursor:ew-resize;pointer-events:auto;background:transparent;z-index:" + (Z + 1) + ";";
+  var edgeGrip = document.createElement("div");
+  edgeGrip.style.cssText = "position:absolute;left:1px;top:50%;width:6px;height:24px;margin-top:-12px;border-radius:3px;background:#2563eb;border:1px solid #fff;";
+  edge.appendChild(edgeGrip);
+  layer.appendChild(edge);
+  var resizeBox = box("rgba(37,99,235,0.06)", "2px dashed #2563eb");
+  layer.appendChild(resizeBox);
   document.documentElement.appendChild(layer);
 
   function box(bg, border) {
@@ -136,6 +152,49 @@
     return out;
   }
   function byFid(fid) { return nodesOf(fid)[0] || null; }
+  /** The form field a DOM node sits in: `{fid, name, el}`, or null. The SDK
+   *  stamps `data-forge-field`; an older SDK's field is the grid child that
+   *  holds a control labelled `f-<name>`. */
+  function fieldOf(node) {
+    if (!node || isOurs(node)) return null;
+    var el = node.nodeType === 1 ? node : node.parentElement;
+    var w = el && el.closest ? el.closest("[data-forge-field]") : null;
+    var name = w ? w.getAttribute("data-forge-field") : null;
+    if (!w) {
+      var lab = el && el.closest ? el.closest("form") : null;
+      if (!lab) return null;
+      for (var c = el; c && c !== lab; c = c.parentElement) {
+        var ctl = c.querySelector && c.querySelector("[id^='f-']");
+        if (ctl && c.parentElement && c.parentElement.parentElement === lab) { w = c; name = ctl.id.slice(2); break; }
+      }
+    }
+    if (!w || !name) return null;
+    var fid = ownerFid(w);
+    return fid ? { fid: fid, name: name, el: w } : null;
+  }
+  /** Every field of the form that owns `fid`, in order. */
+  function fieldsOf(fid) {
+    var out = [];
+    var els = nodesOf(fid);
+    for (var i = 0; i < els.length; i++) {
+      var form = els[i].tagName === "FORM" ? els[i] : els[i].querySelector("form");
+      if (!form) continue;
+      var stamped = form.querySelectorAll("[data-forge-field]");
+      if (stamped.length) { for (var j = 0; j < stamped.length; j++) out.push({ name: stamped[j].getAttribute("data-forge-field"), el: stamped[j] }); return out; }
+      var grid = form.firstElementChild;
+      for (var k = 0; grid && k < grid.children.length; k++) {
+        var ctl = grid.children[k].querySelector("[id^='f-']");
+        if (ctl) out.push({ name: ctl.id.slice(2), el: grid.children[k] });
+      }
+      return out;
+    }
+    return out;
+  }
+  function fieldEl(fid, name) {
+    var fs = fieldsOf(fid);
+    for (var i = 0; i < fs.length; i++) if (fs[i].name === name) return fs[i].el;
+    return null;
+  }
   function rectOfFid(fid) {
     var els = nodesOf(fid);
     var t = Infinity, l = Infinity, b = -Infinity, r = -Infinity;
@@ -154,9 +213,22 @@
     try { window.parent.postMessage({ type: PREFIX + type, payload: payload || {} }, window.location.origin); } catch (e) { /* not cloneable */ }
   }
 
+  function drawEdge() {
+    fieldBox.style.display = "none";
+    edge.style.display = "none";
+    if (mode !== "design" || selected.length !== 1) return;
+    var r = rectOfFid(selected[0]);
+    if (selectedField) {
+      var fe = fieldEl(selected[0], selectedField);
+      if (!fe) { selectedField = null; } else { r = rectOf(fe); place(fieldBox, r); }
+    }
+    if (!r) return;
+    place(edge, { top: r.top, left: r.left + r.width, width: 8, height: r.height });
+  }
   function drawSelection() {
     while (selectBoxes.length) layer.removeChild(selectBoxes.pop());
     if (mode === "preview") return;
+    drawEdge();
     var rects = {};
     for (var i = 0; i < selected.length; i++) {
       var r = rectOfFid(selected[i]);
@@ -181,7 +253,7 @@
 
   // --- pointer -------------------------------------------------------------
   document.addEventListener("mousemove", function (e) {
-    if (mode !== "design" || (moving && moving.started)) return;
+    if (mode !== "design" || (moving && moving.started) || resizing || isOurs(e.target)) return;
     var fid = ownerFid(e.target);
     if (fid !== hovered) {
       hovered = fid;
@@ -200,7 +272,8 @@
     // The click that ends a move is not a selection.
     if (moved) { moved = false; return; }
     var fid = ownerFid(e.target);
-    send("select", { fid: fid, rect: fid ? rectOfFid(fid) : null,
+    var fld = fieldOf(e.target);
+    send("select", { fid: fid, rect: fid ? rectOfFid(fid) : null, field: fld && fld.fid === fid ? fld.name : null,
                      shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
   }, true);
   document.addEventListener("dblclick", function (e) {
@@ -271,13 +344,55 @@
     hideDrop();
     document.documentElement.style.cursor = "";
   }
+  var resizing = null;  // { fid, field, x, rect, parentWidth }
   document.addEventListener("pointerdown", function (e) {
-    if (mode !== "design" || e.button !== 0 || !e.isPrimary || isOurs(e.target)) return;
+    if (mode !== "design" || e.button !== 0 || !e.isPrimary) return;
+    if (e.target === edge || e.target === edgeGrip) {
+      // The right edge of the selection: drag it to a new width.
+      swallow(e);
+      var sfid = selected[0];
+      var sel = selectedField ? fieldEl(sfid, selectedField) : byFid(sfid);
+      var sr = selectedField ? (sel ? rectOf(sel) : null) : rectOfFid(sfid);
+      if (!sel || !sr) return;
+      var parent = selectedField ? sel.parentElement : sel.parentElement;
+      var pw = parent ? parent.getBoundingClientRect().width : sr.width;
+      resizing = { fid: sfid, field: selectedField, x: e.clientX, rect: sr, parentWidth: pw, width: sr.width };
+      document.documentElement.style.cursor = "ew-resize";
+      place(resizeBox, sr);
+      return;
+    }
+    if (isOurs(e.target)) return;
     var fid = ownerFid(e.target);
     if (!fid || selected.indexOf(fid) < 0) return;
+    var fld = fieldOf(e.target);
+    if (fld && fld.fid === fid && selectedField === fld.name) {
+      // The chosen field: drag it to another place in its form.
+      var fr = rectOf(fld.el);
+      moving = { fid: fid, field: fld.name, x: e.clientX, y: e.clientY, started: false, rect: fr, dx: e.clientX - fr.left, dy: e.clientY - fr.top };
+      return;
+    }
+    if (fld && fld.fid === fid) return;   // a field not yet chosen: the click will choose it
     var r = rectOfFid(fid);
     if (!r) return;
     moving = { fid: fid, x: e.clientX, y: e.clientY, started: false, rect: r, dx: e.clientX - r.left, dy: e.clientY - r.top };
+  }, true);
+  document.addEventListener("pointermove", function (e) {
+    if (!resizing || !e.isPrimary) return;
+    var w = Math.max(24, Math.min(resizing.parentWidth, resizing.rect.width + (e.clientX - resizing.x)));
+    resizing.width = w;
+    place(resizeBox, { top: resizing.rect.top, left: resizing.rect.left, width: w, height: resizing.rect.height });
+    place(edge, { top: resizing.rect.top, left: resizing.rect.left + w, width: 8, height: resizing.rect.height });
+  }, true);
+  document.addEventListener("pointerup", function (e) {
+    if (!resizing) return;
+    swallow(e);
+    var r = resizing;
+    resizing = null;
+    resizeBox.style.display = "none";
+    document.documentElement.style.cursor = "";
+    moved = true;
+    if (Math.abs(r.width - r.rect.width) >= 4) send("resize", { fid: r.fid, field: r.field, width: r.width, parentWidth: r.parentWidth });
+    else reportRects();
   }, true);
   document.addEventListener("pointermove", function (e) {
     if (!moving || !e.isPrimary) return;
@@ -288,6 +403,20 @@
       hoverBox.style.display = "none";
     }
     place(ghost, { top: e.clientY - moving.dy, left: e.clientX - moving.dx, width: moving.rect.width, height: moving.rect.height });
+    if (moving.field) {
+      ghost.style.display = "none";
+      var underF = document.elementFromPoint(e.clientX, e.clientY);
+      ghost.style.display = "block";
+      var over = fieldOf(underF);
+      hideDrop();
+      if (over && over.fid === moving.fid && over.name !== moving.field) {
+        var orr = rectOf(over.el);
+        var above = e.clientY < orr.top + orr.height / 2;
+        place(dropBar, { top: (above ? orr.top : orr.top + orr.height) - 1.5, left: orr.left, width: orr.width, height: 3 });
+        moving.over = { name: over.name, y: above ? 0 : 1 };
+      } else moving.over = null;
+      return;
+    }
     var t = moveTarget(e);
     var band = t.y < 0.3 ? 0 : t.y > 0.7 ? 2 : 1;
     if (!dragAt || dragAt.fid !== t.fid || dragAt.band !== band) {
@@ -299,6 +428,13 @@
     if (!moving) return;
     if (!moving.started) { moving = null; return; }
     swallow(e);
+    if (moving.field) {
+      var mf = moving;
+      moved = true;
+      endMove();
+      if (mf.over) send("field-drop", { fid: mf.fid, name: mf.field, over: mf.over.name, y: mf.over.y });
+      return;
+    }
     var t = moveTarget(e);
     var fid = moving.fid;
     moved = true;
@@ -307,6 +443,7 @@
     send("move-drop", { fid: t.fid, y: t.y, moving: fid });
   }, true);
   function cancelMove() {
+    if (resizing) { resizing = null; resizeBox.style.display = "none"; document.documentElement.style.cursor = ""; reportRects(); }
     if (!moving) return;
     var started = moving.started;
     endMove();
@@ -416,6 +553,7 @@
       case "select":
         selected = p.fids || [];
         labels = p.labels || {};
+        selectedField = p.field || null;
         reportRects();
         break;
       case "hover": {

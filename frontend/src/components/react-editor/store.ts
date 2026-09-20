@@ -12,8 +12,9 @@ import { create } from "zustand";
 import { toast } from "sonner";
 
 import { editorApi, failureOf, type JitBundle } from "./api";
-import { breakpointForWidth } from "./lib/classes";
+import { breakpointForWidth, getGroupValue, setGroupValue } from "./lib/classes";
 import { dropPosition, type DropWhere } from "./lib/drop";
+import { colSpanFor, fieldLabel, fieldRemoval, reorderField, widthClassFor, withFieldSpan } from "./lib/fields";
 import { mainRoot, plainName, topmost } from "./lib/plain";
 import type { Breakpoint, Device, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, Rect } from "./types";
 
@@ -124,6 +125,8 @@ export interface EditorState {
   editingTextId: string | null;
   /** The palette item being dragged — the canvas frame cannot read the drag's own data. */
   dragComponent: string | null;
+  /** One field of the selected form, when a field rather than the form is what is chosen. */
+  fieldSelection: { nodeId: string; name: string } | null;
 
   smith: SmithState;
 
@@ -136,6 +139,8 @@ export interface EditorState {
   // --- selection
   select: (ids: string[], opts?: { extend?: boolean; toggle?: boolean }) => void;
   clearSelection: () => void;
+  /** Choose one field of a form (selecting the form with it), or none. */
+  selectField: (nodeId: string, name: string | null) => void;
   setHovered: (id: string | null) => void;
   setRects: (rects: Record<string, Rect>, scrollY: number) => void;
   selectParent: () => void;
@@ -151,6 +156,12 @@ export interface EditorState {
   duplicateSelected: () => Promise<boolean>;
   insertJsx: (jsx: string, imports: Op[], opts?: { parentId?: string; index?: number | null; afterId?: string; label?: string }) => Promise<boolean>;
   moveNode: (id: string, parentId: string, index: number | null) => Promise<boolean>;
+  /** An element's width as a share of its parent's, from a dragged edge. */
+  resizeNode: (id: string, share: number) => Promise<boolean>;
+  /** A form field moved before another (null: last), widened, or taken out. */
+  reorderField: (nodeId: string, name: string, beforeName: string | null) => Promise<boolean>;
+  setFieldSpan: (nodeId: string, name: string, full: boolean) => Promise<boolean>;
+  removeField: (nodeId: string, name: string) => Promise<boolean>;
   setDragComponent: (id: string | null) => void;
   /** Add a palette item where it was dropped: on a layer or on the page. `targetId` null is the end of the page. */
   dropComponent: (compId: string, targetId: string | null, where: DropWhere | { y: number }) => Promise<boolean>;
@@ -282,6 +293,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showReadiness: false,
   editingTextId: null,
   dragComponent: null,
+  fieldSelection: null,
 
   smith: emptySmith(),
 
@@ -355,10 +367,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // A proposal made for another selection is never applied to this one.
     const smithPatch: Partial<SmithState> = changed && smith.proposal && smith.proposalFor.join("|") !== next.join("|")
       ? { proposal: null, proposalFor: [] } : {};
-    set({ selection: next, editingTextId: null, smith: { ...smith, ...smithPatch, open: next.length ? smith.open : smith.pinned && smith.open } });
+    set({ selection: next, editingTextId: null, fieldSelection: null, smith: { ...smith, ...smithPatch, open: next.length ? smith.open : smith.pinned && smith.open } });
   },
 
   clearSelection: () => get().select([]),
+  selectField: (nodeId, name) => {
+    const { selection } = get();
+    if (selection.join("|") !== nodeId) get().select([nodeId]);
+    set({ fieldSelection: name ? { nodeId, name } : null });
+  },
   setHovered: (id) => set({ hovered: id }),
   setRects: (rects, scrollY) => set({ rects, frameScrollY: scrollY }),
 
@@ -430,9 +447,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setClasses: (id, classes) => get().applyOps([{ op: "setClasses", id, classes }], "Change look"),
 
   removeSelected: async () => {
-    const { doc, selection } = get();
+    const { doc, selection, fieldSelection } = get();
     const model = doc?.model;
     if (!model || !selection.length) return false;
+    if (fieldSelection) return get().removeField(fieldSelection.nodeId, fieldSelection.name);
     const ids = selection.filter((id) => model.nodes[id]?.parent);
     if (!ids.length) { toast.info("The page itself cannot be removed."); return false; }
     const parent = model.nodes[ids[0]].parent!;
@@ -505,6 +523,60 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (node.parent === parentId && index != null && index > node.index) at -= 1;
     return get().applyOps([{ op: "move", id, parentId, index }], `Move ${plainName(node, doc?.registry)}`,
                           { reselect: (m) => [m.nodes[parentId]?.children[at]].filter(Boolean) as string[] });
+  },
+
+  resizeNode: async (id, share) => {
+    const { doc } = get();
+    const model = doc?.model;
+    const node = model?.nodes[id];
+    if (!model || !node) return false;
+    const classProp = node.props.find((p) => p.name === "className");
+    if (classProp && classProp.value === null) { toast.info("This item's look is decided by code as the app runs — ask Smith to change it."); return false; }
+    const classes = classProp?.value ?? "";
+    const parent = node.parent ? model.nodes[node.parent] : null;
+    const parentClasses = parent?.props.find((p) => p.name === "className")?.value ?? "";
+    // In a grid, width is whole columns; anywhere else, a share of the row.
+    const cols = /^grid-cols-(\d+)$/.exec(getGroupValue(parentClasses, "gridCols", "") ?? "");
+    const next = cols
+      ? setGroupValue(classes, "colSpan", "", `col-span-${colSpanFor(share, Number(cols[1]))}`)
+      : setGroupValue(classes, "width", "", widthClassFor(share));
+    if (next === classes) return false;
+    return get().applyOps([{ op: "setClasses", id, classes: next }], `Resize ${plainName(node, doc?.registry)}`);
+  },
+
+  reorderField: async (nodeId, name, beforeName) => {
+    const { doc } = get();
+    const node = doc?.model?.nodes[nodeId];
+    const entries = node?.objects?.fields;
+    if (!node || !entries) return false;
+    const next = reorderField(entries, name, beforeName);
+    if (next === entries) return false;
+    const ok = await get().applyOps([{ op: "setObjectProp", id: nodeId, name: "fields", entries: next }], `Move field ${fieldLabel(entries, name)}`);
+    if (ok) set({ fieldSelection: { nodeId, name } });
+    return ok;
+  },
+  setFieldSpan: async (nodeId, name, full) => {
+    const { doc } = get();
+    const node = doc?.model?.nodes[nodeId];
+    const entries = node?.objects?.fields;
+    if (!node || !entries) return false;
+    const ok = await get().applyOps([{ op: "setObjectProp", id: nodeId, name: "fields", entries: withFieldSpan(entries, name, full) }],
+                                    `${fieldLabel(entries, name)} ${full ? "across the row" : "half the row"}`);
+    if (ok) set({ fieldSelection: { nodeId, name } });
+    return ok;
+  },
+  removeField: async (nodeId, name) => {
+    const { doc } = get();
+    const node = doc?.model?.nodes[nodeId];
+    const entries = node?.objects?.fields;
+    if (!node || !entries) return false;
+    const key = node.props.find((p) => p.name === "workflow")?.value?.replace(/^workflows\./, "");
+    const input = doc?.workflows.find((w) => w.key === key)?.inputs.find((i) => i.name === name) ?? null;
+    const out = fieldRemoval(entries, name, input);
+    if ("refused" in out) { toast.info(out.refused); return false; }
+    const ok = await get().applyOps([{ op: "setObjectProp", id: nodeId, name: "fields", entries: out.entries }], `Remove field ${fieldLabel(entries, name)}`);
+    if (ok) set({ fieldSelection: null });
+    return ok;
   },
 
   undo: async () => {

@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 
 import { DataPicker, type DataChoice } from "./DataPicker";
 import { bindingExpr, entry, entryString, fieldChoices, readBinding, withExpr, withString } from "./lib/data";
+import { fieldIsFull } from "./lib/fields";
 import { humanise } from "./lib/templates";
 import { useEditorStore } from "./store";
 import type { ModelNode, ObjectEntry, PageDoc, WorkflowInput, WorkflowRef } from "./types";
@@ -103,19 +104,35 @@ function choiceFromCode(doc: PageDoc, nodeId: string, code: string | undefined):
 export function FormFieldsEditor({ node, doc, workflow }: { node: ModelNode; doc: PageDoc; workflow: WorkflowRef | null }) {
   const applyOps = useEditorStore((s) => s.applyOps);
   const busy = useEditorStore((s) => s.busy);
+  const fieldSelection = useEditorStore((s) => s.fieldSelection);
+  const selectField = useEditorStore((s) => s.selectField);
+  const reorder = useEditorStore((s) => s.reorderField);
+  const setSpan = useEditorStore((s) => s.setFieldSpan);
+  const removeField = useEditorStore((s) => s.removeField);
   const entries = node.objects?.fields ?? [];
   const inputs: WorkflowInput[] = workflow?.inputs ?? [];
-  const names = [...new Set([...inputs.map((i) => i.name), ...entries.map((e) => e.key)])];
-  const [open, setOpen] = useState<string | null>(null);
+  // The form's own order first — it is what the person sees — then what the
+  // workflow takes that the form leaves out.
+  const shown = entries.map((e) => e.key);
+  const names = [...shown, ...inputs.map((i) => i.name).filter((n) => !shown.includes(n))];
+  const [opened, setOpened] = useState<string | null>(null);
+  // The field chosen on the page is the one opened here.
+  const open = fieldSelection?.nodeId === node.id ? fieldSelection.name : opened;
+  const setOpen = (name: string | null) => { setOpened(name); selectField(node.id, name); };
 
   const save = (next: ObjectEntry[], label: string) => applyOps([{ op: "setObjectProp", id: node.id, name: "fields", entries: next }], label);
   const setField = (name: string, fn: (e: ObjectEntry[]) => ObjectEntry[], label: string) => {
     const cur = entry(entries, name);
     const inner = cur && cur.kind === "object" ? cur.entries ?? [] : [];
     const nextInner = fn(inner);
-    const next = [...entries.filter((e) => e.key !== name), { key: name, kind: "object" as const, code: "", entries: nextInner }];
-    // Keep the workflow's order.
-    next.sort((a, b) => names.indexOf(a.key) - names.indexOf(b.key));
+    const at = entries.findIndex((e) => e.key === name);
+    const row = { key: name, kind: "object" as const, code: "", entries: nextInner };
+    // A field keeps its place; a new one joins where the workflow lists it, else last.
+    const next = at >= 0 ? entries.map((e, i) => (i === at ? row : e)) : (() => {
+      const later = inputs.map((i) => i.name).slice(inputs.findIndex((i) => i.name === name) + 1);
+      const idx = entries.findIndex((e) => later.includes(e.key));
+      return idx < 0 ? [...entries, row] : [...entries.slice(0, idx), row, ...entries.slice(idx)];
+    })();
     return save(next, label);
   };
 
@@ -166,6 +183,17 @@ export function FormFieldsEditor({ node, doc, workflow }: { node: ModelNode; doc
                     )}
                     {e && fixed === undefined && (
                       <>
+                        <div className="mb-2 flex flex-wrap items-center gap-1">
+                          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={busy || shown.indexOf(name) <= 0} title="Move up"
+                            onClick={() => void reorder(node.id, name, shown[shown.indexOf(name) - 1])}>↑ Up</Button>
+                          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={busy || shown.indexOf(name) < 0 || shown.indexOf(name) >= shown.length - 1} title="Move down"
+                            onClick={() => void reorder(node.id, name, shown[shown.indexOf(name) + 2] ?? null)}>↓ Down</Button>
+                          {entryString(inner!, "kind") !== "textarea" && (
+                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={busy}
+                              onClick={() => void setSpan(node.id, name, !fieldIsFull(entries, name))}>{fieldIsFull(entries, name) ? "Half the row" : "Across the row"}</Button>
+                          )}
+                          <Button size="sm" variant="outline" className="h-7 px-2 text-xs text-destructive" disabled={busy} onClick={() => void removeField(node.id, name)}>Remove</Button>
+                        </div>
                         <Field label="Label"><Input className="h-8 text-xs" defaultValue={entryString(inner!, "label")} disabled={busy} aria-label="Label" onBlur={(ev) => { if (ev.target.value !== entryString(inner!, "label")) void setField(name, (cur) => withString(cur, "label", ev.target.value), `Relabel ${label}`); }} /></Field>
                         <Field label="Kind of information">
                           <Select value={entryString(inner!, "kind") || (input?.options?.length ? "select" : "text")} disabled={busy} onValueChange={(v) => void setField(name, (cur) => withString(cur, "kind", v === "text" ? "" : v), `Field ${label} is ${v}`)}>
@@ -191,7 +219,7 @@ export function FormFieldsEditor({ node, doc, workflow }: { node: ModelNode; doc
           </div>
         );
       })}
-      <p className="text-[10px] text-muted-foreground">Required information must be filled in by the person or come from the page; the app refuses a form that leaves it out.</p>
+      <p className="text-[10px] text-muted-foreground">Required information must be filled in by the person or come from the page; the app refuses a form that leaves it out. On the page, click a field to choose it, drag it to reorder, drag its right edge to widen it, press Delete to remove it.</p>
     </div>
   );
 }

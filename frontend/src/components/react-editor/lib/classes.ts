@@ -58,6 +58,8 @@ export const CLASS_GROUPS: ClassGroup[] = [
     options: opt([["mt-0", "None"], ["mt-2", "Small"], ["mt-4", "Medium"], ["mt-6", "Large"], ["mt-8", "Extra large"]]) },
   { key: "marginBottom", label: "Space below", test: /^mb-(\d+(\.\d+)?|px|auto)$/,
     options: opt([["mb-0", "None"], ["mb-2", "Small"], ["mb-4", "Medium"], ["mb-6", "Large"], ["mb-8", "Extra large"]]) },
+  { key: "colSpan", label: "Columns it takes", test: /^col-span-(\d+|full)$/,
+    options: opt([["col-span-1", "1"], ["col-span-2", "2"], ["col-span-3", "3"], ["col-span-4", "4"], ["col-span-full", "All"]]) },
   { key: "width", label: "Width", test: /^w-(full|auto|fit|screen|min|max|\d+(\/\d+)?|\[.+\])$/,
     options: opt([["w-auto", "As wide as its content"], ["w-full", "Fill the space"], ["w-1/2", "Half"], ["w-1/3", "A third"]]) },
   { key: "maxWidth", label: "Maximum width", test: /^max-w-(none|xs|sm|md|lg|xl|2xl|3xl|4xl|5xl|6xl|7xl|full|prose|screen-\w+|\[.+\])$/,
