@@ -189,6 +189,40 @@ def answer_in(message: str, history: Iterable[tuple[str, str]],
     return ""
 
 
+def chose_company_earlier(history: Iterable[tuple[str, str]],
+                          company_name: str) -> bool:
+    """Whether they already picked the company's palette from the clarifier.
+
+    The clarifier offers the organisation's own design language as an option
+    on its colour question (`clarify_brief.company_palette_option`), which is
+    the first and most natural moment to ask. Somebody who took it there has
+    ANSWERED this — putting the same question to them again at the approval
+    gate, in different words, is the product forgetting what it was just told.
+
+    Matched on the option string rather than on the turn before it, unlike
+    `answer_in`: this is read from the whole accumulated history, long after
+    the question scrolled away, and the string is specific enough
+    ("Use Northwind's own palette (#1B7F5A, set in Inter)") that nobody types
+    it by accident.
+    """
+    from services.smith.clarify_brief import company_palette_option
+
+    # The PREFIX, not the whole option. The offered string carries a summary
+    # of what was read — "(#336791, set in Open Sans)" — which this function
+    # has no way to know and which a client may or may not echo back. The part
+    # that names the company is the part that identifies the choice.
+    bare = _norm(company_palette_option(company_name, ""))
+    if not bare:
+        return False
+    for role, text in history or []:
+        if str(role or "").lower() != "user":
+            continue
+        said = _norm(text)
+        if said.startswith(bare):
+            return True
+    return False
+
+
 def record(svc: Any, choice: str, *, company_name: str = "",
            reason: str = "Chosen at the approval gate.") -> str:
     """Write the choice to the application and a decision row; return what

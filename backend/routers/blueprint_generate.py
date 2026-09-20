@@ -59,6 +59,8 @@ logger = logging.getLogger(__name__)
 #: here until they finish and discard themselves.
 from services import run_registry
 from services.smith import design_language
+from services.smith.clarify_brief import (
+    company_palette_option as clarify_company_option)
 from services.blueprint.run_progress import Progress
 
 _DETACHED: set[asyncio.Task] = set()
@@ -1538,6 +1540,20 @@ async def smith_chat(
             # on `handoff`/`not_enabled`, and a clarifying question ends the
             # turn. So the definition was written, the gate was shown, and
             # pressing approve started a conversation instead of a build.
+            # ALREADY ANSWERED, EARLIER. The clarifier offers the company's
+            # own palette on its colour question, which is the first and most
+            # natural moment to ask. Somebody who took it there has decided —
+            # putting the same question to them again at the gate, in
+            # different words, is the product forgetting what it was told.
+            if svc is not None and _offer is not None \
+                    and not design_language.chosen(svc.doc) \
+                    and design_language.chose_company_earlier(
+                        [(t.role, t.text) for t in req.history if t.text]
+                        + [("user", req.message)], _offer[0]):
+                design_language.record(
+                    svc, design_language.COMPANY, company_name=_offer[0],
+                    reason="Chosen from the palette question while defining.")
+
             if req.approved:
                 # ONE QUESTION FIRST, AND ONLY WHEN THERE IS SOMETHING TO ASK
                 # ABOUT. Both nodes that consume the answer run inside the
@@ -1674,10 +1690,21 @@ async def smith_chat(
                 if _user_turns < _MAX_CLARIFY_TURNS:
                     from services.smith.clarify_brief import clarify_brief
 
+                    # WHAT THE ORGANISATION ALREADY LOOKS LIKE. Without this
+                    # the clarifier asked "which colour palette should this
+                    # use?" of a company that had told us during onboarding
+                    # exactly what it looks like, and offered every answer
+                    # except their own. Being asked to retype something the
+                    # product already holds is the failure the discovery
+                    # exists to prevent.
+                    _clar = _design_language_offer(output_dir)
                     asked = clarify_brief(
                         _the_brief,
                         design_attached=bool(named_design)
-                        or _has_design_references(str(project_id)))
+                        or _has_design_references(str(project_id)),
+                        company_palette=(
+                            clarify_company_option(_clar[0], _clar[1])
+                            if _clar else ""))
                     if asked:
                         # ONE question this turn — it carries its own options,
                         # and its answer reaches the next turn through `history`,

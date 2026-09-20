@@ -146,3 +146,91 @@ def test_the_gate_asks_before_it_builds():
     asked_at = after.index("design_language.question")
     built_at = after.index("_run_dag(")
     assert asked_at < built_at
+
+
+# --------------------------------------------------------------------------- #
+# the palette question, asked while defining
+# --------------------------------------------------------------------------- #
+
+def test_the_clarifier_offers_the_company_s_own_palette_first():
+    """Smith asked "which colour palette should the calculator use?" of an
+    organisation that had told us during onboarding exactly what it looks
+    like, and offered every answer except their own."""
+    from services.smith.clarify_brief import clarify_brief, company_palette_option
+
+    option = company_palette_option("Tentoro Technologies", "#336791, set in Open Sans")
+    assert option == "Use Tentoro Technologies's own palette (#336791, set in Open Sans)"
+
+    seen: dict = {}
+
+    def provider(prompt: str) -> str:
+        seen["prompt"] = prompt
+        return '{"questions": []}'
+
+    clarify_brief("Build a simple arithmetic calculator",
+                  provider=provider, company_palette=option)
+    assert "DESIGN LANGUAGE ON RECORD" in seen["prompt"]
+    assert option in seen["prompt"]
+    # Offered, not imposed: an app that should not look like the company is a
+    # real case, so the question still gets asked.
+    assert "do not propose palettes" not in seen["prompt"]
+
+
+def test_a_design_attached_to_this_app_outranks_the_company_default():
+    """A file attached to THIS brief is a statement about this application;
+    the company palette is only a default. They are not combined."""
+    from services.smith.clarify_brief import clarify_brief, company_palette_option
+
+    seen: dict = {}
+
+    def provider(prompt: str) -> str:
+        seen["prompt"] = prompt
+        return '{"questions": []}'
+
+    clarify_brief("Build it from this Figma file", provider=provider,
+                  design_attached=True,
+                  company_palette=company_palette_option("Tentoro", "#336791"))
+    assert "do not propose palettes" in seen["prompt"]
+    assert "DESIGN LANGUAGE ON RECORD" not in seen["prompt"]
+
+
+def test_no_company_no_extra_instruction():
+    from services.smith.clarify_brief import clarify_brief
+
+    seen: dict = {}
+
+    def provider(prompt: str) -> str:
+        seen["prompt"] = prompt
+        return '{"questions": []}'
+
+    clarify_brief("Build a calculator", provider=provider)
+    assert "DESIGN LANGUAGE ON RECORD" not in seen["prompt"]
+
+
+def test_taking_the_option_while_defining_is_the_decision():
+    """Answering it once is answering it. The gate must not put the same
+    question a second time in different words."""
+    option = "Use Tentoro Technologies's own palette (#336791, set in Open Sans)"
+    history = [
+        ("user", "Build a simple arithmetic calculator"),
+        ("smith", "Which colour palette should the calculator use?"),
+        ("user", option),
+    ]
+    assert dl.chose_company_earlier(history, "Tentoro Technologies") is True
+    # The option without its summary, as a client may echo it back.
+    assert dl.chose_company_earlier(
+        [("user", "Use Tentoro Technologies's own palette")],
+        "Tentoro Technologies") is True
+    # Somebody else's answer is not theirs.
+    assert dl.chose_company_earlier(
+        [("user", "Soft cream and indigo: modern, app-like")],
+        "Tentoro Technologies") is False
+    # Smith proposing the option is not the user taking it.
+    assert dl.chose_company_earlier([("smith", option)],
+                                    "Tentoro Technologies") is False
+    assert dl.chose_company_earlier([], "Tentoro Technologies") is False
+
+
+def test_the_gate_stops_asking_once_it_has_been_answered(svc):
+    dl.record(svc, dl.COMPANY, company_name="Tentoro Technologies")
+    assert dl.undecided(svc.doc, available=True) is False
