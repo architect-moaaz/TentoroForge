@@ -277,6 +277,13 @@ export interface WorkflowDefinition {
   description?: string;
   /** Optional event/schedule trigger contract — see WorkflowTriggerContract. */
   trigger?: WorkflowTriggerContract;
+  /**
+   * The inputs a run cannot start without, by name (projected from the
+   * Blueprint's `workflow.inputs`). A run missing one is refused before its
+   * first step: 0l133sp2 wrote `kycStatus: pending` and NULL over the
+   * identity photo, so a member's submission was filed with nothing in it.
+   */
+  requiredInputs?: string[];
   /** Process variables — the data context flowing through the workflow */
   processVariables?: ProcessVariable[];
   /**

@@ -2059,6 +2059,15 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             "id": slug,
             "name": wf.get("name") or slug,
             "blueprintId": wf.get("id"),
+            # WHAT THE RUN CANNOT START WITHOUT. The browser knew (the SDK's
+            # `wf(...)` lists them and the form marks the boxes), the server
+            # did not — so a run that reached the engine without the identity
+            # document set `kycStatus: pending` and wrote NULL over the photo
+            # column, and the member's submission looked filed with nothing
+            # in it (0l133sp2). Carried here, the engine can refuse instead.
+            "requiredInputs": [str(i.get("name")) for i in wf.get("inputs") or []
+                               if isinstance(i, dict) and i.get("name")
+                               and i.get("required", True)],
             "processVariables": [],
             "definition": {"trigger": dict(trigger_cfg),
                            "nodes": nodes, "edges": edges},

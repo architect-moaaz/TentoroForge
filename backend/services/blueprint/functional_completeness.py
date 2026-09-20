@@ -620,6 +620,33 @@ def page_findings(doc: dict) -> list[dict]:
                                   f"cannot render"})
             continue
 
+        # A DECLARED VIEW THAT NOTHING RENDERS IS A QUEUE THAT SHOWS
+        # EVERYTHING. /admin/members declared "Pending review" as its default
+        # view, and the composed tree had a plain table of every member with
+        # no filter on the fetch and no picker — a submitted verification was
+        # lost among the rest (0l133sp2). The planner puts both in
+        # (`$savedViews`, the default filter on the source); this is what
+        # notices when a composition came back without them.
+        views = [v for v in (page.get("views") or []) if isinstance(v, dict)]
+        if views:
+            default = next((v for v in views if v.get("isDefault")), None)
+            filtered = any((s.get("filter") or {}) for s in (layout.get("dataSources") or [])
+                           if isinstance(s, dict))
+            rendered = any((n.get("props") or {}).get("savedViews") or (n.get("props") or {}).get("views")
+                           for n in _walk(layout.get("root")))
+            if not rendered or (default and default.get("filter") and not filtered):
+                out.append({"rule": "views-not-composed", "page": pid,
+                            "detail": f"{route} declares "
+                                      + ", ".join(f"{v.get('label')!r}" for v in views)
+                                      + " as saved views"
+                                      + (f" (opening on {default.get('label')!r})" if default else "")
+                                      + ", and the composed page "
+                                      + ("neither offers them nor opens on one"
+                                         if not rendered else "does not open on it")
+                                      + " — it lists everything. Put the views on the list "
+                                        "(FilterBar.savedViews or SavedViewsPicker) and narrow the "
+                                        "source by the default view's filter."})
+
         declared = {str(s.get("name")) for s in (layout.get("dataSources") or [])
                     if isinstance(s, dict) and s.get("name")}
         # A DIALOG IS NAMED BY ITS OWN `id` PROP — that is the registry's
@@ -691,6 +718,22 @@ def page_findings(doc: dict) -> list[dict]:
                                                   f"({ref}), which {did} — the control does something other than "
                                                   f"what it says, so it looks broken. Bind it to {correct!r}, the "
                                                   f"workflow that {_op_of[expected]} this record."})
+                # A CONTROL IS OFFERED TO THE PEOPLE WHO MAY RUN IT. The
+                # Blueprint says which pages launch a workflow, and those
+                # pages say who opens them. 0l133sp2 composed "Approve Member
+                # Verification" — launched from the admin's member page —
+                # onto /profile, which members open: a member was shown a
+                # button that approves their own identity check. Flagged only
+                # when the audiences do not overlap AT ALL, so a row action
+                # beside its own detail page stays fine.
+                if _runner_mismatch(doc, page, ref):
+                    launchers = ", ".join(_launcher_routes(doc, ref)) or "no page"
+                    out.append({"rule": "workflow-audience-mismatch", "page": pid,
+                                "detail": f"{route}: {kind} "
+                                          f"{props.get('label') or props.get('submitLabel') or kind!r} runs "
+                                          f"{_workflow_name(doc, ref)} ({ref}), which is launched from "
+                                          f"{launchers} — nobody who opens {route} may run it. Put the "
+                                          f"control on the page whose audience runs it, or leave it off."})
                 for missing in unsatisfied_inputs(doc, page, layout, node, ref):
                     out.append({"rule": "workflow-inputs-unsatisfied", "page": pid,
                                 "detail": f"{route}: {missing}"})
@@ -825,9 +868,196 @@ def authoring_findings(doc: dict) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# WHO RUNS A WORKFLOW, AND WHERE IT IS RUN FROM
+#
+# `launchedFrom` is the Blueprint's own wiring: the pages a workflow is started
+# from. Those pages say who opens them (`users`), so between them they say who
+# runs it. Two things follow, and 0l133sp2 broke both on one page: the control
+# for "Submit Identity Verification" was never composed onto /profile, which is
+# the only page that launches it (so a member could not submit at all, and the
+# document field stayed empty), while "Approve Member Verification" — the
+# admin's — was composed onto /profile instead.
+# ---------------------------------------------------------------------------
+
+def _workflow_by_ref(doc: dict, ref: str) -> dict | None:
+    return next((w for w in _live(doc.get("workflows")) if str(w.get("id")) == str(ref)), None)
+
+
+def _workflow_name(doc: dict, ref: str) -> str:
+    return str((_workflow_by_ref(doc, ref) or {}).get("name") or ref)
+
+
+def _launcher_routes(doc: dict, ref: str) -> list[str]:
+    wf = _workflow_by_ref(doc, ref) or {}
+    by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    return [str(by_id[pid].get("route") or pid) for pid in wf.get("launchedFrom") or [] if pid in by_id]
+
+
+def _audience(page: dict) -> set[str]:
+    """The roles that open a page. A page open to everyone signed in names no
+    role, and that is not the same as naming none by mistake — it is read as
+    "anyone", which overlaps every audience."""
+    return {str(u) for u in page.get("users") or []}
+
+
+def _runner_mismatch(doc: dict, page: dict, ref: str) -> bool:
+    wf = _workflow_by_ref(doc, ref)
+    if wf is None:
+        return False
+    by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    launchers = [by_id[pid] for pid in wf.get("launchedFrom") or [] if pid in by_id]
+    if not launchers or str(page.get("id")) in {str(p.get("id")) for p in launchers}:
+        return False
+    here = _audience(page)
+    theirs: set[str] = set()
+    for p in launchers:
+        if not _audience(p):
+            return False          # launched from a page anyone may open
+        theirs |= _audience(p)
+    return bool(here) and not (here & theirs)
+
+
+def _runs_workflow(doc: dict, page: dict, layout: dict | None, code: str, ref: str) -> bool:
+    """Whether this page has anything that runs `ref` — a control in its
+    composed tree, or, for a page written as code, the SDK name the projection
+    gives that workflow (`sdk/workflows.ts`)."""
+    if layout:
+        for node in _walk(layout.get("root")):
+            if ref in set(_workflow_refs(node.get("props") or {})):
+                return True
+            # A CONTROL THAT IS A TEMPLATE NAMES NOTHING YET. A button
+            # repeated over `primaryActions`, or labelled `$item.label`,
+            # becomes one control per action when the page renders — which
+            # workflow each runs is not in the tree, so a tree holding one
+            # cannot be read as missing anything.
+            props = node.get("props") or {}
+            if node.get("repeat") or str(props.get("label") or "").startswith("$"):
+                return True
+    if code:
+        from services.blueprint.app_sdk import camel
+
+        name = camel(str((_workflow_by_ref(doc, ref) or {}).get("name") or ref))
+        if ref in code or re.search(rf"\b{re.escape(name)}\b", code):
+            return True
+    return False
+
+
+def launcher_findings(doc: dict) -> list[dict]:
+    """A page the Blueprint says launches a workflow has something that runs
+    it. Nothing on 0l133sp2's /profile ran "Submit Identity Verification",
+    the only page that launches it — the member had no way to send their
+    document, and the workflow, started from anywhere else, saved none."""
+    layouts = {str(l.get("page")): l for l in _live(doc.get("pageLayouts"))}
+    code = {str(c.get("page")): str(c.get("view") or "") for c in doc.get("pageCode") or []
+            if isinstance(c, dict)}
+    by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    out: list[dict] = []
+    for wf in _live(doc.get("workflows")):
+        if str((wf.get("trigger") or {}).get("kind") or "manual") != "manual":
+            continue
+        ref = str(wf.get("id") or "")
+        for pid in wf.get("launchedFrom") or []:
+            page = by_id.get(str(pid))
+            if page is None:
+                continue
+            layout, view = layouts.get(str(pid)), code.get(str(pid), "")
+            if not layout and not view:
+                continue          # the page itself is missing; said elsewhere
+            if _runs_workflow(doc, page, layout, view, ref):
+                continue
+            out.append({"rule": "launcher-without-control", "page": str(pid),
+                        "detail": f"{page.get('route') or pid} launches {wf.get('name') or ref} "
+                                  f"({ref}), and nothing on it runs that workflow — the people who "
+                                  f"open this page have no way to start it. Put the control here, "
+                                  f"with the fields it needs ("
+                                  + ", ".join(str(i.get("name")) for i in wf.get("inputs") or []
+                                              if i.get("kind") == "field") + ")."})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# A QUEUE OPENS ON WHAT IS WAITING
+#
+# When a workflow puts a record into a state and tells a role about it, that
+# role has work to do: those records, and not the rest. 0l133sp2 told the Admin
+# "a member is awaiting KYC verification" and its Member Verification Queue
+# listed every member, with no column for the status it was a queue of — the
+# submission arrived and was invisible among the rest.
+#
+# Read from the Blueprint, not from words: the step that notifies names the
+# role, a step in the same workflow sets a field to a value, and the pages that
+# role opens say which list is over that entity. The page contract already has
+# somewhere to put it (`views`, with `isDefault`), which is why this is worth
+# asking for rather than inventing a page.
+# ---------------------------------------------------------------------------
+
+def _notified_states(doc: dict) -> list[tuple[str, str, str, str]]:
+    """`(role, entity id, field, value)` — a state a role is told about."""
+    out: list[tuple[str, str, str, str]] = []
+    for wf in _live(doc.get("workflows")):
+        steps = [st for st in wf.get("steps") or [] if isinstance(st, dict)]
+        roles = {str((st.get("config") or {}).get("recipientRole") or "")
+                 for st in steps
+                 if str((st.get("config") or {}).get("actionType") or "") == "send_notification"}
+        roles.discard("")
+        if not roles:
+            continue
+        for st in steps:
+            config = st.get("config") or {}
+            if str(config.get("actionType") or "") != "db_update":
+                continue
+            # The step names its entity beside its config, not inside it.
+            entity = str(st.get("entity") or config.get("entity") or "")
+            for field, value in (config.get("values") or {}).items():
+                # A literal, not a template: the state it puts the record INTO.
+                if not isinstance(value, str) or "{{" in value or not value:
+                    continue
+                for role in roles:
+                    out.append((role, entity, str(field), value))
+    return out
+
+
+def queue_findings(doc: dict) -> list[dict]:
+    """The list a notified role opens shows what it was told about."""
+    roles = {str(r.get("id")): str(r.get("name") or "") for r in _live(doc.get("roles"))}
+    by_name = {name: rid for rid, name in roles.items() if name}
+    entities = {str(e.get("id")): e for e in _live((doc.get("data") or {}).get("entities"))}
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for role, entity, field, value in _notified_states(doc):
+        rid = role if role in roles else by_name.get(role, "")
+        ent = entities.get(entity)
+        if not rid or ent is None:
+            continue
+        if not any(str(f.get("name")) == field for f in ent.get("fields") or []):
+            continue
+        for page in _live(doc.get("pages")):
+            if str((page.get("data") or {}).get("primaryEntity") or "") != entity:
+                continue
+            if "[" in str(page.get("route") or "") or rid not in {str(u) for u in page.get("users") or []}:
+                continue
+            views = [v for v in page.get("views") or [] if isinstance(v, dict)]
+            if any(str(v.get("filter", {}).get(field) or "") == value for v in views):
+                continue
+            key = (str(page.get("id")), field)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"rule": "queue-without-its-state", "page": str(page.get("id")),
+                        "detail": f"{page.get('route') or page.get('id')} is the list "
+                                  f"{roles[rid]} opens for {ent.get('name')}, and "
+                                  f"{roles[rid]} is told when a {ent.get('name')} becomes "
+                                  f"{field}={value!r} — but this page has no view for those "
+                                  f"records, so what is waiting is lost among the rest. Add a "
+                                  f"default view filtering {field} to {value!r}, and show "
+                                  f"{field} on the list."})
+    return out
+
+
 def functional_findings(doc: dict) -> list[dict]:
     """Everything, for verification."""
-    return page_findings(doc) + authoring_findings(doc)
+    return page_findings(doc) + launcher_findings(doc) + queue_findings(doc) + authoring_findings(doc)
 
 
 # ---------------------------------------------------------------------------

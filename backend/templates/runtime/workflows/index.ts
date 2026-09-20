@@ -16,6 +16,7 @@
  */
 
 import { promises as fs } from "fs";
+import { missingRequiredInputs } from "./required-inputs";
 import crypto from "node:crypto";
 import path from "path";
 // The app's data layer — used by the default db_* action handlers so workflows
@@ -168,6 +169,27 @@ export async function triggerWorkflow(
       log: [],
       output: {},
       error: `Workflow not found: ${workflowIdOrName}`,
+    };
+  }
+
+  // NOTHING RUNS WITHOUT WHAT IT NEEDS. A required input that arrives empty
+  // used to flow into the first `db_update` as `null` and overwrite the
+  // column it was meant to fill — the run said "completed" and the person
+  // was told their document was submitted (0l133sp2). Refused here, the
+  // caller gets 422 and the form says which box is empty.
+  const missing = missingRequiredInputs(workflow, input as Record<string, unknown>);
+  if (missing.length) {
+    const now = new Date().toISOString();
+    return {
+      workflowId: workflow.id,
+      workflowName: workflow.name,
+      startedAt: now,
+      completedAt: now,
+      status: "failed",
+      refused: true,
+      log: [],
+      output: {},
+      error: `${workflow.name} needs ${missing.join(", ")} — nothing was changed.`,
     };
   }
 
