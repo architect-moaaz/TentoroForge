@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { NextAuthOptions } from "next-auth";
 import { getServerSession } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
@@ -93,7 +95,34 @@ export const authOptions: NextAuthOptions = {
     },
   },
   secret: process.env.NEXTAUTH_SECRET || "dev-secret",
+  // THIS APPLICATION'S OWN COOKIE. Every generated app used next-auth's
+  // default name, and a browser sends a cookie for the HOST, not the port —
+  // so two apps on localhost overwrite each other's session. The second one
+  // then reads a token it cannot decrypt and logs
+  // "[next-auth][error][JWT_SESSION_ERROR] decryption operation failed" on
+  // every request, while the person is quietly signed out.
+  //
+  // The name is derived from the secret, which is already this app's alone,
+  // so nothing new has to be configured or kept in step.
+  cookies: cookieNames(),
 };
+
+/** `next-auth.*` -> `forge-<app>.*`, keeping the platform's secure prefixes. */
+function cookieNames(): NextAuthOptions["cookies"] {
+  const secure = (process.env.NEXTAUTH_URL ?? "").startsWith("https://");
+  const app = createHash("sha256")
+    .update(process.env.NEXTAUTH_SECRET || "dev-secret")
+    .digest("hex")
+    .slice(0, 8);
+  const base = `forge-${app}`;
+  const options = { httpOnly: true, sameSite: "lax" as const, path: "/", secure };
+  return {
+    sessionToken: { name: `${secure ? "__Secure-" : ""}${base}.session-token`, options },
+    callbackUrl: { name: `${secure ? "__Secure-" : ""}${base}.callback-url`,
+                   options: { ...options, httpOnly: false } },
+    csrfToken: { name: `${secure ? "__Host-" : ""}${base}.csrf-token`, options },
+  };
+}
 
 export async function auth() {
   return getServerSession(authOptions);

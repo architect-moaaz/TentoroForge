@@ -328,3 +328,18 @@ def test_the_app_starts_a_new_account_where_no_process_has_taken_it():
     assert "kycVerifiedAt" not in initial, "not required, so it starts empty"
     route = (_ROOT / "backend/templates/app-foundation/src/app/api/auth/signup/route.ts").read_text()
     assert "const values: Record<string, unknown> = { ...ACCOUNT_INITIAL };" in route
+
+
+def test_two_apps_on_one_host_do_not_share_a_session_cookie():
+    """A browser sends a cookie for the HOST, not the port. Both generated
+    apps used next-auth's default name, so signing into one overwrote the
+    other's token — and the other then logged
+    "[next-auth][error][JWT_SESSION_ERROR] decryption operation failed" on
+    every request while quietly signing the person out (j5pte0xt beside
+    0l133sp2). The name is derived from the secret, which is already the
+    app's own, so nothing extra has to be configured."""
+    auth = (_ROOT / "backend/templates/app-foundation/src/auth.ts").read_text()
+    assert "cookies: cookieNames()," in auth
+    assert 'update(process.env.NEXTAUTH_SECRET || "dev-secret")' in auth
+    assert '`${secure ? "__Secure-" : ""}${base}.session-token`' in auth, "keeps the secure prefix"
+    assert '"next-auth.session-token"' not in auth
