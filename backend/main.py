@@ -87,6 +87,7 @@ from routers.export import router as export_router
 from routers.ir import router as ir_router
 from routers.design import router as design_router
 from routers.brand import router as brand_router
+from routers.brand_discovery import router as brand_discovery_router
 from routers.usage import router as usage_router
 
 # Middleware
@@ -163,6 +164,7 @@ app.include_router(incidents_router)
 app.include_router(project_events_router)
 app.include_router(auth_router)
 app.include_router(orgs_router)
+app.include_router(brand_discovery_router)
 # output_projects BEFORE projects so /api/projects/<short-id> routes win
 # first-match for non-UUID ids (the schema editor uses filesystem dirs).
 app.include_router(output_projects_router)

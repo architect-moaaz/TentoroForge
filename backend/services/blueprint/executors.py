@@ -2053,6 +2053,13 @@ def build_prompt(
     # on every run — the first definition, the clarified one, the build.
     from services.blueprint import documents as _documents
     user += _documents.addendum(output_dir, node)
+    # WHAT THE COMPANY LOOKS LIKE AND SOUNDS LIKE, when the owner chose to
+    # build this application in their organisation's design language. Adopted
+    # beside the Blueprint by the same route a supplied document is, and
+    # empty for every node that cannot act on it — the table in
+    # `brand_language.READ_FOR` decides, not a condition here.
+    from services.blueprint import brand_language as _brand
+    user += _brand.addendum(output_dir, node, doc)
     # EVERY BRANCH ABOVE CARRIES THE REJECTION; THIS ONE DROPPED IT. The
     # specialised branches return early having appended `feedback`, so the
     # nodes with no branch of their own — data_model, business_rules, apis,

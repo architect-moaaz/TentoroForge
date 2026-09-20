@@ -56,6 +56,13 @@
             "forge",
             "uxpilot"
           ]
+        },
+        "designLanguage": {
+          "type": "string",
+          "enum": [
+            "company",
+            "custom"
+          ]
         }
       },
       "required": [

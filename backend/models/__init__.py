@@ -23,6 +23,7 @@ from models.project import (
 )
 from models.template import AppTemplate
 from models.discovery import DiscoverySession
+from models.brand_profile import OrgBrandProfile, BrandDiscoveryStatus
 from models.rules import ProjectRule, AppAccessPolicy, FieldAccessPolicy
 from models.decision import (
     DecisionTable,
@@ -70,6 +71,8 @@ __all__ = [
     "Version",
     "AppTemplate",
     "DiscoverySession",
+    "OrgBrandProfile",
+    "BrandDiscoveryStatus",
     "ProjectRule",
     "AppAccessPolicy",
     "FieldAccessPolicy",

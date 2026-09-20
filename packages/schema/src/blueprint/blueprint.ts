@@ -50,6 +50,21 @@ import {
  */
 export const UiDesigner = z.enum(["forge", "uxpilot"]);
 
+/**
+ * Where this application's design language comes from: the company's own,
+ * discovered once from their website during onboarding and held by the
+ * organisation, or one designed for this application alone.
+ *
+ * A closed pair for the same reason `UiDesigner` is one — the
+ * `brand_design_system` node dispatches on it without interpretation, and an
+ * organisation that never finished discovery has nothing to project, so the
+ * value a build reads must be a fact rather than a guess. Absent means the
+ * question has not been put to the user yet; `custom` is what an application
+ * built before the company profile existed was, and what an organisation
+ * with no profile can only be.
+ */
+export const DesignLanguageSource = z.enum(["company", "custom"]);
+
 export const ApplicationMeta = z.object({
   id: z.string(),
   name: z.string(),
@@ -68,6 +83,20 @@ export const ApplicationMeta = z.object({
    * merges its own proposal over the singleton. Absent means `forge`.
    */
   uiDesigner: UiDesigner.optional(),
+  /**
+   * The application-wide answer to "whose design language is this", recorded
+   * when the user answers Smith at the approval gate.
+   *
+   * On `application` for the reason `uiDesigner` is: no agent in the registry
+   * may write this section, so a model merging its own proposal over the
+   * singleton cannot overwrite what a person chose. `company` makes the
+   * organisation's discovered tokens outrank the design agent's own palette
+   * (the `brand_design_system` node projects them after it); `custom` leaves
+   * the agent's design standing. Absent means unasked — which is also what an
+   * organisation with no finished discovery stays, since there would be
+   * nothing to offer.
+   */
+  designLanguage: DesignLanguageSource.optional(),
 });
 
 // ===========================================================================

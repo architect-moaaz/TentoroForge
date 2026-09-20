@@ -12,7 +12,7 @@
 import { use } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Building2, KeyRound, Server } from "lucide-react";
+import { BarChart3, Building2, KeyRound, Palette, Server } from "lucide-react";
 import { useIsOrgAdmin } from "@/lib/org-admin";
 
 interface Tab {
@@ -23,6 +23,7 @@ interface Tab {
 
 const TABS: Tab[] = [
   { href: "",              label: "General",      icon: Building2 },
+  { href: "/brand",        label: "Brand",        icon: Palette },
   { href: "/integrations", label: "Integrations", icon: KeyRound },
   { href: "/mcp-servers",  label: "MCP Servers",  icon: Server },
   // Usage & Cost is admin-only — filtered out of the bar for members

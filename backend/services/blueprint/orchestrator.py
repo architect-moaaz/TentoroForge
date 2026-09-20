@@ -317,7 +317,23 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # key wins, and §40/§53 rank an explicit user design above anything the
     # platform recommends on its own. Precedence by merge order instead of by
     # asking an agent to defer. Before `page_layouts`, so composition sees it.
-    _n("figma_design_system", "figma_intelligence", ("design_system",),
+    # THE ORGANISATION'S OWN DESIGN LANGUAGE, when the owner chose it at the
+    # approval gate. Deterministic for the same reason the Figma projection
+    # is: the palette was counted off the company's rendered site and a model
+    # asked to honour a hex can only restate it, while a model asked to
+    # "apply the brand" returns a plausible neighbour of it.
+    #
+    # Between the design agent and the Figma projection, and the ordering is
+    # the precedence. `designSystem` is a singleton, so `upsert` shallow
+    # merges and the last writer of a key wins: the company outranks what the
+    # platform recommended on its own, and a design the user attached to THIS
+    # application outranks the company default, because attaching one is a
+    # statement about this application specifically. A no-op unless
+    # `application.designLanguage` is `company`.
+    _n("brand_design_system", "accessibility", ("design_system",),
+       ("designSystem",), kind="service",
+       note="the organisation's discovered design language, when chosen"),
+    _n("figma_design_system", "figma_intelligence", ("brand_design_system",),
        ("designSystem",), kind="service",
        note="§40, §47, §53; explicit design outranks generic recommendation"),
     # §34 — ONE TREE PER PAGE, FROM THE PAGE'S OWN CONTRACT. No model designs
@@ -2989,10 +3005,60 @@ def _project_design_reference(svc: BlueprintService) -> None:
     apply_design_reference(svc)
 
 
+def _project_company_language(svc: BlueprintService) -> None:
+    """The organisation's design language, when this application is built in it.
+
+    Two conditions, both read from the document rather than from a flag: the
+    owner answered `company` at the approval gate, and a language was adopted
+    into this build. Either missing is a no-op — an application whose owner
+    chose `custom`, or whose organisation never finished discovery, keeps the
+    design the agent authored.
+
+    A shallow merge, deliberately. The company states colour, type, corners
+    and density; the agent owns accessibility rules, responsive rules,
+    interaction conventions and navigation approach, and those survive
+    untouched because the overlay does not carry those keys.
+    """
+    from services.blueprint import brand_language
+
+    choice = str((svc.doc.get("application") or {}).get("designLanguage") or "")
+    if choice != "company":
+        return
+    overlay = brand_language.tokens(svc.output_dir)
+    if not overlay:
+        logger.info("[brand] designLanguage=company but nothing was adopted "
+                    "into %s; the design agent's own system stands",
+                    svc.output_dir)
+        return
+
+    # The personality line is rewritten rather than merged: the agent wrote
+    # one explaining the palette IT chose, and leaving that beside a palette
+    # it did not choose is a document that contradicts itself — which is
+    # exactly what a later change would argue with.
+    existing = svc.doc.get("designSystem") or {}
+    company = overlay.get("_companyName") or "the company"
+    overlay = {k: v for k, v in overlay.items() if not k.startswith("_")}
+    overlay["visualPersonality"] = (
+        f"{company}'s own design language, read from their website and chosen "
+        f"by the owner for this application. "
+        + str(existing.get("visualPersonality") or "")
+    ).strip()
+
+    # A plain merge onto the section, the way the Figma projection writes
+    # its own — `designSystem` is a singleton and the last writer of a key
+    # wins, which is the precedence this node exists to express.
+    current = svc.doc.get("designSystem") or {}
+    svc.doc["designSystem"] = {**current, **overlay}
+    svc.save()
+    logger.info("[brand] projected %s over designSystem in %s",
+                ", ".join(sorted(overlay)), svc.output_dir)
+
+
 SERVICE_HANDLERS: dict[str, Any] = {
     "page_layouts": _compose_page_layouts,
     "auth_pages": _declare_auth_pages,
     "content_fields": _add_content_fields,
+    "brand_design_system": _project_company_language,
     "figma_design_system": _project_design_reference,
     "verification": _run_verification,
     "apis": _derive_apis,

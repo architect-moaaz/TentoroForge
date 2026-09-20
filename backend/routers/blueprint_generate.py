@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 #: A task with no strong reference can be collected mid-await, so they are held
 #: here until they finish and discard themselves.
 from services import run_registry
+from services.smith import design_language
 from services.blueprint.run_progress import Progress
 
 _DETACHED: set[asyncio.Task] = set()
@@ -813,6 +814,7 @@ async def generate_via_blueprint(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     output_dir.mkdir(parents=True, exist_ok=True)
     _adopt_design_references(output_dir, str(project_id))
+    await _adopt_brand_language(output_dir, project, db)
     # The application is projected beside the Blueprint it comes from, so a
     # later incremental change has somewhere to write. A projection with no
     # app root blocks, and takes every node that depends on it.
@@ -1341,6 +1343,10 @@ async def smith_chat(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     output_dir.mkdir(parents=True, exist_ok=True)
     _adopt_design_references(output_dir, str(project_id))
+    # THE COMPANY'S OWN DESIGN LANGUAGE, when the organisation finished
+    # discovery. Copied in on every turn, used only if the owner says so at
+    # the gate — see `_adopt_brand_language`.
+    await _adopt_brand_language(output_dir, project, db)
     app_root = str(output_dir / "app")
 
     queue: asyncio.Queue = asyncio.Queue()
@@ -1496,6 +1502,33 @@ async def smith_chat(
             # wired. A declaration that looked like a connection was the whole
             # of "the confirmation email never came".
 
+            # WHOSE DESIGN LANGUAGE — the offer, and the answer to it. Read
+            # once per turn from what was adopted beside the Blueprint rather
+            # than from the database, so the gate asks about exactly the
+            # language the build would use. None when the organisation never
+            # finished discovery, which is when nobody is asked at all.
+            _offer = _design_language_offer(output_dir) if svc is not None else None
+
+            # THE ANSWER IS A COMMAND, like the approval it stands in for. The
+            # option was clicked on the card Smith showed at the gate, so it
+            # arrives as an ordinary message and must not be reasoned about —
+            # `answer_in` recognises it only when the immediately preceding
+            # turn was the question itself, which is what keeps the company's
+            # name in a normal sentence from deciding anything.
+            if svc is not None:
+                _answer = design_language.answer_in(
+                    req.message,
+                    [(t.role, t.text) for t in req.history if t.text],
+                    (_offer or ("", ""))[0])
+                if _answer:
+                    emit("message", {
+                        "text": design_language.record(
+                            svc, _answer,
+                            company_name=(_offer or ("", ""))[0])})
+                    return _run_dag(str(output_dir), app_root, req.message,
+                                    approved=True, emit=emit,
+                                    app_name=getattr(project, "name", "") or "")
+
             # AN APPROVAL IS A COMMAND, NOT A MESSAGE TO REASON ABOUT. §25's
             # gate is answered by pressing the button, and the answer means
             # build — there is nothing to clarify and nothing to ask back.
@@ -1506,6 +1539,21 @@ async def smith_chat(
             # turn. So the definition was written, the gate was shown, and
             # pressing approve started a conversation instead of a build.
             if req.approved:
+                # ONE QUESTION FIRST, AND ONLY WHEN THERE IS SOMETHING TO ASK
+                # ABOUT. Both nodes that consume the answer run inside the
+                # build below, so it has to be settled before `_run_dag`. A
+                # two-option question with an empty option is an obstacle in
+                # front of a build rather than a choice, which is why this is
+                # gated on the organisation having a language at all.
+                if _offer is not None \
+                        and design_language.undecided(svc.doc, available=True):
+                    name, summary = _offer
+                    emit("message", {
+                        "text": design_language.question(name, summary=summary),
+                        "options": design_language.options(name),
+                        "status": "asked"})
+                    return {"status": "asked"}
+
                 # VERIFICATION IS THE USER'S CALL, NOT AN AUTOMATIC COST. `_run_dag`
                 # offers it beside the completion line for every approved build
                 # (see there), so a build that outran its turn still delivers the
@@ -1873,6 +1921,94 @@ async def smith_chat(
             yield item
 
     return EventSourceResponse(stream())
+
+
+async def _adopt_brand_language(output_dir: Path, project: Any,
+                                db: Any) -> bool:
+    """Copy the organisation's design language in beside the Blueprint.
+
+    Done here, before the run, for the reason `_adopt_design_references` is:
+    `services.blueprint` is constructible from an output_dir and nothing else,
+    which is what lets a Blueprint load from a fixture or an export with no
+    database in the process. A node reaching into Postgres for a palette would
+    end that.
+
+    ADOPTED WHETHER OR NOT IT IS USED. The files being present is what lets
+    the approval gate name the company and describe what was read; whether the
+    application is actually BUILT in that language is
+    `application.designLanguage`, which both consumers check
+    (`brand_language.addendum`, the `brand_design_system` node). Copying is
+    cheap; asking the user to choose between an unnamed option is not.
+
+    Re-adopted on every run so a company that redesigns and re-runs discovery
+    reaches the next build, and best-effort throughout: a profile that cannot
+    be read is a build that proceeds without one, never a failed generation.
+    """
+    from services.blueprint import brand_language
+
+    org_id = getattr(project, "org_id", None)
+    if not org_id:
+        return False
+    try:
+        from models.brand_profile import OrgBrandProfile
+        from sqlalchemy import select
+
+        found = await db.execute(
+            select(OrgBrandProfile).where(OrgBrandProfile.org_id == org_id))
+        profile = found.scalar_one_or_none()
+    except Exception as exc:  # noqa: BLE001 — no profile readable is no profile
+        logger.info("[brand] %s: profile not readable (%s)", org_id, exc)
+        return False
+
+    if profile is None or not profile.usable:
+        brand_language.clear(output_dir)
+        return False
+
+    logo_bytes = logo_name = logo_media = None
+    try:
+        from services.brand_discovery.store import logo_file
+
+        path = logo_file(str(org_id), (profile.design or {}).get("logo"))
+        if path is not None:
+            logo_bytes = path.read_bytes()
+            logo_name = path.name
+            logo_media = str((profile.design or {}).get("logo", {}).get("mediaType") or "")
+    except Exception as exc:  # noqa: BLE001 — a mark is not the language
+        logger.info("[brand] %s: mark not readable (%s)", org_id, exc)
+
+    try:
+        brand_language.adopt(
+            output_dir,
+            design_md=profile.design_md or "",
+            design=profile.design or {},
+            company_name=profile.company_name or "",
+            logo_bytes=logo_bytes,
+            logo_name=logo_name or "",
+            logo_media=logo_media or "")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[brand] %s: could not adopt (%s)", org_id, exc)
+        return False
+    return True
+
+
+def _design_language_offer(output_dir: Path) -> tuple[str, str] | None:
+    """`(company_name, summary)` when there is a language to offer, else None.
+
+    Read off what was adopted rather than out of the database, so the gate
+    asks about exactly the language the build would use — the two cannot
+    disagree about which palette is on offer.
+    """
+    from services.blueprint import brand_language
+    from services.smith import design_language
+
+    if not brand_language.available(output_dir):
+        return None
+    tokens = brand_language.tokens(output_dir)
+    if not tokens:
+        return None
+    name = str(tokens.get("_companyName") or "")
+    return name, design_language.summary_of(
+        {k: v for k, v in tokens.items() if not k.startswith("_")})
 
 
 def _adopt_design_references(output_dir: Path, project_id: str) -> list[str]:
