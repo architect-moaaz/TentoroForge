@@ -23,7 +23,7 @@ import type { usePreview } from "@/hooks/usePreview";
 import { cn } from "@/lib/utils";
 
 import { InlineTextEditor } from "./InlineTextEditor";
-import { dropPosition } from "./lib/drop";
+import { dropPosition, moveLanding } from "./lib/drop";
 import { mainRoot, plainName } from "./lib/plain";
 import { DEVICE_WIDTHS, useEditorStore } from "./store";
 import type { Rect } from "./types";
@@ -202,14 +202,45 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
           if (!s.rightOpen) s.setRightOpen(true);
           break;
         case "drag-over": {
-          // A palette item over the page: say where it would land.
+          // A palette item — or a selected element being dragged — over the
+          // page: say where it would land.
           const model = s.doc?.model;
-          if (s.mode !== "design" || !s.dragComponent || !model) { post("drop-hint", {}); break; }
+          const moving = p.moving ? String(p.moving) : null;
+          if (s.mode !== "design" || !model || (!s.dragComponent && !moving)) { post("drop-hint", {}); break; }
           const node = p.fid ? model.nodes[String(p.fid)] : null;
-          if (!node) { post("drop-hint", { fid: mainRoot(model), where: "inside" }); break; }
-          post("drop-hint", { fid: node.id, where: dropPosition(node, Number(p.y ?? 1)) });
+          if (!node) {
+            const root = mainRoot(model);
+            if (moving && root && !moveLanding(model, moving, root, "inside")) { post("drop-hint", {}); break; }
+            post("drop-hint", { fid: root, where: "inside" });
+            break;
+          }
+          const where = dropPosition(node, Number(p.y ?? 1));
+          if (moving && !moveLanding(model, moving, node.id, where)) { post("drop-hint", {}); break; }
+          post("drop-hint", { fid: node.id, where });
           break;
         }
+        case "move-drop": {
+          // A selected element let go on the page: move it there.
+          post("drop-hint", {});
+          const model = s.doc?.model;
+          const moving = String(p.moving || "");
+          if (s.mode !== "design" || !model || !model.nodes[moving]) break;
+          const node = p.fid ? model.nodes[String(p.fid)] : null;
+          const targetId = node ? node.id : mainRoot(model);
+          if (!targetId) break;
+          const where = node ? dropPosition(node, Number(p.y ?? 1)) : "inside";
+          const landing = moveLanding(model, moving, targetId, where);
+          if (!landing) break;
+          const from = model.nodes[moving];
+          const at = landing.index ?? (model.nodes[landing.parentId]?.children.length ?? 0);
+          // Let go where it already is: nothing to write.
+          if (from.parent === landing.parentId && (at === from.index || at === from.index + 1)) break;
+          void s.moveNode(moving, landing.parentId, landing.index);
+          break;
+        }
+        case "move-cancel":
+          post("drop-hint", {});
+          break;
         case "drop": {
           const comp = String(p.component || s.dragComponent || "");
           s.setDragComponent(null);

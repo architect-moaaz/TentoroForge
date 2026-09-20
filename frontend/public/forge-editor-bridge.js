@@ -6,8 +6,10 @@
  * (`data-fid`, which the editor stamps on the running copy of each page),
  * draws hover/selection outlines, supports a region drag that resolves to
  * node ids, takes a palette item dropped onto the page (the editor decides
- * where it lands and inserts it), reports where the app navigates to, and
- * steps out of the way entirely in Preview mode.
+ * where it lands and inserts it), lets a selected element be dragged to a
+ * new place on the page (the editor decides where it lands and moves it),
+ * reports where the app navigates to, and steps out of the way entirely in
+ * Preview mode.
  *
  * Protocol: messages are `{type: "forge-editor:<name>", payload}`, posted to
  * the parent at the page's own origin.
@@ -38,6 +40,10 @@
   layer.appendChild(dropBox);
   var dropBar = box("#2563eb", "0");
   layer.appendChild(dropBar);
+  // The element being moved, travelling with the pointer.
+  var ghost = box("rgba(37,99,235,0.10)", "2px dashed #2563eb");
+  ghost.style.opacity = "0.85";
+  layer.appendChild(ghost);
   var selectBoxes = [];
   document.documentElement.appendChild(layer);
 
@@ -175,7 +181,7 @@
 
   // --- pointer -------------------------------------------------------------
   document.addEventListener("mousemove", function (e) {
-    if (mode !== "design") return;
+    if (mode !== "design" || (moving && moving.started)) return;
     var fid = ownerFid(e.target);
     if (fid !== hovered) {
       hovered = fid;
@@ -191,6 +197,8 @@
     if (mode === "preview") return;
     swallow(e);
     if (mode !== "design") return;
+    // The click that ends a move is not a selection.
+    if (moved) { moved = false; return; }
     var fid = ownerFid(e.target);
     send("select", { fid: fid, rect: fid ? rectOfFid(fid) : null,
                      shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
@@ -211,7 +219,7 @@
   document.addEventListener("keydown", function (e) {
     if (mode === "preview") return;
     var typing = /^(INPUT|TEXTAREA|SELECT)$/.test((e.target && e.target.tagName) || "") || (e.target && e.target.isContentEditable);
-    if (e.key === "Escape") { send("key", { key: "escape" }); return; }
+    if (e.key === "Escape") { if (moving && moving.started) { cancelMove(); return; } send("key", { key: "escape" }); return; }
     if (typing) return;
     var mod = e.metaKey || e.ctrlKey;
     if (e.key === "Delete" || e.key === "Backspace") { swallow(e); send("key", { key: "delete" }); }
@@ -221,6 +229,90 @@
     else if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight") { swallow(e); send("key", { key: e.key.toLowerCase(), shift: e.shiftKey, alt: e.altKey }); }
     else if (e.key === "Enter") { swallow(e); send("key", { key: "enter" }); }
   }, true);
+
+  // --- moving a selected element --------------------------------------------
+  // Click selects; a drag that starts on something selected moves it. The
+  // frame only reports what is under the pointer (never the moving element
+  // or anything inside it) and where it was let go; the editor decides.
+  // Pointer events, not mouse events: design mode prevents the default of
+  // every pointerdown (so the app runs nothing), and a prevented pointerdown
+  // suppresses the mouse events that would have followed it.
+  var moving = null;   // { fid, x, y, started, rect, dx, dy }
+  var moved = false;   // the click after a move is swallowed
+  function isUnder(fid, ancestor) { return fid === ancestor || fid.indexOf(ancestor + ".") === 0; }
+  /** The fid under a DOM node that is not the moving element or inside it. */
+  function ownerFidOutside(node, movingFid) {
+    if (!node || isOurs(node)) return null;
+    var el = node.nodeType === 1 ? node : node.parentElement;
+    var start = el;
+    while (start && !fiberOf(start)) start = start.parentElement;
+    for (var f = fiberOf(start); f; f = f.return) {
+      var fid = fidOfFiber(f);
+      if (fid && !isUnder(fid, movingFid)) return fid;
+    }
+    for (var d = el && el.closest ? el.closest("[data-fid]") : null; d; d = d.parentElement && d.parentElement.closest("[data-fid]")) {
+      var id = d.getAttribute("data-fid");
+      if (id && !isUnder(id, movingFid)) return id;
+    }
+    return null;
+  }
+  function moveTarget(e) {
+    ghost.style.display = "none";   // so the element under the pointer is the page's, not ours
+    var under = document.elementFromPoint(e.clientX, e.clientY);
+    ghost.style.display = "block";
+    var fid = ownerFidOutside(under, moving.fid);
+    var r = fid && rectOfFid(fid);
+    if (!r) return { fid: null, y: 1 };
+    return { fid: fid, y: r.height ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 1 };
+  }
+  function endMove() {
+    moving = null;
+    ghost.style.display = "none";
+    hideDrop();
+    document.documentElement.style.cursor = "";
+  }
+  document.addEventListener("pointerdown", function (e) {
+    if (mode !== "design" || e.button !== 0 || !e.isPrimary || isOurs(e.target)) return;
+    var fid = ownerFid(e.target);
+    if (!fid || selected.indexOf(fid) < 0) return;
+    var r = rectOfFid(fid);
+    if (!r) return;
+    moving = { fid: fid, x: e.clientX, y: e.clientY, started: false, rect: r, dx: e.clientX - r.left, dy: e.clientY - r.top };
+  }, true);
+  document.addEventListener("pointermove", function (e) {
+    if (!moving || !e.isPrimary) return;
+    if (!moving.started) {
+      if (Math.abs(e.clientX - moving.x) < 5 && Math.abs(e.clientY - moving.y) < 5) return;
+      moving.started = true;
+      document.documentElement.style.cursor = "grabbing";
+      hoverBox.style.display = "none";
+    }
+    place(ghost, { top: e.clientY - moving.dy, left: e.clientX - moving.dx, width: moving.rect.width, height: moving.rect.height });
+    var t = moveTarget(e);
+    var band = t.y < 0.3 ? 0 : t.y > 0.7 ? 2 : 1;
+    if (!dragAt || dragAt.fid !== t.fid || dragAt.band !== band) {
+      dragAt = { fid: t.fid, band: band };
+      send("drag-over", { fid: t.fid, y: t.y, moving: moving.fid });
+    }
+  }, true);
+  document.addEventListener("pointerup", function (e) {
+    if (!moving) return;
+    if (!moving.started) { moving = null; return; }
+    swallow(e);
+    var t = moveTarget(e);
+    var fid = moving.fid;
+    moved = true;
+    dragAt = null;
+    endMove();
+    send("move-drop", { fid: t.fid, y: t.y, moving: fid });
+  }, true);
+  function cancelMove() {
+    if (!moving) return;
+    var started = moving.started;
+    endMove();
+    if (started) send("move-cancel", {});
+  }
+  document.addEventListener("pointercancel", cancelMove, true);
 
   // --- region selection ----------------------------------------------------
   var drag = null;
@@ -316,6 +408,7 @@
     switch (cmd) {
       case "set-mode":
         mode = p.mode === "preview" || p.mode === "region" ? p.mode : "design";
+        cancelMove();
         hoverBox.style.display = "none";
         document.documentElement.style.cursor = mode === "region" ? "crosshair" : "";
         reportRects();

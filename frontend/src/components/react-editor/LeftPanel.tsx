@@ -18,8 +18,8 @@ import { cn } from "@/lib/utils";
 
 import { ChartDialog } from "./ChartDialog";
 import { PagesPanel } from "./PagesPanel";
-import { VOID, dropPosition } from "./lib/drop";
-import { isDescendant, mainRoot, plainName, plainType } from "./lib/plain";
+import { VOID, dropPosition, moveLanding } from "./lib/drop";
+import { mainRoot, plainName, plainType } from "./lib/plain";
 import { checkModel, findingsByNode } from "./lib/readiness";
 import { entityColumns, formImports, formJsx, tableImports, tableJsx, workflowButtonImports, workflowButtonJsx } from "./lib/templates";
 import { useEditorStore, type LeftTab } from "./store";
@@ -308,12 +308,11 @@ function LayersTab() {
     setDrop(null);
     const compId = e.dataTransfer.getData("application/x-forge-component");
     const movingId = e.dataTransfer.getData("application/x-forge-node");
-    const parentId = where === "inside" ? target.id : target.parent!;
-    const index = where === "inside" ? null : target.index + (where === "after" ? 1 : 0);
     if (compId) {
       await useEditorStore.getState().dropComponent(compId, target.id, where);
-    } else if (movingId && movingId !== target.id && !isDescendant(model, target.id, movingId)) {
-      await moveNode(movingId, parentId, index);
+    } else if (movingId) {
+      const landing = moveLanding(model, movingId, target.id, where);
+      if (landing) await moveNode(movingId, landing.parentId, landing.index);
     }
   };
 
