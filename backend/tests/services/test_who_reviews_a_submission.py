@@ -240,3 +240,13 @@ def test_the_menu_does_not_offer_what_it_will_refuse():
               / "templates/app-foundation/src/app/(dashboard)/layout.tsx").read_text()
     assert "navProps.groups = visibleTo(navProps.groups," in layout
     assert "if (items.length) out.push({ ...group, items });" in layout, "an emptied heading goes too"
+
+
+def test_rows_that_are_already_there_are_not_a_seed_failure():
+    """A restart reported "SEED MISMATCH: members planned rows inserted 0"
+    and withheld the fingerprint, so every start seeded again — the rows were
+    simply already in the table (0l133sp2, second start)."""
+    seed = (Path(__file__).resolve().parents[2] / "templates/runtime/seed.ts").read_text()
+    assert "return got.length || null;" in seed
+    # `null` is the caller's word for "done"; 0 is "try again, then complain".
+    assert "if (n === 0) next.push(t);" in seed

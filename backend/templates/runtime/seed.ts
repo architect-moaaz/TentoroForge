@@ -745,7 +745,12 @@ async function seedDomain(adminId: string | null, imported: Set<string> = new Se
           }
           ids[norm(t.name)] = [...existingIds, ...got];
           console.log(`✅ ${t.name} already had ${c} rows — added ${got.length}/${keyed.length} keyed by email`);
-          return got.length;
+          // NOTHING NEW IS NOT NOTHING. 0 here means every planned row was
+          // already in the table; 0 from the insert path below means every
+          // row was REFUSED. Returning the same number for both made a
+          // restart report "❌ SEED MISMATCH: members planned rows inserted
+          // 0" and withhold the fingerprint, so every start seeded again.
+          return got.length || null;
         }
         console.log(`ℹ️  ${t.name} already has ${c} rows — skipping insert`);
         return null;
