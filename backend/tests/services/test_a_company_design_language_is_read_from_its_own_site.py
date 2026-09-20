@@ -104,6 +104,29 @@ def test_a_typeface_the_site_did_not_choose_is_not_a_typeface():
         "fontFamilyBase": "Inter", "fontFamilyHeading": "Fraunces"}
 
 
+def test_a_token_a_site_points_at_is_not_the_name_of_a_typeface():
+    """A site built with Elementor hands back
+    `var( --e-global-typography-text-font-family )` — itself pointing at a
+    token, which resolves to nothing for a reader who never loaded that
+    stylesheet. It was recorded as a family and shown to a new customer
+    during onboarding as the font their company uses.
+
+    The fallback inside a reference IS a name, and is taken."""
+    from services.brand_discovery.site import _first_family
+
+    assert _first_family("var( --e-global-typography-text-font-family )") == "sans-serif"
+    assert _first_family("--brand-font") == "sans-serif"
+    assert _first_family("var(--brand-font, Inter)") == "Inter"
+    assert _first_family('var(--x, "Playfair Display", serif)') == "Playfair Display"
+    assert _first_family('"Inter", -apple-system, sans-serif') == "Inter"
+
+    # And nothing that names only a reference reaches the design system.
+    r = _page(action_bg=[("#1B7F5A", 5)])
+    r.fonts.update([_first_family("var( --e-global-typography-text-font-family )")] * 40)
+    design, _ = reader.design_system_from(r)
+    assert "typography" not in design
+
+
 def test_the_corner_is_the_decision_not_the_hundred_elements_inheriting_it():
     """`0px` is every element nobody styled; it must not outvote the radius
     the site actually chose for its controls."""

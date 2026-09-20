@@ -301,13 +301,33 @@ def _absorb(reading: Reading, census: dict) -> None:
     reading.text = str(census.get("text") or "")
 
 
+#: `var(--x)` or `var(--x, Inter)` where a family should be.
+_VAR_REF = re.compile(r"^var\(\s*--[^,)]+(?:,\s*(?P<fallback>[^)]+))?\)$", re.I)
+
+
 def _first_family(declaration: str) -> str:
     """`"Inter", -apple-system, sans-serif` -> `Inter`.
 
     The first name is the one the site chose; the rest is the stack it falls
     back to, which is the same on every site and says nothing about anyone.
+
+    A NAME, NEVER A REFERENCE TO ONE. A page built with Elementor (or any
+    theme that keeps its type in custom properties) can hand back
+    `var( --e-global-typography-text-font-family )` — the site pointing at
+    its own token, which does not resolve for a reader who never loaded that
+    stylesheet. Recorded as a family, it was shown to a new customer during
+    onboarding as the font their company uses. The fallback inside the
+    reference IS a name and is taken (`var(--brand, Inter)` -> `Inter`);
+    a reference with nothing behind it means this page told us no typeface,
+    which is what "sans-serif" says here.
     """
-    first = str(declaration or "").split(",")[0].strip().strip("\"'")
+    text = str(declaration or "").strip()
+    reference = _VAR_REF.match(text)
+    if reference:
+        text = (reference.group("fallback") or "").strip()
+    first = text.split(",")[0].strip().strip("\"'")
+    if first.startswith("--") or "var(" in first.lower():
+        return "sans-serif"
     return first or "sans-serif"
 
 
