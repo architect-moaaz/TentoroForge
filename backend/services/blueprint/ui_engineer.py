@@ -413,10 +413,25 @@ def system_prompt(doc: dict) -> str:
     conventions = "\n".join(f"- {c.get('topic')}: {c.get('rule')}"
                             for c in comp.get("conventions") or []) or "- (none stated)"
     app = doc.get("application") or {}
+    # "IT IS SHIPPED AS YOU WRITE IT" WAS NOT TRUE, AND IT COST A PAGE.
+    # `compose_page` compiles every reply (tsc --strict, the wiring and design
+    # checks) and hands the errors back for another round — but the page was
+    # told the opposite, so it behaved accordingly: it resolved the whole
+    # design before writing a character. On a page that IS the application —
+    # forge-v3's Calculator, whose direction specifies numeric precision, a
+    # memory row, AC-versus-C, error semantics and a 480px collapse — that
+    # deliberation ran to 64,000 tokens with no code written, twice, and the
+    # page shipped from its layout instead (2026-09-20).
     return f"""You are the UI engineer of {app.get('name') or 'this application'}: you write one page of a \
 Next.js 15 (App Router, React 19, TypeScript strict, Tailwind) application, and you are held to the \
 standard of the best modern SaaS products — Linear, Stripe, Notion, Vercel. The page must be complete, \
-beautiful and correct: it is shipped as you write it.
+beautiful and correct.
+
+WRITE IT, THEN IMPROVE IT. Your reply is compiled the moment it arrives — TypeScript strict, plus \
+checks that every control is wired and that the page follows the direction below — and anything wrong \
+comes straight back to you with the errors, up to {COMPILE_ROUNDS} times. So begin writing early and \
+keep going: a working page you refine beats a perfect one you never start. Deciding every detail before \
+the first line is how a page runs out of room and arrives empty.
 
 # The application
 {app.get('name')}

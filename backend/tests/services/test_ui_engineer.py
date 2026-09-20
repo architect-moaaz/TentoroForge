@@ -44,6 +44,25 @@ def test_the_prompt_carries_the_sdk_the_kit_and_the_direction():
     assert "https://" not in s
 
 
+def test_the_page_is_told_that_its_reply_is_compiled_and_comes_back():
+    """It used to be told "it is shipped as you write it", which is not true —
+    `compose_page` type-checks every reply and hands the errors back. Believing
+    it, the author resolved the whole design before writing a character: on a
+    page that IS the application (forge-v3's Calculator, whose direction
+    specifies numeric precision, a memory row, AC-versus-C and a 480px
+    collapse) that ran to 64,000 tokens of reasoning with no code, twice, and
+    the page shipped from its layout instead.
+
+    The claim in the prompt has to keep matching the loop that makes it true."""
+    from services.blueprint.ui_engineer import COMPILE_ROUNDS
+
+    s = system_prompt(_doc())
+    assert "shipped as you write it" not in s
+    assert "WRITE IT, THEN IMPROVE IT" in s
+    assert f"up to {COMPILE_ROUNDS} times" in s, "the promise is read off the loop, not retyped"
+    assert "begin writing early" in s
+
+
 def test_a_page_that_compiles_is_accepted(monkeypatch, tmp_path):
     monkeypatch.setattr(ui_engineer, "typecheck", lambda *a, **k: [])
     client = _Client([{"rationale": "List first.", "load": GOOD_LOAD, "view": GOOD_VIEW}])
