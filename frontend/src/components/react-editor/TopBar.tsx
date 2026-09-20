@@ -1,9 +1,11 @@
 "use client";
 import { useState } from "react";
 import {
-  Check, ClipboardCheck, Code2, Eye, History, Loader2, Monitor, MousePointer2, PanelLeft, PanelRight,
+  Check, ClipboardCheck, Code2, Eye, History, Loader2, Monitor, MousePointer2, PanelLeft, PanelRight, Sparkles,
   Pencil, Play, Redo2, RotateCcw, Server, Smartphone, SquareDashedMousePointer, Tablet, Undo2, X, Zap,
 } from "lucide-react";
+
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,6 +60,9 @@ export function TopBar({ preview }: { preview: ReturnType<typeof usePreview> }) 
   const rightOpen = useEditorStore((s) => s.rightOpen);
   const setLeftOpen = useEditorStore((s) => s.setLeftOpen);
   const setRightOpen = useEditorStore((s) => s.setRightOpen);
+  const smithOpen = useEditorStore((s) => s.smith.open);
+  const selectionCount = useEditorStore((s) => s.selection.length);
+  const setSmith = useEditorStore((s) => s.setSmith);
   const setShowCode = useEditorStore((s) => s.setShowCode);
   const setShowHistory = useEditorStore((s) => s.setShowHistory);
   const setShowReadiness = useEditorStore((s) => s.setShowReadiness);
@@ -144,6 +149,8 @@ export function TopBar({ preview }: { preview: ReturnType<typeof usePreview> }) 
       )}
       <div className="sticky right-0 ml-auto shrink-0 bg-card pl-1">
         <Seg active={rightOpen} onClick={() => setRightOpen(!rightOpen)} title="Show or hide settings (⌘.)"><PanelRight className="h-3.5 w-3.5" /></Seg>
+        <Seg active={smithOpen && selectionCount > 0} onClick={() => { if (!selectionCount) toast.info("Select something on the page first, then ask Smith about it."); else setSmith({ open: !smithOpen }); }}
+          title={smithOpen && selectionCount ? "Close Smith" : "Ask Smith about what is selected"}><Sparkles className="h-3.5 w-3.5" /></Seg>
       </div>
     </div>
   );

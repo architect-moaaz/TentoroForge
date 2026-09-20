@@ -201,8 +201,9 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
           } else {
             s.select([String(p.fid)], { extend: !!p.shift || !!p.meta, toggle: !!p.meta });
           }
-          if (!s.smith.open && !s.smith.pinned) s.setSmith({ open: true });
           // Selecting is how something is configured: its settings come with it.
+          // Smith is not summoned by a click — the window opens from its own
+          // button, or from "Ask Smith" in Settings.
           // A closed panel whose toggle had scrolled out of the top bar left
           // a selected component with nothing to set.
           if (!s.rightOpen) s.setRightOpen(true);
@@ -279,7 +280,7 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
           break;
         }
         case "region":
-          if (Array.isArray(p.fids) && p.fids.length) { s.select(p.fids.map(String)); s.setSmith({ open: true }); }
+          if (Array.isArray(p.fids) && p.fids.length) s.select(p.fids.map(String));
           s.setRegionSelect(false);
           break;
         case "hover":
