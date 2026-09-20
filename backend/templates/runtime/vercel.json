@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "buildCommand": "npx tsx src/db/reset-schema.ts && npx drizzle-kit push --config=drizzle.config.ts --force --verbose < /dev/null && npx tsx src/db/seed.ts && next build && node scripts/fix-rsc-manifest.js",
+  "buildCommand": "npx tsx src/db/reset-schema.ts && npx tsx src/db/prepare-schema.ts && npx drizzle-kit push --config=drizzle.config.ts --force --verbose < /dev/null && npx tsx src/db/seed.ts && next build && node scripts/fix-rsc-manifest.js",
   "installCommand": "npm install --legacy-peer-deps",
   "crons": [
     {

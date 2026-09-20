@@ -71,3 +71,29 @@ def test_the_start_script_cannot_be_asked_a_question():
     assert runs, "the start script no longer migrates"
     for line in runs:
         assert "--force" in line and "< /dev/null" in line, line
+
+
+def test_the_constraints_push_would_ask_about_are_added_before_it():
+    """0l133sp2's own start: push waited at "about to add
+    disputes_rental_id_unique ... Do you want to truncate disputes table?"
+    with /dev/null on its stdin. On Vercel nobody can answer at all, so the
+    question must not be reachable: the constraint is added first."""
+    src = (TEMPLATES / "app-foundation" / "src" / "db" / "prepare-schema.ts").read_text()
+    assert "ADD CONSTRAINT" in src and "UNIQUE" in src
+    assert "TRUNCATE" not in src and "DROP " not in src, "it never destroys rows"
+    assert "HAVING count(*) > 1" in src, "rows that break the uniqueness are named, not deleted"
+
+
+@pytest.mark.parametrize("where", ["build", "start"])
+def test_nothing_pushes_before_the_schema_is_prepared(where):
+    if where == "build":
+        command = json.loads((TEMPLATES / "runtime" / "vercel.json").read_text())["buildCommand"]
+        command = command.replace("drizzle-kit push", "npx drizzle-kit push", 0) or command
+    else:
+        import inspect
+
+        from services import runtime_injector
+        command = inspect.getsource(runtime_injector)
+    # The comments name the command too; the line that RUNS it is `npx ...`.
+    needle = "npx drizzle-kit push" if where == "start" else "drizzle-kit push"
+    assert command.index("prepare-schema.ts") < command.index(needle)

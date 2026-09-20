@@ -2238,6 +2238,14 @@ if [ -f drizzle.config.ts ]; then
   if [ -f src/db/extensions.ts ]; then
     npx tsx src/db/extensions.ts < /dev/null || say "${YELLOW}⚠️  Could not enable database extensions — see above${NC}"
   fi
+  # A QUESTION PUSH CANNOT BE ALLOWED TO ASK. It waits at "about to add
+  # <table>_<col>_unique ... Do you want to truncate <table>?" on a database
+  # that already holds rows — on a Vercel build, until the clock runs out.
+  # This adds those constraints itself, so push has nothing to ask about.
+  if [ -f src/db/prepare-schema.ts ]; then
+    npx tsx src/db/prepare-schema.ts < /dev/null || {
+      say "${RED}❌ The database cannot take the definition (see above).${NC}"; exit 1; }
+  fi
   say "${YELLOW}🔄 Running database migrations...${NC}"
   PUSH_LOG="$(mktemp)"
   npx drizzle-kit push --force < /dev/null 2>&1 | tee "$PUSH_LOG"
