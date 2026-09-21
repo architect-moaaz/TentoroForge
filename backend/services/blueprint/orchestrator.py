@@ -2629,6 +2629,14 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # looking alike is unacceptable, and a second composer is a second answer
     # to "what does this screen look like". An honest 404 on the front door is
     # a defect anyone can see; a tile grid nobody authored is one they cannot.
+    # THE LOOK FIRST, BECAUSE NOTHING ABOUT A PAGE CAN BREAK IT. The tokens and
+    # the logo read the design system and nothing else. After the page
+    # projection they shared its fate twice: once when a landing-page composer
+    # threw (above), and again when a route with a camelCase param was refused
+    # — HippieKit's green (#17B65C) never reached tokens.css, so the app ran on
+    # the scaffold's near-black and every button came out the wrong colour.
+    project_brand_logo(svc.doc, app_root)
+    project_design_tokens(svc.doc, app_root)
     result = apply_frontend_projection(svc, app_root)
     # THE DESIGNED PAGES, OVER THEIR FLOORS. The SDK they were compiled against
     # (the fixed half ships with the scaffold; the typed half is this
@@ -2677,8 +2685,6 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # The rail references `/brand/<digest>.<ext>`; this is what puts the file
     # there. After `project_shell`, so the two are read together, and before
     # the tokens for no reason but that the look belongs in one place.
-    project_brand_logo(svc.doc, app_root)
-    project_design_tokens(svc.doc, app_root)
     project_middleware(svc.doc, app_root)
     # The data route needs the same list the matcher was built from.
     project_public_resources(svc.doc, app_root)

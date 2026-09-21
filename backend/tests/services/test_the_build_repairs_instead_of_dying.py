@@ -127,3 +127,24 @@ def test_a_dry_run_that_cannot_start_is_a_look_not_taken(monkeypatch):
     issues: list[dict] = []
     assert build_repair.dispatches_with_repair(_Svc(), "/app", issues) == 0
     assert issues[0]["kind"] == "check" and "could not run" in issues[0]["detail"]
+
+
+def test_a_page_that_fails_to_project_does_not_take_the_colours_with_it(monkeypatch, tmp_path):
+    """The tokens used to be written AFTER the page projection, so any page
+    failure skipped them. HippieKit's route with a camelCase param was refused
+    there, and its green (#17B65C) never reached tokens.css — the app ran on
+    the scaffold's near-black and every button came out the wrong colour."""
+    import services.blueprint.orchestrator as orchestrator
+    import services.blueprint.projection as projection
+
+    written = []
+    monkeypatch.setattr(projection, "project_brand_logo", lambda doc, root: written.append("logo"))
+    monkeypatch.setattr(projection, "project_design_tokens", lambda doc, root: written.append("tokens"))
+
+    def refuse(svc, root):
+        raise ValueError("route segment '[scanId]' contains unsafe characters")
+    monkeypatch.setattr(projection, "apply_frontend_projection", refuse)
+
+    with pytest.raises(ValueError):
+        orchestrator._project_frontend(_Svc(), str(tmp_path))
+    assert written == ["logo", "tokens"], "the look is written before anything about pages can fail"
