@@ -167,3 +167,82 @@ def test_the_nodes_taken_off_the_observer_have_no_repair_rounds(node):
     (`finish` skips `observe`); the runs above show it for three of them."""
     from services.blueprint.orchestrator import OBSERVER_ROUNDS_BY_NODE
     assert OBSERVER_ROUNDS_BY_NODE[node] == 0
+
+
+# ── a subject is judged on what its author was given ─────────────────────
+
+def _with_requirements(svc):
+    svc.doc["requirements"] = [
+        {"id": "REQ-001", "title": "A user signs in with an email", "owner": "data.entities"},
+        {"id": "REQ-002", "title": "A booking records its date", "owner": "data.entities"},
+        {"id": "REQ-003", "title": "Every booking belongs to a user", "owner": "data.entities"},
+    ]
+    users, bookings = svc.doc["data"]["entities"]
+    users["fields"] = [{"name": "id", "type": "uuid", "primaryKey": True}]
+    users["requirements"] = ["REQ-001"]
+    bookings["fields"] = [{"name": "id", "type": "uuid", "primaryKey": True}]
+    bookings["requirements"] = ["REQ-002", "REQ-003"]
+
+
+def test_a_subject_is_shown_the_requirements_its_author_was_given(svc):
+    """Over three weeks, "leaves out something a requirement asks for" was 53%
+    of every repair the observer sent (387 of 729). A field author writing ONE
+    entity is shown only the requirements that entity cites, and was graded
+    against every requirement in the domain — marked down for gaps in other
+    entities it had never been shown."""
+    from services.blueprint.observer import observation_context
+
+    _with_requirements(svc)
+    ctx = observation_context(svc.doc, agent="data_model", subject="ENTITY-001")
+    assert ctx["scope"] == "subject"
+    assert [r["id"] for r in ctx["requirements"]] == ["REQ-001"], "not REQ-002/003, which are Booking's"
+
+
+def test_a_subject_that_cites_nothing_sees_the_section_as_its_author_did(svc):
+    from services.blueprint.observer import observation_context
+
+    _with_requirements(svc)
+    svc.doc["data"]["entities"][0]["requirements"] = []
+    ctx = observation_context(svc.doc, agent="data_model", subject="ENTITY-001")
+    assert {r["id"] for r in ctx["requirements"]} == {"REQ-001", "REQ-002", "REQ-003"}
+
+
+def test_coverage_across_subjects_is_judged_once_after_they_all_land(svc):
+    """Nothing is lost: what no subject covers is still asked — in ONE call,
+    with every subject in view, rather than once per subject."""
+    _with_requirements(svc)
+    critic = _Critic([])
+    _observe(svc, critic)
+    scopes = [c["scope"] for c in critic.calls]
+    assert scopes.count("subject") == 2 and scopes.count("domain") == 1
+    domain = next(c for c in critic.calls if c["scope"] == "domain")
+    assert {r["id"] for r in domain["requirements"]} == {"REQ-001", "REQ-002", "REQ-003"}
+    assert len(domain["output"]["data.entities"]) == 2, "every subject is in view"
+
+
+def test_a_cross_subject_gap_goes_to_the_subject_that_should_carry_it(svc):
+    """The domain pass names the artifact that lacks it, so the repair goes to
+    Booking's author — not to whichever entity happened to be under review."""
+    _with_requirements(svc)
+
+    class _DomainOnly(_Critic):
+        def __call__(self, *, system, user, schema):
+            ctx = json.loads(user)
+            self.calls.append(ctx)
+            found = self.findings if ctx.get("scope") == "domain" else []
+            return json.dumps({"verdict": "fail" if found else "pass", "findings": found})
+
+    gap = {"section": "data.entities", "artifact": "ENTITY-002", "requirement": "REQ-003",
+           "detail": "Booking has no reference to the User it belongs to"}
+    obs = _observe(svc, _DomainOnly([gap]))
+    assert list(obs.findings) == ["ENTITY-002"]
+    assert [t.subject for t in Observer().repairs(obs)] == ["ENTITY-002"]
+
+
+def test_a_node_with_one_subject_is_not_asked_twice(svc):
+    _with_requirements(svc)
+    critic = _Critic([])
+    Observer(critic=critic).observe(
+        "data_model", agent="data_model", subjects=[""], doc=svc.doc,
+        pending=set(), planned={"data.entities"})
+    assert [c["scope"] for c in critic.calls] == ["node"]

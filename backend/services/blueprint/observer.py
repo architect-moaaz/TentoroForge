@@ -302,7 +302,7 @@ def _rows(doc: Mapping[str, Any], section: str, subject: str) -> Any:
 
 def observation_context(
     doc: Mapping[str, Any], *, agent: str, subject: str = "",
-    user_request: str = "",
+    user_request: str = "", scope: str = "",
 ) -> dict[str, Any]:
     """What the critic is shown: the node's output, the requirements in force,
     and the request. Not the whole Blueprint — a page's judgement does not
@@ -340,10 +340,22 @@ def observation_context(
     # bug, so drop it — the owning node still judges it.
     cited = {c for c in cited if _in_scope(by_id.get(c) or {})}
 
+    in_scope = [r for r in _live(doc.get("requirements")) if _in_scope(r)]
+    # A SUBJECT IS JUDGED ON WHAT ITS AUTHOR WAS GIVEN. A fan-out author —
+    # one entity's fields, one workflow's steps — is shown only the
+    # requirements its subject cites (the whole section when it cites none).
+    # Graded against the whole domain and the whole request instead, it was
+    # marked down for gaps in OTHER subjects it was never shown: over three
+    # weeks, "leaves out something a requirement asks for" was 53% of every
+    # repair the observer sent (387 of 729), 222 of them on entity_fields,
+    # page_details and workflow_steps. Coverage across subjects is still
+    # judged — once, after they all land (`scope: "domain"`).
+    if subject and cited:
+        in_scope = [r for r in in_scope if r.get("id") in cited]
     requirements = [
         {k: r.get(k) for k in ("id", "title", "statement", "description",
                                "priority", "status") if r.get(k) is not None}
-        for r in _live(doc.get("requirements")) if _in_scope(r)
+        for r in in_scope
     ]
     if subject:
         # A page's contract is the promise its layout is judged against.
@@ -352,6 +364,7 @@ def observation_context(
             produced["pages"] = [page]
 
     return {
+        "scope": scope or ("subject" if subject else "node"),
         "userRequest": user_request,
         "application": {
             k: v for k, v in (doc.get("application") or {}).items()
@@ -372,9 +385,25 @@ def critic_prompt(context: dict[str, Any]) -> tuple[str, str]:
     system = (
         "You are the observer for a Prompt-to-App build. A specialist agent "
         "has just finished its task and you are judging its outcome.\n\n"
-        "Decide whether the output is COMPLETE against the requirements it "
-        "claims, the requirements that fall in its domain, and the user's "
-        "request. Report a finding for each thing that is genuinely missing, "
+        + {
+            "subject": (
+                "This output is ONE subject of several — one entity, one workflow, "
+                "one page — and its author was given exactly the requirements "
+                "listed. Decide whether it is COMPLETE against those. A requirement "
+                "about a different subject is not a gap in this one: coverage across "
+                "subjects is judged separately, once they have all landed. "),
+            "domain": (
+                "This is EVERY subject this node wrote, judged together; each one is "
+                "also judged on its own, separately. Look only for a requirement in its "
+                "domain that NO subject satisfies. Name, as the artifact, the existing "
+                "entity/workflow/page that should carry it — or leave it empty when "
+                "nothing that could carry it exists yet. Do not repeat a problem "
+                "inside a single subject; that was already judged. "),
+        }.get(str(context.get("scope") or ""),
+              "Decide whether the output is COMPLETE against the requirements it "
+              "claims, the requirements that fall in its domain, and the user's "
+              "request. ")
+        + "Report a finding for each thing that is genuinely missing, "
         "contradicts a requirement, or claims a requirement it does not "
         "actually satisfy. Each finding names: the section (one of "
         "sectionsYouMayName), the artifact id it concerns (empty if none "
@@ -476,12 +505,12 @@ class Observer:
         obs.deferred.append(f)
 
     def _ask(self, obs: Observation, doc: Mapping[str, Any], subject: str, *,
-             user_request: str) -> tuple[str, Any] | None:
+             user_request: str, scope: str = "") -> tuple[str, Any] | None:
         """One critic call for one subject: ``("ok", (verdict, items))``,
         ``("unavailable", why)``, or ``None`` when there is nothing to judge.
         Touches nothing on ``obs`` — it runs beside its siblings."""
         context = observation_context(
-            doc, agent=obs.agent, subject=subject, user_request=user_request,
+            doc, agent=obs.agent, subject=subject, user_request=user_request, scope=scope,
         )
         if not context["output"]:
             # The node wrote nothing this subject can be judged on. A
@@ -531,15 +560,24 @@ class Observer:
         subject order afterwards — the verdict is the same one, sooner.
         """
         subjects = list(obs.subjects)
+        jobs: list[tuple[str, str]] = [(s, "") for s in subjects]
+        # COVERAGE ACROSS SUBJECTS, ONCE. Each subject is judged on the
+        # requirements its author was given; what no subject covers is asked
+        # in one more call with every subject in view, and filed against the
+        # artifact that should carry it — the entity that lacks the field, not
+        # whichever entity happened to be under review. It reads the same
+        # snapshot, so it runs BESIDE the others: a node waits no longer than
+        # it did, for one call rather than the rounds it replaces.
         if len(subjects) > 1:
+            jobs.append(("", "domain"))
+        if len(jobs) > 1:
             with ThreadPoolExecutor(
-                    max_workers=min(len(subjects), CRITIC_CONCURRENCY)) as pool:
+                    max_workers=min(len(jobs), CRITIC_CONCURRENCY)) as pool:
                 answers = list(pool.map(
-                    lambda s: self._ask(obs, doc, s, user_request=user_request),
-                    subjects))
+                    lambda job: self._ask(obs, doc, job[0], user_request=user_request, scope=job[1]),
+                    jobs))
         else:
-            answers = [self._ask(obs, doc, s, user_request=user_request)
-                       for s in subjects]
+            answers = [self._ask(obs, doc, s, user_request=user_request, scope=sc) for s, sc in jobs]
 
         verdicts: list[str] = []
         for answer in answers:
