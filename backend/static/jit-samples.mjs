@@ -154,6 +154,22 @@ export async function runWidget(widget: any, opts: any = {}): Promise<WidgetData
   const first = src.measures[0]?.key;
   return { rows, value: single && first ? Number(rows[0]?.[first] ?? 0) : null };
 }
+// THE SAME SURFACE AS THE REAL \`@/sdk/server\`, OR THE PAGE WILL NOT BUILD.
+// \`similar()\` arrived with image search and this shim was not told, so any
+// page that ranks by picture failed in the editor with "No matching export
+// for import 'similar'" (HippieKit's /scan/confirm/[scanId]). Same rules as
+// the real one: nothing to compare against is no rows, closest first, and a
+// \`similarity\` that only means something relative to its neighbours.
+export interface SimilarOptions { image?: string; text?: string; field?: string; limit?: number }
+export interface Similar<T> { rows: Array<T & { similarity: number }>; error: string | null }
+export async function similar(entity: string, opts: SimilarOptions): Promise<Similar<any>> {
+  await wait();
+  if (!opts?.image && !String(opts?.text ?? "").trim()) return { rows: [], error: null };
+  const limit = Math.min(Math.max(Number(opts.limit ?? 12), 1), 100);
+  const rows = (ROWS[entity] ?? []).slice(0, limit)
+    .map((r: any, i: number) => ({ ...r, similarity: Math.max(92 - i * 7, 20) }));
+  return { rows, error: null };
+}
 export async function series(entity: string, opts: any): Promise<SeriesPoint[]> {
   await wait();
   const groups = new Map<string, number[]>();
