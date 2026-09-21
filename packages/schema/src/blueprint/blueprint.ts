@@ -257,9 +257,19 @@ export const PagePattern = z.enum([
  *   asks for it.
  * - `related` — the record the page's record points at through its foreign
  *   key `via`, shown by `field` of that record (`entity`).
+ * - `reverse` — the record that points AT the page's record: the row of
+ *   `entity` whose foreign key `via` is the page's record, narrowed by
+ *   `where`, the latest by `sort` (default `createdAt`), shown by `field` —
+ *   or, through `then`, by a field of the record THAT row points at. A
+ *   shopper's current plan: Subscription `via` shopperId, `where` status
+ *   active, `then` {via planId, entity Plan, field name}. The link the
+ *   reader cares about is often stored on the other side, and `related`
+ *   alone could only follow a key the page's own record holds.
  * - `count` / `total` — rows of `entity` whose foreign key `via` points at the
  *   page's record (or, with `of`, at the record the page's record points at
  *   through `of`), narrowed by `where`; `total` applies `fn` to `field`.
+ *   Without `via`, every row of `entity` that matches `where` — a staff
+ *   overview's "Active subscriptions" belongs to no one record.
  * - `process` — what a rule or a workflow means for the reader (`about`):
  *   reassurance beside an action, or what happens next.
  * - `distance` — how far the reader is from the record: its `location` field
@@ -267,13 +277,19 @@ export const PagePattern = z.enum([
  *   points at (`entity`, `field`) — the owner's area for a tool.
  */
 export const PageContentSource = z.object({
-  kind: z.enum(["field", "related", "count", "total", "process", "distance"]),
+  kind: z.enum(["field", "related", "reverse", "count", "total", "process", "distance"]),
   entity: EntityId.optional(),
   field: z.string().optional(),
   via: z.string().optional(),
   of: z.string().optional(),
   where: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   fn: z.enum(["sum", "avg", "min", "max"]).optional(),
+  /** `reverse`: which of several rows is shown — the latest by this field. */
+  sort: z.string().optional(),
+  /** `reverse`: follow the found row's foreign key `via` to `entity`, show `field`. */
+  then: z
+    .object({ via: z.string(), entity: EntityId, field: z.string().optional() })
+    .optional(),
   about: z.string().optional(),
   newField: z
     .object({

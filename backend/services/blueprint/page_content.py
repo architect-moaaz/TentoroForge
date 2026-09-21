@@ -68,6 +68,15 @@ def _new_field_findings(label: str, entity: dict, name: str, new: dict) -> list[
     return []
 
 
+def _names(entity: dict) -> str:
+    return ", ".join(str(f.get("name")) for f in entity.get("fields") or [])
+
+
+def _where_findings(label: str, entity: dict, src: dict) -> list[str]:
+    return [f"{label!r}: `where` names {key!r}, which {entity.get('name')} does not have"
+            for key in (src.get("where") or {}) if _field(entity, str(key)) is None]
+
+
 def item_findings(item: dict, page: dict, doc: dict) -> list[str]:
     """Why one content item's source does not resolve, if it does not."""
     ents = _entities(doc)
@@ -101,7 +110,8 @@ def item_findings(item: dict, page: dict, doc: dict) -> list[str]:
         fk = _field(primary, via) if via else None
         if fk is None:
             return [f"{label!r}: `via` must be a foreign key of {primary.get('name')} "
-                    f"(it has: {', '.join(str(f.get('name')) for f in primary.get('fields') or [])})"]
+                    f"(it has: {_names(primary)}) — if the link is stored on the other record, "
+                    f"use `reverse` with that record's `via`"]
         if ent is None:
             return [f"{label!r}: name the related `entity` {via} points at"]
         if _points_elsewhere(fk, ent_id):
@@ -111,24 +121,59 @@ def item_findings(item: dict, page: dict, doc: dict) -> list[str]:
             out.extend(_new_field_findings(label, ent, name, src.get("newField") or {}))
         return out
 
+    if kind == "reverse":
+        if primary is None:
+            return [f"{label!r}: a `reverse` fact needs the page's primary entity"]
+        if ent is None:
+            return [f"{label!r}: name the `entity` whose row points at the page's record"]
+        via = str(src.get("via") or "")
+        fk = _field(ent, via) if via else None
+        if fk is None:
+            return [f"{label!r}: `via` must be the field of {ent.get('name')} that points at the "
+                    f"{primary.get('name')} (it has: {_names(ent)})"]
+        if _points_elsewhere(fk, primary_id):
+            out.append(f"{label!r}: {ent.get('name')}.{via} references {fk.get('references')}, "
+                       f"not {primary.get('name')}")
+        out.extend(_where_findings(label, ent, src))
+        sort = str(src.get("sort") or "")
+        if sort and _field(ent, sort) is None:
+            out.append(f"{label!r}: `sort` names {sort!r}, which {ent.get('name')} does not have")
+        shown, name = ent, str(src.get("field") or "")
+        then = src.get("then") or {}
+        if then:
+            hop = _field(ent, str(then.get("via") or ""))
+            target = ents.get(str(then.get("entity") or ""))
+            if hop is None:
+                return out + [f"{label!r}: `then.via` must be a foreign key of {ent.get('name')} "
+                              f"(it has: {_names(ent)})"]
+            if target is None:
+                return out + [f"{label!r}: `then.entity` {then.get('entity')!r} is not in the data model"]
+            if _points_elsewhere(hop, str(then.get("entity"))):
+                out.append(f"{label!r}: {ent.get('name')}.{then.get('via')} references "
+                           f"{hop.get('references')}, not {then.get('entity')}")
+            shown, name = target, str(then.get("field") or "")
+        if name and _field(shown, name) is None:
+            out.extend(_new_field_findings(label, shown, name, src.get("newField") or {}))
+        return out
+
     if kind in ("count", "total"):
         if ent is None:
             return [f"{label!r}: name the `entity` whose rows are counted"]
         via = str(src.get("via") or "")
         fk = _field(ent, via) if via else None
-        if fk is None:
+        if via and fk is None:
             return [f"{label!r}: `via` must be the field of {ent.get('name')} that points at the record "
-                    f"(it has: {', '.join(str(f.get('name')) for f in ent.get('fields') or [])})"]
+                    f"(it has: {_names(ent)}) — or leave `via` out to count every matching row"]
         of = str(src.get("of") or "")
-        if of:
+        if of and not via:
+            out.append(f"{label!r}: `of` counts against a record through `via` — name `via` too")
+        elif of:
             if primary is None or _field(primary, of) is None:
                 out.append(f"{label!r}: `of` must be a foreign key of the page's record")
-        elif primary_id and _points_elsewhere(fk, primary_id):
+        elif fk is not None and primary_id and _points_elsewhere(fk, primary_id):
             out.append(f"{label!r}: {ent.get('name')}.{via} references {fk.get('references')}, not the page's "
                        f"record — use `of` to count against the record it points at")
-        for key in (src.get("where") or {}):
-            if _field(ent, str(key)) is None:
-                out.append(f"{label!r}: `where` names {key!r}, which {ent.get('name')} does not have")
+        out.extend(_where_findings(label, ent, src))
         if kind == "total":
             if src.get("fn") not in ("sum", "avg", "min", "max"):
                 out.append(f"{label!r}: a total names `fn` (sum, avg, min, max)")
@@ -210,11 +255,18 @@ def requested_fields(doc: dict) -> dict[str, list[dict]]:
         for item in page.get("content") or []:
             src = (item or {}).get("source") or {}
             new = src.get("newField")
-            if src.get("kind") not in ("field", "related", "distance") or not new or not src.get("field"):
+            if src.get("kind") not in ("field", "related", "reverse", "distance") or not new:
                 continue
-            eid = str(src.get("entity") or (primary_id if src.get("kind") != "related" and not src.get("via") else ""))
+            then = src.get("then") or {}
+            if src.get("kind") == "reverse" and then:
+                eid, field_name = str(then.get("entity") or ""), then.get("field")
+            else:
+                eid = str(src.get("entity") or (primary_id if src.get("kind") != "related" and not src.get("via") else ""))
+                field_name = src.get("field")
+            if not field_name:
+                continue
             ent = ents.get(eid)
-            name = str(src["field"])
+            name = str(field_name)
             if ent is None or _field(ent, name) is not None or not _type_ok(new.get("type")):
                 continue
             if any(f["name"] == name for f in out.get(eid, [])):
@@ -244,10 +296,26 @@ def entity_bodies_with_requested_fields(doc: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _sdk_where(src: dict, record: str) -> str:
-    pairs = [f"{src.get('via')}: {record}.{src['of']}" if src.get("of") else f"{src.get('via')}: {record}.id"]
+    """The `where` of an SDK read. No `via` is every row that matches — the
+    staff overview's count, which belongs to no one record."""
+    pairs = []
+    if src.get("via"):
+        pairs.append(f"{src.get('via')}: {record}.{src['of']}" if src.get("of") else f"{src.get('via')}: {record}.id")
     pairs += [f"{k}: {v!r}" if isinstance(v, str) else f"{k}: {str(v).lower()}"
               for k, v in (src.get("where") or {}).items()]
-    return "{ " + ", ".join(pairs) + " }"
+    return "{ " + ", ".join(pairs) + " }" if pairs else ""
+
+
+def _reverse_read(src: dict, ent: dict, ents: dict, record: str) -> str:
+    sort = src.get("sort") or ("createdAt" if _field(ent, "createdAt") else "")
+    order = f", sort: \"{sort}\", order: \"desc\"" if sort else ""
+    row = f"(await list(\"{ent.get('name')}\", {{ where: {_sdk_where(src, record)}{order}, limit: 1 }}))[0]"
+    then = src.get("then") or {}
+    if not then:
+        return f"{row}?.{src.get('field') or ent.get('labelField') or 'name'}"
+    target = ents.get(str(then.get("entity") or "")) or {}
+    shown = then.get("field") or target.get("labelField") or "name"
+    return f"(await record(\"{target.get('name')}\", {row}?.{then.get('via')}))?.{shown}"
 
 
 def content_brief(doc: dict, page: dict) -> list[dict]:
@@ -271,10 +339,16 @@ def content_brief(doc: dict, page: dict) -> list[dict]:
             shown = src.get("field") or ent.get("labelField") or "name"
             read = (f"(await record(\"{name}\", {rec}.{src.get('via')}))?.{shown}" if one else
                     f"recordsById(\"{name}\", rows.map(r => r.{src.get('via')}))[row.{src.get('via')}]?.{shown}")
+        elif kind == "reverse":
+            read = _reverse_read(src, ent, ents, rec if one else "row")
+            if not one:
+                read += " — per row; read it for the rows on screen, not the whole table"
         elif kind == "count":
-            read = f"count(\"{name}\", {_sdk_where(src, rec)})"
+            where = _sdk_where(src, rec)
+            read = f"count(\"{name}\"{', ' + where if where else ''})"
         elif kind == "total":
-            read = f"total(\"{name}\", \"{src.get('fn')}\", \"{src.get('field')}\", {_sdk_where(src, rec)})"
+            where = _sdk_where(src, rec)
+            read = f"total(\"{name}\", \"{src.get('fn')}\", \"{src.get('field')}\"{', ' + where if where else ''})"
         elif kind == "distance":
             where = (f"(await record(\"{name}\", {rec}.{src.get('via')}))?.{src.get('field')}" if src.get("via")
                      else f"{rec}.{src.get('field')}")

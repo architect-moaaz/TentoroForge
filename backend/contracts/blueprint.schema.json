@@ -536,6 +536,7 @@
                       "enum": [
                         "field",
                         "related",
+                        "reverse",
                         "count",
                         "total",
                         "process",
@@ -574,6 +575,28 @@
                         "min",
                         "max"
                       ]
+                    },
+                    "sort": {
+                      "type": "string"
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "via": {
+                          "type": "string"
+                        },
+                        "entity": {
+                          "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                        },
+                        "field": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "via",
+                        "entity"
+                      ],
+                      "additionalProperties": false
                     },
                     "about": {
                       "type": "string"
