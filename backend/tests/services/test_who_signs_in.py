@@ -266,13 +266,15 @@ def test_the_person_behind_a_login_never_stores_a_password():
     """0l133sp2's Member had a required passwordHash; signup creates the row
     without one, so every signup would have failed."""
     import pytest
-    from services.blueprint.agent_contract import InvalidEntityFields, check_entity_fields
+    from services.blueprint.agent_contract import CREDENTIAL_RULE, InvalidEntityFields, check_entity_fields
     from services.blueprint.executors import NODE_TASKS
 
     result = _entities({"name": "Member", "account": True, "fields": [
         {"name": "id", "type": "uuid"}, {"name": "passwordHash", "type": "string", "required": True}]})
-    with pytest.raises(InvalidEntityFields, match="login already holds their password"):
+    with pytest.raises(InvalidEntityFields) as raised:
         check_entity_fields(result, {"data": {"entities": []}})
+    # The words the observer is shown too (`agent_contract.PLATFORM_RULES`).
+    assert "passwordHash" in str(raised.value) and CREDENTIAL_RULE in str(raised.value)
     assert "never has a password" in NODE_TASKS["entity_fields"]
 
 

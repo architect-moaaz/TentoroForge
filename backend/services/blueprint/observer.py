@@ -379,6 +379,13 @@ def observation_context(
     }
 
 
+def _platform_rules() -> tuple[str, ...]:
+    """The same words the contract refuses with (`agent_contract.PLATFORM_RULES`)."""
+    from services.blueprint.agent_contract import PLATFORM_RULES
+
+    return PLATFORM_RULES
+
+
 def critic_prompt(context: dict[str, Any]) -> tuple[str, str]:
     """(system, user). The system half is the contract; the user half is the
     slice."""
@@ -409,6 +416,9 @@ def critic_prompt(context: dict[str, Any]) -> tuple[str, str]:
         "sectionsYouMayName), the artifact id it concerns (empty if none "
         "exists yet), the requirement id it fails (empty if none), and in one "
         "or two sentences what is missing.\n\n"
+        + "The platform already provides the following. Never report their absence as a "
+          "finding, and never ask for the opposite — the contract refuses it, so the author "
+          "could not comply:\n" + "".join(f"- {r}\n" for r in _platform_rules()) + "\n"
         "You cannot edit anything and you must not propose alternatives, "
         "restyle, rename, or comment on quality. Do not report preferences. "
         "If the output is complete, the verdict is pass and findings is "

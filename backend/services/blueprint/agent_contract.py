@@ -491,6 +491,19 @@ class InvalidEntityFields(AuthorRefusal):
 EMBEDDABLE_TYPES = frozenset({"image", "string", "text"})
 
 
+#: WHAT THE PLATFORM ALREADY DOES, stated once — the refusals below enforce
+#: it, and the observer is shown the same words so it stops asking for the
+#: opposite. Measured: over three weeks the critic demanded a password field
+#: on the login entity again and again, which this module refuses outright —
+#: a round nobody could win, twice in one HippieKit build.
+CREDENTIAL_RULE = ("A person's password, or any credential, is held by the platform's login and "
+                   "never stored as a field of an entity — not even the login entity.")
+AUTH_RULE = ("Signing up, signing in and resetting a password are provided by the platform "
+             "(its /login and /signup pages and its session); they are not written as entity "
+             "fields, business rules or workflows.")
+PLATFORM_RULES: tuple[str, ...] = (CREDENTIAL_RULE, AUTH_RULE)
+
+
 def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
     """A `vector` field names the image or text field of the same entity it is
     taken of. 036farqu: Tool and ConditionEvidence came back with
@@ -515,6 +528,24 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
                    else "this entity has no image or text field to embed — remove the vector field, "
                         "or add the image field it should be taken of")
             problems.append(f"{body.get('name') or proposal.natural_key}.{f.get('name')}: a vector field {said}; {fix}")
+    # AN ENTITY'S LABEL IS ONE OF ITS OWN FIELDS. `labelField: "brandName"` on
+    # an entity with no `brandName` is a contradiction a reader can see in the
+    # proposal itself — checked here, at the author, in the same attempt,
+    # rather than sent back by the observer a round later (HippieKit's
+    # BrandSuggestion). Only once fields are being written: the entity set
+    # names the label before any field exists.
+    known = {str(e.get("name")): e for e in ((doc or {}).get("data") or {}).get("entities") or []
+             if isinstance(e, dict)}
+    for proposal in (p for p in result.proposals if p.section == "data.entities"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        names = [str(f.get("name")) for f in body.get("fields") or [] if isinstance(f, dict) and f.get("name")]
+        if not names:
+            continue
+        ename = str(body.get("name") or proposal.natural_key)
+        label = body.get("labelField") or (known.get(ename) or {}).get("labelField")
+        if label and label not in names:
+            problems.append(f"{ename}: `labelField` is {label!r}, which is not one of its fields "
+                            f"({', '.join(names)}) — add that field, or set `labelField` to one of these")
     # THE ACCOUNT ENTITY: at most one, and signup must be able to create it —
     # a required reference to another record is a field no one can fill when
     # the account is made.
@@ -538,8 +569,7 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
             # `passwordHash`; signup creates the row without one, so every
             # signup would have been refused by the database.
             if isinstance(f, dict) and _is_credential_field(f.get("name")):
-                problems.append(f"{name}.{f.get('name')}: the person's login already holds their password — "
-                                "remove this field; the account entity never stores a credential")
+                problems.append(f"{name}.{f.get('name')}: remove this field. {CREDENTIAL_RULE}")
             if isinstance(f, dict) and f.get("references") and f.get("required"):
                 problems.append(f"{name}.{f.get('name')}: the account entity's row is created at signup, when no "
                                 "other record exists to point at — make this reference optional")

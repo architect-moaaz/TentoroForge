@@ -246,3 +246,66 @@ def test_a_node_with_one_subject_is_not_asked_twice(svc):
         "data_model", agent="data_model", subjects=[""], doc=svc.doc,
         pending=set(), planned={"data.entities"})
     assert [c["scope"] for c in critic.calls] == ["node"]
+
+
+# ── what the platform does is not a finding; a self-contradiction is not a round ──
+
+def test_the_observer_is_told_what_the_platform_already_does():
+    """Over three weeks the critic demanded a password field on the login
+    entity again and again — twice in one HippieKit build — and the contract
+    refuses exactly that. It is now shown the platform's rules, in the very
+    words the refusal uses, so the two cannot drift apart."""
+    from services.blueprint.agent_contract import CREDENTIAL_RULE, PLATFORM_RULES
+    from services.blueprint.observer import critic_prompt
+
+    for scope in ("subject", "domain", "node"):
+        system, _ = critic_prompt({"scope": scope, "output": {}})
+        for rule in PLATFORM_RULES:
+            assert rule in system, (scope, rule)
+    assert "password" in CREDENTIAL_RULE.lower()
+
+
+def test_the_refusal_quotes_the_same_rule():
+    from services.blueprint.agent_contract import (
+        CREDENTIAL_RULE, AgentResult, ArtifactProposal, InvalidEntityFields, check_entity_fields,
+    )
+    body = {"name": "Shopper", "account": True,
+            "fields": [{"name": "id", "type": "uuid"}, {"name": "passwordHash", "type": "string"}]}
+    result = AgentResult(task_id="t", agent="data_model",
+                         proposals=[ArtifactProposal(section="data.entities", natural_key="Shopper", body=body)])
+    with pytest.raises(InvalidEntityFields) as raised:
+        check_entity_fields(result, {"data": {"entities": []}})
+    assert CREDENTIAL_RULE in str(raised.value)
+
+
+def test_an_entity_label_must_be_one_of_its_own_fields():
+    """`labelField: "brandName"` on an entity with no brandName is visible in
+    the proposal itself. Refused at the author, in the same attempt, instead
+    of an observer round later (HippieKit's BrandSuggestion)."""
+    from services.blueprint.agent_contract import (
+        AgentResult, ArtifactProposal, InvalidEntityFields, check_entity_fields,
+    )
+
+    def propose(body):
+        return AgentResult(task_id="t", agent="data_model",
+                           proposals=[ArtifactProposal(section="data.entities",
+                                                       natural_key=body["name"], body=body)])
+
+    bad = {"name": "BrandSuggestion", "labelField": "brandName",
+           "fields": [{"name": "id", "type": "uuid"}, {"name": "suggestedBy", "type": "uuid"}]}
+    with pytest.raises(InvalidEntityFields) as raised:
+        check_entity_fields(propose(bad), {"data": {"entities": []}})
+    said = str(raised.value)
+    assert "'brandName'" in said and "suggestedBy" in said, "names the fault and the choices"
+
+    good = {**bad, "fields": bad["fields"] + [{"name": "brandName", "type": "string"}]}
+    check_entity_fields(propose(good), {"data": {"entities": []}})
+
+    # The entity set names a label before any field exists; that is not a fault.
+    check_entity_fields(propose({"name": "BrandSuggestion", "labelField": "brandName"}),
+                        {"data": {"entities": []}})
+
+    # A label declared on the entity set is held to the fields when they arrive.
+    doc = {"data": {"entities": [{"name": "BrandSuggestion", "labelField": "brandName"}]}}
+    with pytest.raises(InvalidEntityFields):
+        check_entity_fields(propose({"name": "BrandSuggestion", "fields": bad["fields"]}), doc)
