@@ -56,6 +56,14 @@ class ApplyRequest(BaseModel):
     baseRevision: str
     ops: list[dict[str, Any]] = Field(default_factory=list)
     label: str = "Edit"
+    #: A whole source (view, load) to save as one revision — what a draft becomes.
+    source: dict[str, str] | None = None
+
+
+class DraftRequest(BaseModel):
+    baseRevision: str
+    ops: list[dict[str, Any]] = Field(default_factory=list)
+    source: dict[str, str] | None = None
 
 
 class RestoreRequest(BaseModel):
@@ -157,7 +165,22 @@ async def apply_transaction(project_id: uuid.UUID, page_id: str, req: ApplyReque
                             user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     project = await _project(project_id, user, db)
     return await _run(service.apply, project, page_id, base_revision=req.baseRevision, ops=req.ops,
-                      label=req.label[:120])
+                      label=req.label[:120], source=req.source)
+
+
+@router.post("/api/projects/{project_id}/react-editor/pages/{page_id}/draft")
+async def draft_transaction(project_id: uuid.UUID, page_id: str, req: DraftRequest,
+                            user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """An edit onto the page's draft — kept until the person saves."""
+    project = await _project(project_id, user, db)
+    return await _run(service.draft_apply, project, page_id, base_revision=req.baseRevision, ops=req.ops, source=req.source)
+
+
+@router.delete("/api/projects/{project_id}/react-editor/pages/{page_id}/draft")
+async def drop_draft(project_id: uuid.UUID, page_id: str,
+                     user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    return await _run(service.discard_draft, project, page_id)
 
 
 @router.get("/api/projects/{project_id}/react-editor/vendor")
@@ -172,8 +195,9 @@ async def vendor_script(project_id: uuid.UUID, fresh: bool = Query(default=False
 @router.get("/api/projects/{project_id}/react-editor/pages/{page_id}/jit")
 async def render_page(project_id: uuid.UUID, page_id: str, params: str | None = Query(default=None),
                       search: str | None = Query(default=None), fresh: bool = Query(default=False),
+                      draft: bool = Query(default=False),
                       user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    """The page bundled on demand with sample data — no dev server needed."""
+    """The page bundled on demand with sample data — no dev server needed. `draft`: its unsaved edits."""
     project = await _project(project_id, user, db)
 
     def _dict(raw: str | None) -> dict[str, str]:
@@ -182,7 +206,7 @@ async def render_page(project_id: uuid.UUID, page_id: str, params: str | None = 
         except json.JSONDecodeError:
             out = {}
         return {str(k): str(v) for k, v in out.items()} if isinstance(out, dict) else {}
-    return await _run(jit.build, project, page_id, params=_dict(params), search=_dict(search), fresh=fresh)
+    return await _run(jit.build, project, page_id, params=_dict(params), search=_dict(search), fresh=fresh, draft=draft)
 
 
 @router.post("/api/projects/{project_id}/react-editor/pages/{page_id}/widgets")

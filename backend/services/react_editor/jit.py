@@ -27,7 +27,7 @@ from typing import Any
 
 from services.blueprint.app_sdk import code_page_dir
 from services.react_editor import adapter
-from services.react_editor.service import EditorError, Project, _entity_refs, _live, _page, _row, load_blueprint
+from services.react_editor.service import EditorError, Project, _entity_refs, _live, _page, _row, load_blueprint, read_draft
 
 logger = logging.getLogger(__name__)
 
@@ -150,8 +150,10 @@ def vendor(project: Project, *, fresh: bool = False, timeout: float = 180.0) -> 
 
 
 def build(project: Project, page_id: str, *, params: dict[str, str] | None = None,
-          search: dict[str, str] | None = None, fresh: bool = False, timeout: float = 120.0) -> dict[str, Any]:
-    """The page's bundle at its current revision: ``{js, css, revision, ms, cached}``."""
+          search: dict[str, str] | None = None, fresh: bool = False, draft: bool = False,
+          timeout: float = 120.0) -> dict[str, Any]:
+    """The page's bundle at its current revision — or its draft's, when asked
+    and there is one: ``{js, css, revision, ms, cached}``."""
     svc = load_blueprint(project)
     doc = svc.doc
     page = _page(doc, page_id)
@@ -160,6 +162,11 @@ def build(project: Project, page_id: str, *, params: dict[str, str] | None = Non
         raise EditorError(409, "not-coded", "This page has no designed code to render yet.")
     view, load = str(row.get("view") or ""), str(row.get("load") or "")
     revision = adapter.revision_of(view, load)
+    # A draft is bundled from its own place in the tree, never from the
+    # page's files: the running app keeps showing what was saved.
+    drafted = read_draft(project, page_id, revision) if draft else None
+    if drafted:
+        view, load, revision = drafted["view"], drafted["load"], drafted["revision"]
     params, search = dict(params or {}), dict(search or {})
     # A RECORD PAGE PREVIEWS ON A SAMPLE ROW. The canvas builds every page with
     # empty params; a `[id]` route then reaches `record(entity, undefined)`,
@@ -186,7 +193,7 @@ def build(project: Project, page_id: str, *, params: dict[str, str] | None = Non
     _require_toolchain(project)
     # The app's copy of the page carries the ids the canvas selects by; make
     # sure it is current before bundling it.
-    page_dir = code_page_dir(page)
+    page_dir = f"src/.forge-drafts/{page_id}" if drafted else code_page_dir(page)
     target = project.app_root / page_dir / "view.tsx"
     try:
         annotated = adapter.annotate(view, app_root=project.app_root)

@@ -192,7 +192,7 @@ async def list_project_files(
         return {"project_id": str(project.id), "files": []}
 
     files = []
-    skip_dirs = {"node_modules", ".next", ".git", "__pycache__", ".forge-jit", ".forge-check"}
+    skip_dirs = {"node_modules", ".next", ".git", "__pycache__", ".forge-jit", ".forge-check", ".forge-drafts"}
     for path in sorted(project_dir.rglob("*")):
         if path.is_file() and not any(part in skip_dirs for part in path.parts):
             rel = str(path.relative_to(project_dir))

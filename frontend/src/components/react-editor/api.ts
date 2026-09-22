@@ -7,7 +7,7 @@
  * a status text, which is exactly the wording (UX-004) the editor exists to
  * show.
  */
-import type { ApplyResult, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, Proposal, ThemeDoc, ThemePatch, WidgetRef, WidgetSpec } from "./types";
+import type { ApplyResult, DraftResult, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, Proposal, ThemeDoc, ThemePatch, WidgetRef, WidgetSpec } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -122,11 +122,12 @@ export const editorApi = {
   listAssets: (projectId: string) => call<{ assets: { url: string; name: string }[] }>(`${base(projectId)}/assets`),
   vendor: (projectId: string, opts: { fresh?: boolean } = {}, signal?: AbortSignal) =>
     call<VendorBundle>(`${base(projectId)}/vendor${opts.fresh ? "?fresh=true" : ""}`, { signal }),
-  jit: (projectId: string, pageId: string, opts: { params?: Record<string, string>; search?: Record<string, string>; fresh?: boolean } = {}, signal?: AbortSignal) => {
+  jit: (projectId: string, pageId: string, opts: { params?: Record<string, string>; search?: Record<string, string>; fresh?: boolean; draft?: boolean } = {}, signal?: AbortSignal) => {
     const q = new URLSearchParams();
     if (opts.params && Object.keys(opts.params).length) q.set("params", JSON.stringify(opts.params));
     if (opts.search && Object.keys(opts.search).length) q.set("search", JSON.stringify(opts.search));
     if (opts.fresh) q.set("fresh", "true");
+    if (opts.draft) q.set("draft", "true");
     const qs = q.toString();
     return call<JitBundle>(`${base(projectId)}/pages/${pageId}/jit${qs ? `?${qs}` : ""}`, { signal });
   },
@@ -143,8 +144,13 @@ export const editorApi = {
   setNavigation: (projectId: string, spec: { tree?: NavItemSpec[]; style?: string; initialRoute?: string | null }) =>
     call<{ navigation: Navigation }>(`${base(projectId)}/navigation`, { method: "PUT", body: JSON.stringify({ spec }) }),
   open: (projectId: string, pageId: string) => call<PageDoc>(`${base(projectId)}/pages/${pageId}`),
-  apply: (projectId: string, pageId: string, baseRevision: string, ops: Op[], label: string) =>
-    post<ApplyResult>(`${base(projectId)}/pages/${pageId}/apply`, { baseRevision, ops, label }),
+  apply: (projectId: string, pageId: string, baseRevision: string, ops: Op[], label: string, source?: { view: string; load: string }) =>
+    post<ApplyResult>(`${base(projectId)}/pages/${pageId}/apply`, source ? { baseRevision, ops, label, source } : { baseRevision, ops, label }),
+  /** An edit onto the page's draft — nothing is saved until `apply` with the draft's source. */
+  draftApply: (projectId: string, pageId: string, body: { baseRevision: string; ops?: Op[]; source?: { view: string; load: string } }) =>
+    post<DraftResult>(`${base(projectId)}/pages/${pageId}/draft`, body),
+  discardDraft: (projectId: string, pageId: string) =>
+    call<{ discarded: boolean }>(`${base(projectId)}/pages/${pageId}/draft`, { method: "DELETE" }),
   history: (projectId: string, pageId: string) => call<{ history: HistoryEntry[] }>(`${base(projectId)}/pages/${pageId}/history`),
   restore: (projectId: string, pageId: string, revision: string, expectedRevision: string) =>
     post<ApplyResult>(`${base(projectId)}/pages/${pageId}/restore`, { revision, expectedRevision }),

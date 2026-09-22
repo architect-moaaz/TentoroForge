@@ -215,6 +215,8 @@ export interface HistoryEntry {
 }
 
 export interface PageDoc {
+  /** Unsaved edits: the model and source are the draft's; `base` is the saved revision they sit on. */
+  draft?: { revision: string; base: string } | null;
   page: { id: string; name: string; route: string; purpose: string; access?: string; file?: string };
   coded: boolean;
   reason?: string;
@@ -268,6 +270,16 @@ export interface ApplyResult {
   unchanged: boolean;
   version: number | null;
   history?: HistoryEntry;
+}
+
+/** An edit landed on the page's draft: the saved revision it sits on, and the draft's own. */
+export interface DraftResult {
+  revision: string;
+  draftRevision: string;
+  dirty: boolean;
+  unchanged: boolean;
+  model: PageModel;
+  source: { view: string; load: string };
 }
 
 export interface Proposal {

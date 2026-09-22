@@ -981,3 +981,36 @@ def test_an_element_changes_kind_and_the_signed_in_person_joins_what_the_page_lo
     with pytest.raises(AdapterError) as e:
         adapter.patch_load("export async function load() {\n  return { a: 1 };\n}\n", [{"op": "addReturnKey", "file": "load", "key": "me", "expr": "{ctx}.user"}])
     assert "takes no context" in str(e.value)
+
+
+def test_edits_land_on_a_draft_and_save_writes_them_as_one_revision(tmp_path, monkeypatch):
+    project = _chart_project(tmp_path, monkeypatch)
+    doc = service.open_page(project, "PAGE-001")
+    rev = doc["revision"]
+    assert doc["draft"] is None
+    one = service.draft_apply(project, "PAGE-001", base_revision=rev, ops=[{"op": "setText", "id": "r0.0", "text": "First"}])
+    assert one["dirty"] and one["revision"] == rev and one["draftRevision"] != rev
+    assert one["model"]["nodes"]["r0.0"]["text"] == "First"
+    two = service.draft_apply(project, "PAGE-001", base_revision=rev, ops=[{"op": "setText", "id": "r0.0", "text": "Second"}])
+    assert two["model"]["nodes"]["r0.0"]["text"] == "Second"
+    # nothing was saved: the page reads as before, but comes back with its draft
+    assert service.load_blueprint(project).doc["pageCode"][0]["view"] == doc["source"]["view"]
+    again = service.open_page(project, "PAGE-001")
+    assert again["draft"] == {"revision": two["draftRevision"], "base": rev} and again["model"]["nodes"]["r0.0"]["text"] == "Second"
+    assert again["revision"] == rev
+    # undo is the draft moved back, not a saved revision
+    back = service.draft_apply(project, "PAGE-001", base_revision=rev, source={"view": doc["source"]["view"], "load": doc["source"]["load"]})
+    assert back["dirty"] is False and service.open_page(project, "PAGE-001")["draft"] is None
+    # save: one revision, one history entry, no draft left
+    two = service.draft_apply(project, "PAGE-001", base_revision=rev, ops=[{"op": "setText", "id": "r0.0", "text": "Second"}])
+    n = len(service.history(project, "PAGE-001"))
+    saved = service.apply(project, "PAGE-001", base_revision=rev, ops=[], source=two["source"], label="Edits in the editor")
+    assert saved["revision"] == two["draftRevision"] and len(service.history(project, "PAGE-001")) == n + 1
+    assert service.open_page(project, "PAGE-001")["draft"] is None
+    # a draft made on an older version is left alone, never applied
+    service.draft_apply(project, "PAGE-001", base_revision=saved["revision"], ops=[{"op": "setText", "id": "r0.0", "text": "Third"}])
+    service.apply(project, "PAGE-001", base_revision=saved["revision"], ops=[{"op": "setText", "id": "r0.0", "text": "Elsewhere"}], label="Someone else")
+    assert service.open_page(project, "PAGE-001")["draft"] is None
+    with pytest.raises(EditorError) as e:
+        service.draft_apply(project, "PAGE-001", base_revision=saved["revision"], ops=[{"op": "setText", "id": "r0.0", "text": "x"}])
+    assert e.value.code == "stale"

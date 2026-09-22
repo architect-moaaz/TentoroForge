@@ -75,8 +75,14 @@ export function pageForPath(path: string, pages: { id: string; route: string }[]
   return null;
 }
 
+// A later build of the same page is swapped into the document that is
+// already open — its style and its script — rather than loading a new one:
+// the shared script stays, the bridge stays, the scroll and the selection
+// stay, and nothing flashes.
+const SWAP = `window.addEventListener("message",function(e){var d=e.data;if(!d||d.type!=="forge-editor:swap"||!d.payload)return;var st=document.getElementById("forge-page-css");if(st)st.textContent=d.payload.css||"";var s=document.createElement("script");s.textContent=d.payload.js;document.body.appendChild(s);s.remove();window.parent&&window.parent.postMessage({type:"forge-editor:swapped",payload:{}},"*");});`;
+
 function frameHtml(css: string, vendorUrl: string, js: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body><div id="root"></div><script src="${vendorUrl}"></script><script>${js}</script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style id="forge-page-css">${css}</style></head><body><div id="root"></div><script>${SWAP}</script><script src="${vendorUrl}"></script><script>${js}</script></body></html>`;
 }
 
 export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) {
@@ -131,12 +137,23 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
   const targetPath = previewApp ? entryRoute : filledRoute;
   const appSrc = servePath && preview.port && !missing.length ? `${servePath}${targetPath === "/" ? "" : targetPath}` : null;
 
-  // The instant page lives at a blob URL of the parent's origin.
-  const jitUrl = useMemo(() => {
-    if (!jit || !frameDoc || !vendor) return null;
-    return URL.createObjectURL(new Blob([frameHtml(frameDoc.css, vendor.url, frameDoc.js)], { type: "text/html" }));
+  // The instant page lives at a blob URL of the parent's origin. A later
+  // build of the same page on the same shared script is swapped into the
+  // open document instead of loading a new one.
+  const [jitUrl, setJitUrl] = useState<string | null>(null);
+  const mountedRef = useRef<{ vendorKey: string; pageId: string } | null>(null);
+  useEffect(() => {
+    if (!jit || !frameDoc || !vendor) { setJitUrl((old) => { if (old) URL.revokeObjectURL(old); return null; }); mountedRef.current = null; return; }
+    const m = mountedRef.current;
+    const win = iframeRef.current?.contentWindow;
+    if (m && m.vendorKey === vendor.key && m.pageId === frameDoc.pageId && useEditorStore.getState().frameReady && win) {
+      win.postMessage({ type: PREFIX + "swap", payload: { js: frameDoc.js, css: frameDoc.css } }, "*");
+      return;
+    }
+    mountedRef.current = { vendorKey: vendor.key, pageId: frameDoc.pageId };
+    const url = URL.createObjectURL(new Blob([frameHtml(frameDoc.css, vendor.url, frameDoc.js)], { type: "text/html" }));
+    setJitUrl((old) => { if (old) URL.revokeObjectURL(old); return url; });
   }, [jit, frameDoc, vendor]);
-  useEffect(() => () => { if (jitUrl) URL.revokeObjectURL(jitUrl); }, [jitUrl]);
   const src = jit ? jitUrl : appSrc;
 
   // The app-wide preview starts at the entry page; leaving it returns to the open page.
@@ -249,6 +266,12 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
         case "move-cancel":
           post("drop-hint", {});
           break;
+        case "swapped":
+          // The page was rebuilt in place: the outlines follow the new document.
+          post("select", { fids: s.selection, labels: labelsFor(s.selection),
+                           field: s.fieldSelection && s.selection.includes(s.fieldSelection.nodeId) ? s.fieldSelection.name : null });
+          post("get-rects", {});
+          break;
         case "asset": {
           // The frame cannot send the person's token: fetch the picture here and hand back a URL it can show.
           const path = String(p.path || "");
@@ -327,6 +350,7 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
           if (p.key === "delete") void s.removeSelected();
           else if (p.key === "undo") void s.undo();
           else if (p.key === "redo") void s.redo();
+          else if (p.key === "save") void s.save();
           else if (p.key === "duplicate") void s.duplicateSelected();
           else if (p.key === "group") void s.groupSelected("stack");
           else if (p.key === "ungroup") void s.ungroupSelected();

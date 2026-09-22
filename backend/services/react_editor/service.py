@@ -266,6 +266,90 @@ def _state(svc: BlueprintService, project: Project, page_id: str) -> tuple[dict,
     return page, row, view, load, revision_of(view, load)
 
 
+# ---------------------------------------------------------------------------
+# Drafts — edits held back until the person saves
+# ---------------------------------------------------------------------------
+#
+# An edit in the editor lands on a draft of the page, not on the Blueprint:
+# the person changes as much as they like, sees it on the canvas, and Save
+# writes it all as one revision — one history entry, one type-check, one
+# rebuild of the running app. The draft is a file beside the page's history,
+# so closing the editor loses nothing; it names the revision it was made on,
+# and a draft made on an older version is left alone rather than applied.
+
+def _draft_path(project: Project, page_id: str) -> Path:
+    return project.editor_dir / "drafts" / f"{page_id}.json"
+
+
+def read_draft(project: Project, page_id: str, revision: str) -> dict | None:
+    """The page's draft when it was made on `revision`; None otherwise."""
+    p = _draft_path(project, page_id)
+    if not p.is_file():
+        return None
+    try:
+        d = json.loads(p.read_text("utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if d.get("base") != revision:
+        return None
+    return {"view": str(d.get("view") or ""), "load": str(d.get("load") or ""), "base": revision,
+            "revision": revision_of(str(d.get("view") or ""), str(d.get("load") or ""))}
+
+
+def _write_draft(project: Project, page_id: str, base: str, view: str, load: str) -> None:
+    p = _draft_path(project, page_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"base": base, "view": view, "load": load, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}), "utf-8")
+
+
+def discard_draft(project: Project, page_id: str) -> dict[str, Any]:
+    p = _draft_path(project, page_id)
+    had = p.exists()
+    p.unlink(missing_ok=True)
+    return {"discarded": had}
+
+
+def draft_apply(project: Project, page_id: str, *, base_revision: str, ops: list[dict[str, Any]] | None = None,
+                source: dict[str, str] | None = None) -> dict[str, Any]:
+    """Ops (or a whole source) onto the page's draft: written to the draft, never to the Blueprint.
+    Returns the model and source of the draft, the committed revision it sits on, and the draft's own."""
+    if not ops and source is None:
+        raise EditorError(400, "empty", "Nothing to change.")
+    svc = load_blueprint(project)
+    with _lock(project.root):
+        page, row, view, load, revision = _state(svc, project, page_id)
+        if row is None:
+            raise EditorError(409, "not-coded", "This page has no designed code to edit yet.")
+        if base_revision != revision:
+            raise EditorError(409, "stale", "The page changed since you last loaded it — your change was not "
+                                            "applied. Reload to see the latest version and try again.",
+                              current=revision)
+        cur = read_draft(project, page_id, revision)
+        start_view, start_load = (cur["view"], cur["load"]) if cur else (view, load)
+        if source is not None:
+            new_view, new_load = str(source.get("view", start_view)), str(source.get("load", start_load))
+        else:
+            view_ops = [o for o in ops or [] if o.get("file") != "load"]
+            load_ops = [{k: v for k, v in o.items() if k != "file"} for o in ops or [] if o.get("file") == "load"]
+            try:
+                new_view = adapter.patch(start_view, view_ops, app_root=project.app_root) if view_ops else start_view
+                new_load = adapter.patch_load(start_load, load_ops, app_root=project.app_root) if load_ops else start_load
+            except AdapterError as exc:
+                raise EditorError(422, exc.code, str(exc), line=exc.line)
+        dirty = not (new_view == view and new_load == load)
+        if dirty:
+            _write_draft(project, page_id, revision, new_view, new_load)
+        else:
+            _draft_path(project, page_id).unlink(missing_ok=True)
+        try:
+            model = adapter.model(new_view, new_load, app_root=project.app_root)
+        except AdapterError as exc:
+            raise EditorError(422, exc.code, str(exc), line=exc.line)
+        return {"revision": revision, "draftRevision": revision_of(new_view, new_load), "dirty": dirty,
+                "unchanged": new_view == start_view and new_load == start_load,
+                "model": model, "source": {"view": new_view, "load": new_load}}
+
+
 def open_page(project: Project, page_id: str, *, annotate: bool = True) -> dict[str, Any]:
     svc = load_blueprint(project)
     with _lock(project.root):
@@ -286,7 +370,16 @@ def open_page(project: Project, page_id: str, *, annotate: bool = True) -> dict[
             raise EditorError(422, exc.code, str(exc), line=exc.line)
         if annotate:
             _annotate_app_copy(project, doc, page, view)
+        # Unsaved edits, when there are any, are what the person sees and edits.
+        draft = read_draft(project, page_id, revision)
+        if draft:
+            try:
+                model = adapter.model(draft["view"], draft["load"], app_root=project.app_root)
+                view, load = draft["view"], draft["load"]
+            except AdapterError:
+                draft = None
         return {
+            "draft": {"revision": draft["revision"], "base": revision} if draft else None,
             "page": {"id": page_id, "name": page.get("name"), "route": page.get("route"),
                      "purpose": page.get("purpose") or "", "access": page.get("access") or "authenticated",
                      "file": f"{code_page_dir(page)}/view.tsx"},
@@ -372,6 +465,7 @@ def apply(project: Project, page_id: str, *, base_revision: str, ops: list[dict[
             except AdapterError as exc:
                 raise EditorError(422, exc.code, str(exc), line=exc.line)
         if new_view == view and new_load == load:
+            _draft_path(project, page_id).unlink(missing_ok=True)
             model = adapter.model(view, load, app_root=project.app_root)
             return {"revision": revision, "model": model, "source": {"view": view, "load": load},
                     "checked": False, "unchanged": True, "version": svc.doc.get("version")}
@@ -384,6 +478,7 @@ def apply(project: Project, page_id: str, *, base_revision: str, ops: list[dict[
                 raise EditorError(422, "does-not-compile",
                                   "That change would break the page, so it was not saved.", findings=found)
         version = _write(svc, project, page, row, new_view, new_load, label=label)
+        _draft_path(project, page_id).unlink(missing_ok=True)
         new_rev = revision_of(new_view, new_load)
         entry = _record(project, page_id, revision=new_rev, parent=revision, label=label, kind=kind,
                         view=new_view, load=new_load, version=version)

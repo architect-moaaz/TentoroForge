@@ -276,12 +276,12 @@ const PARAMS: Record<string, string> = ${JSON.stringify(params || {})};
 const SEARCH: Record<string, string | undefined> = ${JSON.stringify(searchParams || {})};
 (window as any).__forgeParams = PARAMS;
 (window as any).__forgeLocation = ${JSON.stringify(filledRoute(route, params, searchParams))};
-installPreviewFetch();
+if (!(window as any).__forgePreviewFetch) { installPreviewFetch(); (window as any).__forgePreviewFetch = true; }
 
 // A picture at a root-relative address lives in the app's public files. This
 // frame is not the app, so it asks the editor for the file and shows what
 // comes back.
-(() => {
+if (!(window as any).__forgeAssets) { (window as any).__forgeAssets = true; (() => {
   const waiting = new Map<string, HTMLImageElement[]>();
   const ask = (img: HTMLImageElement) => {
     const s = img.getAttribute("src") || "";
@@ -304,7 +304,7 @@ installPreviewFetch();
     }
   }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
   sweep(document);
-})();
+})(); }
 
 class ErrorCatcher extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
@@ -316,10 +316,11 @@ class ErrorCatcher extends React.Component<{ children: React.ReactNode }, { erro
   }
 }
 
-let root: ReturnType<typeof createRoot> | null = null;
+// One React root per document: a page swapped in later renders into it.
 async function render() {
   const host = document.getElementById("root")!;
-  root = root ?? createRoot(host);
+  const w = window as any;
+  const root: ReturnType<typeof createRoot> = w.__forgeRoot ?? (w.__forgeRoot = createRoot(host));
   const ctx = { params: PARAMS, searchParams: SEARCH, user: await currentUser() };
   let data: any;
   try { data = await load(ctx as any); }

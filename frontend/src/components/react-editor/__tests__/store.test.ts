@@ -10,7 +10,7 @@ vi.mock("sonner", () => ({ toast: { warning: vi.fn(), error: vi.fn(), info: vi.f
 
 const calls: { name: string; args: unknown[] }[] = [];
 const api = {
-  pages: vi.fn(), open: vi.fn(), apply: vi.fn(), restore: vi.fn(), check: vi.fn(), propose: vi.fn(),
+  pages: vi.fn(), open: vi.fn(), apply: vi.fn(), draftApply: vi.fn(), discardDraft: vi.fn(), restore: vi.fn(), check: vi.fn(), propose: vi.fn(),
   applyProposal: vi.fn(), discardProposal: vi.fn(), history: vi.fn(), jit: vi.fn(), vendor: vi.fn(),
 };
 vi.mock("../api", async () => {
@@ -50,30 +50,45 @@ beforeEach(async () => {
 });
 
 describe("the store's transactions", () => {
-  it("sends an edit against the loaded revision and holds what came back, undoable as one step", async () => {
-    api.apply.mockResolvedValue({ revision: "rev2", model: model("Cases"), source: { view: "<h1>Cases</h1>", load: "" }, checked: false, unchanged: false, version: 3 });
+  it("lands an edit on the page's draft, undoable as one step, and saves everything as one revision", async () => {
+    api.draftApply.mockResolvedValue({ revision: "rev1", draftRevision: "d2", dirty: true, unchanged: false, model: model("Cases"), source: { view: "<h1>Cases</h1>", load: "" } });
     const s = useEditorStore.getState();
     s.select(["r0.0"]);
     expect(await s.setText("r0.0", "Cases")).toBe(true);
-    const apply = calls.find((c) => c.name === "apply")!;
-    expect(apply.args.slice(1)).toEqual(["PAGE-001", "rev1", [{ op: "setText", id: "r0.0", text: "Cases" }], "Change text"]);
+    const draft = calls.find((c) => c.name === "draftApply")!;
+    expect(draft.args.slice(1)).toEqual(["PAGE-001", { baseRevision: "rev1", ops: [{ op: "setText", id: "r0.0", text: "Cases" }] }]);
     const st = useEditorStore.getState();
-    expect(st.doc?.revision).toBe("rev2");
+    expect(st.doc?.revision).toBe("rev1");                       // nothing saved yet
+    expect(st.doc?.draft).toEqual({ revision: "d2", base: "rev1" });
     expect(st.doc?.model?.nodes["r0.0"].text).toBe("Cases");
-    expect(st.saveState).toBe("saved");
-    expect(st.undoStack.map((u) => [u.label, u.before.revision, u.after.revision])).toEqual([["Change text", "rev1", "rev2"]]);
+    expect(st.saveState).toBe("unsaved");
+    expect(st.undoStack.map((u) => [u.label, u.before.revision, u.after.revision])).toEqual([["Change text", "rev1", "d2"]]);
     expect(st.selection).toEqual(["r0.0"]);
+    expect(calls.some((c) => c.name === "apply")).toBe(false);
 
-    api.restore.mockResolvedValue({ revision: "rev1", model: model("Records"), source: { view: "<h1>Records</h1>", load: "" }, checked: false, unchanged: false, version: 4 });
+    // undo moves the draft back to what was saved: no draft left
+    api.draftApply.mockResolvedValue({ revision: "rev1", draftRevision: "rev1", dirty: false, unchanged: false, model: model("Records"), source: { view: "<h1>Records</h1>", load: "" } });
     await useEditorStore.getState().undo();
-    const restore = calls.find((c) => c.name === "restore")!;
-    expect(restore.args.slice(1)).toEqual(["PAGE-001", "rev1", "rev2"]);
-    expect(useEditorStore.getState().doc?.revision).toBe("rev1");
+    const back = calls.filter((c) => c.name === "draftApply")[1]!;
+    expect(back.args[2]).toEqual({ baseRevision: "rev1", source: { view: "<h1>Records</h1>", load: "" } });
+    expect(useEditorStore.getState().doc?.draft).toBeNull();
+    expect(useEditorStore.getState().saveState).toBe("saved");
     expect(useEditorStore.getState().redoStack).toHaveLength(1);
+
+    // redo, then Save: one apply with the draft's whole source
+    api.draftApply.mockResolvedValue({ revision: "rev1", draftRevision: "d2", dirty: true, unchanged: false, model: model("Cases"), source: { view: "<h1>Cases</h1>", load: "" } });
+    await useEditorStore.getState().redo();
+    api.apply.mockResolvedValue({ revision: "d2", model: model("Cases"), source: { view: "<h1>Cases</h1>", load: "" }, checked: true, unchanged: false, version: 3 });
+    expect(await useEditorStore.getState().save()).toBe(true);
+    const apply = calls.find((c) => c.name === "apply")!;
+    expect(apply.args.slice(1)).toEqual(["PAGE-001", "rev1", [], "Edits in the editor", { view: "<h1>Cases</h1>", load: "" }]);
+    expect(useEditorStore.getState().doc?.revision).toBe("d2");
+    expect(useEditorStore.getState().doc?.draft).toBeNull();
+    expect(useEditorStore.getState().saveState).toBe("saved");
   });
 
   it("reloads on a stale revision instead of overwriting", async () => {
-    api.apply.mockRejectedValue(new EditorApiError({ status: 409, code: "stale", message: "The page changed", current: "rev9" }));
+    api.draftApply.mockRejectedValue(new EditorApiError({ status: 409, code: "stale", message: "The page changed", current: "rev9" }));
     api.open.mockResolvedValue(doc("rev9", "Someone else's title"));
     expect(await useEditorStore.getState().setText("r0.0", "Mine")).toBe(false);
     const st = useEditorStore.getState();
@@ -84,7 +99,7 @@ describe("the store's transactions", () => {
   });
 
   it("keeps the last valid page when a change is refused, and shows why", async () => {
-    api.apply.mockRejectedValue(new EditorApiError({ status: 422, code: "does-not-compile", message: "That change would break the page, so it was not saved.",
+    api.draftApply.mockRejectedValue(new EditorApiError({ status: 422, code: "does-not-compile", message: "That change would break the page, so it was not saved.",
       findings: [{ file: "view.tsx", line: 2, code: "TS2322", raw: "x", plain: "Line 2 of the page: not accepted", severity: "must-fix" }] }));
     expect(await useEditorStore.getState().setProp("r0.0", "size", { kind: "string", value: "huge" })).toBe(false);
     const st = useEditorStore.getState();
@@ -94,7 +109,7 @@ describe("the store's transactions", () => {
   });
 
   it("marks the save as failed when the connection is lost, without claiming it saved", async () => {
-    api.apply.mockRejectedValue(new TypeError("Failed to fetch"));
+    api.draftApply.mockRejectedValue(new TypeError("Failed to fetch"));
     expect(await useEditorStore.getState().setText("r0.0", "x")).toBe(false);
     const st = useEditorStore.getState();
     expect(st.saveState).toBe("failed");
@@ -124,16 +139,18 @@ describe("the store's transactions", () => {
 
 
 describe("the instant canvas", () => {
-  it("builds the open page on open, rebuilds it after a saved change, and follows the app-wide preview", async () => {
+  it("builds the open page on open, rebuilds it from the draft after an edit, and follows the app-wide preview", async () => {
     let st = useEditorStore.getState();
     expect(st.source).toBe("jit");
     expect(st.frameDoc?.pageId).toBe("PAGE-001");
     expect(calls.filter((c) => c.name === "jit")).toHaveLength(1);
 
-    api.apply.mockResolvedValue({ revision: "rev2", model: model("Cases"), source: { view: "<h1>Cases</h1>", load: "" }, checked: false, unchanged: false, version: 3 });
+    // an edit lands on the draft; the canvas is built from the draft, not from what is saved
+    api.draftApply.mockResolvedValue({ revision: "rev1", draftRevision: "d2", dirty: true, unchanged: false, model: model("Cases"), source: { view: "<h1>Cases</h1>", load: "" } });
     await st.setText("r0.0", "Cases");
     await new Promise((r) => setTimeout(r, 0));
     expect(calls.filter((c) => c.name === "jit")).toHaveLength(2);
+    expect(calls.filter((c) => c.name === "jit").pop()!.args[2]).toMatchObject({ draft: true });
 
     useEditorStore.setState({ pages: [...useEditorStore.getState().pages, { id: "PAGE-002", name: "One", route: "/records/[id]", purpose: "", pattern: null, access: "authenticated", coded: true, module: null, navigatesTo: [] }] });
     useEditorStore.getState().previewNavigate("PAGE-002", { id: "sample-record-2" }, {});
@@ -142,7 +159,7 @@ describe("the instant canvas", () => {
     expect(st.frameTarget).toEqual({ pageId: "PAGE-002", params: { id: "sample-record-2" }, search: {} });
     expect(st.previewStack.map((t) => t.pageId)).toEqual(["PAGE-001"]);
     const last = calls.filter((c) => c.name === "jit").pop()!;
-    expect(last.args.slice(1, 3)).toEqual(["PAGE-002", { params: { id: "sample-record-2" }, search: {}, fresh: undefined }]);
+    expect(last.args.slice(1, 3)).toEqual(["PAGE-002", { params: { id: "sample-record-2" }, search: {}, fresh: undefined, draft: false }]);
     expect(st.pageId).toBe("PAGE-001");
     useEditorStore.getState().previewBack();
     await new Promise((r) => setTimeout(r, 0));

@@ -36,6 +36,8 @@ function Seg({ active, onClick, title, children, disabled }: { active?: boolean;
 export function TopBar({ preview }: { preview: ReturnType<typeof usePreview> }) {
   const doc = useEditorStore((s) => s.doc);
   const saveState = useEditorStore((s) => s.saveState);
+  const saveDraft = useEditorStore((s) => s.save);
+  const discard = useEditorStore((s) => s.discard);
   const saveError = useEditorStore((s) => s.saveError);
   const undoStack = useEditorStore((s) => s.undoStack);
   const redoStack = useEditorStore((s) => s.redoStack);
@@ -86,12 +88,19 @@ export function TopBar({ preview }: { preview: ReturnType<typeof usePreview> }) 
         <div className="truncate text-[11px] leading-tight text-muted-foreground">{doc?.page.route ?? ""}</div>
       </div>
 
-      <div className={cn("ml-2 flex items-center gap-1 rounded-md px-2 py-0.5 text-xs",
-        save.tone === "ok" && "text-emerald-600", save.tone === "busy" && "text-muted-foreground", save.tone === "bad" && "bg-destructive/10 text-destructive")}
-        role="status" aria-live="polite">
-        {save.tone === "busy" ? <Loader2 className="h-3 w-3 animate-spin" /> : save.tone === "ok" ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
-        <span className="max-w-[16rem] truncate">{save.text}</span>
-      </div>
+      {saveState === "unsaved" ? (
+        <div className="ml-2 flex items-center gap-1">
+          <Button size="sm" className="h-7 px-3 text-xs" disabled={busy} onClick={() => void saveDraft()} title="Save everything changed since the last save (⌘S)">Save</Button>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground" disabled={busy} onClick={() => { if (window.confirm("Drop every change since the last save?")) void discard(); }} title="Drop the unsaved changes">Discard</Button>
+        </div>
+      ) : (
+        <div className={cn("ml-2 flex items-center gap-1 rounded-md px-2 py-0.5 text-xs",
+          save.tone === "ok" && "text-emerald-600", save.tone === "busy" && "text-muted-foreground", save.tone === "bad" && "bg-destructive/10 text-destructive")}
+          role="status" aria-live="polite">
+          {save.tone === "busy" ? <Loader2 className="h-3 w-3 animate-spin" /> : save.tone === "ok" ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+          <span className="max-w-[16rem] truncate">{save.text}</span>
+        </div>
+      )}
 
       <div className="mx-1 h-5 w-px bg-border" />
       <Seg onClick={() => void undo()} title={undoStack.length ? `Undo ${undoStack[undoStack.length - 1].label} (⌘Z)` : "Nothing to undo"} disabled={!undoStack.length || busy}><Undo2 className="h-3.5 w-3.5" /></Seg>

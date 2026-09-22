@@ -56,6 +56,7 @@ export function ReactEditor({ projectId }: ReactEditorProps) {
       const mod = e.metaKey || e.ctrlKey;
       const s = useEditorStore.getState();
       if (mod && e.key.toLowerCase() === "z" && !typing) { e.preventDefault(); void (e.shiftKey ? s.redo() : s.undo()); }
+      else if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); void s.save(); }
       else if (mod && e.key === ".") { e.preventDefault(); setRightOpen(!s.rightOpen); }
       else if (mod && e.key === "/") { e.preventDefault(); setLeftOpen(!s.leftOpen); }
       else if (e.key === "Escape" && s.mode === "preview" && !s.previewApp) { s.setMode("design"); }
@@ -63,7 +64,10 @@ export function ReactEditor({ projectId }: ReactEditorProps) {
       else if (mod && e.key.toLowerCase() === "p" && !typing) { e.preventDefault(); s.setMode(s.mode === "design" ? "preview" : "design"); }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Leaving with unsaved edits: the browser asks. (They are kept on the server either way.)
+    const onLeave = (e: BeforeUnloadEvent) => { if (useEditorStore.getState().doc?.draft) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", onLeave);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("beforeunload", onLeave); };
   }, [setLeftOpen, setRightOpen]);
 
   if (loadError && !doc && !pages.length) {

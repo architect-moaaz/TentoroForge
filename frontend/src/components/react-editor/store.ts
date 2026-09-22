@@ -19,12 +19,17 @@ import { pageSources } from "./lib/data";
 import { listKeyFor } from "./lib/lists";
 import { GROUPS, type GroupKind } from "./lib/templates";
 import { mainRoot, plainName, topmost } from "./lib/plain";
-import type { Breakpoint, Device, Finding, HistoryEntry, ModelNode, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, ReadOptions, Rect, ThemeDoc, ThemePatch } from "./types";
+import type { Breakpoint, Device, DraftResult, Finding, HistoryEntry, ModelNode, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, ReadOptions, Rect, ThemeDoc, ThemePatch } from "./types";
 
 export interface Snapshot { revision: string; view: string; load: string }
 export interface HistoryOp { label: string; before: Snapshot; after: Snapshot }
 
-export type SaveState = "saved" | "saving" | "checking" | "failed";
+export type SaveState = "saved" | "unsaved" | "saving" | "checking" | "failed";
+
+/** The revision the person is looking at: the draft's when there is one. */
+export function currentRevision(doc: PageDoc | null | undefined): string {
+  return doc?.draft?.revision ?? doc?.revision ?? "";
+}
 export type Mode = "design" | "preview";
 export type ViewLevel = "simple" | "advanced";
 export type LeftTab = "pages" | "add" | "layers" | "theme";
@@ -161,6 +166,10 @@ export interface EditorState {
 
   // --- editing
   applyOps: (ops: Op[], label: string, opts?: { reselect?: (model: PageModel) => string[] }) => Promise<boolean>;
+  /** Everything edited since the last save, written as one revision. */
+  save: () => Promise<boolean>;
+  /** Unsaved edits dropped; the page as last saved. */
+  discard: () => Promise<void>;
   setText: (id: string, text: string) => Promise<boolean>;
   setProp: (id: string, name: string, value: PropValue | null) => Promise<boolean>;
   setClasses: (id: string, classes: string) => Promise<boolean>;
@@ -253,7 +262,12 @@ function writePrefs(state: EditorState) {
 }
 
 function snapshotOf(doc: PageDoc): Snapshot {
-  return { revision: doc.revision, view: doc.source?.view ?? "", load: doc.source?.load ?? "" };
+  return { revision: currentRevision(doc), view: doc.source?.view ?? "", load: doc.source?.load ?? "" };
+}
+
+/** The page after an edit on its draft, as the store holds it. */
+function withDraft(doc: PageDoc, out: DraftResult): PageDoc {
+  return { ...doc, model: out.model, source: out.source, draft: out.dirty ? { revision: out.draftRevision, base: out.revision } : null };
 }
 
 const emptySmith = (): SmithState => ({
@@ -361,7 +375,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const doc = await editorApi.open(projectId, pageId);
       // The revision subscription below builds the instant canvas from it.
-      set({ doc, loading: false, saveState: "saved", saveError: null });
+      set({ doc, loading: false, saveState: doc.draft ? "unsaved" : "saved", saveError: null });
     } catch (err) {
       set({ loading: false, loadError: failureOf(err).message, doc: null });
     }
@@ -372,7 +386,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!projectId || !pageId) return;
     try {
       const doc = await editorApi.open(projectId, pageId);
-      set({ doc, saveState: "saved", saveError: null, undoStack: [], redoStack: [],
+      set({ doc, saveState: doc.draft ? "unsaved" : "saved", saveError: null, undoStack: [], redoStack: [],
             selection: selection.filter((id) => doc.model?.nodes[id]) });
     } catch (err) {
       set({ loadError: failureOf(err).message });
@@ -431,42 +445,80 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   applyOps: async (ops, label, opts = {}) => {
     const { projectId, pageId, doc, busy } = get();
     if (!projectId || !pageId || !doc?.model || busy) return false;
-    const structural = ops.some((o) => ["insert", "move", "remove", "duplicate", "replaceNode", "wrap", "unwrap"].includes(o.op));
-    set({ busy: true, saveState: structural || ops.some((o) => o.op === "setProp" || o.op === "addImport") ? "checking" : "saving", saveError: null });
+    // An edit lands on the page's draft; nothing is saved until Save.
+    set({ busy: true, saveError: null });
     const before = snapshotOf(doc);
     try {
-      const out = await editorApi.apply(projectId, pageId, doc.revision, ops, label);
-      const nextDoc: PageDoc = { ...doc, revision: out.revision, model: out.model, source: out.source,
-                                 history: out.history ? [...doc.history, out.history] : doc.history };
+      const out = await editorApi.draftApply(projectId, pageId, { baseRevision: doc.revision, ops });
+      const nextDoc = withDraft(doc, out);
       const after = snapshotOf(nextDoc);
       const reselect = opts.reselect ? opts.reselect(out.model) : get().selection.filter((id) => out.model.nodes[id]);
       set((s) => ({
-        doc: nextDoc, busy: false, saveState: "saved", lastFindings: [],
+        doc: nextDoc, busy: false, saveState: out.dirty ? "unsaved" : "saved", lastFindings: [],
         undoStack: out.unchanged ? s.undoStack : [...s.undoStack, { label, before, after }].slice(-100),
         redoStack: out.unchanged ? s.redoStack : [],
         selection: topmost(out.model, reselect),
-        serverFindings: out.checked ? [] : s.serverFindings,
-        checkedRevision: out.checked ? out.revision : s.checkedRevision,
       }));
       return true;
     } catch (err) {
       const f = failureOf(err);
       if (f.code === "stale") {
         toast.warning("The page changed elsewhere — reloaded it. Try your change again.");
-        set({ busy: false, saveState: "saved" });
+        set({ busy: false });
         await get().reload();
         return false;
       }
       if (f.status === 422) {
-        set({ busy: false, saveState: "saved", lastFindings: f.findings ?? [] });
+        set({ busy: false, lastFindings: f.findings ?? [] });
         const first = f.findings?.[0]?.plain;
         toast.error(f.message, { description: first ?? undefined, duration: 8000 });
         return false;
       }
       set({ busy: false, saveState: "failed", saveError: f.message });
-      toast.error("Couldn't save that change.", { description: f.message });
+      toast.error("Couldn't make that change.", { description: f.message });
       return false;
     }
+  },
+
+  save: async () => {
+    const { projectId, pageId, doc, busy } = get();
+    if (!projectId || !pageId || !doc?.draft || !doc.source || busy) return false;
+    set({ busy: true, saveState: "checking", saveError: null });
+    try {
+      const out = await editorApi.apply(projectId, pageId, doc.revision, [], "Edits in the editor", doc.source);
+      set((s) => ({
+        doc: { ...doc, revision: out.revision, model: out.model, source: out.source, draft: null,
+               history: out.history ? [...doc.history, out.history] : doc.history },
+        busy: false, saveState: "saved", lastFindings: [],
+        serverFindings: out.checked ? [] : s.serverFindings, checkedRevision: out.checked ? out.revision : s.checkedRevision,
+      }));
+      toast.success("Saved.");
+      return true;
+    } catch (err) {
+      const f = failureOf(err);
+      if (f.code === "stale") {
+        toast.warning("The page changed elsewhere since you opened it. Reloaded — your unsaved edits are kept aside; apply them again.");
+        set({ busy: false, saveState: "saved" });
+        await get().reload();
+        return false;
+      }
+      if (f.status === 422) {
+        set({ busy: false, saveState: "unsaved", lastFindings: f.findings ?? [] });
+        toast.error("Not saved — something on the page would not work.", { description: f.findings?.[0]?.plain, duration: 10000 });
+        return false;
+      }
+      set({ busy: false, saveState: "failed", saveError: f.message });
+      toast.error("Couldn't save.", { description: f.message });
+      return false;
+    }
+  },
+
+  discard: async () => {
+    const { projectId, pageId, doc } = get();
+    if (!projectId || !pageId || !doc?.draft) return;
+    try { await editorApi.discardDraft(projectId, pageId); } catch (err) { toast.error(failureOf(err).message); return; }
+    set({ undoStack: [], redoStack: [] });
+    await get().reload();
   },
 
   setText: (id, text) => get().applyOps([{ op: "setText", id, text }], "Change text"),
@@ -719,22 +771,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { projectId, pageId, doc, undoStack, busy } = get();
     const op = undoStack[undoStack.length - 1];
     if (!projectId || !pageId || !doc || !op || busy) return;
-    if (op.after.revision !== doc.revision) {
+    if (op.after.revision !== currentRevision(doc)) {
       toast.info("The page moved on since that change — use History to go back further.");
       set({ undoStack: [], redoStack: [] });
       return;
     }
-    set({ busy: true, saveState: "saving" });
+    set({ busy: true });
     try {
-      const out = await editorApi.restore(projectId, pageId, op.before.revision, doc.revision);
+      const out = await editorApi.draftApply(projectId, pageId, { baseRevision: doc.revision, source: { view: op.before.view, load: op.before.load } });
       set((s) => ({
-        doc: { ...doc, revision: out.revision, model: out.model, source: out.source, history: out.history ? [...doc.history, out.history] : doc.history },
-        undoStack: s.undoStack.slice(0, -1), redoStack: [...s.redoStack, op], busy: false, saveState: "saved",
-        selection: s.selection.filter((id) => out.model.nodes[id]),
+        doc: withDraft(doc, out), undoStack: s.undoStack.slice(0, -1), redoStack: [...s.redoStack, op], busy: false,
+        saveState: out.dirty ? "unsaved" : "saved", selection: s.selection.filter((id) => out.model.nodes[id]),
       }));
     } catch (err) {
       const f = failureOf(err);
-      set({ busy: false, saveState: f.status ? "saved" : "failed", saveError: f.message });
+      set({ busy: false, saveState: f.status ? get().saveState : "failed", saveError: f.message });
       toast.error("Couldn't undo.", { description: f.message });
       if (f.code === "stale") await get().reload();
     }
@@ -744,18 +795,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { projectId, pageId, doc, redoStack, busy } = get();
     const op = redoStack[redoStack.length - 1];
     if (!projectId || !pageId || !doc || !op || busy) return;
-    if (op.before.revision !== doc.revision) { set({ redoStack: [] }); return; }
-    set({ busy: true, saveState: "saving" });
+    if (op.before.revision !== currentRevision(doc)) { set({ redoStack: [] }); return; }
+    set({ busy: true });
     try {
-      const out = await editorApi.restore(projectId, pageId, op.after.revision, doc.revision);
+      const out = await editorApi.draftApply(projectId, pageId, { baseRevision: doc.revision, source: { view: op.after.view, load: op.after.load } });
       set((s) => ({
-        doc: { ...doc, revision: out.revision, model: out.model, source: out.source, history: out.history ? [...doc.history, out.history] : doc.history },
-        redoStack: s.redoStack.slice(0, -1), undoStack: [...s.undoStack, op], busy: false, saveState: "saved",
-        selection: s.selection.filter((id) => out.model.nodes[id]),
+        doc: withDraft(doc, out), redoStack: s.redoStack.slice(0, -1), undoStack: [...s.undoStack, op], busy: false,
+        saveState: out.dirty ? "unsaved" : "saved", selection: s.selection.filter((id) => out.model.nodes[id]),
       }));
     } catch (err) {
       const f = failureOf(err);
-      set({ busy: false, saveState: f.status ? "saved" : "failed", saveError: f.message });
+      set({ busy: false, saveState: f.status ? get().saveState : "failed", saveError: f.message });
       toast.error("Couldn't redo.", { description: f.message });
     }
   },
@@ -829,7 +879,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!projectId || !t) return;
     set({ frameTarget: t, frameLoading: true, frameBuildError: null });
     try {
-      const bundle: JitBundle = await editorApi.jit(projectId, t.pageId, { params: t.params, search: t.search, fresh: opts.fresh });
+      const bundle: JitBundle = await editorApi.jit(projectId, t.pageId, { params: t.params, search: t.search, fresh: opts.fresh,
+                                                                            draft: !!get().doc?.draft && t.pageId === get().pageId });
       // The shared script is fetched once per app and kept as a blob URL; a
       // page built against a newer vendor brings the new one along.
       if (get().vendor?.key !== bundle.vendorKey) {
@@ -873,6 +924,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setSmith: (patch) => set((s) => ({ smith: { ...s.smith, ...patch } })),
 
   askSmith: async (prompt, annotation = "", prior) => {
+    if (get().doc?.draft) {
+      // Smith reads the saved page; what is unsaved is saved first.
+      const saved = await get().save();
+      if (!saved) return;
+    }
     const { projectId, pageId, doc, selection, smith } = get();
     if (!projectId || !pageId || !doc || !selection.length || !prompt.trim()) return;
     smith.controller?.abort();
@@ -972,6 +1028,7 @@ export function saveLabel(state: SaveState, error: string | null): { text: strin
     case "saving": return { text: "Saving…", tone: "busy" };
     case "checking": return { text: "Checking…", tone: "busy" };
     case "failed": return { text: error ? `Not saved — ${error}` : "Not saved", tone: "bad" };
+    case "unsaved": return { text: "Unsaved changes", tone: "busy" };
     default: return { text: "Saved", tone: "ok" };
   }
 }
@@ -983,7 +1040,7 @@ export function historyLabel(entry: HistoryEntry): string {
 // A saved change is a new revision; the instant canvas rebuilds the open page
 // from it (the app-wide preview keeps showing where it went).
 useEditorStore.subscribe((s, prev) => {
-  if (s.doc?.revision === prev.doc?.revision || !s.doc?.coded || s.source !== "jit" || !s.pageId) return;
+  if (currentRevision(s.doc) === currentRevision(prev.doc) || !s.doc?.coded || s.source !== "jit" || !s.pageId) return;
   if (s.previewApp && s.frameTarget && s.frameTarget.pageId !== s.pageId) return;
   void s.loadFrame({ pageId: s.pageId, params: s.frameTarget?.params ?? {}, search: s.frameTarget?.search ?? {} });
 });
