@@ -28,7 +28,7 @@ import { checkModel } from "./lib/readiness";
 import { GROUPS, buttonAction, buttonActionOps, pageHref, widgetOfNode } from "./lib/templates";
 import { ChartSettings } from "./ChartSettings";
 import { FormFieldsEditor, ShowsControl, WorkflowInputEditor } from "./DataMapping";
-import { LookSection, ShowWhenControl, ValuesSection, coveredProps } from "./GenericSettings";
+import { ListSettings, LookSection, RepeatControl, ShowWhenControl, ValuesSection, coveredProps } from "./GenericSettings";
 import { useEditorStore } from "./store";
 import type { Breakpoint, ModelNode, Op, PageDoc, PropValue, SettingSpec } from "./types";
 
@@ -250,6 +250,8 @@ function SimpleSettings({ nodes, doc, def }: { nodes: ModelNode[]; doc: PageDoc;
         </Field>
       )}
       <ValuesSection nodes={nodes} doc={doc} covered={coveredProps(specs)} />
+      {!multi && <RepeatControl node={node} doc={doc} />}
+      {!multi && <ListSettings node={node} doc={doc} />}
       {!multi && <ShowWhenControl node={node} doc={doc} />}
       {isButton && !multi && <ButtonAction node={node} doc={doc} />}
       {!multi && (

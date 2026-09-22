@@ -890,3 +890,78 @@ def test_the_look_is_read_by_the_job_each_colour_does_and_a_change_reaches_the_t
     # a look nobody can read is said in plain words, not refused
     warned = theme.update(project, {"colors": {"textPrimary": "#f0f0f0"}})
     assert any("hard to read" in w for w in warned["warnings"])
+
+
+REPEAT_VIEW = '''export default function View(props: Props) {
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent>
+          <p>{props.current?.name ?? ""}</p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+'''
+
+
+def test_an_element_repeats_over_a_list_and_stands_once_again():
+    out = adapter.patch(REPEAT_VIEW, [{"op": "wrapRepeat", "id": "r0.0", "source": "props.records", "variable": "row"}])
+    assert out == '''export default function View(props: Props) {
+  return (
+    <div className="space-y-4">
+      {props.records.map((row) => (
+        <Card key={row.id}>
+          <CardContent>
+            <p>{props.current?.name ?? ""}</p>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+'''
+    m = adapter.model(out, "")
+    card = next(n for n in m["nodes"].values() if n["type"] == "Card")
+    assert card["repeat"] == {"source": "props.records", "variable": "row"} and card["context"] == "repeat"
+    retargeted = adapter.patch(out, [{"op": "wrapRepeat", "id": card["id"], "source": "props.people"}])
+    assert "{props.people.map((row) => (" in retargeted
+    back = adapter.patch(out, [{"op": "unwrapRepeat", "id": card["id"]}])
+    assert back == REPEAT_VIEW
+
+
+def test_how_a_list_is_read_is_data_the_editor_can_change():
+    load = ('import { list, type PageContext } from "@/sdk/server";\n'
+            'export async function load(ctx: PageContext) {\n  const records = await list("Record", { sort: "createdAt", order: "desc" });\n'
+            '  const custom = await list("Record", { where: { owner: ctx.user?.id } });\n  return { records, custom, plain: await list("Record") };\n}\n')
+    shapes = adapter.model("export default function View() { return <div />; }", load)["loadShapes"]
+    assert shapes["records"]["options"] == {"sort": "createdAt", "order": "desc"}
+    assert shapes["custom"].get("optionsCustom") is True and "options" not in shapes["custom"]
+    assert shapes["plain"]["options"] == {}
+    out = adapter.patch_load(load, [{"op": "setReadOptions", "file": "load", "key": "records",
+                                     "options": {"where": {"status": "OPEN"}, "sort": "name", "order": "asc", "limit": 10}}])
+    assert 'const records = await list("Record", { where: { status: "OPEN" }, sort: "name", order: "asc", limit: 10 });' in out
+    out = adapter.patch_load(out, [{"op": "setReadOptions", "file": "load", "key": "plain", "options": {"limit": 5}}])
+    assert 'plain: await list("Record", { limit: 5 })' in out
+    out = adapter.patch_load(out, [{"op": "setReadOptions", "file": "load", "key": "records", "options": {}}])
+    assert 'const records = await list("Record");' in out
+    with pytest.raises(AdapterError) as e:
+        adapter.patch_load(load, [{"op": "setReadOptions", "file": "load", "key": "custom", "options": {"limit": 1}}])
+    assert "decided by code" in str(e.value)
+
+
+def test_refreshing_the_sdk_gives_an_older_tree_the_scaffold_files_the_sdk_now_imports(tmp_path, monkeypatch):
+    from services.blueprint import ui_engineer
+    project = _chart_project(tmp_path, monkeypatch)
+    doc = service.load_blueprint(project).doc
+    account = project.app_root / "src" / "lib" / "account.ts"
+    assert not account.exists()
+    ui_engineer.ensure_sdk(doc, project.app_root)
+    client = (project.app_root / "src" / "sdk" / "client.tsx").read_text()
+    if "./auth" in client:
+        assert account.exists(), "the SDK's client half imports the account model; the tree must carry it"
+    # a file the tree already has is its own
+    account.write_text("// mine\n")
+    ui_engineer.ensure_sdk(doc, project.app_root)
+    assert account.read_text() == "// mine\n"

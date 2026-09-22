@@ -193,6 +193,28 @@ def skipped_by_scaffold(path: str | Path) -> bool:
     return any(part in _SKIP_DIRS for part in Path(path).parts)
 
 
+def fill_scaffold_defaults(app_root: str | Path) -> list[str]:
+    """Copy each ``SCAFFOLD_DEFAULTS`` file the tree lacks, from the scaffold
+    layers. What a refreshed SDK imports has to exist: ``client.tsx`` gained
+    ``./auth``, which reads ``@/lib/account``, and an application built before
+    the account model had no such file — its next editor check refreshed the
+    SDK and left it unable to build. A default only fills a hole; a file the
+    projection wrote, or the person's, is never touched."""
+    out = Path(app_root)
+    written: list[str] = []
+    for layer in _template_dirs():
+        if not layer.is_dir():
+            continue
+        for rel in SCAFFOLD_DEFAULTS:
+            src = layer / rel
+            dst = out / rel
+            if src.is_file() and not dst.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, dst)
+                written.append(rel)
+    return written
+
+
 def _template_dirs() -> list[Path]:
     """The scaffold layers, base first.
 

@@ -357,8 +357,8 @@ function objectEntries(source, obj) {
 //: from the database (the SDK's reads), computed by a widget's query, the
 //: signed-in person, the page's address, fetched from an API, or written in.
 const READS = {
-  list: (a) => ({ kind: "rows", entity: a[0], via: { how: "server", call: "list", entity: a[0] } }),
-  listPage: (a) => ({ kind: "page", entity: a[0], via: { how: "server", call: "listPage", entity: a[0] } }),
+  list: (a, raw, nodes) => ({ kind: "rows", entity: a[0], via: { how: "server", call: "list", entity: a[0] }, ...readOptionsOf(nodes[1]) }),
+  listPage: (a, raw, nodes) => ({ kind: "page", entity: a[0], via: { how: "server", call: "listPage", entity: a[0] }, ...readOptionsOf(nodes[1]) }),
   record: (a) => ({ kind: "record", entity: a[0], via: { how: "server", call: "record", entity: a[0] } }),
   count: (a) => ({ kind: "number", via: { how: "server", call: "count", entity: a[0] } }),
   total: (a) => ({ kind: "number", via: { how: "server", call: "total", entity: a[0] } }),
@@ -367,6 +367,98 @@ const READS = {
   runWidget: (a, raw) => { const w = (/^widgets\.(\w+)/.exec(raw[0] || "") || [])[1] || null; return { kind: "widget", widget: w, via: { how: "widget", widget: w } }; },
   currentUser: () => ({ kind: "user", via: { how: "user" } }),
 };
+
+/** A literal's value — string, number, boolean, null, an array or object of
+ *  literals — or `undefined` when code decides it. */
+function literalValue(node) {
+  if (!node) return undefined;
+  switch (node.type) {
+    case "StringLiteral": return node.value;
+    case "NumericLiteral": return node.value;
+    case "BooleanLiteral": return node.value;
+    case "NullLiteral": return null;
+    case "TemplateLiteral": return node.expressions.length ? undefined : node.quasis.map((q) => q.value.cooked).join("");
+    case "UnaryExpression": { const v = literalValue(node.argument); return node.operator === "-" && typeof v === "number" ? -v : undefined; }
+    case "ArrayExpression": { const out = []; for (const e of node.elements) { const v = literalValue(e); if (v === undefined) return undefined; out.push(v); } return out; }
+    case "ObjectExpression": {
+      const out = {};
+      for (const p of node.properties) {
+        if (p.type !== "ObjectProperty" || p.computed) return undefined;
+        const v = literalValue(p.value);
+        if (v === undefined) return undefined;
+        out[p.key.name ?? p.key.value] = v;
+      }
+      return out;
+    }
+    case "TSAsExpression": case "ParenthesizedExpression": return literalValue(node.expression);
+    default: return undefined;
+  }
+}
+
+/** A read's options (`list("X", { where, sort, order, limit })`) as data,
+ *  or a note that code decides them. */
+function readOptionsOf(node) {
+  if (!node) return { options: {} };
+  const v = literalValue(node);
+  return v && typeof v === "object" && !Array.isArray(v) ? { options: v } : { optionsCustom: true };
+}
+
+/** The literal text for a read's options; null when there are none. */
+function optionsLiteral(o) {
+  const parts = [];
+  const key = (k) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k));
+  if (o.where && Object.keys(o.where).length) parts.push(`where: { ${Object.entries(o.where).map(([k, v]) => `${key(k)}: ${JSON.stringify(v)}`).join(", ")} }`);
+  if (o.search) parts.push(`search: ${JSON.stringify(String(o.search))}`);
+  if (o.sort) parts.push(`sort: ${JSON.stringify(String(o.sort))}`);
+  if (o.order) parts.push(`order: ${JSON.stringify(String(o.order))}`);
+  if (o.limit) parts.push(`limit: ${Number(o.limit)}`);
+  if (o.page) parts.push(`page: ${Number(o.page)}`);
+  return parts.length ? `{ ${parts.join(", ")} }` : null;
+}
+
+/** The SDK read call whose result `load` returns under `key`, or null. */
+function readCallFor(ast, key) {
+  const m = loadModelFromAst(ast);
+  if (!m.fn) return null;
+  const unwrap = (e) => { while (e && (e.type === "AwaitExpression" || e.type === "ParenthesizedExpression" || e.type === "TSAsExpression" || e.type === "TSNonNullExpression")) e = e.argument ?? e.expression; return e; };
+  const isRead = (e) => e && e.type === "CallExpression" && e.callee.type === "Identifier" && READS[e.callee.name];
+  const vars = new Map();
+  const walk = (n) => {
+    if (n.type === "VariableDeclarator" && n.init) {
+      const init = unwrap(n.init);
+      if (n.id.type === "Identifier") vars.set(n.id.name, init);
+      else if (n.id.type === "ArrayPattern" && init && init.type === "CallExpression" && init.arguments[0] && init.arguments[0].type === "ArrayExpression") {
+        n.id.elements.forEach((el, i) => { if (el && el.type === "Identifier") vars.set(el.name, unwrap(init.arguments[0].elements[i])); });
+      }
+    }
+    if ((n.type === "ArrowFunctionExpression" || n.type === "FunctionExpression" || n.type === "FunctionDeclaration") && n !== m.fn) return;
+    for (const c of children(n)) walk(c);
+  };
+  walk(m.fn.body);
+  for (const { obj } of m.returns) {
+    for (const p of obj.properties) {
+      if (p.type !== "ObjectProperty" || (p.key.name ?? p.key.value) !== key) continue;
+      let v = unwrap(p.value);
+      if (v.type === "Identifier") v = vars.get(v.name);
+      if (v && v.type === "MemberExpression" && v.object.type === "Identifier") v = vars.get(v.object.name);
+      if (isRead(v)) return v;
+    }
+  }
+  return null;
+}
+
+function opSetReadOptions(source, m, op) {
+  needLoad(m);
+  const call = readCallFor(parseTsx(source), op.key);
+  if (!call) throw new PatchError("no-read", "This list is not read in a way the editor can change — ask Smith.");
+  if (call.arguments[1] && readOptionsOf(call.arguments[1]).optionsCustom) {
+    throw new PatchError("custom-options", "How this list is read is decided by code on this page — ask Smith to change it.");
+  }
+  const lit = optionsLiteral(op.options || {});
+  const args = call.arguments;
+  if (args.length >= 2) return lit ? splice(source, args[1].start, args[1].end, lit) : splice(source, args[0].end, args[1].end, "");
+  return lit ? splice(source, args[0].end, args[0].end, `, ${lit}`) : source;
+}
 
 /** The `fetch(…)` call an expression is built on, if any: `fetch(u)`,
  *  `(await fetch(u)).json()`, `fetch(u).then(…)`. */
@@ -389,7 +481,7 @@ function shapeOf(expr, vars, source) {
   if (expr.type === "CallExpression" && expr.callee.type === "Identifier" && READS[expr.callee.name]) {
     const args = expr.arguments.map((a) => (a.type === "StringLiteral" ? a.value : null));
     const raw = expr.arguments.map((a) => source.slice(a.start, a.end));
-    return READS[expr.callee.name](args, raw);
+    return READS[expr.callee.name](args, raw, expr.arguments);
   }
   // fetch(url) — or (await fetch(url)).json(): fetched from an API.
   const fetched = fetchCallOf(expr);
@@ -552,7 +644,10 @@ function attrText(name, value) {
 /** A node's source with its own indentation taken off the continuation
  *  lines, so it can be put down anywhere at a new depth. */
 function sourceOf(source, n) {
-  const [s, e] = removeSpan(n);
+  return spanSource(source, removeSpan(n));
+}
+function spanSource(source, span) {
+  const [s, e] = span;
   const own = lineIndent(source, s);
   return source.replace(/\r\n/g, "\n").slice(s, e).split("\n")
     .map((l, i) => (i === 0 || !own ? l : l.startsWith(own) ? l.slice(own.length) : l.replace(/^\s*/, (ws) => ws.slice(Math.min(ws.length, own.length)))))
@@ -858,6 +953,42 @@ function opWrapCondition(source, m, op) {
   return splice(source, n.span[0], n.span[1], `{${op.expr} && (\n${indent}  ${body}\n${indent})}`);
 }
 
+function opWrapRepeat(source, m, op) {
+  // One of the element per item of `source`: `{source.map((row) => (<X key={row.id}>…</X>))}`.
+  // An element already repeated has its source replaced.
+  const n = need(m, op.id);
+  if (n.parent == null) throw new PatchError("no-parent", "The page itself cannot be repeated.");
+  const variable = op.variable || "row";
+  if (n.wrapperSpan && n.repeat) {
+    const [ws] = n.wrapperSpan;
+    const start = ws + 1;
+    return splice(source, start, start + n.repeat.source.length, op.source);
+  }
+  if (n.wrapperSpan) throw new PatchError("in-expression", "This is shown under a condition — take that off first, then repeat it.");
+  const indent = lineIndent(source, n.span[0]);
+  let body = sourceOf(source, n);
+  if (!n.props.some((p) => p.name === "key")) {
+    const open = /^<([A-Za-z][\w.]*)/.exec(body);
+    if (open) body = body.slice(0, open[0].length) + ` key={${variable}.id}` + body.slice(open[0].length);
+  }
+  return splice(source, n.span[0], n.span[1], `{${op.source}.map((${variable}) => (\n${indent}  ${indentSnippet(body, indent + "  ")}\n${indent}))}`);
+}
+
+function opUnwrapRepeat(source, m, op) {
+  // The element stands once again; the key that named its row goes with the row.
+  const n = need(m, op.id);
+  if (!n.wrapperSpan || !n.repeat) return source;
+  const [ws, we] = n.wrapperSpan;
+  const indent = lineIndent(source, ws);
+  let body = spanSource(source, n.span);
+  const key = n.props.find((p) => p.name === "key" && p.span);
+  if (key && n.repeat.variable && String(key.value || "").startsWith(n.repeat.variable)) {
+    const ks = key.span[0] - n.span[0], ke = key.span[1] - n.span[0];
+    body = body.slice(0, ks).replace(/\s+$/, "") + body.slice(ke);
+  }
+  return splice(source, ws, we, indentSnippet(body, indent));
+}
+
 function opWrap(source, m, op) {
   // Siblings put inside a new container, in their order, where the first
   // one stood. `open`/`close` are the container's lines, relative; the
@@ -909,6 +1040,8 @@ function opUnwrapCondition(source, m, op) {
 const OPS = {
   wrap: opWrap,
   unwrap: opUnwrap,
+  wrapRepeat: opWrapRepeat,
+  unwrapRepeat: opUnwrapRepeat,
   wrapCondition: opWrapCondition,
   unwrapCondition: opUnwrapCondition,
   setChildren: opSetChildren,
@@ -1007,7 +1140,7 @@ function opRemoveReturnKey(source, m, op) {
   return source;
 }
 
-const LOAD_OPS = { addReturnKey: opAddReturnKey, removeReturnKey: opRemoveReturnKey, addImport: opAddImport };
+const LOAD_OPS = { addReturnKey: opAddReturnKey, removeReturnKey: opRemoveReturnKey, addImport: opAddImport, setReadOptions: opSetReadOptions };
 
 function patchLoad(load, ops) {
   let source = load;

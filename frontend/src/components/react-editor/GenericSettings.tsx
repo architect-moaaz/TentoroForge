@@ -19,8 +19,10 @@ import { DataPicker, type DataChoice } from "./DataPicker";
 import { GROUP_BY_KEY, effectiveValue, getGroupValue, setGroupValue } from "./lib/classes";
 import { bindingExpr, fieldChoices, pageSources, readBinding, rowContext, sampleOf, type DataSource } from "./lib/data";
 import { humanise } from "./lib/templates";
+import { listOf, optionsSummary, repeatableSources } from "./lib/lists";
 import { useEditorStore } from "./store";
-import type { ModelNode, Op, PageDoc, PropValue, SettingSpec } from "./types";
+import { VOID } from "./lib/drop";
+import type { ModelNode, Op, PageDoc, PropValue, ReadOptions, SettingSpec } from "./types";
 
 const NONE = "__none__";
 //: Attributes that are the editor's or React's business, not the person's.
@@ -271,3 +273,105 @@ export function coveredProps(specs: SettingSpec[]): Set<string> {
 }
 
 export { cn };
+
+// ---------------------------------------------------------------------------
+// One of this per item of a list
+// ---------------------------------------------------------------------------
+
+export function RepeatControl({ node, doc }: { node: ModelNode; doc: PageDoc }) {
+  const repeatNode = useEditorStore((s) => s.repeatNode);
+  const addList = useEditorStore((s) => s.addList);
+  const busy = useEditorStore((s) => s.busy);
+  const sources = repeatableSources(doc);
+  const inRow = !node.repeat && !!rowContext(doc, node.id);
+  if (!node.parent || node.selfClosing || (node.kind === "element" && VOID.has(node.type)) || inRow) return null;
+  const current = node.repeat ? sources.find((s) => s.expr === node.repeat!.source) : null;
+  const custom = !!node.repeat && !current;
+  const value = node.repeat ? (current ? current.id : "custom") : "once";
+  return (
+    <Field label="How many" help={custom ? `Repeated over ${node.repeat!.source}, which is decided by code — choose a list here to replace it.` : undefined}>
+      <Select value={value} disabled={busy} onValueChange={(v) => {
+        if (v === "once") void repeatNode(node.id, null);
+        else if (v.startsWith("add:")) void addList(v.slice(4)).then((key) => { if (key) void repeatNode(node.id, `${doc.model?.viewParam?.kind === "identifier" ? doc.model.viewParam.name + "." : ""}${key}`); });
+        else { const s = sources.find((x) => x.id === v); if (s) void repeatNode(node.id, s.expr); }
+      }}>
+        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="once">Just once</SelectItem>
+          {sources.map((s) => <SelectItem key={s.id} value={s.id}>One for each of: {s.label.toLowerCase()}</SelectItem>)}
+          {custom && <SelectItem value="custom" disabled>One for each item of {node.repeat!.source}</SelectItem>}
+          {doc.entities.map((e) => <SelectItem key={`add:${e.name}`} value={`add:${e.name}`}>One per {e.name.toLowerCase()} record (load that list)</SelectItem>)}
+        </SelectContent>
+      </Select>
+      {node.repeat && <p className="mt-1 text-[10px] text-muted-foreground">Inside it, “Shows” offers each item's fields; the first item is the design of all of them.</p>}
+    </Field>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Which rows a list has, in what order, how many
+// ---------------------------------------------------------------------------
+
+export function ListSettings({ node, doc }: { node: ModelNode; doc: PageDoc }) {
+  const setListOptions = useEditorStore((s) => s.setListOptions);
+  const busy = useEditorStore((s) => s.busy);
+  const [adding, setAdding] = useState(false);
+  const list = listOf(doc, node.id);
+  if (!list || !list.editable) return null;
+  const fields = list.entity?.fields.filter((f) => f.name !== "id") ?? [];
+  const o = list.options ?? {};
+  const save = (next: ReadOptions) => void setListOptions(list.key, next);
+  const where = o.where ?? {};
+  const samplesFor = (name: string) => [...new Set((doc.samples?.[list.entity?.name ?? ""] ?? []).map((r) => String(r[name] ?? "")).filter(Boolean))].slice(0, 8);
+  return (
+    <Field label={`The list: ${list.source.label.toLowerCase()}`} help={list.custom ? "How this list is read is decided by code on this page — ask Smith to change it." : optionsSummary(list.options, list.entity)}>
+      {!list.custom && (
+        <div className="space-y-1 rounded-md border border-border p-2">
+          <div className="flex gap-1">
+            <Select value={o.sort ?? NONE} disabled={busy} onValueChange={(v) => save({ ...o, sort: v === NONE ? undefined : v, order: v === NONE ? undefined : o.order ?? "asc" })}>
+              <SelectTrigger className="h-8 flex-1 text-xs"><SelectValue placeholder="In order of…" /></SelectTrigger>
+              <SelectContent><SelectItem value={NONE}>As added</SelectItem>{fields.map((f) => <SelectItem key={f.name} value={f.name}>By {(f.label || humanise(f.name)).toLowerCase()}</SelectItem>)}</SelectContent>
+            </Select>
+            {o.sort && (
+              <Select value={o.order ?? "asc"} disabled={busy} onValueChange={(v) => save({ ...o, order: v as "asc" | "desc" })}>
+                <SelectTrigger className="h-8 w-[118px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="asc">Lowest first</SelectItem><SelectItem value="desc">Highest first</SelectItem></SelectContent>
+              </Select>
+            )}
+          </div>
+          {Object.entries(where).map(([k, v]) => {
+            const f = fields.find((x) => x.name === k);
+            const values = [...new Set([...(f?.options ?? []), ...samplesFor(k)])];
+            return (
+              <div key={k} className="flex items-center gap-1">
+                <span className="w-24 truncate text-[11px] text-muted-foreground">Only where {(f?.label || humanise(k)).toLowerCase()} is</span>
+                {values.length ? (
+                  <Select value={String(v)} disabled={busy} onValueChange={(nv) => save({ ...o, where: { ...where, [k]: nv } })}>
+                    <SelectTrigger className="h-8 flex-1 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>{values.map((x) => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
+                  </Select>
+                ) : (
+                  <Input className="h-8 flex-1 text-xs" defaultValue={String(v)} disabled={busy} aria-label={`Only where ${k} is`} onBlur={(e) => { if (e.target.value !== String(v)) save({ ...o, where: { ...where, [k]: e.target.value } }); }} />
+                )}
+                <Button size="sm" variant="ghost" className="h-8 px-2" disabled={busy} title="Remove this rule" onClick={() => { const next = { ...where }; delete next[k]; save({ ...o, where: next }); }}><X className="h-3 w-3" /></Button>
+              </div>
+            );
+          })}
+          {adding ? (
+            <Select onValueChange={(f) => { setAdding(false); save({ ...o, where: { ...where, [f]: samplesFor(f)[0] ?? fields.find((x) => x.name === f)?.options?.[0] ?? "" } }); }}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Only where…" /></SelectTrigger>
+              <SelectContent>{fields.filter((f) => !(f.name in where)).map((f) => <SelectItem key={f.name} value={f.name}>{f.label || humanise(f.name)}</SelectItem>)}</SelectContent>
+            </Select>
+          ) : (
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy || fields.every((f) => f.name in where)} onClick={() => setAdding(true)}>Only some of them…</Button>
+          )}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-muted-foreground">At most</span>
+            <Input type="number" min={1} max={200} className="h-8 w-20 text-xs" defaultValue={o.limit ?? ""} placeholder="all" disabled={busy} aria-label="At most"
+              onBlur={(e) => { const n = e.target.value ? Math.max(1, Math.min(200, Number(e.target.value))) : undefined; if (n !== o.limit) save({ ...o, limit: n }); }} />
+          </div>
+        </div>
+      )}
+    </Field>
+  );
+}

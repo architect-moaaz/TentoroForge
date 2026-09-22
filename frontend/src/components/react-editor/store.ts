@@ -15,9 +15,10 @@ import { editorApi, failureOf, type JitBundle } from "./api";
 import { breakpointForWidth, getGroupValue, setGroupValue } from "./lib/classes";
 import { dropPosition, type DropWhere } from "./lib/drop";
 import { colSpanFor, fieldLabel, fieldRemoval, reorderField, widthClassFor, withFieldSpan } from "./lib/fields";
+import { listKeyFor } from "./lib/lists";
 import { GROUPS, type GroupKind } from "./lib/templates";
 import { mainRoot, plainName, topmost } from "./lib/plain";
-import type { Breakpoint, Device, Finding, HistoryEntry, ModelNode, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, Rect, ThemeDoc, ThemePatch } from "./types";
+import type { Breakpoint, Device, Finding, HistoryEntry, ModelNode, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, ReadOptions, Rect, ThemeDoc, ThemePatch } from "./types";
 
 export interface Snapshot { revision: string; view: string; load: string }
 export interface HistoryOp { label: string; before: Snapshot; after: Snapshot }
@@ -168,6 +169,12 @@ export interface EditorState {
   /** The selection put inside a new container; a container taken away around what it holds. */
   groupSelected: (kind: GroupKind) => Promise<boolean>;
   ungroupSelected: () => Promise<boolean>;
+  /** One of the element per item of a list the page loads (null: once again). */
+  repeatNode: (id: string, source: string | null) => Promise<boolean>;
+  /** A list of an entity's records added to what the page loads; the new key. */
+  addList: (entityName: string) => Promise<string | null>;
+  /** How a list is read: which rows, what order, how many. */
+  setListOptions: (key: string, options: ReadOptions) => Promise<boolean>;
   /** A form field moved before another (null: last), widened, or taken out. */
   reorderField: (nodeId: string, name: string, beforeName: string | null) => Promise<boolean>;
   setFieldSpan: (nodeId: string, name: string, full: boolean) => Promise<boolean>;
@@ -613,6 +620,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const again = get().doc?.model?.nodes[parent]?.children[at];
     if (!again) return ok;
     return get().applyOps([{ op: "unwrap", id: again }], "Ungroup card", { reselect: (m) => lifted(m, inner.children.length) });
+  },
+
+  repeatNode: async (id, source) => {
+    const { doc } = get();
+    const node = doc?.model?.nodes[id];
+    if (!node) return false;
+    if (!source) return node.repeat ? get().applyOps([{ op: "unwrapRepeat", id }], `Show ${plainName(node, doc?.registry)} once`) : false;
+    const parentId = node.parent!;
+    const at = node.index;
+    return get().applyOps([{ op: "wrapRepeat", id, source, variable: "row" }], `Repeat ${plainName(node, doc?.registry)} for each item`,
+                          { reselect: (m) => [m.nodes[parentId]?.children[at]].filter(Boolean) as string[] });
+  },
+  addList: async (entityName) => {
+    const { doc } = get();
+    const model = doc?.model;
+    const entity = doc?.entities.find((e) => e.name === entityName);
+    if (!model || !entity) return null;
+    const key = listKeyFor(entity.name, model.loadKeys);
+    const ok = await get().applyOps([
+      { op: "addImport", file: "load", source: "@/sdk/server", names: ["list"] },
+      { op: "addReturnKey", file: "load", key, expr: `await list(${JSON.stringify(entity.name)})`,
+        type: `Entities[${JSON.stringify(entity.name)}][]`, typeSource: "@/sdk/schema", fallback: "[]" },
+    ], `Load the list of ${entity.name.toLowerCase()} records`);
+    return ok ? key : null;
+  },
+  setListOptions: async (key, options) => {
+    const { doc } = get();
+    if (!doc?.model?.loadKeys.includes(key)) return false;
+    return get().applyOps([{ op: "setReadOptions", file: "load", key, options }], "Change how the list is read");
   },
 
   reorderField: async (nodeId, name, beforeName) => {

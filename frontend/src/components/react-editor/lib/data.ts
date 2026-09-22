@@ -19,6 +19,8 @@ export interface DataSource {
   row?: boolean;
   /** Where the value comes from, in a sentence: read on the server, an API, the address… */
   via?: string;
+  /** For a row: the id of the list it is one item of. */
+  listId?: string;
 }
 
 export interface FieldChoice { name: string; label: string; type: string; sample: unknown }
@@ -92,7 +94,7 @@ export function rowContext(doc: PageDoc, nodeId: string): DataSource | null {
       const match = sources.find((s) => src === s.expr || src === `${s.expr}.rows` || src === s.id || src === `${s.id}.rows`);
       const entity = match?.entity ?? null;
       const rowsOf = match?.shape.kind === "widget" ? null : entity;
-      return { id: `row:${cur.repeat.variable}`, expr: cur.repeat.variable, row: true,
+      return { id: `row:${cur.repeat.variable}`, expr: cur.repeat.variable, row: true, listId: match?.id,
                label: rowsOf ? `Each ${rowsOf.name.toLowerCase()} in the list` : `Each item of ${humanise(src.replace(/^props\./, ""))}`,
                shape: { kind: "row", entity: rowsOf?.name ?? null }, entity: rowsOf };
     }

@@ -645,6 +645,10 @@ def ensure_sdk(doc: dict, app_root: Path) -> None:
             dst = target / f.name
             if not dst.exists() or dst.read_text() != f.read_text():
                 shutil.copyfile(f, dst)
+        # The fixed half imports scaffold files a newer scaffold ships
+        # (`./auth` → `@/lib/account`); an older tree gets the defaults it lacks.
+        from services.blueprint.assembly import fill_scaffold_defaults
+        fill_scaffold_defaults(app_root)
         project_app_sdk(doc, app_root)
 
 

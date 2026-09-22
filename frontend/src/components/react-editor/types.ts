@@ -66,8 +66,11 @@ export type Via =
   | { how: "user" } | { how: "address" } | { how: "fixed" }
   | { how: "api"; url: string };
 
+/** How a list is read on the server: which rows, in what order, how many. */
+export interface ReadOptions { where?: Record<string, string | number | boolean | string[]>; search?: string; sort?: string; order?: "asc" | "desc"; limit?: number; page?: number }
+
 /** What a key `load()` returns holds. */
-export type LoadShape = LoadShapeKind & { via?: Via };
+export type LoadShape = LoadShapeKind & { via?: Via; options?: ReadOptions; optionsCustom?: boolean };
 type LoadShapeKind =
   | { kind: "rows"; entity: string | null }
   | { kind: "page"; entity: string | null }
@@ -304,6 +307,9 @@ export type Op =
   | { op: "ensureProp"; name: string }
   | { op: "setChildren"; id: string; jsx: string }
   | { op: "wrap"; ids: string[]; open: string; close: string }
+  | { op: "wrapRepeat"; id: string; source: string; variable?: string }
+  | { op: "unwrapRepeat"; id: string }
+  | { op: "setReadOptions"; file: "load"; key: string; options: ReadOptions }
   | { op: "unwrap"; id: string }
   | { op: "wrapCondition"; id: string; expr: string }
   | { op: "unwrapCondition"; id: string }
