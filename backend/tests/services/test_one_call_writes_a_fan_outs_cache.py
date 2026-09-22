@@ -46,6 +46,7 @@ def _author(svc, *, signals_after=None, runs_for=0.0, log=None):
         return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                            proposals=[ArtifactProposal(section="data.entities",
                                                        natural_key=entity["name"], body=body)])
+    author.warms_prefix = True      # what make_executor's executor declares
     return author
 
 
@@ -69,6 +70,22 @@ def test_a_first_call_that_cannot_signal_releases_the_others_when_it_returns(svc
     starts = [t for kind, _, t in log if kind == "start"]
     assert all(t - t0 >= 0.2 for t in starts[1:])
     assert time.monotonic() - t0 < orchestrator.PREFIX_WARM_WAIT_S
+
+
+def test_an_executor_that_writes_no_cache_holds_nobody(svc):
+    """A fake, or a deterministic executor: its siblings run as wide as ever."""
+    log: list = []
+    author = _author(svc, runs_for=0.2, log=log)
+    del author.warms_prefix
+    t0 = time.monotonic()
+    run(svc, author, plan=["entity_fields"])
+    starts = [t for kind, _, t in log if kind == "start"]
+    assert max(starts) - t0 < 0.15, "followers waited for the leader"
+
+
+def test_the_real_executor_declares_it(svc):
+    from services.blueprint.executors import AnthropicModel, make_executor
+    assert getattr(make_executor(svc, AnthropicModel()), "warms_prefix", False) is True
 
 
 def test_a_node_that_does_not_fan_out_is_not_held(svc):

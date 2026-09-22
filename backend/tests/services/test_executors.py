@@ -1127,11 +1127,10 @@ def test_the_montage_leads_and_the_page_brief_follows(tmp_path):
     class _Client:
         class messages:
             @staticmethod
-            def create(**kw):
+            def stream(**kw):          # every call streams (2026-09-22)
                 sent.update(kw)
                 raise RuntimeError("stop after capture")
 
-    # Small max_tokens keeps this on the non-streaming path.
     model = AnthropicModel(_client=_Client(), max_tokens=1000)
     try:
         model(system="s", user="author PAGE-003", schema={}, image=p)
@@ -1150,7 +1149,7 @@ def test_without_a_montage_the_message_is_unchanged(tmp_path):
     class _Client:
         class messages:
             @staticmethod
-            def create(**kw):
+            def stream(**kw):
                 sent.update(kw)
                 raise RuntimeError("stop")
 

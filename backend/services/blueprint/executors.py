@@ -694,14 +694,15 @@ class AnthropicModel:
             },
         )
         client = self._anthropic()
-        if self.max_tokens > STREAM_ABOVE:
-            # The SDK refuses a non-streaming request it estimates could exceed
-            # ~10 minutes, which any large max_tokens does. Stream and take the
-            # accumulated message.
-            with client.messages.stream(**kwargs) as stream:
-                response = self._drain(stream)
-        else:
-            response = client.messages.create(**kwargs)
+        # EVERY CALL STREAMS. The SDK refuses a non-streaming request it
+        # estimates could exceed ~10 minutes (any large max_tokens), and a
+        # fan-out's followers wait for the leader's FIRST streamed event to
+        # know its cached prefix is readable (`_prefix_readable`). A call made
+        # with `create()` never sends that event, so a node under the old
+        # threshold idled its followers for the whole wait bound. The
+        # accumulated message is the same either way.
+        with client.messages.stream(**kwargs) as stream:
+            response = self._drain(stream)
         # Check before reading content: a refusal returns HTTP 200 with an
         # empty or partial content list, and indexing it blindly raises.
         if response.stop_reason == "refusal":
@@ -3975,4 +3976,8 @@ def make_executor(
             raise Truncated(f"{spec.node}: {last}", output_tokens=last.output_tokens)
         raise MalformedEnvelope(f"{spec.node}: {last}")
 
+    # A model executor writes a fan-out's shared prefix to the cache; the
+    # scheduler holds the node's other calls until the first has made it
+    # readable (see the orchestrator's `_call_warm`).
+    executor.warms_prefix = True  # type: ignore[attr-defined]
     return executor

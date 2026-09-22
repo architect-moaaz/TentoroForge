@@ -2221,7 +2221,10 @@ def _call_warm(executor: Executor, spec: TaskSpec, warm: Any, leads: bool) -> An
     (42,527, nine times): the warm-up that prevented it (b6588932) went with
     the wave scheduler it lived in (bda6f7a6). The first call goes alone; the
     others wait the seconds prefill takes, then run exactly as wide."""
-    if warm is None:
+    # Only an executor that WRITES a cache is worth waiting for: a fake or a
+    # non-model executor returns in its own time, and holding its siblings
+    # for it re-serialises the fan-out (test_applies_happen_one_at_a_time).
+    if warm is None or not getattr(executor, "warms_prefix", False):
         return _call(executor, spec)
     if not leads:
         warm.wait(PREFIX_WARM_WAIT_S)

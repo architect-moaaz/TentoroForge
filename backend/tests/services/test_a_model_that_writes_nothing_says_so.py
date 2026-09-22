@@ -30,10 +30,30 @@ def _response(content, stop_reason="max_tokens", output_tokens=32000):
     )
 
 
+class _Stream:
+    """What `messages.stream(...)` hands back: no events, then the message.
+    Every call streams now (2026-09-22), including these short ones."""
+
+    def __init__(self, response):
+        self.response = response
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __iter__(self):
+        return iter(())
+
+    def get_final_message(self):
+        return self.response
+
+
 def _model(response, max_tokens=4000):
-    """An AnthropicModel whose client returns `response` without streaming."""
+    """An AnthropicModel whose client streams `response` with no events."""
     model = executors.AnthropicModel(model="claude-sonnet-5", max_tokens=max_tokens)
-    fake = SimpleNamespace(messages=SimpleNamespace(create=lambda **_: response))
+    fake = SimpleNamespace(messages=SimpleNamespace(stream=lambda **_: _Stream(response)))
     model._anthropic = lambda: fake
     return model
 
