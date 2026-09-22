@@ -47,8 +47,16 @@ export interface ObjectEntry {
   items?: ObjectEntry[][];
 }
 
+/** How a loaded value is obtained. */
+export type Via =
+  | { how: "server"; call: string; entity: string | null }
+  | { how: "widget"; widget: string | null }
+  | { how: "user" } | { how: "address" } | { how: "fixed" }
+  | { how: "api"; url: string };
+
 /** What a key `load()` returns holds. */
-export type LoadShape =
+export type LoadShape = LoadShapeKind & { via?: Via };
+type LoadShapeKind =
   | { kind: "rows"; entity: string | null }
   | { kind: "page"; entity: string | null }
   | { kind: "record"; entity: string | null }

@@ -352,18 +352,35 @@ function objectEntries(source, obj) {
   return out;
 }
 
-//: The server SDK's reads and what each returns, for `loadShapes`.
+//: The server SDK's reads and what each returns, for `loadShapes`. Each
+//: shape also says HOW the value is obtained (`via`): read on the server
+//: from the database (the SDK's reads), computed by a widget's query, the
+//: signed-in person, the page's address, fetched from an API, or written in.
 const READS = {
-  list: (a) => ({ kind: "rows", entity: a[0] }),
-  listPage: (a) => ({ kind: "page", entity: a[0] }),
-  record: (a) => ({ kind: "record", entity: a[0] }),
-  count: () => ({ kind: "number" }),
-  total: () => ({ kind: "number" }),
-  series: () => ({ kind: "series" }),
-  query: (a) => ({ kind: "query", entity: a[0] }),
-  runWidget: (a, raw) => ({ kind: "widget", widget: (/^widgets\.(\w+)/.exec(raw[0] || "") || [])[1] || null }),
-  currentUser: () => ({ kind: "user" }),
+  list: (a) => ({ kind: "rows", entity: a[0], via: { how: "server", call: "list", entity: a[0] } }),
+  listPage: (a) => ({ kind: "page", entity: a[0], via: { how: "server", call: "listPage", entity: a[0] } }),
+  record: (a) => ({ kind: "record", entity: a[0], via: { how: "server", call: "record", entity: a[0] } }),
+  count: (a) => ({ kind: "number", via: { how: "server", call: "count", entity: a[0] } }),
+  total: (a) => ({ kind: "number", via: { how: "server", call: "total", entity: a[0] } }),
+  series: (a) => ({ kind: "series", via: { how: "server", call: "series", entity: a[0] } }),
+  query: (a) => ({ kind: "query", entity: a[0], via: { how: "server", call: "query", entity: a[0] } }),
+  runWidget: (a, raw) => { const w = (/^widgets\.(\w+)/.exec(raw[0] || "") || [])[1] || null; return { kind: "widget", widget: w, via: { how: "widget", widget: w } }; },
+  currentUser: () => ({ kind: "user", via: { how: "user" } }),
 };
+
+/** The `fetch(…)` call an expression is built on, if any: `fetch(u)`,
+ *  `(await fetch(u)).json()`, `fetch(u).then(…)`. */
+function fetchCallOf(expr) {
+  let e = expr;
+  for (let i = 0; e && i < 6; i++) {
+    if (e.type === "AwaitExpression" || e.type === "ParenthesizedExpression" || e.type === "TSAsExpression") { e = e.argument ?? e.expression; continue; }
+    if (e.type === "CallExpression" && e.callee.type === "Identifier" && e.callee.name === "fetch") return e;
+    if (e.type === "CallExpression" && e.callee.type === "MemberExpression") { e = e.callee.object; continue; }
+    if (e.type === "MemberExpression") { e = e.object; continue; }
+    return null;
+  }
+  return null;
+}
 
 function shapeOf(expr, vars, source) {
   // Unwrap `await`, parentheses, `as`, `!`.
@@ -374,16 +391,25 @@ function shapeOf(expr, vars, source) {
     const raw = expr.arguments.map((a) => source.slice(a.start, a.end));
     return READS[expr.callee.name](args, raw);
   }
+  // fetch(url) — or (await fetch(url)).json(): fetched from an API.
+  const fetched = fetchCallOf(expr);
+  if (fetched) {
+    const u = fetched.arguments[0];
+    return { kind: "unknown", via: { how: "api", url: u ? source.slice(u.start, u.end).replace(/^["'`]|["'`]$/g, "") : "" } };
+  }
   if (expr.type === "Identifier") return vars.get(expr.name) ?? { kind: "unknown" };
   if (expr.type === "MemberExpression" && expr.object.type === "Identifier" && expr.property.type === "Identifier") {
     const base = vars.get(expr.object.name);
-    if (base && base.kind === "page") return expr.property.name === "rows" ? { kind: "rows", entity: base.entity } : expr.property.name === "total" ? { kind: "number" } : { kind: "unknown" };
-    if (base && base.kind === "widget") return expr.property.name === "value" ? { kind: "number" } : { kind: "unknown" };
-    if (expr.object.name === "ctx" || (base && base.kind === "context")) return { kind: "string" };
+    if (base && base.kind === "page") return expr.property.name === "rows" ? { kind: "rows", entity: base.entity, via: base.via } : expr.property.name === "total" ? { kind: "number", via: base.via } : { kind: "unknown", via: base.via };
+    if (base && base.kind === "widget") return expr.property.name === "value" ? { kind: "number", via: base.via } : { kind: "unknown", via: base.via };
+    if (expr.object.name === "ctx" || (base && base.kind === "context")) return { kind: "string", via: { how: "address" } };
   }
-  if (expr.type === "StringLiteral" || expr.type === "TemplateLiteral") return { kind: "string" };
-  if (expr.type === "NumericLiteral") return { kind: "number" };
-  if (expr.type === "BooleanLiteral") return { kind: "boolean" };
+  // ctx.params.id, ctx.searchParams.q: from the page's address.
+  if (expr.type === "MemberExpression" && expr.object.type === "MemberExpression" && expr.object.object.type === "Identifier"
+      && (expr.object.object.name === "ctx" || (vars.get(expr.object.object.name) || {}).kind === "context")) return { kind: "string", via: { how: "address" } };
+  if (expr.type === "StringLiteral" || expr.type === "TemplateLiteral") return { kind: "string", via: { how: "fixed" } };
+  if (expr.type === "NumericLiteral") return { kind: "number", via: { how: "fixed" } };
+  if (expr.type === "BooleanLiteral") return { kind: "boolean", via: { how: "fixed" } };
   if (expr.type === "LogicalExpression" || expr.type === "ConditionalExpression") {
     const a = shapeOf(expr.left ?? expr.consequent, vars, source);
     return a.kind === "unknown" ? shapeOf(expr.right ?? expr.alternate, vars, source) : a;

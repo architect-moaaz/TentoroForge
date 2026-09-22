@@ -64,6 +64,8 @@ export function DataPicker({ doc, nodeId, value, onChange, want, compact }: {
           </Select>
         </div>
       )}
+      {source?.via && <p className="text-[10px] text-muted-foreground">{source.via}</p>}
+      {source?.row && <p className="text-[10px] text-muted-foreground">One row of the list this sits in</p>}
       {example && <p className="text-[10px] text-muted-foreground">Example: <span className="text-foreground">{example}</span></p>}
     </div>
   );

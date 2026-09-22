@@ -584,8 +584,18 @@ def test_the_model_knows_the_shape_of_what_the_page_loads_and_the_row_a_cell_sit
             '      <table><tbody>{props.rows.map((row) => (<tr key={row.id}><td>{String(row.amount ?? "")}</td></tr>))}</tbody></table>\n'
             '      <WorkflowForm workflow={workflows.close} fields={{ note: { label: "Note", kind: "textarea" }, case: { value: props.current?.id } }} />\n    </div>\n  );\n}\n')
     m = adapter.model(view, load)
-    assert m["loadShapes"] == {"rows": {"kind": "rows", "entity": "Case"}, "total": {"kind": "number"}, "open": {"kind": "number"},
-                               "current": {"kind": "record", "entity": "Case"}, "male": {"kind": "widget", "widget": "male"}, "q": {"kind": "string"}}
+    shapes = m["loadShapes"]
+    assert {k: {x: y for x, y in v.items() if x != "via"} for k, v in shapes.items()} == {
+        "rows": {"kind": "rows", "entity": "Case"}, "total": {"kind": "number"}, "open": {"kind": "number"},
+        "current": {"kind": "record", "entity": "Case"}, "male": {"kind": "widget", "widget": "male"}, "q": {"kind": "string"}}
+    # and how each is obtained: read on the server, computed by a widget, from the address
+    assert shapes["rows"]["via"] == {"how": "server", "call": "listPage", "entity": "Case"}
+    assert shapes["open"]["via"] == {"how": "server", "call": "count", "entity": "Case"}
+    assert shapes["male"]["via"] == {"how": "widget", "widget": "male"}
+    assert shapes["q"]["via"] == {"how": "address"}
+    api = adapter.model(view, 'export async function load(ctx: PageContext) {\n  const rates = await (await fetch("https://api.example.com/rates")).json();\n  return { rates, title: "Rates" };\n}\n')
+    assert api["loadShapes"]["rates"]["via"] == {"how": "api", "url": "https://api.example.com/rates"}
+    assert api["loadShapes"]["title"]["via"] == {"how": "fixed"}
     assert m["viewParam"] == {"kind": "identifier", "name": "props"}
     cell = next(n for n in m["nodes"].values() if n["type"] == "td")
     assert cell["exprOnly"] == 'String(row.amount ?? "")'

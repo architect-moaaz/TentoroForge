@@ -17,6 +17,8 @@ export interface DataSource {
   entity: EntityRef | null;
   /** True for the row of the repeated element the selection sits in. */
   row?: boolean;
+  /** Where the value comes from, in a sentence: read on the server, an API, the address… */
+  via?: string;
 }
 
 export interface FieldChoice { name: string; label: string; type: string; sample: unknown }
@@ -36,6 +38,28 @@ function accessFor(model: PageModel, key: string): string {
 }
 
 /** Everything the page loads, as a place a value can come from. */
+/** Where a loaded value comes from, for a person: the server's database, a
+ *  widget's query, the signed-in account, the page's address, an API, or the
+ *  page itself. */
+export function viaLabel(shape: LoadShape | { kind: "row"; entity: string | null }, entity: EntityRef | null): string | undefined {
+  const via = "via" in shape ? shape.via : undefined;
+  if (!via) return undefined;
+  // A count has no entity of its own on the shape; the read names it.
+  const name = entity?.name ?? (via.how === "server" ? via.entity : null);
+  const what = name ? plural(name).toLowerCase() : "the database";
+  switch (via.how) {
+    case "server": return via.call === "listPage" ? `Read on the server from ${what}, a page at a time`
+      : via.call === "record" ? `Read on the server from ${what}, the one the page is about`
+      : via.call === "count" || via.call === "total" ? `Counted on the server across ${what}`
+      : `Read on the server from ${what}`;
+    case "widget": return "Worked out on the server by this widget's query";
+    case "user": return "The account of the person signed in";
+    case "address": return "Taken from the page's address (URL)";
+    case "api": return via.url ? `Fetched from ${via.url}` : "Fetched from an API";
+    case "fixed": return "A fixed value written into the page";
+  }
+}
+
 export function pageSources(doc: PageDoc): DataSource[] {
   const model = doc.model;
   if (!model) return [];
@@ -51,7 +75,7 @@ export function pageSources(doc: PageDoc): DataSource[] {
     else if (shape.kind === "widget") label = doc.widgets?.find((w) => w.key === shape.widget)?.label ?? humanise(key);
     else if (shape.kind === "number") label = `${humanise(key)} (a number)`;
     else if (shape.kind === "user") label = "The signed-in person";
-    out.push({ id: key, expr: accessFor(model, key), label, shape, entity });
+    out.push({ id: key, expr: accessFor(model, key), label, shape, entity, via: viaLabel(shape, entity) });
   }
   return out;
 }

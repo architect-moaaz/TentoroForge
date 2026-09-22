@@ -46,7 +46,7 @@ export function ShowsControl({ node, doc }: { node: ModelNode; doc: PageDoc }) {
 
   if (current.kind === "custom") {
     return (
-      <Field label="Shows" help="This comes from something written for this page. Ask Smith to change it, or choose data below to replace it.">
+      <Field label="Shows" help={`${/\bfetch\s*\(/.test(current.code) ? "This is fetched from an API by code written for this page." : "This comes from something written for this page."} Ask Smith to change it, or choose data below to replace it.`}>
         <Input className="h-8 font-mono text-[11px]" readOnly value={current.code} aria-label="Shows" />
         <div className="mt-1"><DataPicker doc={doc} nodeId={node.id} value={null} onChange={(c) => c && void bind(c)} compact /></div>
       </Field>

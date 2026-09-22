@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { bandOf, bindingExpr, fieldChoices, pageSources, readBinding, rowContext, sampleOf, sampleQuery, withExpr, withString } from "../lib/data";
+import { bandOf, bindingExpr, fieldChoices, pageSources, readBinding, rowContext, sampleOf, sampleQuery, viaLabel, withExpr, withString } from "../lib/data";
 import type { ModelNode, PageDoc, PageModel } from "../types";
 
 function node(id: string, type: string, extra: Partial<ModelNode> = {}): ModelNode {
@@ -15,7 +15,8 @@ function node(id: string, type: string, extra: Partial<ModelNode> = {}): ModelNo
 const model: PageModel = {
   ok: true, roots: [{ id: "r0", owner: "View" }], imports: [], viewProps: ["props"], viewParam: { kind: "identifier", name: "props" },
   loadKeys: ["records", "total", "current", "male"],
-  loadShapes: { records: { kind: "rows", entity: "Record" }, total: { kind: "number" }, current: { kind: "record", entity: "Record" }, male: { kind: "widget", widget: "male" } },
+  loadShapes: { records: { kind: "rows", entity: "Record", via: { how: "server", call: "list", entity: "Record" } }, total: { kind: "number", via: { how: "server", call: "count", entity: "Record" } },
+                current: { kind: "record", entity: "Record", via: { how: "server", call: "record", entity: "Record" } }, male: { kind: "widget", widget: "male", via: { how: "widget", widget: "male" } } },
   nodes: {
     r0: node("r0", "div", { children: ["r0.0", "r0.1", "r0.2"] }),
     "r0.0": node("r0.0", "h1", { exprOnly: "props.current?.fullName ?? \"\"" }),
@@ -45,6 +46,16 @@ describe("the page's data in a person's words", () => {
     expect(pageSources(doc).map((s) => [s.id, s.label, s.expr])).toEqual([
       ["records", "The list of records", "props.records"], ["total", "Total (a number)", "props.total"],
       ["current", "The record this page shows", "props.current"], ["male", "Male records", "props.male"]]);
+  });
+
+  it("says where each thing comes from, in a sentence", () => {
+    expect(pageSources(doc).map((s) => s.via)).toEqual([
+      "Read on the server from records", "Counted on the server across records",
+      "Read on the server from records, the one the page is about", "Worked out on the server by this widget's query"]);
+    expect(viaLabel({ kind: "string", via: { how: "address" } }, null)).toBe("Taken from the page's address (URL)");
+    expect(viaLabel({ kind: "unknown", via: { how: "api", url: "/api/rates" } }, null)).toBe("Fetched from /api/rates");
+    expect(viaLabel({ kind: "string", via: { how: "fixed" } }, null)).toBe("A fixed value written into the page");
+    expect(viaLabel({ kind: "string" }, null)).toBeUndefined();
   });
 
   it("knows the row a repeated cell sits in", () => {
