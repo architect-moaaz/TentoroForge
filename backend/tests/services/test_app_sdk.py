@@ -390,3 +390,16 @@ def test_a_sign_in_page_is_given_a_full_height_frame_to_centre_in():
     module = page_module(doc, doc["pages"][0], {"page": "PAGE-026", "load": "", "view": ""})
     assert '<div className="min-h-dvh grid">' in module and "</div>" in module
     assert "PageFrame" not in module and "hasCodeRoot" not in module
+
+
+def test_a_load_that_takes_no_context_still_compiles_against_the_page_module():
+    """`load()` for a page that needs nothing is a natural spelling; the module
+    called `load(ctx)` and TS2554 cost three compile rounds and the page
+    (Contacts Mini PAGE-004 on UAT; Kids Vaccination's sign-in, 2026-09-23)."""
+    from services.blueprint.app_sdk import page_module
+
+    doc = {"pages": [{"id": "PAGE-026", "name": "Sign in", "route": "/login", "pattern": "auth",
+                      "access": "public"}], "data": {"entities": []}}
+    module = page_module(doc, doc["pages"][0], {"page": "PAGE-026", "load": "export async function load() { return {}; }", "view": ""})
+    assert "(load as (ctx: PageContext) => ReturnType<typeof load>)(ctx)" in module
+    assert "await load(ctx)" not in module

@@ -630,7 +630,13 @@ def page_module(doc: dict, page: dict, row: dict) -> str:
         "    searchParams: Object.fromEntries(Object.entries(search ?? {}).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v])),\n"
         "    user: await currentUser(),\n"
         "  };\n"
-        "  const data = await load(ctx);\n"
+        # A PAGE THAT NEEDS NOTHING IS WRITTEN AS `load()`. Called as
+        # `load(ctx)` that is TS2554 ("Expected 0 arguments, but got 1"), and
+        # it cost three compile rounds and the page: Contacts Mini PAGE-004 on
+        # UAT, Kids Vaccination's sign-in locally (2026-09-23). A function of
+        # fewer parameters is assignable to one of more, so the cast keeps the
+        # return type and accepts either spelling.
+        "  const data = await (load as (ctx: PageContext) => ReturnType<typeof load>)(ctx);\n"
         "  if (data === null) notFound();\n"
         "  return (\n"
         + (f"    {frame_open}\n" if frame_open in ("<>", '<div className="min-h-dvh grid">')

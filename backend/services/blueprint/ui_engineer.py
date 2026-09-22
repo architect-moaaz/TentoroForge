@@ -106,6 +106,10 @@ PLAN_MAX_TOKENS = 8000
 #: 24,000 is three times the median and still leaves room to think; 64,000 is
 #: room to think INSTEAD of writing, which is what it was used for.
 WRITE_MAX_TOKENS = 24000
+#: The effort the WRITE call runs at once a plan is in hand. `low` was chosen
+#: on one calculator page (2026-09-21) for cost and time; whether it costs
+#: design quality is an A/B question, and this is the knob it turns.
+WRITE_EFFORT = "low"
 
 DIRECTION_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -841,7 +845,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     # asked in one call at `high`/64,000 spent 758s, then 867s, and wrote
     # nothing at all. Without a plan the client is left as it was: that is the
     # old path, and it is what a repair round uses.
-    writer = _with(client, effort="low", max_tokens=WRITE_MAX_TOKENS) if plan else client
+    writer = _with(client, effort=WRITE_EFFORT, max_tokens=WRITE_MAX_TOKENS) if plan else client
     for round_ in range(1, COMPILE_ROUNDS + 1):
         t0 = time.monotonic()
         reply = writer(system=system, user=user_prompt(doc, page, feedback=note, brief=brief,
