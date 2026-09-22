@@ -43,6 +43,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 import logging
@@ -317,6 +318,32 @@ _CACHE_CONTROL = {"type": "ephemeral"}
 CACHE_BREAK = "\n\n## This call\n\n"
 
 
+#: The event a fan-out's first call sets once its cached prefix is readable —
+#: per worker thread, because the call it belongs to runs on one (see the
+#: orchestrator's `_call_warm`).
+_LEADING = threading.local()
+
+
+class leading_prefix:
+    """While a call runs, the event to set at its first streamed event."""
+
+    def __init__(self, event: Any) -> None:
+        self.event = event
+
+    def __enter__(self) -> None:
+        _LEADING.event = self.event
+
+    def __exit__(self, *exc: Any) -> None:
+        _LEADING.event = None
+
+
+def _prefix_readable() -> None:
+    """A cache entry can be read once the response writing it streams."""
+    event = getattr(_LEADING, "event", None)
+    if event is not None:
+        event.set()
+
+
 def _user_blocks(user: str) -> Any:
     """The user message, with what every subject shares cache-tagged when it
     is big enough to be worth a breakpoint (see :data:`CACHE_BREAK`)."""
@@ -517,6 +544,7 @@ class AnthropicModel:
         thinking_chars, answered = 0, False
         try:
             for event in stream:
+                _prefix_readable()
                 kind = getattr(event, "type", "")
                 delta = getattr(event, "delta", None)
                 dtype = getattr(delta, "type", None)
@@ -561,6 +589,7 @@ class AnthropicModel:
         sink = ReasoningSink(self.reasoning)
         try:
             for event in stream:
+                _prefix_readable()
                 delta = getattr(event, "delta", None)
                 if getattr(delta, "type", None) == "thinking_delta":
                     sink.feed(str(getattr(delta, "thinking", "") or ""))

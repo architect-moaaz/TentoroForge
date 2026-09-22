@@ -40,6 +40,7 @@ from __future__ import annotations
 import copy
 import json
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -1492,7 +1493,8 @@ def _execute(
                 subject=subject,
                 feedback=state.feedback.get(subject, ""),
             )
-            futures[pool.submit(_call, executor, spec)] = spec
+            leads = state.warm is not None and subject == state.leader and attempt == 1
+            futures[pool.submit(_call_warm, executor, spec, state.warm, leads)] = spec
 
     def start(pool: ThreadPoolExecutor, key: str) -> None:
         started.add(key)
@@ -1520,6 +1522,8 @@ def _execute(
         _note(ledger, "node_start", key, len(subjects))
         runs[key] = _NodeRun(subjects=subjects, pending=list(subjects),
                              queue=list(subjects))
+        if len(subjects) > 1:
+            runs[key].warm, runs[key].leader = threading.Event(), subjects[0]
         if not subjects:
             finish(pool, key)
             return
@@ -2116,6 +2120,38 @@ def _retire(svc: BlueprintService, identities: set[tuple], *, note: str) -> None
     svc.save()
 
 
+#: How long a fan-out's other calls wait for the first to make its cached
+#: prefix readable before going anyway. Prefill on a 30k-token prefix takes
+#: seconds; the bound is for a call that cannot signal (a transport that does
+#: not stream) and for one that hangs, which must not hold the node.
+PREFIX_WARM_WAIT_S = 30.0
+
+
+def _call_warm(executor: Executor, spec: TaskSpec, warm: Any, leads: bool) -> Any:
+    """`_call`, with one call writing a fan-out's cache and the rest reading it.
+
+    ONE CALL WRITES THE CACHE; THE REST READ IT. A cache entry is readable
+    only once the response writing it has begun streaming, so a fan-out whose
+    calls start together all WRITE the shared prefix at 1.25x and none reads
+    it at 0.1x. HippieKit's rebuild (2026-09-22) paid that for every first
+    call of page_details (35,649 tokens, ten times over) and workflow_steps
+    (42,527, nine times): the warm-up that prevented it (b6588932) went with
+    the wave scheduler it lived in (bda6f7a6). The first call goes alone; the
+    others wait the seconds prefill takes, then run exactly as wide."""
+    if warm is None:
+        return _call(executor, spec)
+    if not leads:
+        warm.wait(PREFIX_WARM_WAIT_S)
+        return _call(executor, spec)
+    from services.blueprint.executors import leading_prefix
+
+    try:
+        with leading_prefix(warm):
+            return _call(executor, spec)
+    finally:
+        warm.set()      # however it ended, the others are not held for it
+
+
 def _call(executor: Executor, spec: TaskSpec) -> Any:
     """One executor call on a worker thread. Calls, and nothing else.
 
@@ -2375,6 +2411,11 @@ class _NodeRun:
     #: measured against: anything here the repair does not re-propose is
     #: retired, because a repair is the subject's whole answer.
     authored: dict[str, set[tuple]] = field(default_factory=dict)
+    #: Set once the first call's cached prefix is readable (see `_call_warm`);
+    #: None for a node that does not fan out.
+    warm: Any = None
+    #: The subject whose first call writes that prefix.
+    leader: str = ""
 
 
 def _apply_subject(
