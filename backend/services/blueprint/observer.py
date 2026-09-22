@@ -292,6 +292,14 @@ def _rows(doc: Mapping[str, Any], section: str, subject: str) -> Any:
         return value
     # A fan-out subject is an artifact id (a page); its own row, and any row
     # in another owned section that points at it (a page's layout, widgets).
+    # A PART of a feature (`ENTITY-003~2`) is the pages it was given, by id —
+    # matched on the entity, it would be judged on its sibling parts' pages.
+    from services.blueprint.orchestrator import PART, feature_pages
+
+    if PART in subject:
+        ids = {str(p.get("id")) for p in feature_pages(doc, subject)}
+        return [row for row in value if isinstance(row, dict)
+                and (str(row.get("id")) in ids or str(row.get("page")) in ids)]
     return [
         row for row in value if isinstance(row, dict)
         and subject in (row.get("id"), row.get("page"),
@@ -471,6 +479,7 @@ class Observer:
         planned: Iterable[str] = (),
         user_request: str = "",
         subject_of: Callable[[str], str | None] | None = None,
+        mode: str = "all",
     ) -> Observation:
         """Judge one node's outcome. Pure with respect to the Blueprint: reads
         ``doc``, writes nothing. Safe to run on any thread — the scheduler
@@ -478,17 +487,29 @@ class Observer:
 
         ``subject_of`` maps an artifact id to the subject that authored it,
         for a fan-out whose subjects are not artifact ids (a feature's pages).
+
+        ``mode`` splits the judgement for a fan-out that is judged as its
+        subjects land (see the orchestrator's `observe`):
+
+        * ``"subjects"`` — each subject by the critic, on its own requirements,
+          and nothing else. Its siblings may not be written yet, so neither the
+          graph checks nor the coverage pass can be fair to it;
+        * ``"sweep"`` — once every subject has landed: the graph checks over
+          all of them, and the coverage pass across them. Not each subject
+          again — each has been judged already;
+        * ``"all"`` — both at once, as a node that is judged when it finishes.
         """
         subjects = list(subjects) or [""]
         edges = ready_edges(doc, pending=pending, planned=planned)
         obs = Observation(node=key, agent=agent, subjects=subjects, edges=edges)
 
-        for f in verify(dict(doc), edges=edges).findings:
-            self._file(obs, f, subject_of)
+        if mode != "subjects":
+            for f in verify(dict(doc), edges=edges).findings:
+                self._file(obs, f, subject_of)
 
         if self.critic is not None:
             self._consult(obs, doc, user_request=user_request,
-                          subject_of=subject_of)
+                          subject_of=subject_of, mode=mode)
 
         with self._lock:
             self.history.append(obs)
@@ -558,7 +579,8 @@ class Observer:
 
     def _consult(self, obs: Observation, doc: Mapping[str, Any], *,
                  user_request: str,
-                 subject_of: Callable[[str], str | None] | None = None) -> None:
+                 subject_of: Callable[[str], str | None] | None = None,
+                 mode: str = "all") -> None:
         """Ask the critic, once per subject. Its findings are filed like any
         other; its verdict is recorded as it was given.
 
@@ -570,7 +592,7 @@ class Observer:
         subject order afterwards — the verdict is the same one, sooner.
         """
         subjects = list(obs.subjects)
-        jobs: list[tuple[str, str]] = [(s, "") for s in subjects]
+        jobs: list[tuple[str, str]] = [] if mode == "sweep" else [(s, "") for s in subjects]
         # COVERAGE ACROSS SUBJECTS, ONCE. Each subject is judged on the
         # requirements its author was given; what no subject covers is asked
         # in one more call with every subject in view, and filed against the
@@ -578,7 +600,7 @@ class Observer:
         # whichever entity happened to be under review. It reads the same
         # snapshot, so it runs BESIDE the others: a node waits no longer than
         # it did, for one call rather than the rounds it replaces.
-        if len(subjects) > 1:
+        if len(subjects) > 1 and mode != "subjects":
             jobs.append(("", "domain"))
         if len(jobs) > 1:
             with ThreadPoolExecutor(

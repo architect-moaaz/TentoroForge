@@ -2884,8 +2884,13 @@ def _page_details_prompt(doc: dict, system: str, subject: str,
         or page_key(str(p.get("route") or ""))
         for p in mine
     }
+    from services.blueprint.orchestrator import PART
+
+    feature, _, part = subject.partition(PART)
+    what = f"feature {feature}" + (
+        f" (part {part}: its other pages are written beside this one)" if part else "")
     user = (
-        f"Write the contracts for feature {subject}: the {len(mine)} page(s) "
+        f"Write the contracts for {what}: the {len(mine)} page(s) "
         "below, each under the `natural_key` listed for it.\n\n```json\n"
         + json.dumps({"pages": mine, "naturalKeys": keys}, indent=2, sort_keys=True)
         + "\n```\n\nThe whole page set, by id — `navigatesTo` names any of "
@@ -3419,6 +3424,30 @@ def after_no_answer(client: Any, feedback: str) -> Any:
                                max_tokens=max(int(getattr(client, "max_tokens", 0) or 0), NO_ANSWER_RETRY_TOKENS))
 
 
+#: One notch down, never below `low`.
+_LOWER_EFFORT = {"max": "xhigh", "xhigh": "high", "high": "medium", "medium": "low", "low": "low"}
+
+
+def for_repair(client: Any, spec: Any) -> Any:
+    """The client for an observer repair: the node's own, one effort notch
+    lower.
+
+    A REPAIR IS NOT A FIRST DRAFT. It carries the findings — this entity has
+    no unique key on the pair, this workflow never stores the embedding — and
+    edits an answer that was already accepted. Measured on HippieKit
+    (2026-09-21): one workflow repair took 280s at the node's `high`, and the
+    whole `workflow_steps` node waited on it; `entity_fields` repairs at
+    `medium` took ~60s. What the thinking buys on a first pass — deciding the
+    shape — the repair is handed. A retry after a refusal is not a repair and
+    keeps the node's effort: its answer was never accepted."""
+    import dataclasses
+
+    if not getattr(spec, "repair", False) or not dataclasses.is_dataclass(client) \
+            or not hasattr(client, "effort"):
+        return client
+    return dataclasses.replace(client, effort=_LOWER_EFFORT.get(str(client.effort), client.effort))
+
+
 def tiered_router(
     default_effort: str = "high", model: str = DEFAULT_MODEL,
     *, reasoning: Any = None,
@@ -3774,8 +3803,8 @@ def make_executor(
         from services.blueprint.artifact_patch import patch_node_output
         from services.blueprint.orchestrator import DAG
 
-        client = (model.for_task(spec.node, spec.agent)
-                  if isinstance(model, ModelRouter) else model)
+        client = for_repair(model.for_task(spec.node, spec.agent)
+                            if isinstance(model, ModelRouter) else model, spec)
         try:
             with svc.lock:
                 system, context = build_prompt(
@@ -3872,12 +3901,12 @@ def make_executor(
             composed = _compose_via_a2ui(spec)
             if composed is not None:
                 return composed
-        client = after_no_answer(
+        client = for_repair(after_no_answer(
             model.for_task(spec.node, spec.agent)
             if isinstance(model, ModelRouter)
             else model,
             spec.feedback,
-        )
+        ), spec)
         # §5 — an application can be described by showing as well as by
         # telling. Resolved per call rather than threaded through `run`,
         # because the references belong to the application and `svc` is the

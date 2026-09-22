@@ -488,30 +488,70 @@ FANOUT: dict[str, Any] = {
 }
 
 
-def page_features(doc: Mapping[str, Any]) -> list[str]:
-    """The subjects `page_details` fans out over, in first-seen order."""
-    seen: list[str] = []
+#: The most pages one `page_details` call writes.
+#:
+#: A FEATURE IS NOT A UNIT OF TIME. Subjects were an entity's pages together,
+#: and the node is done when its slowest subject is: HippieKit's Product owned
+#: eight pages while most features owned one to three, and every other feature
+#: had been written for ten minutes when Product's second attempt landed
+#: (2026-09-21, 1,417s into the run against the others' 780s). Three pages is
+#: the size most features already are; a larger one is written in parts of
+#: that size, side by side, each shown the whole page set so `navigatesTo`
+#: still reaches across.
+PAGES_PER_SUBJECT = 3
+
+#: Separates a feature from its part: ``ENTITY-003~2``.
+PART = "~"
+
+
+def _feature_groups(doc: Mapping[str, Any]) -> dict[str, list[dict]]:
+    """Each feature's pages, in first-seen order: an entity's pages together,
+    and a page that belongs to no entity on its own. An auth page is declared
+    whole by `auth_pages` and belongs to no feature."""
+    groups: dict[str, list[dict]] = {}
     for page in doc.get("pages") or []:
         if not isinstance(page, dict) or not page.get("id") \
-                or page.get("status") == "DEPRECATED":
+                or page.get("status") == "DEPRECATED" or page.get("pattern") == "auth":
             continue
-        if page.get("pattern") == "auth":
-            continue                  # declared whole by `auth_pages`, no feature of its own
-        subject = str((page.get("data") or {}).get("primaryEntity") or "") \
-            or str(page["id"])
-        if subject not in seen:
-            seen.append(subject)
-    return seen
+        key = str((page.get("data") or {}).get("primaryEntity") or "") or str(page["id"])
+        groups.setdefault(key, []).append(page)
+    return groups
+
+
+def _parts(pages: list[dict]) -> list[list[dict]]:
+    """Pages in parts of at most PAGES_PER_SUBJECT, as even as they go."""
+    n = -(-len(pages) // PAGES_PER_SUBJECT)
+    size = -(-len(pages) // n) if n else 0
+    return [pages[i:i + size] for i in range(0, len(pages), size)] if size else []
+
+
+def page_subjects(doc: Mapping[str, Any]) -> dict[str, list[dict]]:
+    """``{subject: its pages}`` — a feature, or ``feature~n`` for its n-th part."""
+    out: dict[str, list[dict]] = {}
+    for key, pages in _feature_groups(doc).items():
+        parts = _parts(pages)
+        if len(parts) == 1:
+            out[key] = parts[0]
+        else:
+            for i, part in enumerate(parts, 1):
+                out[f"{key}{PART}{i}"] = part
+    return out
+
+
+def page_features(doc: Mapping[str, Any]) -> list[str]:
+    """The subjects `page_details` fans out over, in first-seen order."""
+    return list(page_subjects(doc))
 
 
 def feature_pages(doc: Mapping[str, Any], subject: str) -> list[dict]:
     """The declared pages one `page_details` subject is asked to write."""
-    return [
-        p for p in doc.get("pages") or []
-        if isinstance(p, dict) and p.get("status") != "DEPRECATED"
-        and ((str((p.get("data") or {}).get("primaryEntity") or "") or str(p.get("id")))
-             == subject)
-    ]
+    return page_subjects(doc).get(subject, [])
+
+
+def page_subject_of(doc: Mapping[str, Any]) -> dict[str, str]:
+    """``{page id: the subject that writes it}``."""
+    return {str(p.get("id")): subject
+            for subject, pages in page_subjects(doc).items() for p in pages}
 
 
 def subjects_for(node: "DagNode", doc: dict) -> list[str]:
@@ -1070,6 +1110,9 @@ class TaskSpec:
     #: it again (see ``artifact_patch``). Empty on a first pass and on a retry
     #: after a refusal, where there is no accepted answer to edit.
     current: tuple = ()
+    #: An observer repair — a targeted fix against named findings, run one
+    #: effort notch below the node's own (see ``executors.for_repair``).
+    repair: bool = False
 
 
 @dataclass
@@ -1329,6 +1372,8 @@ def _execute(
     watches: dict[str, _Watch] = {}
     #: Future -> the subjects an "observe" future is judging.
     judging: dict[Future, list[str]] = {}
+    #: The "observe" futures that are a node's closing sweep.
+    sweeps: set[Future] = set()
     rounds = int(getattr(observer_agent, "rounds", 1) or 1)
 
     def ready() -> list[str]:
@@ -1374,12 +1419,38 @@ def _execute(
         # none passed after repair). The page is still held to its contract
         # and its floor when it is composed — that is where its correctness is
         # enforced — and still checked by `verification` at the end.
+        if key in watches and _applied(state):
+            # Its subjects were judged as they landed; what is left is what
+            # needs all of them — the graph checks and the coverage pass.
+            observe(pool, key, _applied(state), mode="sweep")
+            return
         if (observer_agent is not None
                 and OBSERVER_ROUNDS_BY_NODE.get(key, 1) != 0
                 and _watchable(key, state, order, in_plan, finished)):
             observe(pool, key, _applied(state))
             return
+        if key in watches:
+            # Judged early, then every subject failed: nothing to sweep.
+            watches[key].authoring = False
+            advance(pool, key)
+            return
         complete(key)
+
+    def judge_early(key: str, state: _NodeRun) -> bool:
+        """Whether a fan-out subject is judged the moment it lands.
+
+        ONE SLOW SUBJECT USED TO HOLD EVERY VERDICT. A node was judged when
+        its last subject landed, so a feature written at 606s waited for one
+        written at 1,417s before anyone looked at it, and its repair started
+        after that (HippieKit, 2026-09-21: every page_details verdict at
+        1,538s; workflow_steps the same at 2,161s). A subject's own judgement
+        needs only its own output and the requirements its author was given,
+        so it starts as soon as that output exists; what needs every subject
+        waits for the sweep in `finish`."""
+        return (observer_agent is not None
+                and OBSERVER_ROUNDS_BY_NODE.get(key, 1) != 0
+                and len(state.subjects) > 1
+                and _watchable(key, state, order, in_plan, finished))
 
     def complete(key: str) -> None:
         state = runs[key]
@@ -1483,6 +1554,8 @@ def _execute(
         state.in_flight.discard(spec.subject)
         if verdict == "retry":
             state.queue.append(spec.subject)
+        elif verdict == "applied" and judge_early(key, state):
+            observe(pool, key, [spec.subject], mode="subjects")
         pump(pool, key)
         if not state.in_flight and not state.queue:
             finish(pool, key)
@@ -1490,7 +1563,7 @@ def _execute(
     # -- the observer's half ------------------------------------------------
 
     def observe(pool: ThreadPoolExecutor, key: str, subjects: list[str],
-                *, final: bool = False) -> None:
+                *, final: bool = False, mode: str = "all") -> None:
         """Judge ``subjects`` of ``key`` on a worker, against the document as
         it is right now. The snapshot is taken here, under the lock, so the
         observer reads what the node finished with and not what the next
@@ -1499,8 +1572,16 @@ def _execute(
         w = watches.setdefault(key, _Watch(
             subjects=list(subjects),
             authored={k: set(v) for k, v in runs[key].authored.items()},
+            authoring=mode == "subjects",
         ))
-        w.observing.update(subjects)
+        for subject in subjects:
+            # A subject that landed after the watch opened. Never overwrites:
+            # after a repair this is the repair's answer.
+            w.authored.setdefault(subject, set(runs[key].authored.get(subject, set())))
+        if mode == "sweep":
+            w.sweeping = True
+        else:
+            w.observing.update(subjects)
         if final:
             w.final.update(subjects)
         with svc.lock:
@@ -1510,18 +1591,28 @@ def _execute(
             subjects=list(subjects), doc=snapshot,
             pending=_pending_sections(in_plan, finished),
             planned=_planned_sections(in_plan), user_request=user_request,
-            subject_of=_subject_resolver(DAG[key], snapshot),
+            subject_of=_subject_resolver(DAG[key], snapshot), mode=mode,
         )
         futures[fut] = TaskSpec(task_id=f"OBSERVE-{key}", node=key,
                                 agent=OBSERVER_AGENT)
         kinds[fut] = "observe"
         judging[fut] = list(subjects)
+        if mode == "sweep":
+            sweeps.add(fut)
 
     def settle_observation(pool: ThreadPoolExecutor, key: str, obs: Any,
-                           subjects: list[str]) -> None:
+                           subjects: list[str], *, sweep: bool = False) -> None:
         w = watches[key]
-        w.observing.difference_update(subjects)
-        w.final.difference_update(subjects)
+        if sweep:
+            w.sweeping = w.authoring = False
+        else:
+            w.observing.difference_update(subjects)
+            w.final.difference_update(subjects)
+        if isinstance(obs, Exception) and sweep:
+            logger.warning("[%s] observer sweep failed: %s", key, _reason(obs))
+            report.observed[key] = {"node": key, "ok": None, "error": _reason(obs)}
+            advance(pool, key)
+            return
         if isinstance(obs, Exception):
             # The observer's own failure is not the node's. Recorded, and the
             # subjects it was judging stand as their author left them.
@@ -1552,6 +1643,19 @@ def _execute(
             _note(ledger, "deferred", key, f.section or "", f.detail)
         for subject in obs.subjects:
             label = f"{key}:{subject}" if subject else key
+            if sweep:
+                found = obs.findings.get(subject) or []
+                if not found:
+                    # The sweep did not judge the subject itself; its silence
+                    # is not a pass.
+                    continue
+                if subject in w.awaiting or subject in w.observing:
+                    # Being repaired or judged right now: these join the
+                    # verdict that is on its way.
+                    w.extra.setdefault(subject, []).extend(found)
+                    continue
+            elif w.extra.get(subject):
+                obs.findings.setdefault(subject, []).extend(w.extra.pop(subject))
             if obs.findings.get(subject):
                 # Did the round that just ran change anything at all? If a repair
                 # already ran and came back with the IDENTICAL findings, the
@@ -1580,7 +1684,7 @@ def _execute(
                     feedback=obs.brief(subject),
                 )
                 w.last[subject] = obs
-            elif subject in w.open:
+            elif subject in w.open and not sweep:
                 w.open.pop(subject)
                 w.stuck.discard(subject)
                 report.repaired.append(label)
@@ -1589,6 +1693,8 @@ def _execute(
     def _flag(key: str, subject: str, task: Any) -> None:
         """Leave a subject as its author last wrote it, flagged OUT_OF_SYNC."""
         obs = watches[key].last[subject]
+        if watches[key].extra.get(subject):
+            obs.findings.setdefault(subject, []).extend(watches[key].extra.pop(subject))
         with svc.lock:
             flag_unrepaired(svc, obs, subject)
         why = "; ".join(
@@ -1627,7 +1733,8 @@ def _execute(
                 w.stuck.discard(subject)
                 continue
             dispatch_repair(pool, key, subject, task, limit)
-        if not w.closed and not w.awaiting and w.observing <= w.final:
+        if not w.closed and not w.authoring and not w.sweeping \
+                and not w.awaiting and w.observing <= w.final:
             w.closed = True
             complete(key)
 
@@ -1654,6 +1761,7 @@ def _execute(
             task_id=f"TASK-{task.label}-observer{n}",
             node=key, agent=task.agent, attempt=n,
             subject=subject, feedback=task.feedback, current=current,
+            repair=True,
         )
         _note(ledger, "repair", key, subject, n, limit, task.feedback)
         fut = pool.submit(_call, executor, spec)
@@ -1702,8 +1810,12 @@ def _execute(
             # Verify again — the half of the loop that decides — for this
             # subject alone, now.
             limit = OBSERVER_ROUNDS_BY_NODE.get(key, rounds)
+            # While its siblings are still being written, a repaired subject
+            # is judged as it was the first time — on its own; the sweep
+            # runs the graph checks once they have all landed.
             observe(pool, key, [spec.subject],
-                    final=w.rounds.get(spec.subject, 0) >= limit)
+                    final=w.rounds.get(spec.subject, 0) >= limit,
+                    mode="subjects" if w.authoring else "all")
         advance(pool, key)
 
     def flush(pool: ThreadPoolExecutor) -> None:
@@ -1741,7 +1853,9 @@ def _execute(
                 kind = kinds.pop(fut, None)
                 if kind == "observe":
                     settle_observation(pool, spec.node, outcome,
-                                       judging.pop(fut, []))
+                                       judging.pop(fut, []),
+                                       sweep=fut in sweeps)
+                    sweeps.discard(fut)
                     continue
                 if kind == "repair":
                     settle_repair(pool, spec, outcome)
@@ -1810,6 +1924,14 @@ class _Watch:
     #: Findings already reported as deferred, so a second round's identical
     #: verdict does not repeat them in the report.
     deferred_seen: set[tuple] = field(default_factory=set)
+    #: Judged as they land: the node's subjects are still being written, so
+    #: it cannot complete however quiet its watch looks.
+    authoring: bool = False
+    #: The closing sweep (graph checks + coverage) is out on a worker.
+    sweeping: bool = False
+    #: Subject -> sweep findings that arrived while it was being repaired or
+    #: judged; they join its next verdict.
+    extra: dict[str, list] = field(default_factory=dict)
 
 
 def _finding_sig(findings: Iterable[Any]) -> frozenset:
@@ -1898,12 +2020,7 @@ def _subject_resolver(node: DagNode, doc: Mapping[str, Any]) -> Any:
     the feature that page belongs to."""
     if node.fanout != "page_features":
         return None
-    by_page = {
-        p["id"]: (str((p.get("data") or {}).get("primaryEntity") or "") or p["id"])
-        for p in doc.get("pages") or []
-        if isinstance(p, dict) and p.get("id")
-    }
-    return by_page.get
+    return page_subject_of(doc).get
 
 
 def _record_observation(report: RunReport, ledger: Any, obs: Any) -> None:
