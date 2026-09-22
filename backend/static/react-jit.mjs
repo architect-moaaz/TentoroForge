@@ -278,6 +278,34 @@ const SEARCH: Record<string, string | undefined> = ${JSON.stringify(searchParams
 (window as any).__forgeLocation = ${JSON.stringify(filledRoute(route, params, searchParams))};
 installPreviewFetch();
 
+// A picture at a root-relative address lives in the app's public files. This
+// frame is not the app, so it asks the editor for the file and shows what
+// comes back.
+(() => {
+  const waiting = new Map<string, HTMLImageElement[]>();
+  const ask = (img: HTMLImageElement) => {
+    const s = img.getAttribute("src") || "";
+    if (!s.startsWith("/") || s.startsWith("//") || s.startsWith("/api/") || img.dataset.forgeAsset === s) return;
+    img.dataset.forgeAsset = s;
+    if (!waiting.has(s)) { waiting.set(s, []); window.parent?.postMessage({ type: "forge-editor:asset", payload: { path: s } }, "*"); }
+    waiting.get(s)!.push(img);
+  };
+  window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (!d || d.type !== "forge-editor:asset-url" || !d.payload) return;
+    for (const img of waiting.get(d.payload.path) || []) { if (d.payload.url) img.src = d.payload.url; }
+    waiting.delete(d.payload.path);
+  });
+  const sweep = (root: ParentNode) => root.querySelectorAll?.("img").forEach((i) => ask(i as HTMLImageElement));
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      if (m.type === "attributes" && (m.target as Element).tagName === "IMG") ask(m.target as HTMLImageElement);
+      m.addedNodes.forEach((n) => { if (n.nodeType !== 1) return; if ((n as Element).tagName === "IMG") ask(n as HTMLImageElement); sweep(n as ParentNode); });
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+  sweep(document);
+})();
+
 class ErrorCatcher extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
   static getDerivedStateFromError(error: Error) { return { error }; }

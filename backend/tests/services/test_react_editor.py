@@ -837,3 +837,25 @@ def test_siblings_group_into_a_container_and_come_back_out_of_it():
     with pytest.raises(AdapterError) as e:
         adapter.patch(GROUP_VIEW, [{"op": "unwrap", "id": "r0.1"}])
     assert "nothing inside" in str(e.value)
+
+
+def test_a_picture_is_stored_under_the_apps_public_files_and_served_back_only_from_there(tmp_path):
+    from services.react_editor import assets
+    project = service.Project(root=tmp_path, app_root=tmp_path / "app")
+    (tmp_path / "app").mkdir()
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    out = assets.save(project, "Team Photo.PNG", png)
+    assert out["url"].startswith("/uploads/team-photo-") and out["url"].endswith(".png")
+    assert (tmp_path / "app" / out["path"]).read_bytes() == png
+    assert assets.save(project, "Team Photo.PNG", png)["url"] == out["url"], "the same bytes are the same file"
+    path, ctype = assets.resolve(project, out["url"])
+    assert ctype == "image/png" and path == (tmp_path / "app" / out["path"]).resolve()
+    assert [a["url"] for a in assets.listing(project)] == [out["url"]]
+    with pytest.raises(EditorError) as e:
+        assets.save(project, "notes.txt", b"hello")
+    assert "picture file" in str(e.value)
+    (tmp_path / "secret.png").write_bytes(png)
+    with pytest.raises(EditorError):
+        assets.resolve(project, "../secret.png")
+    with pytest.raises(EditorError):
+        assets.resolve(project, "/uploads/missing.png")

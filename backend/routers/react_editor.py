@@ -13,7 +13,8 @@ import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +23,7 @@ from database import get_db
 from models.auth import PlatformUser
 from services.project_paths import project_root
 from services.project_service import get_project_with_auth
-from services.react_editor import jit, pages, service, smith, widgets
+from services.react_editor import assets, jit, pages, service, smith, widgets
 from services.react_editor.service import EditorError, Project
 
 router = APIRouter(tags=["react-editor"])
@@ -258,3 +259,35 @@ async def smith_discard(project_id: uuid.UUID, page_id: str, proposal_id: str,
                         user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     project = await _project(project_id, user, db)
     return await _run(smith.discard, project, proposal_id)
+
+
+# ---------------------------------------------------------------------------
+# Pictures: uploaded into the app's public files, served back to the canvas
+# ---------------------------------------------------------------------------
+
+@router.post("/api/projects/{project_id}/react-editor/assets")
+async def upload_asset(project_id: uuid.UUID, file: UploadFile = File(...),
+                       user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    data = await file.read()
+    try:
+        return assets.save(project, file.filename or "", data)
+    except EditorError as e:
+        _raise(e)
+
+
+@router.get("/api/projects/{project_id}/react-editor/assets")
+async def list_assets(project_id: uuid.UUID, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    return {"assets": assets.listing(project)}
+
+
+@router.get("/api/projects/{project_id}/react-editor/public/{path:path}")
+async def public_asset(project_id: uuid.UUID, path: str,
+                       user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    try:
+        file, ctype = assets.resolve(project, path)
+    except EditorError as e:
+        _raise(e)
+    return FileResponse(file, media_type=ctype, headers={"Cache-Control": "private, max-age=60"})

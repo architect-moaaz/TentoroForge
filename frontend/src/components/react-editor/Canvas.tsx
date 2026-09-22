@@ -23,6 +23,7 @@ import type { usePreview } from "@/hooks/usePreview";
 import { cn } from "@/lib/utils";
 
 import { InlineTextEditor } from "./InlineTextEditor";
+import { assetObjectUrl } from "./api";
 import { dropPosition, moveLanding } from "./lib/drop";
 import { mainRoot, plainName } from "./lib/plain";
 import { DEVICE_WIDTHS, useEditorStore } from "./store";
@@ -248,6 +249,16 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
         case "move-cancel":
           post("drop-hint", {});
           break;
+        case "asset": {
+          // The frame cannot send the person's token: fetch the picture here and hand back a URL it can show.
+          const path = String(p.path || "");
+          const projectId = s.projectId;
+          if (!path || !projectId) break;
+          assetObjectUrl(projectId, path)
+            .then((url) => post("asset-url", { path, url }))
+            .catch(() => post("asset-url", { path, url: "" }));
+          break;
+        }
         case "field-drop": {
           // A field of a form let go over another field of the same form.
           const nodeId = String(p.fid || "");

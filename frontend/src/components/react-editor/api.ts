@@ -85,7 +85,39 @@ export interface VendorBundle {
   cached: boolean;
 }
 
+/** A picture the app holds, fetched with the person's token (the canvas cannot send it), as a URL the page can show. */
+const assetUrls = new Map<string, Promise<string>>();
+export function assetObjectUrl(projectId: string, path: string): Promise<string> {
+  const key = `${projectId}:${path}`;
+  let p = assetUrls.get(key);
+  if (!p) {
+    p = (async () => {
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      const res = await fetch(`${API_BASE}${base(projectId)}/public/${path.replace(/^\/+/, "")}`, { headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: "include" });
+      if (!res.ok) throw new Error(`No such picture: ${path}`);
+      return URL.createObjectURL(await res.blob());
+    })();
+    assetUrls.set(key, p);
+    p.catch(() => assetUrls.delete(key));
+  }
+  return p;
+}
+
 export const editorApi = {
+  uploadAsset: async (projectId: string, file: globalThis.File): Promise<{ url: string; path: string; type: string }> => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    const body = new FormData();
+    body.append("file", file, file.name);
+    const res = await fetch(`${API_BASE}${base(projectId)}/assets`, { method: "POST", body, headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: "include" });
+    if (!res.ok) {
+      let detail: unknown = null;
+      try { detail = (await res.json()).detail; } catch { /* no body */ }
+      const d = detail && typeof detail === "object" ? (detail as Record<string, unknown>) : {};
+      throw new EditorApiError({ status: res.status, code: String(d.code ?? "error"), message: String(d.message ?? res.statusText) });
+    }
+    return res.json();
+  },
+  listAssets: (projectId: string) => call<{ assets: { url: string; name: string }[] }>(`${base(projectId)}/assets`),
   vendor: (projectId: string, opts: { fresh?: boolean } = {}, signal?: AbortSignal) =>
     call<VendorBundle>(`${base(projectId)}/vendor${opts.fresh ? "?fresh=true" : ""}`, { signal }),
   jit: (projectId: string, pageId: string, opts: { params?: Record<string, string>; search?: Record<string, string>; fresh?: boolean } = {}, signal?: AbortSignal) => {

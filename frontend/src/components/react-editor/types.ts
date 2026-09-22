@@ -85,7 +85,7 @@ export type SettingTarget =
 export interface SettingSpec {
   key: string;
   label: string;
-  control: "text" | "select" | "toggle" | "page" | "workflow";
+  control: "text" | "select" | "toggle" | "page" | "workflow" | "image";
   target: SettingTarget;
   section: "simple" | "layout" | "style" | "data" | "validation" | "events" | "visibility" | "advanced";
   options?: { value: string; label: string }[];

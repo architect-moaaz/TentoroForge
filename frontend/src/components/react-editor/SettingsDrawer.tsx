@@ -8,6 +8,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, ChevronRight, Copy, Group, Sparkles, Trash2, Ungroup, X } from "lucide-react";
 
+import { toast } from "sonner";
+
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 import { Button } from "@/components/ui/button";
@@ -17,7 +19,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
+import { assetObjectUrl, editorApi, failureOf } from "./api";
 import { BREAKPOINTS, CLASS_GROUPS, GROUP_BY_KEY, effectiveValue, getVisibility, setGroupValue, setVisibility, type Visibility } from "./lib/classes";
+import { ICON_SET } from "./lib/icon-set";
+import { ICONS, isIconNode, searchIcons } from "./lib/icons";
 import { breadcrumb, componentFor, plainName, plainType } from "./lib/plain";
 import { checkModel } from "./lib/readiness";
 import { GROUPS, buttonAction, buttonActionOps, pageHref, widgetOfNode } from "./lib/templates";
@@ -215,6 +220,7 @@ function SimpleSettings({ nodes, doc, def }: { nodes: ModelNode[]; doc: PageDoc;
   const setText = useEditorStore((s) => s.setText);
   const node = nodes[0];
   const multi = nodes.length > 1;
+  const icon = !multi && isIconNode(node.type, doc.model?.imports ?? []);
   const specs = (def?.settings ?? []).filter((s) => s.section === "simple");
   const hasTextSpec = specs.some((s) => s.target.kind === "text");
   const isButton = ["Button", "button", "WorkflowButton"].includes(node.type);
@@ -225,6 +231,7 @@ function SimpleSettings({ nodes, doc, def }: { nodes: ModelNode[]; doc: PageDoc;
 
   return (
     <Section title="Settings">
+      {icon && <IconControl node={node} />}
       {!multi && !isButton && node.kind === "element" && (node.textEditable || node.exprOnly) && !node.children.length && (
         <ShowsControl node={node} doc={doc} />
       )}
@@ -286,6 +293,9 @@ function SettingControl({ spec, nodes, doc }: { spec: SettingSpec; nodes: ModelN
     const commit = (value: PropValue | null) => applyOps(nodes.map((n) => ({ op: "setProp", id: n.id, name: t.name, value }) as Op), `Change ${label.toLowerCase()}`);
     if (prop && prop.kind === "expr" && !t.expr && !t.boolean) {
       return <Field label={label} help="Set by data on this page — ask Smith to change it."><Input className="h-8 text-xs" readOnly value={prop.value ?? ""} aria-label={label} /></Field>;
+    }
+    if (spec.control === "image" && nodes.length === 1) {
+      return <ImageControl label={label} help={spec.help} value={prop?.kind === "string" ? prop.value ?? "" : ""} onChange={(v) => void commit(v ? { kind: "string", value: v } : null)} />;
     }
     if (t.boolean || spec.control === "toggle") {
       const on = !!prop && (prop.kind === "true" || prop.value === "true");
@@ -582,3 +592,118 @@ function AdvancedSettings({ node, doc }: { node: ModelNode; doc: PageDoc }) {
 }
 
 export { CLASS_GROUPS };
+
+// ---------------------------------------------------------------------------
+// A picture: upload one, pick one the app has, or give a web address
+// ---------------------------------------------------------------------------
+
+function ImageControl({ label, help, value, onChange }: { label: string; help?: string; value: string; onChange: (v: string) => void }) {
+  const projectId = useEditorStore((s) => s.projectId);
+  const busy = useEditorStore((s) => s.busy);
+  const [preview, setPreview] = useState<string>("");
+  const [uploading, setUploading] = useState(false);
+  const [had, setHad] = useState<{ url: string; name: string }[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (!value) { setPreview(""); return; }
+    if (!value.startsWith("/") || value.startsWith("//") || !projectId) { setPreview(value); return; }
+    assetObjectUrl(projectId, value).then((u) => { if (live) setPreview(u); }).catch(() => { if (live) setPreview(""); });
+    return () => { live = false; };
+  }, [value, projectId]);
+  const upload = async (file: File | undefined) => {
+    if (!file || !projectId) return;
+    setUploading(true);
+    try {
+      const out = await editorApi.uploadAsset(projectId, file);
+      onChange(out.url);
+      setHad(null);
+    } catch (err) {
+      toast.error(failureOf(err).message);
+    } finally {
+      setUploading(false);
+    }
+  };
+  return (
+    <Field label={label} help={help}>
+      <div className="flex items-start gap-2">
+        <div className="flex h-16 w-24 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
+          {preview ? <img src={preview} alt="" className="max-h-16 max-w-24 object-contain" /> : <span className="text-[10px] text-muted-foreground">No picture</span>}
+        </div>
+        <div className="min-w-0 flex-1 space-y-1">
+          <label className={cn("inline-flex h-7 cursor-pointer items-center rounded-md border border-input bg-background px-2 text-xs hover:bg-muted", (busy || uploading) && "pointer-events-none opacity-50")}>
+            {uploading ? "Uploading…" : "Upload a picture…"}
+            <input type="file" accept="image/*" className="sr-only" aria-label="Upload a picture" onChange={(e) => void upload(e.target.files?.[0])} />
+          </label>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={busy || !projectId} onClick={async () => {
+            if (had) { setHad(null); return; }
+            try { setHad((await editorApi.listAssets(projectId!)).assets); } catch { setHad([]); }
+          }}>{had ? "Hide the app's pictures" : "Choose one the app has…"}</Button>
+          {had && (had.length ? (
+            <div className="grid max-h-40 grid-cols-3 gap-1 overflow-auto rounded-md border border-border p-1">
+              {had.map((a) => <AssetThumb key={a.url} projectId={projectId!} url={a.url} name={a.name} chosen={a.url === value} onPick={() => { onChange(a.url); setHad(null); }} />)}
+            </div>
+          ) : <p className="text-[10px] text-muted-foreground">The app has no pictures yet — upload one.</p>)}
+          <DebouncedInput value={value.startsWith("/") ? "" : value} ariaLabel="Web address of the picture" placeholder="Or paste a web address (https://…)" onCommit={(v) => { if (v.trim()) onChange(v.trim()); }} />
+        </div>
+      </div>
+    </Field>
+  );
+}
+
+function AssetThumb({ projectId, url, name, chosen, onPick }: { projectId: string; url: string; name: string; chosen: boolean; onPick: () => void }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => { let live = true; assetObjectUrl(projectId, url).then((u) => { if (live) setSrc(u); }).catch(() => {}); return () => { live = false; }; }, [projectId, url]);
+  return (
+    <button type="button" title={name} onClick={onPick} className={cn("flex h-12 items-center justify-center overflow-hidden rounded border bg-muted", chosen ? "border-primary ring-1 ring-primary" : "border-transparent hover:border-border")}>
+      {src ? <img src={src} alt={name} className="max-h-12 object-contain" /> : <span className="text-[9px] text-muted-foreground">…</span>}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// An icon: a symbol picked by what it means
+// ---------------------------------------------------------------------------
+
+function IconControl({ node }: { node: ModelNode }) {
+  const applyOps = useEditorStore((s) => s.applyOps);
+  const busy = useEditorStore((s) => s.busy);
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const current = ICONS.find((i) => i.name === node.type);
+  const Current = ICON_SET[node.type];
+  const choose = (name: string) => {
+    if (name === node.type) { setOpen(false); return; }
+    // The same element with a new name: its look (className) and anything else it carried stay.
+    const attrs = node.props.map((p) => p.kind === "true" ? p.name : p.kind === "string" ? `${p.name}="${(p.value ?? "").replace(/"/g, "&quot;")}"` : `${p.name}={${p.value ?? ""}}`).join(" ");
+    void applyOps([{ op: "addImport", source: "lucide-react", names: [name] }, { op: "replaceNode", id: node.id, jsx: `<${name}${attrs ? " " + attrs : ""} />` }],
+                  `Icon: ${ICONS.find((i) => i.name === name)?.label ?? name}`);
+    setOpen(false);
+  };
+  const shown = searchIcons(q).slice(0, 60);
+  return (
+    <Field label="Icon" help="Pick the symbol by what it means.">
+      <button type="button" className="flex h-8 w-full items-center gap-2 rounded-md border border-input bg-background px-2 text-xs hover:bg-muted" disabled={busy} onClick={() => setOpen(!open)} aria-expanded={open}>
+        {Current ? <Current className="h-4 w-4" /> : null}
+        <span className="flex-1 text-left">{current?.label ?? node.type}</span>
+        <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
+      </button>
+      {open && (
+        <div className="mt-1 rounded-md border border-border p-1">
+          <Input className="mb-1 h-7 text-xs" placeholder="Search: add, person, calendar…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search icons" autoFocus />
+          <div className="grid max-h-48 grid-cols-6 gap-0.5 overflow-auto">
+            {shown.map((i) => {
+              const I = ICON_SET[i.name];
+              return I ? (
+                <button key={i.name} type="button" title={i.label} onClick={() => choose(i.name)} disabled={busy}
+                  className={cn("flex h-9 flex-col items-center justify-center rounded hover:bg-muted", i.name === node.type && "bg-primary/10 ring-1 ring-primary")}>
+                  <I className="h-4 w-4" />
+                </button>
+              ) : null;
+            })}
+            {!shown.length && <p className="col-span-6 p-2 text-[10px] text-muted-foreground">Nothing by that name — try another word.</p>}
+          </div>
+        </div>
+      )}
+    </Field>
+  );
+}
