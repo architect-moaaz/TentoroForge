@@ -255,6 +255,7 @@
   document.addEventListener("mousemove", function (e) {
     if (mode !== "design" || (moving && moving.started) || resizing || isOurs(e.target)) return;
     var fid = ownerFid(e.target);
+    document.documentElement.style.cursor = fid && selected.indexOf(fid) >= 0 && !isOurs(e.target) ? "grab" : "";
     if (fid !== hovered) {
       hovered = fid;
       var hr = fid && rectOfFid(fid);
@@ -337,13 +338,21 @@
     var fid = ownerFidOutside(under, moving.fid);
     var r = fid && rectOfFid(fid);
     if (!r) return { fid: null, y: 1 };
-    return { fid: fid, y: r.height ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 1 };
+    return nearestChild(fid, e, moving.fid) || { fid: fid, y: r.height ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 1 };
+  }
+  function capture(pointerId) {
+    try { if (pointerId != null) document.documentElement.setPointerCapture(pointerId); } catch (err) { /* not capturable */ }
+  }
+  function release(pointerId) {
+    try { if (pointerId != null && document.documentElement.hasPointerCapture(pointerId)) document.documentElement.releasePointerCapture(pointerId); } catch (err) { /* already gone */ }
   }
   function endMove() {
+    if (moving) release(moving.pointerId);
     moving = null;
     ghost.style.display = "none";
     hideDrop();
     document.documentElement.style.cursor = "";
+    reportRects();
   }
   var resizing = null;  // { fid, field, x, rect, parentWidth }
   document.addEventListener("pointerdown", function (e) {
@@ -357,25 +366,28 @@
       if (!sel || !sr) return;
       var parent = selectedField ? sel.parentElement : sel.parentElement;
       var pw = parent ? parent.getBoundingClientRect().width : sr.width;
-      resizing = { fid: sfid, field: selectedField, x: e.clientX, rect: sr, parentWidth: pw, width: sr.width };
+      resizing = { fid: sfid, field: selectedField, x: e.clientX, rect: sr, parentWidth: pw, width: sr.width, el: sel, pointerId: e.pointerId };
+      capture(e.pointerId);
       document.documentElement.style.cursor = "ew-resize";
       place(resizeBox, sr);
       return;
     }
     if (isOurs(e.target)) return;
     var fid = ownerFid(e.target);
-    if (!fid || selected.indexOf(fid) < 0) return;
+    if (!fid) return;
+    // A drag may start on anything: it is chosen as it starts to move. A
+    // plain click still selects, and a drag on what is already chosen moves it.
     var fld = fieldOf(e.target);
-    if (fld && fld.fid === fid && selectedField === fld.name) {
-      // The chosen field: drag it to another place in its form.
+    if (fld && fld.fid === fid) {
       var fr = rectOf(fld.el);
-      moving = { fid: fid, field: fld.name, x: e.clientX, y: e.clientY, started: false, rect: fr, dx: e.clientX - fr.left, dy: e.clientY - fr.top };
+      moving = { fid: fid, field: fld.name, x: e.clientX, y: e.clientY, started: false, rect: fr, dx: e.clientX - fr.left, dy: e.clientY - fr.top,
+                 pointerId: e.pointerId, pending: selectedField !== fld.name || selected.indexOf(fid) < 0 };
       return;
     }
-    if (fld && fld.fid === fid) return;   // a field not yet chosen: the click will choose it
     var r = rectOfFid(fid);
     if (!r) return;
-    moving = { fid: fid, x: e.clientX, y: e.clientY, started: false, rect: r, dx: e.clientX - r.left, dy: e.clientY - r.top };
+    moving = { fid: fid, x: e.clientX, y: e.clientY, started: false, rect: r, dx: e.clientX - r.left, dy: e.clientY - r.top,
+               pointerId: e.pointerId, pending: selected.indexOf(fid) < 0 || !!selectedField };
   }, true);
   document.addEventListener("pointermove", function (e) {
     if (!resizing || !e.isPrimary) return;
@@ -389,19 +401,37 @@
     swallow(e);
     var r = resizing;
     resizing = null;
+    release(r.pointerId);
     resizeBox.style.display = "none";
     document.documentElement.style.cursor = "";
     moved = true;
-    if (Math.abs(r.width - r.rect.width) >= 4) send("resize", { fid: r.fid, field: r.field, width: r.width, parentWidth: r.parentWidth });
-    else reportRects();
+    if (Math.abs(r.width - r.rect.width) >= 4) {
+      // The new width is shown at once; the page is rebuilt with it shortly.
+      var share = r.width / Math.max(1, r.parentWidth);
+      try {
+        if (r.field) r.el.style.gridColumn = share > 0.75 ? "1 / -1" : "";
+        else r.el.style.width = Math.round(r.width) + "px";
+      } catch (err) { /* not stylable */ }
+      send("resize", { fid: r.fid, field: r.field, width: r.width, parentWidth: r.parentWidth });
+    }
+    reportRects();
   }, true);
   document.addEventListener("pointermove", function (e) {
     if (!moving || !e.isPrimary) return;
     if (!moving.started) {
       if (Math.abs(e.clientX - moving.x) < 5 && Math.abs(e.clientY - moving.y) < 5) return;
       moving.started = true;
+      if (moving.pending) {
+        // Chosen as it starts to move — the editor hears it, and follows.
+        selected = [moving.fid];
+        selectedField = moving.field || null;
+        send("select", { fid: moving.fid, rect: rectOfFid(moving.fid), field: moving.field || null, shift: false, meta: false });
+        reportRects();
+      }
+      capture(moving.pointerId);
       document.documentElement.style.cursor = "grabbing";
       hoverBox.style.display = "none";
+      edge.style.display = "none";
     }
     place(ghost, { top: e.clientY - moving.dy, left: e.clientX - moving.dx, width: moving.rect.width, height: moving.rect.height });
     if (moving.field) {
@@ -444,13 +474,16 @@
     send("move-drop", { fid: t.fid, y: t.y, moving: fid });
   }, true);
   function cancelMove() {
-    if (resizing) { resizing = null; resizeBox.style.display = "none"; document.documentElement.style.cursor = ""; reportRects(); }
+    if (resizing) { release(resizing.pointerId); resizing = null; resizeBox.style.display = "none"; document.documentElement.style.cursor = ""; reportRects(); }
     if (!moving) return;
     var started = moving.started;
     endMove();
     if (started) send("move-cancel", {});
   }
   document.addEventListener("pointercancel", cancelMove, true);
+  // The pointer gone elsewhere (another window, the editor's own panels) ends the drag.
+  document.addEventListener("lostpointercapture", function () { if ((moving && moving.started) || resizing) cancelMove(); }, true);
+  window.addEventListener("blur", cancelMove);
 
   // --- region selection ----------------------------------------------------
   var drag = null;
@@ -496,12 +529,31 @@
   // pointer and how far down it (0 top .. 1 bottom), and where it was let go.
   var dragAt = null;
   function hideDrop() { dropBox.style.display = "none"; dropBar.style.display = "none"; }
+  /** The pointer in a container's own gap or padding: the child nearest it,
+   *  so a drop between two things lands between them — not "inside the
+   *  container, at the end". `skip` is the element being moved. */
+  function nearestChild(fid, e, skip) {
+    var el = byFid(fid);
+    if (!el || !el.children) return null;
+    var best = null;
+    for (var i = 0; i < el.children.length; i++) {
+      var c = el.children[i];
+      if (isOurs(c)) continue;
+      var cf = ownerFid(c);
+      if (!cf || cf === fid || (skip && isUnder(cf, skip))) continue;
+      var r = c.getBoundingClientRect();
+      if (!r.height) continue;
+      var d = e.clientY < r.top ? r.top - e.clientY : e.clientY > r.bottom ? e.clientY - r.bottom : 0;
+      if (!best || d < best.d) best = { fid: cf, r: r, d: d };
+    }
+    return best ? { fid: best.fid, y: Math.min(1, Math.max(0, (e.clientY - best.r.top) / best.r.height)) } : null;
+  }
   function dropTarget(e) {
     var fid = ownerFid(e.target);
     if (!fid) { var first = document.querySelector("[data-fid]"); fid = first ? first.getAttribute("data-fid") : null; }
     var r = fid && rectOfFid(fid);
     if (!r) return { fid: null, y: 1 };
-    return { fid: fid, y: r.height ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 1 };
+    return nearestChild(fid, e, null) || { fid: fid, y: r.height ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 1 };
   }
   document.addEventListener("dragover", function (e) {
     if (mode !== "design") return;
