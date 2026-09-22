@@ -159,13 +159,23 @@ def editable_artifacts(doc: dict, node_produces: Iterable[str],
 
 
 def build_edit_prompt(system: str, artifacts: list[dict], feedback: str,
-                      context: str = "") -> tuple[str, str]:
+                      context: str = "", *, refused: bool = False) -> tuple[str, str]:
     """The node's own system prompt — its contract and section shapes — with an
-    edit request in place of the authoring request."""
+    edit request in place of the authoring request.
+
+    ``refused``: the artifacts were turned back by the Blueprint contract, not
+    accepted and then judged. The instruction differs in one thing — WHO found
+    the fault and what it is — and the edit is the same cheap move."""
+    if refused:
+        why = ("You wrote the artifacts below and the Blueprint contract REFUSED "
+               "them, for the specific reasons listed. Nothing was kept. Fix "
+               "exactly those faults by returning ")
+    else:
+        why = ("You wrote the artifacts below and they were accepted. An observer "
+               "then found the specific problems listed. Fix exactly those "
+               "problems by returning ")
     system = system + (
-        "\n\n---\nTHIS CALL IS A REPAIR, NOT A NEW AUTHORING. You wrote the "
-        "artifacts below and they were accepted. An observer then found the "
-        "specific problems listed. Fix exactly those problems by returning "
+        "\n\n---\nTHIS CALL IS A REPAIR, NOT A NEW AUTHORING. " + why +
         "JSON Patch edits (RFC 6902) against the document "
         "`{\"artifacts\": [...]}` shown — and nothing else.\n\n"
         "Rules:\n"
@@ -188,7 +198,8 @@ def build_edit_prompt(system: str, artifacts: list[dict], feedback: str,
     # what an edit saves, and it stays small either way.
     user = (
         (context.strip() + "\n\n---\n\n" if context else "")
-        + "REPAIR REQUEST. The observer's findings:\n\n" + (feedback or "").strip()
+        + ("REPAIR REQUEST. The contract's refusal:\n\n" if refused
+           else "REPAIR REQUEST. The observer's findings:\n\n") + (feedback or "").strip()
         + "\n\nYour current output:\n\n```json\n"
         + json.dumps({"artifacts": artifacts}, indent=1, ensure_ascii=False)
         + "\n```"
@@ -243,7 +254,7 @@ def apply_edits(artifacts: list[dict], edits: list[dict],
 
 def patch_node_output(spec: Any, client: Callable[..., Any], *, system: str,
                       produces: Iterable[str], task_id: str, context: str = "",
-                      usage: Any = None, project: str = "") -> Any:
+                      usage: Any = None, project: str = "", refused: bool = False) -> Any:
     """An AgentResult re-proposing the subject's artifacts with the edits
     applied — or ``None``, meaning: rewrite in full as before."""
     from services.blueprint.agent_contract import AgentResult, ArtifactProposal
@@ -255,8 +266,11 @@ def patch_node_output(spec: Any, client: Callable[..., Any], *, system: str,
     # for a rewrite — "Your reply REPLACES what you wrote" — and handed to an
     # editor it contradicts the one instruction that makes this cheap.
     from services.blueprint.page_patch import findings_of
-    edit_system, user = build_edit_prompt(system, artifacts,
-                                          findings_of(spec.feedback), context)
+    edit_system, user = build_edit_prompt(
+        system, artifacts,
+        # A refusal is already a list of faults, one per attempt; the
+        # observer's brief has framing to strip.
+        spec.feedback if refused else findings_of(spec.feedback), context, refused=refused)
     if dataclasses.is_dataclass(client) and hasattr(client, "effort"):
         client = dataclasses.replace(client, effort=EDIT_EFFORT)
     t0 = time.monotonic()

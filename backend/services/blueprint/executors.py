@@ -174,6 +174,77 @@ class NoAnswer(RuntimeError):
         self.stop_reason = stop_reason
 
 
+class BuildCannotStart(RuntimeError):
+    """The API refused a one-token call before the build spent anything."""
+
+
+#: The message the API gives an account with no balance. A 400, so it does
+#: not carry a class of its own in the SDK.
+_NO_CREDIT = ("credit balance", "billing", "purchase credits")
+
+
+def api_outage(exc: BaseException) -> str | None:
+    """What kind of API outage an exception is, or None when it is not one.
+
+    ``"credit"`` — the account cannot pay (no balance, a bad or revoked key):
+    nothing will succeed until a person acts, and every call made meanwhile
+    is a call that fails. ``"transient"`` — the API is busy or the network
+    dropped (429, 5xx, 529, a timeout): the same call a little later is
+    likely to land. Neither says anything about what the author wrote, and
+    neither is worth an attempt: HippieKit's second measured rebuild
+    (2026-09-22) FAILED a page for "Your credit balance is too low", and a
+    build that hits that mid-run used to fail one subject per remaining call.
+    Read from the SDK's exception classes where they exist, and from the
+    message where they do not (a 400 is a 400)."""
+    text = str(exc).lower()
+    if any(word in text for word in _NO_CREDIT):
+        return "credit"
+    try:
+        import anthropic
+    except ImportError:  # pragma: no cover — the SDK is a dependency
+        anthropic = None  # type: ignore[assignment]
+    if anthropic is not None:
+        if isinstance(exc, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+            return "credit"
+        if isinstance(exc, (anthropic.RateLimitError, anthropic.InternalServerError,
+                            anthropic.APIConnectionError)):
+            return "transient"
+        if isinstance(exc, anthropic.APIStatusError) and int(getattr(exc, "status_code", 0) or 0) >= 500:
+            return "transient"
+    # Without a class to go on, only the API's own message shape counts —
+    # "Error code: 529 - {...}" — never a free word like "timeout", which a
+    # composer, a gateway or a test fake may say for reasons of their own.
+    if re.search(r"error code: (429|5\d\d)\b", text):
+        return "transient"
+    return None
+
+
+def preflight(client: Any) -> None:
+    """One token's worth of proof that the API will answer. Raises
+    :class:`BuildCannotStart` for an account that cannot pay; a busy API is
+    let through. A client with no ``preflight`` of its own is trusted.
+
+    NOT CALLED BY THE RUN ITSELF. A run's first model call is its preflight:
+    a request the API refuses for a low balance is not billed, and the
+    scheduler pauses the run on it with nothing sent since (see the
+    orchestrator's `pause`). Wired into `run` it reached the real API from a
+    test suite whose fakes never would have. For a caller that wants the
+    answer before it starts anything — a UI about to show a progress bar —
+    this is the call."""
+    check = getattr(client, "preflight", None)
+    if check is None:
+        return
+    try:
+        check()
+    except BuildCannotStart:
+        raise
+    except Exception as exc:  # noqa: BLE001 — classified, not swallowed
+        if api_outage(exc) == "credit":
+            raise BuildCannotStart(f"the API refused before the build began: {exc}") from exc
+        # Transient, or something a 1-token call cannot tell: the build goes
+        # ahead and each call speaks for itself.
+
+
 # ---------------------------------------------------------------------------
 # §29 — the structured output envelope
 # ---------------------------------------------------------------------------
@@ -598,6 +669,12 @@ class AnthropicModel:
             # raises, so a failed call still shows how far it got.
             sink.close()
         return stream.get_final_message()
+
+    def preflight(self) -> None:
+        """The cheapest call the API takes. Raises whatever it raises."""
+        self._anthropic().messages.create(
+            model=self.model, max_tokens=1,
+            messages=[{"role": "user", "content": "ok"}])
 
     def __call__(self, *, system: str, user: str, schema: dict[str, Any],
                  image: str | Path | None = None,
@@ -2926,6 +3003,22 @@ def expand_data_model(data: dict) -> list["ArtifactProposal"]:
     return out
 
 
+class Truncated(ValueError):
+    """The reply ran into ``max_tokens`` mid-answer.
+
+    It parsed as "not JSON: Unterminated string" and was retried as a
+    malformed reply — the same question, the same budget, and often the same
+    cut (HippieKit page_details ENTITY-003, 2026-09-21). A reply that ran out
+    of room is not a reply that was wrong: the retry needs the room and the
+    lighter reasoning the first call lacked, and to be told it was cut off,
+    not that it was rejected. Under structured outputs a reply cannot be
+    continued from where it stopped, so this is the closest thing to it."""
+
+    def __init__(self, message: str, output_tokens: int = 0) -> None:
+        super().__init__(message)
+        self.output_tokens = output_tokens
+
+
 class MalformedEnvelope(ValueError):
     """The model's reply did not parse as the §29 envelope."""
 
@@ -3255,12 +3348,14 @@ def after_no_answer(client: Any, feedback: str) -> Any:
     out and wrote nothing: less effort and more room. Asking again at the same
     effort and budget got the same nothing (UAT twice; 0l133sp2's /rentals/[id],
     a record page with fifteen facts and ten workflows, spent 48,000 tokens
-    reasoning). Any other retry, or a client that has no effort to lower, is
-    returned as it is."""
+    reasoning). A reply CUT OFF mid-answer (`Truncated`) is the same shape
+    one step later: the budget went on reasoning and the answer did not fit
+    in what was left. Any other retry, or a client that has no effort to
+    lower, is returned as it is."""
     import dataclasses
 
-    if not str(feedback or "").startswith("NoAnswer") or not dataclasses.is_dataclass(client) \
-            or not hasattr(client, "effort"):
+    if not str(feedback or "").startswith(("NoAnswer", "Truncated")) \
+            or not dataclasses.is_dataclass(client) or not hasattr(client, "effort"):
         return client
     # ALL THE WAY DOWN, NOT ONE NOTCH. A notch was measured and is not
     # enough: a Calculator page spent its whole budget reasoning at `high`,
@@ -3666,8 +3761,10 @@ def make_executor(
             result = patch_node_output(
                 spec, client, system=system, produces=DAG[spec.node].produces,
                 task_id=spec.task_id, context=context, usage=usage,
-                project=project)
+                project=project, refused=not getattr(spec, "repair", False))
         except Exception as exc:  # noqa: BLE001 — an edit that breaks is a rewrite
+            if api_outage(exc):
+                raise           # not the edit's fault, and not worth a rewrite call
             logger.warning("[edit-repair] %s: %s", spec.node, exc)
             return None
         if result is None:
@@ -3680,6 +3777,11 @@ def make_executor(
         elif spec.node == "page_details":
             with svc.lock:
                 pin_page_identity(svc, spec.subject, result)
+        elif spec.node == "data_model":
+            pin_entity_set(result)
+        elif spec.node == "entity_fields":
+            with svc.lock:
+                pin_entity_identity(svc, spec.subject, result)
         return result
 
     def _compose_ui(spec: TaskSpec) -> AgentResult:
@@ -3728,13 +3830,19 @@ def make_executor(
     def executor(spec: TaskSpec) -> AgentResult:
         if spec.agent in ("ui_director", "ui_engineer"):
             return _compose_ui(spec)
-        # A REPAIR EDITS WHAT WAS ACCEPTED. Only an observer repair carries
-        # `current`; a retry after a refusal has no accepted answer and
-        # rewrites. The two data-model envelopes are a different reply shape
-        # and both nodes are off the observer, so they keep the rewrite.
+        # A REPAIR EDITS WHAT WAS ACCEPTED, AND A RETRY EDITS WHAT WAS
+        # REFUSED. An observer repair carries the accepted answer in
+        # `current`; a retry after a contract refusal now carries the refused
+        # proposals in it, so a reply the contract turned back for one bad
+        # field is fixed by an edit rather than written again from nothing
+        # (31 full rewrites in the builds since 2026-09-15, each paid for).
+        # The two data-model envelopes are a different reply shape and are
+        # off the observer, so an observer repair of them still rewrites; a
+        # refused data-model reply has already been parsed into proposals
+        # and edits like any other.
         if (spec.feedback and getattr(spec, "current", ())
                 and spec.agent != "a2ui_pages"
-                and spec.node not in SCHEMA_BY_NODE):
+                and (not getattr(spec, "repair", False) or spec.node not in SCHEMA_BY_NODE)):
             edited = _edit_repair(spec)
             if edited is not None:
                 return edited
@@ -3779,7 +3887,14 @@ def make_executor(
 
         for attempt in range(repair_attempts + 1):
             prompt = user
-            if attempt and last:
+            if attempt and isinstance(last, Truncated):
+                prompt = (
+                    f"{user}\n\nYour previous reply was CUT OFF before it was "
+                    f"complete: {last}. It was not wrong; it was too long for "
+                    "the room. Write the same answer, complete, with no "
+                    "explanation and no repetition — the budget is larger now."
+                )
+            elif attempt and last:
                 prompt = (
                     f"{user}\n\nYour previous reply was rejected: {last}\n"
                     "Return a corrected envelope. Do not explain the mistake."
@@ -3822,6 +3937,16 @@ def make_executor(
                 parsed = parse_envelope(text, task_id=spec.task_id,
                                         agent=spec.agent, node=spec.node)
             except MalformedEnvelope as exc:
+                if getattr(raw, "stop_reason", None) == "max_tokens":
+                    spent_out = getattr(reply_usage, "output_tokens", 0) or 0
+                    last = Truncated(
+                        f"the reply was cut off at {spent_out:,} output tokens "
+                        f"(budget {getattr(client, 'max_tokens', '?')}) before the "
+                        "answer was complete", output_tokens=spent_out)
+                    # THE RETRY GETS ROOM, NOT THE SAME CUT. Same lever as a
+                    # reply that never started: least effort, most budget.
+                    client = after_no_answer(client, f"Truncated: {last}")
+                    continue
                 last = exc
                 continue
             if spec.node == "workflow_steps":
@@ -3846,6 +3971,8 @@ def make_executor(
                     pin_entity_identity(svc, spec.subject, parsed)
             return parsed
 
+        if isinstance(last, Truncated):
+            raise Truncated(f"{spec.node}: {last}", output_tokens=last.output_tokens)
         raise MalformedEnvelope(f"{spec.node}: {last}")
 
     return executor

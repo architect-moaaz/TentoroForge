@@ -97,6 +97,12 @@ def test_a_refused_entity_is_asked_again(svc):
 
     def model(*, system, user, schema=None):
         calls.append(user)
+        from services.blueprint.artifact_patch import PATCH_SCHEMA
+        if schema is PATCH_SCHEMA:
+            # The retry EDITS what was refused (2026-09-22): the one bad
+            # field goes, the rest stands.
+            return json.dumps({"edits": [{"op": "remove", "path": "/artifacts/0/body/fields/2"}],
+                               "note": ""})
         vector = {"name": "embedding", "type": "vector"}          # no `embedding.of`: refused
         fields = [{"name": "id", "type": "uuid", "primaryKey": True},
                   {"name": "name", "type": "string", "required": True}]

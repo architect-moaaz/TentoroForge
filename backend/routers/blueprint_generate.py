@@ -615,6 +615,9 @@ def _report_payload(report: Any, doc: dict | None = None) -> dict:
             for n in report.failed
         ],
         "unbuilt": _unbuilt_pages(doc),
+        # The API could not be paid: the run stopped, nothing authored was
+        # lost, and a rebuild continues from here.
+        "paused": str(getattr(report, "paused_because", "") or ""),
         # §73 closed at the node: what the observer sent back and got right,
         # and what it flagged because no round brought it round.
         "repaired": list(getattr(report, "repaired", []) or []),
@@ -2222,7 +2225,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         # reload shows "built" even when the stream that launched it was long
         # gone by the time it landed. Best-effort: a completion that cannot be
         # worded must not fail a build that succeeded.
-        if announce_completion:
+        if announce_completion and not getattr(report, "paused_because", ""):
             _announce_build_complete(svc.doc, emit, offer_verify=approved,
                                      where=Path(output_dir).name)
     counts = forecast(svc.doc)

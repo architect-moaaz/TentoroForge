@@ -192,6 +192,16 @@ class RunLedger:
         self._write({"event": "node:blocked", "node": key,
                      "reason": str(reason)[:600], "at": _now()})
 
+    def node_stalled(self, key: str, subject: str, reason: str) -> None:
+        """The API, not the author, failed a call; it is re-sent after a pause
+        and the subject's attempts are untouched."""
+        self._write({"event": "node:stalled", "node": key, "subject": subject,
+                     "reason": reason[:400], "at": _now()})
+
+    def run_paused(self, _key: str, reason: str) -> None:
+        """The API cannot be paid. Nothing more is sent; what landed stays."""
+        self._write({"event": "run:paused", "reason": reason[:600], "at": _now()})
+
     def node_skipped(self, key: str, unmet: str) -> None:
         self._write({"event": "node:skipped", "node": key, "unmet": unmet,
                      "at": _now()})
@@ -213,6 +223,9 @@ class RunLedger:
             "skippedBecause": dict(getattr(report, "skipped_because", {}) or {}),
             "repaired": list(getattr(report, "repaired", []) or []),
             "unrepaired": dict(getattr(report, "unrepaired", {}) or {}),
+            # The API stopped answering, not the work: what is in `skipped`
+            # under this reason is still to do, and nothing was lost.
+            "pausedBecause": str(getattr(report, "paused_because", "") or ""),
         })
 
     def crashed(self, exc: BaseException) -> None:

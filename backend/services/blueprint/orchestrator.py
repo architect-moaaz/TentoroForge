@@ -1170,10 +1170,15 @@ class RunReport:
     #: not a failure of the run, because nothing was lost — it is a divergence
     #: the report names rather than a repair the platform hid.
     unrepaired: dict[str, str] = field(default_factory=dict)
+    #: Why the run stopped before its plan was done, when the API could not
+    #: be paid rather than because anything went wrong with the work. Nothing
+    #: authored is lost: what completed is in the Blueprint, what did not is
+    #: in `skipped` with this reason, and the next run continues from there.
+    paused_because: str = ""
 
     @property
     def ok(self) -> bool:
-        return not self.failed and not self.blocked
+        return not self.failed and not self.blocked and not self.paused_because
 
 
 import logging
@@ -1371,6 +1376,9 @@ def _execute(
     #: future absent here is an ordinary call.
     kinds: dict[Future, str] = {}
     watches: dict[str, _Watch] = {}
+    #: Set once the API says it cannot be paid: nothing new is sent, what is
+    #: in flight is allowed to land, and the run ends with the reason.
+    paused: list[str] = []
     #: Future -> the subjects an "observe" future is judging.
     judging: dict[Future, list[str]] = {}
     #: The "observe" futures that are a node's closing sweep.
@@ -1378,6 +1386,8 @@ def _execute(
     rounds = int(getattr(observer_agent, "rounds", 1) or 1)
 
     def ready() -> list[str]:
+        if paused:
+            return []
         return [
             key for key in order
             if key not in started
@@ -1480,7 +1490,7 @@ def _execute(
     def pump(pool: ThreadPoolExecutor, key: str) -> None:
         """Submit queued subjects up to the node's own width."""
         state = runs[key]
-        while state.queue and len(state.in_flight) < FANOUT_CONCURRENCY:
+        while state.queue and len(state.in_flight) < FANOUT_CONCURRENCY and not paused:
             subject = state.queue.pop(0)
             attempt = state.attempts.get(subject, 0) + 1
             state.attempts[subject] = attempt
@@ -1492,9 +1502,12 @@ def _execute(
                 attempt=attempt,
                 subject=subject,
                 feedback=state.feedback.get(subject, ""),
+                current=state.current.get(subject, ()),
             )
             leads = state.warm is not None and subject == state.leader and attempt == 1
-            futures[pool.submit(_call_warm, executor, spec, state.warm, leads)] = spec
+            # After an outage, the re-send waits — on its worker, not here.
+            delay = OUTAGE_BACKOFF_S * state.stalled.get(subject, 0)
+            futures[pool.submit(_call_after, delay, executor, spec, state.warm, leads)] = spec
 
     def start(pool: ThreadPoolExecutor, key: str) -> None:
         started.add(key)
@@ -1541,6 +1554,15 @@ def _execute(
             done.add(key)
         settle_optional(key)
 
+    def pause(reason: str) -> None:
+        """Stop sending. Everything already landed stays; the run ends with
+        the reason once what is in flight has come back."""
+        if paused:
+            return
+        paused.append(reason)
+        _note(ledger, "run_paused", "", reason)
+        logger.warning("[run] paused: %s", reason)
+
     def settle(pool: ThreadPoolExecutor, spec: TaskSpec, outcome: Any) -> None:
         key = spec.node
         if DAG[key].kind != "agent":
@@ -1556,7 +1578,30 @@ def _execute(
                 report=report, ledger=ledger,
             )
         state.in_flight.discard(spec.subject)
-        if verdict == "retry":
+        if verdict == "paused":
+            pause(f"{spec.node}{':' + spec.subject if spec.subject else ''}: {_reason(outcome)}")
+            # The subject is not failed; it is still to do. Back in the queue
+            # so the tail records it as pending, and the next run sends it.
+            state.attempts[spec.subject] -= 1
+            state.queue.append(spec.subject)
+        elif verdict == "again":
+            n = state.stalled[spec.subject] = state.stalled.get(spec.subject, 0) + 1
+            state.attempts[spec.subject] -= 1           # the API's failure, not an attempt
+            if n > OUTAGE_RETRIES:
+                # The outage outlasted what we wait for. Now it is a failure,
+                # in the API's own words — not an attempt, and not sent to
+                # `_apply_subject`, which would read those words as one more
+                # outage and send it round for ever.
+                label = f"{key}:{spec.subject}" if spec.subject else key
+                report.failed.append(label)
+                report.failed_because[label] = f"the API failed this call {n} times: {_reason(outcome)}"
+                state.failed.append(spec.subject)
+                _note(ledger, "node_subject", key, spec.subject,
+                      (state.subjects.index(spec.subject) + 1) if spec.subject in state.subjects else 0,
+                      len(state.subjects or [""]), False)
+            else:
+                state.queue.append(spec.subject)
+        elif verdict == "retry":
             state.queue.append(spec.subject)
         elif verdict == "applied" and judge_early(key, state):
             observe(pool, key, [spec.subject], mode="subjects")
@@ -1730,6 +1775,11 @@ def _execute(
             if subject in w.awaiting or subject in w.observing:
                 continue
             task = w.open[subject]
+            if paused:
+                # Left as its author wrote it. Not flagged: nothing judged it
+                # wrong after a repair, the API stopped answering.
+                w.open.pop(subject)
+                continue
             if subject in w.stuck or w.rounds.get(subject, 0) >= limit:
                 # EARLY STOP, or rounds spent: flag rather than re-author
                 # against a brief that has already failed.
@@ -1778,6 +1828,16 @@ def _execute(
         key = spec.node
         w = watches[key]
         w.awaiting.discard(spec.subject)
+        from services.blueprint.executors import api_outage
+        if isinstance(outcome, Exception) and api_outage(outcome):
+            # The API failed the repair call; the author was never asked.
+            # The round is given back, and the subject waits for the API.
+            w.rounds[spec.subject] = max(0, w.rounds.get(spec.subject, 0) - 1)
+            if api_outage(outcome) == "credit":
+                pause(f"{key}:{spec.subject} (repair): {_reason(outcome)}")
+                w.open.pop(spec.subject, None)      # left as authored; not flagged
+            advance(pool, key)
+            return
         with svc.lock:
             refused, application = _repair_apply(
                 svc, outcome, commit=commit, user_request=user_request)
@@ -1882,12 +1942,26 @@ def _execute(
     # Blueprint simply kept the endpoints it already had, with nothing to
     # indicate the derivation never ran.
     for key in order:
+        if key in done or key in report.failed:
+            continue
+        if paused:
+            # Not a failure and not a dependency: the API stopped. Said so,
+            # per node, and the next run picks these up where they stopped.
+            state = runs.get(key)
+            left = f" ({len(state.queue) + len(state.in_flight)} of {len(state.subjects)} subjects still to author)" \
+                if state is not None and state.subjects != [""] else ""
+            report.skipped.append(key)
+            report.skipped_because[key] = f"paused: {paused[0]}{left}"
+            ledger.node_skipped(key, report.skipped_because[key])
+            continue
         if key in started:
             continue
         unmet = {d for d in DAG[key].depends_on if d in in_plan and d not in done}
         report.skipped.append(key)
         report.skipped_because[key] = ", ".join(sorted(unmet))
         ledger.node_skipped(key, ", ".join(sorted(unmet)))
+    if paused:
+        report.paused_because = paused[0]
 
     ledger.finish(report)
     return report
@@ -2125,6 +2199,15 @@ def _retire(svc: BlueprintService, identities: set[tuple], *, note: str) -> None
 #: seconds; the bound is for a call that cannot signal (a transport that does
 #: not stream) and for one that hangs, which must not hold the node.
 PREFIX_WARM_WAIT_S = 30.0
+
+
+def _call_after(delay: float, executor: Executor, spec: TaskSpec, warm: Any, leads: bool) -> Any:
+    """`_call_warm` after a pause — the wait an outage earns, spent on the
+    worker so the scheduler keeps settling everything else."""
+    if delay > 0:
+        import time as _time
+        _time.sleep(delay)
+    return _call_warm(executor, spec, warm, leads)
 
 
 def _call_warm(executor: Executor, spec: TaskSpec, warm: Any, leads: bool) -> Any:
@@ -2416,6 +2499,21 @@ class _NodeRun:
     warm: Any = None
     #: The subject whose first call writes that prefix.
     leader: str = ""
+    #: Subject -> the proposals its last attempt made and the contract
+    #: refused, as ``({section, natural_key, body}, ...)`` — what the retry
+    #: EDITS rather than writes again (see the executor's `_edit_repair`).
+    current: dict[str, tuple] = field(default_factory=dict)
+    #: Subject -> how many times the API, not the author, failed its call.
+    stalled: dict[str, int] = field(default_factory=dict)
+
+
+#: How many times one subject's call is re-sent after the API failed it
+#: (busy, timed out, dropped) before the run gives up on that subject. The SDK
+#: already retries three times inside a call; this is the layer above, with a
+#: pause between, for outages that outlast those.
+OUTAGE_RETRIES = 3
+#: The pause before re-sending, multiplied by the number of failures so far.
+OUTAGE_BACKOFF_S = 20.0
 
 
 def _apply_subject(
@@ -2481,6 +2579,23 @@ def _apply_subject(
         return "retry"
 
     if isinstance(outcome, Exception):
+        # THE API'S FAILURE IS NOT THE AUTHOR'S ATTEMPT. A busy API, a dropped
+        # connection or an account that cannot pay says nothing about what
+        # was written, and charging it to the subject's attempts turned an
+        # outage into a failed node (HippieKit, 2026-09-22: a page "failed"
+        # for a low balance). The scheduler re-sends or pauses; see `settle`.
+        from services.blueprint.executors import api_outage
+        kind = api_outage(outcome)
+        # An OPTIONAL node never holds the application, and that includes
+        # for an account that cannot pay: what is required has landed, and
+        # the app ships without the extra, recorded as degraded — the policy
+        # `settle_optional` already states. Only a required node pauses.
+        if kind == "credit" and not DAG[key].optional:
+            return "paused"
+        if kind == "transient":
+            _note(ledger, "node_stalled", key, subject, _reason(outcome))
+            return "again"
+        state.current.pop(subject, None)
         return _rejected(_reason(outcome))
 
     try:
@@ -2496,13 +2611,23 @@ def _apply_subject(
         # inside a section it may write, and the whole turn died where one
         # subject should have been asked again.
         from services.blueprint.refusals import record_refusal
-        record_refusal(svc.output_dir, subject or key, 0,
-                       list(getattr(outcome, "proposals", None) or []), _reason(exc))
+        proposals = list(getattr(outcome, "proposals", None) or [])
+        record_refusal(svc.output_dir, subject or key, 0, proposals, _reason(exc))
+        # WHAT WAS REFUSED IS WHAT THE RETRY EDITS. The proposals are kept
+        # for the next attempt, which fixes the named faults in place rather
+        # than authoring the whole subject again.
+        # ...unless the fault is the ENVELOPE — a section that is not
+        # writable, a key an edit may not change — which an edit cannot
+        # reach. That retry rewrites, as before.
+        state.current[subject] = () if isinstance(exc, ContractViolation) else tuple(
+            {"section": p.section, "natural_key": p.natural_key, "body": p.body}
+            for p in proposals if isinstance(getattr(p, "body", None), dict))
         # A validator's verdict on a proposal: deterministic, so the same
         # words twice mean the same words a third time.
         return _rejected(_reason(exc), deterministic=True)
 
     if application.applied:
+        state.current.pop(subject, None)
         report.artifacts.extend(application.artifacts)
         report.change_requests.extend(application.change_requests)
         _act_on(svc, key, application.change_requests, report, commit=commit)
