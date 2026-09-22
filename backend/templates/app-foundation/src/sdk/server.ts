@@ -41,6 +41,19 @@ export type Where<E extends EntityName> = Partial<{
   [K in keyof Entities[E]]: string | number | boolean;
 }>;
 
+type Scalar = string | number | boolean;
+
+/** A foreign key's filter by the record it points at: `{ in: "Ingredient",
+ *  where: { kind: "harmful" } }`. */
+export type Related = { [T in EntityName]: { in: T; where: Where<T> } }[EntityName];
+
+/** A count's filter: equality on the entity's own columns — or, on a foreign
+ *  key, `Related`: the rows whose key points at a record matching `where`.
+ *  Counts and totals only. */
+export type CountWhere<E extends EntityName> = Partial<{
+  [K in keyof Entities[E]]: Scalar | Related;
+}>;
+
 export interface ListOptions<E extends EntityName> {
   where?: Where<E>;
   /** Free-text search over the entity's searchable columns. */
@@ -220,7 +233,7 @@ export async function myAccount(): Promise<Entities[Extract<AccountEntity, Entit
 }
 
 /** How many rows match. */
-export async function count<E extends EntityName>(entity: E, where?: Where<E>): Promise<number> {
+export async function count<E extends EntityName>(entity: E, where?: CountWhere<E>): Promise<number> {
   if (await reviewingEmpty()) return 0;
   const out = await resolveAggregate({
     name: "count", entity, op: "aggregate",
@@ -231,7 +244,7 @@ export async function count<E extends EntityName>(entity: E, where?: Where<E>): 
 
 /** A sum, average, minimum or maximum of a numeric field. */
 export async function total<E extends EntityName>(
-  entity: E, fn: "sum" | "avg" | "min" | "max", field: NumericField<E>, where?: Where<E>,
+  entity: E, fn: "sum" | "avg" | "min" | "max", field: NumericField<E>, where?: CountWhere<E>,
 ): Promise<number> {
   if (await reviewingEmpty()) return 0;
   const out = await resolveAggregate({

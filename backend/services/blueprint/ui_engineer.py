@@ -156,8 +156,8 @@ recordsById(entity, ids: (string | null | undefined)[]): Promise<Record<id, Row>
 near(entity, locationField, from: GeoPoint | null, { where?, radiusKm?, limit? }?): Promise<(Row & { distanceKm: number | null })[]>   // closest first
 whereAmI(ctx): Promise<GeoPoint | null>     // the reader: ?near= (set by <NearMe />), else their account's location
 distanceKm(a, b): number | null;  formatDistance(km): string   // "0.4 mi" — also from "@/sdk/client"
-count(entity, where?): Promise<number>
-total(entity, fn: "sum" | "avg" | "min" | "max", numericField, where?): Promise<number>
+count(entity, where?): Promise<number>   // a foreign key in where may be { in: "Entity", where: {...} }: rows whose key points at a matching record
+total(entity, fn: "sum" | "avg" | "min" | "max", numericField, where?): Promise<number>   // same where
 series(entity, { groupBy: field; bucket?: "day" | "week" | "month"; fn?: "count" | "sum" | "avg" | "min" | "max"; field?: numericField }): Promise<SeriesPoint[]>
 query(entity, { measures: { [key]: { fn: "count" } | { fn: "count_distinct" | "min" | "max", field } | { fn: "sum" | "avg", field: numericField } };
                 dimensions?: [field | { field, bucket?: "day" | "week" | "month" | "quarter" | "year" }

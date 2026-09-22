@@ -125,3 +125,71 @@ def test_the_contract_and_the_author_know_both():
     from services.blueprint.executors import NODE_TASKS
     prompt = NODE_TASKS["page_details"]
     assert "`reverse`" in prompt and "Leave `via` out to count every" in prompt
+
+
+# --- a count through a join ---------------------------------------------------
+#
+# HippieKit's rebuild (2026-09-22) retried a product page on "Harmful
+# ingredients": ProductIngredient rows whose Ingredient is of kind harmful.
+# `where` only named the counted entity's own fields.
+
+PRODUCT, INGREDIENT, LINK = "ENTITY-003", "ENTITY-006", "ENTITY-005"
+
+
+def _join_doc():
+    return {"data": {"entities": [
+        {"id": PRODUCT, "name": "Product", "fields": [{"name": "id", "type": "uuid"}]},
+        {"id": INGREDIENT, "name": "Ingredient", "fields": [
+            {"name": "id", "type": "uuid"}, {"name": "kind", "type": "enum", "enumValues": ["clean", "harmful"]}]},
+        # The link's keys carry no `references`: the relationship says where they point.
+        {"id": LINK, "name": "ProductIngredient", "fields": [
+            {"name": "id", "type": "uuid"}, {"name": "productId", "type": "uuid"},
+            {"name": "ingredientId", "type": "uuid"}]}],
+        "relationships": [
+            {"from": PRODUCT, "to": LINK, "kind": "one_to_many", "fromField": "id", "toField": "productId"},
+            {"from": INGREDIENT, "to": LINK, "kind": "one_to_many", "fromField": "id", "toField": "ingredientId"}]},
+        "pages": []}
+
+
+HARMFUL = _item("Harmful ingredients", kind="count", entity=LINK, via="productId",
+                where={"ingredientId.kind": "harmful"})
+
+
+def test_a_count_may_filter_on_the_record_a_foreign_key_points_at():
+    assert content_findings(_page(HARMFUL, route="/products/[id]", primary=PRODUCT), _join_doc()) == []
+
+
+@pytest.mark.parametrize("where, fault", [
+    ({"ingredient.kind": "harmful"}, "before the dot goes a foreign key of ProductIngredient (productId, ingredientId)"),
+    ({"ingredientId.colour": "red"}, "Ingredient has no field 'colour'"),
+])
+def test_a_join_that_does_not_resolve_says_how_to_write_it(where, fault):
+    item = _item("Harmful", kind="count", entity=LINK, via="productId", where=where)
+    (finding,) = content_findings(_page(item, route="/products/[id]", primary=PRODUCT), _join_doc())
+    assert fault in finding, finding
+
+
+def test_a_reverse_fact_filters_on_its_own_fields_only():
+    """`reverse` reads through `list`, which filters on the entity's own columns."""
+    item = _item("Latest harmful", kind="reverse", entity=LINK, via="productId",
+                 where={"ingredientId.kind": "harmful"})
+    (finding,) = content_findings(_page(item, route="/products/[id]", primary=PRODUCT), _join_doc())
+    assert "own fields only" in finding
+
+
+def test_the_engineer_is_given_the_target_by_name():
+    """The generated app does not know where a foreign key points; the read says."""
+    doc = _join_doc()
+    (b,) = content_brief(doc, _page(HARMFUL, route="/products/[id]", primary=PRODUCT))
+    assert b["read"] == ('count("ProductIngredient", { productId: product.id, '
+                         'ingredientId: { in: "Ingredient", where: { kind: \'harmful\' } } })')
+
+
+def test_the_sdk_and_the_engine_speak_the_same_join():
+    root = Path(__file__).resolve().parents[2]
+    sdk = (root / "templates" / "app-foundation" / "src" / "sdk" / "server.ts").read_text()
+    engine = (root / "templates" / "runtime" / "data-engine.ts").read_text()
+    samples = (root / "static" / "jit-samples.mjs").read_text()
+    assert "export type CountWhere" in sdk and "where?: CountWhere<E>" in sdk
+    assert "async function joinedCondition" in engine and "accessConditions(targetName" in engine
+    assert "rel.in" in samples

@@ -1123,6 +1123,33 @@ type AggregateSource = {
 let _testDb: any = null;
 export function __setTestDb(d: any) { _testDb = d; }
 
+/**
+ * A count through a foreign key: `{ ingredientId: { in: "Ingredient", where:
+ * { kind: "harmful" } } }` — the rows whose `ingredientId` points at an
+ * Ingredient of kind harmful. The target is NAMED because a generated app
+ * does not know at run time which entity a foreign key points at (its schema
+ * declares plain uuid columns); the page's author does, and says so.
+ * Compiled to `fk IN (SELECT id FROM target WHERE … AND <target's access>)`,
+ * so the count sees only related rows the reader may read. `null` when it
+ * does not resolve.
+ */
+async function joinedCondition(column: any, spec: unknown, ctx: DataEngineContext): Promise<SQL | null> {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return null;
+  const { in: targetName, where } = spec as { in?: unknown; where?: Record<string, unknown> };
+  const target = typeof targetName === "string" ? getEntity(targetName) : undefined;
+  const tcols = target?.table as any;
+  if (!target || !tcols?.id) return null;
+  const tconds: SQL[] = [];
+  for (const [k, v] of Object.entries(where || {})) {
+    if (tcols[k] === undefined) return null;
+    tconds.push(eq(tcols[k], v as any));
+  }
+  tconds.push(...(await accessConditions(targetName as string, target, ctx)));
+  const _db = _testDb ?? db;
+  const sub = (_db as any).select({ id: tcols.id }).from(target.table);
+  return inArray(column, tconds.length ? sub.where(and(...tconds)) : sub);
+}
+
 /** Run a single plain aggregate and return a number (0 on missing entity / error).
  *  `range` overrides the metric's own `window` with an explicit half-open
  *  [start, end) — used by period-delta to query the prior window. */
@@ -1159,7 +1186,13 @@ async function computeSimple(
   if (start && dateCol) conds.push(gte(dateCol, start));
   if (range?.end && dateCol) conds.push(lt(dateCol, range.end));
   for (const [k, v] of Object.entries(m.filter || {})) {
-    if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
+    if (cols[k] !== undefined && (v === null || typeof v !== "object")) { conds.push(eq(cols[k], v as any)); continue; }
+    const joined = cols[k] !== undefined ? await joinedCondition(cols[k], v, ctx) : null;
+    if (joined) { conds.push(joined); continue; }
+    // A filter that names nothing used to be dropped without a word, and the
+    // tile counted every row. It still is not an error — a KPI must not break
+    // a page — but it is said.
+    console.warn(`[data-engine] ${entityName}: filter ${JSON.stringify(k)} does not resolve; ignored`);
   }
 
   const _db = _testDb ?? db;

@@ -269,7 +269,9 @@ export const PagePattern = z.enum([
  *   page's record (or, with `of`, at the record the page's record points at
  *   through `of`), narrowed by `where`; `total` applies `fn` to `field`.
  *   Without `via`, every row of `entity` that matches `where` — a staff
- *   overview's "Active subscriptions" belongs to no one record.
+ *   overview's "Active subscriptions" belongs to no one record. A `where` key
+ *   may be `fk.field`: a field of the record the counted row's foreign key
+ *   `fk` points at (ProductIngredient `where` {"ingredientId.kind": "harmful"}).
  * - `process` — what a rule or a workflow means for the reader (`about`):
  *   reassurance beside an action, or what happens next.
  * - `distance` — how far the reader is from the record: its `location` field

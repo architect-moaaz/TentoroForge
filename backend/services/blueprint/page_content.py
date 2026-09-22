@@ -72,9 +72,52 @@ def _names(entity: dict) -> str:
     return ", ".join(str(f.get("name")) for f in entity.get("fields") or [])
 
 
-def _where_findings(label: str, entity: dict, src: dict) -> list[str]:
-    return [f"{label!r}: `where` names {key!r}, which {entity.get('name')} does not have"
-            for key in (src.get("where") or {}) if _field(entity, str(key)) is None]
+def _fk_target(doc: dict, ents: dict[str, dict], entity: dict, fk: str) -> dict | None:
+    """The entity a foreign key of `entity` points at: its `references`, or
+    the declared relationship that names it."""
+    f = _field(entity, fk)
+    if f is None:
+        return None
+    if f.get("references"):
+        return ents.get(str(f["references"]))
+    eid = str(entity.get("id"))
+    for r in _live((doc.get("data") or {}).get("relationships")):
+        if str(r.get("to")) == eid and r.get("toField") == fk:
+            return ents.get(str(r.get("from")))
+        if str(r.get("from")) == eid and r.get("fromField") == fk and r.get("toField") in (None, "", "id"):
+            return ents.get(str(r.get("to")))
+    return None
+
+
+def _where_findings(label: str, entity: dict, src: dict, *,
+                    doc: dict | None = None, ents: dict[str, dict] | None = None) -> list[str]:
+    """Each `where` key names a field of `entity` — or, for a count or total
+    (`doc` given), `fk.field`: a field of the record its foreign key `fk`
+    points at ("harmful ingredients": ProductIngredient rows `where`
+    `ingredientId.kind` = harmful)."""
+    out = []
+    for key in (src.get("where") or {}):
+        key = str(key)
+        if "." not in key:
+            if _field(entity, key) is None:
+                out.append(f"{label!r}: `where` names {key!r}, which {entity.get('name')} does not have")
+            continue
+        fks = [str(f.get("name")) for f in entity.get("fields") or []
+               if doc is not None and _fk_target(doc, ents or {}, entity, str(f.get("name"))) is not None]
+        if doc is None:
+            out.append(f"{label!r}: `where` names {key!r} — this fact filters on {entity.get('name')}'s "
+                       f"own fields only")
+            continue
+        fk, far = key.split(".", 1)
+        target = _fk_target(doc, ents or {}, entity, fk)
+        if target is None:
+            out.append(f"{label!r}: `where` names {key!r} — before the dot goes a foreign key of "
+                       f"{entity.get('name')} ({', '.join(fks) or 'it has none'}), after it a field of "
+                       f"the record it points at")
+        elif _field(target, far) is None:
+            out.append(f"{label!r}: `where` names {key!r}, but {target.get('name')} has no field {far!r} "
+                       f"(it has: {_names(target)})")
+    return out
 
 
 def item_findings(item: dict, page: dict, doc: dict) -> list[str]:
@@ -173,7 +216,7 @@ def item_findings(item: dict, page: dict, doc: dict) -> list[str]:
         elif fk is not None and primary_id and _points_elsewhere(fk, primary_id):
             out.append(f"{label!r}: {ent.get('name')}.{via} references {fk.get('references')}, not the page's "
                        f"record — use `of` to count against the record it points at")
-        out.extend(_where_findings(label, ent, src))
+        out.extend(_where_findings(label, ent, src, doc=doc, ents=ents))
         if kind == "total":
             if src.get("fn") not in ("sum", "avg", "min", "max"):
                 out.append(f"{label!r}: a total names `fn` (sum, avg, min, max)")
@@ -295,14 +338,30 @@ def entity_bodies_with_requested_fields(doc: dict) -> list[dict]:
 # The plan as the UI engineer reads it
 # ---------------------------------------------------------------------------
 
-def _sdk_where(src: dict, record: str) -> str:
+def _js(v: Any) -> str:
+    return repr(v) if isinstance(v, str) else str(v).lower()
+
+
+def _sdk_where(src: dict, record: str, *, doc: dict | None = None, entity: dict | None = None) -> str:
     """The `where` of an SDK read. No `via` is every row that matches — the
-    staff overview's count, which belongs to no one record."""
+    staff overview's count, which belongs to no one record. A `fk.field` key
+    becomes `fk: { in: "Target", where: { field: … } }`: the app does not know
+    where a foreign key points, so the read names it."""
     pairs = []
     if src.get("via"):
         pairs.append(f"{src.get('via')}: {record}.{src['of']}" if src.get("of") else f"{src.get('via')}: {record}.id")
-    pairs += [f"{k}: {v!r}" if isinstance(v, str) else f"{k}: {str(v).lower()}"
-              for k, v in (src.get("where") or {}).items()]
+    joined: dict[str, list[str]] = {}
+    for k, v in (src.get("where") or {}).items():
+        k = str(k)
+        if "." in k and doc is not None and entity is not None:
+            fk, far = k.split(".", 1)
+            joined.setdefault(fk, []).append(f"{far}: {_js(v)}")
+        else:
+            pairs.append(f"{k}: {_js(v)}")
+    ents = _entities(doc or {})
+    for fk, conds in joined.items():
+        target = _fk_target(doc or {}, ents, entity or {}, fk) or {}
+        pairs.append(f"{fk}: {{ in: \"{target.get('name')}\", where: {{ {', '.join(conds)} }} }}")
     return "{ " + ", ".join(pairs) + " }" if pairs else ""
 
 
@@ -344,10 +403,10 @@ def content_brief(doc: dict, page: dict) -> list[dict]:
             if not one:
                 read += " — per row; read it for the rows on screen, not the whole table"
         elif kind == "count":
-            where = _sdk_where(src, rec)
+            where = _sdk_where(src, rec, doc=doc, entity=ent)
             read = f"count(\"{name}\"{', ' + where if where else ''})"
         elif kind == "total":
-            where = _sdk_where(src, rec)
+            where = _sdk_where(src, rec, doc=doc, entity=ent)
             read = f"total(\"{name}\", \"{src.get('fn')}\", \"{src.get('field')}\"{', ' + where if where else ''})"
         elif kind == "distance":
             where = (f"(await record(\"{name}\", {rec}.{src.get('via')}))?.{src.get('field')}" if src.get("via")
