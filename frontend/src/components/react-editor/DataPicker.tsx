@@ -11,6 +11,9 @@ import { fieldChoices, pageSources, rowContext, sampleOf, type DataSource } from
 import type { PageDoc } from "./types";
 
 const NONE = "__none__";
+/** The source's own value — `fieldChoices` names it "" (no part to pick), and
+ *  a Select item may not carry an empty value. Mapped here and back. */
+const SELF = "__self__";
 
 export interface DataChoice { source: DataSource; field: string }
 
@@ -58,9 +61,10 @@ export function DataPicker({ doc, nodeId, value, onChange, want, compact }: {
       {source && !idOnly && fields.length > 0 && (
         <div>
           {!compact && <Label className="mb-1 block text-[11px] font-medium text-muted-foreground">Which part</Label>}
-          <Select value={value?.field ?? ""} onValueChange={(f) => onChange({ source, field: f })}>
+          <Select value={value?.field === undefined ? "" : (value.field || SELF)}
+                  onValueChange={(f) => onChange({ source, field: f === SELF ? "" : f })}>
             <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Choose" /></SelectTrigger>
-            <SelectContent>{fields.map((f) => <SelectItem key={f.name || "_"} value={f.name}>{f.label}</SelectItem>)}</SelectContent>
+            <SelectContent>{fields.map((f) => <SelectItem key={f.name || SELF} value={f.name || SELF}>{f.label}</SelectItem>)}</SelectContent>
           </Select>
         </div>
       )}
