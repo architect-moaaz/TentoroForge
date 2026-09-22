@@ -65,6 +65,7 @@ describe("the store's transactions", () => {
     expect(st.undoStack.map((u) => [u.label, u.before.revision, u.after.revision])).toEqual([["Change text", "rev1", "d2"]]);
     expect(st.selection).toEqual(["r0.0"]);
     expect(calls.some((c) => c.name === "apply")).toBe(false);
+    expect(st.livePatches).toEqual([{ fid: "r0.0", text: "Cases" }]);   // shown on the page before the rebuild
 
     // undo moves the draft back to what was saved: no draft left
     api.draftApply.mockResolvedValue({ revision: "rev1", draftRevision: "rev1", dirty: false, unchanged: false, model: model("Records"), source: { view: "<h1>Records</h1>", load: "" } });

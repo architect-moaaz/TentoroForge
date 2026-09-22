@@ -37,6 +37,21 @@ export type LeftTab = "pages" | "add" | "layers" | "theme";
 export type CanvasSource = "jit" | "app";
 
 export interface FrameTarget { pageId: string; params: Record<string, string>; search: Record<string, string> }
+/** A change shown on the page's DOM at once: text, classes or an attribute of an element. */
+export interface LivePatch { fid: string; text?: string; className?: string; attr?: { name: string; value: string | null } }
+
+/** The edits that can be shown on the page before it is rebuilt. */
+export function livePatchesOf(ops: Op[]): LivePatch[] {
+  const out: LivePatch[] = [];
+  for (const o of ops) {
+    if (o.op === "setText") out.push({ fid: o.id, text: o.text });
+    else if (o.op === "setClasses") out.push({ fid: o.id, className: o.classes });
+    else if (o.op === "setProp" && o.name !== "className" && /^[a-z][a-z-]*$/.test(o.name) && (o.value === null || o.value.kind === "string")) {
+      out.push({ fid: o.id, attr: { name: o.name, value: o.value ? String(o.value.value ?? "") : null } });
+    }
+  }
+  return out;
+}
 
 export interface FrameDoc extends FrameTarget { js: string; css: string; revision: string; vendorKey: string; ms: number; cached: boolean; warnings: string[] }
 
@@ -138,6 +153,8 @@ export interface EditorState {
   pendingGuide: { compId: string; parentId: string; index: number | null } | null;
   /** One field of the selected form, when a field rather than the form is what is chosen. */
   fieldSelection: { nodeId: string; name: string } | null;
+  /** What the last edit looks like on the page right away, before the page is rebuilt. */
+  livePatches: LivePatch[];
   /** The application's look, read when the Theme tab opens. */
   theme: ThemeDoc | null;
   themeLoading: boolean;
@@ -333,6 +350,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   dragComponent: null,
   pendingGuide: null,
   fieldSelection: null,
+  livePatches: [],
   theme: null,
   themeLoading: false,
 
@@ -445,8 +463,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   applyOps: async (ops, label, opts = {}) => {
     const { projectId, pageId, doc, busy } = get();
     if (!projectId || !pageId || !doc?.model || busy) return false;
-    // An edit lands on the page's draft; nothing is saved until Save.
-    set({ busy: true, saveError: null });
+    // An edit lands on the page's draft; nothing is saved until Save. What
+    // it looks like is shown on the page at once; the rebuilt page follows.
+    set({ busy: true, saveError: null, livePatches: livePatchesOf(ops) });
     const before = snapshotOf(doc);
     try {
       const out = await editorApi.draftApply(projectId, pageId, { baseRevision: doc.revision, ops });

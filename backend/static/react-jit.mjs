@@ -250,11 +250,24 @@ module.exports = out;`,
   if (!js) throw new Error("esbuild produced no script");
   const inputs = Object.keys(result.metafile.inputs).filter((p) => !p.startsWith("<") && !p.startsWith("forge-vendor:"));
   const warnings = result.warnings.map((w) => w.text).slice(0, 10);
-  const timings = { esbuildMs: Date.now() - tEs, tailwindMs: 0 };
+  const timings = { esbuildMs: Date.now() - tEs, tailwindMs: 0, cssCached: false };
   let css = "";
   const tTw = Date.now();
-  try { css = await tailwind(appRoot, req, inputs, (vendor && vendor.candidates) || ""); }
-  catch (e) { warnings.push("The page's styles could not be compiled: " + String(e && e.message || e).slice(0, 300)); }
+  // Tailwind is most of a build, and its output depends only on the classes
+  // the page's files and the shared script mention, the app's global CSS and
+  // tokens, and its config: the same set gets the same sheet, from a cache.
+  // A text edit, a move, a new prop leave the classes as they were.
+  const cssKey = cssCacheKey(appRoot, req, inputs, (vendor && vendor.candidates) || "");
+  const cssFile = cssKey ? join(appRoot, ".forge-jit", "css", cssKey + ".css") : null;
+  if (cssFile && existsSync(cssFile)) {
+    css = readFileSync(cssFile, "utf8");
+    timings.cssCached = true;
+  } else {
+    try {
+      css = await tailwind(appRoot, req, inputs, (vendor && vendor.candidates) || "");
+      if (cssFile) { mkdirSync(dirname(cssFile), { recursive: true }); writeFileSync(cssFile, css); }
+    } catch (e) { warnings.push("The page's styles could not be compiled: " + String(e && e.message || e).slice(0, 300)); }
+  }
   timings.tailwindMs = Date.now() - tTw;
   return { js, css, inputs: inputs.length, warnings, timings };
 }
@@ -345,6 +358,32 @@ function filledRoute(route, params, search) {
   const path = String(route || "/").replace(/\[([^\]]+)\]/g, (_, k) => encodeURIComponent((params || {})[k] ?? ""));
   const q = new URLSearchParams(Object.entries(search || {}).filter(([, v]) => v != null)).toString();
   return q ? `${path}?${q}` : path;
+}
+
+/** What the page's stylesheet depends on, as a key — or null when it cannot be told. */
+function cssCacheKey(appRoot, req, inputs, vendorCandidates) {
+  let extractor = null;
+  try {
+    const { defaultExtractor } = req("tailwindcss/lib/lib/defaultExtractor");
+    extractor = defaultExtractor({ tailwindConfig: { separator: ":", prefix: "" } });
+  } catch { return null; }
+  const seen = new Set();
+  for (const rel of inputs) {
+    const abs = resolve(appRoot, rel);
+    if (!/\.(tsx?|jsx?|mjs|cjs)$/.test(abs) || isVendorPath(rel)) continue;
+    let text;
+    try { text = readFileSync(abs, "utf8"); } catch { continue; }
+    for (const c of extractor(text)) seen.add(c);
+  }
+  const h = createHash("sha1");
+  h.update([...seen].sort().join(" "));
+  h.update("\0" + createHash("sha1").update(vendorCandidates || "").digest("hex"));
+  for (const f of ["src/app/globals.css", "app/globals.css", "src/styles/globals.css", "src/app/tokens.css",
+                   "tailwind.config.ts", "tailwind.config.js", "tailwind.config.mjs", "tailwind.config.cjs"]) {
+    const p = join(appRoot, f);
+    if (existsSync(p)) { try { h.update("\0" + f + "\0" + readFileSync(p, "utf8")); } catch { /* unreadable: not in the key */ } }
+  }
+  return h.digest("hex").slice(0, 16);
 }
 
 /** The app's own Tailwind (v3, postcss) over its globals, the page's files and the vendor's candidates. */

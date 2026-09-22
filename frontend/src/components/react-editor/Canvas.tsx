@@ -191,6 +191,14 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
     }
   }, [setFrame]);
 
+  // What an edit looks like, on the page right away.
+  const livePatches = useEditorStore((s) => s.livePatches);
+  useEffect(() => {
+    if (!livePatches.length) return;
+    if (useEditorStore.getState().frameReady) post("patch", { patches: livePatches });
+    useEditorStore.setState({ livePatches: [] });
+  }, [livePatches, post]);
+
   // A drag that ends anywhere takes its landing hint with it.
   const dragComponent = useEditorStore((s) => s.dragComponent);
   useEffect(() => { if (!dragComponent) post("drop-hint", {}); }, [dragComponent, post]);

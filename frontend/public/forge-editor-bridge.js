@@ -628,6 +628,24 @@
         else place(dropBar, { top: (p.where === "before" ? dr.top : dr.top + dr.height) - 1.5, left: dr.left, width: dr.width, height: 3 });
         break;
       }
+      case "patch": {
+        // An edit shown before the page is rebuilt: text, classes or an
+        // attribute, on what the element rendered. The rebuild redraws it all.
+        for (var pi = 0; pi < (p.patches || []).length; pi++) {
+          var pt = p.patches[pi];
+          var pels = nodesOf(pt.fid);
+          for (var pj = 0; pj < pels.length; pj++) {
+            var pel = pels[pj];
+            try {
+              if (pt.className != null) pel.className = pt.className;
+              if (pt.text != null && pel.childElementCount === 0) pel.textContent = pt.text;
+              if (pt.attr) { if (pt.attr.value == null) pel.removeAttribute(pt.attr.name); else pel.setAttribute(pt.attr.name, pt.attr.value); }
+            } catch (err) { /* not patchable: the rebuild shows it */ }
+          }
+        }
+        reportRects();
+        break;
+      }
       case "get-rects": reportRects(); break;
       case "navigate": window.location.assign(p.path); break;
       case "reload": window.location.reload(); break;
