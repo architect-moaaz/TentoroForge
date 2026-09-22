@@ -546,6 +546,7 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
         if label and label not in names:
             problems.append(f"{ename}: `labelField` is {label!r}, which is not one of its fields "
                             f"({', '.join(names)}) — add that field, or set `labelField` to one of these")
+    problems.extend(_unique_many_side(result, doc))
     # THE ACCOUNT ENTITY: at most one, and signup must be able to create it —
     # a required reference to another record is a field no one can fill when
     # the account is made.
@@ -575,6 +576,49 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
                                 "other record exists to point at — make this reference optional")
     if problems:
         raise InvalidEntityFields(_all_of(problems))
+
+
+def _unique_many_side(result: "AgentResult", doc: dict | None) -> list[str]:
+    """A reference on the MANY side of a one-to-many is never unique by itself.
+
+    HippieKit (2026-09-22) marked `ProductIngredient.productId` and
+    `RecentSearch.shopperId` unique while the data model said a product has
+    many ingredients and a shopper many searches: each product could then
+    carry one ingredient, each shopper keep one search. The observer caught
+    both a round later. The two statements are in the Blueprint side by side —
+    the relationship and the flag — so the contradiction is refused here, in
+    the author's own attempt. One row per PAIR is a `unique` constraint over
+    both columns, which this does not touch."""
+    data = (doc or {}).get("data") or {}
+    name_of = {str(e.get("id")): str(e.get("name")) for e in data.get("entities") or []
+               if isinstance(e, dict)}
+    many: dict[str, dict[str, str]] = {}      # entity name -> {fk field: the "one" entity}
+    rels = list(data.get("relationships") or [])
+    for proposal in (p for p in result.proposals if p.section == "data.relationships"):
+        if isinstance(proposal.body, dict):
+            rels.append(proposal.body)
+    for r in rels:
+        if not isinstance(r, dict) or r.get("kind") != "one_to_many" or r.get("status") == "DEPRECATED":
+            continue
+        fk = str(r.get("toField") or "")
+        if not fk or fk == "id":
+            continue
+        one = name_of.get(str(r.get("from")), str(r.get("from")))
+        many.setdefault(name_of.get(str(r.get("to")), str(r.get("to"))), {})[fk] = one
+    out: list[str] = []
+    for proposal in (p for p in result.proposals if p.section == "data.entities"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        ename = str(body.get("name") or name_of.get(str(proposal.natural_key), proposal.natural_key))
+        for f in body.get("fields") or []:
+            if not isinstance(f, dict) or not f.get("unique") or f.get("primaryKey"):
+                continue
+            one = many.get(ename, {}).get(str(f.get("name")))
+            if one:
+                out.append(f"{ename}.{f.get('name')}: marked `unique`, but the data model says one {one} "
+                           f"has many {ename} rows — unique, each {one} could have only one. Remove "
+                           f"`unique`; if one {ename} per pair is meant, add a `unique` constraint over "
+                           f"both columns")
+    return out
 
 
 class InvalidPageContent(AuthorRefusal):
