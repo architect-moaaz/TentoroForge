@@ -6,7 +6,9 @@
  * same source through the same transactions.
  */
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, ChevronRight, Copy, Sparkles, Trash2, X } from "lucide-react";
+import { AlertCircle, ChevronRight, Copy, Group, Sparkles, Trash2, Ungroup, X } from "lucide-react";
+
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { BREAKPOINTS, CLASS_GROUPS, GROUP_BY_KEY, effectiveValue, getVisibility, setGroupValue, setVisibility, type Visibility } from "./lib/classes";
 import { breadcrumb, componentFor, plainName, plainType } from "./lib/plain";
 import { checkModel } from "./lib/readiness";
-import { buttonAction, buttonActionOps, pageHref, widgetOfNode } from "./lib/templates";
+import { GROUPS, buttonAction, buttonActionOps, pageHref, widgetOfNode } from "./lib/templates";
 import { ChartSettings } from "./ChartSettings";
 import { FormFieldsEditor, ShowsControl, WorkflowInputEditor } from "./DataMapping";
 import { LookSection, ShowWhenControl, ValuesSection, coveredProps } from "./GenericSettings";
@@ -180,11 +182,24 @@ function Empty({ title, body, onClose }: { title: string; body: string; onClose:
 function Actions() {
   const removeSelected = useEditorStore((s) => s.removeSelected);
   const duplicateSelected = useEditorStore((s) => s.duplicateSelected);
+  const groupSelected = useEditorStore((s) => s.groupSelected);
+  const ungroupSelected = useEditorStore((s) => s.ungroupSelected);
   const setSmith = useEditorStore((s) => s.setSmith);
   const busy = useEditorStore((s) => s.busy);
+  const selection = useEditorStore((s) => s.selection);
+  const model = useEditorStore((s) => s.doc?.model);
+  const one = selection.length === 1 ? model?.nodes[selection[0]] : null;
+  const canUngroup = !!one && !!one.parent && one.children.length > 0 && !one.wrapperSpan && (one.kind === "element" || one.type === "Card");
   return (
-    <div className="flex gap-1 border-t border-border p-2">
+    <div className="flex flex-wrap gap-1 border-t border-border p-2">
       <Button size="sm" variant="outline" className="h-7 flex-1 text-xs" disabled={busy} onClick={() => setSmith({ open: true, expanded: true })}><Sparkles className="h-3 w-3" /> Ask Smith</Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy || !selection.length} title="Put the selection inside a container (⌘G: a stack)"><Group className="h-3 w-3" /> Group</Button></DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {GROUPS.map((g) => <DropdownMenuItem key={g.kind} className="text-xs" onSelect={() => void groupSelected(g.kind)}>{g.label}<span className="ml-2 text-[10px] text-muted-foreground">{g.about}</span></DropdownMenuItem>)}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {canUngroup && <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => void ungroupSelected()} title="Take the container away, keep what is inside (⇧⌘G)"><Ungroup className="h-3 w-3" /> Ungroup</Button>}
       <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy} onClick={() => void duplicateSelected()} title="Duplicate (⌘D)"><Copy className="h-3 w-3" /></Button>
       <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" disabled={busy} onClick={() => void removeSelected()} title="Remove (Delete)"><Trash2 className="h-3 w-3" /></Button>
     </div>

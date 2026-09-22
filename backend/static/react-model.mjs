@@ -549,6 +549,16 @@ function attrText(name, value) {
   throw new PatchError("bad-value", `Unknown value kind ${value.kind}`);
 }
 
+/** A node's source with its own indentation taken off the continuation
+ *  lines, so it can be put down anywhere at a new depth. */
+function sourceOf(source, n) {
+  const [s, e] = removeSpan(n);
+  const own = lineIndent(source, s);
+  return source.replace(/\r\n/g, "\n").slice(s, e).split("\n")
+    .map((l, i) => (i === 0 || !own ? l : l.startsWith(own) ? l.slice(own.length) : l.replace(/^\s*/, (ws) => ws.slice(Math.min(ws.length, own.length)))))
+    .join("\n");
+}
+
 function indentSnippet(snippet, indent) {
   const lines = snippet.replace(/\r\n/g, "\n").replace(/\n+$/, "").split("\n");
   return lines.map((l, i) => (i === 0 ? l : indent + l)).join("\n");
@@ -709,7 +719,7 @@ function opMove(source, m, op) {
   if (op.parentId === op.id || isAncestor(m, op.id, op.parentId))
     throw new PatchError("circular", "Something cannot be moved inside itself.");
   const span = removeSpan(n);
-  const snippet = source.slice(span[0], span[1]);
+  const snippet = sourceOf(source, n);
   // Insert first when the destination is before the cut, so spans stay valid;
   // otherwise cut first and re-model.
   let index = op.index ?? null;
@@ -722,8 +732,7 @@ function opMove(source, m, op) {
 function opDuplicate(source, m, op) {
   const n = need(m, op.id);
   if (n.parent == null) throw new PatchError("no-parent", "The page itself cannot be duplicated.");
-  const span = removeSpan(n);
-  return insertInto(source, m, n.parent, n.index + 1, source.slice(span[0], span[1]));
+  return insertInto(source, m, n.parent, n.index + 1, sourceOf(source, n));
 }
 
 function opReplaceNode(source, m, op) {
@@ -845,8 +854,48 @@ function opWrapCondition(source, m, op) {
   }
   if (n.wrapperSpan) throw new PatchError("in-expression", "This is part of a list or a choice already — ask Smith to add a condition to it.");
   const indent = lineIndent(source, n.span[0]);
-  const body = indentSnippet(source.slice(n.span[0], n.span[1]), indent + "  ");
+  const body = indentSnippet(sourceOf(source, n), indent + "  ");
   return splice(source, n.span[0], n.span[1], `{${op.expr} && (\n${indent}  ${body}\n${indent})}`);
+}
+
+function opWrap(source, m, op) {
+  // Siblings put inside a new container, in their order, where the first
+  // one stood. `open`/`close` are the container's lines, relative; the
+  // children sit one level in per line of `open`.
+  const nodes = (op.ids || []).map((id) => need(m, id));
+  if (!nodes.length) throw new PatchError("nothing", "Select what to group first.");
+  const parent = nodes[0].parent;
+  if (parent == null) throw new PatchError("no-parent", "The page itself cannot be grouped.");
+  if (nodes.some((n) => n.parent !== parent)) throw new PatchError("not-siblings", "Group things that sit next to each other in the same container.");
+  nodes.sort((a, b) => a.index - b.index);
+  const first = removeSpan(nodes[0]);
+  const indent = lineIndent(source, first[0]);
+  const depth = String(op.open).split("\n").length;
+  const inner = indent + "  ".repeat(depth);
+  const body = nodes.map((n) => indentSnippet(sourceOf(source, n), inner)).join(`\n${inner}`);
+  const wrapped = `${indentSnippet(op.open, indent)}\n${inner}${body}\n${indent}${indentSnippet(op.close, indent)}`;
+  let out = source;
+  // The later siblings go first (their offsets sit past the first one's).
+  for (const [s, e] of nodes.slice(1).map((n) => removeSpan(n)).sort((a, b) => b[0] - a[0])) out = cutWithLine(out, s, e);
+  return splice(out, first[0], first[1], wrapped);
+}
+
+function opUnwrap(source, m, op) {
+  // A container's children take its place; the container goes.
+  const n = need(m, op.id);
+  if (n.parent == null) throw new PatchError("no-parent", "The page itself cannot be ungrouped.");
+  if (!n.children.length) throw new PatchError("empty", "There is nothing inside it to keep — remove it instead.");
+  if (n.wrapperSpan) throw new PatchError("in-expression", "This is shown under a condition or as part of a list — take that off first.");
+  // Text of its own between the children would be lost; say so.
+  let rest = source.slice(n.innerSpan[0], n.innerSpan[1]);
+  for (const cid of [...n.children].reverse()) {
+    const [s, e] = removeSpan(m.nodes[cid]);
+    rest = rest.slice(0, s - n.innerSpan[0]) + rest.slice(e - n.innerSpan[0]);
+  }
+  if (rest.replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "").trim()) throw new PatchError("has-text", "This holds text of its own as well as the things inside it — ask Smith to take it apart.");
+  const indent = lineIndent(source, n.span[0]);
+  const parts = n.children.map((cid) => indentSnippet(sourceOf(source, m.nodes[cid]), indent));
+  return splice(source, n.span[0], n.span[1], parts.join(`\n${indent}`));
 }
 
 function opUnwrapCondition(source, m, op) {
@@ -858,6 +907,8 @@ function opUnwrapCondition(source, m, op) {
 }
 
 const OPS = {
+  wrap: opWrap,
+  unwrap: opUnwrap,
   wrapCondition: opWrapCondition,
   unwrapCondition: opUnwrapCondition,
   setChildren: opSetChildren,

@@ -298,6 +298,7 @@
     if (e.key === "Delete" || e.key === "Backspace") { swallow(e); send("key", { key: "delete" }); }
     else if (mod && e.key.toLowerCase() === "z") { swallow(e); send("key", { key: e.shiftKey ? "redo" : "undo" }); }
     else if (mod && e.key.toLowerCase() === "d") { swallow(e); send("key", { key: "duplicate" }); }
+    else if (mod && e.key.toLowerCase() === "g") { swallow(e); send("key", { key: e.shiftKey ? "ungroup" : "group" }); }
     else if (mod && e.key.toLowerCase() === "a") { swallow(e); send("key", { key: "select-all" }); }
     else if (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight") { swallow(e); send("key", { key: e.key.toLowerCase(), shift: e.shiftKey, alt: e.altKey }); }
     else if (e.key === "Enter") { swallow(e); send("key", { key: "enter" }); }

@@ -15,8 +15,9 @@ import { editorApi, failureOf, type JitBundle } from "./api";
 import { breakpointForWidth, getGroupValue, setGroupValue } from "./lib/classes";
 import { dropPosition, type DropWhere } from "./lib/drop";
 import { colSpanFor, fieldLabel, fieldRemoval, reorderField, widthClassFor, withFieldSpan } from "./lib/fields";
+import { GROUPS, type GroupKind } from "./lib/templates";
 import { mainRoot, plainName, topmost } from "./lib/plain";
-import type { Breakpoint, Device, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, Rect } from "./types";
+import type { Breakpoint, Device, Finding, HistoryEntry, ModelNode, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, Rect } from "./types";
 
 export interface Snapshot { revision: string; view: string; load: string }
 export interface HistoryOp { label: string; before: Snapshot; after: Snapshot }
@@ -158,6 +159,9 @@ export interface EditorState {
   moveNode: (id: string, parentId: string, index: number | null) => Promise<boolean>;
   /** An element's width as a share of its parent's, from a dragged edge. */
   resizeNode: (id: string, share: number) => Promise<boolean>;
+  /** The selection put inside a new container; a container taken away around what it holds. */
+  groupSelected: (kind: GroupKind) => Promise<boolean>;
+  ungroupSelected: () => Promise<boolean>;
   /** A form field moved before another (null: last), widened, or taken out. */
   reorderField: (nodeId: string, name: string, beforeName: string | null) => Promise<boolean>;
   setFieldSpan: (nodeId: string, name: string, full: boolean) => Promise<boolean>;
@@ -404,7 +408,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   applyOps: async (ops, label, opts = {}) => {
     const { projectId, pageId, doc, busy } = get();
     if (!projectId || !pageId || !doc?.model || busy) return false;
-    const structural = ops.some((o) => ["insert", "move", "remove", "duplicate", "replaceNode"].includes(o.op));
+    const structural = ops.some((o) => ["insert", "move", "remove", "duplicate", "replaceNode", "wrap", "unwrap"].includes(o.op));
     set({ busy: true, saveState: structural || ops.some((o) => o.op === "setProp" || o.op === "addImport") ? "checking" : "saving", saveError: null });
     const before = snapshotOf(doc);
     try {
@@ -542,6 +546,39 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       : setGroupValue(classes, "width", "", widthClassFor(share));
     if (next === classes) return false;
     return get().applyOps([{ op: "setClasses", id, classes: next }], `Resize ${plainName(node, doc?.registry)}`);
+  },
+
+  groupSelected: async (kind) => {
+    const { doc, selection } = get();
+    const model = doc?.model;
+    const g = GROUPS.find((x) => x.kind === kind);
+    if (!model || !g) return false;
+    const nodes = selection.map((id) => model.nodes[id]).filter((n): n is ModelNode => !!n && !!n.parent);
+    if (!nodes.length) { toast.info("Select what to group first."); return false; }
+    const parent = nodes[0].parent!;
+    if (nodes.some((n) => n.parent !== parent)) { toast.info("Group things that sit next to each other in the same container."); return false; }
+    const at = Math.min(...nodes.map((n) => n.index));
+    return get().applyOps([...g.imports, { op: "wrap", ids: nodes.map((n) => n.id), open: g.open, close: g.close }],
+                          `Group into ${g.label.toLowerCase()}`, { reselect: (m) => [m.nodes[parent]?.children[at]].filter(Boolean) as string[] });
+  },
+  ungroupSelected: async () => {
+    const { doc, selection } = get();
+    const model = doc?.model;
+    const node = model?.nodes[selection[0]];
+    if (!model || !node || selection.length !== 1) { toast.info("Select one group to take apart."); return false; }
+    if (!node.parent || !node.children.length) { toast.info("There is nothing inside it to keep — remove it instead."); return false; }
+    const parent = node.parent;
+    const at = node.index;
+    const lifted = (m: PageModel, count: number) => (m.nodes[parent]?.children ?? []).slice(at, at + count);
+    // A card holds its things in a CardContent: both come off.
+    const twice = node.type === "Card" && node.children.length === 1 && model.nodes[node.children[0]]?.type === "CardContent";
+    const inner = twice ? model.nodes[node.children[0]] : node;
+    const ok = await get().applyOps([{ op: "unwrap", id: node.id }], `Ungroup ${plainName(node, doc?.registry)}`,
+                                    { reselect: (m) => (twice ? [m.nodes[parent]?.children[at]].filter(Boolean) as string[] : lifted(m, node.children.length)) });
+    if (!ok || !twice) return ok;
+    const again = get().doc?.model?.nodes[parent]?.children[at];
+    if (!again) return ok;
+    return get().applyOps([{ op: "unwrap", id: again }], "Ungroup card", { reselect: (m) => lifted(m, inner.children.length) });
   },
 
   reorderField: async (nodeId, name, beforeName) => {

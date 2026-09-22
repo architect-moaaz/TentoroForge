@@ -317,6 +317,8 @@ export function Canvas({ preview }: { preview: ReturnType<typeof usePreview> }) 
           else if (p.key === "undo") void s.undo();
           else if (p.key === "redo") void s.redo();
           else if (p.key === "duplicate") void s.duplicateSelected();
+          else if (p.key === "group") void s.groupSelected("stack");
+          else if (p.key === "ungroup") void s.ungroupSelected();
           else if (p.key === "escape") { if (s.regionSelect) s.setRegionSelect(false); else s.clearSelection(); }
           else if (p.key === "arrowup") s.selectSibling(-1);
           else if (p.key === "arrowdown") s.selectSibling(1);

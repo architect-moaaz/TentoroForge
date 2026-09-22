@@ -291,6 +291,8 @@ export type Op =
   | { op: "addImport"; source: string; names: string[]; file?: "load" }
   | { op: "ensureProp"; name: string }
   | { op: "setChildren"; id: string; jsx: string }
+  | { op: "wrap"; ids: string[]; open: string; close: string }
+  | { op: "unwrap"; id: string }
   | { op: "wrapCondition"; id: string; expr: string }
   | { op: "unwrapCondition"; id: string }
   | { op: "setObjectProp"; id: string; name: string; entries: ObjectEntry[] }

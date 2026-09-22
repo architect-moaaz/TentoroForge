@@ -259,6 +259,16 @@ export function measureLabel(m: { aggregation: string; field?: string }, entityN
   return m.aggregation;
 }
 
+/** What a selection can be grouped into, in plain words, with the lines that hold it. */
+export const GROUPS: { kind: GroupKind; label: string; about: string; open: string; close: string; imports: Op[] }[] = [
+  { kind: "card", label: "A card", about: "A framed box around them", open: '<Card>\n  <CardContent className="space-y-4 p-4">', close: "  </CardContent>\n</Card>",
+    imports: [{ op: "addImport", source: "@/components/ui/card", names: ["Card", "CardContent"] }] },
+  { kind: "row", label: "Side by side", about: "A row, left to right", open: '<div className="flex items-center gap-4">', close: "</div>", imports: [] },
+  { kind: "stack", label: "One under another", about: "A stack with space between", open: '<div className="space-y-4">', close: "</div>", imports: [] },
+  { kind: "section", label: "A section", about: "A block of the page", open: '<section className="space-y-4">', close: "</section>", imports: [] },
+];
+export type GroupKind = "card" | "row" | "stack" | "section";
+
 /** Every chart the app's Chart draws, and the shape each needs — mirrors the
  *  verifier's `_MARK_SHAPE`: [groupings min,max], [numbers min,max]. */
 export const MARKS: { value: ChartMark; label: string; dims: [number, number]; measures: [number, number]; about: string }[] = [

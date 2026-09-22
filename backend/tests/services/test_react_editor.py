@@ -773,3 +773,67 @@ def test_the_canvas_gives_a_record_page_a_sample_row_so_it_is_not_empty(tmp_path
     # An explicit param still wins.
     jit.build(proj, "PAGE-015", params={"id": "real-123"}, fresh=True)
     assert seen["params"] == {"id": "real-123"}
+
+
+GROUP_VIEW = '''export default function View(props: Props) {
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <p>One</p>
+        <p>Two</p>
+      </div>
+      <span>Three</span>
+      <em>Four</em>
+    </div>
+  );
+}
+'''
+
+
+def test_siblings_group_into_a_container_and_come_back_out_of_it():
+    grouped = adapter.patch(GROUP_VIEW, [{"op": "wrap", "ids": ["r0.2", "r0.0"],
+                                          "open": '<Card>\n  <CardContent className="space-y-4">', "close": "  </CardContent>\n</Card>"}])
+    assert grouped == '''export default function View(props: Props) {
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="space-y-4">
+          <div className="flex gap-2">
+            <p>One</p>
+            <p>Two</p>
+          </div>
+          <em>Four</em>
+        </CardContent>
+      </Card>
+      <span>Three</span>
+    </div>
+  );
+}
+'''
+    # a duplicate keeps its lines at their depth too (it used to double-indent)
+    dup = adapter.patch(GROUP_VIEW, [{"op": "duplicate", "id": "r0.0"}])
+    assert "      <div className=\"flex gap-2\">\n        <p>One</p>\n        <p>Two</p>\n      </div>\n      <div className=\"flex gap-2\">\n        <p>One</p>" in dup
+    # ungrouping the card twice (the card, then its content) lifts the pieces back
+    m = adapter.model(grouped, "")
+    card = next(n for n in m["nodes"].values() if n["type"] == "Card")
+    once = adapter.patch(grouped, [{"op": "unwrap", "id": card["id"]}])
+    twice = adapter.patch(once, [{"op": "unwrap", "id": card["id"]}])
+    assert twice == '''export default function View(props: Props) {
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <p>One</p>
+        <p>Two</p>
+      </div>
+      <em>Four</em>
+      <span>Three</span>
+    </div>
+  );
+}
+'''
+    with pytest.raises(AdapterError) as e:
+        adapter.patch(GROUP_VIEW, [{"op": "wrap", "ids": ["r0.0.0", "r0.1"], "open": "<div>", "close": "</div>"}])
+    assert "next to each other" in str(e.value)
+    with pytest.raises(AdapterError) as e:
+        adapter.patch(GROUP_VIEW, [{"op": "unwrap", "id": "r0.1"}])
+    assert "nothing inside" in str(e.value)
