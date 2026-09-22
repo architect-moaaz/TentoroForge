@@ -70,6 +70,7 @@ invented for it.
 from __future__ import annotations
 
 import json
+import re
 import logging
 import threading
 import time
@@ -339,11 +340,13 @@ def observation_context(
 
     by_id = {r.get("id"): r for r in _live(doc.get("requirements"))}
 
-    cited: set[str] = set()
-    for value in produced.values():
-        for row in (value if isinstance(value, list) else [value]):
-            if isinstance(row, dict):
-                cited.update(row.get("requirements") or [])
+    # WHEREVER THE SECTION CITES THEM. A row's `requirements` used to be read
+    # at the top level only; `product` is one object whose capabilities each
+    # cite their own, so the critic was handed `requirementsCited: []` and
+    # reported that REQ-029 "does not exist anywhere in the artifact" — a
+    # finding about its own slice, sent back as two repair rounds and a flag
+    # (forge-v3 9naxfb3d, 2026-09-22: 9 minutes on one node).
+    cited: set[str] = _cited_requirements(list(produced.values()))
     # A row may cite a requirement another section owns; grading it here is the
     # bug, so drop it — the owning node still judges it.
     cited = {c for c in cited if _in_scope(by_id.get(c) or {})}
@@ -385,6 +388,26 @@ def observation_context(
         "requirementsCited": sorted(cited),
         "requirements": requirements,
     }
+
+
+_REQ_ID = re.compile(r"^REQ-\d+$")
+
+
+def _cited_requirements(value: Any) -> set[str]:
+    """Every requirement id cited anywhere inside `value` — a row's own
+    `requirements`, or those of the things it holds (a product's
+    capabilities, a page's views)."""
+    out: set[str] = set()
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            if key == "requirements" and isinstance(inner, list):
+                out.update(str(x) for x in inner if isinstance(x, str) and _REQ_ID.match(x))
+            else:
+                out |= _cited_requirements(inner)
+    elif isinstance(value, list):
+        for item in value:
+            out |= _cited_requirements(item)
+    return out
 
 
 def _platform_rules() -> tuple[str, ...]:
