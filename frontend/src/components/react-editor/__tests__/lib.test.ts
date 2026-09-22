@@ -18,7 +18,8 @@ describe("class families", () => {
     expect(groupOf("md:grid-cols-2")?.key).toBe("gridCols");
     expect(groupOf("hover:bg-muted")?.key).toBe("background"); // a hover slot of the same family
     expect(groupOf("dark:bg-muted")).toBeNull();
-    expect(groupOf("whitespace-nowrap")).toBeNull();
+    expect(groupOf("whitespace-nowrap")?.key).toBe("wrap");
+    expect(groupOf("select-none")).toBeNull();
   });
 
   it("sets one family at one breakpoint and leaves every other class in place", () => {
@@ -301,6 +302,16 @@ describe("interactions", () => {
 });
 
 import { MARKS, markProblem } from "../lib/templates";
+import { groupOf as groupOfClass } from "../lib/classes";
+
+describe("more of what text can be", () => {
+  it("knows line spacing, letter spacing and how long text is cut", () => {
+    expect(groupOfClass("leading-relaxed")?.key).toBe("lineHeight");
+    expect(groupOfClass("tracking-wide")?.key).toBe("letterSpacing");
+    expect(groupOfClass("truncate")?.key).toBe("wrap");
+    expect(groupOfClass("line-clamp-2")?.key).toBe("wrap");
+  });
+});
 
 describe("every chart the app draws", () => {
   it("offers every mark the app draws and says what each needs", () => {

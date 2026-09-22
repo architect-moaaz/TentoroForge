@@ -15,6 +15,7 @@ import { editorApi, failureOf, type JitBundle } from "./api";
 import { breakpointForWidth, getGroupValue, setGroupValue } from "./lib/classes";
 import { dropPosition, type DropWhere } from "./lib/drop";
 import { colSpanFor, fieldLabel, fieldRemoval, reorderField, widthClassFor, withFieldSpan } from "./lib/fields";
+import { pageSources } from "./lib/data";
 import { listKeyFor } from "./lib/lists";
 import { GROUPS, type GroupKind } from "./lib/templates";
 import { mainRoot, plainName, topmost } from "./lib/plain";
@@ -175,6 +176,8 @@ export interface EditorState {
   addList: (entityName: string) => Promise<string | null>;
   /** How a list is read: which rows, what order, how many. */
   setListOptions: (key: string, options: ReadOptions) => Promise<boolean>;
+  /** Shown only to people with this role; the page loads who is signed in if it does not yet. */
+  showOnlyForRole: (id: string, role: string) => Promise<boolean>;
   /** A form field moved before another (null: last), widened, or taken out. */
   reorderField: (nodeId: string, name: string, beforeName: string | null) => Promise<boolean>;
   setFieldSpan: (nodeId: string, name: string, full: boolean) => Promise<boolean>;
@@ -649,6 +652,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { doc } = get();
     if (!doc?.model?.loadKeys.includes(key)) return false;
     return get().applyOps([{ op: "setReadOptions", file: "load", key, options }], "Change how the list is read");
+  },
+
+  showOnlyForRole: async (id, role) => {
+    const { doc } = get();
+    const model = doc?.model;
+    if (!model || !model.nodes[id]) return false;
+    let user = pageSources(doc).find((s) => s.shape.kind === "user");
+    if (!user) {
+      const key = model.loadKeys.includes("me") ? "signedIn" : "me";
+      const ok = await get().applyOps([
+        { op: "addReturnKey", file: "load", key, expr: "{ctx}.user", type: 'PageContext["user"]', typeSource: "@/sdk/server", fallback: "null" },
+      ], "Load who is signed in");
+      if (!ok) return false;
+      user = pageSources(get().doc!).find((s) => s.shape.kind === "user");
+      if (!user) return false;
+    }
+    return get().applyOps([{ op: "wrapCondition", id, expr: `${user.expr}?.role === ${JSON.stringify(role)}` }], `Only for ${role}`);
   },
 
   reorderField: async (nodeId, name, beforeName) => {

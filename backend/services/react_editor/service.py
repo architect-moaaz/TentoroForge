@@ -298,6 +298,7 @@ def open_page(project: Project, page_id: str, *, annotate: bool = True) -> dict[
             "pages": _page_refs(doc),
             "workflows": _workflow_refs(doc),
             "entities": _entity_refs(doc),
+            "roles": [str(r.get("name")) for r in _live(doc.get("roles")) if r.get("name")],
             "widgets": _widget_refs(doc),
             "samples": adapter.samples(_entities_for_samples(doc), app_root=project.app_root),
             "theme": _theme(doc),

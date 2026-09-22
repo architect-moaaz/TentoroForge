@@ -494,7 +494,11 @@ function shapeOf(expr, vars, source) {
     const base = vars.get(expr.object.name);
     if (base && base.kind === "page") return expr.property.name === "rows" ? { kind: "rows", entity: base.entity, via: base.via } : expr.property.name === "total" ? { kind: "number", via: base.via } : { kind: "unknown", via: base.via };
     if (base && base.kind === "widget") return expr.property.name === "value" ? { kind: "number", via: base.via } : { kind: "unknown", via: base.via };
-    if (expr.object.name === "ctx" || (base && base.kind === "context")) return { kind: "string", via: { how: "address" } };
+    if (expr.object.name === "ctx" || (base && base.kind === "context")) {
+      // `ctx.user` is the signed-in person; `ctx.params` / `ctx.searchParams` come from the address.
+      if (expr.property.name === "user") return { kind: "user", via: { how: "user" } };
+      return { kind: "string", via: { how: "address" } };
+    }
   }
   // ctx.params.id, ctx.searchParams.q: from the page's address.
   if (expr.type === "MemberExpression" && expr.object.type === "MemberExpression" && expr.object.object.type === "Identifier"
@@ -953,6 +957,23 @@ function opWrapCondition(source, m, op) {
   return splice(source, n.span[0], n.span[1], `{${op.expr} && (\n${indent}  ${body}\n${indent})}`);
 }
 
+function opSetTag(source, m, op) {
+  // `<h1 …>…</h1>` becomes `<h2 …>…</h2>`: the same element under another name.
+  const n = need(m, op.id);
+  const to = String(op.type || "");
+  if (n.kind !== "element" || !/^[a-z][a-z0-9]*$/.test(to)) throw new PatchError("bad-tag", "Only a plain element can change kind.");
+  if (to === n.type) return source;
+  const openAt = n.span[0] + 1;
+  if (source.slice(openAt, openAt + n.type.length) !== n.type) throw new PatchError("tag-shape", "This element's tag could not be read.");
+  let out = source;
+  if (!n.selfClosing) {
+    const closeAt = n.span[1] - 1 - n.type.length;
+    if (source.slice(closeAt - 2, n.span[1]) !== `</${n.type}>`) throw new PatchError("tag-shape", "This element's closing tag could not be read.");
+    out = splice(out, closeAt, closeAt + n.type.length, to);
+  }
+  return splice(out, openAt, openAt + n.type.length, to);
+}
+
 function opWrapRepeat(source, m, op) {
   // One of the element per item of `source`: `{source.map((row) => (<X key={row.id}>…</X>))}`.
   // An element already repeated has its source replaced.
@@ -1042,6 +1063,7 @@ const OPS = {
   unwrap: opUnwrap,
   wrapRepeat: opWrapRepeat,
   unwrapRepeat: opUnwrapRepeat,
+  setTag: opSetTag,
   wrapCondition: opWrapCondition,
   unwrapCondition: opUnwrapCondition,
   setChildren: opSetChildren,
@@ -1077,8 +1099,15 @@ function opAddReturnKey(source, m, op) {
   // Every `return { … }` of load gets the key, so the page's data has one
   // shape; a `catch` return gets the fallback value when one is given.
   const edits = [];
+  // `{ctx}` stands for the load's context parameter, whatever it is called.
+  const ctxName = m.fn.params && m.fn.params[0] && m.fn.params[0].type === "Identifier" ? m.fn.params[0].name : null;
+  const withCtx = (text) => {
+    if (!/\{ctx\}/.test(text)) return text;
+    if (!ctxName) throw new PatchError("no-context", "What this page loads takes no context — ask Smith to add it.");
+    return text.replace(/\{ctx\}/g, ctxName);
+  };
   for (const { stmt, obj, fallback } of m.returns) {
-    const expr = fallback && op.fallback ? op.fallback : op.expr;
+    const expr = withCtx(fallback && op.fallback ? op.fallback : op.expr);
     const existing = obj.properties.find((p) => p.type === "ObjectProperty" && (p.key.name ?? p.key.value) === op.key);
     if (existing) { edits.push([existing.value.start, existing.value.end, expr]); continue; }
     const props = obj.properties;

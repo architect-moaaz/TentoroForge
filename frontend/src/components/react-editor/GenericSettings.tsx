@@ -129,7 +129,7 @@ export function LookSection({ nodes, doc }: { nodes: ModelNode[]; doc: PageDoc }
   const isFlex = getGroupValue(classes, "display", "") === "flex" || /\bflex\b/.test(classes);
   const isGrid = getGroupValue(classes, "display", "") === "grid";
   const groups: string[] = [];
-  if (isText) groups.push("textSize", "fontWeight", "textColor", "textAlign");
+  if (isText) groups.push("textSize", "fontWeight", "textColor", "textAlign", "lineHeight", "letterSpacing", "wrap");
   if (holds) groups.push("padding", isGrid ? "gridCols" : "gap");
   if (isFlex) groups.push("flexDirection", "justify", "items");
   const parentClasses = node.parent ? classesOf(model.nodes[node.parent]) : "";
@@ -179,6 +179,26 @@ export function LookSection({ nodes, doc }: { nodes: ModelNode[]; doc: PageDoc }
 // "Show this when…" (UX-003) — a condition chosen, never typed
 // ---------------------------------------------------------------------------
 
+/** What kind of text an element is: its tag, in plain words. */
+export const TEXT_KINDS: { tag: string; label: string }[] = [
+  { tag: "h1", label: "Page title" }, { tag: "h2", label: "Heading" }, { tag: "h3", label: "Subheading" }, { tag: "h4", label: "Small heading" },
+  { tag: "p", label: "Paragraph" }, { tag: "span", label: "A run of text" }, { tag: "small", label: "Small print" },
+];
+
+export function TextKindControl({ node }: { node: ModelNode }) {
+  const applyOps = useEditorStore((s) => s.applyOps);
+  const busy = useEditorStore((s) => s.busy);
+  if (node.kind !== "element" || !TEXT_KINDS.some((k) => k.tag === node.type) || !node.parent) return null;
+  return (
+    <Field label="Kind of text" help="A page has one page title; headings say how it is organised.">
+      <Select value={node.type} disabled={busy} onValueChange={(tag) => { if (tag !== node.type) void applyOps([{ op: "setTag", id: node.id, type: tag }], `Make it a ${TEXT_KINDS.find((k) => k.tag === tag)?.label.toLowerCase() ?? tag}`); }}>
+        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+        <SelectContent>{TEXT_KINDS.map((k) => <SelectItem key={k.tag} value={k.tag}>{k.label}</SelectItem>)}</SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
 export interface Condition { source: DataSource; field: string; op: "is" | "is-not" | "has" | "empty"; value: string }
 
 export function parseCondition(doc: PageDoc, node: ModelNode): Condition | null {
@@ -208,7 +228,8 @@ export function parseCondition(doc: PageDoc, node: ModelNode): Condition | null 
 }
 
 export function conditionExpr(c: Condition): string {
-  const opt = c.source.shape.kind === "record" ? "?." : ".";
+  // A record or the signed-in person may be absent on this page.
+  const opt = c.source.shape.kind === "record" || c.source.shape.kind === "user" ? "?." : ".";
   const base = c.field ? `${c.source.expr}${opt}${c.field}` : c.source.expr;
   if (c.op === "has") return base;
   if (c.op === "empty") return `!${base}`;
@@ -218,12 +239,15 @@ export function conditionExpr(c: Condition): string {
 
 export function ShowWhenControl({ node, doc }: { node: ModelNode; doc: PageDoc }) {
   const applyOps = useEditorStore((s) => s.applyOps);
+  const showOnlyForRole = useEditorStore((s) => s.showOnlyForRole);
   const current = parseCondition(doc, node);
   const custom = !!node.condition && !current;
-  const [mode, setMode] = useState<"always" | "when">(node.condition ? "when" : "always");
+  const isRole = !!current && current.source.shape.kind === "user" && current.field === "role" && current.op === "is";
+  const [mode, setMode] = useState<"always" | "when" | "role">(isRole ? "role" : node.condition ? "when" : "always");
   const [draft, setDraft] = useState<Condition | null>(current);
-  useEffect(() => { setMode(node.condition ? "when" : "always"); setDraft(current); }, [node.id, node.condition]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setMode(isRole ? "role" : node.condition ? "when" : "always"); setDraft(current); }, [node.id, node.condition]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!node.parent) return null;
+  const roles = doc.roles ?? [];
   const choice: DataChoice | null = draft ? { source: draft.source, field: draft.field } : null;
   const fieldInfo = draft ? fieldChoices(doc, draft.source).find((f) => f.name === draft.field) : null;
   const options = fieldInfo && draft ? (doc.entities.find((e) => e.name === draft.source.entity?.name)?.fields.find((f) => f.name === draft.field)?.options ?? []) : [];
@@ -233,12 +257,25 @@ export function ShowWhenControl({ node, doc }: { node: ModelNode; doc: PageDoc }
   return (
     <Field label="Show this" help={custom ? `Currently: when ${node.condition} — a condition written for this page. Choosing here replaces it.` : undefined}>
       <Select value={mode} onValueChange={(v) => {
-        setMode(v as "always" | "when");
+        setMode(v as "always" | "when" | "role");
         if (v === "always" && node.condition) void applyOps([{ op: "unwrapCondition", id: node.id }], "Always show");
       }}>
         <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-        <SelectContent><SelectItem value="always">Always</SelectItem><SelectItem value="when">Only when…</SelectItem></SelectContent>
+        <SelectContent>
+          <SelectItem value="always">Always</SelectItem>
+          <SelectItem value="when">Only when…</SelectItem>
+          {roles.length > 0 && <SelectItem value="role">Only for people who are…</SelectItem>}
+        </SelectContent>
       </Select>
+      {mode === "role" && (
+        <div className="mt-1 rounded-md border border-border p-2">
+          <Select value={isRole ? current!.value : NONE} onValueChange={(r) => { if (r !== NONE) void showOnlyForRole(node.id, r); }}>
+            <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Choose a role" /></SelectTrigger>
+            <SelectContent>{roles.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+          </Select>
+          <p className="mt-1 text-[10px] text-muted-foreground">Everyone else does not see it. The page reads who is signed in to decide.</p>
+        </div>
+      )}
       {mode === "when" && (
         <div className="mt-1 space-y-1 rounded-md border border-border p-2">
           <DataPicker doc={doc} nodeId={node.id} compact value={choice} onChange={(c) => { if (!c) return; const next: Condition = { source: c.source, field: c.field, op: draft?.op ?? "is", value: "" }; setDraft(next); if (next.op === "has" || next.op === "empty") void apply(next); }} />

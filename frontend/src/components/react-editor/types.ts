@@ -225,6 +225,8 @@ export interface PageDoc {
   pages: PageRef[];
   workflows: WorkflowRef[];
   entities: EntityRef[];
+  /** The application's roles, by name — what "only for people who are…" offers. */
+  roles?: string[];
   widgets?: WidgetRef[];
   /** Example rows per entity — what the instant canvas shows. */
   samples?: Record<string, Record<string, unknown>[]>;
@@ -307,6 +309,7 @@ export type Op =
   | { op: "ensureProp"; name: string }
   | { op: "setChildren"; id: string; jsx: string }
   | { op: "wrap"; ids: string[]; open: string; close: string }
+  | { op: "setTag"; id: string; type: string }
   | { op: "wrapRepeat"; id: string; source: string; variable?: string }
   | { op: "unwrapRepeat"; id: string }
   | { op: "setReadOptions"; file: "load"; key: string; options: ReadOptions }

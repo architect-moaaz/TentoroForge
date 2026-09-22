@@ -965,3 +965,19 @@ def test_refreshing_the_sdk_gives_an_older_tree_the_scaffold_files_the_sdk_now_i
     account.write_text("// mine\n")
     ui_engineer.ensure_sdk(doc, project.app_root)
     assert account.read_text() == "// mine\n"
+
+
+def test_an_element_changes_kind_and_the_signed_in_person_joins_what_the_page_loads():
+    view = 'export default function View() {\n  return (\n    <div>\n      <h1 className="text-2xl">Title</h1>\n      <hr />\n    </div>\n  );\n}\n'
+    out = adapter.patch(view, [{"op": "setTag", "id": "r0.0", "type": "h2"}])
+    assert '<h2 className="text-2xl">Title</h2>' in out
+    assert adapter.patch(view, [{"op": "setTag", "id": "r0.1", "type": "div"}]).count("<div />") == 1
+    with pytest.raises(AdapterError):
+        adapter.patch(view, [{"op": "setTag", "id": "r0.0", "type": "Card"}])
+    load = 'import type { PageContext } from "@/sdk/server";\nexport async function load(context: PageContext) {\n  return { title: "x" };\n}\n'
+    out = adapter.patch_load(load, [{"op": "addReturnKey", "file": "load", "key": "me", "expr": "{ctx}.user", "fallback": "null"}])
+    assert "me: context.user" in out
+    assert adapter.model("export default function View() { return <div />; }", out)["loadShapes"]["me"] == {"kind": "user", "via": {"how": "user"}}
+    with pytest.raises(AdapterError) as e:
+        adapter.patch_load("export async function load() {\n  return { a: 1 };\n}\n", [{"op": "addReturnKey", "file": "load", "key": "me", "expr": "{ctx}.user"}])
+    assert "takes no context" in str(e.value)
