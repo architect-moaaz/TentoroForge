@@ -1014,3 +1014,21 @@ def test_edits_land_on_a_draft_and_save_writes_them_as_one_revision(tmp_path, mo
     with pytest.raises(EditorError) as e:
         service.draft_apply(project, "PAGE-001", base_revision=saved["revision"], ops=[{"op": "setText", "id": "r0.0", "text": "x"}])
     assert e.value.code == "stale"
+
+
+def test_the_adapter_worker_answers_many_calls_from_one_process_and_recovers_from_a_crash():
+    from services.react_editor import worker
+    w = worker.get_worker(adapter.SCRIPT, cwd=None, env={**__import__("os").environ, "NODE_PATH": adapter._node_path(None)})
+    first = w.request({"command": "model", "view": "export default function View() { return <p>Hi</p>; }", "load": ""}, timeout=30)
+    assert first["ok"] and first["nodes"]["r0"]["type"] == "p"
+    pid = w._proc.pid
+    second = w.request({"command": "patch", "view": "export default function View() { return <p>Hi</p>; }", "ops": [{"op": "setText", "id": "r0", "text": "Yo"}]}, timeout=30)
+    assert second["ok"] and "<p>Yo</p>" in second["view"] and w._proc.pid == pid, "the same process answered"
+    bad = w.request({"command": "model", "view": "export default function View() { return <p>; }", "load": ""}, timeout=30)
+    assert bad["ok"] is False and bad["error"]["code"] == "syntax" and w.alive(), "a bad page is an answer, not a crash"
+    w._proc.kill()
+    w._proc.wait(timeout=5)
+    third = w.request({"command": "model", "view": "export default function View() { return <b>x</b>; }", "load": ""}, timeout=30)
+    assert third["ok"] and third["nodes"]["r0"]["type"] == "b" and w._proc.pid != pid, "a fresh process after a crash"
+    # the adapter's own calls go through it, and are the same answers
+    assert adapter.model("export default function View() { return <i>x</i>; }")["nodes"]["r0"]["type"] == "i"

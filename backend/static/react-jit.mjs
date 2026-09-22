@@ -32,18 +32,40 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, copyFileSync, readd
 import { createRequire } from "module";
 import { dirname, join, resolve } from "path";
 
-async function main() {
-  const chunks = [];
-  for await (const c of process.stdin) chunks.push(c);
-  const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+/** One build answered — never thrown. */
+async function handle(input) {
   const t0 = Date.now();
   try {
     const out = input.command === "vendor" ? await buildVendor(input) : await buildPage(input);
-    process.stdout.write(JSON.stringify({ ok: true, ms: Date.now() - t0, ...out }));
+    return { ok: true, ms: Date.now() - t0, ...out };
   } catch (e) {
-    process.stdout.write(JSON.stringify({ ok: false, error: { message: String(e && e.message || e), detail: String(e && e.stack || "").slice(0, 2000) } }));
-    process.exitCode = 2;
+    return { ok: false, error: { message: String(e && e.message || e), detail: String(e && e.stack || "").slice(0, 2000) } };
   }
+}
+
+/** `--serve`: a request per line on stdin (`{id, command, …}`), an answer per
+ *  line on stdout with the same id. esbuild's own service stays warm between them. */
+async function serve() {
+  const { createInterface } = await import("readline");
+  console.log = (...a) => console.error(...a);   // stdout carries answers only
+  const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    let req;
+    try { req = JSON.parse(line); } catch (e) { process.stdout.write(JSON.stringify({ ok: false, error: { message: String(e.message) } }) + "\n"); continue; }
+    const out = await handle(req);
+    process.stdout.write(JSON.stringify({ id: req.id, ...out }) + "\n");
+  }
+}
+
+async function main() {
+  if (process.argv.includes("--serve")) return serve();
+  const chunks = [];
+  for await (const c of process.stdin) chunks.push(c);
+  const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  const out = await handle(input);
+  process.stdout.write(JSON.stringify(out));
+  if (!out.ok) process.exitCode = 2;
 }
 
 //: Always vendor, whether or not a page names them: the JSX runtime esbuild
@@ -373,7 +395,9 @@ function cssCacheKey(appRoot, req, inputs, vendorCandidates) {
     if (!/\.(tsx?|jsx?|mjs|cjs)$/.test(abs) || isVendorPath(rel)) continue;
     let text;
     try { text = readFileSync(abs, "utf8"); } catch { continue; }
-    for (const c of extractor(text)) seen.add(c);
+    // The extractor takes every word; only what could be a utility class
+    // is in the key, so a changed heading is not a changed stylesheet.
+    for (const c of extractor(text)) if (/[-:/\[]/.test(c) || BARE_UTILITIES.has(c)) seen.add(c);
   }
   const h = createHash("sha1");
   h.update([...seen].sort().join(" "));

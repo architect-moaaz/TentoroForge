@@ -1229,26 +1229,46 @@ function annotate(view) {
 
 // ---------------------------------------------------------------------------
 
+/** One command answered — never thrown. */
+function handle(cmd, input) {
+  try {
+    if (cmd === "model") return model(input.view ?? "", input.load ?? null);
+    if (cmd === "patch") return patch(input.view ?? "", input.ops ?? []);
+    if (cmd === "patchLoad") return patchLoad(input.load ?? "", input.ops ?? []);
+    if (cmd === "annotate") return annotate(input.view ?? "");
+    if (cmd === "samples") return { ok: true, rows: Object.fromEntries((input.entities || []).map((e) => [e.name, Array.from({ length: 8 }, (_, i) => sampleRow(e, i, input.entities))])) };
+    throw new PatchError("usage", `unknown command ${cmd}`);
+  } catch (e) {
+    const code = e instanceof PatchError ? e.code : (e.name === "SyntaxError" ? "syntax" : "internal");
+    const line = e.loc ? e.loc.line : null;
+    return { ok: false, error: { code, message: e.message, line } };
+  }
+}
+
+/** `--serve`: a request per line on stdin (`{id, command, …}`), an answer per
+ *  line on stdout with the same id. The process stays for the next one. */
+async function serve() {
+  const { createInterface } = await import("readline");
+  console.log = (...a) => console.error(...a);   // stdout carries answers only
+  const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  for await (const line of rl) {
+    if (!line.trim()) continue;
+    let req;
+    try { req = JSON.parse(line); } catch (e) { process.stdout.write(JSON.stringify({ ok: false, error: { code: "bad-request", message: String(e.message) } }) + "\n"); continue; }
+    const out = handle(req.command, req);
+    process.stdout.write(JSON.stringify({ id: req.id, ...out }) + "\n");
+  }
+}
+
 async function main() {
+  if (process.argv.includes("--serve")) return serve();
   const cmd = process.argv[2];
   const chunks = [];
   for await (const c of process.stdin) chunks.push(c);
   const input = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-  try {
-    let out;
-    if (cmd === "model") out = model(input.view ?? "", input.load ?? null);
-    else if (cmd === "patch") out = patch(input.view ?? "", input.ops ?? []);
-    else if (cmd === "patchLoad") out = patchLoad(input.load ?? "", input.ops ?? []);
-    else if (cmd === "annotate") out = annotate(input.view ?? "");
-    else if (cmd === "samples") out = { ok: true, rows: Object.fromEntries((input.entities || []).map((e) => [e.name, Array.from({ length: 8 }, (_, i) => sampleRow(e, i, input.entities))])) };
-    else throw new PatchError("usage", `unknown command ${cmd}`);
-    process.stdout.write(JSON.stringify(out));
-  } catch (e) {
-    const code = e instanceof PatchError ? e.code : (e.name === "SyntaxError" ? "syntax" : "internal");
-    const line = e.loc ? e.loc.line : null;
-    process.stdout.write(JSON.stringify({ ok: false, error: { code, message: e.message, line } }));
-    process.exitCode = 2;
-  }
+  const out = handle(cmd, input);
+  process.stdout.write(JSON.stringify(out));
+  if (!out.ok) process.exitCode = 2;
 }
 
 main();

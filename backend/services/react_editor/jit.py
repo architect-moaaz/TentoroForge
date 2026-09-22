@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from services.blueprint.app_sdk import code_page_dir
-from services.react_editor import adapter
+from services.react_editor import adapter, worker
 from services.react_editor.service import EditorError, Project, _entity_refs, _live, _page, _row, load_blueprint, read_draft
 
 logger = logging.getLogger(__name__)
@@ -67,15 +67,26 @@ def _cache_key(page_id: str, revision: str, params: dict, search: dict, vendor_k
 
 def _run(project: Project, payload: dict[str, Any], *, timeout: float) -> dict[str, Any]:
     env = {**os.environ, "NODE_PATH": str(project.app_root / "node_modules")}
-    try:
-        proc = subprocess.run(["node", str(SCRIPT)], input=json.dumps(payload), capture_output=True, text=True,
-                              timeout=timeout, cwd=str(project.app_root), env=env)
-    except subprocess.TimeoutExpired as exc:
-        raise EditorError(504, "jit-timeout", "Rendering the page took too long.") from exc
-    try:
-        result = json.loads((proc.stdout or "").strip() or "{}")
-    except json.JSONDecodeError as exc:
-        raise EditorError(500, "jit", "The page could not be rendered: " + (proc.stderr or "").strip()[-600:]) from exc
+    result: dict[str, Any] | None = None
+    if worker.enabled():
+        # One bundler process per app, kept warm: esbuild's own service and
+        # the loaded Tailwind stay between builds.
+        try:
+            result = worker.get_worker(SCRIPT, cwd=project.app_root, env=env).request(payload, timeout=timeout)
+        except worker.WorkerError as exc:
+            if "timeout" in str(exc):
+                raise EditorError(504, "jit-timeout", "Rendering the page took too long.") from exc
+            result = None
+    if result is None:
+        try:
+            proc = subprocess.run(["node", str(SCRIPT)], input=json.dumps(payload), capture_output=True, text=True,
+                                  timeout=timeout, cwd=str(project.app_root), env=env)
+        except subprocess.TimeoutExpired as exc:
+            raise EditorError(504, "jit-timeout", "Rendering the page took too long.") from exc
+        try:
+            result = json.loads((proc.stdout or "").strip() or "{}")
+        except json.JSONDecodeError as exc:
+            raise EditorError(500, "jit", "The page could not be rendered: " + (proc.stderr or "").strip()[-600:]) from exc
     if not result.get("ok"):
         err = result.get("error") or {}
         raise EditorError(422, "jit-build", _plain_build_error(str(err.get("message") or "")), detail=str(err.get("detail") or "")[:1500])

@@ -15,6 +15,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from services.react_editor import worker
+
 SCRIPT = Path(__file__).resolve().parents[2] / "static" / "react-model.mjs"
 _REPO_NODE_MODULES = Path(__file__).resolve().parents[3] / "node_modules"
 
@@ -44,21 +46,33 @@ def _node_path(app_root: Path | None) -> str:
 def run(command: str, payload: dict[str, Any], *, app_root: Path | None = None,
         timeout: float = 30.0) -> dict[str, Any]:
     env = {**os.environ, "NODE_PATH": _node_path(app_root)}
-    try:
-        proc = subprocess.run(["node", str(SCRIPT), command], input=json.dumps(payload),
-                              capture_output=True, text=True, timeout=timeout, env=env)
-    except FileNotFoundError as exc:
-        raise AdapterError("no-node", "Node.js is not installed where the platform runs, so pages "
-                                      "cannot be read or edited here.") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise AdapterError("timeout", "Reading the page took too long.") from exc
-    out = (proc.stdout or "").strip()
-    if not out:
-        raise AdapterError("adapter", "The page could not be read: " + (proc.stderr or "").strip()[:400])
-    try:
-        result = json.loads(out)
-    except json.JSONDecodeError as exc:
-        raise AdapterError("adapter", f"The page could not be read: {out[:200]}") from exc
+    result: dict[str, Any] | None = None
+    if worker.enabled():
+        # The script kept running: no Node start per call. A worker that
+        # cannot answer falls back to a one-shot run once, and is started
+        # again by the next call.
+        try:
+            result = worker.get_worker(SCRIPT, cwd=None, env=env).request({"command": command, **payload}, timeout=timeout)
+        except worker.WorkerError as exc:
+            if "timeout" in str(exc):
+                raise AdapterError("timeout", "Reading the page took too long.") from exc
+            result = None
+    if result is None:
+        try:
+            proc = subprocess.run(["node", str(SCRIPT), command], input=json.dumps(payload),
+                                  capture_output=True, text=True, timeout=timeout, env=env)
+        except FileNotFoundError as exc:
+            raise AdapterError("no-node", "Node.js is not installed where the platform runs, so pages "
+                                          "cannot be read or edited here.") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise AdapterError("timeout", "Reading the page took too long.") from exc
+        out = (proc.stdout or "").strip()
+        if not out:
+            raise AdapterError("adapter", "The page could not be read: " + (proc.stderr or "").strip()[:400])
+        try:
+            result = json.loads(out)
+        except json.JSONDecodeError as exc:
+            raise AdapterError("adapter", f"The page could not be read: {out[:200]}") from exc
     if not result.get("ok"):
         err = result.get("error") or {}
         raise AdapterError(str(err.get("code") or "adapter"), str(err.get("message") or "The change could not be made."),
