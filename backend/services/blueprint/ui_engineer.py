@@ -278,7 +278,10 @@ What a finished page looks like:
 
 - AN `auth` PAGE IS THE WHOLE SCREEN, and the one exception to the frame below:
   nothing wraps it, so it carries the product itself — its name, a line on what
-  it is for, the brand's colour — beside or above the form. A `login` page places
+  it is for, the brand's colour — beside or above the form. The page hands the
+  view one full-height cell: fill it (`min-h-full`, or `min-h-dvh`) and centre
+  the form in it, so a short form does not sit at the top of an empty screen.
+  A `login` page places
   <SignInForm /> and links to the signup page; a `signup` page places
   <SignUpForm /> (it already asks for the person's own details and the login)
   and links to sign in. Both from "@/sdk/client". Never hand-roll the sign-in or

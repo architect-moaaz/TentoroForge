@@ -3,7 +3,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { renderSchemaPage } from "@/lib/schema-page";
 import { entryRoute, schemas as routesRegistry } from "@/schemas/registry";
-import CodedRoot, { hasCodeRoot } from "../_root/page";
+import CodedRoot, { hasCodeRoot, rootIsPublic } from "../_root/page";
+import DashboardLayout from "../(dashboard)/layout";
 
 /**
  * DV-BIND: dynamic-segment aware catch-all.
@@ -41,7 +42,14 @@ export default async function Page({
   // (this catch-all already answers `/`), so it lives in the private `_root`
   // module and is rendered from here — before any schema lookup.
   if (slug.length === 0 && hasCodeRoot) {
-    return CodedRoot({ params: Promise.resolve({}), searchParams });
+    const page = await CodedRoot({ params: Promise.resolve({}), searchParams });
+    // IN THE SHELL, LIKE EVERY OTHER SIGNED-IN PAGE. This file sits outside
+    // `(dashboard)`, so a coded root rendered here bare: no rail, no
+    // account menu to sign out from, no page padding (Kids Vaccination,
+    // 2026-09-23 — "generated app doesn't have a menu?"). The group's
+    // layout is applied here instead; it also redirects the signed-out. A
+    // public root keeps its public frame.
+    return rootIsPublic ? page : <DashboardLayout>{page}</DashboardLayout>;
   }
   // OPTIONAL, SO IT SERVES "/" TOO. `[...slug]` needs at least one segment,
   // so the root URL matched no route at all and Next answered 404 — while

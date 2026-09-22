@@ -352,3 +352,41 @@ def test_a_page_brief_lists_its_widgets_in_order():
     assert area["reads"] == {"entity": "Case", "measures": ["amount"], "by": ["openedAt per month", "status"]}
     assert area["size"] == "lg" and area["chart"] == {"mark": "area", "stacked": True}
     assert _page_brief(d, d["pages"][0])["widgets"] == []            # the retired one is gone
+
+
+# --- the root and the sign-in pages get the frame every other page has -------
+
+def test_a_coded_root_is_rendered_inside_the_shell_unless_it_is_public(tmp_path):
+    """Kids Vaccination (2026-09-23): the parent dashboard at `/` rendered with
+    no menu, no sign-out and no padding, because the catch-all that serves
+    `/` sits outside `(dashboard)` and rendered the coded root bare."""
+    from pathlib import Path
+
+    from services.blueprint.app_sdk import page_module
+
+    catch_all = (Path(__file__).resolve().parents[2]
+                 / "templates/standalone-app/src/app/[[...slug]]/page.tsx").read_text()
+    assert 'import DashboardLayout from "../(dashboard)/layout";' in catch_all
+    assert "rootIsPublic ? page : <DashboardLayout>{page}</DashboardLayout>" in catch_all
+    stub = (Path(__file__).resolve().parents[2] / "templates/standalone-app/src/app/_root/page.tsx").read_text()
+    assert "export const rootIsPublic = false;" in stub
+
+    doc = {"pages": [{"id": "PAGE-001", "name": "Home", "route": "/", "pattern": "dashboard",
+                      "access": "authenticated"}], "data": {"entities": []}}
+    signed_in = page_module(doc, doc["pages"][0], {"page": "PAGE-001", "load": "", "view": ""})
+    assert "export const hasCodeRoot = true;" in signed_in and "export const rootIsPublic = false;" in signed_in
+    doc["pages"][0]["access"] = "public"
+    public = page_module(doc, doc["pages"][0], {"page": "PAGE-001", "load": "", "view": ""})
+    assert "export const rootIsPublic = true;" in public and "PublicPageFrame" in public
+
+
+def test_a_sign_in_page_is_given_a_full_height_frame_to_centre_in():
+    """Its view was dropped straight into <body>, as tall as its content, so a
+    view written to centre itself sat at the top of an empty screen."""
+    from services.blueprint.app_sdk import page_module
+
+    doc = {"pages": [{"id": "PAGE-026", "name": "Sign in", "route": "/login", "pattern": "auth",
+                      "access": "public"}], "data": {"entities": []}}
+    module = page_module(doc, doc["pages"][0], {"page": "PAGE-026", "load": "", "view": ""})
+    assert '<div className="min-h-dvh grid">' in module and "</div>" in module
+    assert "PageFrame" not in module and "hasCodeRoot" not in module

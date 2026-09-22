@@ -598,21 +598,26 @@ def page_module(doc: dict, page: dict, row: dict) -> str:
     root = code_page_dir(page) == ROOT_DIR
     if str(page.get("pattern") or "") == "auth":
         # A sign-in screen is the whole screen: no rail, no public header, no
-        # page frame — the view is the page.
-        frame_open, frame_close, frame_import = "<>", "</>", ""
+        # page frame — but a HEIGHT. The view is dropped straight into <body>,
+        # which is as tall as its content, so a view written to centre itself
+        # (`min-h-full`, `justify-center`) sat at the top of an empty screen
+        # (Kids Vaccination's sign-in, 2026-09-23). One full-viewport grid
+        # cell gives the view a definite height to fill.
+        frame_open, frame_close, frame_import = '<div className="min-h-dvh grid">', "</div>", ""
     return (
         f"{CODE_PAGE_MARKER} {page.get('id')}\n"
         f"// {page.get('name')} — generated from the Living Blueprint (pageCode). Edit the\n"
         "// Blueprint, not this file.\n"
         'import { notFound } from "next/navigation";\n'
         'import { currentUser, type PageContext } from "@/sdk/server";\n'
-        + ('' if frame_open == "<>" else 'import { PageFrame } from "@/sdk/frame";\n')
+        + ('' if frame_open in ("<>", '<div className="min-h-dvh grid">') else 'import { PageFrame } from "@/sdk/frame";\n')
         + frame_import +
         'import { load } from "./load";\n'
         'import View from "./view";\n'
         "\n"
         'export const dynamic = "force-dynamic";\n'
         + ("// The catch-all renders this for `/` (see ROOT_DIR).\nexport const hasCodeRoot = true;\n"
+           f"export const rootIsPublic = {'true' if public else 'false'};\n"
            if root else "")
         + "\n"
         "type Search = Record<string, string | string[] | undefined>;\n"
@@ -628,7 +633,8 @@ def page_module(doc: dict, page: dict, row: dict) -> str:
         "  const data = await load(ctx);\n"
         "  if (data === null) notFound();\n"
         "  return (\n"
-        + (f"    {frame_open}\n" if frame_open == "<>" else f"    {frame_open} entities={{{json.dumps(entities)}}}>\n")
+        + (f"    {frame_open}\n" if frame_open in ("<>", '<div className="min-h-dvh grid">')
+           else f"    {frame_open} entities={{{json.dumps(entities)}}}>\n")
         + ""
         "      <View {...data} />\n"
         f"    {frame_close}\n"

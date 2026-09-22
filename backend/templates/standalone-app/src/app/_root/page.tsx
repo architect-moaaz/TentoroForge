@@ -8,6 +8,8 @@
 // This is the scaffold's stub: no coded root, so `/` is served as it always
 // was. The frontend projection replaces it when the Blueprint has one.
 export const hasCodeRoot = false;
+// Whether that root is a public page (no shell). Read with hasCodeRoot.
+export const rootIsPublic = false;
 
 export default async function RootPage(_props: {
   params: Promise<Record<string, string>>;
