@@ -159,7 +159,8 @@ def editable_artifacts(doc: dict, node_produces: Iterable[str],
 
 
 def build_edit_prompt(system: str, artifacts: list[dict], feedback: str,
-                      context: str = "", *, refused: bool = False) -> tuple[str, str]:
+                      context: str = "", *, refused: bool = False,
+                      sections: Iterable[str] = ()) -> tuple[str, str]:
     """The node's own system prompt — its contract and section shapes — with an
     edit request in place of the authoring request.
 
@@ -188,7 +189,11 @@ def build_edit_prompt(system: str, artifacts: list[dict], feedback: str,
         "- Edit the smallest thing that fixes each finding. Everything a "
         "finding does not name stays exactly as it is.\n"
         "- Never change an artifact's `section` or `natural_key`.\n"
-        f"- At most {MAX_EDITS} edits. If a finding cannot be fixed by editing "
+        + (f"- Every artifact, edited or added, stays in one of the sections this "
+           f"task writes: {', '.join(sorted(sections))}. An artifact anywhere else "
+           "makes the whole edit unusable — if a finding needs another section, "
+           "leave it and say so in `note`.\n" if sections else "")
+        + f"- At most {MAX_EDITS} edits. If a finding cannot be fixed by editing "
         "these artifacts, leave it and say so in `note`.\n"
         "- Return {\"edits\": [...], \"note\": \"...\"}."
     )
@@ -270,7 +275,11 @@ def patch_node_output(spec: Any, client: Callable[..., Any], *, system: str,
         system, artifacts,
         # A refusal is already a list of faults, one per attempt; the
         # observer's brief has framing to strip.
-        spec.feedback if refused else findings_of(spec.feedback), context, refused=refused)
+        spec.feedback if refused else findings_of(spec.feedback), context, refused=refused,
+        # NAMED, NOT IMPLIED. Told only "never change a section", the product
+        # author answered a refusal by ADDING an artifact in `requirements`,
+        # the edit was unusable, and a 76s rewrite followed (KV, 2026-09-23).
+        sections=produces)
     if dataclasses.is_dataclass(client) and hasattr(client, "effort"):
         client = dataclasses.replace(client, effort=EDIT_EFFORT)
     t0 = time.monotonic()

@@ -326,3 +326,15 @@ def test_the_data_model_reply_schema_cannot_say_what_the_contract_refuses():
     for name, shape in c_field["properties"].items():
         if "enum" in shape:
             assert r_field["properties"][name].get("enum") == shape["enum"], name
+
+
+def test_the_edit_prompt_names_the_sections_an_edit_may_touch():
+    """Told only \"never change a section\", the product author answered a
+    refusal by ADDING an artifact in `requirements`; the edit was unusable and
+    a 76s rewrite followed (KV, local, 2026-09-23)."""
+    from services.blueprint.artifact_patch import build_edit_prompt
+
+    system, _ = build_edit_prompt("S", [{"section": "product", "natural_key": "PRODUCT", "body": {}}],
+                                  "- attempt 1: product: extra keys", sections=("product",), refused=True)
+    assert "stays in one of the sections this task writes: product" in system
+    assert "makes the whole edit unusable" in system
