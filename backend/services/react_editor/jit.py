@@ -44,9 +44,19 @@ def _tooling_hash() -> str:
     return h.hexdigest()[:12]
 
 
-def _cache_key(page_id: str, revision: str, params: dict, search: dict, vendor_key: str, widgets: Any = None) -> str:
+def _theme_stamp(project: Project) -> str:
+    """The app's projected tokens: a changed look is a new build of every page."""
+    f = project.app_root / "src" / "app" / "tokens.css"
+    try:
+        return hashlib.sha1(f.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return "-"
+
+
+def _cache_key(page_id: str, revision: str, params: dict, search: dict, vendor_key: str, widgets: Any = None, theme: str = "") -> str:
     h = hashlib.sha1()
     h.update(revision.encode())
+    h.update(theme.encode())
     # A chart's definition is in the Blueprint, not the page's files.
     h.update(json.dumps(widgets or [], sort_keys=True, default=str).encode())
     h.update(vendor_key.encode())
@@ -164,7 +174,7 @@ def build(project: Project, page_id: str, *, params: dict[str, str] | None = Non
                         if str(e.get("id")) == str((page.get("data") or {}).get("primaryEntity") or "")), None)
             params[name] = f"sample-{str(ent.get('name')).lower()}-1" if ent and ent.get("name") else "sample-1"
     shared = vendor(project, fresh=fresh)
-    key = _cache_key(page_id, revision, params, search, shared["key"], _live(doc.get("widgets")))
+    key = _cache_key(page_id, revision, params, search, shared["key"], _live(doc.get("widgets")), _theme_stamp(project))
     cache = project.editor_dir / "jit" / f"{key}.json"
     if cache.exists() and not fresh:
         try:

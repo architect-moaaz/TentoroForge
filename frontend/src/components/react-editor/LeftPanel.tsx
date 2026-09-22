@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 
 import { ChartDialog } from "./ChartDialog";
 import { PagesPanel } from "./PagesPanel";
+import { ThemePanel } from "./ThemePanel";
 import { VOID, dropPosition, moveLanding } from "./lib/drop";
 import { mainRoot, plainName, plainType } from "./lib/plain";
 import { checkModel, findingsByNode } from "./lib/readiness";
@@ -40,7 +41,7 @@ export function insertionTarget(model: PageModel, selection: string[], def: Comp
 export function LeftPanel({ onClose }: { onClose: () => void }) {
   const leftTab = useEditorStore((s) => s.leftTab);
   const setLeftTab = useEditorStore((s) => s.setLeftTab);
-  const tabs: { key: LeftTab; label: string }[] = [{ key: "pages", label: "Pages" }, { key: "add", label: "Add" }, { key: "layers", label: "Layers" }];
+  const tabs: { key: LeftTab; label: string }[] = [{ key: "pages", label: "Pages" }, { key: "add", label: "Add" }, { key: "layers", label: "Layers" }, { key: "theme", label: "Look" }];
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center border-b border-border px-1" role="tablist">
@@ -55,6 +56,7 @@ export function LeftPanel({ onClose }: { onClose: () => void }) {
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {leftTab === "pages" && <PagesPanel />}
+        {leftTab === "theme" && <ThemePanel />}
         {leftTab === "add" && <AddTab />}
         {leftTab === "layers" && <LayersTab />}
       </div>

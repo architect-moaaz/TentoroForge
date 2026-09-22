@@ -17,7 +17,7 @@ import { dropPosition, type DropWhere } from "./lib/drop";
 import { colSpanFor, fieldLabel, fieldRemoval, reorderField, widthClassFor, withFieldSpan } from "./lib/fields";
 import { GROUPS, type GroupKind } from "./lib/templates";
 import { mainRoot, plainName, topmost } from "./lib/plain";
-import type { Breakpoint, Device, Finding, HistoryEntry, ModelNode, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, Rect } from "./types";
+import type { Breakpoint, Device, Finding, HistoryEntry, ModelNode, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, Rect, ThemeDoc, ThemePatch } from "./types";
 
 export interface Snapshot { revision: string; view: string; load: string }
 export interface HistoryOp { label: string; before: Snapshot; after: Snapshot }
@@ -25,7 +25,7 @@ export interface HistoryOp { label: string; before: Snapshot; after: Snapshot }
 export type SaveState = "saved" | "saving" | "checking" | "failed";
 export type Mode = "design" | "preview";
 export type ViewLevel = "simple" | "advanced";
-export type LeftTab = "pages" | "add" | "layers";
+export type LeftTab = "pages" | "add" | "layers" | "theme";
 /** Where the canvas gets the page: bundled on demand with sample data, or the app's own dev server. */
 export type CanvasSource = "jit" | "app";
 
@@ -128,6 +128,9 @@ export interface EditorState {
   dragComponent: string | null;
   /** One field of the selected form, when a field rather than the form is what is chosen. */
   fieldSelection: { nodeId: string; name: string } | null;
+  /** The application's look, read when the Theme tab opens. */
+  theme: ThemeDoc | null;
+  themeLoading: boolean;
 
   smith: SmithState;
 
@@ -142,6 +145,9 @@ export interface EditorState {
   clearSelection: () => void;
   /** Choose one field of a form (selecting the form with it), or none. */
   selectField: (nodeId: string, name: string | null) => void;
+  loadTheme: () => Promise<void>;
+  /** A change to the look: written to the design system, every page follows. */
+  saveTheme: (patch: ThemePatch) => Promise<boolean>;
   setHovered: (id: string | null) => void;
   setRects: (rects: Record<string, Rect>, scrollY: number) => void;
   selectParent: () => void;
@@ -298,6 +304,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   editingTextId: null,
   dragComponent: null,
   fieldSelection: null,
+  theme: null,
+  themeLoading: false,
 
   smith: emptySmith(),
 
@@ -308,7 +316,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // Another project has another shared script; let this one's go.
     const old = get().vendor;
     if (old && typeof URL.revokeObjectURL === "function" && old.url.startsWith("blob:")) URL.revokeObjectURL(old.url);
-    set({ projectId, ...prefs, pages: [], pageId: null, doc: null, selection: [], undoStack: [], redoStack: [],
+    set({ projectId, ...prefs, pages: [], pageId: null, doc: null, selection: [], undoStack: [], redoStack: [], theme: null,
           smith: emptySmith(), mode: "design", previewApp: false, loadError: null,
           vendor: null, frameTarget: null, frameDoc: null, frameBuildError: null, previewStack: [], actions: [] });
     await get().loadPages();
@@ -546,6 +554,32 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       : setGroupValue(classes, "width", "", widthClassFor(share));
     if (next === classes) return false;
     return get().applyOps([{ op: "setClasses", id, classes: next }], `Resize ${plainName(node, doc?.registry)}`);
+  },
+
+  loadTheme: async () => {
+    const { projectId } = get();
+    if (!projectId) return;
+    set({ themeLoading: true });
+    try { set({ theme: await editorApi.theme(projectId) }); }
+    catch (err) { toast.error(failureOf(err).message); }
+    finally { set({ themeLoading: false }); }
+  },
+  saveTheme: async (patch) => {
+    const { projectId, busy } = get();
+    if (!projectId || busy) return false;
+    set({ busy: true });
+    try {
+      const theme = await editorApi.setTheme(projectId, patch);
+      set({ theme });
+      // The look is part of every page: the canvas is built again with it.
+      void get().loadFrame(undefined, { fresh: true });
+      return true;
+    } catch (err) {
+      toast.error(failureOf(err).message);
+      return false;
+    } finally {
+      set({ busy: false });
+    }
   },
 
   groupSelected: async (kind) => {

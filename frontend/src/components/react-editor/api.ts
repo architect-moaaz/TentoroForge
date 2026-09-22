@@ -7,7 +7,7 @@
  * a status text, which is exactly the wording (UX-004) the editor exists to
  * show.
  */
-import type { ApplyResult, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, Proposal, WidgetRef, WidgetSpec } from "./types";
+import type { ApplyResult, Finding, HistoryEntry, Navigation, Op, PageDoc, PageListItem, Proposal, ThemeDoc, ThemePatch, WidgetRef, WidgetSpec } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -117,6 +117,8 @@ export const editorApi = {
     }
     return res.json();
   },
+  theme: (projectId: string) => call<ThemeDoc>(`${base(projectId)}/theme`),
+  setTheme: (projectId: string, patch: ThemePatch) => call<ThemeDoc>(`${base(projectId)}/theme`, { method: "PUT", body: JSON.stringify(patch) }),
   listAssets: (projectId: string) => call<{ assets: { url: string; name: string }[] }>(`${base(projectId)}/assets`),
   vendor: (projectId: string, opts: { fresh?: boolean } = {}, signal?: AbortSignal) =>
     call<VendorBundle>(`${base(projectId)}/vendor${opts.fresh ? "?fresh=true" : ""}`, { signal }),

@@ -859,3 +859,34 @@ def test_a_picture_is_stored_under_the_apps_public_files_and_served_back_only_fr
         assets.resolve(project, "../secret.png")
     with pytest.raises(EditorError):
         assets.resolve(project, "/uploads/missing.png")
+
+
+def test_the_look_is_read_by_the_job_each_colour_does_and_a_change_reaches_the_tokens(tmp_path, monkeypatch):
+    from services.react_editor import theme
+    project = _chart_project(tmp_path, monkeypatch)
+    svc = service.load_blueprint(project)
+    doc = svc.doc
+    doc["designSystem"] = {**(doc.get("designSystem") or {}), "colors": {"primary": "#2563EB", "background": "#F8FAFC", "text": "#0B1220", "border": "#E2E8F0"},
+                           "typography": {"fontFamily": "Inter, system-ui, sans-serif"}, "radius": {"sm": "4px", "md": "8px", "lg": "12px"}}
+    svc.commit(user_request="a look to start from")
+    (project.app_root / "src" / "app").mkdir(parents=True, exist_ok=True)
+    (project.app_root / "src" / "app" / "globals.css").write_text("@import './tokens.css';\n")
+    t = theme.get(project)
+    by = {c["role"]: c for c in t["colors"]}
+    assert by["primary"]["value"] == "#2563eb" and by["primary"]["set"] is True
+    assert by["textPrimary"]["value"] == "#0b1220", "an alias role (text) is read as the job it does"
+    assert by["success"]["set"] is False and by["success"]["value"], "an unset role shows the contract's default"
+    assert t["font"] == "Inter, system-ui, sans-serif" and t["radius"] == "8px" and t["hasDesign"]
+    out = theme.update(project, {"colors": {"primary": "#B91C1C"}, "radius": "12px", "density": "compact", "font": "Lora"})
+    assert {c["role"]: c["value"] for c in out["colors"]}["primary"] == "#b91c1c"
+    assert out["radius"] == "12px" and out["density"] == "compact" and out["font"] == "Lora"
+    tokens = (project.app_root / "src" / "app" / "tokens.css").read_text()
+    assert "--primary: 0 74% 42%;" in tokens and "--radius: 12px;" in tokens and "Lora" in tokens
+    ds = service.load_blueprint(project).doc["designSystem"]
+    assert ds["colors"]["primary"] == "#b91c1c" and ds["radius"] == {"sm": "6px", "md": "12px", "lg": "18px"} and ds["informationDensity"] == "compact"
+    with pytest.raises(EditorError) as e:
+        theme.update(project, {"colors": {"primary": "reddish"}})
+    assert "not a colour" in str(e.value)
+    # a look nobody can read is said in plain words, not refused
+    warned = theme.update(project, {"colors": {"textPrimary": "#f0f0f0"}})
+    assert any("hard to read" in w for w in warned["warnings"])

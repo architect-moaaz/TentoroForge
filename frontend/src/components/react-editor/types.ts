@@ -47,6 +47,18 @@ export interface ObjectEntry {
   items?: ObjectEntry[][];
 }
 
+/** The application's look, as the theme panel shows and changes it. */
+export interface ThemeDoc {
+  personality: string;
+  colors: { role: string; group: string; label: string; about: string; value: string | null; set: boolean }[];
+  font: string; headingFont: string; baseSize: string; fontSuggestions: string[];
+  radius: string; radiusChoices: { value: string; label: string }[];
+  density: "compact" | "comfortable" | "spacious";
+  warnings: string[];
+  hasDesign: boolean;
+}
+export interface ThemePatch { colors?: Record<string, string>; font?: string; headingFont?: string; baseSize?: string; radius?: string; density?: string }
+
 /** How a loaded value is obtained. */
 export type Via =
   | { how: "server"; call: string; entity: string | null }

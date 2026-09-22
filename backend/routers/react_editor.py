@@ -23,7 +23,7 @@ from database import get_db
 from models.auth import PlatformUser
 from services.project_paths import project_root
 from services.project_service import get_project_with_auth
-from services.react_editor import assets, jit, pages, service, smith, widgets
+from services.react_editor import assets, jit, pages, service, smith, theme, widgets
 from services.react_editor.service import EditorError, Project
 
 router = APIRouter(tags=["react-editor"])
@@ -291,3 +291,35 @@ async def public_asset(project_id: uuid.UUID, path: str,
     except EditorError as e:
         _raise(e)
     return FileResponse(file, media_type=ctype, headers={"Cache-Control": "private, max-age=60"})
+
+
+# ---------------------------------------------------------------------------
+# The application's look
+# ---------------------------------------------------------------------------
+
+class ThemePatch(BaseModel):
+    colors: dict[str, str] | None = None
+    font: str | None = None
+    headingFont: str | None = None
+    baseSize: str | None = None
+    radius: str | None = None
+    density: str | None = None
+
+
+@router.get("/api/projects/{project_id}/react-editor/theme")
+async def get_theme(project_id: uuid.UUID, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    try:
+        return await asyncio.to_thread(theme.get, project)
+    except EditorError as e:
+        _raise(e)
+
+
+@router.put("/api/projects/{project_id}/react-editor/theme")
+async def set_theme(project_id: uuid.UUID, body: ThemePatch,
+                    user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    project = await _project(project_id, user, db)
+    try:
+        return await asyncio.to_thread(theme.update, project, body.model_dump(exclude_none=True))
+    except EditorError as e:
+        _raise(e)
