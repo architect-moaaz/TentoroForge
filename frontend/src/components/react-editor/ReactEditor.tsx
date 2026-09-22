@@ -16,6 +16,7 @@ import { useEditorBreakpoint } from "@/hooks/useMediaQuery";
 
 import { Canvas } from "./Canvas";
 import { CodeDialog, HistoryDialog, ReadinessDialog } from "./Dialogs";
+import { GuideDialog } from "./LeftPanel";
 import { LeftPanel } from "./LeftPanel";
 import { SettingsDrawer } from "./SettingsDrawer";
 import { SmithWindow } from "./SmithWindow";
@@ -109,8 +110,19 @@ export function ReactEditor({ projectId }: ReactEditorProps) {
       <ReadinessDialog />
       <HistoryDialog />
       <CodeDialog />
+      <PendingGuide />
     </div>
   );
 }
 
 export default ReactEditor;
+
+
+/** The questions a dropped chart, tile or form asks, opened by the drop itself. */
+function PendingGuide() {
+  const pending = useEditorStore((s) => s.pendingGuide);
+  const setPendingGuide = useEditorStore((s) => s.setPendingGuide);
+  const def = useEditorStore((s) => (pending ? s.doc?.registry.components.find((c) => c.id === pending.compId) ?? null : null));
+  if (!pending || !def) return null;
+  return <GuideDialog def={def} target={{ parentId: pending.parentId, index: pending.index }} onClose={() => setPendingGuide(null)} />;
+}

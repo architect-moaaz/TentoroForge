@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 
 import { editorApi, failureOf } from "./api";
 import { ChartPreview, FilterEditor } from "./DataMapping";
-import { insertionTarget } from "./LeftPanel";
+import { type DropTarget, insertionTarget } from "./LeftPanel";
 import { sampleQuery } from "./lib/data";
 import { MARKS, humanise, markProblem, measureLabel, widgetOps } from "./lib/templates";
 import { useEditorStore } from "./store";
@@ -42,7 +42,7 @@ function Choice({ checked, onChange, children, name }: { checked: boolean; onCha
   );
 }
 
-export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () => void }) {
+export function ChartDialog({ def, target, onClose }: { def: ComponentDef; target?: DropTarget; onClose: () => void }) {
   const doc = useEditorStore((s) => s.doc)!;
   const projectId = useEditorStore((s) => s.projectId)!;
   const selection = useEditorStore((s) => s.selection);
@@ -200,7 +200,7 @@ export function ChartDialog({ def, onClose }: { def: ComponentDef; onClose: () =
     try {
       const out = await editorApi.createWidget(projectId, doc.page.id, spec);
       created = out.widget;
-      const t = insertionTarget(doc.model, selection, def);
+      const t = target ? { ...target, afterId: undefined } : insertionTarget(doc.model, selection, def);
       const ops = widgetOps(doc.model, out.widget, t.afterId ? { afterId: t.afterId } : { parentId: t.parentId, index: t.index });
       const ok = await applyOps(ops, `Add ${kind === "metric" ? "number tile" : "chart"} “${title}”`);
       if (!ok) throw new Error("The page could not take the chart.");

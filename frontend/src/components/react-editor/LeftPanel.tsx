@@ -138,12 +138,16 @@ function AddTab() {
 }
 
 /** One decision at a time; a live summary of what will be added; back and skip. */
-function GuideDialog({ def, onClose }: { def: ComponentDef; onClose: () => void }) {
-  if (def.guide === "chart" || def.guide === "metric") return <ChartDialog def={def} onClose={onClose} />;
-  return <FlowDialog def={def} onClose={onClose} />;
+/** Where a guided kind goes once its questions are answered: the spot it was
+ *  dropped on, or — from a click in Add — the usual insertion target. */
+export type DropTarget = { parentId: string; index: number | null };
+
+export function GuideDialog({ def, target, onClose }: { def: ComponentDef; target?: DropTarget; onClose: () => void }) {
+  if (def.guide === "chart" || def.guide === "metric") return <ChartDialog def={def} target={target} onClose={onClose} />;
+  return <FlowDialog def={def} target={target} onClose={onClose} />;
 }
 
-function FlowDialog({ def, onClose }: { def: ComponentDef; onClose: () => void }) {
+function FlowDialog({ def, target, onClose }: { def: ComponentDef; target?: DropTarget; onClose: () => void }) {
   const doc = useEditorStore((s) => s.doc)!;
   const selection = useEditorStore((s) => s.selection);
   const insertJsx = useEditorStore((s) => s.insertJsx);
@@ -228,7 +232,7 @@ function FlowDialog({ def, onClose }: { def: ComponentDef; onClose: () => void }
   const last = step >= steps.length - 1;
   const finish = async () => {
     if (!preview || !doc.model) return;
-    const t = insertionTarget(doc.model, selection, def);
+    const t = target ? { ...target, afterId: undefined } : insertionTarget(doc.model, selection, def);
     const ok = await insertJsx(preview.jsx, preview.imports, t.afterId ? { afterId: t.afterId, label: `Add ${def.label.toLowerCase()}` } : { parentId: t.parentId, index: t.index, label: `Add ${def.label.toLowerCase()}` });
     if (ok) onClose();
   };

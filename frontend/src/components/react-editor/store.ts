@@ -128,6 +128,9 @@ export interface EditorState {
   editingTextId: string | null;
   /** The palette item being dragged — the canvas frame cannot read the drag's own data. */
   dragComponent: string | null;
+  /** A guided kind (a chart, a number tile, a form) dropped on the page: its
+   *  questions open at once, and the answer goes where it was dropped. */
+  pendingGuide: { compId: string; parentId: string; index: number | null } | null;
   /** One field of the selected form, when a field rather than the form is what is chosen. */
   fieldSelection: { nodeId: string; name: string } | null;
   /** The application's look, read when the Theme tab opens. */
@@ -183,6 +186,7 @@ export interface EditorState {
   setFieldSpan: (nodeId: string, name: string, full: boolean) => Promise<boolean>;
   removeField: (nodeId: string, name: string) => Promise<boolean>;
   setDragComponent: (id: string | null) => void;
+  setPendingGuide: (guide: { compId: string; parentId: string; index: number | null } | null) => void;
   /** Add a palette item where it was dropped: on a layer or on the page. `targetId` null is the end of the page. */
   dropComponent: (compId: string, targetId: string | null, where: DropWhere | { y: number }) => Promise<boolean>;
   undo: () => Promise<void>;
@@ -313,6 +317,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   showReadiness: false,
   editingTextId: null,
   dragComponent: null,
+  pendingGuide: null,
   fieldSelection: null,
   theme: null,
   themeLoading: false,
@@ -515,6 +520,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   setDragComponent: (dragComponent) => set({ dragComponent }),
+  setPendingGuide: (pendingGuide) => set({ pendingGuide }),
 
   dropComponent: async (compId, targetId, whereOrY) => {
     const { doc } = get();
@@ -526,10 +532,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const parentId = !target ? mainRoot(model)! : where === "inside" ? target.id : target.parent!;
     const index = !target || where === "inside" ? null : target.index + (where === "after" ? 1 : 0);
     if (def.guide) {
-      // A guided kind asks its questions first; it goes where it was dropped.
+      // A guided kind asks its questions first — HERE, the moment it lands,
+      // and the answer goes where it was dropped. It used to select the
+      // target, switch to Add and toast "click it in Add": a drop that put
+      // nothing on the page and asked the person to do it again (NK,
+      // 2026-09-22: "when I drag and drop the chart I cannot see it").
       get().select([parentId]);
-      get().setLeftTab("add");
-      toast.info(`${def.label}: click it in Add to choose what it shows — it will go inside the selected ${plainName(model.nodes[parentId], doc?.registry).toLowerCase()}.`);
+      set({ pendingGuide: { compId, parentId, index } });
       return false;
     }
     return get().insertJsx(def.jsx, def.imports.map((i) => ({ op: "addImport", source: i.source, names: i.names }) as Op),
