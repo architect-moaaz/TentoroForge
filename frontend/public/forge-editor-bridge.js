@@ -333,12 +333,13 @@
     return null;
   }
   function moveTarget(e) {
-    ghost.style.display = "none";   // so the element under the pointer is the page's, not ours
+    // The overlay takes no pointer events, so what is under the pointer is the page's.
     var under = document.elementFromPoint(e.clientX, e.clientY);
-    ghost.style.display = "block";
     var fid = ownerFidOutside(under, moving.fid);
-    var r = fid && rectOfFid(fid);
+    if (!fid) return { fid: null, y: 1 };
+    var r = moving.rectCache && moving.rectCache.fid === fid ? moving.rectCache.r : rectOfFid(fid);
     if (!r) return { fid: null, y: 1 };
+    moving.rectCache = { fid: fid, r: r };
     return nearestChild(fid, e, moving.fid) || { fid: fid, y: r.height ? Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) : 1 };
   }
   function capture(pointerId) {
@@ -350,6 +351,7 @@
   function endMove() {
     if (moving) release(moving.pointerId);
     moving = null;
+    childCache = null;
     ghost.style.display = "none";
     hideDrop();
     document.documentElement.style.cursor = "";
@@ -390,13 +392,29 @@
     moving = { fid: fid, x: e.clientX, y: e.clientY, started: false, rect: r, dx: e.clientX - r.left, dy: e.clientY - r.top,
                pointerId: e.pointerId, pending: selected.indexOf(fid) < 0 || !!selectedField };
   }, true);
+  // Pointer events come faster than frames are drawn; each frame reads the
+  // last one and does the work once.
+  var lastMove = null, frameQueued = false;
+  function onFrame() {
+    frameQueued = false;
+    var e = lastMove;
+    lastMove = null;
+    if (!e) return;
+    if (resizing) trackResize(e);
+    else if (moving) trackMove(e);
+  }
   document.addEventListener("pointermove", function (e) {
-    if (!resizing || !e.isPrimary) return;
+    if (!e.isPrimary || (!resizing && !moving)) return;
+    lastMove = e;
+    if (!frameQueued) { frameQueued = true; requestAnimationFrame(onFrame); }
+  }, true);
+  function trackResize(e) {
+    if (!resizing) return;
     var w = Math.max(24, Math.min(resizing.parentWidth, resizing.rect.width + (e.clientX - resizing.x)));
     resizing.width = w;
     place(resizeBox, { top: resizing.rect.top, left: resizing.rect.left, width: w, height: resizing.rect.height });
     place(edge, { top: resizing.rect.top, left: resizing.rect.left + w, width: 8, height: resizing.rect.height });
-  }, true);
+  }
   document.addEventListener("pointerup", function (e) {
     if (!resizing) return;
     swallow(e);
@@ -417,8 +435,8 @@
     }
     reportRects();
   }, true);
-  document.addEventListener("pointermove", function (e) {
-    if (!moving || !e.isPrimary) return;
+  function trackMove(e) {
+    if (!moving) return;
     if (!moving.started) {
       if (Math.abs(e.clientX - moving.x) < 5 && Math.abs(e.clientY - moving.y) < 5) return;
       moving.started = true;
@@ -436,10 +454,7 @@
     }
     place(ghost, { top: e.clientY - moving.dy, left: e.clientX - moving.dx, width: moving.rect.width, height: moving.rect.height });
     if (moving.field) {
-      ghost.style.display = "none";
-      var underF = document.elementFromPoint(e.clientX, e.clientY);
-      ghost.style.display = "block";
-      var over = fieldOf(underF);
+      var over = fieldOf(document.elementFromPoint(e.clientX, e.clientY));
       hideDrop();
       if (over && over.fid === moving.fid && over.name !== moving.field) {
         var orr = rectOf(over.el);
@@ -455,7 +470,7 @@
       dragAt = { fid: t.fid, band: band };
       send("drag-over", { fid: t.fid, y: t.y, moving: moving.fid });
     }
-  }, true);
+  }
   document.addEventListener("pointerup", function (e) {
     if (!moving) return;
     if (!moving.started) { moving = null; return; }
@@ -533,19 +548,32 @@
   /** The pointer in a container's own gap or padding: the child nearest it,
    *  so a drop between two things lands between them — not "inside the
    *  container, at the end". `skip` is the element being moved. */
-  function nearestChild(fid, e, skip) {
+  var childCache = null;   // { fid, scrollX, scrollY, kids: [{fid, r}] } — measured once per container per drag
+  function childrenOf(fid, skip) {
+    if (childCache && childCache.fid === fid && childCache.scrollX === window.scrollX && childCache.scrollY === window.scrollY) return childCache.kids;
     var el = byFid(fid);
-    if (!el || !el.children) return null;
+    var kids = [];
+    if (el && el.children) {
+      for (var i = 0; i < el.children.length; i++) {
+        var c = el.children[i];
+        if (isOurs(c)) continue;
+        var cf = ownerFid(c);
+        if (!cf || cf === fid || (skip && isUnder(cf, skip))) continue;
+        var r = c.getBoundingClientRect();
+        if (!r.height) continue;
+        kids.push({ fid: cf, r: { top: r.top, bottom: r.bottom, height: r.height } });
+      }
+    }
+    childCache = { fid: fid, scrollX: window.scrollX, scrollY: window.scrollY, kids: kids };
+    return kids;
+  }
+  function nearestChild(fid, e, skip) {
+    var kids = childrenOf(fid, skip);
     var best = null;
-    for (var i = 0; i < el.children.length; i++) {
-      var c = el.children[i];
-      if (isOurs(c)) continue;
-      var cf = ownerFid(c);
-      if (!cf || cf === fid || (skip && isUnder(cf, skip))) continue;
-      var r = c.getBoundingClientRect();
-      if (!r.height) continue;
-      var d = e.clientY < r.top ? r.top - e.clientY : e.clientY > r.bottom ? e.clientY - r.bottom : 0;
-      if (!best || d < best.d) best = { fid: cf, r: r, d: d };
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i];
+      var d = e.clientY < k.r.top ? k.r.top - e.clientY : e.clientY > k.r.bottom ? e.clientY - k.r.bottom : 0;
+      if (!best || d < best.d) best = { fid: k.fid, r: k.r, d: d };
     }
     return best ? { fid: best.fid, y: Math.min(1, Math.max(0, (e.clientY - best.r.top) / best.r.height)) } : null;
   }
