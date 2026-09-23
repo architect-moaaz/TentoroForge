@@ -62,6 +62,23 @@ export interface RunEvent {
 }
 
 /**
+ * One thing that happened to one subject of one node — the grain the run
+ * panel's level map draws: a page landing, the reviewer's verdict on it, a
+ * repair round, a retry, a wait on the API. Kept structured beside the
+ * `events` summaries so the map is derived, never guessed from text.
+ */
+export interface RunMoment {
+  kind: "subject" | "verdict" | "repair" | "unrepaired" | "retry" | "stalled" | "paused";
+  node: string;
+  subject: string;
+  ok?: boolean;
+  findings?: number;
+  attempt?: number;
+  of?: number;
+  reason?: string;
+}
+
+/**
  * One line of Smith working, as it worked.
  *
  * `reasoning` is the model thinking. `step` is deterministic work naming
@@ -124,6 +141,10 @@ export interface BlueprintRun {
   thoughts: RunThought[];
   /** Every event, in order. The engine's own account of the run. */
   events: RunEvent[];
+  /** The moments the level map draws (see `RunMoment`), in order. */
+  moments?: RunMoment[];
+  /** The plan's concurrency levels — the nodes that may run side by side. */
+  levels?: string[][];
   /** Ordered as the orchestrator planned them, not as they finish. */
   nodes: RunNode[];
   nodesDone: number;
@@ -508,6 +529,8 @@ export function reduce(
       { seq: prev.events.length, event, detail: describe(event, data) },
     ],
   };
+  const moment = momentOf(event, data);
+  if (moment) prev = { ...prev, moments: [...(prev.moments ?? []), moment] };
 
   switch (event) {
     case "started":
@@ -602,6 +625,8 @@ export function reduce(
         ...prev,
         nodes: keys.map((key) => ({ key, state: "waiting", calls: 0 })),
         nodesTotal: (data.total as number) ?? keys.length,
+        levels: (data.levels as string[][]) ?? undefined,
+        moments: [],
         alreadyComplete: (data.alreadyComplete as string[]) ?? [],
         awaitingApproval: Boolean(data.awaitingApproval),
       };
@@ -707,6 +732,31 @@ export function reduce(
 
 
 /** One line a person can read, per event. */
+/** The structured moment an event is, or null when the map has no use for it. */
+export function momentOf(event: string, data: Record<string, unknown>): RunMoment | null {
+  const node = String(data.node ?? "");
+  const subject = String(data.subject ?? "");
+  const reason = data.reason != null ? String(data.reason) : undefined;
+  switch (event) {
+    case "node:subject":
+      return { kind: "subject", node, subject, ok: Boolean(data.ok) };
+    case "observer:verdict":
+      return { kind: "verdict", node, subject, ok: Boolean(data.ok), findings: Number(data.findings ?? 0) };
+    case "observer:repair":
+      return { kind: "repair", node, subject, attempt: Number(data.round ?? 1), of: Number(data.of ?? 0), reason };
+    case "observer:unrepaired":
+      return { kind: "unrepaired", node, subject, reason };
+    case "node:retry":
+      return { kind: "retry", node, subject, attempt: Number(data.attempt ?? 0), of: Number(data.of ?? 0), reason };
+    case "node:stalled":
+      return { kind: "stalled", node, subject, reason };
+    case "run:paused":
+      return { kind: "paused", node: "", subject: "", reason };
+    default:
+      return null;
+  }
+}
+
 function describe(event: string, data: Record<string, unknown>): string {
   switch (event) {
     case "started":

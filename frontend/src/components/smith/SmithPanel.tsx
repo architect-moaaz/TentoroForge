@@ -55,8 +55,7 @@ import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
 import { STAGE_VERB, labelFor } from "./stages";
-import { OfficeStrip } from "./OfficeStrip";
-import { useOfficeStore } from "@/components/virtual-office";
+import { QuestMap } from "./QuestMap";
 import {
   AppTile,
   BlueprintSummary,
@@ -1167,10 +1166,6 @@ function StageList({
     return () => clearInterval(t);
   }, [run.status]);
   const started = startedAt.current;
-  // The office outlives the request that started the run by a few frames
-  // (the celebration, whoever stayed parked); keyed on the run alone the
-  // strip vanished at exactly the moment there was something to look at.
-  const officeRunActive = useOfficeStore((s) => s.runActive);
 
   return (
     <div className="rounded-lg border bg-card p-3">
@@ -1256,11 +1251,6 @@ function StageList({
         </div>
       )}
 
-      {/* WHO IS DOING WHAT, RIGHT NOW. The bar above says how far; the
-          office says what a build actually is — people working side by
-          side, a reviewer sending pages back, a wait for the API. */}
-      {(run.status === "running" || officeRunActive) && <OfficeStrip />}
-
       {/*
         ROUTES THAT WILL 404, SAID OUT LOUD. A page whose composition failed
         leaves no layout, so nothing is projected for it and the route falls
@@ -1293,11 +1283,11 @@ function StageList({
           I had already worked this out — nothing needed redoing.
         </p>
       ) : (
-        <ul className="space-y-1">
-          {run.nodes.map((n) => (
-            <StageRow key={n.key} node={n} />
-          ))}
-        </ul>
+        // THE BUILD AS A LEVEL MAP, not a list. A list of stages ticking
+        // off said how far and nothing about what a build is: steps running
+        // side by side, a step that is twelve calls at once, the reviewer
+        // sending one back. See `questModel`.
+        <QuestMap run={run} />
       )}
 
       {run.alreadyComplete.length > 0 && (
@@ -1523,40 +1513,5 @@ function _duration(secs: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-function StageRow({ node }: { node: RunNode }) {
-  const Icon =
-    node.state === "done"
-      ? CheckCircle2
-      : node.state === "running"
-        ? Loader2
-        : node.state === "failed"
-          ? XCircle
-          : Circle;
-
-  return (
-    <li className="flex items-center gap-2 text-xs">
-      <Icon
-        className={cn(
-          "h-3.5 w-3.5 shrink-0",
-          node.state === "done" && "text-green-600",
-          node.state === "running" && "animate-spin text-primary",
-          node.state === "failed" && "text-destructive",
-          node.state === "waiting" && "text-muted-foreground/40",
-        )}
-      />
-      <span
-        className={cn(
-          node.state === "waiting" && "text-muted-foreground",
-          node.state === "done" && "text-foreground",
-        )}
-      >
-        {labelFor(node.key)}
-      </span>
-      {node.subject && (
-        <span className="truncate text-muted-foreground">{node.subject}</span>
-      )}
-    </li>
-  );
-}
 
 export default SmithPanel;
