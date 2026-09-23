@@ -264,6 +264,11 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # which is also what blocks the theme-token projection.
     _n("design_system", "accessibility", ("application_model",), ("designSystem",),
        note="§37; must precede page design so composition has a language"),
+    # THE PICTURES THE DESIGN NAMED, FOUND. The design agent writes what each
+    # photograph is of; this looks them up (Unsplash, when the platform has a
+    # key) so the page authors are handed URLs and credits, not queries.
+    _n("imagery", "accessibility", ("design_system",), ("designSystem",), kind="service",
+       note="the design's photographs, found and credited; nothing without a key"),
     # THE PAGE SET IS DECIDED ONCE AND THE CONTRACTS ARE WRITTEN PER FEATURE.
     # This node answers the slot question — which features exist, which are
     # declined, and for each page its route, pattern, module and entity —
@@ -367,7 +372,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # degraded, never stopped. `install` because the compiler lives in the
     # app's node_modules; `workflow_steps` because a form collects inputs.
     _n("ui_direction", "ui_director",
-       ("page_details", "design_system", "figma_design_system"), ("composition",),
+       ("page_details", "design_system", "figma_design_system", "imagery"), ("composition",),
        optional=True, note="§34; the whole app's look and conventions, one call"),
     _n("page_code", "ui_engineer",
        ("ui_direction", "page_layouts", "workflow_steps", "install"), ("pageCode",),
@@ -3346,7 +3351,19 @@ def _project_company_language(svc: BlueprintService) -> None:
                 ", ".join(sorted(overlay)), svc.output_dir)
 
 
+def _find_imagery(svc: BlueprintService) -> None:
+    """Fill the design's `imagery` entries from Unsplash (see `imagery`)."""
+    from services.blueprint.imagery import fill_imagery
+
+    out = fill_imagery(svc.doc)
+    if out.get("found"):
+        svc.save()
+    logger.info("[imagery] found=%s kept=%s empty=%s %s", out.get("found"), out.get("kept"),
+                out.get("empty"), out.get("why") or "")
+
+
 SERVICE_HANDLERS: dict[str, Any] = {
+    "imagery": _find_imagery,
     "page_layouts": _compose_page_layouts,
     "auth_pages": _declare_auth_pages,
     "content_fields": _add_content_fields,

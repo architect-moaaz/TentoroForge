@@ -211,8 +211,10 @@ def test_a_design_system_too_thin_to_compose_against_is_caught():
     """
     d = doc(designSystem={"colors": {"primary": "#125E8A"}})
     hits = verify(d, edges=("Design↔DesignSystem",)).findings
+    from services.blueprint.verification import OPTIONAL_PALETTE_ROLES
     assert {h.artifact_id for h in hits} == {"spacing", "typography", "radius"} | {
-        f"colors.{role}" for role in PALETTE_ROLES if role != "primary"}
+        f"colors.{role}" for role in PALETTE_ROLES
+        if role != "primary" and role not in OPTIONAL_PALETTE_ROLES}
 
     d = doc(designSystem={})
     hits = verify(d, edges=("Design↔DesignSystem",)).findings

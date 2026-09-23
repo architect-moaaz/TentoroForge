@@ -340,6 +340,20 @@ What a finished page looks like:
   steps. Copy is written for the person, in the domain's words.
 - HIERARCHY BEFORE DECORATION. Size, weight and spacing carry the structure; colour
   is for meaning (status, priority, money in/out). Use tabular-nums for figures.
+- THE GRADIENT HAS THREE HOMES, AND NO OTHERS. `bg-brand-gradient` (its text is
+  already set) may paint the one leading card instead of bg-inverse, the sign-in
+  page's brand panel, and a hero band at the top of a home or dashboard — one of
+  these per screen at most, and where a photograph is given it goes UNDER the
+  photo as its scrim (`bg-brand-gradient` on the container, the <img> at
+  `opacity-80 mix-blend-multiply` or a `bg-gradient-to-t from-gradient-start/80`
+  overlay). Never behind body text, tables, forms or lists; never `from-blue-500`.
+  A number tile or a chart card stays on bg-card.
+- PHOTOGRAPHS, WHERE THEY EARN THEIR PLACE. When the look names a photograph for a
+  job, use it for that job and nothing else: `object-cover` in a container of
+  fixed height (the brand panel, a 40-56 px-tall hero band on `md`, the empty
+  state's picture), with `alt` as given and the credit in one small muted line —
+  `Photo by <a href=link>Name</a> on Unsplash` — beside or under it. A page never
+  loads a picture the look does not name, and never one from another host.
 - REAL CONTENT, REAL STATES. Every list has an empty state that says what to do next
   (and offers the action). Every record page handles a missing optional field with
   a quiet em dash, not "null". Long text truncates with a title attribute.
@@ -445,7 +459,8 @@ def _look(doc: dict) -> str:
     classes = {"background": "bg-background", "surface": "bg-card", "textPrimary": "text-foreground",
                "textSecondary": "text-muted-foreground", "primary": "bg-primary / text-primary",
                "accent": "bg-accent / variant=\"accent\"", "accentSubtle": "bg-accent-subtle",
-               "inverse": "bg-inverse"}
+               "inverse": "bg-inverse", "gradientStart": "from-gradient-start",
+               "gradientEnd": "to-gradient-end"}
     from services.blueprint.verification import PALETTE_ROLES
     lines = [str(design.get("visualPersonality") or "")[:600]]
     for role, job in PALETTE_ROLES.items():
@@ -455,6 +470,11 @@ def _look(doc: dict) -> str:
     body = typo.get("fontFamilyBase") or typo.get("fontFamily") or typo.get("fontFamilyBody")
     if head or body:
         lines.append(f"- font-heading: {head or body}; body: {body or head}")
+    gs, ge = colors.get("gradientStart"), colors.get("gradientEnd")
+    lines.append("- bg-brand-gradient" + (f" ({gs} → {ge})" if gs and ge else " (primary → accent)")
+                 + ": the brand gradient — the leading card, the sign-in panel, a hero band; its text is set")
+    from services.blueprint.imagery import imagery_brief
+    lines.append(imagery_brief(doc))
     return "\n".join(x for x in lines if x)
 
 

@@ -1991,6 +1991,27 @@ export const DesignSystem = z.object({
   borders: z.record(z.string(), z.string()).default({}),
   elevation: z.record(z.string(), z.string()).default({}),
   navigationApproach: z.string().default(""),
+  /**
+   * The photographs the application uses, by the job each does: the sign-in
+   * page's brand panel (`auth`), the band that leads a dashboard (`hero`), an
+   * illustrated empty state (`empty`). The design agent writes the `query` and
+   * `alt`; the `imagery` service node fills `url`, `thumbUrl` and `credit` from
+   * Unsplash when the platform has a key, and pages fall back to the brand
+   * gradient when it has not. `credit` is shown beside the picture — the
+   * licence asks for it.
+   */
+  imagery: z
+    .array(
+      z.object({
+        role: z.enum(["auth", "hero", "empty"]),
+        query: z.string().min(1),
+        alt: z.string().default(""),
+        url: z.string().default(""),
+        thumbUrl: z.string().default(""),
+        credit: z.object({ name: z.string(), link: z.string() }).optional(),
+      }),
+    )
+    .default([]),
   informationDensity: z.enum(["compact", "comfortable", "spacious"]).default("comfortable"),
   responsiveRules: z.array(z.string()).default([]),
   accessibilityRules: z.array(z.string()).default([]),

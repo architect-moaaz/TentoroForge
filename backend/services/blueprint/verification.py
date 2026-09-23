@@ -483,7 +483,14 @@ PALETTE_ROLES: dict[str, str] = {
     "accent": "the ONE thing to act on now: the main call to action, the active status, the selected option",
     "accentSubtle": "a tint of the accent for selected chips and highlighted items, with accent-toned text",
     "inverse": "a dark surface for the one card that leads a screen (what is happening now), with light text",
+    "gradientStart": "the brand gradient's first stop — the primary's hue, deep enough to carry light text",
+    "gradientEnd": "its second stop — the same hue turned 20-40° round the wheel (never the accent), "
+                   "so the sign-in panel, a hero band and the leading card have depth without a photo",
 }
+
+#: Roles a palette may leave out: the projection derives the gradient from the
+#: primary and the accent when the design does not state one.
+OPTIONAL_PALETTE_ROLES = frozenset({"gradientStart", "gradientEnd"})
 
 
 def check_palette_roles(doc: dict) -> list[Finding]:
@@ -500,7 +507,8 @@ def check_palette_roles(doc: dict) -> list[Finding]:
     have = {_kebab(k) for k, v in colors.items() if isinstance(v, str) and v}
     return [Finding("Design↔DesignSystem", section="designSystem", artifact_id=f"colors.{role}",
                     detail=f"colors.{role} is missing — {job}")
-            for role, job in PALETTE_ROLES.items() if _kebab(role) not in have]
+            for role, job in PALETTE_ROLES.items()
+            if role not in OPTIONAL_PALETTE_ROLES and _kebab(role) not in have]
 
 
 # ---------------------------------------------------------------------------
@@ -563,6 +571,10 @@ def check_palette_contrast(doc: dict) -> list[Finding]:
     pairs.append(("accent-subtle-foreground", "accent-subtle",
                   "a selected chip's text on the accent tint", _AA_TEXT))
     pairs.append(("inverse-foreground", "inverse", "text on the dark hero card", _AA_TEXT))
+    # A gradient is read at BOTH ends: light text that reads on the first stop
+    # and vanishes on the second is the common failure.
+    pairs.append(("gradient-foreground", "gradient-start", "text on the brand gradient's first stop", _AA_TEXT))
+    pairs.append(("gradient-foreground", "gradient-end", "text on the brand gradient's second stop", _AA_TEXT))
 
     out: list[Finding] = []
     for fg, bg, what, threshold in pairs:

@@ -1691,6 +1691,17 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
         # Headings in the display face without every page having to ask.
         body_rule += ("h1, h2, h3, .font-heading {\n  font-family: var(--font-heading), "
                       "var(--font-body), ui-sans-serif, system-ui, sans-serif;\n}\n")
+    # THE BRAND GRADIENT, AS TWO CLASSES. `bg-gradient-to-br from-gradient-start
+    # to-gradient-end` works too (the tailwind config names both stops); these
+    # are the short spelling pages are told to use, with the primary and the
+    # accent standing in when the design states no gradient of its own.
+    body_rule += (
+        ".bg-brand-gradient {\n  background-image: linear-gradient(135deg, "
+        "hsl(var(--gradient-start, var(--primary))), hsl(var(--gradient-end, var(--accent))));\n"
+        "  color: hsl(var(--gradient-foreground, var(--primary-foreground)));\n}\n"
+        ".text-brand-gradient {\n  background-image: linear-gradient(135deg, "
+        "hsl(var(--gradient-start, var(--primary))), hsl(var(--gradient-end, var(--accent))));\n"
+        "  -webkit-background-clip: text;\n  background-clip: text;\n  color: transparent;\n}\n")
     body = (fonts_import + "html:root {\n" + "\n".join(lines) + "\n}\n" + body_rule) if lines else (
         "/* designSystem states no colour roles yet — the scaffold's own\n"
         "   defaults stand rather than inventing a palette here. */\n")

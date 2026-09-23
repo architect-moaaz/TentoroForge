@@ -2397,6 +2397,60 @@
           "type": "string",
           "default": ""
         },
+        "imagery": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "auth",
+                  "hero",
+                  "empty"
+                ]
+              },
+              "query": {
+                "type": "string",
+                "minLength": 1
+              },
+              "alt": {
+                "type": "string",
+                "default": ""
+              },
+              "url": {
+                "type": "string",
+                "default": ""
+              },
+              "thumbUrl": {
+                "type": "string",
+                "default": ""
+              },
+              "credit": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "link": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "link"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "role",
+              "query"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
         "informationDensity": {
           "type": "string",
           "enum": [

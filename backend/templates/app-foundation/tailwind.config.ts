@@ -52,6 +52,10 @@ const config: Config = {
           DEFAULT: "hsl(var(--inverse, 222 47% 11%))",
           foreground: "hsl(var(--inverse-foreground, 210 20% 98%))",
         },
+        // The brand gradient's stops, for `from-gradient-start to-gradient-end`.
+        "gradient-start": "hsl(var(--gradient-start, var(--primary)))",
+        "gradient-end": "hsl(var(--gradient-end, var(--accent)))",
+        "gradient-foreground": "hsl(var(--gradient-foreground, var(--primary-foreground)))",
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
