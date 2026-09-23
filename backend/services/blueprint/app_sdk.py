@@ -525,8 +525,12 @@ def project_app_sdk(doc: dict, app_root: str | Path) -> list[str]:
     for rel, content in sdk_files(doc).items():
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists() or path.read_text() != content:
-            path.write_text(content)
+        try:
+            unchanged = path.exists() and path.read_text(encoding="utf-8") == content
+        except UnicodeDecodeError:
+            unchanged = False
+        if not unchanged:
+            path.write_text(content, encoding="utf-8")
         written.append(rel)
     return written
 
@@ -678,8 +682,12 @@ def project_code_pages(doc: dict, app_root: str | Path) -> list[str]:
         for rel, content in code_page_files(doc, row).items():
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
-            if not path.exists() or path.read_text() != content:
-                path.write_text(content)
+            try:
+                unchanged = path.exists() and path.read_text(encoding="utf-8") == content
+            except UnicodeDecodeError:
+                unchanged = False
+            if not unchanged:
+                path.write_text(content, encoding="utf-8")
             written.append(rel)
     keep = {str(Path(r).parent) for r in written}
     app = root / "src/app"
@@ -689,15 +697,22 @@ def project_code_pages(doc: dict, app_root: str | Path) -> list[str]:
             if rel_dir in keep:
                 continue
             try:
-                head = page_file.read_text()[:64]
-            except OSError:
+                head = page_file.read_text(encoding="utf-8")[:64]
+            except (OSError, UnicodeDecodeError):
+                # Every generated page is written UTF-8 (see project_code_pages
+                # above); a file that isn't readable as UTF-8 here is not one
+                # of ours, and reading `Path.read_text()` bare on Windows
+                # decodes with the locale codepage (cp1252, not UTF-8) —
+                # `UnicodeDecodeError` is a `ValueError`, not an `OSError`, so
+                # this crashed the whole projection the first time a page
+                # with a real dash or quote in it existed at all.
                 continue
             if head.startswith(CODE_PAGE_MARKER):
                 for name in ("page.tsx", "load.ts", "view.tsx"):
                     (page_file.parent / name).unlink(missing_ok=True)
                 if page_file.parent == root / ROOT_DIR and _ROOT_STUB.exists():
                     # The catch-all imports it: `/` without code is the stub.
-                    page_file.write_text(_ROOT_STUB.read_text())
+                    page_file.write_text(_ROOT_STUB.read_text(encoding="utf-8"), encoding="utf-8")
                     continue
                 floor = _AUTH_FLOORS.get(str(page_file.parent.relative_to(root)))
                 if floor is not None and floor.exists():
@@ -707,7 +722,7 @@ def project_code_pages(doc: dict, app_root: str | Path) -> list[str]:
                     from services.runtime_injector import (
                         _substitute_app_name, _substitute_auth_copy, _substitute_auth_image,
                     )
-                    page_file.write_text(floor.read_text())
+                    page_file.write_text(floor.read_text(encoding="utf-8"), encoding="utf-8")
                     app_doc = doc.get("application") or {}
                     _substitute_app_name(root, app_doc.get("name"), app_doc.get("domain"))
                     _substitute_auth_image(root, app_doc.get("domain"))

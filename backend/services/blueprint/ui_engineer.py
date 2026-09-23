@@ -134,7 +134,7 @@ DIRECTION_SCHEMA: dict[str, Any] = {
 def _kit_exports() -> str:
     lines = []
     for f in sorted(_UI_KIT.glob("*.tsx")):
-        src = f.read_text()
+        src = f.read_text(encoding="utf-8")
         names: list[str] = []
         for block in re.findall(r"export\s*\{([^}]+)\}", src):
             names += [n.strip() for n in block.split(",") if n.strip() and "Variants" not in n]
@@ -650,7 +650,11 @@ def ensure_sdk(doc: dict, app_root: Path) -> None:
         target.mkdir(parents=True, exist_ok=True)
         for f in _SDK_TEMPLATE.glob("*.ts*"):
             dst = target / f.name
-            if not dst.exists() or dst.read_text() != f.read_text():
+            try:
+                unchanged = dst.exists() and dst.read_text(encoding="utf-8") == f.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                unchanged = False
+            if not unchanged:
                 shutil.copyfile(f, dst)
         # The fixed half imports scaffold files a newer scaffold ships
         # (`./auth` → `@/lib/account`); an older tree gets the defaults it lacks.
@@ -670,9 +674,17 @@ def typecheck(doc: dict, app_root: Path, page_id: str, load: str, view: str,
     Only errors in the page's own three files count: the scaffold's modules
     are built with type errors ignored and carry some, and a page is not the
     place they are fixed. Returns the errors, empty when it compiles."""
-    tsc = app_root / "node_modules/.bin/tsc"
-    if not tsc.exists():
+    # npm links every `.bin` entry as `tsc` (a `#!/usr/bin/env node` shebang
+    # script), `tsc.cmd` and `tsc.ps1`, on every platform — never only one.
+    # `subprocess.run([app_root/"node_modules/.bin/tsc", ...])` executed the
+    # shebang script directly on Windows, which has no shebang interpreter:
+    # `OSError: [WinError 193] %1 is not a valid Win32 application`. Asking
+    # `shutil.which` for the name (not the shebang file) resolves the right
+    # one per platform — `tsc.cmd` here, plain `tsc` on POSIX.
+    tsc_path = shutil.which("tsc", path=str(app_root / "node_modules" / ".bin"))
+    if not tsc_path:
         raise RuntimeError(f"no TypeScript compiler under {app_root} — install has not run")
+    tsc = Path(tsc_path)
     ensure_sdk(doc, app_root)
     files = code_page_files(doc, {"page": page_id, "load": load, "view": view})
     if not files:
@@ -683,7 +695,7 @@ def typecheck(doc: dict, app_root: Path, page_id: str, load: str, view: str,
     check.mkdir(parents=True)
     try:
         for rel, content in files.items():
-            (check / Path(rel).name).write_text(content)
+            (check / Path(rel).name).write_text(content, encoding="utf-8")
         (check / "tsconfig.json").write_text(json.dumps({
             "extends": "../../tsconfig.json",
             "compilerOptions": {"incremental": False, "noEmit": True},
@@ -691,7 +703,7 @@ def typecheck(doc: dict, app_root: Path, page_id: str, load: str, view: str,
                         "../../src/types/**/*.d.ts"],
         }))
         proc = subprocess.run([str(tsc), "-p", str(check / "tsconfig.json"), "--pretty", "false"],
-                              cwd=str(app_root), capture_output=True, text=True, timeout=timeout)
+                              cwd=str(app_root), capture_output=True, text=True, encoding="utf-8", timeout=timeout)
         # tsc prints paths relative to its own idea of the cwd — under a
         # symlinked root (`/tmp` on macOS) that is `../../../../tmp/…/<check>/`,
         # so the check directory is looked for anywhere in the path, not at
@@ -748,7 +760,7 @@ def _static_findings(load: str, view: str) -> list[str]:
         out.append("load.ts/view.tsx: calls fetch — read through @/sdk/server, write through workflows.")
     if re.search(r"@/lib/|@/db", load + view):
         out.append("load.ts/view.tsx: imports app internals — only @/sdk, @/sdk/server, @/sdk/client.")
-    if re.search(r"lorem ipsum|TODO|coming soon", view, re.I):
+    if re.search(r"lorem ipsum|coming soon", view, re.I) or re.search(r"\bTODO\b", view):
         out.append("view.tsx: placeholder copy.")
     return out
 

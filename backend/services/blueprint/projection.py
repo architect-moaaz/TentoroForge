@@ -1677,9 +1677,16 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
         query = "&".join("family=" + f.replace(" ", "+") + ":wght@400;500;600;700"
                          for f in dict.fromkeys(families))
         fonts_import = f'@import url("https://fonts.googleapis.com/css2?{query}&display=swap");\n'
-    body_rule = ""
+    # THE SAME GAP, ONE TOKEN OVER. `--font-size-base` was emitted right next
+    # to `--font-body` and had the identical bug: nothing set the body's own
+    # font-size, so picking "18 px" in the Look tab changed the variable and
+    # nothing on the page.
+    body_decls = []
     if (typography or {}).get("fontFamilyBase"):
-        body_rule = "body {\n  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;\n}\n"
+        body_decls.append("  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;")
+    if (typography or {}).get("baseSize"):
+        body_decls.append("  font-size: var(--font-size-base);")
+    body_rule = "body {\n" + "\n".join(body_decls) + "\n}\n" if body_decls else ""
     if (typography or {}).get("fontFamilyHeading"):
         # Headings in the display face without every page having to ask.
         body_rule += ("h1, h2, h3, .font-heading {\n  font-family: var(--font-heading), "

@@ -142,17 +142,32 @@ def _workflow_refs(doc: dict) -> list[dict]:
     ents = {str(e.get("id")): e for e in _live((doc.get("data") or {}).get("entities"))}
     out = []
     for w in _live(doc.get("workflows")):
+        # An input rarely repeats its field's enum values — the workflow step
+        # that writes them already names the entity. When an input shares its
+        # name with a field there, that field's own enum values are its real
+        # options, so a status input still gets a dropdown instead of a blank
+        # text box asking someone to type "In Progress" correctly by hand.
+        target_entity_id = next((s.get("entity") for s in (w.get("steps") or [])
+                                 if isinstance(s, dict) and s.get("entity")), None)
+        target_entity = ents.get(str(target_entity_id or ""))
+        target_fields = {f.get("name"): f for f in (target_entity.get("fields") or [])
+                         if isinstance(f, dict)} if target_entity else {}
         inputs = []
         for inp in w.get("inputs") or []:
             if not isinstance(inp, dict) or not inp.get("name"):
                 continue
             ent = ents.get(str(inp.get("entity") or ""))
+            options = list(inp.get("enumValues") or inp.get("options") or [])
+            if not options:
+                field = target_fields.get(inp.get("name"))
+                if isinstance(field, dict):
+                    options = list(field.get("enumValues") or [])
             inputs.append({"name": inp.get("name"), "kind": inp.get("kind") or "field",
                            "type": inp.get("type") or ("string" if inp.get("kind") == "record" else "string"),
                            "required": bool(inp.get("required", True)),
                            "description": inp.get("description") or "",
                            "entity": ent.get("name") if ent else None,
-                           "options": list(inp.get("enumValues") or inp.get("options") or [])})
+                           "options": options})
         out.append({"id": str(w.get("id")), "key": keys.get(str(w.get("id"))), "name": w.get("name"),
                     "description": w.get("description") or "", "inputs": inputs,
                     "launchedFrom": [str(x) for x in (w.get("launchedFrom") or [])]})

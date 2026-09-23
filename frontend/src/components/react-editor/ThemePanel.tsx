@@ -5,7 +5,7 @@
  * Every change is the Blueprint's design system changing, so every page
  * follows — the canvas at once, the running app on its next build.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -115,16 +115,36 @@ export function ThemePanel() {
 
 function FontField({ value, suggestions, disabled, label, onCommit }: { value: string; suggestions: string[]; disabled: boolean; label: string; onCommit: (v: string) => void }) {
   const [draft, setDraft] = useState(value);
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => setDraft(value), [value]);
-  const id = `font-${label.replace(/\W+/g, "-").toLowerCase()}`;
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!boxRef.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+  const commit = (v: string) => { setDraft(v); setOpen(false); if (v.trim() !== value.trim()) onCommit(v.trim()); };
   return (
-    <div>
+    <div ref={boxRef} className="relative">
       <div className="mb-1 text-[11px] font-medium text-muted-foreground">{label}</div>
-      <Input list={`${id}-list`} className="h-8 text-xs" value={draft} disabled={disabled} aria-label={label} placeholder="Inter, Roboto, Georgia…"
-        style={{ fontFamily: draft || undefined }}
-        onChange={(e) => setDraft(e.target.value)} onBlur={() => { if (draft.trim() !== value.trim()) onCommit(draft.trim()); }}
-        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-      <datalist id={`${id}-list`}>{suggestions.map((s) => <option key={s} value={s} />)}</datalist>
+      <Input className="h-8 text-xs" value={draft} disabled={disabled} aria-label={label} placeholder="Inter, Roboto, Georgia…"
+        autoComplete="off" style={{ fontFamily: draft || undefined }}
+        onFocus={() => setOpen(true)} onClick={() => setOpen(true)}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { if (draft.trim() !== value.trim()) onCommit(draft.trim()); }}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setOpen(false); }} />
+      {open && suggestions.length > 0 && (
+        <div className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+          {suggestions.map((s) => (
+            <button key={s} type="button" style={{ fontFamily: s }}
+              className="flex w-full cursor-default items-center rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+              onMouseDown={(e) => e.preventDefault()} onClick={() => commit(s)}>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
