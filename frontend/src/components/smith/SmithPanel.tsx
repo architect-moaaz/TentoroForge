@@ -54,6 +54,9 @@ import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
+import { STAGE_VERB, labelFor } from "./stages";
+import { OfficeStrip } from "./OfficeStrip";
+import { useOfficeStore } from "@/components/virtual-office";
 import {
   AppTile,
   BlueprintSummary,
@@ -90,42 +93,6 @@ type Greeting = {
 /** Messages sent with each turn — Smith reads the last six; a little slack. */
 const SENT_HISTORY = 10;
 
-const STAGE_VERB: Record<string, string> = {
-  requirements: "Reading what you asked for",
-  application_model: "Modelling the product",
-  figma_intelligence: "Reading the Figma design",
-  ux_architecture: "Arranging the modules and navigation",
-  design_system: "Choosing the colours, type and feel",
-  imagery: "Finding the photographs",
-  brand_design_system: "Applying your brand",
-  figma_design_system: "Holding to the Figma design",
-  data_model: "Naming the entities",
-  entity_fields: "Detailing each entity's fields",
-  integrations: "Noting the third parties",
-  page_contracts: "Deciding the page set",
-  page_details: "Writing each feature's page contracts",
-  content_fields: "Adding the fields the pages need",
-  auth_pages: "Adding sign-in and sign-up",
-  security: "Deciding who may do what",
-  workflows: "Declaring the workflows",
-  workflow_steps: "Authoring each workflow's steps",
-  business_rules: "Writing the rules down",
-  analytics: "Designing the numbers and charts",
-  apis: "Designing the endpoints",
-  page_layouts: "Laying out each page",
-  ui_direction: "Setting the app's look and conventions",
-  page_code: "Writing each page in React",
-  backend: "Generating the backend",
-  frontend: "Generating the frontend",
-  memory: "Remembering the decisions",
-  verification: "Checking its own work",
-  integration: "Wiring it together",
-  assemble: "Building and starting the app",
-  install: "Installing dependencies",
-  database: "Laying out the database",
-  testing: "Writing the tests",
-  preview: "Starting the preview",
-};
 
 /** `4m 12s`, or `48s` — a duration a person reads at a glance. */
 function human(ms: number): string {
@@ -134,48 +101,7 @@ function human(ms: number): string {
                  : `${s}s`;
 }
 
-/** The steps by what each decides — the names a person sees in the plan.
- *  Two pairs read the wrong way round from their keys and are named by what
- *  they DO: `data_model` names the entities, `entity_fields` details them;
- *  `page_contracts` decides the page set, `page_details` writes the contracts. */
-const STAGE_LABEL: Record<string, string> = {
-  requirements: "Requirements",
-  application_model: "Product model",
-  figma_intelligence: "Figma evidence",
-  ux_architecture: "Modules & navigation",
-  design_system: "Design system",
-  imagery: "Photographs",
-  brand_design_system: "Brand tokens",
-  figma_design_system: "Figma design system",
-  data_model: "Entities",
-  entity_fields: "Entity fields",
-  integrations: "Integrations",
-  page_contracts: "Page set",
-  page_details: "Page contracts",
-  content_fields: "Fields the pages need",
-  auth_pages: "Sign-in pages",
-  security: "Roles & permissions",
-  workflows: "Workflows",
-  workflow_steps: "Workflow steps",
-  business_rules: "Business rules",
-  analytics: "Analytics",
-  apis: "API surface",
-  page_layouts: "Page layouts",
-  ui_direction: "Design direction",
-  page_code: "React pages",
-  backend: "Backend code",
-  frontend: "Frontend code",
-  memory: "Decisions",
-  verification: "Verification",
-  integration: "Wiring",
-  assemble: "Build & start",
-  install: "Install",
-  database: "Database schema",
-  testing: "Tests",
-  preview: "Preview",
-};
 
-const labelFor = (key: string) => STAGE_LABEL[key] ?? key;
 
 const _BASE_TITLE =
   typeof document !== "undefined" ? document.title : "Tentoro Forge";
@@ -1241,6 +1167,10 @@ function StageList({
     return () => clearInterval(t);
   }, [run.status]);
   const started = startedAt.current;
+  // The office outlives the request that started the run by a few frames
+  // (the celebration, whoever stayed parked); keyed on the run alone the
+  // strip vanished at exactly the moment there was something to look at.
+  const officeRunActive = useOfficeStore((s) => s.runActive);
 
   return (
     <div className="rounded-lg border bg-card p-3">
@@ -1325,6 +1255,11 @@ function StageList({
           </div>
         </div>
       )}
+
+      {/* WHO IS DOING WHAT, RIGHT NOW. The bar above says how far; the
+          office says what a build actually is — people working side by
+          side, a reviewer sending pages back, a wait for the API. */}
+      {(run.status === "running" || officeRunActive) && <OfficeStrip />}
 
       {/*
         ROUTES THAT WILL 404, SAID OUT LOUD. A page whose composition failed

@@ -19,6 +19,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { OfficeBridge } from "@/components/smith/officeBridge";
+import { useOfficeStore } from "@/components/virtual-office/OfficeStateManager";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -188,6 +190,11 @@ export interface StartOptions {
 
 export function useBlueprintRun(projectId: string | null) {
   const [run, setRun] = useState<BlueprintRun>(EMPTY);
+  // THE OFFICE WATCHES THE SAME STREAM. Every event the panel reduces is
+  // also told to the office, translated into its own vocabulary (see
+  // `officeBridge`), so the animated floor shows the build this panel is
+  // counting — the fan-out, the reviewer, the retries, the strike.
+  const office = useRef(new OfficeBridge());
   const abortRef = useRef<AbortController | null>(null);
   // True while this hook is driving its own stream. A reattached run must not
   // be overwritten by polling, and polling must stop the moment we start one.
@@ -423,6 +430,12 @@ export function useBlueprintRun(projectId: string | null) {
         }
         if (event === "done") gotTerminal = true;
         setRun((prev) => reduce(prev, event, data));
+        try {
+          const tell = useOfficeStore.getState().handleEvent;
+          for (const e of office.current.translate(event, data)) tell(e);
+        } catch {
+          // The office is a picture of the run, never a reason to lose it.
+        }
       };
 
       try {

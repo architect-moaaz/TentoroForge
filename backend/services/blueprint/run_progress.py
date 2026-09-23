@@ -30,7 +30,10 @@ from typing import Any, Callable
 
 #: Ledger events passed through untouched, for the activity list.
 _FORWARDED = ("node:retry", "node:failed", "node:blocked", "node:skipped",
-              "observer:verdict", "observer:repair", "observer:unrepaired")
+              "observer:verdict", "observer:repair", "observer:unrepaired",
+              # An API that stopped answering, and a run that stopped for it:
+              # the office shows the wait and the strike.
+              "node:stalled", "run:paused")
 
 
 class Progress:

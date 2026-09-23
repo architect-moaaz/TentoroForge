@@ -590,6 +590,21 @@ def _unbuilt_pages(doc: dict | None) -> list[dict]:
         return []
 
 
+def _plan_event(plan: list[str], already: Any, awaiting: bool) -> dict:
+    """The plan as the panel and the office read it: the nodes, and — so the
+    office can seat the right people and show who works beside whom — the
+    agent behind each node and the concurrency levels of this plan."""
+    from services.blueprint.orchestrator import DAG, levels
+
+    in_plan = set(plan)
+    return {
+        "nodes": plan, "total": len(plan),
+        "alreadyComplete": sorted(already), "awaitingApproval": awaiting,
+        "agents": {k: DAG[k].agent for k in plan if k in DAG},
+        "levels": [[k for k in lvl if k in in_plan] for lvl in levels() if any(k in in_plan for k in lvl)],
+    }
+
+
 def _report_payload(report: Any, doc: dict | None = None) -> dict:
     """The run outcome, including what did *not* run — and what did not build.
 
@@ -904,9 +919,7 @@ async def generate_via_blueprint(
                 already = completed_nodes(svc.doc, confirmed=nodes_recorded_done(output_dir) or None)
                 plan = [k for k in plan if k not in already]
 
-            emit("plan", {"nodes": plan, "total": len(plan),
-                          "alreadyComplete": sorted(already),
-                          "awaitingApproval": awaiting and not req.approved})
+            emit("plan", _plan_event(plan, already, awaiting and not req.approved))
 
             # A single client rather than a router: per-node model choice is a
             # tuning decision, and defaulting every node to one model keeps the
@@ -2187,9 +2200,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     already = completed_nodes(svc.doc, confirmed=nodes_recorded_done(output_dir) or None)
     plan = [k for k in plan if k not in already]
 
-    emit("plan", {"nodes": plan, "total": len(plan),
-                  "alreadyComplete": sorted(already),
-                  "awaitingApproval": not approved})
+    emit("plan", _plan_event(plan, already, not approved))
 
     usage = RunUsage.for_app(svc)
     router = tiered_router()

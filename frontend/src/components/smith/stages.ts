@@ -1,0 +1,83 @@
+/**
+ * The build's steps, by what a person sees: the name in the plan and the
+ * verb while it runs. Keys are the DAG's; two pairs read the wrong way round
+ * from their keys and are named by what they DO — `data_model` names the
+ * entities, `entity_fields` details them; `page_contracts` decides the page
+ * set, `page_details` writes the contracts.
+ */
+export const STAGE_LABEL: Record<string, string> = {
+  requirements: "Requirements",
+  application_model: "Product model",
+  figma_intelligence: "Figma evidence",
+  ux_architecture: "Modules & navigation",
+  design_system: "Design system",
+  imagery: "Photographs",
+  brand_design_system: "Brand tokens",
+  figma_design_system: "Figma design system",
+  data_model: "Entities",
+  entity_fields: "Entity fields",
+  integrations: "Integrations",
+  page_contracts: "Page set",
+  page_details: "Page contracts",
+  content_fields: "Fields the pages need",
+  auth_pages: "Sign-in pages",
+  security: "Roles & permissions",
+  workflows: "Workflows",
+  workflow_steps: "Workflow steps",
+  business_rules: "Business rules",
+  analytics: "Analytics",
+  apis: "API surface",
+  page_layouts: "Page layouts",
+  ui_direction: "Design direction",
+  page_code: "React pages",
+  backend: "Backend code",
+  frontend: "Frontend code",
+  memory: "Decisions",
+  verification: "Verification",
+  integration: "Wiring",
+  assemble: "Build & start",
+  install: "Install",
+  database: "Database schema",
+  testing: "Tests",
+  preview: "Preview",
+};
+
+export const STAGE_VERB: Record<string, string> = {
+  requirements: "Reading what you asked for",
+  application_model: "Modelling the product",
+  figma_intelligence: "Reading the Figma design",
+  ux_architecture: "Arranging the modules and navigation",
+  design_system: "Choosing the colours, type and feel",
+  imagery: "Finding the photographs",
+  brand_design_system: "Applying your brand",
+  figma_design_system: "Holding to the Figma design",
+  data_model: "Naming the entities",
+  entity_fields: "Detailing each entity's fields",
+  integrations: "Noting the third parties",
+  page_contracts: "Deciding the page set",
+  page_details: "Writing each feature's page contracts",
+  content_fields: "Adding the fields the pages need",
+  auth_pages: "Adding sign-in and sign-up",
+  security: "Deciding who may do what",
+  workflows: "Declaring the workflows",
+  workflow_steps: "Authoring each workflow's steps",
+  business_rules: "Writing the rules down",
+  analytics: "Designing the numbers and charts",
+  apis: "Designing the endpoints",
+  page_layouts: "Laying out each page",
+  ui_direction: "Setting the app's look and conventions",
+  page_code: "Writing each page in React",
+  backend: "Generating the backend",
+  frontend: "Generating the frontend",
+  memory: "Remembering the decisions",
+  verification: "Checking its own work",
+  integration: "Wiring it together",
+  assemble: "Building and starting the app",
+  install: "Installing dependencies",
+  database: "Laying out the database",
+  testing: "Writing the tests",
+  preview: "Starting the preview",
+};
+
+export const labelFor = (key: string): string => STAGE_LABEL[key] ?? key;
+export const verbFor = (key: string): string => STAGE_VERB[key] ?? labelFor(key);

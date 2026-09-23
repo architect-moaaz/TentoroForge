@@ -331,6 +331,7 @@ export const AGENT_REGISTRY: AgentInfo[] = [
 
   // ── Logic ─────────────────────────────────────────────────────────────
   { id: "workflow", name: "Workflow", spriteKey: "workflow_agent", room: "logic", role: "Wires up the workflows", color: "#4F46E5" },
+  { id: "analytics", name: "Analytics", spriteKey: "mechanic", room: "data", role: "Designs the numbers and charts each page carries", color: "#B45309" },
   { id: "business_rules", name: "Business Rules", spriteKey: "rules_writer", room: "logic", role: "Writes the business rules", color: "#6D28D9" },
 
   // ── Security ──────────────────────────────────────────────────────────
