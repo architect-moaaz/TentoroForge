@@ -109,11 +109,9 @@ function Lockup({ size }: { size: 36 | 48 }) {
 function BrandPanel({ variant }: { variant: "full" | "panel" }) {
   return (
     <div
-      className="relative flex h-full flex-col justify-between overflow-hidden p-10 lg:p-12"
-      style={{
-        background:
-          "linear-gradient(150deg, hsl(var(--primary)) 0%, hsl(var(--primary)) 45%, hsl(var(--accent)) 100%)",
-      }}
+      // The design's own gradient (tokens.css `.bg-brand-gradient`), which falls
+      // back to primary → accent when the design states no stops of its own.
+      className="bg-brand-gradient relative flex h-full flex-col justify-between overflow-hidden p-10 lg:p-12"
     >
       {/* Depth: soft radial bloom + a fine grid — geometry, not clip-art. */}
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.22]"
