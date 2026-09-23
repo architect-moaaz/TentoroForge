@@ -60,7 +60,7 @@ def run(command: str, payload: dict[str, Any], *, app_root: Path | None = None,
     if result is None:
         try:
             proc = subprocess.run(["node", str(SCRIPT), command], input=json.dumps(payload),
-                                  capture_output=True, text=True, timeout=timeout, env=env)
+                                  capture_output=True, text=True, encoding="utf-8", timeout=timeout, env=env)
         except FileNotFoundError as exc:
             raise AdapterError("no-node", "Node.js is not installed where the platform runs, so pages "
                                           "cannot be read or edited here.") from exc

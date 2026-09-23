@@ -58,6 +58,7 @@ class NodeWorker:
         try:
             self._proc = subprocess.Popen(["node", str(self.script), *self.args, "--serve"], stdin=subprocess.PIPE,
                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1,
+                                          encoding="utf-8",
                                           cwd=str(self.cwd) if self.cwd else None, env=self.env)
         except OSError as exc:
             raise WorkerError(f"could not start node: {exc}") from exc

@@ -16,7 +16,11 @@ export function humanise(name: string): string {
 function fieldKind(input: WorkflowInput): string {
   const t = (input.type || "").toLowerCase();
   if (input.options?.length) return "select";
-  if (t.includes("text") && !t.includes("string")) return "textarea";
+  // "text" itself means an ordinary short field (a title, a name) in this
+  // schema's own vocabulary — `t.includes("text")` matched that literal
+  // string too, so every short title turned into a giant textarea. Only a
+  // longer, explicitly-named type ("longtext", "richtext"…) means multi-line.
+  if (t !== "text" && t.includes("text") && !t.includes("string")) return "textarea";
   if (t === "email") return "email";
   if (t === "date") return "date";
   if (t === "timestamp" || t === "datetime") return "datetime";

@@ -158,6 +158,9 @@ export interface EditorState {
   /** The application's look, read when the Theme tab opens. */
   theme: ThemeDoc | null;
   themeLoading: boolean;
+  /** A look change that arrived while another save was in flight — merged in
+   *  and sent the moment the current one finishes, so it is never dropped. */
+  pendingThemePatch: ThemePatch | null;
 
   smith: SmithState;
 
@@ -353,6 +356,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   livePatches: [],
   theme: null,
   themeLoading: false,
+  pendingThemePatch: null,
 
   smith: emptySmith(),
 
@@ -656,7 +660,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   saveTheme: async (patch) => {
     const { projectId, busy } = get();
-    if (!projectId || busy) return false;
+    if (!projectId) return false;
+    // Something else is mid-save (another colour's blur, a page edit — one
+    // shared `busy`). Dropping this silently lost real edits (a colour typed
+    // right after another looked unchanged); merged in and sent as soon as
+    // the in-flight save clears, instead.
+    if (busy) {
+      set((s) => ({ pendingThemePatch: { ...s.pendingThemePatch, ...patch, colors: { ...s.pendingThemePatch?.colors, ...patch.colors } } }));
+      return false;
+    }
     set({ busy: true });
     try {
       const theme = await editorApi.setTheme(projectId, patch);
@@ -669,6 +681,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return false;
     } finally {
       set({ busy: false });
+      const pending = get().pendingThemePatch;
+      if (pending) { set({ pendingThemePatch: null }); void get().saveTheme(pending); }
     }
   },
 

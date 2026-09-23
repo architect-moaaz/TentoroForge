@@ -80,7 +80,7 @@ def _run(project: Project, payload: dict[str, Any], *, timeout: float) -> dict[s
     if result is None:
         try:
             proc = subprocess.run(["node", str(SCRIPT)], input=json.dumps(payload), capture_output=True, text=True,
-                                  timeout=timeout, cwd=str(project.app_root), env=env)
+                                  encoding="utf-8", timeout=timeout, cwd=str(project.app_root), env=env)
         except subprocess.TimeoutExpired as exc:
             raise EditorError(504, "jit-timeout", "Rendering the page took too long.") from exc
         try:
