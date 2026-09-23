@@ -27,6 +27,8 @@ COLOR_ROLES: list[dict[str, Any]] = [
     {"role": "surfaceMuted", "group": "Surfaces", "label": "Quiet areas", "about": "Table headers, disabled parts"},
     {"role": "border", "group": "Surfaces", "label": "Lines", "about": "Borders and dividers"},
     {"role": "inverse", "group": "Surfaces", "label": "Dark bars", "about": "A sidebar or footer drawn dark"},
+    {"role": "gradientStart", "group": "Brand", "label": "Gradient, from", "about": "The sign-in panel and hero bands start here"},
+    {"role": "gradientEnd", "group": "Brand", "label": "Gradient, to", "about": "…and blend to this"},
     {"role": "textPrimary", "group": "Text", "label": "Text", "about": "Most words"},
     {"role": "textSecondary", "group": "Text", "label": "Quieter text", "about": "Hints, captions, labels"},
     {"role": "danger", "group": "Status", "label": "Danger", "about": "Errors, delete"},
