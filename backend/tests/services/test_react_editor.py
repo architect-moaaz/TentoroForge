@@ -1032,3 +1032,20 @@ def test_the_adapter_worker_answers_many_calls_from_one_process_and_recovers_fro
     assert third["ok"] and third["nodes"]["r0"]["type"] == "b" and w._proc.pid != pid, "a fresh process after a crash"
     # the adapter's own calls go through it, and are the same answers
     assert adapter.model("export default function View() { return <i>x</i>; }")["nodes"]["r0"]["type"] == "i"
+
+
+def test_an_import_of_a_default_export_never_becomes_a_named_one_and_a_default_only_import_is_extended_beside():
+    view = "export default function View() { return <div />; }\n"
+    # next/link's Link is its default, whatever Smith calls it
+    assert adapter.patch(view, [{"op": "addImport", "source": "next/link", "names": ["Link"]}]).startswith('import Link from "next/link";')
+    # already there under another name: a second default import beside it, not a refusal
+    aliased = 'import NextLink from "next/link";\n' + view
+    out = adapter.patch(aliased, [{"op": "addImport", "source": "next/link", "names": ["Link"]}])
+    assert out.startswith('import NextLink from "next/link";\nimport Link from "next/link";\n')
+    # names onto a default-only import: a second statement, not "cannot extend"
+    react = 'import React from "react";\n' + view
+    out = adapter.patch(react, [{"op": "addImport", "source": "react", "names": ["useState"]}])
+    assert out.startswith('import React from "react";\nimport { useState } from "react";\n')
+    # and a braced import is still extended in place
+    braced = 'import { useState } from "react";\n' + view
+    assert adapter.patch(braced, [{"op": "addImport", "source": "react", "names": ["useEffect"]}]).startswith('import { useState, useEffect } from "react";')

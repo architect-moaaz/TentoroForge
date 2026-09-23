@@ -845,6 +845,10 @@ function localOf(name) {
   return name.includes(":") ? name.slice(name.indexOf(":") + 1) : name;
 }
 
+//: Modules whose one export is the default: a request for `Link` from
+//: "next/link" means its default, never a named `{ Link }` that does not exist.
+const DEFAULT_EXPORT_MODULES = new Set(["next/link", "next/image", "next/head", "next/script", "next/dynamic", "next/font/google", "next/font/local"]);
+
 function opAddImport(source, m, op) {
   // A name already bound by ANY import stays as it is — the page may take
   // `widgets` from "@/sdk/widgets" rather than "@/sdk", and a second binding
@@ -852,21 +856,31 @@ function opAddImport(source, m, op) {
   // type-only binding as well.
   const typeOnly = !!op.typeOnly;
   const bound = new Set(m.imports.filter((i) => typeOnly || !i.typeOnly).flatMap((i) => i.names.map(localOf)));
-  const names = (op.names ?? []).filter((nm) => nm && !bound.has(localOf(nm)));
+  const asDefault = DEFAULT_EXPORT_MODULES.has(op.source);
+  const names = (op.names ?? []).map((nm) => (asDefault && nm && !nm.includes(":") ? `default:${nm}` : nm))
+    .filter((nm) => nm && !bound.has(localOf(nm)));
   if (!names.length) return source;
   const existing = m.imports.find((i) => i.source === op.source && !!i.typeOnly === typeOnly);
-  if (existing) {
-    const missing = names.filter((nm) => !existing.names.includes(nm));
-    if (!missing.length) return source;
-    const raw = source.slice(existing.span[0], existing.span[1]);
-    const brace = raw.lastIndexOf("}");
-    if (brace < 0) throw new PatchError("import-shape", `Cannot extend the import from ${op.source}.`);
-    const before = raw.slice(0, brace).replace(/\s*,?\s*$/, "");
-    const spaced = before.endsWith("{") ? before + " " : before + ", ";
-    return splice(source, existing.span[0], existing.span[1], `${spaced}${missing.join(", ")} ${raw.slice(brace)}`);
-  }
   const defaults = names.filter((n) => n.startsWith("default:")).map(localOf);
   const named = names.filter((n) => !n.includes(":"));
+  if (existing) {
+    const missing = named.filter((nm) => !existing.names.includes(nm));
+    const raw = source.slice(existing.span[0], existing.span[1]);
+    const brace = raw.lastIndexOf("}");
+    if (missing.length && brace >= 0 && !defaults.length) {
+      const before = raw.slice(0, brace).replace(/\s*,?\s*$/, "");
+      const spaced = before.endsWith("{") ? before + " " : before + ", ";
+      return splice(source, existing.span[0], existing.span[1], `${spaced}${missing.join(", ")} ${raw.slice(brace)}`);
+    }
+    if (!missing.length && !defaults.length) return source;
+    // A default under a new name, or names onto a default-only import: a
+    // second import statement from the same module is plain JavaScript.
+    const clause = [defaults[0], missing.length ? `{ ${missing.join(", ")} }` : ""].filter(Boolean).join(", ");
+    const line = `import ${typeOnly ? "type " : ""}${clause} from "${op.source}";\n`;
+    let at = existing.span[1];
+    if (source[at] === "\n") at++;
+    return splice(source, at, at, line);
+  }
   const clause = [defaults[0], named.length ? `{ ${named.join(", ")} }` : ""].filter(Boolean).join(", ");
   const line = `import ${typeOnly ? "type " : ""}${clause} from "${op.source}";\n`;
   const last = m.imports.length ? m.imports[m.imports.length - 1] : null;
