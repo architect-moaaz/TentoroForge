@@ -71,10 +71,12 @@ def test_flag_on_bootstrap_routes_to_bootstrap_flow(tmp_path, monkeypatch):
     assert "ATS" in r.answer
 
 
-def test_flag_on_iteration_asks_when_understand_returns_clarification(
-    tmp_path, monkeypatch,
-):
-    """A project past bootstrap + ambiguous ask ⇒ ask_user."""
+def test_flag_on_iteration_asks_when_the_chooser_asks(tmp_path, monkeypatch):
+    """A project past bootstrap + ambiguous ask ⇒ ask_user.
+
+    Smith v4: there is no `understand_ask_fn`; the chooser is the seam. Its
+    first question is sent to look (nothing has been read), its second stands.
+    """
     bp = Blueprint.load(project_id="p1", output_dir=str(tmp_path))
     bp.set_domain(name="ATS", primary_actors=[], core_verbs=[],
                   distinctive_shape="", why="")
@@ -84,8 +86,8 @@ def test_flag_on_iteration_asks_when_understand_returns_clarification(
         project_id="p1", output_dir=str(tmp_path),
         message="fix it", source="user",
         session_overrides={
-            "understand_ask_fn": lambda m, ctx: {
-                "clarification_needed": "which page were you on?",
+            "next_step_fn": lambda ask, page, seen, history: {
+                "tool": "ask_user", "args": {"question": "Which page were you on?"}, "why": "",
             },
             "iteration_move_fn": lambda u, out: None,
         },

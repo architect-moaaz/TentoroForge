@@ -117,14 +117,23 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
             return _seams_missing("bootstrap", str(exc))
         return _to_response(result, intent="bootstrap")
 
-    # kind == "iteration"
-    try:
-        result = session.run_iteration(
-        user_message=intent.message, history=req.history,
+    # kind == "iteration" — Smith v4: the loop is the front door. No
+    # interpretation call before it; `understand_ask_fn` is no longer a seam.
+    # `next_step_fn` (the chooser), `iteration_move_fn` and `guards_fn` still
+    # win when injected, which is what keeps the handler testable.
+    from services.smith4 import handle as smith4_handle
+    overrides = req.session_overrides or {}
+    out = smith4_handle(
+        project_id=req.project_id, output_dir=req.output_dir,
+        message=intent.message, history=req.history,
+        choose=overrides.get("next_step_fn"),
+        move=overrides.get("iteration_move_fn"),
+        guards=overrides.get("guards_fn"),
+        reasoning=req.reasoning_fn,
     )
-    except AssertionError as exc:
-        return _seams_missing("iteration", str(exc))
-    return _to_response(result, intent="iteration")
+    return ChatV2Response(status=out.status, answer=out.said, options=list(out.options),
+                          diff_summary=out.diff_summary, touched_paths=list(out.touched),
+                          intent="iteration")
 
 
 # --------------------------------------------------------------------------- #

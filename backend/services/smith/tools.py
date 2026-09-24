@@ -87,6 +87,13 @@ TERMINAL: tuple[tuple[str, str, tuple[str, ...]], ...] = (
      "turn with `question`. Asking is not a failure — acting on the wrong "
      "reading is.",
      ("question",)),
+    ("propose_plan",
+     "The message asks for MORE THAN ONE thing. `steps`: every ask in it, each "
+     "a sentence in their words, in the order they should happen — data-model "
+     "changes before the screens that show them; several asks about one screen "
+     "are one step. Ends the turn: the plan is shown and agreed to once, and "
+     "nothing is done before the yes. Not for a message that asks for one thing.",
+     ("steps",)),
 )
 
 TERMINAL_NAMES: frozenset[str] = frozenset(name for name, _d, _a in TERMINAL)
@@ -158,7 +165,7 @@ def render() -> str:
     lines.append("")
     lines.append("Ending the turn:")
     for name, said, args in TERMINAL:
-        shown = ", ".join(f"{a}: string" for a in args) or "no arguments"
+        shown = ", ".join(f"{a}: {'array' if a == 'steps' else 'string'}" for a in args) or "no arguments"
         lines.append(f"- `{name}` ({shown})")
         lines.append(f"    {' '.join(said.split())}")
     return "\n".join(lines)

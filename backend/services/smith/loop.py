@@ -112,8 +112,8 @@ def already_done(tool: str, args: dict, observations: list[Observation]) -> bool
     return any(_identity(o.tool, o.args) == want for o in observations)
 
 
-_PROMPT = """You are changing an application someone owns. You have already \
-taken the steps below; decide the NEXT one, or end the turn.
+_PROMPT = """You are changing an application someone owns. Decide the NEXT \
+step, or end the turn. The steps already taken this turn, if any, are below.
 
 THE CONVERSATION SO FAR:
 {history}
@@ -175,6 +175,12 @@ A QUESTION ALREADY ASKED ABOVE WAS ASKED FROM THE SLICE ALONE. "Does the
 page already have X?", "which file is it in?", "what is it called?" — the
 code answers these. Read, then act. Ask the person only for what nothing in
 the application can tell you, and then ask exactly that.
+
+SEVERAL ASKS IN ONE MESSAGE ARE A PLAN, NOT A GUESS ABOUT WHICH ONE. "Add a
+phone number, show it on the form and make it required" is three; end the
+turn with `propose_plan` and every ask in their words, and they agree once.
+One thing asked for in several words is not a plan: "rename the delete
+button to archive" is one step. A yes to a plan already shown is not a plan.
 
 END WITH `answer` when they asked a question rather than for a change, or when
 the honest outcome is that nothing needed doing. AN ANSWER ALREADY GIVEN ABOVE
