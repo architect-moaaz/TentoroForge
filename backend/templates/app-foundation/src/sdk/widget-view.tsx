@@ -18,6 +18,9 @@ type Row = Record<string, string | number | null>;
 export interface WidgetViewData {
   rows: Row[];
   value: number | null;
+  /** A metric read over a range: its change against the period before (0.12 = up 12%). */
+  previous?: number | null;
+  delta?: number | null;
 }
 
 type Format = "number" | "currency" | "percent" | "duration";
@@ -136,9 +139,12 @@ export function WidgetView({ widget, data, height = 260, currency = "USD", onSel
   const format = formatOf(widget.unit);
 
   if (widget.kind === "metric") {
+    const delta = data?.delta;
     return (
       <div className={className}>
-        <MetricTile label={widget.label} value={data?.value ?? (null as unknown as number)} format={format} />
+        <MetricTile label={widget.label} value={data?.value ?? (null as unknown as number)} format={format}
+                    {...(delta != null && Number.isFinite(delta)
+                      ? { delta: { value: Math.abs(delta), direction: delta >= 0 ? "up" : "down" } } : {})} />
       </div>
     );
   }

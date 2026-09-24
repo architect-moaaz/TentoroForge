@@ -78,7 +78,7 @@ export async function total(entity: string, fn: string, field: string, where?: a
   return vals.length;
 }
 export type QueryRow = Record<string, string | number | null>;
-export interface WidgetData { rows: QueryRow[]; value: number | null }
+export interface WidgetData { rows: QueryRow[]; value: number | null; previous?: number | null; delta?: number | null }
 export interface DateRange { from?: string; to?: string }
 export type QueryOptions<E, M> = any; export type Measure<E> = any; export type Dimension<E> = any;
 function bucketOf(v: any, bucket: string): string {
@@ -158,7 +158,13 @@ export async function runWidget(widget: any, opts: any = {}): Promise<WidgetData
   const rows = runQuery(src.entity, { measures: src.measures, dimensions: src.dimensions, where: { ...src.filter, ...(opts.where ?? {}) }, sort: src.sort, limit: src.limit });
   const single = !src.dimensions?.length;
   const first = src.measures[0]?.key;
-  return { rows, value: single && first ? Number(rows[0]?.[first] ?? 0) : null };
+  const value = single && first ? Number(rows[0]?.[first] ?? 0) : null;
+  // A sample delta, so a dashboard previews with its KPIs in context.
+  if (single && src.timeField && opts.range?.from && opts.range?.to && value != null) {
+    const previous = Math.max(1, Math.round(value * 0.85));
+    return { rows, value, previous, delta: (value - previous) / previous };
+  }
+  return { rows, value };
 }
 // THE SAME SURFACE AS THE REAL \`@/sdk/server\`, OR THE PAGE WILL NOT BUILD.
 // \`similar()\` arrived with image search and this shim was not told, so any

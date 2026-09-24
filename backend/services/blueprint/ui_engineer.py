@@ -246,7 +246,8 @@ query(entity, { measures: { [key]: { fn: "count" } | { fn: "count_distinct" | "m
 myAccount(): Promise<Row | null>
    The signed-in person's own record — the account entity's row, whose id IS their login's id
    (`$user.id` in a workflow). Null when signed out or when the application has no account entity.
-runWidget(widgets.x, { range?, where? }): Promise<WidgetData>      // WidgetData = { rows: QueryRow[]; value: number | null }
+runWidget(widgets.x, { range?, where? }): Promise<WidgetData>      // WidgetData = { rows: QueryRow[]; value: number | null; previous?: number | null; delta?: number | null }
+                                                                    // a metric read with `range` carries `delta` vs the period before (0.12 = up 12%); <WidgetView /> shows it
    Reads one of the page's declared widgets exactly as the Blueprint defines it. `value` is the number of a
    metric or gauge. `where` narrows it (a record page passes its own id: { customerId: params.id }).
 similar(entity, { image?: ctx.searchParams.image, text?: ctx.searchParams.q, limit? }): Promise<{ rows: (Row & { similarity })[]; error: string | null }>
