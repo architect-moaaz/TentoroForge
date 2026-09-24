@@ -9,7 +9,7 @@ and a screen can be removed (`test_smith_removes_a_page`).
 
 from __future__ import annotations
 
-from services.smith.limits import answer, cannot
+from services.smith.limits import answer
 from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP
 
 DOC = {
@@ -19,13 +19,15 @@ DOC = {
 }
 
 
-def test_each_refusal_is_a_verb_the_classifier_can_reach():
-    for verb in ("rename_entity", "change_field_type", "edit_api", "reorder"):
+def test_each_refusal_is_a_verb_the_loop_can_reach():
+    """No gate in front of the loop: a refusal is a verb whose outcome is
+    `limits.answer`, and the table says which those are."""
+    from services.smith4.verbs import PERFORM, honest_refusal
+    for verb in ("rename_entity", "change_field_type", "edit_api"):
         assert verb in REQUIRED_BY_VERB and verb in VERB_HELP, verb
-        assert cannot(verb)
-    assert not cannot("remove") and not cannot("rename_field") and not cannot("revert")
-    # It was the fifth of these until a screen could actually be removed.
-    assert "remove_page" in REQUIRED_BY_VERB and not cannot("remove_page")
+        assert PERFORM[verb] is honest_refusal
+    for verb in ("remove", "rename_field", "revert", "remove_page", "reorder"):
+        assert PERFORM[verb] is not honest_refusal
 
 
 def test_a_screen_is_no_longer_answered_here_at_all():
@@ -65,7 +67,7 @@ def test_the_turn_says_why_and_offers_the_nearest_thing(tmp_path):
     """`reorder` stands in for what `remove_page` used to demonstrate here."""
     import json
 
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     forge = tmp_path / ".forge" / "blueprint"
     forge.mkdir(parents=True)

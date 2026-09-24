@@ -328,7 +328,7 @@ def _written(project: Path, out: dict) -> Path:
 # ------------------------------------------------------------- the turn itself
 
 def _session(project, verb, monkeypatch, reader):
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     monkeypatch.setattr(records_out, "postgres_reader", reader)
     return SmithSession(

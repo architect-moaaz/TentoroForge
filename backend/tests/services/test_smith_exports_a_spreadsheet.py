@@ -245,9 +245,9 @@ def test_the_verb_needs_nothing_because_all_of_them_names_no_entity():
 
 def test_the_model_and_the_tool_loop_both_know_about_it():
     from services import smith_tools
-    from services.smith.understand_ask import _PROMPT
+    from services.smith.tools import render as _catalogue
 
-    assert "export_data" in _PROMPT and "spreadsheet" in _PROMPT
+    assert "export_data" in _catalogue() and "spreadsheet" in _catalogue()
     assert "export_data" in smith_tools.READONLY_HANDLERS
     entry = [t for t in smith_tools.TOOL_CATALOG if t["name"] == "export_data"][0]
     assert "READS ONLY" in entry["desc"]
@@ -262,7 +262,7 @@ def test_it_is_in_the_list_smith_gives_when_asked_what_it_can_do():
 
 
 def test_the_turn_hands_back_the_file_and_reports_no_change(svc, tmp_path, db):
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     session = SmithSession(project_id="proj1", output_dir=str(tmp_path),
                            guards_fn=lambda *a, **kw: [],

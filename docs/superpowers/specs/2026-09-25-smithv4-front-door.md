@@ -88,6 +88,38 @@ detour entirely and its brief names lines 16 and 17.
 same four pre-existing failures.
 
 ## 6. Not yet
+
+Decided 2026-09-25: **self-heal, the verify pass, the journey verifier's
+autofix and verify & fix are reimplemented on v4** rather than kept on the
+legacy agent. Each is a turn whose ask comes from the platform instead of a
+person — a runtime error, a rendered page, a failed journey — and whose steps
+are the same reads, writes and verbs. That makes `agents/smith_agent.py` and
+`smith_tools.py` deletable, with their consumers (`self_healing`,
+`self_verify_pass`, `journey_verifier/smith_autofix`, the legacy route in
+`routers/generate.py`), as a second deletion after the front door's.
+
 - **`write_section`** — the entity, API and rules writers exposed to the loop the way `write_page_code` exposes the UI engineer. Closes `rename_entity`, `change_field_type`, `edit_api`.
-- **Deleting the old front door**: `understand_ask.py`, `smith_session._iterate/_perform/_loop` and the adapters, `limits.py`, `capabilities.nearest`, the phrasebook's dispatcher reading, `agents/smith_agent.py` + `smith_tools.py`. After measurement, not before.
+- ~~Deleting the old front door~~ **Done 2026-09-25**, in two halves:
+  - *Gone*: `understand_ask()` and its prompt (the module keeps only the shape
+    of an understanding and the normalisers the loop applies); `SmithSession`'s
+    entire iteration half — `run_iteration`, `_iterate`, `_perform`, `_loop`
+    and twenty-five adapter methods, ~1,600 lines (bootstrap stays);
+    `limits.cannot`; `capabilities.nearest` and its word arithmetic; the
+    phrasebook's AST reading of the if-chain (it reads `PERFORM` now, and
+    `move_requires` reads `tree_edit`).
+  - *Kept, deliberately*: `agents/smith_agent.py` + `smith_tools.py` and their
+    consumers — the second deletion, once self-heal, the verify pass and the
+    journey verifier exist on v4.
+  - The ~250 seam tests that drove `run_iteration` with an injected
+    understanding now run through `tests/services/_front_door.py`, a
+    test-only adapter that turns the understanding into a v4 turn's first
+    step. Production has no such thing.
+  - Four things the deletion turned up and fixed in v4: `rename` declared
+    five required fields of which three were descriptions (now `element_label`
+    + `target_file`); `ask_user` carried no chips; a plan proposed inside an
+    agreed plan's step replaced the plan instead of splicing into it; the
+    phrasebook coloured `rebuild` as acting. And a gap with known answers —
+    "Which record?" — now ends the turn with those answers as chips rather
+    than going back to the model. The 28 example sentences the old prompt
+    quoted per verb live in `verbs.VERB_EXAMPLES` and render in the catalogue.
 - **Bootstrap** through the same loop.

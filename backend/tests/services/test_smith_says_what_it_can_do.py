@@ -49,25 +49,6 @@ def test_the_answer_covers_each_group_in_plain_words():
         assert ident not in said, ident
 
 
-def test_the_unknown_verb_reply_is_the_same_list(tmp_path):
-    """One message whose entire job is "here is what I can do" must not have
-    a different, shorter answer than the question that asks it."""
-    from services.smith_session import SmithSession
-
-    session = SmithSession(
-        project_id="p1", output_dir=str(tmp_path),
-        guards_fn=lambda *a, **kw: [],
-        understand_ask_fn=lambda m, ctx, **kw: {"verb": "refactor_everything"},
-        iteration_move_fn=lambda *a, **kw: None)
-    result = session.run_iteration(user_message="refactor the codebase")
-    assert result.status == "needs_user"
-    # Nothing in the ask is close to anything Smith knows, so the whole list
-    # is the honest answer; an ask that IS close is offered the closest few as
-    # chips instead (see test_smith_never_dead_ends).
-    assert result.answer.startswith("I did not recognise that as something I can do")
-    assert cap.summary() in result.answer
-
-
 def test_help_is_a_command_the_chat_answers_itself():
     from routers.blueprint_generate import _lifecycle_verb
 

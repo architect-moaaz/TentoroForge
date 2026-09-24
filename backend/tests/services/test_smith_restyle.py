@@ -136,8 +136,8 @@ def test_the_summary_says_what_moved(svc, tmp_path):
 def test_the_verb_and_the_tool_both_reach_the_one_implementation(monkeypatch, tmp_path):
     import services.smith_tools as smith_tools
     from services.smith.verbs import REQUIRED_BY_VERB, missing_fields
-    from services.smith.understand_ask import _PROMPT
-    assert REQUIRED_BY_VERB["restyle"] == {"change"} and '"restyle"' in _PROMPT and "restyle needs:" in _PROMPT
+    from services.smith.tools import render as _catalogue
+    assert REQUIRED_BY_VERB["restyle"] == {"change"} and "`restyle`" in _catalogue() and "`restyle` (" in _catalogue()
     assert missing_fields({"verb": "restyle"}) == ["change"]
     entry = next(t for t in smith_tools.TOOL_CATALOG if t["name"] == "restyle")
     assert "edit_page" in entry["desc"] and "restyle" in smith_tools.READONLY_HANDLERS
@@ -147,7 +147,7 @@ def test_the_verb_and_the_tool_both_reach_the_one_implementation(monkeypatch, tm
                         lambda output_dir, change, **kw: called.append(change) or
                         {"applied": True, "edited_paths": ["src/app/tokens.css"], "diff_summary": "Restyled."})
     assert smith_tools.READONLY_HANDLERS["restyle"](str(tmp_path), {"change": "green"})["applied"]
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
     session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=lambda _d: [],
                            understand_ask_fn=lambda m, c, history=None: {"verb": "restyle", "change": "green theme"},
                            iteration_move_fn=lambda *a, **k: None)

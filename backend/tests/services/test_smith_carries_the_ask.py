@@ -47,10 +47,12 @@ def test_the_whole_ask_is_what_was_asked_then_what_was_answered():
     assert pending_ask.joined("add a calculator", "add a calculator") == "add a calculator"
 
 
-def test_a_turn_carries_the_ask_from_the_turn_that_asked(tmp_path):
+def test_a_turn_carries_the_ask_from_the_turn_that_asked(tmp_path, monkeypatch):
+    import services.smith4.verbs as _v4
+    monkeypatch.setitem(_v4.PERFORM, "compose_route", _v4.PERFORM["compose_route"])
     """The session's own contract: a clarification keeps the ask, and the next
     turn hands the whole of it to the seam."""
-    from services.smith_session import SmithSession, TurnResult
+    from tests.services._front_door import SmithSession, TurnResult
 
     asked_with: list[str] = []
 
@@ -65,8 +67,10 @@ def test_a_turn_carries_the_ask_from_the_turn_that_asked(tmp_path):
                          guards_fn=lambda *a, **kw: [],
                          understand_ask_fn=_understand,
                          iteration_move_fn=lambda *a, **kw: None)
-        s._compose = lambda verb, understanding, ask: (          # noqa: ARG005
-            asked_with.append(ask) or TurnResult(status="resolved", answer="done"))
+        from services.smith4 import verbs as v4
+        from services.smith4.outcome import Outcome
+        v4.PERFORM["compose_route"] = lambda ctx, u: (               # noqa: ARG005
+            asked_with.append(ctx.ask) or Outcome(status="resolved", said="done"))
         return s
 
     first = _session().run_iteration(user_message="add a simple arithmetic calculator")

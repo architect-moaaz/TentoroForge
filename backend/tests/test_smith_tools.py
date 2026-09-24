@@ -393,7 +393,7 @@ def test_a_request_smith_has_no_move_for_is_not_reported_as_no_change():
     """
     from pathlib import Path as _P
 
-    from services import smith_session
+    from services.smith4 import verbs as smith_session
     from services.smith.verbs import REQUIRED_BY_VERB
 
     # A composition is expressible, and needs a route rather than a label.
@@ -403,7 +403,7 @@ def test_a_request_smith_has_no_move_for_is_not_reported_as_no_change():
 
     src = _P(smith_session.__file__).read_text(encoding="utf-8")
     # The turn dispatches on the verb before it reaches the rename path.
-    assert 'if verb in ("compose_route", "add_widgets")' in src
+    assert '"compose_route": compose, "add_widgets": compose' in src
     # And a dispatcher that ran and found nothing names what it searched for,
     # so it cannot be mistaken for "I had no move".
     assert "could not find it" in src
@@ -412,7 +412,7 @@ def test_a_request_smith_has_no_move_for_is_not_reported_as_no_change():
 def test_the_no_match_message_names_what_was_searched():
     from pathlib import Path as _P
 
-    from services import smith_session
+    from services.smith4 import verbs as smith_session
 
     src = _P(smith_session.__file__).read_text(encoding="utf-8")
     assert "editing the nearest thing" in src

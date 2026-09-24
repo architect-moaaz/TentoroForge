@@ -41,9 +41,9 @@ WHERE EACH FACT COMES FROM
   verbs reach a handler (they change the application), and which are answered
   where they are dispatched and change nothing. This is the only place that
   knows, and it knows it in control flow rather than in a table.
-* `limits.cannot` / `limits.answer` — the verbs the code itself declares it
+* `smith4.verbs.honest_refusal` / `limits.answer` — the verbs the code itself declares it
   recognises and cannot serve. Called, not copied.
-* `verbs.VERB_HELP` and `understand_ask._PROMPT` — every sentence the code
+* `verbs.VERB_HELP`, rendered by `tools.render` — every sentence the code
   quotes as an example of asking for something. A sentence the phrasebook
   calls dead that the code now quotes is the exact shape of the revert
   staleness, caught by name.
@@ -79,59 +79,68 @@ from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP, missing_fields
 #: only thing it was collected for.
 CORPUS_PATH = Path(__file__).with_name("phrasebook_corpus.yaml")
 
-#: The module whose control flow decides what a verb does, and the methods that
-#: hold it. Named rather than searched: if any of them moves, this fails
-#: loudly, which is the right way for a drift detector to meet a refactor — and
-#: it did. Since the turn became a loop (`2026-09-24-smith-as-a-loop`) the
-#: dispatcher is two methods: `_iterate` decides whether a verb runs at all
-#: (the slot gate lives there), `_perform` carries it out (the verb chain and
-#: the move moved there whole, so a second step is carried out by the code that
-#: carries out the first). Read in that order, which is the order they run in.
-DISPATCH_MODULE = Path(__file__).resolve().parents[1] / "smith_session.py"
-DISPATCH_METHODS: tuple[str, ...] = ("_iterate", "_perform")
-
-#: A sentence the code quotes as an example of asking for something. This is
-#: `capabilities._EXAMPLE` — the code's own rule for "a quoted example long
-#: enough to say what is meant" — and a test asserts the two stay identical.
-#: The floor is what keeps `quoted_under` from matching a phrasebook sentence
-#: on a word: "undo" is four characters and is inside a great many sentences.
 _QUOTE = re.compile(r"[\"“]([^\"“”]{8,70})[\"”]")
 
-#: Anything in quotation marks at all, however short. Used only for
-#: PROVENANCE — whether a sentence marked `source: code` is still written in
-#: the code, compared whole rather than by containment — because "undo" and
-#: "go back" are real examples of asking for `revert` and are under the floor.
+
 _ANY_QUOTE = re.compile(r"[\"“]([^\"“”]{1,80})[\"”]")
 
-#: The four colours. `answers` is its own colour on purpose: a recognised ask
-#: that is refused with a reason is neither a success nor a silent gap, and
-#: scoring it as either is what made the hand-written list wrong in both
-#: directions at once.
+
 ACTS = "acts"
+
+
 ASKS = "asks"
+
+
 ANSWERS = "answers"
+
+
 NOTHING = "nothing"
 
 
-# ---------------------------------------------------------------------------
-# What the dispatcher does with a verb, read from the dispatcher.
-# ---------------------------------------------------------------------------
-
-#: A verb reaches a handler that changes the application.
 VIA_HANDLER = "handler"
-#: A verb is answered where it is dispatched, with a reason, and returns.
+
+
 VIA_DISPATCH_ANSWER = "dispatch-answer"
-#: A verb the code declares it recognises and cannot serve (`limits.cannot`).
+
+
 VIA_LIMIT = "limit"
-#: A verb no branch returns for: it falls through to the move at the end of
-#: the method, which edits the screen. `rename` and `remove` are these.
+
+
 VIA_MOVE = "move"
-#: A lifecycle word the router answers before any understanding runs.
+
+
 VIA_COMMAND = "command"
-#: A consent gate in the router: the words that start a build or a verify.
+
+
 VIA_GATE = "gate"
-#: No verb: nothing in the code takes this.
+
+
 VIA_NONE = "none"
+
+
+def _verbs_in_test(test: ast.expr) -> tuple[str, frozenset[str]]:
+    """The verbs a branch condition selects, and how it selects them.
+
+    `("eq" | "in", verbs)` for a branch about named verbs, `("ne", verbs)` for
+    one that EXCLUDES them — the slot gate is written that way — and
+    `("call:<name>", ())` for a branch guarded by a predicate, which is how
+    the refusals are selected.
+    """
+    if isinstance(test, ast.Compare) and isinstance(test.left, ast.Name) \
+            and test.left.id == "verb" and len(test.ops) == 1:
+        op, comparator = test.ops[0], test.comparators[0]
+        if isinstance(comparator, ast.Constant) and isinstance(comparator.value, str):
+            if isinstance(op, ast.Eq):
+                return "eq", frozenset({comparator.value})
+            if isinstance(op, ast.NotEq):
+                return "ne", frozenset({comparator.value})
+        if isinstance(op, ast.In) and isinstance(comparator, (ast.Tuple, ast.List, ast.Set)):
+            return "in", frozenset(
+                e.value for e in comparator.elts
+                if isinstance(e, ast.Constant) and isinstance(e.value, str))
+    if isinstance(test, ast.Call) and isinstance(test.func, ast.Name):
+        return f"call:{test.func.id}", frozenset()
+    return "", frozenset()
 
 
 @dataclass(frozen=True)
@@ -167,134 +176,51 @@ class Classified:
         return str(self.entry.get("id") or "")
 
 
-def _dispatch_body() -> list[ast.stmt]:
-    """Every statement of the dispatcher, in the order the turn runs them."""
-    source = DISPATCH_MODULE.read_text(encoding="utf-8")
-    found: dict[str, ast.FunctionDef] = {}
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.FunctionDef) and node.name in DISPATCH_METHODS:
-            found[node.name] = node
-    missing = [m for m in DISPATCH_METHODS if m not in found]
-    if missing:
-        raise LookupError(
-            f"{DISPATCH_MODULE.name} has no {', '.join(missing)}: the dispatcher "
-            "this reads has moved, and every classification below is guesswork "
-            "until this points at it again.")
-    out: list[ast.stmt] = []
-    for name in DISPATCH_METHODS:
-        out += found[name].body
-    return out
-
-
-def _verbs_in_test(test: ast.expr) -> tuple[str, frozenset[str]]:
-    """The verbs a branch condition selects, and how it selects them.
-
-    `("eq" | "in", verbs)` for a branch about named verbs, `("ne", verbs)` for
-    one that EXCLUDES them — the slot gate is written that way — and
-    `("call:<name>", ())` for a branch guarded by a predicate, which is how
-    the refusals are selected.
-    """
-    if isinstance(test, ast.Compare) and isinstance(test.left, ast.Name) \
-            and test.left.id == "verb" and len(test.ops) == 1:
-        op, comparator = test.ops[0], test.comparators[0]
-        if isinstance(comparator, ast.Constant) and isinstance(comparator.value, str):
-            if isinstance(op, ast.Eq):
-                return "eq", frozenset({comparator.value})
-            if isinstance(op, ast.NotEq):
-                return "ne", frozenset({comparator.value})
-        if isinstance(op, ast.In) and isinstance(comparator, (ast.Tuple, ast.List, ast.Set)):
-            return "in", frozenset(
-                e.value for e in comparator.elts
-                if isinstance(e, ast.Constant) and isinstance(e.value, str))
-    if isinstance(test, ast.Call) and isinstance(test.func, ast.Name):
-        return f"call:{test.func.id}", frozenset()
-    return "", frozenset()
-
-
-def _returned_handler(body: list[ast.stmt]) -> str:
-    """The `self._x(...)` a branch RETURNS, or "".
-
-    Returned, not merely called: `rebuild` calls `self._stale_plan_reason()`
-    to decide which sentence to say, and saying a sentence is not doing the
-    thing. What separates a verb that changes the application from one that
-    explains why it will not is whether the turn's result IS a handler's.
-    """
-    for node in ast.walk(ast.Module(body=list(body), type_ignores=[])):
-        if isinstance(node, ast.Return) and isinstance(node.value, ast.Call):
-            func = node.value.func
-            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) \
-                    and func.value.id == "self":
-                return func.attr
-    return ""
-
-
-def _returns_result_literal(body: list[ast.stmt]) -> bool:
-    for node in ast.walk(ast.Module(body=list(body), type_ignores=[])):
-        if isinstance(node, ast.Return) and isinstance(node.value, ast.Call) \
-                and isinstance(node.value.func, ast.Name) \
-                and node.value.func.id == "TurnResult":
-            return True
-    return False
-
-
 @lru_cache(maxsize=1)
 def dispatch_facts() -> dict[str, VerbFacts]:
     """Every verb, and what the dispatcher does with it now.
 
-    Read in source order, because the dispatcher is read in source order: the
-    first branch for a verb that ALWAYS returns is the one that decides it.
-    `remove_field` matches two branches — a confirmation gate that may return
-    and the definition handler that always does — and it is the second that
-    says what the verb is.
+    Since Smith v4 the dispatcher is a table — `smith4.verbs.PERFORM` — so
+    this reads the table: which function a verb reaches, and whether that
+    function is a handler, the tree edit proved by git, or the honest
+    refusal. A verb in the table and not in `REQUIRED_BY_VERB` (or the
+    reverse) is reported, which is how a new verb meets the loop.
     """
+    from services.smith4 import verbs as v4
+
     facts: dict[str, VerbFacts] = {}
-    refused = frozenset(v for v in REQUIRED_BY_VERB if limits.cannot(v))
-    for statement in _dispatch_body():
-        if not isinstance(statement, ast.If):
+    for verb in REQUIRED_BY_VERB:
+        fn = v4.PERFORM.get(verb)
+        if fn is None:
             continue
-        how, verbs = _verbs_in_test(statement.test)
-        if how not in ("eq", "in") or not verbs:
-            continue
-        if not isinstance(statement.body[-1], ast.Return):
-            continue                     # may fall through; not decisive
-        handler = _returned_handler(statement.body)
-        for verb in verbs:
-            if verb in facts:
-                continue
-            if handler:
-                facts[verb] = VerbFacts(verb, VIA_HANDLER, handler, statement.lineno)
-            elif _returns_result_literal(statement.body):
-                facts[verb] = VerbFacts(verb, VIA_DISPATCH_ANSWER, "", statement.lineno)
-    for verb in sorted(REQUIRED_BY_VERB):
-        if verb in facts:
-            continue
-        # THE CODE'S OWN DECLARATION, CALLED. `limits.cannot` names the asks
-        # it recognises and will not serve, and the branch that serves them is
-        # guarded by that predicate rather than by the verb's name — so there
-        # is nothing in the syntax tree to read, and the right thing to read
-        # is the predicate.
-        facts[verb] = VerbFacts(verb, VIA_LIMIT if verb in refused else VIA_MOVE)
+        if fn is v4.honest_refusal:
+            facts[verb] = VerbFacts(verb, VIA_LIMIT, fn.__name__, fn.__code__.co_firstlineno)
+        elif fn is v4.rebuild:
+            # Recognised, answered with a reason, changes nothing: the build is
+            # started from the card, not from chat.
+            facts[verb] = VerbFacts(verb, VIA_DISPATCH_ANSWER, fn.__name__, fn.__code__.co_firstlineno)
+        elif fn is v4.tree_edit:
+            facts[verb] = VerbFacts(verb, VIA_MOVE, fn.__name__, fn.__code__.co_firstlineno)
+        else:
+            facts[verb] = VerbFacts(verb, VIA_HANDLER, fn.__name__, fn.__code__.co_firstlineno)
     return facts
+
+
+def _refused(verb: str) -> bool:
+    """Whether the table answers `verb` with the honest refusal."""
+    fact = dispatch_facts().get(verb)
+    return bool(fact) and fact.via == VIA_LIMIT
 
 
 @lru_cache(maxsize=1)
 def slot_gate_skips() -> frozenset[str]:
-    """Verbs the dispatcher does NOT hold to `missing_fields` before acting.
+    """Verbs the loop does NOT hold to `missing_fields` before acting.
 
-    Written in the code as `if verb != "rename"`, because a rename's fields are
-    enforced earlier, in the understanding. Read rather than assumed: a second
-    verb added to that exemption changes what a bare sentence does, and the
-    document would otherwise go on saying it asks.
+    None. The old dispatcher excused `rename` because its fields were enforced
+    by the classifier; there is no classifier, and `smith4.turn` holds every
+    call to the fields its verb declares after trying the message and the
+    document for them. Kept as a function so the document keeps saying so.
     """
-    for statement in _dispatch_body():
-        if not isinstance(statement, ast.If):
-            continue
-        how, verbs = _verbs_in_test(statement.test)
-        if how == "ne" and any(
-                isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id == "missing_fields"
-                for node in ast.walk(statement)):
-            return frozenset(verbs)
     return frozenset()
 
 
@@ -311,14 +237,11 @@ def _normalise(text: str) -> str:
 def _quoted(pattern_source: str) -> dict[str, tuple[str, ...]]:
     """Every sentence the code quotes, and the verbs it is quoted under.
 
-    Two surfaces, because a sentence reaches a verb through either: the help
-    text, which is what the chips offer and what `capabilities.nearest` ranks,
-    and the understanding prompt, which is what the model reads when it picks
-    a verb. A phrasebook sentence that appears in either is a sentence the
-    code claims to serve.
+    One surface since Smith v4: the help text, which is what the catalogue
+    renders for the model (`tools.render`) and what the chips offer. A
+    phrasebook sentence that appears in it is a sentence the code claims to
+    serve.
     """
-    from services.smith.understand_ask import _PROMPT
-
     pattern = re.compile(pattern_source)
     found: dict[str, set[str]] = {}
 
@@ -333,27 +256,10 @@ def _quoted(pattern_source: str) -> dict[str, tuple[str, ...]]:
     for verb, help_text in VERB_HELP.items():
         for quote in pattern.findall(help_text):
             keep(quote, verb)
-    # WRAPPED, THEN READ AS ONE LINE. The prompt is a wrapped string literal,
-    # so half its examples are split across a line break and eleven spaces of
-    # indent — "I cannot see fathersName on the registration\n     page" is
-    # over seventy characters and was silently not an example at all.
-    prompt = " ".join(_PROMPT.split())
-    # The prompt names each verb and then quotes examples of it, in that
-    # order, so a quote belongs to the last verb named before it.
-    verb_at: list[tuple[int, str]] = []
-    for verb in REQUIRED_BY_VERB:
-        for hit in re.finditer(rf'"{re.escape(verb)}"', prompt):
-            verb_at.append((hit.start(), verb))
-    verb_at.sort()
-    for hit in pattern.finditer(prompt):
-        owner = ""
-        for position, verb in verb_at:
-            if position < hit.start():
-                owner = verb
-            else:
-                break
-        if owner:
-            keep(hit.group(1), owner)
+    from services.smith.verbs import VERB_EXAMPLES
+    for verb, examples in VERB_EXAMPLES.items():
+        for example in examples:
+            keep(example, verb)
     return {sentence: tuple(sorted(verbs)) for sentence, verbs in found.items()}
 
 
@@ -470,28 +376,45 @@ def gates() -> dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def move_requires() -> frozenset[str]:
-    """What the move at the end of the dispatcher asks for before it runs.
+    """What the tree edit asks for before it runs.
 
-    `rename` is the one verb the slot gate is skipped for, so the only thing
-    standing between a bare "rename it" and an edit is the dispatcher's own
-    `if not target_file: ... status="asked"`. Read, so that a sentence naming
+    Read off `smith4.verbs.tree_edit`: a local bound from a field of the
+    understanding (`target, label = _s(u, "target_file"), …`) whose absence
+    returns an `Outcome(status="asked", …)`. Read, so that a sentence naming
     no screen is coloured the way the product colours it.
     """
-    wanted: set[str] = set()
-    for statement in _dispatch_body():
-        if not isinstance(statement, ast.If):
+    import inspect
+
+    from services.smith4 import verbs as v4
+
+    tree = ast.parse(inspect.getsource(v4.tree_edit))
+    bound: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
             continue
-        test = statement.test
+        targets = node.targets[0]
+        names = [t.id for t in targets.elts] if isinstance(targets, ast.Tuple) \
+            else [targets.id] if isinstance(targets, ast.Name) else []
+        values = list(node.value.elts) if isinstance(node.value, ast.Tuple) else [node.value]
+        for name, value in zip(names, values):
+            if isinstance(value, ast.Call) and getattr(value.func, "id", "") == "_s" \
+                    and len(value.args) == 2 and isinstance(value.args[1], ast.Constant):
+                bound[name] = str(value.args[1].value)
+    wanted: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
         if not (isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)
                 and isinstance(test.operand, ast.Name)):
             continue
-        for node in ast.walk(statement):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-                    and node.func.id == "TurnResult" \
-                    and any(kw.arg == "status"
-                            and getattr(kw.value, "value", "") == "asked"
-                            for kw in node.keywords):
-                wanted.add(test.operand.id)
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Call) and getattr(inner.func, "id", "") == "Outcome" \
+                    and any(kw.arg == "status" and getattr(kw.value, "value", "") == "asked"
+                            for kw in inner.keywords):
+                field = bound.get(test.operand.id)
+                if field:
+                    wanted.add(field)
     return frozenset(wanted)
 
 
@@ -538,7 +461,7 @@ def classify(entry: dict[str, Any]) -> Classified:
     said_by = quoted_under(say)
     if said_by:
         return Classified(
-            entry, ANSWERS if all(limits.cannot(v) for v in said_by) else ACTS,
+            entry, ANSWERS if all(_refused(v) for v in said_by) else ACTS,
             VIA_HANDLER,
             because=("the code now quotes this sentence as an example of "
                      + ", ".join(f"`{v}`" for v in said_by)))
@@ -671,17 +594,17 @@ def findings(path: Path | None = None) -> list[Finding]:
     works if one verb is excused is not a special case, it is a defect in the
     verb set, and it is reported here under its own name.
     """
-    from services.smith import capabilities
-    from services.smith.understand_ask import _PROMPT
+    from services.smith import capabilities, tools
 
     out: list[Finding] = []
 
-    unchosen = tuple(sorted(v for v in REQUIRED_BY_VERB if f'"{v}"' not in _PROMPT))
+    offered = tools.render()
+    unchosen = tuple(sorted(v for v in REQUIRED_BY_VERB if f"`{v}`" not in offered))
     if unchosen:
         out.append(Finding(
             "verb the model is never offered",
-            "in the verb table and not named in the understanding prompt, so "
-            "nothing can ever be classified as it",
+            "in the verb table and not in the catalogue the loop renders, so "
+            "nothing can ever be chosen as it",
             unchosen))
 
     unhelped = tuple(sorted(set(REQUIRED_BY_VERB) - set(VERB_HELP)))
@@ -697,12 +620,12 @@ def findings(path: Path | None = None) -> list[Finding]:
     facts = dispatch_facts()
     answered_off_table = tuple(sorted(
         v for v, f in facts.items()
-        if f.via == VIA_DISPATCH_ANSWER and not limits.cannot(v)))
+        if f.via == VIA_DISPATCH_ANSWER and not _refused(v)))
     if answered_off_table:
         out.append(Finding(
             "verb refused outside the refusal table",
             "answered with a reason and changing nothing, but absent from "
-            "`limits.cannot`, so every list built from that table advertises "
+            "`honest_refusal`, so every list built from that table advertises "
             "it as something the chat can do",
             answered_off_table))
 

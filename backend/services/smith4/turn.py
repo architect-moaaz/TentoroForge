@@ -91,6 +91,15 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None) -> Outcome:
             understanding = _understanding_for(ctx, tool, args)
             gaps = missing_fields(understanding)
             if gaps:
+                # A GAP THE APPLICATION CAN LIST IS THE PERSON'S TO CHOOSE. "Which
+                # record?" with the records as chips is a click; the model
+                # guessing one is a guess. A gap with no known answers goes back
+                # to the model, which may know it or may ask.
+                from services.smith.slot_options import ask_for
+                question, choices = ask_for(gaps, ctx.doc(), understanding)
+                if choices:
+                    return _finished(landed, touched, Outcome(status="asked", said=question,
+                                                              options=choices))
                 observations.append(Observation(
                     tool=tool, args=args, status="error",
                     said=(f"`{tool}` needs {', '.join(gaps)}, and the call did not carry them "
@@ -156,6 +165,20 @@ def _plan(ctx: Ctx, args: dict, landed: list[str], touched: list[str]) -> Outcom
         return _finished(landed, touched, Outcome(status="asked", said=plan_mod.as_question(steps, [])))
     confirm.remember(ctx.out, confirm.fingerprint("plan", key))
     planned, over = plan_mod.split(steps)
+    # A STEP THAT SPLITS KEEPS THE PLAN IT IS PART OF. Its sub-steps go in
+    # front of what was still to do; replacing the plan lost "show the area"
+    # and "take the current location" after "next" split the step before
+    # them (UAT jubyt8jk).
+    rest = [r for r in plan_mod.peek(ctx.out) if r not in planned]
+    if rest:
+        plan_mod.remember_all(ctx.out, planned + over + rest)
+        question = plan_mod.as_question(planned, []).replace(
+            "\n\nShall I work through them?",
+            "\n\nAfter those, the rest of the plan is still waiting:\n"
+            + "\n".join(f"- {a}" for a in over + rest) + "\n\nShall I work through them?")
+        return Outcome(status="asked", said=question,
+                       options=[plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL, plan_mod.REWORD_LABEL],
+                       touched=list(touched))
     plan_mod.remember(ctx.out, planned)
     return Outcome(status="asked", said=plan_mod.as_question(planned, over),
                    options=[plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL, plan_mod.REWORD_LABEL],
@@ -166,8 +189,9 @@ def _ended(tool: str, args: dict, landed: list[str], touched: list[str],
            last: Outcome | None) -> Outcome:
     if tool == "ask_user":
         question = str(args.get("question") or "").strip()
+        options = [str(o).strip() for o in (args.get("options") or []) if str(o).strip()]
         if question:
-            return Outcome(status="asked", said=question, touched=list(touched))
+            return Outcome(status="asked", said=question, options=options, touched=list(touched))
     if tool == "answer" and not landed:
         said = str(args.get("text") or "").strip()
         if said:

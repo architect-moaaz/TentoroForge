@@ -131,14 +131,12 @@ def test_every_verb_is_exercised_by_a_sentence():
 def test_refusals_are_scored_as_neither_success_nor_gap(rows):
     """The deliberate recognise-and-refuse verbs get their own colour.
 
-    `limits.cannot` names them; each says why in a clause and offers the
+    `smith4.verbs.honest_refusal` names them; each says why in a clause and offers the
     nearest thing that works. Counting one as a success overstates the
     product, and counting it as a silent gap understates it — and the closing
     section is built on that distinction.
     """
-    from services.smith import limits
-
-    refusals = sorted(v for v in REQUIRED_BY_VERB if limits.cannot(v))
+    refusals = sorted(v for v in REQUIRED_BY_VERB if phrasebook._refused(v))
     assert refusals, "the refusal table is empty; the distinction has gone"
     for verb in refusals:
         said = [row for row in rows
@@ -152,25 +150,24 @@ def test_refusals_are_scored_as_neither_success_nor_gap(rows):
 
 
 def test_the_dispatcher_accounts_for_every_verb():
-    """The syntax-tree read of `_iterate` is the only thing that knows whether
-    a verb changes the application. A refactor that moves a branch out of it
-    must be seen here rather than quietly colouring everything `acts`."""
+    """The table (`smith4.verbs.PERFORM`) is the only thing that knows whether
+    a verb changes the application. A verb dropped from it must be seen here
+    rather than quietly colouring everything `acts`."""
     facts = phrasebook.dispatch_facts()
     assert set(facts) == set(REQUIRED_BY_VERB)
     handled = {v for v, f in facts.items() if f.via == phrasebook.VIA_HANDLER}
-    assert len(handled) > 20, (
-        "almost nothing reaches a handler any more, which means the dispatcher "
-        f"is no longer being read: check {phrasebook.DISPATCH_METHOD} in "
-        f"{phrasebook.DISPATCH_MODULE.name}")
-    assert phrasebook.dispatch_facts()["revert"].handler == "_revert"
+    assert len(handled) > 20, "almost nothing reaches a handler: the table is no longer being read"
+    assert facts["revert"].handler == "revert"
+    assert facts["rename"].via == phrasebook.VIA_MOVE
+    assert facts["rename_entity"].via == phrasebook.VIA_LIMIT
 
 
 def test_the_slot_gate_exemption_is_read_from_the_code():
-    """`rename` is the one verb the dispatcher does not hold to
-    `missing_fields`, and the one whose bare sentences therefore depend on the
-    move's own check instead. A second exemption changes what a bare sentence
-    does and must be re-read, not absorbed."""
-    assert phrasebook.slot_gate_skips() == frozenset({"rename"})
+    """No verb is excused from `missing_fields` any more — the old dispatcher
+    excused `rename` because the classifier enforced its fields; there is no
+    classifier. What the tree edit still asks for before it runs is read off
+    it, not assumed."""
+    assert phrasebook.slot_gate_skips() == frozenset()
     assert phrasebook.move_requires() == frozenset({"target_file"})
 
 

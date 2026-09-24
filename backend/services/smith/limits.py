@@ -16,6 +16,10 @@ nearest thing that can — offered as sentences a click can say.
 
 Nothing here changes anything. That is the point: an honest refusal that hands
 over the next move is a better turn than a wrong change.
+
+No gate lives here any more. Smith v4 has no `cannot()` in front of the loop:
+these four are ordinary verbs whose outcome is this module's answer, and §0 of
+the loop spec makes each a case to close (`write_section`).
 """
 
 from __future__ import annotations
@@ -65,9 +69,4 @@ def answer(verb: str, understanding: dict, doc: dict) -> tuple[str, list[str]]:
     return ("", [])
 
 
-def cannot(verb: str) -> bool:
-    """Whether this verb is one of the honest refusals."""
-    return verb in {"rename_entity", "change_field_type", "edit_api", "reorder"}
-
-
-__all__ = ["answer", "cannot"]
+__all__ = ["answer"]

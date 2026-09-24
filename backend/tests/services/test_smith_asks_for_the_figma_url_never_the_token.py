@@ -21,15 +21,23 @@ persisted.
 """
 import pytest
 
-from services.smith.understand_ask import _PROMPT, _env_name_only
+from services.smith.tools import render as _catalogue
+from services.smith.understand_ask import _env_name_only
 from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP
-from services.smith_session import SmithSession
+from tests.services._front_door import SmithSession
 
 
 def _session(output_dir="/tmp/does-not-exist"):
-    s = SmithSession.__new__(SmithSession)
-    s.output_dir = output_dir
-    return s
+    """The verb, as v4 carries it out — the old session method is gone."""
+    from services.smith4.verbs import Ctx, connect_figma
+    from tests.services._front_door import TurnResult
+
+    class _S:
+        def _connect_figma(self, u):
+            o = connect_figma(Ctx(output_dir=output_dir, project_id="p", message="", ask=""),
+                       {**u, "verb": "connect_figma"})
+            return TurnResult(status=o.status, answer=o.said, options=list(o.options))
+    return _S()
 
 
 # --------------------------------------------------------------- the contract
@@ -43,14 +51,15 @@ def test_the_verb_help_says_never_the_token():
 
 
 def test_the_prompt_tells_the_model_to_ask_for_a_name():
-    assert "connect_figma" in _PROMPT
-    assert "NAME of the environment variable" in _PROMPT
+    assert "`connect_figma`" in _catalogue()
+    assert "NAME" in _catalogue()
 
 
 def test_the_prompt_tells_the_model_what_to_do_with_a_pasted_token():
     """The obvious reply to "I need your Figma token" is to paste one, so the
     model is told the shape of that mistake and how to answer it."""
-    assert "figd_" in _PROMPT
+    from services.smith.loop import _PROMPT
+    assert "figd_" in _PROMPT and "NAME" in _PROMPT
 
 
 # ------------------------------------------------------- the persistence guard

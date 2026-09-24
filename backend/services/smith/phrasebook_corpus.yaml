@@ -87,12 +87,6 @@ open_findings:
   - about: command declared and answered nowhere
     verbs: [approve, define]
 
-  # `REQUIRED_BY_VERB["rename"]` demands `screen`, `current_behavior` and
-  # `desired_behavior`; an understanding has no such fields, and the prompt
-  # asks for `new_value`, which the table does not list. The gate is skipped
-  # for `rename` rather than never passing — see `slot_gate_skips`.
-  - about: required slot the understanding cannot carry
-    verbs: [rename]
 
 sentences:
 
@@ -144,7 +138,7 @@ sentences:
 
   - id: screens-rename-bare
     say: "Call it something clearer"
-    checked: {colour: asks, via: none, missing: [target_file]}
+    checked: {colour: asks, via: none, missing: [element_label, target_file]}
     source: phrasebook
     reaches: {verb: rename, states: []}
 
@@ -1895,7 +1889,7 @@ sentences:
 
   - id: refuse-move-chart-on-dashboard
     say: "Move the chart above the table on the dashboard"
-    checked: {colour: answers, via: limit}
+    checked: {colour: asks, via: none, missing: [target_file]}
     source: phrasebook
     reaches: {verb: reorder, states: [route]}
 

@@ -474,7 +474,18 @@ def connect_figma(ctx: Ctx, u: dict) -> Outcome:
             "dialog, like https://figma.com/design/<key>/<name>?node-id=1-2"))
     treat_as = _design_scope(u.get("treat_as"))
     if not treat_as:
-        return Outcome(status="asked", said=_SCOPE_QUESTION, options=["Specification", "Reference"])
+        # ASKED ONCE, BECAUSE THE TWO ANSWERS BUILD DIFFERENT APPLICATIONS — and
+        # the question says what each costs: "specification" quietly means no
+        # sign-in and no create forms, and that belongs in the question, not
+        # in the built app.
+        return Outcome(status="asked", options=["Specification", "Reference"], said=(
+            "Before I pull it in — is this design the SPECIFICATION or a REFERENCE?\n\n"
+            "• Specification: I build exactly the screens you drew and nothing else. No "
+            "sign-in, no lists behind the numbers, no forms to create what they show, "
+            "unless they are in the file.\n"
+            "• Reference: the screens become requirements and the design language, and "
+            "the application is built around them — usually more pages than frames.\n\n"
+            "Say “specification” or “reference”."))
     try:
         out = connect(ctx.out, figma_url=url, token_env=token_env, treat_as=treat_as)
     except FigmaConnectError as exc:

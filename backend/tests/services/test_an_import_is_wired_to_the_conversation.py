@@ -19,7 +19,7 @@ import pytest
 
 from services.blueprint.service import BlueprintService
 from services.smith import capabilities, data_import as di
-from services.smith.understand_ask import _PROMPT
+from services.smith.tools import render as _catalogue
 from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP, is_known, missing_fields
 
 CONTRACT = Path(__file__).resolve().parents[2] / "contracts" / "blueprint.schema.json"
@@ -36,8 +36,8 @@ def test_the_verb_asks_for_which_records_and_nothing_else():
 
 
 def test_the_model_is_told_what_it_is_for():
-    assert "import_data" in _PROMPT
-    assert "spreadsheet" in _PROMPT
+    assert "`import_data`" in _catalogue()
+    assert "spreadsheet" in _catalogue()
     help_text = VERB_HELP["import_data"]
     assert "customer spreadsheet" in help_text
     assert "writes nothing" in help_text
@@ -112,7 +112,7 @@ def svc(tmp_path):
 
 
 def _session(svc, verb: dict):
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     return SmithSession(project_id="p1", output_dir=str(svc.output_dir),
                         guards_fn=lambda *a, **kw: [],

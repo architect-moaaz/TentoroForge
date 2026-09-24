@@ -190,10 +190,10 @@ def test_an_unknown_workflow_is_named_with_the_choices(svc):
 
 def test_the_verbs_and_the_tools_share_the_seam(monkeypatch, tmp_path):
     import services.smith_tools as smith_tools
-    from services.smith.understand_ask import _PROMPT
+    from services.smith.tools import render as _catalogue
     from services.smith.verbs import REQUIRED_BY_VERB
     for v in ("add_workflow", "edit_workflow", "remove_workflow"):
-        assert v in REQUIRED_BY_VERB and f'"{v}"' in _PROMPT and f"{v} needs:" in _PROMPT
+        assert v in REQUIRED_BY_VERB and f"`{v}`" in _catalogue() and f"`{v}` (" in _catalogue()
     assert REQUIRED_BY_VERB["edit_workflow"] == {"workflow", "change"}
     calls = []
     monkeypatch.setattr("services.smith.workflow_change.run",
@@ -204,7 +204,7 @@ def test_the_verbs_and_the_tools_share_the_seam(monkeypatch, tmp_path):
     assert smith_tools.READONLY_HANDLERS["remove_workflow"](str(tmp_path), {"workflow": "Delete Nurse"})["applied"]
     assert [c[0] for c in calls] == ["add_workflow", "remove_workflow"]
     assert calls[0][1]["workflow"] == "email the admin" and calls[1][1]["workflow"] == "Delete Nurse"
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
     session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=lambda _d: [],
                            understand_ask_fn=lambda m, c, history=None: {"verb": "edit_workflow", "workflow": "Delete Nurse", "change": "ask for a reason"},
                            iteration_move_fn=lambda *a, **k: None)

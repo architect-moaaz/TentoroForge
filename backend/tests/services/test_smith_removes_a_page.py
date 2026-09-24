@@ -25,8 +25,7 @@ from services.blueprint.ids import IdAllocator, page_key
 from services.blueprint.service import BlueprintService
 from services.smith import confirm
 from services.smith import page_change as pc
-from services.smith.limits import cannot
-from services.smith_session import SmithSession
+from tests.services._front_door import SmithSession
 
 
 def _layout(page_id: str, root: dict) -> dict:
@@ -102,7 +101,8 @@ def test_removing_a_screen_is_no_longer_one_of_the_things_smith_only_explains():
     from services.smith.capabilities import unaccounted, verbs_covered
     from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP
 
-    assert not cannot("remove_page")
+    from services.smith4.verbs import PERFORM, honest_refusal
+    assert PERFORM["remove_page"] is not honest_refusal
     assert REQUIRED_BY_VERB["remove_page"] == {"route"}
     assert "remove_page" in verbs_covered() and not unaccounted()
     assert "Cannot be done" not in VERB_HELP["remove_page"]

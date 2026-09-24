@@ -22,7 +22,7 @@ from services.smith_move_dispatcher import (
     infer_move_kind,
     SEAM_KEYS,
 )
-from services.smith_session import IterationMove
+from tests.services._front_door import IterationMove
 
 
 # --------------------------------------------------------------------------- #

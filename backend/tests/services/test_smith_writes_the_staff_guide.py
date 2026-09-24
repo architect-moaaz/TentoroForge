@@ -274,7 +274,7 @@ def test_the_turn_writes_the_guide_and_hands_back_the_file(built, monkeypatch):
     `handover.run` and the classifier were each covered and the join between
     them was not, which is the one place a typo reaches nobody's test.
     """
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     monkeypatch.setattr("services.smith.handover.compose",
                         lambda data, **kw: "# Using Ward Roster\n\nYou'll see today's shifts.")
@@ -292,7 +292,7 @@ def test_the_turn_writes_the_guide_and_hands_back_the_file(built, monkeypatch):
 
 
 def test_a_turn_with_nothing_composed_asks_rather_than_claiming_a_guide(built, monkeypatch):
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     built.doc["pageLayouts"] = []
     built.save()
@@ -309,20 +309,14 @@ def test_a_turn_with_nothing_composed_asks_rather_than_claiming_a_guide(built, m
 
 def test_the_ask_is_a_verb_that_needs_nothing_and_has_a_home():
     from services.smith.capabilities import unaccounted
-    from services.smith.limits import cannot
     from services.smith.verbs import REQUIRED_BY_VERB, is_known, missing_fields
+    from services.smith4.verbs import PERFORM, honest_refusal
 
     assert REQUIRED_BY_VERB["write_guide"] == set()
     assert is_known({"verb": "write_guide"})
     assert missing_fields({"verb": "write_guide"}) == []
     # It is a thing Smith DOES, not one of the asks it answers but cannot serve.
-    assert not cannot("write_guide")
+    assert PERFORM["write_guide"] is not honest_refusal
     assert unaccounted() == frozenset()
 
 
-def test_the_phrasebooks_sentence_classifies_to_it():
-    """§06's own wording, which reached nothing before this existed."""
-    from services.smith.capabilities import nearest
-
-    verbs = [v for v, _example in nearest("can you write me a one-page guide for the team?")]
-    assert "write_guide" in verbs

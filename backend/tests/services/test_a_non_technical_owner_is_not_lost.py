@@ -23,15 +23,16 @@ def test_a_step_that_splits_keeps_the_rest_of_the_plan(tmp_path):
 
 
 def test_the_session_splices_rather_than_replaces_and_keeps_the_plan_in_view():
-    from services import smith_session
-    src = inspect.getsource(smith_session)
-    assert '_in_plan_step' in src and "_plan.remember_all(self.output_dir, planned + over + rest)" in src
-    assert "note = _plan_mod.remaining_note(_plan_mod.peek(self.output_dir))" in src
+    from services.smith4 import handle as handle_mod, turn as turn_mod
+    src = inspect.getsource(turn_mod)
+    handle_src = inspect.getsource(handle_mod)
+    assert "plan_mod.remember_all(ctx.out, planned + over + rest)" in src
+    assert "plan_mod.remaining_note(plan_mod.peek(output_dir))" in handle_src
 
 
 def test_understanding_is_told_what_non_technical_owners_actually_say():
-    from services.smith import understand_ask
-    src = inspect.getsource(understand_ask)
+    from services.smith import loop
+    src = inspect.getsource(loop)
     for rule in ("EVERY ask, the layout ones too", "WHAT A SCREEN CALLS A THING IS NOT WHAT THE DATA MODEL",
                  "WHAT THE APPLICATION CANNOT DO IS SAID, NOT DROPPED", "WRONG BEHAVIOUR IS NOT A CRASH"):
         assert rule in src, rule

@@ -22,7 +22,7 @@ from typing import Any
 import pytest
 
 from services.smith_blueprint import Blueprint
-from services.smith_session import (
+from tests.services._front_door import (
     SmithSession,
     TurnResult,
     IterationMove,

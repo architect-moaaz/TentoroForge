@@ -24,12 +24,18 @@ from __future__ import annotations
 
 #: verb -> the fields a turn must carry to be actionable.
 #:
-#: `rename` keeps exactly what it always required. The others ask for what
-#: their own machinery needs and nothing more: a composition needs a route, not
-#: a `current_behavior` for a page that does not exist yet.
+#: Each verb asks for what its own machinery needs and nothing more: a
+#: composition needs a route, not a description of a page that does not exist
+#: yet; a rename needs the screen, the text and the new text.
 REQUIRED_BY_VERB: dict[str, set[str]] = {
-    "rename": {"screen", "element_label", "current_behavior",
-               "desired_behavior", "target_file"},
+    # The screen and the control's exact visible text. `new_value` is what to
+    # write and the move derives it when a behaviour was described instead;
+    # a rename with none is a removal, which is `remove`'s job. The old
+    # classifier also demanded `screen`, `current_behavior` and
+    # `desired_behavior` — descriptions, not inputs — and the dispatcher
+    # excused `rename` from the slot gate because of it. Smith v4 holds every
+    # verb to its declared fields, so the declaration is what the edit needs.
+    "rename": {"element_label", "target_file"},
     # A control taken off a screen: the screen and the control's exact visible
     # text. No `new_value` — that is what makes it a removal to the move.
     # Without this verb the model had to express "remove the delete button"
@@ -463,6 +469,82 @@ VERB_HELP: dict[str, str] = {
         "changes since, and where it went. Says plainly that the figure is "
         "the platform's cost of running the models and not an invoice. Needs "
         "nothing, and changes nothing."
+    ),
+}
+
+
+#: Sentences people actually typed, per verb — the examples the model is
+#: shown beside each tool in the catalogue (`tools.render`). They lived in
+#: the old classifier's prompt; there is no prompt now, so they live with the
+#: verb. The phrasebook checks each is still quoted somewhere the model reads.
+VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
+    'compose_route': (
+        'The page is empty',
+        'add a dashboard at /',
+    ),
+    'add_widgets': (
+        'I cannot see fathersName on the registration page',
+        'show phone on the nurse form',
+    ),
+    'remove': (
+        'get rid of the export link',
+    ),
+    'add_field': (
+        'customers need a phone number',
+    ),
+    'rename_field': (
+        'rename yearsOfExperience to experienceYears',
+    ),
+    'remove_field': (
+        'drop the location field from nurses',
+    ),
+    'remove_entity': (
+        "we don't need the Department entity",
+    ),
+    'add_workflow': (
+        'send a reminder every Monday',
+    ),
+    'edit_workflow': (
+        'the delete should ask for a reason first',
+    ),
+    'remove_workflow': (
+        'stop sending the welcome email',
+    ),
+    'edit_rule': (
+        'raise the experience cap to 70',
+    ),
+    'restyle': (
+        'change the theme colour from blue to green',
+    ),
+    'edit_product': (
+        'call the app Nurse Roster',
+        'it is for ward managers',
+        'the interface should be in Arabic',
+    ),
+    'add_requirement': (
+        'the app should also let a nurse mark herself unavailable',
+    ),
+    'remove_api': (
+        'remove the export endpoint',
+    ),
+    'remove_integration': (
+        'drop the Stripe integration',
+    ),
+    'write_guide': (
+        'how do I explain this to the people using it?',
+        'a cheat sheet for the drivers',
+    ),
+    'spend': (
+        'what have I spent on this',
+        'what did the build cost',
+        'how many tokens has this used',
+    ),
+    'rebuild': (
+        'rebuild everything',
+        'generate the app',
+    ),
+    'back_up': (
+        'what happens if I lose all this?',
     ),
 }
 

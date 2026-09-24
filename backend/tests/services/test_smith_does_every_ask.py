@@ -12,7 +12,7 @@ import pytest
 
 from services.blueprint.service import BlueprintService
 from services.smith import plan
-from services.smith_session import SmithSession, TurnResult
+from tests.services._front_door import SmithSession, TurnResult
 
 STEPS = ["add a phone number to nurses",
          "show the phone number on the registration form",
@@ -35,12 +35,21 @@ def _session(project, done: list[str], asks=()) -> SmithSession:
         return {"verb": "add_field", "entity": "Nurse", "field": {"name": "phone"},
                 "asks": list(asks) if message.strip() == STEPS[0] else []}
 
-    session = SmithSession(
+    from services.smith4 import verbs as v4
+    from services.smith4.outcome import Outcome
+    v4.PERFORM["add_field"] = lambda ctx, u: (                            # noqa: ARG005
+        done.append("did it") or Outcome(status="resolved", said="Done."))
+    return SmithSession(
         project_id="p1", output_dir=str(project.output_dir), guards_fn=lambda *a, **kw: [],
         understand_ask_fn=_understand, iteration_move_fn=lambda *a, **kw: None)
-    session._add_field = lambda understanding: (                      # noqa: ARG005
-        done.append("did it") or TurnResult(status="resolved", answer="Done."))
-    return session
+
+
+@pytest.fixture(autouse=True)
+def _restore_add_field():
+    from services.smith4 import verbs as v4
+    original = v4.PERFORM["add_field"]
+    yield
+    v4.PERFORM["add_field"] = original
 
 
 def test_the_plan_is_shown_and_nothing_is_done_before_the_yes(project):

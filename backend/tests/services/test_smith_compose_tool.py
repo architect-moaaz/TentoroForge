@@ -67,12 +67,12 @@ def test_the_tool_and_the_session_share_one_implementation():
     be two answers to what composing a route means."""
     import inspect
 
-    from services.smith_session import SmithSession
+    from services.smith4 import verbs as v4
 
-    src = inspect.getsource(SmithSession._compose)
-    assert "from services.smith.compose import run as compose_run" in src
+    src = inspect.getsource(v4.compose)
+    assert "from services.smith.compose import run" in src
     # The docstring names `apply_change`; the CODE must not load a
     # Blueprint or commit one of its own.
-    body = src[src.index("compose_run"):]
+    body = src[src.index("= run("):]
     assert "BlueprintService" not in body
     assert "apply_change(" not in body

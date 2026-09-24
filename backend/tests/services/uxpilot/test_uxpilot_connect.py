@@ -4,22 +4,30 @@ from __future__ import annotations
 
 import pytest
 
-from services.smith.understand_ask import _PROMPT
+from services.smith.tools import render as _catalogue
 from services.smith.uxpilot_connect import find_in
 from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP
-from services.smith_session import SmithSession
+from tests.services._front_door import SmithSession
 
 
 def _session(output_dir="/tmp/does-not-exist"):
-    s = SmithSession.__new__(SmithSession)
-    s.output_dir = output_dir
-    return s
+    """The verb, as v4 carries it out — the old session method is gone."""
+    from services.smith4.verbs import Ctx, connect_uxpilot
+    from tests.services._front_door import TurnResult
+
+    class _S:
+        def _connect_uxpilot(self, u):
+            o = connect_uxpilot(Ctx(output_dir=output_dir, project_id="p", message="", ask=""),
+                       {**u, "verb": "connect_uxpilot"})
+            return TurnResult(status=o.status, answer=o.said, options=list(o.options))
+    return _S()
 
 
 def test_the_verb_needs_a_page_and_a_variable_name():
     assert REQUIRED_BY_VERB["connect_uxpilot"] == {"uxpilot_ref", "key_env"}
     assert "never the key" in VERB_HELP["connect_uxpilot"].lower()
-    assert "connect_uxpilot" in _PROMPT and "ep_" in _PROMPT
+    from services.smith.loop import _PROMPT
+    assert "`connect_uxpilot`" in _catalogue() and "ep_" in _PROMPT
 
 
 def test_a_brief_naming_a_page_is_found_with_a_named_key():

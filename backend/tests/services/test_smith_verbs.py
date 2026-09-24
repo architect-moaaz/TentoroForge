@@ -22,10 +22,9 @@ def test_each_verb_asks_for_what_its_own_machinery_needs():
     # A composition does not need a `current_behavior` for a page that does
     # not exist yet.
     assert "current_behavior" not in REQUIRED_BY_VERB["compose_route"]
-    # And a rename keeps exactly what it always required.
-    assert REQUIRED_BY_VERB["rename"] == {
-        "screen", "element_label", "current_behavior", "desired_behavior",
-        "target_file"}
+    # And a rename needs the screen and the text — not the descriptions the
+    # old classifier used to demand alongside them.
+    assert REQUIRED_BY_VERB["rename"] == {"element_label", "target_file"}
 
 
 def test_an_absent_verb_is_a_rename():

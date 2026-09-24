@@ -11,7 +11,7 @@ import pytest
 
 from services.smith import tools, writes
 from services.smith.verbs import REQUIRED_BY_VERB
-from tests.services.test_smith_loop import _Chooser, _Writes, _repo, _session, _understanding
+from tests.services._loop_fixtures import _Chooser, _Writes, _repo, _session, _understanding
 
 
 def test_write_page_code_is_a_tool_and_not_a_verb():

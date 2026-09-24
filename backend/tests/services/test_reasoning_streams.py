@@ -146,12 +146,12 @@ def test_compose_hands_the_session_sink_down_to_the_router():
     import inspect
 
     from services.smith import compose
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     assert "tiered_router(reasoning=reasoning)" in inspect.getsource(
         compose.compose_route)
-    assert "reasoning=self._reasoning" in inspect.getsource(
-        SmithSession._compose)
+    from services.smith4 import verbs as v4
+    assert "reasoning=ctx.reasoning" in inspect.getsource(v4.compose)
 
 
 # ── a reply that never starts ───────────────────────────────────────────

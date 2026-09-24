@@ -202,10 +202,10 @@ def test_retiring_an_entity_takes_its_screens_workflows_and_menu_entry_with_it(s
 
 def test_every_new_verb_is_offered_dispatched_and_tooled(monkeypatch, tmp_path):
     import services.smith_tools as smith_tools
-    from services.smith.understand_ask import _PROMPT
+    from services.smith.tools import render as _catalogue
     from services.smith.verbs import REQUIRED_BY_VERB
     for v in ("edit_access", "add_rule", "edit_rule", "remove_rule", "add_entity", "remove_entity"):
-        assert v in REQUIRED_BY_VERB and f'"{v}"' in _PROMPT, v
+        assert v in REQUIRED_BY_VERB and f"`{v}`" in _catalogue(), v
     calls = []
     monkeypatch.setattr("services.smith.access_change.run", lambda d, change, **k: calls.append(("access", change)) or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
     monkeypatch.setattr("services.smith.rule_change.run", lambda d, verb, **k: calls.append((verb, k.get("rule"))) or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
@@ -221,7 +221,7 @@ def test_every_new_verb_is_offered_dispatched_and_tooled(monkeypatch, tmp_path):
     assert H["add_rule"](str(tmp_path), {})["applied"] is False
     assert [c[0] for c in calls] == ["access", "access", "add_rule", "add_entity", "remove_entity"]
     assert calls[0][1] == "add a role named Ward Manager" and calls[3][1] == "Ward with name (text)"
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
     session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=lambda _d: [],
                            understand_ask_fn=lambda m, c, history=None: {"verb": "edit_rule", "rule": "cap", "change": "raise it"},
                            iteration_move_fn=lambda *a, **k: None)

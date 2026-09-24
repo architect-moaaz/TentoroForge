@@ -14,7 +14,7 @@ from pathlib import Path
 from services.blueprint.service import BlueprintService
 from services.smith import design_disconnect as D
 from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP
-from services.smith.understand_ask import _PROMPT
+from services.smith.tools import render as _catalogue
 
 
 def _svc(tmp_path):
@@ -40,7 +40,7 @@ def _svc(tmp_path):
 def test_the_verb_exists_and_needs_nothing():
     assert REQUIRED_BY_VERB["disconnect_design"] == set()
     assert "component library" in VERB_HELP["disconnect_design"]
-    assert "disconnect_design" in _PROMPT
+    assert "`disconnect_design`" in _catalogue()
 
 
 def test_disconnect_removes_the_source_the_frames_and_the_drawn_layouts(tmp_path):

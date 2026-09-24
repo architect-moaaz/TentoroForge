@@ -241,10 +241,10 @@ def test_both_verbs_need_nothing_from_the_ask():
 
 
 def test_the_classifier_is_taught_both_sentences():
-    from services.smith.understand_ask import _PROMPT
+    from services.smith.tools import render as _catalogue
 
-    assert '"it crashed"' in _PROMPT and '"explain_crash"' in _PROMPT
-    assert "\"it's really slow\"" in _PROMPT and '"explain_slowness"' in _PROMPT
+    assert '"it crashed"' in _catalogue() and "`explain_crash`" in _catalogue()
+    assert "\"it's really slow\"" in _catalogue() and "`explain_slowness`" in _catalogue()
 
 
 def test_the_run_shape_is_the_one_a_tool_handler_needs(tmp_path):

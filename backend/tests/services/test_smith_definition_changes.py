@@ -310,11 +310,11 @@ def test_an_integration_is_declared_with_secret_names_only(svc):
 
 def test_every_new_verb_is_offered_dispatched_and_tooled(monkeypatch, tmp_path):
     import services.smith_tools as smith_tools
-    from services.smith.understand_ask import _PROMPT
+    from services.smith.tools import render as _catalogue
     from services.smith.verbs import REQUIRED_BY_VERB
     for v in ("rename_field", "remove_field", "add_requirement", "edit_requirement", "remove_requirement", "edit_product",
               "add_api", "remove_api", "add_integration", "remove_integration"):
-        assert v in REQUIRED_BY_VERB and f'"{v}"' in _PROMPT, v
+        assert v in REQUIRED_BY_VERB and f"`{v}`" in _catalogue(), v
     calls = []
     monkeypatch.setattr("services.smith.field_change.run", lambda d, verb, **k: calls.append((verb, k)) or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
     monkeypatch.setattr("services.smith.definition_change.run", lambda d, verb, **k: calls.append((verb, k)) or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
@@ -327,7 +327,7 @@ def test_every_new_verb_is_offered_dispatched_and_tooled(monkeypatch, tmp_path):
     assert H["add_integration"](str(tmp_path), {})["applied"] is False
     assert [c[0] for c in calls] == ["rename_field", "remove_field", "edit_product"]
     assert calls[0][1]["new_value"] == "town" and calls[2][1]["text"] == "call it Roster"
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
     session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=lambda _d: [],
                            understand_ask_fn=lambda m, c, history=None: {"verb": "rename_field", "entity": "Nurse", "field": {"name": "location"}, "new_value": "town"},
                            iteration_move_fn=lambda *a, **k: None)

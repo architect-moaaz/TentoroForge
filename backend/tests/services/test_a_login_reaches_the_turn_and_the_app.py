@@ -25,7 +25,7 @@ def project(tmp_path):
 
 
 def _session(project, understanding: dict):
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     return SmithSession(project_id="p1", output_dir=str(project),
                         guards_fn=lambda *a, **kw: [],

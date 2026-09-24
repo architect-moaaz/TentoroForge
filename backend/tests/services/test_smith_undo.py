@@ -107,7 +107,7 @@ def test_the_tool_entry_reports_a_refusal_rather_than_raising(tmp_path):
 
 
 def test_the_turn_undoes_and_says_what_it_undid(svc, monkeypatch):
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     _change(svc, "add Nurse.phone",
             lambda s: s.doc["data"]["entities"][0]["fields"].append({"name": "phone", "type": "string"}))

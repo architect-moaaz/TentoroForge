@@ -229,19 +229,17 @@ def test_the_verb_needs_nothing_and_is_offered_by_name():
     assert missing_fields({"verb": "spend"}) == []
     assert "how much has this cost me?" in VERB_HELP["spend"]
 
-    from services.smith.understand_ask import _PROMPT
-    # The prompt wraps, so the sentence is matched on its words, not its lines.
-    prompt = " ".join(_PROMPT.split())
-    assert '"spend"' in prompt and "how much has this cost me?" in prompt
+    from services.smith import tools
+    catalogue = " ".join(tools.render().split())
+    assert "`spend`" in catalogue and "how much has this cost me?" in catalogue
 
     from services.smith import capabilities as cap
     assert cap.unaccounted() == frozenset()
     assert "spend" in cap.verbs_covered()
-    assert cap.nearest("how much has this cost me?")[0][0] == "spend"
 
 
 def test_the_turn_answers_and_changes_nothing(app, ledger):
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     _write(ledger, [_row("acme01", "page_layouts:page_design", phase="build")])
     session = SmithSession(

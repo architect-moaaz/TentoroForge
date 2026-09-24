@@ -14,7 +14,8 @@ from services.smith.verbs import REQUIRED_BY_VERB
 from services.smith4 import handle
 from services.smith4.turn import LOOK_FIRST
 from services.smith4.verbs import PERFORM
-from tests.services.test_smith_loop import _Chooser, _Writes, _rename, _repo
+from tests.services._loop_fixtures import (_ClaimsWithoutWriting, _Chooser, _FindsNothing,
+                                           _Writes, _rename, _repo)
 
 
 def _turn(tmp_path, chooser, message="do it", *, move=None, history=None):
@@ -58,7 +59,7 @@ def test_the_first_step_is_the_models_choice(tmp_path):
 # --------------------------------------------------------------------------- #
 
 def test_a_move_that_found_nothing_is_read_by_the_step_after_it(tmp_path):
-    from tests.services.test_smith_loop import _FindsNothing
+    from tests.services._loop_fixtures import _FindsNothing
     _repo(tmp_path)
     writes = _Writes(tmp_path)
     chooser = _Chooser(_rename("src/page.json", "the dashboard"),
@@ -175,7 +176,7 @@ def test_a_read_is_observed_whole(tmp_path):
 # --------------------------------------------------------------------------- #
 
 def test_a_proof_the_edit_missed_is_handed_back(tmp_path):
-    from tests.services.test_smith_loop import _ClaimsWithoutWriting
+    from tests.services._loop_fixtures import _ClaimsWithoutWriting
     _repo(tmp_path)
     chooser = _Chooser(_rename("src/a.json", "A"), _rename("src/b.json", "B"))
 
@@ -187,7 +188,7 @@ def test_a_proof_the_edit_missed_is_handed_back(tmp_path):
 
 
 def test_a_finding_the_loop_cannot_settle_is_still_shown(tmp_path):
-    from tests.services.test_smith_loop import _ClaimsWithoutWriting
+    from tests.services._loop_fixtures import _ClaimsWithoutWriting
     _repo(tmp_path)
     chooser = _Chooser(_rename("src/a.json", "A"))
     result = _turn(tmp_path, chooser, "rename A", move=_ClaimsWithoutWriting(tmp_path))
@@ -206,3 +207,91 @@ def test_the_cap_is_said(tmp_path, monkeypatch):
 
 def test_propose_plan_is_in_the_catalogue():
     assert "propose_plan" in tools.TERMINAL_NAMES and "propose_plan" in tools.render()
+
+
+# --------------------------------------------------------------------------- #
+# Carried over from the v2 loop's tests
+# --------------------------------------------------------------------------- #
+
+def test_already_done_is_identity_not_a_list_of_repeatable_verbs():
+    from services.smith.loop import Observation, already_done
+    seen = [Observation(tool="add_field", args={"entity": "Nurse", "field": {"name": "phone"}})]
+    assert already_done("add_field", {"entity": "Nurse", "field": {"name": "phone"}}, seen)
+    assert not already_done("add_field", {"entity": "Nurse", "field": {"name": "email"}}, seen)
+
+
+def test_an_unreachable_chooser_ends_the_turn_on_what_landed():
+    from services.smith.loop import next_step
+
+    def boom(_prompt: str) -> str:
+        raise RuntimeError("no network")
+
+    assert next_step("x", "ctx", [], provider=boom)["tool"] == "done"
+    assert next_step("x", "ctx", [], provider=lambda _p: "I think we should…")["tool"] == "done"
+
+
+def test_a_refused_read_is_an_observation_the_loop_carries_on_from(tmp_path):
+    _repo(tmp_path)
+    (tmp_path / ".env").write_text("SECRET=x\n")
+    writes = _Writes(tmp_path)
+    chooser = _Chooser({"tool": "read_file", "args": {"path": ".env"}, "why": ""},
+                       _rename("src/b.json", "B"))
+    _turn(tmp_path, chooser, "do it", move=writes)
+    refused = chooser.seen[1][-1]
+    assert refused.status == "read" and "holds credentials" in refused.said
+    assert len(writes.calls) == 1
+
+
+def test_each_step_is_proved_against_its_own_baseline(tmp_path):
+    """A second step measured from the first step's baseline would claim the
+    first step's files, so a step that wrote nothing would look like it had."""
+    from tests.services._front_door import IterationMove
+    _repo(tmp_path)
+
+    class _SecondClaims(_Writes):
+        def __call__(self, understanding, output_dir):
+            if not self.calls:
+                return super().__call__(understanding, output_dir)
+            self.calls.append(dict(understanding))
+            return IterationMove(move_name="claims a change", touched_paths=["src/b.json"])
+
+    move = _SecondClaims(tmp_path)
+    chooser = _Chooser(_rename("src/a.json", "A"), _rename("src/b.json", "B"))
+    result = _turn(tmp_path, chooser, "two things", move=move)
+    assert len(move.calls) == 2
+    assert result.status == "needs_user" and "nothing actually changed" in result.said
+    assert "src/a.json" in result.touched
+
+
+def test_the_composer_not_drawing_what_it_was_told_is_a_finding(tmp_path, monkeypatch):
+    """"I changed /admin/dashboard, but the new screen does not show what you
+    asked for" — a proof, so the step after it gets to act."""
+    import services.smith.compose as compose_mod
+    _repo(tmp_path)
+    monkeypatch.setattr(compose_mod, "run", lambda *a, **k: {
+        "applied": True, "edited_paths": ["src/pages/dashboard.tsx"],
+        "missing": ["Rentals", "Overdue Returns"], "diff_summary": "composed"})
+    chooser = _Chooser({"tool": "compose_route", "args": {"route": "/admin/dashboard"}, "why": ""},
+                       {"tool": "add_field", "args": {"entity": "Rental", "field": {"name": "overdue"}},
+                        "why": ""})
+    _turn(tmp_path, chooser, "build the dashboard")
+    proof = chooser.seen[1][-1]
+    assert proof.status == "finding" and "does not draw" in proof.said and "Rentals" in proof.said
+
+
+def test_the_prompt_renders_and_reaches_the_provider():
+    """A live turn ended with zero model calls: a stray `{lat, lng}` in the
+    prompt made `str.format` raise, and `next_step` swallowed it as "provider
+    unreachable" and ended the turn. Every test injects a chooser, so nothing
+    rendered the template. This does."""
+    from services.smith.loop import next_step
+    seen: dict = {}
+
+    def capture(prompt: str) -> str:
+        seen["prompt"] = prompt
+        return '{"tool": "done", "args": {}, "why": ""}'
+
+    out = next_step("rename the button", "the slice", [], [("user", "hi")], provider=capture)
+    assert out["tool"] == "done" and out["why"] == ""
+    assert "rename the button" in seen["prompt"] and "the slice" in seen["prompt"]
+    assert "`read_page_code`" in seen["prompt"] and "`propose_plan`" in seen["prompt"]

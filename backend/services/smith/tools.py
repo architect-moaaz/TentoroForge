@@ -37,7 +37,7 @@ declared rather than silently arriving as a string.
 from __future__ import annotations
 
 from services.smith.reads import READ_NAMES, READS
-from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP
+from services.smith.verbs import REQUIRED_BY_VERB, VERB_EXAMPLES, VERB_HELP
 from services.smith.writes import WRITE_NAMES, WRITES
 
 #: The shape of every field a verb can require. Strings unless said otherwise;
@@ -84,9 +84,11 @@ TERMINAL: tuple[tuple[str, str, tuple[str, ...]], ...] = (
      ("text",)),
     ("ask_user",
      "You cannot pick the next step without a fact only they have. Ends the "
-     "turn with `question`. Asking is not a failure — acting on the wrong "
-     "reading is.",
-     ("question",)),
+     "turn with `question`, and `options` — two to five short labels, each a "
+     "complete answer they can pick with one click, drawn from THIS "
+     "application — when the question offers choices. Asking is not a "
+     "failure — acting on the wrong reading is.",
+     ("question", "options")),
     ("propose_plan",
      "The message asks for MORE THAN ONE thing. `steps`: every ask in it, each "
      "a sentence in their words, in the order they should happen — data-model "
@@ -150,6 +152,9 @@ def render() -> str:
         lines.append(head)
         if tool["description"]:
             lines.append(f"    {' '.join(tool['description'].split())}")
+        examples = VERB_EXAMPLES.get(tool["name"])
+        if examples:
+            lines.append("    e.g. " + "; ".join(f'"{e}"' for e in examples))
     lines.append("")
     lines.append("Looking (these change nothing, and cost a step like anything else):")
     for name, said, args in READS:
@@ -165,7 +170,7 @@ def render() -> str:
     lines.append("")
     lines.append("Ending the turn:")
     for name, said, args in TERMINAL:
-        shown = ", ".join(f"{a}: {'array' if a == 'steps' else 'string'}" for a in args) or "no arguments"
+        shown = ", ".join(f"{a}: {'array' if a in ('steps', 'options') else 'string'}" for a in args) or "no arguments"
         lines.append(f"- `{name}` ({shown})")
         lines.append(f"    {' '.join(said.split())}")
     return "\n".join(lines)
