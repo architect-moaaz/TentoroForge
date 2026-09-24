@@ -2476,6 +2476,15 @@
                 "brand-wash",
                 "top-anchored"
               ]
+            },
+            "tone": {
+              "type": "string",
+              "enum": [
+                "dark",
+                "brand",
+                "light",
+                "tinted"
+              ]
             }
           },
           "required": [

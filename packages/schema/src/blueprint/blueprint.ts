@@ -2040,6 +2040,14 @@ export const DesignSystem = z.object({
     .object({
       chrome: z.enum(["standard-rail", "wide-rail", "icon-rail", "floating-rail", "right-rail", "topbar", "dock"]),
       auth: z.enum(["split-editorial", "split-reversed", "side-panel", "centered-minimal", "brand-wash", "top-anchored"]),
+      /**
+       * What the navigation is painted with: `dark` (the design's inverse
+       * surface), `brand` (the primary colour), `light` (a card beside the
+       * page), `tinted` (the ground washed with the primary). Every rail was
+       * the inverse surface — the one navy rail on a warm pediatric app and a
+       * stark tool alike. Derived from the personality when not stated.
+       */
+      tone: z.enum(["dark", "brand", "light", "tinted"]).optional(),
     })
     .optional(),
   informationDensity: z.enum(["compact", "comfortable", "spacious"]).default("comfortable"),

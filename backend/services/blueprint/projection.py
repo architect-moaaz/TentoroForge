@@ -939,6 +939,31 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     page_roles = {str(p.get("id")): sorted({role_names.get(str(u), str(u)) for u in p.get("users") or []})
                   for p in (doc.get("pages") or [])
                   if p.get("id") and str(p.get("access") or "") == "role_restricted"}
+    # WHO THE DESTINATION IS FOR — the menu's other half. A page's `users` is
+    # its audience, not a permission, and a product with several kinds of
+    # user (a parent, a doctor, an administrator) lists each kind's screens
+    # for that kind: the design of nlwtcyz5 said so ("listing only the
+    # current role's items") and the rail showed all three sets to
+    # everyone, headed PARENT / DOCTOR / ADMIN. The layout hides an
+    # audience the signed-in person is not part of; a page for everyone
+    # names none.
+    many_roles = len([r for r in role_names.values() if r]) > 1
+    page_audience = {str(p.get("id")): sorted({role_names.get(str(u), str(u)) for u in p.get("users") or []})
+                     for p in (doc.get("pages") or []) if p.get("id") and many_roles and p.get("users")}
+    # A ROLE'S LANDING PAGE IS THAT ROLE'S. `initialRoute` names where each
+    # kind of user opens ("parent": "/", "admin": "/admin"); a landing page
+    # that names no users is still for the kind that lands on it — "Parent
+    # Dashboard" stayed on the administrator's rail for want of this.
+    initial = nav.get("initialRoute") if isinstance(nav.get("initialRoute"), dict) else {}
+    by_lower = {name.lower(): name for name in role_names.values() if name}
+    for p in (doc.get("pages") or []):
+        pid = str(p.get("id") or "")
+        if not pid or not many_roles or page_audience.get(pid):
+            continue
+        landers = sorted({by_lower[k.lower()] for k, r in initial.items()
+                          if k.lower() in by_lower and str(r) == str(p.get("route") or "")})
+        if landers:
+            page_audience[pid] = landers
 
     # A DYNAMIC ROUTE IS NOT A RAIL DESTINATION. `/rentals/[id]/return` is
     # reached through a row or an action that fills a concrete id, never from the
@@ -968,6 +993,8 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             out["tab"] = True
         if page_roles.get(page_id):
             out["roles"] = page_roles[page_id]
+        if page_audience.get(page_id):
+            out["audience"] = page_audience[page_id]
         return out
 
     groups: list[dict[str, Any]] = []
@@ -986,6 +1013,9 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             kid_roles = [set(it.get("roles") or []) for it in group["items"]]
             if kid_roles and all(kid_roles):
                 group["roles"] = sorted(set.union(*kid_roles))
+            kid_audience = [set(it.get("audience") or []) for it in group["items"]]
+            if kid_audience and all(kid_audience):
+                group["audience"] = sorted(set.union(*kid_audience))
             if group["items"]:
                 groups.append(group)
         else:
@@ -1010,9 +1040,10 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # to the library's navy and a blue mark, on an app whose design is a warm
     # paper and a forest green (0l133sp2). The design's dark lead surface, its
     # text and its accent, as the tokens the page already reads.
-    rail: dict[str, Any] = {"groups": groups, "appName": app_name, "mode": "dark",
-                            "bg": "hsl(var(--inverse))", "text": "hsl(var(--inverse-foreground) / 0.82)",
-                            "muted": "hsl(var(--inverse-foreground) / 0.55)", "accent": "hsl(var(--accent))"}
+    # …AND IN THE TONE THE DESIGN CHOSE (`shell.tone`), not the inverse
+    # surface on every app: see `RAIL_PAINT`.
+    paint = RAIL_PAINT[derive_shell(doc)["tone"]]
+    rail: dict[str, Any] = {"groups": groups, "appName": app_name, **paint, "accent": "hsl(var(--accent))"}
     # THE OWNER'S MARK GOES WHERE THE APPLICATION'S NAME IS. The rail's brand
     # block draws a square with the first letter of the name in it; given a
     # logo it draws the logo instead. Only the reference is written here —
@@ -1560,6 +1591,21 @@ SHELL_IDENTITY_PATH = "src/contracts/design-dna.json"
 
 CHROMES = ("standard-rail", "wide-rail", "icon-rail", "floating-rail", "right-rail", "topbar", "dock")
 AUTH_LAYOUTS = ("split-editorial", "split-reversed", "side-panel", "centered-minimal", "brand-wash", "top-anchored")
+TONES = ("dark", "brand", "light", "tinted")
+
+#: What each tone paints the navigation with — the design's own tokens, so
+#: the rail is the app's palette and not a colour of its own. `mode` is
+#: what the chromes read for borders, hover and active treatment.
+RAIL_PAINT: dict[str, dict[str, str]] = {
+    "dark": {"mode": "dark", "bg": "hsl(var(--inverse))", "text": "hsl(var(--inverse-foreground) / 0.82)",
+             "muted": "hsl(var(--inverse-foreground) / 0.55)"},
+    "brand": {"mode": "dark", "bg": "hsl(var(--primary))", "text": "hsl(var(--primary-foreground) / 0.9)",
+              "muted": "hsl(var(--primary-foreground) / 0.6)"},
+    "light": {"mode": "light", "bg": "hsl(var(--card))", "text": "hsl(var(--foreground) / 0.85)",
+              "muted": "hsl(var(--muted-foreground))"},
+    "tinted": {"mode": "light", "bg": "color-mix(in srgb, hsl(var(--primary)) 9%, hsl(var(--background)))",
+               "text": "hsl(var(--foreground) / 0.88)", "muted": "hsl(var(--muted-foreground))"},
+}
 
 
 def derive_shell(doc: dict) -> dict[str, str]:
@@ -1571,6 +1617,7 @@ def derive_shell(doc: dict) -> dict[str, str]:
     stated = design.get("shell") if isinstance(design.get("shell"), dict) else {}
     chrome = str(stated.get("chrome") or "")
     auth = str(stated.get("auth") or "")
+    tone = str(stated.get("tone") or "")
     nav = doc.get("navigation") or {}
     approach = str(design.get("navigationApproach") or "").lower()
     personality = str(design.get("visualPersonality") or "").lower()
@@ -1619,7 +1666,27 @@ def derive_shell(doc: dict) -> dict[str, str]:
             auth = "side-panel"
         else:
             auth = "split-editorial"
-    return {"chrome": chrome, "auth": auth, "density": density}
+    if tone not in TONES:
+        # THE RAIL'S PAINT IS THE PERSONALITY'S. Every Blueprint app's rail
+        # was the inverse surface — one navy rail on a warm pediatric app
+        # ("soft sky blue as the calm anchor for navigation", it said) and
+        # a stark tool alike. A design that says nothing gets a tone from its
+        # density, so two apps still differ.
+        # WHOLE WORDS, A SHORT LIST. A personality is a paragraph ("a warm
+        # paper background … not a complex hospital system"), and substrings
+        # read off it made every app one tone.
+        felt = lambda *words: any(re.search(r"\b" + w + r"\b", personality) for w in words)  # noqa: E731
+        if felt("stark", "utility", "minimal", "tool"):
+            tone = "light"
+        elif felt("bold", "vivid", "energetic", "confident", "brand-forward"):
+            tone = "brand"
+        elif felt("warm", "friendly", "playful", "child", "children", "family", "consumer", "gentle"):
+            tone = "tinted"
+        elif density == "compact" or felt("dense", "operations", "back-office", "console"):
+            tone = "dark"
+        else:
+            tone = {"spacious": "light", "comfortable": "tinted"}.get(density, "dark")
+    return {"chrome": chrome, "auth": auth, "tone": tone, "density": density}
 
 
 def project_shell_identity(doc: dict, app_root: str | Path) -> dict[str, Any]:
@@ -1630,7 +1697,8 @@ def project_shell_identity(doc: dict, app_root: str | Path) -> dict[str, Any]:
     out = Path(app_root) / SHELL_IDENTITY_PATH
     out.parent.mkdir(parents=True, exist_ok=True)
     body = {"_generated": "from the Living Blueprint (designSystem.shell) — edit the Blueprint, not this file",
-            "layout": {"chrome": shell["chrome"], "auth": shell["auth"], "density": shell["density"]},
+            "layout": {"chrome": shell["chrome"], "auth": shell["auth"], "tone": shell["tone"],
+                       "density": shell["density"]},
             "skin": ""}
     out.write_text(json.dumps(body, indent=2) + "\n", "utf-8")
     return {"files": [SHELL_IDENTITY_PATH], **shell}
