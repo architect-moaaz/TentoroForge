@@ -35,6 +35,15 @@ RUN ARCH=$(dpkg --print-architecture) && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# THE BROWSER THE BUILD LOOKS AT PAGES WITH. `page_look` renders every page
+# as it is written and `page_review` every page of the built app, both in
+# headless Chromium through Playwright; without the browser in the image
+# every look is "unavailable" and pages ship unseen, as they did before it.
+# Installed to a path the non-root user below can read (the default is
+# root's own cache), with the system libraries Chromium needs.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN playwright install --with-deps chromium && chmod -R a+rX /ms-playwright
+
 # Copy application code
 COPY . .
 
