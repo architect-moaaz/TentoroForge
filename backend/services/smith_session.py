@@ -92,6 +92,23 @@ class TurnResult:
                          rollback.
       * ``no_op``      — Smith read but didn't need to change
                          anything.
+
+    ``finding`` separates the two things ``needs_user`` had come to mean. A
+    FINDING is something the platform PROVED about the work it just did — git
+    says the diff did not touch the file that was named, the composer laid the
+    page out without what it was told to put on it, a guard that passed now
+    fails. A question for the person is not a finding: "I do not recognise
+    that", "building runs from the card", "are you sure — this deletes a
+    column" are asks, and no amount of thinking makes them answerable without
+    them.
+
+    The distinction is the whole of `2026-09-24-smith-as-a-loop` §4.4. A
+    finding is evidence, and evidence is exactly what a second step can act on:
+    "I edited X but you asked about Y" is the sentence that makes a model try
+    the other reading. Handed to the person instead, with three chips, it is a
+    dead end at the end of four minutes' work. The text is written for the
+    thing that reads it next, not for the chat bubble — ``answer`` is still
+    what the person sees.
     """
     status: str
     answer: str
@@ -99,6 +116,9 @@ class TurnResult:
     diff_summary: str = ""
     touched_paths: list[str] = field(default_factory=list)
     trace: list[dict] = field(default_factory=list)
+    #: What an oracle proved about this step, in its own words. "" when the
+    #: outcome is a question rather than a proof.
+    finding: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -112,6 +132,15 @@ GeneratorFn = Callable[[PlannerArtifact, str], GeneratorArtifact]
 GuardsFn = Callable[[str], list[dict[str, Any]]]
 UnderstandFn = Callable[[str, str], dict[str, Any]]
 MoveFn = Callable[[dict[str, Any], str], Optional[IterationMove]]
+#: (ask, blueprint context, what has happened so far, the exchange)
+#: -> {tool, args, why}.
+NextStepFn = Callable[[str, str, list, list], dict[str, Any]]
+
+
+#: What the loop says to a second question asked without looking.
+_LOOK_FIRST = ("That is the question already asked, reworded, and nothing has been "
+               "read since. Read the page (`read_page_code`, `grep`) — the code "
+               "usually answers it. Ask again only if it still stands.")
 
 
 class SmithSession:
@@ -127,6 +156,7 @@ class SmithSession:
         guards_fn: GuardsFn | None = None,
         understand_ask_fn: UnderstandFn | None = None,
         iteration_move_fn: MoveFn | None = None,
+        next_step_fn: NextStepFn | None = None,
         reasoning_fn: Callable[[str], None] | None = None,
     ) -> None:
         self.project_id = project_id
@@ -138,6 +168,12 @@ class SmithSession:
         self._guards = guards_fn or (lambda _out: [])
         self._understand = understand_ask_fn
         self._move = iteration_move_fn
+        # WHO PICKS THE NEXT STEP. Absent, a turn is the one step it always
+        # was — which is what every caller predating the loop gets, and what
+        # `MAX_STEPS = 1` gets on purpose. Wired the same place the other two
+        # are (`smith_chat_v2`), so a test that injects seams never reaches a
+        # model it did not ask for.
+        self._next_step = next_step_fn
         # Where Smith's reasoning goes so the user can read it. None means
         # nobody is watching, which is every caller that predates it.
         self._reasoning = reasoning_fn
@@ -146,6 +182,15 @@ class SmithSession:
         self._ask = ""
         #: What was typed on THIS turn, before the carried ask is folded in.
         self._last_message = ""
+        #: What the last step was asked to do, so the step after it can tell a
+        #: repeat from a different call. Projected onto the verb's own declared
+        #: fields by `loop._identity`; kept whole here.
+        self._last_args: dict = {}
+        #: The verb the last step attempted, or "" when none did. `no_op` means
+        #: two different things — a question answered from the Blueprint, and a
+        #: move that found nothing to change — and only the second is something
+        #: a further step could follow. Nothing else distinguishes them.
+        self._last_verb = ""
 
     # ---- Bootstrap flow (§5.1) ------------------------------------------
 
@@ -728,10 +773,13 @@ class SmithSession:
         if not out.get("applied"):
             # A refusal is an outcome. Reporting it beats claiming success with
             # nothing behind it, which is the failure this path is a reaction to.
-            return TurnResult(status="needs_user",
-                              answer=str(out.get("reason") or
-                                         f"I could not {verb.replace('_', ' ')} "
-                                         f"{route} and have changed nothing."))
+            # AND IT IS A FINDING: "did not compile: TS2322 …" is the compiler
+            # speaking, and the loop can read the code and brief the engineer
+            # again where the person can only paste the error back.
+            reason = str(out.get("reason") or
+                         f"I could not {verb.replace('_', ' ')} {route} and have changed nothing.")
+            return TurnResult(status="needs_user", answer=reason,
+                              finding=f"{route} was not changed: {reason}")
 
         touched = list(out.get("edited_paths") or [])
         missing = [str(m) for m in (out.get("missing") or [])]
@@ -750,6 +798,12 @@ class SmithSession:
                           "form directly. Otherwise say what it should contain "
                           "and I will compose the screen again."),
                 touched_paths=touched,
+                finding=(f"{route} was composed, but the code does not draw: "
+                         + ", ".join(missing)
+                         + ". The page changed; what was asked for is not on "
+                           "it. Either the missing thing is a field the record "
+                           "does not have — add it — or the page must be "
+                           "composed again saying what it should contain."),
             )
         # A paragraph of its own: the summary may end in a list, and a
         # sentence appended to a list's last line becomes part of the bullet.
@@ -772,16 +826,21 @@ class SmithSession:
     def _run_step(self, step: str) -> "TurnResult":
         """One step of an agreed plan, as an ordinary turn.
 
-        Re-entering `_iterate` rather than a second execution path: a step is
-        a normal ask and must be able to do everything one can — ask its own
-        question, refuse, confirm a cascade — with the rest of the plan still
-        waiting behind it.
+        Re-entering the turn rather than a second execution path: a step is a
+        normal ask and must be able to do everything one can — ask its own
+        question, refuse, confirm a cascade, take a second step — with the rest
+        of the plan still waiting behind it.
+
+        `_loop`, not `_iterate`: the steps of an agreed plan are exactly the
+        multi-part asks the loop is for, and going in one level below it meant
+        a measured run took **0 loop steps** on the case the loop was written
+        for (2026-09-24).
         """
         self._ask = step
         self._last_message = step
         self._in_plan_step = True
         try:
-            return self._iterate(step, None)
+            return self._loop(step, None)
         finally:
             self._in_plan_step = False
 
@@ -1100,7 +1159,7 @@ class SmithSession:
         # "go ahead" is a yes, "remove complaints\n\ngo ahead" is not a
         # sentence anybody typed.
         self._last_message = user_message
-        result = self._iterate(user_message, history)
+        result = self._loop(user_message, history)
         if result.status == "asked":
             # Still unanswered: keep it for the turn that answers. The
             # question itself is not kept — it is Smith's, not the ask.
@@ -1116,6 +1175,253 @@ class SmithSession:
             if note and note.strip() not in (result.answer or ""):
                 result.answer = (result.answer or "") + note
         return result
+
+    def _loop(self, user_message: str,
+              history: list[tuple[str, str]] | None = None) -> "TurnResult":
+        """The turn as act → observe → act, bounded by `loop.MAX_STEPS`.
+
+        Step one is `_iterate`, unchanged and doing everything it always did —
+        answering a question, splitting a plan, asking its own question. What
+        is new begins after it: a step that RAN and finished is reported back
+        to the model, which picks the next verb from the same catalogue the
+        dispatcher already had (`services.smith.tools`), and that step is
+        carried out by `_perform`, which is the code that carried out step one.
+
+        Two failures this exists for, both of them the same shape — a report
+        nothing read:
+
+        * "yes please" to Smith's own offer came back as "I don't see anything
+          to change" (`docs/SMITH-VERBS.md`). That is a `no_op` with a sentence
+          in it; a second look reads the sentence and picks another verb.
+        * "add a phone number, show it on the form and make it required" did
+          the biggest one. Steps two and three are now steps of this turn.
+
+        A step that RAN and did not finish ends the turn ONLY when what it
+        produced is a question. When it produced a FINDING — git says the diff
+        did not touch the file that was named, the composer laid the page out
+        without what it was told to put on it — the finding is an observation
+        and the loop carries on, because a proof is the one thing a second step
+        can act on. `TurnResult.finding` is where that distinction lives; the
+        measurement on 2026-09-24 found this to be the only path where a second
+        look was clearly worth something. A step that could not run at all is
+        different again and is recovered from: an unknown tool, a repeat, or a call without the fields its verb
+        declares costs a step, is said in the observation, and the model picks
+        again.
+
+        `MAX_STEPS = 1` is exactly the behaviour that shipped before this
+        method existed, which is what makes the comparison it is written for
+        possible.
+        """
+        from services.smith import loop as _loop
+        from services.smith import tools as _tools
+        from services.smith.verbs import missing_fields
+
+        result = self._iterate(user_message, history)
+        # A cap of one is the turn as it shipped: nobody is asked for a second
+        # step, so nothing is cut off and there is nothing to report as cut off.
+        if _loop.MAX_STEPS <= 1 or not self._next_step or not self._last_verb \
+                or (result.status not in ("resolved", "no_op")
+                    and not result.finding
+                    and self._last_verb != "ask_user"):
+            return result
+
+        observations = [_loop.Observation(
+            tool=self._last_verb, args=dict(self._last_args),
+            status="finding" if result.finding else result.status,
+            said=result.finding or result.answer,
+            touched=list(result.touched_paths))]
+        # AN ANSWER IS NOT SOMETHING THAT LANDED. Kept out so a better answer,
+        # given after looking, replaces it rather than being refused as prose
+        # added to a change; `done` still falls back to it via `last.answer`.
+        landed = ([result.answer] if result.answer and not result.finding
+                  and self._last_verb not in ("answer", "ask_user") else [])
+        touched = list(result.touched_paths)
+        ask = self._ask or user_message
+        last = result
+
+        for _step in range(2, _loop.MAX_STEPS + 1):
+            bp = Blueprint.load(project_id=self.project_id,
+                                output_dir=self.output_dir)
+            ctx = blueprint_to_context(pick_relevant_slice(bp, ask=ask))
+            chosen = self._next_step(ask, ctx, observations,
+                                     list(history or [])) or {}
+            chosen = {"tool": str(chosen.get("tool") or "").strip(),
+                      "args": chosen.get("args") if isinstance(chosen.get("args"), dict) else {},
+                      "why": str(chosen.get("why") or "").strip()}
+            tool, args = chosen["tool"], chosen["args"]
+
+            # LOOK BEFORE YOU ASK AGAIN. A question raised from the slice alone
+            # is step one; a second question with nothing read in between is
+            # the first question reworded — measured live, "does the section
+            # exist?" became "badge or section?" while `view.tsx:16` held the
+            # answer to both. One refusal, not a policy: after one look a
+            # question that still stands is the person's to answer.
+            if tool == "ask_user" and self._last_verb == "ask_user" \
+                    and not any(o.status == "read" for o in observations) \
+                    and not any(o.said == _LOOK_FIRST for o in observations):
+                observations.append(_loop.Observation(
+                    tool=tool, args=args, status="error", said=_LOOK_FIRST))
+                continue
+            if tool in _tools.TERMINAL_NAMES or not tool:
+                return self._ended(tool, chosen, landed, touched, last)
+
+            # NAMED AS UNKNOWN, NEVER MAPPED ONTO THE NEAREST VERB. `turn.py`'s
+            # rule; the loop only changes who gets to act on the refusal.
+            if not _tools.is_tool(tool):
+                observations.append(_loop.Observation(
+                    tool=tool, args=args, status="error",
+                    said=_tools.unknown(tool)))
+                continue
+            if _loop.already_done(tool, args, observations):
+                observations.append(_loop.Observation(
+                    tool=tool, args=args, status="error",
+                    said=("That exact step has already been taken this turn — "
+                          "read what it reported rather than repeating it.")))
+                continue
+
+            # A READ LOOKS AND WRITES NOTHING. No baseline, no proof, no
+            # capability — and a refusal (a credentials file, a path that is
+            # not there) IS the observation, in the tool's own words.
+            if _tools.is_read(tool):
+                from services.smith import reads as _reads
+                from services.smith.engine_blueprint_adapter import load_engine_doc
+                seen = _reads.run(tool, args, output_dir=str(self.output_dir),
+                                  doc=load_engine_doc(str(self.output_dir)) or {})
+                observations.append(_loop.Observation(
+                    tool=tool, args=args, status="read", said=seen))
+                continue
+
+            # A WRITE GOES THROUGH THE BUILD'S OWN SEAM. `writes.run` briefs
+            # the UI engineer, whose code meets the compiler and the contract
+            # before it becomes a `pageCode` row; what those oracles say comes
+            # back as a finding, and what changed on disk is read off the tree,
+            # not off the report.
+            if _tools.is_write(tool):
+                from services.smith import writes as _writes
+                baseline = snapshot_baseline(self.output_dir, guards_fn=self._guards)
+                out = _writes.run(tool, args, output_dir=str(self.output_dir),
+                                  reasoning=self._reasoning)
+                changed = sorted(tree_changes(self.output_dir, baseline.get("tree") or {}))
+                step = TurnResult(
+                    status="resolved" if out.get("applied") and not out.get("finding") else "needs_user",
+                    answer=str(out.get("said") or ""), touched_paths=changed,
+                    finding=str(out.get("finding") or ""))
+                observations.append(_loop.Observation(
+                    tool=tool, args=args,
+                    status="finding" if step.finding else step.status,
+                    said=step.finding or step.answer, touched=changed))
+                if step.answer and not step.finding:
+                    landed.append(step.answer)
+                touched += [p for p in changed if p not in touched]
+                last = step
+                continue
+
+            understanding = self._understanding_for(tool, args)
+            gaps = missing_fields(understanding)
+            if gaps:
+                observations.append(_loop.Observation(
+                    tool=tool, args=args, status="error",
+                    said=(f"`{tool}` needs {', '.join(gaps)}, and the call did "
+                          "not carry them. Call it again with them, or ask.")))
+                continue
+
+            # ITS OWN BASELINE. The ground-truth checks at the bottom of
+            # `_perform` diff against what they are given; a second step
+            # measured from the first step's baseline would claim the first
+            # step's files as its own.
+            baseline = snapshot_baseline(self.output_dir, guards_fn=self._guards)
+            step = self._perform(tool, understanding, bp=bp, baseline=baseline,
+                                 user_message=user_message)
+            observations.append(_loop.Observation(
+                tool=tool, args=args,
+                status="finding" if step.finding else step.status,
+                said=step.finding or step.answer,
+                touched=list(step.touched_paths)))
+            # A FINDING IS NOT SOMETHING THAT LANDED. Its sentence describes
+            # work that did NOT come off; joined to the turn's reply beside a
+            # later step that did, it reads as both having happened.
+            if step.answer and not step.finding:
+                landed.append(step.answer)
+            touched += [p for p in step.touched_paths if p not in touched]
+            last = step
+            if step.status not in ("resolved", "no_op") and not step.finding:
+                return self._finished(landed, touched, step)
+
+        return self._finished(landed, touched, last,
+                              note=_loop.remaining_note(observations, capped=True))
+
+    def _understanding_for(self, verb: str, args: dict) -> dict:
+        """A tool call, as the understanding every seam below already reads.
+
+        The reconciliation is `understand_ask`'s own, imported rather than
+        copied: `route` and `target_file` are one fact under two names — the
+        composing verbs read one and the editing verbs the other — and a model
+        filling whichever the tool listed would otherwise be asked which screen
+        it meant about a screen it had just named.
+        """
+        from services.smith.understand_ask import _blank, _is_route
+
+        clean = {k: v for k, v in (args or {}).items() if v not in (None, "")}
+        understanding = _blank(verb=verb, **clean)
+        route = str(understanding.get("route") or "").strip()
+        target = str(understanding.get("target_file") or "").strip()
+        if not route and _is_route(target):
+            understanding["route"] = target
+        if not target and route:
+            understanding["target_file"] = route
+        return understanding
+
+    def _ended(self, tool: str, chosen: dict, landed: list[str],
+               touched: list[str], last: "TurnResult") -> "TurnResult":
+        """A terminal move. `done` reports the steps; the other two speak."""
+        args = chosen.get("args") or {}
+        if tool == "ask_user":
+            # `why` is the fallback because a model that puts its question in
+            # the sentence meant for the person has still asked one, and losing
+            # it would end the turn on silence.
+            question = (str(args.get("question") or "").strip()
+                        or str(chosen.get("why") or "").strip())
+            if question:
+                return TurnResult(status="asked", answer=question,
+                                  touched_paths=list(touched))
+        # AN ANSWER IS FOR A TURN THAT CHANGED NOTHING. `answer` exists for a
+        # message that asked something rather than asked for something; once a
+        # step has landed, the turn's reply is what the seams reported, and
+        # prose written here is prose about work nobody checked. Asked to
+        # build a dashboard and told "yes please", the loop built it and then
+        # appended an answer about identity documents — a subject taken out of
+        # the Blueprint slice, appended to a correct report.
+        if tool == "answer" and not landed:
+            said = str(args.get("text") or "").strip()
+            if said:
+                return self._finished([said], touched, last)
+        return self._finished(landed, touched, last)
+
+    def _finished(self, landed: list[str], touched: list[str],
+                  last: "TurnResult", *, note: str = "") -> "TurnResult":
+        """The turn's reply, assembled from what the steps actually reported.
+
+        Never from a summary the model writes at the end: that is a chance to
+        describe a change that did not happen, and every sentence here was
+        written by the seam that did the work and proved it.
+
+        A FINDING THE LOOP COULD NOT SETTLE IS STILL THE PERSON'S TO SEE. Its
+        sentence is kept out of `landed` — it describes work that did not come
+        off — so it has to be added back here, after what did land, or a turn
+        that ends on one says "Done" in the answer and `needs_user` in the
+        status.
+        """
+        said = list(landed)
+        if last.finding and last.answer:
+            said.append(last.answer)
+        answer = "\n\n".join(dict.fromkeys(s for s in said if s)) or last.answer
+        return TurnResult(
+            status=last.status,
+            answer=answer + note,
+            options=list(last.options),
+            diff_summary=last.diff_summary,
+            touched_paths=list(touched),
+        )
 
     def _iterate(self, user_message: str,
                  history: list[tuple[str, str]] | None = None) -> TurnResult:
@@ -1135,6 +1441,8 @@ class SmithSession:
         assert self._understand and self._move, (
             "iteration requires understand_ask_fn + iteration_move_fn"
         )
+        self._last_verb = ""
+        self._last_args = {}
 
         bp = Blueprint.load(project_id=self.project_id, output_dir=self.output_dir)
         blueprint_slice = pick_relevant_slice(bp, ask=user_message)
@@ -1169,6 +1477,17 @@ class SmithSession:
         # not hand off to the DAG, so a question no longer produces a run.
         answered = (understanding.get("answer") or "").strip()
         if answered:
+            # STEP ONE, NOT THE END. This answer was written from the slice
+            # alone; asked what code decides which rentals need attention, the
+            # model said the Blueprint "does not expose the underlying filter
+            # code" and then listed five statuses where `view.tsx` names three.
+            # It knew it could not see, and the turn gave it no way to look.
+            # Recorded under the terminal name so `_loop` treats it as a step
+            # taken: the chooser sees the answer, may read, and may answer
+            # again — `_ended` lets `answer` speak when nothing has landed,
+            # which is the case here by definition.
+            self._last_verb = "answer"
+            self._last_args = {"text": answered}
             return TurnResult(status="no_op", answer=answered)
 
         # SEVERAL ASKS IN ONE MESSAGE. Shown as a plan and agreed to once,
@@ -1215,6 +1534,16 @@ class SmithSession:
             # next turn, the way the definition's questions are answered.
             choices = [str(c).strip() for c in (understanding.get("clarification_options") or [])
                        if str(c or "").strip()]
+            # STEP ONE, NOT THE END — the same rule as an answer from the
+            # slice. Asked to make accepted rentals count as needing attention,
+            # the model asked whether a "needs attention" section already
+            # existed; `view.tsx:211` says it does. A question the code can
+            # answer is a read, not a turn. Recorded under the terminal name so
+            # the loop sees the question, may look, and may act — or ask a
+            # better question. The plan's consent question above is NOT this:
+            # that one is the person's to answer, and stays terminal.
+            self._last_verb = "ask_user"
+            self._last_args = {"question": clarification}
             return TurnResult(status="asked", answer=clarification, options=choices)
 
         # WHICH VERB, BEFORE WHICH FIELDS. Every request was held to a rename's
@@ -1270,6 +1599,25 @@ class SmithSession:
                     question, choices = ask_for(gaps, doc, understanding)
                     return TurnResult(status="asked", answer=question, options=choices)
 
+        return self._perform(verb, understanding, bp=bp, baseline=baseline,
+                             user_message=user_message)
+
+    def _perform(self, verb: str, understanding: dict, *, bp: Any,
+                 baseline: dict, user_message: str) -> "TurnResult":
+        """Carry out one understood verb, and prove it landed.
+
+        Split out of `_iterate` so the loop (`services.smith.loop`) can take a
+        second step without a second execution path — the reason `_run_step`
+        re-enters `_iterate` rather than duplicating it. Everything below ran
+        here before, in this order; nothing about a verb changed.
+
+        `baseline` is the tree as it stood BEFORE this step, so the ground-truth
+        checks at the bottom prove THIS step rather than the turn: a loop whose
+        second step is verified against the first step's baseline would report
+        a change that the first step made.
+        """
+        self._last_verb = verb
+        self._last_args = dict(understanding)
         if verb == "restyle":
             return self._restyle(understanding, self._ask)
         if verb in ("set_logo", "remove_logo"):
@@ -1473,6 +1821,9 @@ class SmithSession:
                 options=["retry with a different approach",
                          "let me investigate further",
                          "leave it and I'll come back later"],
+                finding=(f"The move `{move.move_name}` ran and the working tree "
+                         "is unchanged: nothing was written. Whatever it was "
+                         "told to edit, it did not find."),
             )
 
         # Diff-based checks — git's diff for what it tracks, the tree's for
@@ -1500,6 +1851,10 @@ class SmithSession:
                          "keep this edit anyway"],
                 diff_summary=_diff_summary_line(actually_touched, diff),
                 touched_paths=list(actually_touched),
+                finding=(f"git says the edit landed on {actually_touched}, not "
+                         f"on `{target_file}`, which is what was named. The "
+                         "wrong thing was edited — the ask may be right and "
+                         "the target wrong."),
             )
 
         # Element-label check: does the diff mention the label?
@@ -1516,6 +1871,10 @@ class SmithSession:
                          "keep this edit anyway"],
                 diff_summary=_diff_summary_line(actually_touched, diff),
                 touched_paths=list(actually_touched),
+                finding=(f"`{target_file}` was edited, but the diff mentions "
+                         f"nothing labelled '{element_label}' — something "
+                         "nearby was changed instead. That label may not be "
+                         "what the thing is actually called."),
             )
 
         # Guard delta.
@@ -1537,6 +1896,9 @@ class SmithSession:
                          "keep it — I'll deal with the guards later"],
                 diff_summary=_diff_summary_line(actually_touched, diff),
                 touched_paths=list(actually_touched),
+                finding=(f"The edit landed on `{target_file}` and broke "
+                         f"{len(new_failures)} guard(s) that passed before it: "
+                         f"{summary}."),
             )
 
         # All checks pass — record the win.

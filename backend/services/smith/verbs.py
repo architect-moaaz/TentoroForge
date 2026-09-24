@@ -496,7 +496,11 @@ def missing_fields(understanding: dict) -> list[str]:
         if isinstance(value, str):
             if not value.strip():
                 out.append(key)
-        elif isinstance(value, (list, tuple)):
+        elif isinstance(value, (list, tuple, dict)):
+            # `field` arrives as `{}` when the model named none, and an empty
+            # dict is not a field spec. Untreated it passed this gate and
+            # reached the seam as "Nurse has no field ''" — the same silence
+            # `widgets: []` is checked for one line up.
             if not value:
                 out.append(key)
         elif value is None:

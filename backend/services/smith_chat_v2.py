@@ -46,6 +46,17 @@ logger = logging.getLogger(__name__)
 # Request / response shapes
 # --------------------------------------------------------------------------- #
 
+def _next_step_with(reasoning: Any) -> Any:
+    """`loop.next_step`, carrying the reasoning stream the turn was given."""
+    from services.smith.loop import next_step
+
+    def choose(ask: str, ctx: str, observations: list,
+               history: list | None = None) -> dict:
+        return next_step(ask, ctx, observations, history, reasoning=reasoning)
+
+    return choose
+
+
 @dataclass
 class ChatV2Request:
     project_id: str
@@ -146,6 +157,12 @@ def _build_session(
         # than believing it. Wired here; overrides still win, which is how the
         # handler stays testable without touching a filesystem.
         iteration_move_fn=overrides.get("iteration_move_fn") or move_dispatcher,
+        # WHO PICKS THE SECOND STEP. The turn used to be one move and end, so a
+        # move that reported it had changed nothing was read by nobody and a
+        # message asking for three things did the biggest one. Wired here with
+        # the other two; an override still wins, and a caller that supplies
+        # none takes the single step it always did.
+        next_step_fn=overrides.get("next_step_fn") or _next_step_with(req.reasoning_fn),
         reasoning_fn=req.reasoning_fn,
     )
 

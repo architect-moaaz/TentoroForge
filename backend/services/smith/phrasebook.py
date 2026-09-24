@@ -79,11 +79,16 @@ from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP, missing_fields
 #: only thing it was collected for.
 CORPUS_PATH = Path(__file__).with_name("phrasebook_corpus.yaml")
 
-#: The module whose control flow decides what a verb does, and the method that
-#: holds all of it. Named rather than searched: if either moves, this fails
-#: loudly, which is the right way for a drift detector to meet a refactor.
+#: The module whose control flow decides what a verb does, and the methods that
+#: hold it. Named rather than searched: if any of them moves, this fails
+#: loudly, which is the right way for a drift detector to meet a refactor — and
+#: it did. Since the turn became a loop (`2026-09-24-smith-as-a-loop`) the
+#: dispatcher is two methods: `_iterate` decides whether a verb runs at all
+#: (the slot gate lives there), `_perform` carries it out (the verb chain and
+#: the move moved there whole, so a second step is carried out by the code that
+#: carries out the first). Read in that order, which is the order they run in.
 DISPATCH_MODULE = Path(__file__).resolve().parents[1] / "smith_session.py"
-DISPATCH_METHOD = "_iterate"
+DISPATCH_METHODS: tuple[str, ...] = ("_iterate", "_perform")
 
 #: A sentence the code quotes as an example of asking for something. This is
 #: `capabilities._EXAMPLE` — the code's own rule for "a quoted example long
@@ -162,15 +167,23 @@ class Classified:
         return str(self.entry.get("id") or "")
 
 
-def _dispatch_tree() -> ast.FunctionDef:
+def _dispatch_body() -> list[ast.stmt]:
+    """Every statement of the dispatcher, in the order the turn runs them."""
     source = DISPATCH_MODULE.read_text(encoding="utf-8")
+    found: dict[str, ast.FunctionDef] = {}
     for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.FunctionDef) and node.name == DISPATCH_METHOD:
-            return node
-    raise LookupError(
-        f"{DISPATCH_MODULE.name} has no {DISPATCH_METHOD}: the dispatcher this "
-        "reads has moved, and every classification below is guesswork until "
-        "this points at it again.")
+        if isinstance(node, ast.FunctionDef) and node.name in DISPATCH_METHODS:
+            found[node.name] = node
+    missing = [m for m in DISPATCH_METHODS if m not in found]
+    if missing:
+        raise LookupError(
+            f"{DISPATCH_MODULE.name} has no {', '.join(missing)}: the dispatcher "
+            "this reads has moved, and every classification below is guesswork "
+            "until this points at it again.")
+    out: list[ast.stmt] = []
+    for name in DISPATCH_METHODS:
+        out += found[name].body
+    return out
 
 
 def _verbs_in_test(test: ast.expr) -> tuple[str, frozenset[str]]:
@@ -236,7 +249,7 @@ def dispatch_facts() -> dict[str, VerbFacts]:
     """
     facts: dict[str, VerbFacts] = {}
     refused = frozenset(v for v in REQUIRED_BY_VERB if limits.cannot(v))
-    for statement in _dispatch_tree().body:
+    for statement in _dispatch_body():
         if not isinstance(statement, ast.If):
             continue
         how, verbs = _verbs_in_test(statement.test)
@@ -273,7 +286,7 @@ def slot_gate_skips() -> frozenset[str]:
     verb added to that exemption changes what a bare sentence does, and the
     document would otherwise go on saying it asks.
     """
-    for statement in _dispatch_tree().body:
+    for statement in _dispatch_body():
         if not isinstance(statement, ast.If):
             continue
         how, verbs = _verbs_in_test(statement.test)
@@ -465,7 +478,7 @@ def move_requires() -> frozenset[str]:
     no screen is coloured the way the product colours it.
     """
     wanted: set[str] = set()
-    for statement in _dispatch_tree().body:
+    for statement in _dispatch_body():
         if not isinstance(statement, ast.If):
             continue
         test = statement.test
