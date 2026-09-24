@@ -589,10 +589,7 @@ async def _run_smith_rounds(
          on-disk changes (stall detection).
     """
     from services.fault_report import build_report_from_runner, render_for_smith
-    # Smith invocation is lazily imported to keep the module loadable
-    # without the Claude Agent SDK at import time (tests, CI).
-    from agents.smith_agent import run_smith_agent
-    from services.app_recall import assemble_recall
+    from services.smith4.platform import smith_result as _smith_turn
 
     fixed: list[str] = []
     escalated: list[dict] = []
@@ -610,21 +607,16 @@ async def _run_smith_rounds(
             break
         prompt = render_for_smith(report)
 
-        # Best-effort recall block — Smith's own memory pipeline. If
-        # unavailable, ship an empty recall (won't crash).
-        try:
-            recall_block = assemble_recall(project.output_dir).to_prompt_block()
-        except Exception:
-            recall_block = ""
-
         # Snapshot commit before Smith mutates so SV-7 can revert.
         pre_commit = _git_head(project.output_dir)
 
         try:
-            result = run_smith_agent(
-                user_message=prompt,
-                output_dir=project.output_dir,
-                recall_block=recall_block,
+            # The faults are the ask; the loop reads and writes through the
+            # seams; the round is committed here (staged to what it touched)
+            # so the stall check and the revert below have a commit to see.
+            result = await asyncio.to_thread(
+                _smith_turn, str(project.id), project.output_dir, prompt,
+                commit=True, commit_message=f"smith(verify round {rounds}): fix faults",
             )
         except Exception as e:
             logger.exception("[self-verify] Smith round %d failed", rounds)

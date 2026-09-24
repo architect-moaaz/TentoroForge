@@ -10,8 +10,8 @@ just added.
 
 The design ladders on top of the tools built earlier in this session:
 
-* :func:`agents.smith_agent.run_smith_agent` — the agent loop, now
-  with ``read_file``/``edit_file``/``verify_promise`` in its palette.
+* :func:`services.smith4.platform.smith_result` — Smith v4's loop, with the
+  crash as the ask and the build's seams as its writes.
 * :func:`services.post_generate_fixes.apply_post_generate_fixes` —
   runs the guard suite over Smith's writes before commit.
 * :func:`services.fix_applier._commit` — one commit per heal so the
@@ -158,59 +158,18 @@ async def _run_heal_attempt(
     # the chat panel replaces the progress card with the final result card.
     in_progress_conv_id = await _persist_self_heal_progress(proj_id, snapshot)
 
-    from agents.smith_agent import run_smith_agent
+    from services.smith4.platform import smith_result as _smith_turn
     try:
-        recall_block = ""
-        try:
-            from services.app_recall import assemble_recall
-            recall_block = assemble_recall(output_dir).to_prompt_block()
-        except Exception:  # noqa: BLE001
-            logger.exception("[self-heal] assemble_recall failed")
-
-        memory_block = ""
-        try:
-            from services.smith_memory import read_smith_memory
-            async with async_session() as sess:
-                memory = await read_smith_memory(sess, proj_id)
-                memory_block = memory.to_prompt_block()
-        except Exception:  # noqa: BLE001
-            logger.exception("[self-heal] read_smith_memory failed")
-
-        # Enrich the prompt with anchors — the raw error/stack alone made Smith
-        # ask "which screen?"; loading the workflow JSON + page schema + registry
-        # summary gives him files to act on immediately (no clarifying turn wasted).
+        # The crash is the ask. The loop reads the page or workflow the
+        # incident names itself (`grep`, `read_page_code`) and writes through
+        # the build's seams; nothing is pre-loaded for it. It is not asked to
+        # commit — the commit below stages exactly what it touched.
         anchor_block = _load_anchor_files(snapshot, output_dir)
         prompt_with_anchors = f"{prompt}\n\n{anchor_block}" if anchor_block else prompt
-
-        # Runtime-exception healing needs more turns than a user-typed
-        # chat. When FORGE_SMITH_ORCH=1 the orchestrator loop handles
-        # retry-until-guards-green with rollback on give-up — much
-        # stronger than the flat max_iters=20 fallback for the classic
-        # smith agent.
-        import os as _os
-        if _os.environ.get("FORGE_SMITH_ORCH") == "1":
-            from services.smith_orchestrator import run as _smith_orch_run
-            orch = await asyncio.to_thread(
-                _smith_orch_run,
-                prompt_with_anchors, output_dir,
-                project_id=str(proj_id),
-            )
-            # Adapt to run_smith_agent's shape for the rest of this handler.
-            smith_result = {
-                "answer":       orch.answer if orch.status in ("resolved", "no_op", "rolled_back") else None,
-                "question":     orch.question,
-                "handoff":      orch.handoff,
-                "diagnosis":    None,
-                "edited_paths": orch.applied_paths,
-                "trace":        orch.trace,
-            }
-            logger.info("[smith-orch/self-heal] status=%s turns=%d applied=%d commit=%s",
-                        orch.status, orch.turns, len(orch.applied_paths), orch.commit)
-        else:
-            smith_result = await asyncio.to_thread(
-                run_smith_agent, prompt_with_anchors, output_dir, recall_block, memory_block,
-                max_iters=20,
-            )
+        smith_result = await asyncio.to_thread(
+            _smith_turn, str(proj_id), output_dir, prompt_with_anchors,
+            commit=False,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("[self-heal] Smith crashed")
         await _mark_exception(
@@ -532,16 +491,17 @@ def _synthesize_smith_prompt(exc: dict) -> str:
         "asking you a question. Find the culprit and fix it.",
         "",
         "RULES for runtime-exception healing:",
-        "  • Do NOT call `ask_user` on this turn. The crash IS the ground",
-        "    truth; there is nothing to clarify. If you're tempted to ask",
-        "    'which screen/workflow?', call `list_workflows` / `list_pages`",
-        "    instead and grep the JSON for the failure signature.",
-        "  • Do NOT call `propose_fix` — the runtime file needs a direct",
-        "    edit, not a seam patch card.",
-        "  • Use `read_workflow` / `read_page` / `read_file` to inspect,",
-        "    `edit_file` to patch, `verify_promise` to confirm the fix",
-        "    survived a re-run of the guards.",
-        "  • `answer` with a short summary of what you changed and where.",
+        "  • Do NOT `ask_user` on this turn. The crash IS the ground truth;",
+        "    there is nothing to clarify. Read instead: `grep` the message or",
+        "    the frame's file, `read_page_code` the route, `read_section` the",
+        "    workflow.",
+        "  • Fix it through the seam that owns it: `write_page_code` for a",
+        "    page's React, `write_section` for a workflow, rule or field,",
+        "    `edit_workflow` / `add_field` where a verb fits. The compiler's",
+        "    verdict comes back to you; a page that did not compile is a brief",
+        "    to sharpen, not a reason to stop.",
+        "  • End with `done` once the fix landed. `answer` only if nothing",
+        "    needed changing, saying why.",
     ])
     return "\n".join(lines)
 

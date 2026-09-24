@@ -41,20 +41,14 @@ def test_synthesize_includes_error_message_and_locator():
     assert "update_status" in prompt
 
 
-def test_synthesize_instructs_direct_edit_not_seam():
+def test_synthesize_names_the_loops_reads_and_writes_and_forbids_asking():
+    """The crash is the ground truth: the prompt sends the loop to read the
+    code and fix it through the build's seams, and forbids a question."""
     prompt = _synthesize_smith_prompt(_UUID_CRASH_EXC)
-    assert "read_file" in prompt
-    assert "edit_file" in prompt
-    assert "verify_promise" in prompt
-    # The prompt must forbid propose_fix on runtime-crash healing (a seam
-    # patch card is wrong when the runtime file itself needs editing).
-    # Accepts either phrasing since the rule matters more than the exact words.
-    lowered = prompt.lower()
-    assert ("do not propose" in lowered
-            or "not propose" in lowered
-            or "do not call `propose_fix`" in lowered), (
-        "runtime-exception prompt must forbid propose_fix"
-    )
+    assert "read_page_code" in prompt and "grep" in prompt
+    assert "write_page_code" in prompt and "write_section" in prompt
+    assert "Do NOT `ask_user`" in prompt
+    assert "edit_file" not in prompt and "propose_fix" not in prompt      # the legacy palette is gone
 
 
 def test_synthesize_reports_occurrence_count_when_gt_one():

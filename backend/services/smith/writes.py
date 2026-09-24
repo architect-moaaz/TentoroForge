@@ -85,7 +85,66 @@ WRITES = WRITES + (
      {"section": "string", "brief": "string", "subject": "string"}),
 )
 
+WRITES = WRITES + (
+    ("verify_pages",
+     "Open the application's coded pages in a browser — with data, with none, "
+     "on a missing record — press every control, judge each page, and have the "
+     "ones below the bar rewritten by their author and compiled. `routes` "
+     "narrows it (a list); empty means every coded page. Slow: a minute or two "
+     "per page. The verdict per page comes back to you; a page still below the "
+     "bar is a finding you can act on with `write_page_code`.",
+     {"routes": "array"}),
+)
+
 WRITE_NAMES: frozenset[str] = frozenset(name for name, _d, _a in WRITES)
+
+
+def verify_pages(output_dir: str, routes: list[str] | None = None, *, reasoning: Any = None) -> dict:
+    """Verify & fix, as the loop's own move: `orchestrator.review_coded_pages`."""
+    from services.blueprint.orchestrator import review_coded_pages
+    from services.blueprint.page_review import ReviewUnavailable
+    from services.blueprint.service import BlueprintService
+
+    try:
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except FileNotFoundError:
+        return _finding("This project has no Blueprint, so there are no pages to verify.")
+    pages = {str(p.get("id")): p for p in svc.doc.get("pages") or [] if isinstance(p, dict)}
+    route_of = {pid: str(p.get("route") or pid) for pid, p in pages.items()}
+    wanted = [str(r).strip() for r in (routes or []) if str(r).strip()]
+    only = {pid for pid, r in route_of.items() if r in set(wanted)} if wanted else None
+    if wanted and not only:
+        return _finding(f"None of {', '.join(wanted)} is a page here. Routes: "
+                        + ", ".join(sorted(route_of.values()))[:500] + ".")
+    app_root = str(Path(output_dir) / "app")
+    try:
+        outcome = review_coded_pages(svc, app_root, only=only)
+    except ReviewUnavailable as exc:
+        return _finding(f"The pages could not be opened in a browser here: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("[smith] verify_pages failed")
+        return _finding(f"The review did not finish — {type(exc).__name__}: {exc}")
+    report = outcome.get("pages") or {}
+    if not report:
+        return {"applied": True, "said": str(outcome.get("skipped") or "No coded pages to verify."),
+                "finding": "", "touched": [], "version": 0}
+    rewritten = sorted(route_of.get(p, p) for p, r in report.items() if r.get("rewritten"))
+    passing = sorted(route_of.get(p, p) for p, r in report.items() if r.get("passed"))
+    short = {route_of.get(p, p): r for p, r in report.items() if not r.get("passed")}
+    said = (f"Opened {len(report)} page(s) in a browser and pressed every control."
+            + (f" Rewrote: {', '.join(rewritten)}." if rewritten else "")
+            + (f" Passing: {', '.join(passing)}." if passing else ""))
+    finding = ""
+    if short:
+        lines = []
+        for route, r in sorted(short.items()):
+            v = r.get("review") or {}
+            why = (v.get("broken") or [None])[0] or next(
+                (f"{i.get('where')}: {i.get('problem')}" for i in v.get("issues") or []), "")
+            score = (r.get("scores") or [None])[-1]
+            lines.append(f"{route} ({score}/10){': ' + str(why)[:200] if why else ''}")
+        finding = "Still below the bar after the review: " + "; ".join(lines)
+    return {"applied": True, "said": said, "finding": finding, "touched": [], "version": 0}
 
 
 def write_section(output_dir: str, section: str, brief: str, *, subject: str = "",
@@ -215,10 +274,13 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     if name == "write_page_code":
         return write_page_code(output_dir, str(args.get("route") or ""),
                                str(args.get("brief") or ""), reasoning=reasoning)
+    if name == "verify_pages":
+        routes = args.get("routes")
+        return verify_pages(output_dir, list(routes) if isinstance(routes, list) else [], reasoning=reasoning)
     if name == "write_section":
         return write_section(output_dir, str(args.get("section") or ""), str(args.get("brief") or ""),
                              subject=str(args.get("subject") or ""), reasoning=reasoning)
     raise KeyError(name)
 
 
-__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "run", "write_page_code", "write_section"]
+__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "run", "verify_pages", "write_page_code", "write_section"]

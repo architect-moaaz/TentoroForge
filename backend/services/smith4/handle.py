@@ -22,7 +22,8 @@ def handle(*, project_id: str, output_dir: str, message: str,
            choose: Callable | None = None,
            move: Callable | None = None,
            guards: Callable | None = None,
-           reasoning: Any = None) -> Outcome:
+           reasoning: Any = None,
+           max_steps: int | None = None) -> Outcome:
     """One turn on a built application. `choose` decides each step; absent,
     `services.smith.loop.next_step` on the real model. `move` is the tree
     editor for layout pages; absent, `move_dispatcher`."""
@@ -44,7 +45,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
             plan_mod.clear(output_dir)
         if step:
             pending_ask.clear(output_dir)
-            result = turn(ctx_for(step), choose=choose, history=history)
+            result = turn(ctx_for(step), choose=choose, history=history, max_steps=max_steps)
             note = plan_mod.remaining_note(plan_mod.peek(output_dir))
             if note and result.status == "resolved":
                 result.said += note
@@ -60,7 +61,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
         return Outcome(status="asked", said="Go ahead — tell me the one thing you want first.")
 
     ask = pending_ask.joined(pending_ask.take(output_dir), typed)
-    result = turn(ctx_for(ask), choose=choose, history=history)
+    result = turn(ctx_for(ask), choose=choose, history=history, max_steps=max_steps)
     if result.status == "asked":
         pending_ask.remember(output_dir, ask)
     elif result.done:

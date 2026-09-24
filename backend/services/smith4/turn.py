@@ -45,14 +45,25 @@ LOOK_FIRST = ("Nothing has been read this turn. Read the page (`read_page_code`,
               "Ask again only if it still stands.")
 
 
-def turn(ctx: Ctx, *, choose: Choose, history: list | None = None) -> Outcome:
+def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
+         max_steps: int | None = None) -> Outcome:
+    """One turn. `max_steps` overrides `loop.MAX_STEPS` for a caller with its
+    own budget — a fault dispatched by the journey verifier gets a few steps,
+    a person's ask gets the full cap."""
     observations: list[Observation] = []
+    out = _run(ctx, choose, list(history or []), observations,
+               max_steps or loop_mod.MAX_STEPS)
+    out.steps = [o.tool for o in observations]
+    return out
+
+
+def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation],
+         max_steps: int) -> Outcome:
     landed: list[str] = []
     touched: list[str] = []
     last: Outcome | None = None
-    history = list(history or [])
 
-    for _step in range(1, loop_mod.MAX_STEPS + 1):
+    for _step in range(1, max_steps + 1):
         page = opening(ctx.project_id, ctx.out, ctx.ask)
         chosen = choose(ctx.ask, page, observations, history) or {}
         tool = str(chosen.get("tool") or "").strip()
@@ -123,7 +134,9 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None) -> Outcome:
         if not step.done and not step.finding:
             return _finished(landed, touched, step)
 
-    return _finished(landed, touched, last, note=loop_mod.remaining_note(observations, capped=True))
+    note = loop_mod.remaining_note(observations, capped=True).replace(
+        f"{loop_mod.MAX_STEPS} steps", f"{max_steps} steps")
+    return _finished(landed, touched, last, note=note)
 
 
 def _understanding_for(ctx: Ctx, verb: str, args: dict) -> dict:

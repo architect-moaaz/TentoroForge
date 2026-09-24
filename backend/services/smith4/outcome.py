@@ -24,6 +24,9 @@ class Outcome:
     touched: list[str] = field(default_factory=list)
     diff_summary: str = ""
     finding: str = ""
+    #: The tools the turn called, in order — what a platform caller (self-heal,
+    #: the verify pass) reports as the turn's trace.
+    steps: list[str] = field(default_factory=list)
 
     @property
     def done(self) -> bool:
