@@ -1463,7 +1463,7 @@ sentences:
 
   - id: edit_api-change-that-endpoint-to-take-a
     say: "change that endpoint to take a date range"
-    checked: {colour: answers, via: limit}
+    checked: {colour: acts, via: handler}
     source: routing
     reaches: {verb: edit_api, states: [api]}
 
@@ -1731,7 +1731,7 @@ sentences:
 
   - id: rename_entity-call-nurses-colleagues-everywhere
     say: "call nurses colleagues everywhere"
-    checked: {colour: answers, via: limit}
+    checked: {colour: acts, via: handler}
     source: routing
     reaches: {verb: rename_entity, states: [entity, new_value]}
 
@@ -1853,13 +1853,13 @@ sentences:
 
   - id: refuse-call-nurses-colleagues
     say: "call nurses colleagues"
-    checked: {colour: answers, via: limit}
+    checked: {colour: acts, via: handler}
     source: code
     reaches: {verb: rename_entity, states: [entity, new_value]}
 
   - id: refuse-ward-to-unit
     say: "rename the Ward record to Unit"
-    checked: {colour: answers, via: limit}
+    checked: {colour: acts, via: handler}
     source: code
     reaches: {verb: rename_entity, states: [entity, new_value]}
 
@@ -1871,13 +1871,13 @@ sentences:
 
   - id: refuse-nurse-phone-as-number
     say: "Make the phone number on a nurse a number instead of text"
-    checked: {colour: answers, via: limit}
+    checked: {colour: acts, via: handler}
     source: phrasebook
     reaches: {verb: change_field_type, states: [entity, field]}
 
   - id: refuse-endpoint-date-range
     say: "make that endpoint take a date range"
-    checked: {colour: answers, via: limit}
+    checked: {colour: acts, via: handler}
     source: code
     reaches: {verb: edit_api, states: [api]}
 

@@ -14,14 +14,12 @@ the person named is not asked for again. A verb in `REQUIRED_BY_VERB` with no
 entry here fails `test_every_verb_is_performed`, which is the honest way for a
 new verb to meet the loop.
 
-THE FOUR HONEST REFUSALS ARE STILL HERE, AS VERBS. `rename_entity`,
-`change_field_type`, `edit_api` and `reorder` (on a layout page) answer with
-`limits.answer` — the reason and the nearest thing that works — exactly as
-before. §0 of the loop spec makes them cases to close, and the primitive that
-closes them (`write_section`, through the entity and API agents) is the next
-one after `write_page_code`. Until it exists, a refusal that says why is a
-better turn than a wrong change; what has changed is that nothing here is a
-GATE in front of the loop.
+THREE OF THE FOUR HONEST REFUSALS ARE CLOSED. `rename_entity`,
+`change_field_type` and `edit_api` go through `write_section` — the loop's
+primitive that briefs the agent owning a section — and their outcome is the
+section's, refusal and all. `reorder` on a layout page still answers with
+`limits.answer` (the tree edit has no reorder), and on a coded page composes.
+Nothing here is a GATE in front of the loop.
 """
 from __future__ import annotations
 
@@ -618,8 +616,53 @@ def rebuild(ctx: Ctx, u: dict) -> Outcome:
         "change one screen from here — name the route and I will rebuild that."))
 
 
+def section_write(ctx: Ctx, u: dict) -> Outcome:
+    """The three asks that used to be refused, made through `write_section`.
+
+    `rename_entity`, `change_field_type` and `edit_api` were `limits.py`'s
+    honest refusals: each names a change to a section the verb table had no
+    seam for. The seam exists now — the loop's `write_section` briefs the
+    owning agent — so the verb composes the brief from what was said and the
+    outcome is the section's. What the refusal used to warn about (a type
+    change loses what is in the box; a rename reaches pages and processes) is
+    in the brief, and in the reply, so the loop can follow it up.
+    """
+    from services.smith import writes
+    verb = u["verb"]
+    ent, new = _s(u, "entity"), _s(u, "new_value")
+    field = _field_name(u)
+    if verb == "rename_entity":
+        section, subject = "data.entities", ""
+        brief = (f"Rename the record kind **{ent}** to **{new}** — its name and label, and its table "
+                 "name where it is derived from the name. Keep its id, every field, every "
+                 "relationship and every constraint exactly as they are. Pages, workflows and "
+                 f"rules that say \"{ent}\" are separate sections; report them rather than touching them.")
+    elif verb == "change_field_type":
+        section, subject = "data.entities", ""
+        want = _s(u, "change") or _s(u, "field") if not isinstance(u.get("field"), dict) else str((u.get("field") or {}).get("type") or _s(u, "change"))
+        brief = (f"Change the type of the field **{field}** on **{ent}** to {want or 'what was asked'}. "
+                 "Keep the field's name, label and everything else on the entity. If existing values "
+                 "cannot be carried across, say so in the migration rather than silently dropping them.")
+    else:  # edit_api
+        section, subject = "apis", ""
+        brief = (f"Change the endpoint **{_s(u, 'api')}**: {_s(u, 'change') or ctx.ask}. Keep its "
+                 "path and method unless the change is to them; keep every other endpoint as it is.")
+    out = writes.write_section(ctx.out, section, brief, subject=subject, reasoning=ctx.reasoning)
+    said = str(out.get("said") or "")
+    if verb == "rename_entity" and out.get("applied") and not out.get("finding"):
+        from services.smith.entity_change import consequences
+        who = consequences(ctx.doc(), new) or consequences(ctx.doc(), ent)
+        rest = [s for s in (who.get("pages") or []) + (who.get("workflows") or []) if s]
+        if rest:
+            said += (f" Still saying \"{ent}\" and worth a look: " + ", ".join(rest[:8]) + ".")
+    return Outcome(status="resolved" if out.get("applied") and not out.get("finding") else "needs_user",
+                   said=said, touched=list(out.get("touched") or []),
+                   finding=str(out.get("finding") or ""))
+
+
 def honest_refusal(ctx: Ctx, u: dict) -> Outcome:
-    """`limits.answer`: why not, and the nearest thing that works, as chips."""
+    """`limits.answer`: why not, and the nearest thing that works, as chips.
+    Only `reorder` on a layout page reaches this now (see `tree_edit`)."""
     from services.smith.limits import answer
     said, options = answer(u["verb"], u, ctx.doc())
     return Outcome(status="needs_user", said=said, options=options)
@@ -674,7 +717,7 @@ PERFORM: dict[str, Perform] = {
     "add_login": accounts, "remove_login": accounts, "reset_login": accounts,
     "explain_crash": incident, "explain_slowness": incident, "back_up": records_out,
     "rebuild": rebuild,
-    "rename_entity": honest_refusal, "change_field_type": honest_refusal, "edit_api": honest_refusal,
+    "rename_entity": section_write, "change_field_type": section_write, "edit_api": section_write,
 }
 
 

@@ -10,8 +10,9 @@ this module gave it ("a screen exists because something is described as
 needing it, so removing it here would put it back") was a description of the
 machinery, and the owner had asked about their application.
 
-Each of the rest is a VERB now, so the classifier has somewhere to put it and
-this module answers it: what cannot be done, why in one clause, and the
+One is left. `rename_entity`, `change_field_type` and `edit_api` are made
+through `write_section` since Smith v4; `reorder` on a page laid out from a
+tree is still answered here: what cannot be done, why in one clause, and the
 nearest thing that can — offered as sentences a click can say.
 
 Nothing here changes anything. That is the point: an honest refusal that hands
@@ -32,31 +33,6 @@ def answer(verb: str, understanding: dict, doc: dict) -> tuple[str, list[str]]:
     said = {k: str(understanding.get(k) or "").strip() for k in ("route", "entity", "new_value", "api")}
     field = understanding.get("field") if isinstance(understanding.get("field"), dict) else {}
     box = str(field.get("name") or "").strip()
-
-    if verb == "rename_entity":
-        ent = said["entity"] or "that record"
-        new = said["new_value"] or "the new name"
-        return (f"I cannot rename the **{ent}** record to **{new}** everywhere — "
-                "individual boxes can be renamed across the whole application, "
-                "a whole kind of record cannot.\n\nThe nearest thing, and it is "
-                "usually what people want: tell me the words to use, and every "
-                "label a person reads changes.", [f"We say “{new}”, never “{ent}”"])
-
-    if verb == "change_field_type":
-        ent, name = said["entity"] or "that record", box or "that box"
-        return (f"I cannot change what kind of value **{name}** holds after the "
-                "fact — the column is already that type, and changing it in "
-                "place would risk what is written in it.\n\nThe way round it is "
-                "to remove it and add it again, which loses what is in that "
-                f"box on every existing {ent} record.",
-                [f"Remove {name} from {ent}", "Leave it as it is"])
-
-    if verb == "edit_api":
-        which = said["api"] or "that endpoint"
-        return (f"I cannot edit **{which}** — endpoints are added or removed, "
-                "not changed in place.\n\nRemove it and declare the one you "
-                "want; nothing else refers to it by shape.",
-                [f"Remove {which}", "Declare a new endpoint"])
 
     if verb == "reorder":
         where = said["route"] or "that screen"

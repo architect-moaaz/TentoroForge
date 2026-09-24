@@ -45,7 +45,114 @@ WRITES: tuple[tuple[str, str, dict[str, str]], ...] = (
      {"route": "string", "brief": "string"}),
 )
 
+#: Which node re-decides a section when the loop asks for it changed. The
+#: same nodes the change seams use (`entity_change`, `rule_change`,
+#: `access_change`, `restyle`, `definition_change`); a test holds each to
+#: `DAG` and to the agent's declared `writes`. Dotted names reach the data
+#: model's parts; `data.entities` goes to the fields author, which is the
+#: one that knows a field's type and what a migration costs.
+SECTION_NODE: dict[str, str] = {
+    "data.entities": "entity_fields",
+    "data.relationships": "data_model",
+    "data.constraints": "data_model",
+    "apis": "apis",
+    "integrations": "integrations",
+    "businessRules": "business_rules",
+    "permissions": "security",
+    "roles": "security",
+    "security": "security",
+    "workflows": "workflow_steps",
+    "designSystem": "design_system",
+    "navigation": "ux_architecture",
+    "modules": "ux_architecture",
+    "pages": "page_contracts",
+    "requirements": "requirements",
+    "product": "requirements",
+    "widgets": "analytics",
+}
+
+WRITES = WRITES + (
+    ("write_section",
+     "Change one section of the Blueprint by briefing the agent that owns it — "
+     "the data model (`data.entities`: rename a record, change a field's type), "
+     "`apis`, `businessRules`, `permissions`, `workflows`, `designSystem`, "
+     "`navigation`, `pages`, `requirements`, `product`. `brief` says what "
+     "should be different and what must stay, in terms of what you read "
+     "(`read_section`). `subject` narrows it to one artifact's id. The reply "
+     "is held to the contract and committed as one version; what changed on "
+     "disk is re-projected. A refusal comes back to you with its reason. For a "
+     "page's React use `write_page_code`; for one new field, `add_field`.",
+     {"section": "string", "brief": "string", "subject": "string"}),
+)
+
 WRITE_NAMES: frozenset[str] = frozenset(name for name, _d, _a in WRITES)
+
+
+def write_section(output_dir: str, section: str, brief: str, *, subject: str = "",
+                  reasoning: Any = None) -> dict:
+    """Re-decide `section` against `brief` through the node that owns it.
+
+    `section_change.rerun` is the seam every change verb already uses: brief
+    the owning agent, hold its reply to the contract, commit, say what was
+    refused. This is that seam with the section and the brief chosen by the
+    loop instead of by a verb — which is what lets a change no verb describes
+    ("rename the Nurse record to Colleague everywhere") still be made."""
+    from services.blueprint.service import BlueprintService
+    from services.smith.section_change import SectionChangeError, record_requirement, rerun
+
+    section, brief, subject = (section or "").strip(), (brief or "").strip(), (subject or "").strip()
+    if not section or not brief:
+        return _finding("`write_section` needs both `section` and `brief`.")
+    node = SECTION_NODE.get(section)
+    if node is None:
+        return _finding(f"`{section}` is not a section this can change. Sections: "
+                        + ", ".join(sorted(SECTION_NODE)) + ".")
+    try:
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except FileNotFoundError:
+        return _finding("This project has no Blueprint, so there is no section to change.")
+    app_root = str(Path(output_dir) / "app")
+    before = int(svc.doc.get("version") or 0)
+    try:
+        req = record_requirement(svc, brief, owner=section.split(".")[0])
+        framed = ("THIS IS A CHANGE to an application that is already built, not a first authoring. "
+                  f"Change ONLY what this asks and keep everything else exactly as it is: \"{brief}\". "
+                  f"It satisfies {req.get('id')}. Return the artifacts of `{section}` that change, "
+                  "keyed as they are now, and nothing that does not.")
+        props, _ = rerun(svc, node, brief=framed, request=brief, subject=subject,
+                         interpretation=f"change {section}: {brief}", reasoning=reasoning,
+                         app_root=app_root, say=f"Re-deciding {section} for: {brief}.")
+    except SectionChangeError as exc:
+        return _finding(f"{section} was not changed: {exc}")
+    except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
+        logger.exception("[smith] write_section %s failed", section)
+        return _finding(f"{section} was not changed — {type(exc).__name__}: {exc}")
+    touched = _reproject(svc, app_root, section)
+    after = int(svc.doc.get("version") or before)
+    changed = ", ".join(sorted({str(getattr(p, "natural_key", "") or "") for p in props if getattr(p, "natural_key", "")})[:8])
+    return {"applied": True, "finding": "", "touched": touched, "version": after,
+            "said": (f"Changed **{section}** (version {after})"
+                     + (f": {changed}" if changed else "") + "."
+                     + (f" Re-projected: {', '.join(touched[:6])}." if touched else ""))}
+
+
+def _reproject(svc: Any, app_root: str, section: str) -> list[str]:
+    """What a changed section writes to disk. Each section's own projection,
+    the way its change seam calls it; a section with none returns nothing."""
+    try:
+        if section.startswith("data"):
+            from services.smith.entity_change import _project_data
+            return _project_data(svc, app_root)
+        if section == "designSystem":
+            from services.blueprint.projection import project_design_tokens
+            return list(project_design_tokens(svc.doc, app_root).get("files") or [])
+        if section in ("pages", "navigation", "modules"):
+            from services.blueprint.projection import apply_frontend_projection
+            return list((apply_frontend_projection(svc, app_root) or {}).get("files") or [])
+    except Exception as exc:  # noqa: BLE001 — the Blueprint changed; the projection is reported, not fatal
+        logger.warning("[smith] re-projection after %s failed: %s", section, exc)
+        return []
+    return []
 
 
 def write_page_code(output_dir: str, route: str, brief: str, *,
@@ -108,7 +215,10 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     if name == "write_page_code":
         return write_page_code(output_dir, str(args.get("route") or ""),
                                str(args.get("brief") or ""), reasoning=reasoning)
+    if name == "write_section":
+        return write_section(output_dir, str(args.get("section") or ""), str(args.get("brief") or ""),
+                             subject=str(args.get("subject") or ""), reasoning=reasoning)
     raise KeyError(name)
 
 
-__all__ = ["WRITES", "WRITE_NAMES", "run", "write_page_code"]
+__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "run", "write_page_code", "write_section"]

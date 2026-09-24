@@ -32,7 +32,7 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "Add a box to a kind of record, rename or remove one everywhere it is "
      "used, or add and retire a whole kind of record.",
      frozenset({"add_field", "rename_field", "remove_field",
-                "add_entity", "remove_entity"})),
+                "add_entity", "remove_entity", "rename_entity", "change_field_type"})),
     ("What it does by itself",
      "Add, change or stop a process — an email after a registration, an "
      "archive instead of a delete, a reminder on a timer.",
@@ -61,7 +61,7 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "names of the secrets it would need, and say so every time rather than "
      "letting it look connected.",
      frozenset({"edit_product", "add_requirement", "edit_requirement",
-                "remove_requirement", "add_api", "remove_api",
+                "remove_requirement", "add_api", "edit_api", "remove_api",
                 "add_integration", "remove_integration", "connect_service"})),
     ("Your own data",
      "Load the records you already have — attach a spreadsheet and say which "
@@ -76,11 +76,9 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "compose them from the component library instead.",
      frozenset({"connect_figma", "connect_uxpilot", "disconnect_design"})),
     ("Asks I answer but cannot serve",
-     "Renaming a whole kind of record, changing what kind of value a box "
-     "holds, editing an endpoint in place, or moving things around on a "
-     "screen. I say why, and offer the nearest thing that does work.",
-     frozenset({"rename_entity", "change_field_type",
-                "edit_api", "reorder"})),
+     "Moving things around on a screen that is laid out from a tree. I say "
+     "why, and offer the nearest thing that does work.",
+     frozenset({"reorder"})),
     ("When it goes wrong in front of somebody",
      "Tell me it crashed or that it is slow, and I will tell you what the "
      "running application reported — what failed, where, how often, and what "

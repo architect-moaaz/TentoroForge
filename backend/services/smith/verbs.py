@@ -383,17 +383,17 @@ VERB_HELP: dict[str, str] = {
     "rename_entity": (
         "They want a whole KIND OF RECORD called something else everywhere: "
         "\"call nurses colleagues\", \"rename the Ward record to Unit\". "
-        "Cannot be done. Needs the record and the new name. NOT rename_field, "
+        "The data model is re-decided with the new name; pages and processes that still say the old one are reported to follow up. Needs the record and the new name. NOT rename_field, "
         "which is one box on a record."
     ),
     "change_field_type": (
         "They want an existing box to hold a different KIND of value: \"make "
         "the phone number a number instead of text\", \"the date should be a "
-        "date, not free text\". Cannot be done. Needs the record and the box."
+        "date, not free text\". The field is re-authored with the new type and the migration says what carries across. Needs the record and the box."
     ),
     "edit_api": (
         "They want an existing endpoint CHANGED rather than added or removed: "
-        "\"make that endpoint take a date range\". Cannot be done. Needs "
+        "\"make that endpoint take a date range\". The endpoint is re-decided by the API author. Needs "
         "which endpoint."
     ),
     "reorder": (

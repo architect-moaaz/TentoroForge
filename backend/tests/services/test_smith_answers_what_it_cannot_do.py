@@ -19,37 +19,19 @@ DOC = {
 }
 
 
-def test_each_refusal_is_a_verb_the_loop_can_reach():
-    """No gate in front of the loop: a refusal is a verb whose outcome is
-    `limits.answer`, and the table says which those are."""
-    from services.smith4.verbs import PERFORM, honest_refusal
+def test_the_three_refusals_are_made_now_and_reorder_is_the_one_left():
+    """`write_section` closed rename_entity, change_field_type and edit_api;
+    `reorder` on a tree-laid page is the last honest refusal."""
+    from services.smith4.verbs import PERFORM, honest_refusal, section_write, tree_edit
     for verb in ("rename_entity", "change_field_type", "edit_api"):
-        assert verb in REQUIRED_BY_VERB and verb in VERB_HELP, verb
-        assert PERFORM[verb] is honest_refusal
-    for verb in ("remove", "rename_field", "revert", "remove_page", "reorder"):
-        assert PERFORM[verb] is not honest_refusal
+        assert verb in REQUIRED_BY_VERB and "Cannot be done" not in VERB_HELP[verb], verb
+        assert PERFORM[verb] is section_write
+    assert PERFORM["reorder"] is tree_edit and honest_refusal is not None
+    assert answer("reorder", {"route": "/wards"}, DOC)[0]
 
 
 def test_a_screen_is_no_longer_answered_here_at_all():
     assert answer("remove_page", {"route": "/wards"}, DOC) == ("", [])
-
-
-def test_a_record_cannot_be_renamed_but_the_words_people_read_can():
-    said, options = answer("rename_entity", {"entity": "Nurse", "new_value": "Colleague"}, DOC)
-    assert "cannot rename the **Nurse** record" in said
-    assert options == ["We say “Colleague”, never “Nurse”"]
-
-
-def test_a_box_cannot_change_type_and_the_way_round_names_its_cost():
-    said, options = answer("change_field_type", {"entity": "Nurse", "field": {"name": "phone"}}, DOC)
-    assert "cannot change what kind of value **phone** holds" in said
-    assert "loses what is in that box" in said
-    assert options == ["Remove phone from Nurse", "Leave it as it is"]
-
-
-def test_an_endpoint_is_added_or_removed_not_edited():
-    said, options = answer("edit_api", {"api": "GET /api/data/wards"}, DOC)
-    assert "not changed in place" in said and options[0] == "Remove GET /api/data/wards"
 
 
 def test_a_screen_is_laid_out_again_rather_than_nudged():

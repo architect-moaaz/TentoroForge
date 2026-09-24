@@ -128,25 +128,14 @@ def test_every_verb_is_exercised_by_a_sentence():
         "Add the sentence a person would actually type.")
 
 
-def test_refusals_are_scored_as_neither_success_nor_gap(rows):
-    """The deliberate recognise-and-refuse verbs get their own colour.
-
-    `smith4.verbs.honest_refusal` names them; each says why in a clause and offers the
-    nearest thing that works. Counting one as a success overstates the
-    product, and counting it as a silent gap understates it — and the closing
-    section is built on that distinction.
-    """
-    refusals = sorted(v for v in REQUIRED_BY_VERB if phrasebook._refused(v))
-    assert refusals, "the refusal table is empty; the distinction has gone"
-    for verb in refusals:
-        said = [row for row in rows
-                if (row.entry.get("reaches") or {}).get("verb") == verb
-                and not row.missing]
-        assert said, f"no sentence asks for {verb} with everything it needs"
-        for row in said:
-            assert row.category == phrasebook.ANSWERS, (
-                f"“{row.say}” is a refusal and is scored {row.category}")
-            assert row.via == phrasebook.VIA_LIMIT
+def test_no_verb_is_refused_by_the_table_any_more(rows):
+    """The recognise-and-refuse colour existed for three verbs the table had
+    no seam for. `write_section` is that seam; the one refusal left,
+    `reorder` on a tree-laid page, is decided inside the tree edit, not by
+    the table — so nothing here is `limit` and the corpus must not say so."""
+    assert not [v for v in REQUIRED_BY_VERB if phrasebook._refused(v)]
+    for row in rows:
+        assert row.via != phrasebook.VIA_LIMIT, f"“{row.say}” is scored as a refusal"
 
 
 def test_the_dispatcher_accounts_for_every_verb():
@@ -159,7 +148,7 @@ def test_the_dispatcher_accounts_for_every_verb():
     assert len(handled) > 20, "almost nothing reaches a handler: the table is no longer being read"
     assert facts["revert"].handler == "revert"
     assert facts["rename"].via == phrasebook.VIA_MOVE
-    assert facts["rename_entity"].via == phrasebook.VIA_LIMIT
+    assert facts["rename_entity"].handler == "section_write"       # closed by write_section
 
 
 def test_the_slot_gate_exemption_is_read_from_the_code():
