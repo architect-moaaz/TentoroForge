@@ -3361,6 +3361,15 @@ EFFORT_BY_NODE: dict[str, str] = {
 #: 64000 is the value `__post_init__` already uses for xhigh/max effort, so
 #: this is the established headroom rather than a new one. These nodes are
 #: above STREAM_ABOVE either way, so they were already streaming.
+#: Effort by AGENT, for the ones that are not a node: the reviewer that
+#: looks at each page as it is written (`page_look`) gives a verdict on two
+#: screenshots against a contract — not a design from nothing. Measured on
+#: one list page: `high` 42s and 3,184 output tokens, `medium` 30s and 1,929,
+#: the same score and the same five issues.
+EFFORT_BY_AGENT: dict[str, str] = {
+    "page_reviewer": "medium",
+}
+
 MAX_TOKENS_BY_NODE: dict[str, int] = {
     # Names the entities and their relationships without a field; the 64k
     # the single call needed went on fields, which `entity_fields` writes one
@@ -3462,6 +3471,10 @@ def tiered_router(
                 reasoning=reasoning,
             )
             for node in tuned
+        },
+        by_agent={
+            agent: AnthropicModel(model=model, effort=effort, reasoning=reasoning)
+            for agent, effort in EFFORT_BY_AGENT.items()
         },
     )
 
@@ -3855,7 +3868,7 @@ def make_executor(
             doc = _copy.deepcopy(svc.doc)
         if spec.agent == "ui_director":
             t0 = time.monotonic()
-            body, u = ui_engineer.compose_direction(doc, client)
+            body, u = ui_engineer.compose_direction(doc, client, references=references.paths(svc.output_dir))
             record(u, time.monotonic() - t0)
             return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                                proposals=[ArtifactProposal(section="composition",
@@ -3866,12 +3879,25 @@ def make_executor(
         current = next((row for row in doc.get("pageCode") or []
                         if str(row.get("page")) == spec.subject), None)
         tell(reasoning, f"Writing {page.get('route')} in React.", "step", spec.node)
+        # THE PAGE IS LOOKED AT AS IT IS WRITTEN (`page_look`): the reviewer
+        # is the page reviewer's tier, and only a client that can see an
+        # image can review one.
+        critic = (model.for_task("page_look", "page_reviewer") if isinstance(model, ModelRouter) else model)
+        if not getattr(critic, "accepts_images", False):
+            critic = None
         body, spent = ui_engineer.compose_page(
             doc, page, Path(svc.output_dir) / "app", client,
             feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
-            current=current if (spec.feedback or getattr(spec, "brief", "")) else None)
-        for u, elapsed in spent:
-            record(u, elapsed)
+            current=current if (spec.feedback or getattr(spec, "brief", "")) else None,
+            critic=critic,
+            on_look=lambda v: tell(reasoning, f"Looked at {page.get('route')}: {v.get('score')}/10 — "
+                                  + ("passed." if v.get("verdict") == "pass" else "sent back: "
+                                     + "; ".join(str(i.get("problem")) for i in (v.get("issues") or [])[:3])),
+                                  "step", spec.node))
+        for u, elapsed, *who in spent:
+            if usage is not None and u is not None:
+                usage.record(node=spec.node, agent=who[0] if who else spec.agent, usage=u,
+                             elapsed_s=elapsed, project=project)
         return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                            proposals=[ArtifactProposal(section="pageCode",
                                                        natural_key=spec.subject, body=body)])

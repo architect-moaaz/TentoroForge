@@ -456,10 +456,11 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # here" was asking a fair question.
     _n("assemble", "build", ("integration", "install"), ("runtime",),
        kind="projection"),
-    # NO `page_review` NODE. Looking at every page as it renders — the browser
-    # checks, the critique, the rewrites — is the user's call after the build,
-    # taken as "Verify & fix" (`review_coded_pages`), not minutes and money
-    # spent on every build whether it was wanted or not.
+    # NO `page_review` NODE. Each page is looked at as it is written, inside
+    # `page_code` (`page_look`: rendered with sample data, judged on the
+    # screenshots, sent back once). Looking at the BUILT application — the
+    # database, every control pressed — is the user's call after the build,
+    # taken as "Verify & fix" (`review_coded_pages`).
 )}
 
 
@@ -2388,9 +2389,9 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 #: `integrations`: 0 — sent back once and flagged. Product decision the same
 #: day, for time and spend.
 #: `page_code`: 0 — a page's code is judged by the compiler before it is
-#: accepted and by `page_review` as it renders; a critic reading the source
-#: had nothing either of those does not see better, and its repair would be a
-#: rewrite neither had asked for.
+#: accepted and by the reviewer on its screenshots (`page_look`, inside the
+#: writer's loop); a critic reading the source had nothing either of those
+#: does not see better, and its repair would be a rewrite neither had asked for.
 #: `ux_architecture`: 0 — 17 of 19 failed the first look and 9 were repaired;
 #: most findings judged what later nodes fill ("the module's pages array is
 #: empty" before any page exists, an empty `initialRoute`, a missing citation),

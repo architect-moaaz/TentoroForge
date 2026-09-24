@@ -64,7 +64,10 @@ both are decided once and inherited by every screen:
   adjectives is not a choice. The LAST option is always "Let the designer
   choose from the domain" — many people have no preference and should not
   be made to invent one. Where colours are named or a reference is
-  attached, do not ask.
+  attached, do not ask. This question is also where taste is asked, so end
+  it by inviting a picture: "…or attach a screenshot of a product whose
+  look you like, and it will be designed to that standard." A screenshot
+  reaches the designer, the director and the reviewer; an adjective does not.
 
 Otherwise ask only what a definition cannot proceed honestly without: who uses
 this and whether they differ, whether records are shared or private, what
