@@ -174,6 +174,7 @@ def look_at(doc: dict, page: dict, app_root: Path, load: str, view: str, client:
     shown = references.paths(app_root.parent) if getattr(client, "accepts_images", True) else []
     verdict, spent = judge(doc, page, look, client, references=shown)
     verdict["shots"] = look["shots"]
+    verdict["attempt"] = attempt
     # WHAT WAS LOOKED AT AND WHAT WAS SAID, KEPT BESIDE THE SCREENSHOTS. The
     # accepted version is the only code the Blueprint keeps; without these a
     # reader cannot tell what the reviewer asked for or whether the rewrite

@@ -1201,6 +1201,16 @@ def _run_id() -> str:
     return _t.strftime("%Y%m%d-%H%M%S", _t.gmtime()) + "-" + _u.uuid4().hex[:6]
 
 
+def _landed(svc: Any, key: str, subject: str) -> str:
+    """One line on what `subject` is now that it is written (see `landed`)."""
+    from services.blueprint.landed import summarize_subject
+    try:
+        with svc.lock:
+            return summarize_subject(svc.doc, key, subject)
+    except Exception:  # noqa: BLE001 — a summary is a courtesy
+        return ""
+
+
 def _note(ledger: Any, method: str, *args: Any) -> None:
     """Record if there is a ledger. Never raise: the ledger describes the run,
     it does not get to end it.
@@ -1274,6 +1284,10 @@ def run(
     ledger = RunLedger(svc.output_dir, _run_id(),
                        phase="build" if commit else "dry", observer=observer)
     ledger.planned(order)
+    # WHERE AN EXECUTOR CAN FIND THE LEDGER. A page looked at as it is
+    # written (`page_look`) happens inside the executor, which was built
+    # before the run and has no ledger of its own; the run's is here for it.
+    svc.run_ledger = ledger
 
     # A PULSE WHILE THE LONG STEPS RUN. page_layouts and the observer repair go
     # minutes between events, so the ledger fell silent and a live run looked
@@ -2642,7 +2656,7 @@ def _apply_subject(
         _act_on(svc, key, application.change_requests, report, commit=commit)
         state.authored.setdefault(subject, set()).update(
             _proposed_identities(outcome, application))
-        _note(ledger, "node_subject", key, subject, _at(), total, True)
+        _note(ledger, "node_subject", key, subject, _at(), total, True, _landed(svc, key, subject))
         return "applied"
     # A STAGE THAT REFUSES ITS OWN WORK IS THE ONE WORTH LISTENING TO. The
     # calculator's `entity_fields` came back at confidence 0.35 saying the

@@ -3895,10 +3895,7 @@ def make_executor(
             feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
             current=current if (spec.feedback or getattr(spec, "brief", "")) else None,
             critic=critic,
-            on_look=lambda v: tell(reasoning, f"Looked at {page.get('route')}: {v.get('score')}/10 — "
-                                  + ("passed." if v.get("verdict") == "pass" else "sent back: "
-                                     + "; ".join(str(i.get("problem")) for i in (v.get("issues") or [])[:3])),
-                                  "step", spec.node))
+            on_look=lambda v: _looked(svc, spec, page, v, reasoning))
         for u, elapsed, *who in spent:
             if usage is not None and u is not None:
                 usage.record(node=spec.node, agent=who[0] if who else spec.agent, usage=u,
@@ -3906,6 +3903,26 @@ def make_executor(
         return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                            proposals=[ArtifactProposal(section="pageCode",
                                                        natural_key=spec.subject, body=body)])
+
+    def _looked(svc: Any, spec: TaskSpec, page: dict, v: dict, reasoning: Any) -> None:
+        """A look's verdict, told to whoever watches: the thoughts and the
+        run ledger (from which the panel draws the page's score and picture)."""
+        from services.llm_client import tell
+
+        issues = [str(i.get("problem") or "") for i in (v.get("issues") or []) if i.get("problem")]
+        tell(reasoning, f"Looked at {page.get('route')}: {v.get('score')}/10 — "
+             + ("passed." if v.get("verdict") == "pass" else "sent back: " + "; ".join(issues[:3])),
+             "step", spec.node)
+        ledger = getattr(svc, "run_ledger", None)
+        if ledger is None:
+            return
+        try:
+            ledger.page_look(spec.node, spec.subject, route=str(page.get("route") or ""),
+                             attempt=int(v.get("attempt") or 0), score=int(v.get("score") or 0),
+                             verdict=str(v.get("verdict") or ""), issues=issues,
+                             broken=len(v.get("broken") or []), shots=sorted(v.get("shots") or {}))
+        except Exception:  # noqa: BLE001 — the account of the run never ends it
+            pass
 
     def executor(spec: TaskSpec) -> AgentResult:
         if spec.agent in ("ui_director", "ui_engineer"):

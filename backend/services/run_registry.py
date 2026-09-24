@@ -50,6 +50,14 @@ def begin(project_id: str, *, phase: str) -> None:
     }
 
 
+#: The events the level map is drawn from — kept, bounded, so a page that
+#: loads mid-build gets the map back rather than a count. Small each (a
+#: score, an id, the first problems), never a picture.
+MOMENTS = frozenset({"node:subject", "observer:verdict", "observer:repair", "observer:unrepaired",
+                     "node:retry", "node:stalled", "run:paused", "page:look"})
+MOMENTS_KEPT = 600
+
+
 def note(project_id: str, event: str, data: dict[str, Any]) -> None:
     """Fold one stream event into the snapshot.
 
@@ -59,6 +67,11 @@ def note(project_id: str, event: str, data: dict[str, Any]) -> None:
     run = _RUNS.get(str(project_id))
     if run is None:
         return
+    if event in MOMENTS:
+        kept = run.setdefault("moments", [])
+        kept.append({"event": event, **{k: v for k, v in data.items() if k != "at"}})
+        if len(kept) > MOMENTS_KEPT:
+            del kept[:len(kept) - MOMENTS_KEPT]
 
     if event == "plan":
         nodes = data.get("nodes")

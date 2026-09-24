@@ -1092,7 +1092,7 @@ export function SmithPanel({
               ← Back to the current run
             </button>
           )}
-          <StageList run={sidePlan} />
+          <StageList run={sidePlan} projectId={projectId ?? undefined} />
         </div>
       ) : hasDefinition ? (
         // THE BLUEPRINT. Read off the document rather than the run, so a
@@ -1145,8 +1145,10 @@ export function SmithPanel({
  */
 function StageList({
   run,
+  projectId,
 }: {
   run: ReturnType<typeof useBlueprintRun>["run"];
+  projectId?: string;
 }) {
   // WHEN THIS RUN BEGAN, and a clock that moves. Elapsed time read from a
   // static render would freeze at whatever it was when a node last landed —
@@ -1287,7 +1289,7 @@ function StageList({
         // off said how far and nothing about what a build is: steps running
         // side by side, a step that is twelve calls at once, the reviewer
         // sending one back. See `questModel`.
-        <QuestMap run={run} />
+        <QuestMap run={run} projectId={projectId} />
       )}
 
       {run.alreadyComplete.length > 0 && (

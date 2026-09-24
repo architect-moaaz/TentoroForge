@@ -68,7 +68,7 @@ export interface RunEvent {
  * `events` summaries so the map is derived, never guessed from text.
  */
 export interface RunMoment {
-  kind: "subject" | "verdict" | "repair" | "unrepaired" | "retry" | "stalled" | "paused";
+  kind: "subject" | "verdict" | "repair" | "unrepaired" | "retry" | "stalled" | "paused" | "look";
   node: string;
   subject: string;
   ok?: boolean;
@@ -76,6 +76,21 @@ export interface RunMoment {
   attempt?: number;
   of?: number;
   reason?: string;
+  /** What landed, in a line ("Doctor — 9 fields: name, specialization…"). */
+  summary?: string;
+  /** A page looked at as it was written: the reviewer's score and pictures. */
+  look?: RunLook;
+}
+
+export interface RunLook {
+  route: string;
+  attempt: number;
+  score: number;
+  verdict: "pass" | "revise";
+  issues: string[];
+  broken: number;
+  /** Which screenshots exist — fetched by name from the looks endpoint. */
+  shots: string[];
 }
 
 /**
@@ -242,6 +257,7 @@ export function useBlueprintRun(projectId: string | null) {
         nodesTotal?: number;
         callsDone?: number;
         nodes?: { key: string; state: NodeState; subject?: string; calls?: number }[];
+        moments?: ({ event: string } & Record<string, unknown>)[];
         elapsedMs?: number;
         awaitingApproval?: boolean;
         status?: string;
@@ -267,6 +283,12 @@ export function useBlueprintRun(projectId: string | null) {
           awaitingApproval: Boolean(snap.awaitingApproval),
           reattachedStage: snap.stage ?? null,
           reattachedElapsedMs: snap.elapsedMs ?? null,
+          // THE MAP COMES BACK WITH THE COUNTS. The registry keeps the moments
+          // the level map is drawn from; a page that loads mid-build gets
+          // its cells, verdicts and looks, not just "14 of 31".
+          ...(Array.isArray(snap.moments) && snap.moments.length > (prev.moments?.length ?? 0)
+            ? { moments: snap.moments.map((m) => momentOf(m.event, m)).filter((m): m is RunMoment => m !== null) }
+            : {}),
           status: "running",
           // Polling took over — a stream that dropped is no longer an error.
           error: null,
@@ -739,7 +761,15 @@ export function momentOf(event: string, data: Record<string, unknown>): RunMomen
   const reason = data.reason != null ? String(data.reason) : undefined;
   switch (event) {
     case "node:subject":
-      return { kind: "subject", node, subject, ok: Boolean(data.ok) };
+      return { kind: "subject", node, subject, ok: Boolean(data.ok),
+               ...(data.summary ? { summary: String(data.summary) } : {}) };
+    case "page:look":
+      return { kind: "look", node, subject, ok: data.verdict === "pass",
+               look: { route: String(data.route ?? ""), attempt: Number(data.attempt ?? 1),
+                       score: Number(data.score ?? 0), verdict: data.verdict === "pass" ? "pass" : "revise",
+                       issues: Array.isArray(data.issues) ? (data.issues as unknown[]).map(String) : [],
+                       broken: Number(data.broken ?? 0),
+                       shots: Array.isArray(data.shots) ? (data.shots as unknown[]).map(String) : [] } };
     case "observer:verdict":
       return { kind: "verdict", node, subject, ok: Boolean(data.ok), findings: Number(data.findings ?? 0) };
     case "observer:repair":
@@ -774,6 +804,8 @@ function describe(event: string, data: Record<string, unknown>): string {
         ` (${data.nodesDone}/${data.nodesTotal})`;
     case "forecast":
       return "Forecast received";
+    case "page:look":
+      return `Looked at ${data.route}: ${data.score}/10 — ${data.verdict === "pass" ? "passed" : "sent back"}`;
     case "usage": {
       const cost = data.cost_usd as number | undefined;
       const secs = data.elapsed_s as number | undefined;

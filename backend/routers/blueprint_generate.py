@@ -1069,6 +1069,26 @@ async def read_run(
     return run_registry.snapshot(str(project_id))
 
 
+@router.get("/api/projects/{project_id}/looks/{page_id}/{attempt}/{name}")
+async def read_look(
+    project_id: uuid.UUID, page_id: str, attempt: int, name: str,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """A screenshot the build took of a page as it wrote it (`page_look`) —
+    what the reviewer scored. Named parts only: a page id, a look number and
+    `desktop` or `mobile`; nothing here walks a path."""
+    from fastapi.responses import FileResponse
+
+    project = await get_project_with_auth(project_id, user, db)
+    if name not in ("desktop", "mobile") or not re.fullmatch(r"[A-Za-z0-9_-]+", page_id) or attempt < 1:
+        raise HTTPException(status_code=404, detail="no such look")
+    path = _output_dir(project) / ".forge" / "look" / page_id / f"look-{attempt}" / f"{name}.png"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no such look")
+    return FileResponse(str(path), media_type="image/png")
+
+
 @router.get("/api/projects/{project_id}/blueprint")
 async def read_blueprint(
     project_id: uuid.UUID,

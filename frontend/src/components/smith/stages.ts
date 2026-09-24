@@ -81,3 +81,37 @@ export const STAGE_VERB: Record<string, string> = {
 
 export const labelFor = (key: string): string => STAGE_LABEL[key] ?? key;
 export const verbFor = (key: string): string => STAGE_VERB[key] ?? labelFor(key);
+
+/** What each step MAKES — read when a step's card is opened. */
+export const STAGE_MAKES: Record<string, string> = {
+  requirements: "One testable statement per thing a user can do, cited by everything after.",
+  application_model: "What the product is, who uses it and the words it uses for its own things.",
+  ux_architecture: "The modules, the navigation tree and where each kind of user lands.",
+  design_system: "Palette, type, radius, density, the frame's chrome and tone, the sign-in layout.",
+  imagery: "Photographs for the sign-in panel, the hero and the empty states.",
+  data_model: "The entities and how they relate — the tables, before their columns.",
+  entity_fields: "Every column of every entity, one entity per call.",
+  integrations: "The third parties the product talks to, and through what.",
+  page_contracts: "The page set: which screens exist, their routes and patterns.",
+  page_details: "Each page's contract — what it shows, reads and lets a person do.",
+  content_fields: "Fields the pages turned out to need that the entities lacked.",
+  auth_pages: "Sign-in and sign-up, and what a new account is.",
+  security: "Roles, what each may open and what each may change.",
+  workflows: "The workflows — every change to data happens through one.",
+  workflow_steps: "Each workflow's steps, guards and outcomes, one workflow per call.",
+  business_rules: "The rules the workflows and pages enforce.",
+  analytics: "The KPIs and charts each page carries, as queries.",
+  apis: "The API surface other systems call.",
+  page_layouts: "A layout per page from its contract, before any code.",
+  ui_direction: "One vision and the conventions every page keeps — and the page rhythm.",
+  page_code: "Every page as React: written, compiled, looked at, and sent back once if wanting.",
+  backend: "The server: schema, engine, workflows, APIs.",
+  frontend: "The app's tree: routes, shell, pages, tokens.",
+  memory: "The decisions this build made, kept for the next one.",
+  verification: "Every requirement checked against what was built.",
+  integration: "The wiring between pages, workflows and data, proven.",
+  assemble: "Compile, start, seed, and press every control once.",
+  install: "The scaffold, the engines and node_modules — before any agent replies.",
+  database: "The database schema, migrated.",
+  testing: "The tests the build runs on itself.",
+};
