@@ -633,6 +633,8 @@ CHARTS_REQUIRED: dict[str, int] = {"dashboard": 3, "analytics": 3, "entity_list"
 #: A dashboard's charts are of at least this many different marks: three
 #: bars is one chart said three times.
 DASHBOARD_MARKS = 2
+#: A dashboard opens with how things stand: this many `metric` tiles at least.
+DASHBOARD_METRICS = 3
 _DATE_TYPES = {"date", "datetime", "timestamp"}
 _NUMBER_TYPES = {"number", "integer", "int", "decimal", "float", "currency", "money"}
 
@@ -670,6 +672,7 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []
             if isinstance(e, dict) and e.get("status") != "DEPRECATED"}
     charts: dict[str, int] = {}
+    metrics: dict[str, int] = {}
     marks: dict[str, set[str]] = {}
     over_time: set[str] = set()
     problems: list[str] = []
@@ -677,6 +680,8 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
     for p in proposals:
         body = p.body if isinstance(p.body, dict) else {}
         pid = str(body.get("page") or "")
+        if str(body.get("kind") or "") == "metric":
+            metrics[pid] = metrics.get(pid, 0) + 1
         if str(body.get("kind") or "") == "chart":
             charts[pid] = charts.get(pid, 0) + 1
             mark = str((body.get("chart") or {}).get("mark") or "") if isinstance(body.get("chart"), dict) else ""
@@ -714,6 +719,13 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
                             f"it needs at least {need} — a breakdown or a trend{over}")
             continue
         if page.get("pattern") in ("dashboard", "analytics"):
+            # HOW THINGS STAND, THEN WHY. The first reply under the chart
+            # rule kept the charts and dropped the KPI tiles on two of three
+            # dashboards (nlwtcyz5): a dashboard opens with its numbers.
+            if metrics.get(pid, 0) < DASHBOARD_METRICS:
+                problems.append(f"{pid} {page.get('route')} (dashboard): has {metrics.get(pid, 0)} metric tile"
+                                f"{'s' if metrics.get(pid, 0) != 1 else ''}; it opens with at least {DASHBOARD_METRICS} "
+                                f"`kind: metric` widgets that say how things stand, each with `timeField` where its entity has a date")
             # RICH, NOT REPEATED: different marks, and the trend over time
             # when there is a date to trend over.
             if len(marks.get(pid, set())) < DASHBOARD_MARKS:

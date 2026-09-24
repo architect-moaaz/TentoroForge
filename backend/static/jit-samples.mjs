@@ -112,6 +112,19 @@ function aggregate(m: any, rows: any[]): number | null {
   }
   return rows.length;
 }
+/** The name of the sample record an id points at, or undefined when the
+ *  value is not one of ours. */
+function labelOf(v: any): string | undefined {
+  const m = /^sample-([a-z0-9_-]+)-(\\d+)$/.exec(String(v ?? ""));
+  if (!m) return undefined;
+  const ent = Object.keys(ROWS).find((n) => n.toLowerCase() === m[1]);
+  const hit = ent ? (ROWS[ent] ?? []).find((r: any) => r.id === v) : undefined;
+  if (!hit) return undefined;
+  const key = ["name", "fullName", "title", "label", "displayName"].find((k) => typeof hit[k] === "string")
+    ?? Object.keys(hit).find((k) => /name|title/i.test(k) && typeof hit[k] === "string");
+  return key ? String(hit[key]) : undefined;
+}
+
 function runQuery(entity: string, q: { measures: any[]; dimensions?: any[]; where?: any; sort?: any; limit?: number }): QueryRow[] {
   const dims = (q.dimensions ?? []).map((d: any) => (typeof d === "string" ? { field: d } : d));
   const groups = new Map<string, { vals: any[]; rows: any[] }>();
@@ -124,7 +137,13 @@ function runQuery(entity: string, q: { measures: any[]; dimensions?: any[]; wher
   }
   let out: QueryRow[] = [...groups.values()].map(({ vals, rows }) => {
     const row: QueryRow = {};
-    dims.forEach((d: any, i: number) => { row[d.field] = vals[i]; });
+    dims.forEach((d: any, i: number) => {
+      row[d.field] = vals[i];
+      // A breakdown by a foreign key carries the record's name beside the
+      // id, as the data engine's does, so a chart's axis reads names.
+      const label = !d.bucket && !d.ranges?.length ? labelOf(vals[i]) : undefined;
+      if (label !== undefined) row[d.field + "Label"] = label;
+    });
     for (const m of q.measures) row[m.key] = aggregate(m, rows);
     return row;
   });
@@ -209,7 +228,18 @@ export function sampleRow(entity, i, entities) {
     else if (opts.length) row[fname] = opts[i % opts.length];
     else if (/email/.test(lower)) row[fname] = `${FIRST[i % FIRST.length].toLowerCase()}.${LAST[i % LAST.length].toLowerCase()}@example.com`;
     else if (/phone|tel/.test(lower)) row[fname] = `+1 555 01${String(i).padStart(2, "0")} ${String(1000 + i * 37).slice(0, 4)}`;
-    else if (/name|title|subject/.test(lower) && /string|text/.test(type)) row[fname] = /first/.test(lower) ? FIRST[i % FIRST.length] : /last|sur/.test(lower) ? LAST[i % LAST.length] : /full|^name$|person|customer|owner|contact/.test(lower) ? `${FIRST[i % FIRST.length]} ${LAST[i % LAST.length]}` : `${WORDS[i % WORDS.length]} ${i + 1}`;
+    else if (/name|title|subject/.test(lower) && /string|text/.test(type)) {
+      // A PERSON'S NAME ONLY ON A PERSON. Every entity's `name` was a person's
+      // ("Most administered vaccines: Chiara Rossi", 2026-09-24); a thing is
+      // named as the thing it is.
+      const person = /user|person|people|doctor|patient|parent|customer|client|contact|owner|member|employee|staff|account|profile|guardian|student|teacher|nurse|agent|driver|tenant|landlord|host|guest|author|reviewer/.test(name.toLowerCase())
+        || /first|last|sur|full|person|customer|owner|contact/.test(lower);
+      row[fname] = /first/.test(lower) ? FIRST[i % FIRST.length]
+        : /last|sur/.test(lower) ? LAST[i % LAST.length]
+        : person ? `${FIRST[i % FIRST.length]} ${LAST[i % LAST.length]}`
+        : /^name$|label/.test(lower) ? `${humanise(name)} ${i + 1}`
+        : `${WORDS[i % WORDS.length]} ${i + 1}`;
+    }
     else if (/description|notes?|summary|body|comment/.test(lower)) row[fname] = `Sample ${lower} for ${name.toLowerCase()} ${i + 1} — placeholder text shown while designing.`;
     else if (/url|link|website/.test(lower)) row[fname] = `https://example.com/${name.toLowerCase()}/${i + 1}`;
     else if (/status|state|stage/.test(lower)) row[fname] = ["Open", "In progress", "Done", "On hold"][i % 4];
@@ -223,7 +253,11 @@ export function sampleRow(entity, i, entities) {
     }
     else if (/bool/.test(type)) row[fname] = i % 2 === 0;
     else if (/date|time/.test(type) || /at$|date/.test(lower)) {
-      const d = new Date(Date.UTC(2026, 8, 1 + ((i * 3) % 27), 9 + (i % 8), (i * 11) % 60));
+      // ACROSS SIX MONTHS, ENDING NOW. Every sample date used to fall in one
+      // month, so a trend chart drew a single point (2026-09-24). Spread by
+      // row, deterministic per day.
+      const now = new Date();
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (i % 6), 1 + ((i * 3) % 27), 9 + (i % 8), (i * 11) % 60));
       row[fname] = /^date$/.test(type) ? d.toISOString().slice(0, 10) : d.toISOString();
     }
     else if (/\[\]|array|list|tags/.test(type + lower)) row[fname] = [WORDS[i % WORDS.length].split(" ")[0], WORDS[(i + 3) % WORDS.length].split(" ")[0]];

@@ -2384,6 +2384,9 @@ def _run_deterministic(
 #: worth having and a fourth is just the same failure twice more.
 ATTEMPTS_BY_NODE: dict[str, int] = {
     "data_model": 4,
+    # One reply for every page's widgets: a refusal names several pages and
+    # the edit that answers it can leave one; the third attempt is an edit.
+    "analytics": 3,
 }
 
 #: Observer repair rounds per node, where the default (the observer's own
@@ -2594,7 +2597,8 @@ def _apply_subject(
                   f"refused the same way twice; not asking again — {reason}")
         if attempt >= max_attempts or repeated:
             report.failed.append(label)
-            report.failed_because[label] = reason
+            # The report's line is for reading; the retry above got the whole reason.
+            report.failed_because[label] = reason[:400]
             state.failed.append(subject)
             _note(ledger, "node_subject", key, subject, _at(), total, False)
             return "failed"
@@ -2781,9 +2785,17 @@ def _asked(application: Any) -> str:
     return (reason or "the agent declined without giving a reason")[:600]
 
 
+#: How much of a refusal survives into the retry. It was 400 characters —
+#: enough for a report line, and exactly wrong for a contract refusal that
+#: names five pages: the agent was told the first two, fixed them, and was
+#: failed for the third it never saw (nlwtcyz5 analytics, 2026-09-24). The
+#: reason IS the repair instruction; the level map shortens it for display.
+REASON_KEPT = 4000
+
+
 def _reason(exc: Exception) -> str:
-    """One line naming what went wrong, kept short enough to read in a report."""
-    return f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
+    """One line naming what went wrong — whole, so a retry is told all of it."""
+    return f"{type(exc).__name__}: {exc}".replace("\n", " ")[:REASON_KEPT]
 
 
 def _run_agent_subject(

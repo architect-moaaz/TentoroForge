@@ -135,7 +135,9 @@ RHYTHM_OPTIONS: dict[str, dict[str, str]] = {
     "figures": {
         "tiles": "a grid of tiles on `bg-card`, each a label and a big number",
         "strip": "one horizontal strip on `bg-muted`: the figures side by side, separated by `divide-x`, no tiles",
-        "inline": "the figures inline under the page title as `label · value` pairs in `text-muted-foreground` — no tiles, no strip",
+        "inline": "the figures inline under the page title as `label · value` pairs in `text-muted-foreground` — no tiles, no strip. "
+              "A DASHBOARD IS THE EXCEPTION: its KPI widgets are the page, drawn as tiles (`<WidgetView />`, with their change "
+              "against the period before), whatever this says for other pages",
     },
     "sections": {
         "cards": "each section a card on `bg-card` with a `CardHeader`",

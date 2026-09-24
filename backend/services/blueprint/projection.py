@@ -2636,7 +2636,7 @@ def _seed_value(field: dict, entity_name: str, row: int,
     if field.get("references") and tables_by_id is not None:
         parent = tables_by_id.get(str(field.get("references")))
         if parent:
-            return f"ref:{parent}[{(row - 1) % 3}]"
+            return f"ref:{parent}[{(row - 1) % SEED_ROWS}]"
     from services.blueprint.page_planner import enum_values
 
     kind = str(field.get("type") or "text").lower()
@@ -2660,7 +2660,13 @@ def _seed_value(field: dict, entity_name: str, row: int,
     if kind in ("bool", "boolean"):
         return row % 2 == 1
     if kind in ("date", "datetime", "timestamp"):
-        return f"2026-0{(row % 9) + 1}-15T09:00:00Z"
+        # Across the six months before today, so a trend has a line to draw.
+        import datetime as _dt
+        first = _dt.date.today().replace(day=1)
+        month = first.month - (row % 6)
+        year = first.year + (month - 1) // 12
+        month = (month - 1) % 12 + 1
+        return f"{year:04d}-{month:02d}-{1 + (row * 5) % 27:02d}T{9 + row % 8:02d}:00:00Z"
     if kind == "email":
         return f"{to_snake(entity_name)}{row}@example.com"
     return f"{entity_name} {row}" if name.lower() in ("name", "title") else \
@@ -2728,7 +2734,13 @@ def _link_target(doc: dict, entity: dict, field: dict) -> str | None:
     return str(account.get("id")) if account and str(account.get("id")) != eid else None
 
 
-def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, Any]:
+#: Demo rows per entity. Three drew a trend chart as one point and a
+#: breakdown as three equal slices; a dozen gives a dashboard something to
+#: say without pretending to be data.
+SEED_ROWS = 12
+
+
+def project_seed(doc: dict, app_root: str | Path, rows: int = SEED_ROWS) -> dict[str, Any]:
     """Write ``src/db/seed.json`` — a few rows per entity.
 
     A preview of an empty database shows empty states everywhere, which looks

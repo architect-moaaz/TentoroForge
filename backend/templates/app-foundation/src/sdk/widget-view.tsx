@@ -58,15 +58,20 @@ export function chartPropsFor(widget: WidgetRef, rows: Row[], currency = "USD") 
     currency,
     encoding: { stacked: widget.chart?.stacked, horizontal: widget.chart?.horizontal },
   };
+  // NAMES, NEVER IDS — on an axis too. A breakdown by a foreign key comes
+  // back with the record's name beside the id (`<field>Label`, from the data
+  // engine and the editor's sample server alike); the axis reads the name.
+  // "Most administered vaccines" was labelled sample-vaccine-3 (2026-09-24).
+  const named = (field?: string) => (field && rows.length && `${field}Label` in rows[0] ? `${field}Label` : field);
   if (mark === "scatter") {
     return { ...base, xKey: ms[0]?.key, yKey: ms[1]?.key, sizeKey: ms[2]?.key,
-             labelKey: dims[0]?.field, colorKey: dims[1]?.field };
+             labelKey: named(dims[0]?.field), colorKey: named(dims[1]?.field) };
   }
   if (mark === "heatmap" || mark === "graph") {
     // The heatmap's column and row; the graph's link start and end.
-    return { ...base, xKey: dims[0]?.field, yKey: dims[1]?.field, valueKey: ms[0]?.key };
+    return { ...base, xKey: named(dims[0]?.field), yKey: named(dims[1]?.field), valueKey: ms[0]?.key };
   }
-  return { ...base, xKey: dims[0]?.field ?? "label", colorKey: dims[1]?.field, valueKey: ms[0]?.key };
+  return { ...base, xKey: named(dims[0]?.field) ?? "label", colorKey: named(dims[1]?.field), valueKey: ms[0]?.key };
 }
 
 /** A gauge without a declared maximum reads against the next round number. */

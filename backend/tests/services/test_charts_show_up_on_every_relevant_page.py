@@ -62,21 +62,33 @@ def test_a_dashboard_and_a_list_over_chartable_records_must_carry_charts():
     assert "PAGE-005" not in msg, "a retired page is not a page"
 
 
+KPIS = [_w(90, "PAGE-001", "metric"), _w(91, "PAGE-001", "metric"), _w(92, "PAGE-001", "metric")]
+
+
+def test_a_dashboard_opens_with_its_numbers():
+    charts = [_w(1, "PAGE-001", "chart", "line", bucket="month"), _w(2, "PAGE-001", "chart", "donut"),
+              _w(3, "PAGE-001", "chart", "bar"), _w(4, "PAGE-002", "chart", "donut")]
+    with pytest.raises(InvalidAnalytics) as e:
+        check_analytics(_result(charts + KPIS[:1]), DOC)
+    assert "PAGE-001 / (dashboard): has 1 metric tile; it opens with at least 3" in str(e.value)
+    check_analytics(_result(charts + KPIS), DOC)
+
+
 def test_a_dashboard_is_rich_not_repeated():
     three_bars = [_w(1, "PAGE-001", "chart", "bar"), _w(2, "PAGE-001", "chart", "bar"), _w(3, "PAGE-001", "chart", "bar"),
-                  _w(4, "PAGE-002", "chart", "donut")]
+                  _w(4, "PAGE-002", "chart", "donut")] + KPIS
     with pytest.raises(InvalidAnalytics) as e:
         check_analytics(_result(three_bars), DOC)
     assert "its 3 charts are all bar; a dashboard reads through at least 2 different marks" in str(e.value)
     assert "no chart over time, though the data has dates" in str(e.value)
     rich = [_w(1, "PAGE-001", "chart", "line", bucket="month"), _w(2, "PAGE-001", "chart", "donut"),
-            _w(3, "PAGE-001", "chart", "bar"), _w(4, "PAGE-002", "chart", "donut")]
+            _w(3, "PAGE-001", "chart", "bar"), _w(4, "PAGE-002", "chart", "donut")] + KPIS
     check_analytics(_result(rich), DOC)
 
 
 def test_every_widget_is_about_this_application():
     rich = [_w(1, "PAGE-001", "chart", "line", bucket="month"), _w(2, "PAGE-001", "chart", "donut"),
-            _w(3, "PAGE-001", "chart", "bar"), _w(4, "PAGE-002", "chart", "donut")]
+            _w(3, "PAGE-001", "chart", "bar"), _w(4, "PAGE-002", "chart", "donut")] + KPIS
     with pytest.raises(InvalidAnalytics) as e:
         check_analytics(_result(rich + [_w(5, "PAGE-001", "metric", req=()), _w(6, "PAGE-001", "metric", req=("REQ-404",))]), DOC)
     assert "W5 (w5): names no requirement it answers" in str(e.value)
@@ -88,7 +100,7 @@ def test_every_widget_is_about_this_application():
 
 def test_enough_charts_pass_and_nothing_else_is_judged():
     check_analytics(_result([_w(1, "PAGE-001", "chart", "line", bucket="month"), _w(2, "PAGE-001", "chart", "donut"),
-                             _w(3, "PAGE-001", "chart", "bar"), _w(4, "PAGE-002", "chart", "bar")]), DOC)
+                             _w(3, "PAGE-001", "chart", "bar"), _w(4, "PAGE-002", "chart", "bar")] + KPIS), DOC)
     check_analytics(_result([]), DOC)                                       # not an analytics reply
     check_analytics(AgentResult(task_id="t", agent="security", confidence=0.9,
                                 proposals=[ArtifactProposal(section="permissions", natural_key="p", body={})]), DOC)
@@ -119,3 +131,12 @@ def test_a_metric_read_over_a_range_carries_its_change_against_the_period_before
     assert "previous?: number | null; delta?: number | null" in shim and "delta: (value - previous) / previous" in shim
     from services.blueprint.ui_engineer import SDK_GUIDE
     assert "delta?: number | null" in SDK_GUIDE
+
+
+def test_a_refusal_reaches_the_retry_whole():
+    from services.blueprint.orchestrator import ATTEMPTS_BY_NODE, REASON_KEPT, _reason
+    problems = "; ".join(f"PAGE-{i:03} /p{i} (entity_list) has 0 charts; it needs at least 1 — a breakdown or a trend "
+                         f"over Thing: status (enum), createdAt (date)" for i in range(1, 9))
+    kept = _reason(InvalidAnalytics(problems))
+    assert "PAGE-008" in kept and len(kept) > 400, "the third page it was failed for was in the message it never saw"
+    assert REASON_KEPT >= 4000 and ATTEMPTS_BY_NODE["analytics"] == 3
