@@ -111,11 +111,82 @@ WRITE_MAX_TOKENS = 24000
 #: design quality is an A/B question, and this is the knob it turns.
 WRITE_EFFORT = "low"
 
+#: The page rhythm's vocabulary: each decision, its options, and what the
+#: page author does with each. One place, read by the direction agent's
+#: schema, its brief, the page prompt and the fallback.
+RHYTHM_OPTIONS: dict[str, dict[str, str]] = {
+    "header": {
+        "eyebrow-title": "a small eyebrow line (where you are) over the title, the one primary action on the right",
+        "title-only": "a large title with a one-line description under it; the primary action on the line below, left",
+        "band": "a full-width band at the top in `bg-brand-gradient` holding the title and the primary action; content starts under it",
+        "compact": "one line: title on the left, actions inline on the right, a hairline under it — no eyebrow, no description",
+    },
+    "lead": {
+        "dark-card": "one card in `bg-inverse text-inverse-foreground`",
+        "gradient-band": "one band in `bg-brand-gradient`, full width, its facts in large type",
+        "outlined-panel": "one panel on `bg-card` with a 2px `border-primary` left edge — no dark fill",
+        "type-only": "no container: the fact in `font-heading` display size (text-4xl) with its label above it and its action beside it",
+    },
+    "lists": {
+        "table": "a table inside a card: columns, a header row, sortable where it matters",
+        "cards": "a responsive grid of cards, one per record, the label as the card title and two or three facts under it",
+        "rows": "borderless rows separated by `divide-y`, each a flex line — label left, facts and status right — no card around the list",
+    },
+    "figures": {
+        "tiles": "a grid of tiles on `bg-card`, each a label and a big number",
+        "strip": "one horizontal strip on `bg-muted`: the figures side by side, separated by `divide-x`, no tiles",
+        "inline": "the figures inline under the page title as `label · value` pairs in `text-muted-foreground` — no tiles, no strip",
+    },
+    "sections": {
+        "cards": "each section a card on `bg-card` with a `CardHeader`",
+        "open": "no cards: a section is an `h2` in `font-heading` with a hairline under it and its content on the page ground",
+        "dense": "tight panels with 12px padding and `bg-muted/40`, separated by `space-y-2` — for a screen worked all day",
+    },
+}
+
+#: What a Blueprint gets when its direction states no rhythm — the anatomy
+#: every app had before this existed, so nothing regresses.
+RHYTHM_DEFAULT: dict[str, str] = {"header": "eyebrow-title", "lead": "dark-card", "lists": "table",
+                                  "figures": "tiles", "sections": "cards"}
+
+
+def derive_rhythm(doc: dict) -> dict[str, str]:
+    """The rhythm the pages follow: the direction's own when it states one;
+    otherwise read off the design (density, personality) so that even a build
+    whose direction step was skipped does not get the default anatomy."""
+    comp = doc.get("composition") or {}
+    stated = comp.get("rhythm") if isinstance(comp.get("rhythm"), dict) else {}
+    out = dict(RHYTHM_DEFAULT)
+    design = doc.get("designSystem") or {}
+    density = str(design.get("informationDensity") or "comfortable")
+    personality = str(design.get("visualPersonality") or "").lower()
+    if density == "compact":
+        out.update(header="compact", figures="strip", sections="dense", lead="outlined-panel")
+    elif any(w in personality for w in ("warm", "editorial", "playful", "friendly", "consumer")):
+        out.update(header="band", lead="gradient-band", lists="cards", sections="open", figures="inline")
+    elif any(w in personality for w in ("stark", "minimal", "utility", "quiet")):
+        out.update(header="title-only", lead="type-only", lists="rows", sections="open")
+    for key, options in RHYTHM_OPTIONS.items():
+        if str(stated.get(key) or "") in options:
+            out[key] = str(stated[key])
+    return out
+
+
+def _rhythm(doc: dict) -> str:
+    """The rhythm as the page author reads it: each decision with what to do."""
+    r = derive_rhythm(doc)
+    return "\n".join(f"- {key}: `{r[key]}` — {RHYTHM_OPTIONS[key][r[key]]}" for key in RHYTHM_OPTIONS)
+
+
 DIRECTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["vision", "conventions"],
+    "required": ["vision", "conventions", "rhythm"],
     "properties": {
+        "rhythm": {
+            "type": "object", "additionalProperties": False, "required": list(RHYTHM_OPTIONS),
+            "properties": {key: {"type": "string", "enum": list(opts)} for key, opts in RHYTHM_OPTIONS.items()},
+        },
         "vision": {"type": "string"},
         "conventions": {
             "type": "array",
@@ -302,8 +373,8 @@ What a finished page looks like:
   page in a max-width container or add outer page padding; fill the width you
   are given (a narrow form may sit in a card of its own width inside it).
 
-- ONE JOB, OBVIOUS. The page header says where you are (small eyebrow + title) and
-  shows the one primary action for the page on the right. Secondary actions are
+- ONE JOB, OBVIOUS. The page header says where you are and shows the one primary
+  action for the page, built as the rhythm's `header` says. Secondary actions are
   outline or ghost buttons, never a row of equal primaries.
 - THE ACCENT MARKS WHAT TO DO NOW — once per screen. The one action this screen is
   for (Submit claim, Book appointment, Send request) is the accent:
@@ -320,11 +391,12 @@ What a finished page looks like:
   steps. Add nothing the data cannot produce.
 - LEAD WITH WHAT MATTERS NOW. Before the list, decide what this person came to see
   first — the appointment that is next, the request waiting on them, the step
-  not yet done — and give it one card of its own at the top in the dark surface
-  (bg-inverse text-inverse-foreground, supporting text text-inverse-foreground/70)
-  with its facts in words ("Due in 1 day 6 hrs · Mon 18:00") and its action.
-  Then the rest, grouped by what the reader does with it (e.g. Active · Upcoming
-  · Past), not by table.
+  not yet done — and give it its own place at the top, built as the rhythm's
+  `lead` says (a dark card is `bg-inverse text-inverse-foreground`, supporting
+  text `text-inverse-foreground/70`), with its facts in words ("Due in 1 day
+  6 hrs · Mon 18:00") and its action. Then the rest, grouped by what the reader
+  does with it (e.g. Active · Upcoming · Past), built as the rhythm's `lists`
+  and `sections` say.
 - PLACES ARE DISTANCES. A `location` is never shown as numbers or a map pin of
   someone's home: show how far it is (formatDistance → "0.4 mi"), rank lists with
   near(…, await whereAmI(ctx)), offer <NearMe /> beside the search on a list of
@@ -357,8 +429,9 @@ What a finished page looks like:
 - REAL CONTENT, REAL STATES. Every list has an empty state that says what to do next
   (and offers the action). Every record page handles a missing optional field with
   a quiet em dash, not "null". Long text truncates with a title attribute.
-- NUMBERS WITH CONTEXT. A KPI is a label, a big number and, where the data allows, a
-  comparison or a sparkline. Money is formatted with its currency; dates with
+- NUMBERS WITH CONTEXT. A figure is a label, a number and, where the data allows, a
+  comparison or a sparkline, laid out as the rhythm's `figures` says. Money is
+  formatted with its currency; dates with
   Intl.DateTimeFormat (en-GB unless the app says otherwise); relative times for
   recent events.
 - STATUS AS A SYSTEM. Map each enum value to one tone once (a Record<Enum, string> of
@@ -366,8 +439,9 @@ What a finished page looks like:
   bg-warning-subtle text-warning-subtle-foreground, bg-destructive/10 text-destructive,
   bg-muted text-muted-foreground, bg-primary/10 text-primary.
 - LISTS THAT WORK. Search box (writes ?q=), filter chips for the key enum (write
-  ?status=), sortable columns where it matters, a row that opens the record
-  (href(pages.x, { id })), row actions for the workflows that act on one record.
+  ?status=), each record opening its page (href(pages.x, { id })), row actions for
+  the workflows that act on one record — in the shape the rhythm's `lists` says
+  (sortable columns where it is a table).
 - PICTURES ARE SHOWN, NOT NAMED. An image field is a thumbnail (fileUrl) in a list
   and a real image on its record — never the id. The list of an entity that is
   "Findable by likeness" offers "Find similar": <ImageSearch /> beside the search
@@ -511,6 +585,9 @@ the first line is how a page runs out of room and arrives empty.
 # Its direction — follow it on every page
 {comp.get('vision') or '(no vision stated — choose a calm, professional, information-dense style)'}
 {conventions}
+
+# Its page rhythm — decided once for this application; every page keeps to it
+{_rhythm(doc)}
 
 # Its look — what each colour class means here
 {_look(doc)}
@@ -954,7 +1031,15 @@ def direction_prompts(doc: dict) -> tuple[str, str]:
             f"{json.dumps({k: ds.get(k) for k in ('register', 'density', 'typography', 'radius', 'tone', 'personality') if ds.get(k)}, indent=1)[:3000]}\n\n"
             f"Its pages:\n{json.dumps(pages, indent=1)[:12000]}\n\n"
             "Return `vision` — one paragraph a page author reads before every page — and "
-            "8 to 14 `conventions`, each a topic and a precise rule.")
+            "8 to 14 `conventions`, each a topic and a precise rule.\n\n"
+            "AND THE PAGE RHYTHM — five anatomy decisions, made once, that every page then "
+            "shares and that make this product's pages differ from another's. Choose each "
+            "from its personality, its density and how it is used, not by habit:\n"
+            + "\n".join(f"- `{key}`: " + "; ".join(f"`{o}` ({what})" for o, what in opts.items())
+                        for key, opts in RHYTHM_OPTIONS.items())
+            + "\nA product read all day at a desk wants a compact header, figures in a strip "
+            "and dense sections; a consumer product wants a band, cards and open sections; a "
+            "quiet tool wants a title alone and rows. Make the vision agree with what you chose.")
     return system, user
 
 
@@ -962,9 +1047,12 @@ def compose_direction(doc: dict, client: Any) -> tuple[dict, Any]:
     system, user = direction_prompts(doc)
     reply = client(system=system, user=user, schema=DIRECTION_SCHEMA)
     body = json.loads(getattr(reply, "text", reply))
+    rhythm = body.get("rhythm") if isinstance(body.get("rhythm"), dict) else {}
+    rhythm = {k: str(v) for k, v in rhythm.items() if k in RHYTHM_OPTIONS and str(v) in RHYTHM_OPTIONS[k]}
     return ({"vision": str(body.get("vision") or ""),
              "conventions": [{"topic": str(c.get("topic")), "rule": str(c.get("rule"))}
-                             for c in body.get("conventions") or []]},
+                             for c in body.get("conventions") or []],
+             **({"rhythm": rhythm} if len(rhythm) == len(RHYTHM_OPTIONS) else {})},
             getattr(reply, "usage", None))
 
 

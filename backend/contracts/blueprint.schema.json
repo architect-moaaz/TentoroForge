@@ -2906,6 +2906,61 @@
           },
           "default": []
         },
+        "rhythm": {
+          "type": "object",
+          "properties": {
+            "header": {
+              "type": "string",
+              "enum": [
+                "eyebrow-title",
+                "title-only",
+                "band",
+                "compact"
+              ]
+            },
+            "lead": {
+              "type": "string",
+              "enum": [
+                "dark-card",
+                "gradient-band",
+                "outlined-panel",
+                "type-only"
+              ]
+            },
+            "lists": {
+              "type": "string",
+              "enum": [
+                "table",
+                "cards",
+                "rows"
+              ]
+            },
+            "figures": {
+              "type": "string",
+              "enum": [
+                "tiles",
+                "strip",
+                "inline"
+              ]
+            },
+            "sections": {
+              "type": "string",
+              "enum": [
+                "cards",
+                "open",
+                "dense"
+              ]
+            }
+          },
+          "required": [
+            "header",
+            "lead",
+            "lists",
+            "figures",
+            "sections"
+          ],
+          "additionalProperties": false
+        },
         "pages": {
           "type": "array",
           "items": {

@@ -1128,6 +1128,22 @@ export const Composition = z.object({
   conventions: z
     .array(z.object({ topic: z.string(), rule: z.string() }))
     .default([]),
+  /**
+   * The page rhythm: five anatomy decisions made once per application, so
+   * its pages agree with each other and differ from another product's. The
+   * page author used to be handed one anatomy for every application (eyebrow
+   * and title, a dark leading card, KPI tiles, tables in cards), which is why
+   * two apps with different palettes still read as one product recoloured.
+   */
+  rhythm: z
+    .object({
+      header: z.enum(["eyebrow-title", "title-only", "band", "compact"]),
+      lead: z.enum(["dark-card", "gradient-band", "outlined-panel", "type-only"]),
+      lists: z.enum(["table", "cards", "rows"]),
+      figures: z.enum(["tiles", "strip", "inline"]),
+      sections: z.enum(["cards", "open", "dense"]),
+    })
+    .optional(),
   pages: z.array(PageSketch).default([]),
 });
 
