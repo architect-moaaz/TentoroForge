@@ -621,6 +621,81 @@ def _unique_many_side(result: "AgentResult", doc: dict | None) -> list[str]:
     return out
 
 
+class InvalidAnalytics(AuthorRefusal):
+    """A page that should carry charts was given none."""
+
+
+#: The page patterns that carry analytics, and how many charts each must.
+#: A dashboard IS analytics; a list over records with a status, a type, a
+#: date or an amount carries the breakdown or the trend of what it lists.
+CHARTS_REQUIRED: dict[str, int] = {"dashboard": 2, "analytics": 2, "entity_list": 1,
+                                   "master_detail": 1, "approval_inbox": 1}
+_DATE_TYPES = {"date", "datetime", "timestamp"}
+_NUMBER_TYPES = {"number", "integer", "int", "decimal", "float", "currency", "money"}
+
+
+def plottable_fields(entity: dict) -> list[str]:
+    """The fields of an entity a chart can be drawn over: an enum (a status,
+    a type), a date (a trend), a number (a total, a distribution) or a
+    foreign key (a breakdown by the record it points at)."""
+    out = []
+    for f in entity.get("fields") or []:
+        if not isinstance(f, dict) or f.get("status") == "DEPRECATED":
+            continue
+        t = str(f.get("type") or "").lower()
+        why = ("enum" if f.get("enumValues") or t == "enum"
+               else "date" if t in _DATE_TYPES
+               else "number" if t in _NUMBER_TYPES
+               else "reference" if f.get("references") else "")
+        if why:
+            out.append(f"{f.get('name')} ({why})")
+    return out
+
+
+def check_analytics(result: "AgentResult", doc: dict | None) -> None:
+    """CHARTS SHOW UP ON EVERY RELEVANT PAGE. The analytics agent was asked
+    to decide page by page and decided "none" for a product's home
+    dashboard and for every list of its catalogue (zo9k0ekd: 0 of 24
+    widgets on `/`, `/categories`, `/products`). A dashboard with no chart
+    is not a dashboard; a list of records with a status or a date and no
+    breakdown or trend is a table with nothing to say about itself. Refused
+    at the author, naming each page and the fields it could chart, so the
+    reply is edited rather than shipped bare."""
+    proposals = [p for p in result.proposals if p.section == "widgets"]
+    if not proposals or not doc:
+        return
+    ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []
+            if isinstance(e, dict) and e.get("status") != "DEPRECATED"}
+    charts: dict[str, int] = {}
+    for p in proposals:
+        body = p.body if isinstance(p.body, dict) else {}
+        if str(body.get("kind") or "") == "chart":
+            charts[str(body.get("page") or "")] = charts.get(str(body.get("page") or ""), 0) + 1
+    problems: list[str] = []
+    for page in doc.get("pages") or []:
+        if not isinstance(page, dict) or page.get("status") == "DEPRECATED":
+            continue
+        need = CHARTS_REQUIRED.get(str(page.get("pattern") or ""), 0)
+        if not need:
+            continue
+        pid = str(page.get("id"))
+        ent = ents.get(str((page.get("data") or {}).get("primaryEntity") or ""))
+        fields = plottable_fields(ent) if ent else []
+        if page.get("pattern") not in ("dashboard", "analytics") and not fields:
+            continue                      # nothing to draw over: a list of free text
+        have = charts.get(pid, 0)
+        if have >= need:
+            continue
+        over = (f" over {ent.get('name')}: {', '.join(fields[:5])}" if ent and fields
+                else " over the entities the page shows")
+        problems.append(f"{pid} {page.get('route')} ({page.get('pattern')}) has {have} chart{'s' if have != 1 else ''}; "
+                        f"it needs at least {need} — a breakdown or a trend{over}")
+    if problems:
+        raise InvalidAnalytics(
+            "Charts show up on every relevant page. " + _all_of(problems)
+            + " Add `kind: chart` widgets for these pages (keep the metrics you have).")
+
+
 class InvalidPageContent(AuthorRefusal):
     """A page's content plan names a source the data model does not have."""
 
@@ -941,6 +1016,7 @@ def apply_agent_result(
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)
     check_navigation(result, svc.doc)
+    check_analytics(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
     #
