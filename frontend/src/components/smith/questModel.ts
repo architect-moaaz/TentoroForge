@@ -8,7 +8,10 @@
  * A list of stages ticking off says how far a build is and nothing about
  * what a build IS: several steps running side by side, a step that is really
  * twelve calls at once, a reviewer sending one of them back, a page
- * screenshotted and scored, a retry, a wait on the API.
+ * screenshotted and scored, a retry, a wait on the API. And above the map,
+ * the application taking shape: its data, screens, workflows and design as
+ * counts of what is decided, written and reviewed — progress a person can
+ * trust, in the product's own terms.
  */
 import type { BlueprintRun, RunLook, RunMoment, RunNode } from "@/hooks/useBlueprintRun";
 
@@ -39,8 +42,6 @@ export interface StepCard {
   retries: number;
   /** A fan-out step that finished with every subject passing first time. */
   cleanSweep: boolean;
-  /** Points this step earned so far. */
-  xp: number;
 }
 
 export interface Level { index: number; steps: StepCard[]; state: "done" | "active" | "ahead" }
@@ -50,17 +51,33 @@ export interface Ticker { seq: number; tone: "pass" | "back" | "retry" | "wait" 
 /** Something taking shape: a subject that landed, with what it is. */
 export interface Landed { seq: number; node: string; subject: string; label: string; summary: string }
 
-export interface Badge { id: string; label: string; detail: string }
+/** A fact about the build worth pointing at — in the product's terms. */
+export interface Highlight { id: string; label: string; detail: string }
 
-export interface Rank { name: string; at: number; next: number | null }
-
-/** What the bets a watcher placed resolve against — null until the run ends. */
-export interface Outcomes {
-  /** Every page passed the reviewer's FIRST look. */
-  allFirstLook: boolean | null;
-  /** The fan-out step sent back (by the observer or the reviewer) or retried the most. */
-  mostSentBack: string | null;
+/** One line of an area: a step, with how far it is. */
+export interface AreaItem {
+  key: string;
+  label: string;
+  state: RunNode["state"];
+  done: number;
+  total: number;
 }
+
+/** A part of the application taking shape: its data, its screens, its
+ *  workflows, its design, and the build itself. */
+export interface Area {
+  key: "data" | "screens" | "workflows" | "design" | "build";
+  label: string;
+  items: AreaItem[];
+  /** 0..1 over the area's steps, weighted by their subjects. */
+  progress: number;
+  state: "ahead" | "active" | "done";
+  /** One line on where it stands ("5 entities · 38 fields"). */
+  note: string;
+}
+
+/** A milestone of the build, in the order they are reached. */
+export interface Milestone { key: string; label: string; state: "ahead" | "active" | "done" }
 
 export interface QuestModel {
   levels: Level[];
@@ -68,38 +85,42 @@ export interface QuestModel {
   cleared: number;                 // levels every step of which is done
   stats: {
     calls: number; repairs: number; retries: number; inFlight: number; passRate: number | null;
-    xp: number; streak: number; bestStreak: number;
+    /** Reviews: how many checks passed, how many were fixed after a send-back, how many are open. */
+    review: { passed: number; fixed: number; open: number };
     looks: { passed: number; total: number };
   };
-  rank: Rank;
+  areas: Area[];
+  milestones: Milestone[];
   ticker: Ticker[];
   landed: Landed[];
   /** The latest look at each page, in the order the pages were first seen. */
   looks: RunLook[];
-  badges: Badge[];
-  outcomes: Outcomes;
+  highlights: Highlight[];
   paused?: string;
 }
 
 const TICKER = 5;
 const LANDED = 6;
 
-/** Points. Landing is worth something; passing first time is worth more;
- *  coming back from a send-back is worth the most — the loop working. */
-export const XP = {
-  landed: 10, passFirst: 15, passAfterRepair: 20, lookPassFirst: 20, lookPassAfter: 10, levelCleared: 25,
-} as const;
-
-export const RANKS: { name: string; at: number }[] = [
-  { name: "Apprentice", at: 0 }, { name: "Builder", at: 200 }, { name: "Architect", at: 600 },
-  { name: "Master builder", at: 1200 }, { name: "Legend", at: 2400 },
+/** The application's areas, and the steps that build each. */
+export const AREAS: { key: Area["key"]; label: string; steps: string[] }[] = [
+  { key: "data", label: "Data", steps: ["data_model", "entity_fields", "content_fields", "database"] },
+  { key: "screens", label: "Screens", steps: ["ux_architecture", "page_contracts", "page_details", "auth_pages", "page_layouts", "page_code"] },
+  { key: "workflows", label: "Workflows", steps: ["workflows", "workflow_steps", "business_rules", "security", "apis", "integrations"] },
+  { key: "design", label: "Design", steps: ["design_system", "brand_design_system", "figma_design_system", "imagery", "ui_direction"] },
+  { key: "build", label: "Build", steps: ["backend", "frontend", "integration", "assemble", "verification", "testing"] },
 ];
 
-export function rankFor(xp: number): Rank {
-  let i = 0;
-  while (i + 1 < RANKS.length && xp >= RANKS[i + 1].at) i++;
-  return { name: RANKS[i].name, at: RANKS[i].at, next: RANKS[i + 1]?.at ?? null };
-}
+/** The milestones, by the step whose completion reaches each. */
+export const MILESTONES: { key: string; label: string }[] = [
+  { key: "requirements", label: "Understood" },
+  { key: "data_model", label: "Data modelled" },
+  { key: "design_system", label: "Design decided" },
+  { key: "page_contracts", label: "Screens planned" },
+  { key: "workflow_steps", label: "Workflows written" },
+  { key: "page_code", label: "Pages written" },
+  { key: "assemble", label: "Built" },
+];
 
 function shortReason(reason?: string): string {
   const lines = (reason ?? "").split("\n").map((l) => l.trim()).filter((l) => l.startsWith("- ["));
@@ -115,16 +136,13 @@ export function questModel(run: BlueprintRun): QuestModel {
   const cells = new Map<string, Map<string, Cell>>();
   const repairs = new Map<string, number>();
   const retries = new Map<string, number>();
-  const sentBack = new Map<string, number>();            // node -> observer + reviewer send-backs + retries
   const firstTime = new Map<string, boolean>();          // node -> every subject passed untouched
   const touched = new Set<string>();                     // "node/subject" sent back or retried
-  const xpByNode = new Map<string, number>();
   const ticker: Ticker[] = [];
   const landed: Landed[] = [];
   const looksByPage = new Map<string, RunLook>();
   let calls = 0, passes = 0, verdicts = 0, paused: string | undefined;
-  let streak = 0, bestStreak = 0, looksPassed = 0, looksTotal = 0;
-  let firstLookFailed = false;
+  let fixed = 0, looksPassed = 0, looksTotal = 0;
 
   const cell = (node: string, subject: string): Cell => {
     const m = cells.get(node) ?? new Map<string, Cell>();
@@ -134,9 +152,6 @@ export function questModel(run: BlueprintRun): QuestModel {
     return c;
   };
   const name = (m: RunMoment) => (m.subject ? `${labelFor(m.node)} · ${m.subject}` : labelFor(m.node));
-  const earn = (node: string, points: number) => xpByNode.set(node, (xpByNode.get(node) ?? 0) + points);
-  const good = () => { streak += 1; bestStreak = Math.max(bestStreak, streak); };
-  const bad = (node: string) => { streak = 0; sentBack.set(node, (sentBack.get(node) ?? 0) + 1); };
 
   moments.forEach((m, seq) => {
     const key = `${m.node}/${m.subject}`;
@@ -146,11 +161,7 @@ export function questModel(run: BlueprintRun): QuestModel {
         const c = cell(m.node, m.subject);
         if (c.state === "pending" || c.state === "retry" || c.state === "waiting") c.state = m.ok ? "done" : "retry";
         if (m.summary) c.summary = m.summary;
-        if (m.ok) {
-          earn(m.node, XP.landed);
-          good();
-          if (m.summary) landed.push({ seq, node: m.node, subject: m.subject, label: labelFor(m.node), summary: m.summary });
-        }
+        if (m.ok && m.summary) landed.push({ seq, node: m.node, subject: m.subject, label: labelFor(m.node), summary: m.summary });
         break;
       }
       case "verdict": {
@@ -160,8 +171,7 @@ export function questModel(run: BlueprintRun): QuestModel {
           passes += 1;
           c.state = "passed";
           if (!firstTime.has(m.node)) firstTime.set(m.node, true);
-          earn(m.node, touched.has(key) ? XP.passAfterRepair : XP.passFirst);
-          good();
+          if (touched.has(key)) fixed += 1;
           ticker.push({ seq, tone: "pass", text: `${name(m)} passed review` });
         } else {
           c.state = "review";
@@ -173,7 +183,6 @@ export function questModel(run: BlueprintRun): QuestModel {
       case "repair": {
         repairs.set(m.node, (repairs.get(m.node) ?? 0) + 1);
         touched.add(key);
-        bad(m.node);
         const c = cell(m.node, m.subject);
         c.state = "sent_back";
         c.note = shortReason(m.reason);
@@ -191,7 +200,6 @@ export function questModel(run: BlueprintRun): QuestModel {
         retries.set(m.node, (retries.get(m.node) ?? 0) + 1);
         firstTime.set(m.node, false);
         touched.add(key);
-        bad(m.node);
         const c = cell(m.node, m.subject);
         c.state = "retry";
         c.note = shortReason(m.reason);
@@ -208,16 +216,13 @@ export function questModel(run: BlueprintRun): QuestModel {
         if (m.look.verdict === "pass") {
           looksPassed += 1;
           c.state = "passed";
-          earn(m.node, m.look.attempt <= 1 ? XP.lookPassFirst : XP.lookPassAfter);
-          good();
-          ticker.push({ seq, tone: "look", text: `${route} looked at: ${m.look.score}/10 — passed` });
+          if (touched.has(key)) fixed += 1;
+          ticker.push({ seq, tone: "look", text: `${route} reviewed: ${m.look.score}/10 — passed` });
         } else {
-          if (m.look.attempt <= 1) firstLookFailed = true;
           touched.add(key);
-          bad(m.node);
           c.state = "sent_back";
           c.note = m.look.issues[0] ?? `${m.look.score}/10`;
-          ticker.push({ seq, tone: "look", text: `${route} looked at: ${m.look.score}/10 — ${m.look.issues[0] ?? "sent back"}` });
+          ticker.push({ seq, tone: "look", text: `${route} reviewed: ${m.look.score}/10 — ${m.look.issues[0] ?? "sent back"}` });
         }
         break;
       }
@@ -242,14 +247,11 @@ export function questModel(run: BlueprintRun): QuestModel {
     const done = seen.filter((c) => c.state !== "pending" && c.state !== "retry" && c.state !== "waiting").length;
     const padded = [...seen, ...Array.from({ length: Math.max(0, total - seen.length) },
                                           (_, i) => ({ subject: `#${seen.length + i + 1}`, state: "pending" as CellState }))];
-    // A plain step that finished earned its landing too.
-    const xp = (xpByNode.get(key) ?? 0) + (node.state === "done" && seen.length === 0 ? XP.landed : 0);
     return {
       key, label: labelFor(key), state: node.state, cells: padded, total, done,
       repairs: repairs.get(key) ?? 0, retries: retries.get(key) ?? 0,
       cleanSweep: node.state === "done" && total > 1 && firstTime.get(key) === true
         && !(repairs.get(key) ?? 0) && !(retries.get(key) ?? 0),
-      xp,
     };
   };
 
@@ -270,42 +272,82 @@ export function questModel(run: BlueprintRun): QuestModel {
     : (levels.length && levels.every((l) => l.state === "done") ? levels.length : 0);
   const cleared = levels.filter((l) => l.state === "done").length;
 
-  const xp = levels.reduce((sum, l) => sum + l.steps.reduce((a, s) => a + s.xp, 0), 0) + cleared * XP.levelCleared;
-
-  const badges: Badge[] = [];
-  for (const l of levels) for (const s of l.steps) {
-    if (s.cleanSweep) badges.push({ id: `clean:${s.key}`, label: "Clean sweep", detail: `${s.label}: ${s.total} passed first time` });
-  }
-  const comebacks = [...cells.entries()].flatMap(([node, m]) => [...m.values()].filter((c) => c.state === "passed")
-    .filter((c) => moments.some((x) => (x.kind === "repair" || (x.kind === "look" && x.look?.verdict === "revise"))
-                                        && x.node === node && x.subject === c.subject))
-    .map((c) => ({ node, c })));
-  if (comebacks.length) badges.push({ id: "comeback", label: "Comeback", detail: `${comebacks.length} sent back and then passed` });
-  const firstLook = moments.find((m) => m.kind === "look" && m.look?.verdict === "pass" && (m.look?.attempt ?? 1) <= 1);
-  if (firstLook?.look) badges.push({ id: "first-look", label: "First look", detail: `${firstLook.look.route} passed the reviewer at first sight` });
-  if (bestStreak >= 10) badges.push({ id: "unbroken", label: "Unbroken", detail: `${bestStreak} in a row without a send-back` });
+  const steps = new Map(levels.flatMap((l) => l.steps).map((s) => [s.key, s]));
   const complete = run.status === "complete";
-  if (complete && looksTotal >= 3 && looksPassed === looksByPage.size && [...looksByPage.values()].every((l) => l.verdict === "pass")) {
-    badges.push({ id: "full-house", label: "Full house", detail: `every page passed the reviewer` });
+
+  // THE APPLICATION TAKING SHAPE. Each area is the steps that build it,
+  // weighted by their subjects: "Screens 12 of 27 pages written" is progress
+  // in the product's terms, where "node 9 of 14" is progress in the
+  // generator's. A step not in this plan does not count against the area.
+  const areas: Area[] = AREAS.map((a) => {
+    const items: AreaItem[] = a.steps.filter((k) => steps.has(k)).map((k) => {
+      const s = steps.get(k)!;
+      const total = Math.max(1, s.total);
+      const done = s.state === "done" ? total : Math.min(total, s.done);
+      return { key: k, label: s.label, state: s.state, done, total };
+    });
+    const weight = items.reduce((n, i) => n + i.total, 0);
+    const progress = weight ? items.reduce((n, i) => n + i.done, 0) / weight : 0;
+    const state: Area["state"] = items.length && items.every((i) => i.state === "done" || i.state === "failed") ? "done"
+      : items.some((i) => i.state === "running" || i.done > 0) ? "active" : "ahead";
+    return { key: a.key, label: a.label, items, progress, state, note: areaNote(a.key, items, run, looksPassed, looksTotal) };
+  }).filter((a) => a.items.length > 0);
+
+  const milestones: Milestone[] = MILESTONES.filter((m) => steps.has(m.key)).map((m) => {
+    const s = steps.get(m.key)!;
+    return { key: m.key, label: m.label, state: s.state === "done" ? "done" : s.state === "running" || s.done > 0 ? "active" : "ahead" };
+  });
+
+  const highlights: Highlight[] = [];
+  for (const s of steps.values()) {
+    if (s.cleanSweep) highlights.push({ id: `clean:${s.key}`, label: `${s.label}: all ${s.total} passed first review`, detail: "No send-backs, no retries." });
+  }
+  if (fixed) highlights.push({ id: "fixed", label: `${fixed} fixed on review`, detail: "Sent back by the reviewer and passed on the rewrite." });
+  if (complete && looksTotal >= 3 && [...looksByPage.values()].every((l) => l.verdict === "pass")) {
+    highlights.push({ id: "all-pages", label: "Every page passed review", detail: `${looksByPage.size} pages, each reviewed on a desk and a phone.` });
   }
   const inFlight = run.nodes.filter((n) => n.state === "running").length;
-
-  const most = [...sentBack.entries()].sort((a, b) => b[1] - a[1])[0];
-  const outcomes: Outcomes = {
-    allFirstLook: complete ? (looksTotal > 0 && !firstLookFailed) : null,
-    mostSentBack: complete ? (most ? most[0] : "none") : null,
-  };
+  const open = [...cells.values()].flatMap((m) => [...m.values()]).filter((c) => c.state === "sent_back" || c.state === "review" || c.state === "noted").length;
 
   return {
     levels, current, cleared,
     stats: { calls: Math.max(calls, run.callsDone), repairs: [...repairs.values()].reduce((a, b) => a + b, 0),
              retries: [...retries.values()].reduce((a, b) => a + b, 0), inFlight,
              passRate: verdicts ? passes / verdicts : null,
-             xp, streak, bestStreak, looks: { passed: looksPassed, total: looksTotal } },
-    rank: rankFor(xp),
+             review: { passed: passes + looksPassed, fixed, open },
+             looks: { passed: looksPassed, total: looksTotal } },
+    areas, milestones,
     ticker: ticker.slice(-TICKER).reverse(),
     landed: landed.slice(-LANDED).reverse(),
     looks: [...looksByPage.values()],
-    badges, outcomes, paused,
+    highlights, paused,
   };
+}
+
+/** Where an area stands, in one line of the product's terms. */
+function areaNote(key: Area["key"], items: AreaItem[], run: BlueprintRun, looksPassed: number, looksTotal: number): string {
+  const by = new Map(items.map((i) => [i.key, i]));
+  const f = run.forecast ?? {};
+  const n = (k: string) => by.get(k);
+  switch (key) {
+    case "data": {
+      const fields = n("entity_fields");
+      const ents = fields ? fields.total : f.entities ?? 0;
+      return fields ? `${fields.done} of ${ents} entities detailed` : ents ? `${ents} entities` : "";
+    }
+    case "screens": {
+      const code = n("page_code"), contracts = n("page_details");
+      if (code && code.done) return `${code.done} of ${code.total} pages written` + (looksTotal ? ` · ${looksPassed} passed review` : "");
+      if (contracts && contracts.done) return `${contracts.done} of ${contracts.total} page contracts`;
+      return f.pages ? `${f.pages} pages planned` : "";
+    }
+    case "workflows": {
+      const stepsItem = n("workflow_steps");
+      return stepsItem && stepsItem.done ? `${stepsItem.done} of ${stepsItem.total} workflows written` : f.workflows ? `${f.workflows} workflows` : "";
+    }
+    case "design":
+      return items.filter((i) => i.state === "done").map((i) => i.label.toLowerCase()).join(" · ");
+    case "build":
+      return items.filter((i) => i.state === "done").map((i) => i.label.toLowerCase()).join(" · ");
+  }
 }

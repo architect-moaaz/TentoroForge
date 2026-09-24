@@ -1,15 +1,18 @@
 /**
- * The run panel can be played: what landed is read in words, a page's look
- * is shown and scored, points and badges are earned from the record, and a
- * bet placed before the pages are written resolves when the build ends.
+ * The run panel shows the application taking shape, and can be opened.
+ *
+ * What landed is read in words; the product's areas carry real counts in
+ * its own terms; milestones and the review line come from the record; a
+ * page's review is shown with the screenshot it was scored on; a step opens
+ * to what it makes and a subject to what the reviewer said.
  */
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vitest";
 
-import { BETS, QuestMap, betBonus } from "@/components/smith/QuestMap";
-import { RANKS, XP, questModel, rankFor } from "@/components/smith/questModel";
+import { QuestMap } from "@/components/smith/QuestMap";
+import { AREAS, MILESTONES, questModel } from "@/components/smith/questModel";
 import { reduce, type BlueprintRun } from "@/hooks/useBlueprintRun";
 
 const EMPTY: BlueprintRun = {
@@ -21,7 +24,8 @@ const play = (steps: [string, Record<string, unknown>][], from: BlueprintRun = E
   steps.reduce((s, [e, d]) => reduce(s, e, d), from);
 
 const PLAN: [string, Record<string, unknown>] = ["plan", {
-  nodes: ["entity_fields", "page_code"], total: 2, levels: [["entity_fields"], ["page_code"]],
+  nodes: ["requirements", "data_model", "entity_fields", "page_code"], total: 4,
+  levels: [["requirements"], ["data_model"], ["entity_fields"], ["page_code"]],
 }];
 const LOOK = (subject: string, score: number, verdict: "pass" | "revise", attempt = 1, issues: string[] = []) =>
   ["page:look", { node: "page_code", subject, route: `/${subject.toLowerCase()}`, attempt, score, verdict, issues, broken: 0, shots: ["desktop", "mobile"] }] as [string, Record<string, unknown>];
@@ -33,12 +37,41 @@ describe("what landed", () => {
       ["node:subject", { node: "entity_fields", subject: "ENTITY-002", total: 2, done: 2, ok: true, summary: "Patient — 8 fields" }]]);
     const m = questModel(run);
     expect(m.landed.map((l) => l.summary)).toEqual(["Patient — 8 fields", "Doctor — 5 fields"]);
-    expect(m.levels[0].steps[0].cells[0].summary).toBe("Doctor — 5 fields");
+    expect(m.levels[2].steps[0].cells[0].summary).toBe("Doctor — 5 fields");
   });
 });
 
-describe("a page's look", () => {
-  it("scores the page, feeds the gallery and colours the cell", () => {
+describe("the application's areas", () => {
+  it("count progress in the product's terms and only over the steps in the plan", () => {
+    const run = play([PLAN, ["node:start", { node: "requirements" }], ["node:done", { node: "requirements" }],
+      ["node:start", { node: "data_model" }], ["node:done", { node: "data_model" }],
+      ["node:start", { node: "entity_fields", subjects: 4 }],
+      ["node:subject", { node: "entity_fields", subject: "A", total: 4, done: 1, ok: true }],
+      ["node:subject", { node: "entity_fields", subject: "B", total: 4, done: 2, ok: true }]]);
+    const m = questModel(run);
+    expect(m.areas.map((a) => a.key)).toEqual(["data", "screens"]);
+    const data = m.areas[0];
+    expect(data.items.map((i) => [i.key, i.done, i.total])).toEqual([["data_model", 1, 1], ["entity_fields", 2, 4]]);
+    expect(data.progress).toBe(3 / 5);
+    expect(data.note).toBe("2 of 4 entities detailed");
+    expect(data.state).toBe("active");
+    expect(m.areas[1].state).toBe("ahead");
+    expect(m.milestones.map((x) => [x.key, x.state])).toEqual([["requirements", "done"], ["data_model", "done"], ["page_code", "ahead"]]);
+    expect(AREAS.flatMap((a) => a.steps)).toContain("page_code");
+    expect(MILESTONES.map((x) => x.key)).toContain("assemble");
+  });
+
+  it("say what the screens are, from the pages written and reviewed", () => {
+    const run = play([PLAN, ["node:start", { node: "page_code", subjects: 3 }],
+      ["node:subject", { node: "page_code", subject: "PAGE-001", total: 3, done: 1, ok: true }],
+      LOOK("PAGE-001", 8, "pass")]);
+    const screens = questModel(run).areas.find((a) => a.key === "screens")!;
+    expect(screens.note).toBe("1 of 3 pages written · 1 passed review");
+  });
+});
+
+describe("a page's review", () => {
+  it("scores the page, feeds the gallery and the review line", () => {
     const run = play([PLAN, ["node:start", { node: "page_code", subjects: 2 }],
       ["node:subject", { node: "page_code", subject: "PAGE-001", total: 2, done: 1, ok: true }],
       LOOK("PAGE-001", 5, "revise", 1, ["no sort affordance"]),
@@ -46,57 +79,32 @@ describe("a page's look", () => {
       ["node:subject", { node: "page_code", subject: "PAGE-002", total: 2, done: 2, ok: true }],
       LOOK("PAGE-002", 9, "pass")]);
     const m = questModel(run);
-    const page = m.levels[1].steps[0];
+    const page = m.levels[3].steps[0];
     expect(page.cells.map((c) => [c.subject, c.state, c.look?.score])).toEqual([["PAGE-001", "passed", 8], ["PAGE-002", "passed", 9]]);
     expect(m.looks.map((l) => [l.route, l.score, l.attempt])).toEqual([["/page-001", 8, 2], ["/page-002", 9, 1]]);
     expect(m.stats.looks).toEqual({ passed: 2, total: 3 });
-    expect(m.ticker[0].text).toBe("/page-002 looked at: 9/10 — passed");
-    expect(m.ticker[2].text).toBe("/page-001 looked at: 5/10 — no sort affordance");
-    expect(m.badges.map((b) => b.id)).toEqual(expect.arrayContaining(["comeback", "first-look"]));
+    expect(m.stats.review).toEqual({ passed: 2, fixed: 1, open: 0 });
+    expect(m.ticker[0].text).toBe("/page-002 reviewed: 9/10 — passed");
+    expect(m.highlights.map((h) => h.label)).toEqual(["1 fixed on review"]);
   });
 });
 
-describe("points, streaks and rank", () => {
-  it("are earned from the record and never guessed", () => {
+describe("highlights are facts", () => {
+  it("name a step whose every subject passed first review", () => {
     const run = play([PLAN, ["node:start", { node: "entity_fields", subjects: 2 }],
       ["node:subject", { node: "entity_fields", subject: "A", total: 2, done: 1, ok: true }],
       ["observer:verdict", { node: "entity_fields", subject: "A", ok: true }],
       ["node:subject", { node: "entity_fields", subject: "B", total: 2, done: 2, ok: true }],
-      ["observer:verdict", { node: "entity_fields", subject: "B", ok: false, findings: 1 }],
-      ["observer:repair", { node: "entity_fields", subject: "B", round: 1, of: 2, reason: "- [x] missing column" }],
       ["observer:verdict", { node: "entity_fields", subject: "B", ok: true }],
       ["node:done", { node: "entity_fields" }]]);
     const m = questModel(run);
-    const expected = XP.landed * 2 + XP.passFirst + XP.passAfterRepair + XP.levelCleared;
-    expect(m.stats.xp).toBe(expected);
-    expect(m.levels[0].steps[0].xp).toBe(expected - XP.levelCleared);
-    expect(m.stats.streak).toBe(1);        // the send-back broke a streak of 3
-    expect(m.stats.bestStreak).toBe(3);
-    expect(m.rank.name).toBe(RANKS[0].name);
-    expect(rankFor(650)).toEqual({ name: "Architect", at: 600, next: 1200 });
-    expect(rankFor(9999).next).toBeNull();
+    expect(m.highlights.map((h) => h.label)).toEqual(["Entity fields: all 2 passed first review"]);
+    expect(m.stats.review).toEqual({ passed: 2, fixed: 0, open: 0 });
   });
 });
 
-describe("bets", () => {
-  const complete = play([PLAN, ["node:start", { node: "page_code", subjects: 1 }],
-    ["node:subject", { node: "page_code", subject: "P", total: 1, done: 1, ok: true }],
-    LOOK("P", 6, "revise"), LOOK("P", 8, "pass", 2),
-    ["node:done", { node: "page_code" }], ["done", {}]]);
-
-  it("resolve only when the build ends, against what happened", () => {
-    const running = questModel(play([PLAN, LOOK("P", 6, "revise")]));
-    expect(running.outcomes).toEqual({ allFirstLook: null, mostSentBack: null });
-    const m = questModel(complete);
-    expect(m.outcomes).toEqual({ allFirstLook: false, mostSentBack: "page_code" });
-    expect(betBonus({ allFirstLook: "No", mostSentBack: "page_code" }, m.outcomes)).toBe(BETS.allFirstLook.bonus + BETS.mostSentBack.bonus);
-    expect(betBonus({ allFirstLook: "Yes", mostSentBack: "entity_fields" }, m.outcomes)).toBe(0);
-    expect(betBonus({ allFirstLook: "Yes" }, running.outcomes)).toBe(0);
-  });
-});
-
-describe("the map is played, not read", () => {
-  it("opens a step to what it makes and a subject to what the reviewer said", async () => {
+describe("the panel is opened, not read", () => {
+  it("opens an area to its steps, a step to what it makes and a subject to what the reviewer said", async () => {
     const run = play([["started", {}], PLAN, ["node:start", { node: "page_code", subjects: 2 }],
       ["node:subject", { node: "page_code", subject: "PAGE-001", total: 2, done: 1, ok: true, summary: "Manage Doctors · /admin/doctors" }],
       LOOK("PAGE-001", 5, "revise", 1, ["no sort affordance", "status dropped on mobile"])]);
@@ -104,11 +112,17 @@ describe("the map is played, not read", () => {
     document.body.appendChild(host);
     const root = createRoot(host);
     await act(async () => { root.render(<QuestMap run={run} projectId="p1" />); });
-    expect(host.querySelector('[data-testid="quest-xp"]')?.textContent).toBe(`${XP.landed} XP`);
+    expect(host.querySelector('[data-testid="quest-areas"]')?.textContent).toContain("Screens");
+    expect(host.querySelector('[data-testid="quest-milestones"]')?.textContent).toContain("Pages written");
+    expect(host.querySelector('[data-testid="quest-review"]')?.textContent).toContain("1 open");
     expect(host.querySelector('[data-testid="quest-gallery"]')).not.toBeNull();
-    expect(host.querySelector('[data-testid="quest-bets"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="quest-landed"]')?.textContent).toContain("Manage Doctors");
-    // Open the step: what it makes.
+    expect(host.textContent).not.toContain("XP");
+    // Open the area: its steps and counts.
+    await act(async () => { (host.querySelector('[data-area="screens"] button') as HTMLButtonElement).click(); });
+    expect(host.querySelector('[data-area="screens"]')?.textContent).toContain("1/2");
+    // Open the build detail, then the step: what it makes.
+    await act(async () => { (host.querySelector('[data-testid="quest-detail-toggle"]') as HTMLButtonElement).click(); });
     await act(async () => { (host.querySelector('[data-step="page_code"]') as HTMLButtonElement).click(); });
     expect(host.textContent).toContain("Every page as React");
     // Open the subject: what the reviewer said.

@@ -76,16 +76,16 @@ describe("a fan-out step's cells", () => {
     ]);
   });
 
-  it("awards a clean sweep only to a fan-out that passed untouched, and a comeback to a repaired pass", () => {
+  it("notes a fan-out that passed untouched, and a repaired pass, as facts", () => {
     const clean = play([PLAN, ["node:start", { node: "entity_fields" }],
       ["node:subject", { node: "entity_fields", subject: "A", total: 2, done: 1, ok: true }],
       ["node:subject", { node: "entity_fields", subject: "B", total: 2, done: 2, ok: true }],
       ["observer:verdict", { node: "entity_fields", subject: "A", ok: true }],
       ["observer:verdict", { node: "entity_fields", subject: "B", ok: true }],
       ["node:done", { node: "entity_fields" }]]);
-    expect(questModel(clean).badges.map((b) => b.label)).toEqual(["Clean sweep"]);
+    expect(questModel(clean).highlights.map((b) => b.label)).toEqual(["Entity fields: all 2 passed first review"]);
     const back = play([...FAN, ["observer:verdict", { node: "entity_fields", subject: "ENTITY-002", ok: true }]]);
-    expect(questModel(back).badges.map((b) => b.label)).toEqual(["Comeback"]);
+    expect(questModel(back).highlights.map((b) => b.label)).toEqual(["1 fixed on review"]);
   });
 
   it("shows a wait on the API and a pause for credit", () => {

@@ -1,23 +1,24 @@
 "use client";
 /**
- * The build as a level map you can play with, inside the run panel.
+ * The application taking shape, inside the run panel.
  *
- * Each level is a row of the DAG: the steps on it run side by side. Open a
- * step to read what it makes and see each of its subjects — what landed, in
- * words — and open a subject to read what the reviewer said and, for a page,
- * to see the screenshot it was scored on. Pages appear in a gallery as they
- * are looked at. Points, a streak, a rank and badges are earned from the
- * run's own record; two bets placed before the pages are written resolve
- * when the build ends. Nothing here is guessed: see `questModel`.
+ * Above: the product's areas — data, screens, workflows, design, build — each
+ * a ring and a count in the product's own terms ("12 of 27 pages written"),
+ * the milestones reached, how the reviews are going, and the pages as the
+ * reviewer saw them. Below, the build itself as a level map: each level a row
+ * of the DAG, the steps on it running side by side. Open a step to read what
+ * it makes and see each of its subjects — what landed, in words — and open a
+ * subject to read what the reviewer said and, for a page, to see the
+ * screenshot it was scored on. Nothing here is guessed: see `questModel`.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Award, CheckCircle2, ChevronDown, ChevronRight, Circle, Eye, Flame, Loader2, Sparkles, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Circle, Eye, Loader2, XCircle } from "lucide-react";
 
 import type { BlueprintRun, RunLook } from "@/hooks/useBlueprintRun";
 import { cn } from "@/lib/utils";
 
 import { STAGE_MAKES } from "./stages";
-import { questModel, type Cell, type CellState, type Level, type Outcomes, type QuestModel, type StepCard } from "./questModel";
+import { questModel, type Area, type Cell, type CellState, type Level, type Milestone, type QuestModel, type StepCard } from "./questModel";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -36,35 +37,6 @@ const CELL_WORD: Record<CellState, string> = {
   pending: "not started", done: "written", review: "under review", sent_back: "sent back",
   retry: "asked again", passed: "passed", noted: "noted for later", waiting: "waiting for the API",
 };
-
-/** The two bets a watcher can place before the pages are written. */
-export const BETS = {
-  allFirstLook: { question: "Will every page pass the reviewer's first look?", options: ["Yes", "No"] as const, bonus: 50 },
-  mostSentBack: { question: "Which step will be sent back the most?",
-                  options: ["entity_fields", "page_details", "workflow_steps", "page_code"] as const, bonus: 75 },
-} as const;
-export type Bets = { allFirstLook?: "Yes" | "No"; mostSentBack?: string };
-
-/** The bonus a set of bets earned against what happened; 0 while the run is on. */
-export function betBonus(bets: Bets, outcomes: Outcomes): number {
-  let bonus = 0;
-  if (outcomes.allFirstLook != null && bets.allFirstLook) {
-    if ((bets.allFirstLook === "Yes") === outcomes.allFirstLook) bonus += BETS.allFirstLook.bonus;
-  }
-  if (outcomes.mostSentBack != null && bets.mostSentBack && bets.mostSentBack === outcomes.mostSentBack) {
-    bonus += BETS.mostSentBack.bonus;
-  }
-  return bonus;
-}
-
-function useStored<T>(key: string, initial: T): [T, (v: T) => void] {
-  const [value, setValue] = useState<T>(initial);
-  useEffect(() => {
-    try { const raw = localStorage.getItem(key); if (raw) setValue(JSON.parse(raw) as T); } catch { /* no storage */ }
-  }, [key]);
-  const set = (v: T) => { setValue(v); try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* no storage */ } };
-  return [value, set];
-}
 
 /** A look's screenshot, fetched the way every authenticated request is. */
 function useLookImage(projectId: string | undefined, pageId: string, attempt: number, name: string, enabled: boolean) {
@@ -138,8 +110,7 @@ function Card({ step, open, onOpen, picked, onPick }: {
               title={fans ? `${step.done} of ${step.total} · ${step.repairs} sent back · ${step.retries} asked again` : "What this step makes"}>
         <StateIcon state={step.state} />
         <span className={cn("truncate font-medium", step.state === "waiting" && "text-muted-foreground")}>{step.label}</span>
-        {step.xp > 0 && <span className="ml-auto shrink-0 tabular-nums text-[10px] text-muted-foreground">+{step.xp}</span>}
-        {step.cleanSweep && <Award className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-label="Clean sweep" />}
+        {step.cleanSweep && <CheckCircle2 className="ml-auto h-3.5 w-3.5 shrink-0 text-green-600" aria-label="All passed first review" />}
       </button>
       {fans && (
         <div className="mt-1.5 flex flex-wrap gap-0.5" aria-label={`${step.done} of ${step.total} subjects`}>
@@ -217,7 +188,6 @@ function LevelRow({ level, open, onToggle, openStep, onOpenStep, picked, onPick 
   openStep: string | null; onOpenStep: (k: string | null) => void; picked: Pick; onPick: (p: Pick) => void;
 }) {
   const Chevron = open ? ChevronDown : ChevronRight;
-  const xp = level.steps.reduce((a, s) => a + s.xp, 0);
   return (
     <li className={cn("rounded-md", level.state === "ahead" && "opacity-50")}>
       <button type="button" onClick={onToggle}
@@ -225,9 +195,8 @@ function LevelRow({ level, open, onToggle, openStep, onOpenStep, picked, onPick 
         <Chevron className="h-3 w-3 shrink-0" />
         <span className="font-medium tabular-nums">Level {level.index}</span>
         <span className="truncate">{level.steps.map((s) => s.label).join(" · ")}</span>
-        {xp > 0 && <span className="ml-auto shrink-0 tabular-nums text-[10px]">+{xp}</span>}
-        {level.state === "done" && <CheckCircle2 className={cn("h-3 w-3 shrink-0 text-green-600", xp === 0 && "ml-auto")} />}
-        {level.state === "active" && <Loader2 className={cn("h-3 w-3 shrink-0 animate-spin text-primary", xp === 0 && "ml-auto")} />}
+        {level.state === "done" && <CheckCircle2 className="ml-auto h-3 w-3 shrink-0 text-green-600" />}
+        {level.state === "active" && <Loader2 className="ml-auto h-3 w-3 shrink-0 animate-spin text-primary" />}
       </button>
       {open && (
         <div className={cn("mb-1 ml-4 gap-1.5", level.steps.length > 2 ? "grid grid-cols-2" : "flex")}>
@@ -241,40 +210,64 @@ function LevelRow({ level, open, onToggle, openStep, onOpenStep, picked, onPick 
   );
 }
 
-function BetsCard({ bets, setBets, outcomes, locked }: { bets: Bets; setBets: (b: Bets) => void; outcomes: Outcomes; locked: boolean }) {
-  const resolved = outcomes.allFirstLook != null;
-  const label = (k: string) => ({ entity_fields: "Entity fields", page_details: "Page contracts", workflow_steps: "Workflow steps", page_code: "React pages" } as Record<string, string>)[k] ?? k;
+/** A ring of progress, drawn in the app's own primary. */
+function Ring({ value, size = 34 }: { value: number; size?: number }) {
+  const r = (size - 4) / 2, c = 2 * Math.PI * r;
   return (
-    <div data-testid="quest-bets" className="mt-2 rounded-md border border-dashed p-2 text-[11px]">
-      <div className="mb-1 flex items-center gap-1 font-medium"><Sparkles className="h-3 w-3 text-amber-500" /> {resolved ? "Your bets" : locked ? "Bets are locked" : "Place your bets"}</div>
-      {(Object.keys(BETS) as (keyof typeof BETS)[]).map((k) => {
-        const q = BETS[k];
-        const mine = bets[k];
-        const truth = k === "allFirstLook" ? (outcomes.allFirstLook == null ? null : outcomes.allFirstLook ? "Yes" : "No") : outcomes.mostSentBack;
-        return (
-          <div key={k} className="mb-1">
-            <div className="text-muted-foreground">{q.question} <span className="tabular-nums">(+{q.bonus})</span></div>
-            <div className="mt-0.5 flex flex-wrap gap-1">
-              {q.options.map((o) => {
-                const chosen = mine === o;
-                const right = truth != null && o === truth;
-                return (
-                  <button type="button" key={o} disabled={locked || resolved} onClick={() => setBets({ ...bets, [k]: o })}
-                          className={cn("rounded-full border px-2 py-0.5 transition",
-                                        chosen && "border-primary bg-primary/10 font-medium",
-                                        right && "border-green-600 bg-green-500/10",
-                                        resolved && chosen && !right && "line-through opacity-60",
-                                        (locked || resolved) && "cursor-default")}>
-                    {label(o)}
-                  </button>
-                );
-              })}
-              {truth != null && mine && <span className="self-center text-muted-foreground">{mine === truth ? "you called it" : `it was ${label(truth)}`}</span>}
-            </div>
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden className="shrink-0">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={3} className="stroke-muted" />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={3} strokeLinecap="round"
+              className="stroke-primary transition-[stroke-dashoffset] duration-700"
+              strokeDasharray={c} strokeDashoffset={c * (1 - Math.max(0, Math.min(1, value)))}
+              transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+    </svg>
+  );
+}
+
+function AreaTile({ area, open, onToggle }: { area: Area; open: boolean; onToggle: () => void }) {
+  return (
+    <div data-area={area.key} className={cn("rounded-md border p-2", area.state === "ahead" && "opacity-60", area.state === "done" && "bg-muted/40")}>
+      <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-2 text-left">
+        <Ring value={area.progress} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-2 text-xs">
+            <span className="font-medium">{area.label}</span>
+            <span className="tabular-nums text-muted-foreground">{Math.round(area.progress * 100)}%</span>
           </div>
-        );
-      })}
+          <div className="truncate text-[10px] text-muted-foreground">{area.note || (area.state === "ahead" ? "not started" : "in progress")}</div>
+        </div>
+      </button>
+      {open && (
+        <ul className="mt-1.5 space-y-0.5 border-t pt-1.5 text-[10px]">
+          {area.items.map((i) => (
+            <li key={i.key} className="flex items-center gap-1.5">
+              <StateIcon state={i.state} />
+              <span className="min-w-0 flex-1 truncate">{i.label}</span>
+              {i.total > 1 && <span className="tabular-nums text-muted-foreground">{i.done}/{i.total}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
+  );
+}
+
+function Milestones({ items }: { items: Milestone[] }) {
+  if (!items.length) return null;
+  return (
+    <ol data-testid="quest-milestones" className="mt-2 flex flex-wrap items-center gap-y-1 text-[10px]">
+      {items.map((m, i) => (
+        <li key={m.key} className="flex shrink-0 items-center">
+          <span className={cn("inline-flex items-center gap-1 whitespace-nowrap",
+                              m.state === "done" ? "text-foreground" : m.state === "active" ? "font-medium text-primary" : "text-muted-foreground/70")}>
+            {m.state === "done" ? <CheckCircle2 className="h-3 w-3 text-green-600" />
+              : m.state === "active" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Circle className="h-3 w-3" />}
+            {m.label}
+          </span>
+          {i < items.length - 1 && <span className={cn("mx-1.5 h-px w-4", m.state === "done" ? "bg-green-600/60" : "bg-border")} />}
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -284,86 +277,53 @@ export function QuestMap({ run, projectId }: { run: BlueprintRun; projectId?: st
   const [openStep, setOpenStep] = useState<string | null>(null);
   const [picked, setPicked] = useState<Pick>(null);
   const [zoom, setZoom] = useState<string | null>(null);
-  const [bets, setBets] = useStored<Bets>(`forge:bets:${projectId ?? "run"}`, {});
+  const [openArea, setOpenArea] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const isOpen = (l: Level) => pinned[l.index] ?? l.state === "active";
   const pickedCell = picked
     ? model.levels.flatMap((l) => l.steps).find((s) => s.key === picked.node)?.cells.find((c) => c.subject === picked.subject) ?? null
     : null;
-  const pagesStarted = run.nodes.some((n) => n.key === "page_code" && n.state !== "waiting");
-  const bonus = betBonus(bets, model.outcomes);
-  const xp = model.stats.xp + bonus;
   const complete = run.status === "complete";
-  const toNext = model.rank.next ? Math.min(1, (xp - model.rank.at) / (model.rank.next - model.rank.at)) : 1;
-
-  // A point earned is a point noticed: the score pulses when it changes.
-  const [pulse, setPulse] = useState(false);
-  useEffect(() => { setPulse(true); const t = setTimeout(() => setPulse(false), 600); return () => clearTimeout(t); }, [xp]);
+  const review = model.stats.review;
+  // The build detail opens itself when something needs a look — a send-back,
+  // a retry, a wait — and stays where the person put it otherwise.
+  const attention = model.stats.repairs + model.stats.retries > 0 || model.paused != null;
+  useEffect(() => { if (attention) setDetailOpen(true); }, [attention]);
 
   return (
     <div data-testid="quest-map">
-      {model.levels.length > 0 && (
-        <div className="mb-2 rounded-md border bg-gradient-to-r from-primary/10 to-transparent p-2">
-          <div className="flex items-baseline justify-between text-xs">
-            <span className="font-medium">
-              {complete ? "Build report" : model.current ? `Level ${model.current} of ${model.levels.length}` : `${model.levels.length} levels`}
-              {model.cleared > 0 && model.cleared < model.levels.length && (
-                <span className="font-normal text-muted-foreground"> · {model.cleared} cleared</span>
-              )}
-            </span>
-            <span className={cn("tabular-nums font-semibold transition", pulse && "scale-110 text-primary")} data-testid="quest-xp">
-              {xp} XP
-            </span>
+      {model.areas.length > 0 && (
+        <>
+          <div className="grid grid-cols-2 gap-1.5" data-testid="quest-areas">
+            {model.areas.map((a) => (
+              <AreaTile key={a.key} area={a} open={openArea === a.key} onToggle={() => setOpenArea(openArea === a.key ? null : a.key)} />
+            ))}
           </div>
-          <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
-            <span className="font-medium text-foreground">{model.rank.name}</span>
-            <div className="h-1 flex-1 overflow-hidden rounded bg-muted" title={model.rank.next ? `${model.rank.next - xp} to the next rank` : "top rank"}>
-              <div className="h-full bg-primary transition-all duration-500" style={{ width: `${Math.round(toNext * 100)}%` }} />
-            </div>
-            {model.stats.streak >= 3 && (
-              <span className="inline-flex items-center gap-0.5 text-amber-600" title={`${model.stats.streak} in a row without a send-back`}>
-                <Flame className="h-3 w-3" /> {model.stats.streak}
-              </span>
-            )}
-          </div>
-          <div className="mt-1 text-[10px] tabular-nums text-muted-foreground">
-            {model.stats.inFlight > 0 && `${model.stats.inFlight} running · `}
-            {model.stats.calls} calls
-            {model.stats.repairs > 0 && ` · ${model.stats.repairs} back`}
-            {model.stats.retries > 0 && ` · ${model.stats.retries} again`}
-            {model.stats.passRate != null && ` · ${Math.round(model.stats.passRate * 100)}% pass`}
-            {model.stats.looks.total > 0 && ` · ${model.stats.looks.passed}/${model.stats.looks.total} pages passed the look`}
-            {bonus > 0 && ` · +${bonus} from your bets`}
-          </div>
-        </div>
-      )}
-      {model.badges.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-1">
-          {model.badges.map((b) => (
-            <span key={b.id} title={b.detail}
-                  className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-              <Award className="h-3 w-3" /> {b.label}
-            </span>
-          ))}
-        </div>
-      )}
-      <ul className="space-y-0.5">
-        {model.levels.map((l) => (
-          <LevelRow key={l.index} level={l} open={isOpen(l)}
-                    onToggle={() => setPinned((p) => ({ ...p, [l.index]: !isOpen(l) }))}
-                    openStep={openStep} onOpenStep={setOpenStep} picked={picked} onPick={setPicked} />
-        ))}
-      </ul>
-      {pickedCell && picked && (
-        <Detail cell={pickedCell} node={picked.node} projectId={projectId} onZoom={setZoom} onClose={() => setPicked(null)} />
-      )}
-      {model.paused && (
-        <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
-          Paused — {model.paused}. Nothing is lost; the next build continues from here.
-        </p>
+          <Milestones items={model.milestones} />
+          {(review.passed > 0 || review.open > 0 || model.stats.looks.total > 0) && (
+            <p data-testid="quest-review" className="mt-2 text-[11px] text-muted-foreground">
+              <span className="font-medium text-foreground">Review</span>
+              {` · ${review.passed} passed`}
+              {review.fixed > 0 && ` · ${review.fixed} fixed after a send-back`}
+              {review.open > 0 ? ` · ${review.open} open` : " · none open"}
+              {model.stats.looks.total > 0 && ` · ${model.stats.looks.passed} of ${model.stats.looks.total} page reviews passed`}
+            </p>
+          )}
+          {model.highlights.length > 0 && (
+            <ul className="mt-1.5 flex flex-wrap gap-1" data-testid="quest-highlights">
+              {model.highlights.map((h) => (
+                <li key={h.id} title={h.detail}
+                    className="inline-flex items-center gap-1 rounded-full border bg-card px-1.5 py-0.5 text-[10px] text-foreground">
+                  <CheckCircle2 className="h-3 w-3 text-green-600" /> {h.label}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
       {model.looks.length > 0 && (
         <div className="mt-2 border-t pt-2">
-          <div className="mb-1 flex items-center gap-1 text-[11px] font-medium"><Eye className="h-3 w-3" /> Pages, as the reviewer saw them</div>
+          <div className="mb-1 flex items-center gap-1 text-[11px] font-medium"><Eye className="h-3 w-3" /> Pages, as reviewed</div>
           <div className="flex gap-1.5 overflow-x-auto pb-1" data-testid="quest-gallery">
             {model.looks.map((l) => {
               const cell = model.levels.flatMap((x) => x.steps).find((s) => s.key === "page_code")?.cells.find((c) => c.look === l);
@@ -382,7 +342,36 @@ export function QuestMap({ run, projectId }: { run: BlueprintRun; projectId?: st
           ))}
         </ul>
       )}
-      {model.ticker.length > 0 && (
+      {model.levels.length > 0 && (
+        <button type="button" onClick={() => setDetailOpen((v) => !v)} aria-expanded={detailOpen} data-testid="quest-detail-toggle"
+                className="mt-2 flex w-full items-center gap-1.5 border-t pt-2 text-left text-[11px] text-muted-foreground hover:text-foreground">
+          {detailOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          <span className="font-medium">Build detail</span>
+          <span className="tabular-nums">
+            {complete ? `${model.levels.length} levels` : model.current ? `level ${model.current} of ${model.levels.length}` : `${model.levels.length} levels`}
+            {model.stats.inFlight > 0 && ` · ${model.stats.inFlight} running`}
+            {` · ${model.stats.calls} calls`}
+            {model.stats.repairs > 0 && ` · ${model.stats.repairs} sent back`}
+            {model.stats.retries > 0 && ` · ${model.stats.retries} retried`}
+          </span>
+        </button>
+      )}
+      <ul className={cn("mt-1 space-y-0.5", !detailOpen && "hidden")}>
+        {model.levels.map((l) => (
+          <LevelRow key={l.index} level={l} open={isOpen(l)}
+                    onToggle={() => setPinned((p) => ({ ...p, [l.index]: !isOpen(l) }))}
+                    openStep={openStep} onOpenStep={setOpenStep} picked={picked} onPick={setPicked} />
+        ))}
+      </ul>
+      {pickedCell && picked && (
+        <Detail cell={pickedCell} node={picked.node} projectId={projectId} onZoom={setZoom} onClose={() => setPicked(null)} />
+      )}
+      {model.paused && (
+        <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+          Paused — {model.paused}. Nothing is lost; the next build continues from here.
+        </p>
+      )}
+      {model.ticker.length > 0 && detailOpen && (
         <ul className="mt-2 space-y-0.5 border-t pt-2 text-[11px]" aria-label="What the reviewer said">
           {model.ticker.map((t) => (
             <li key={t.seq} className={cn("flex gap-1.5",
@@ -394,9 +383,6 @@ export function QuestMap({ run, projectId }: { run: BlueprintRun; projectId?: st
             </li>
           ))}
         </ul>
-      )}
-      {(run.status === "running" || (complete && (bets.allFirstLook || bets.mostSentBack))) && model.levels.length > 0 && (
-        <BetsCard bets={bets} setBets={setBets} outcomes={model.outcomes} locked={pagesStarted && !complete} />
       )}
       {zoom && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-6" onClick={() => setZoom(null)} role="dialog" aria-modal="true">
