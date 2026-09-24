@@ -2451,6 +2451,39 @@
           },
           "default": []
         },
+        "shell": {
+          "type": "object",
+          "properties": {
+            "chrome": {
+              "type": "string",
+              "enum": [
+                "standard-rail",
+                "wide-rail",
+                "icon-rail",
+                "floating-rail",
+                "right-rail",
+                "topbar",
+                "dock"
+              ]
+            },
+            "auth": {
+              "type": "string",
+              "enum": [
+                "split-editorial",
+                "split-reversed",
+                "side-panel",
+                "centered-minimal",
+                "brand-wash",
+                "top-anchored"
+              ]
+            }
+          },
+          "required": [
+            "chrome",
+            "auth"
+          ],
+          "additionalProperties": false
+        },
         "informationDensity": {
           "type": "string",
           "enum": [

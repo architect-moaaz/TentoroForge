@@ -1552,6 +1552,90 @@ def _font_stack(value: str) -> str:
     return ", ".join(parts)
 
 
+#: What the shell reads its frame from. The scaffold's layout has six
+#: navigation chromes and its sign-in page six compositions, chosen from this
+#: file — which only the old pipeline wrote, so every Blueprint app fell back
+#: to the same rail and the same sign-in (0 of 70 apps had one, 2026-09-24).
+SHELL_IDENTITY_PATH = "src/contracts/design-dna.json"
+
+CHROMES = ("standard-rail", "wide-rail", "icon-rail", "floating-rail", "right-rail", "topbar", "dock")
+AUTH_LAYOUTS = ("split-editorial", "split-reversed", "side-panel", "centered-minimal", "brand-wash", "top-anchored")
+
+
+def derive_shell(doc: dict) -> dict[str, str]:
+    """The frame: the design's own `shell` when it states one, otherwise read
+    off what it did say — the navigation approach, the mobile style, the
+    density and the personality. Deterministic, so the same Blueprint always
+    gets the same frame."""
+    design = doc.get("designSystem") or {}
+    stated = design.get("shell") if isinstance(design.get("shell"), dict) else {}
+    chrome = str(stated.get("chrome") or "")
+    auth = str(stated.get("auth") or "")
+    nav = doc.get("navigation") or {}
+    approach = str(design.get("navigationApproach") or "").lower()
+    personality = str(design.get("visualPersonality") or "").lower()
+    density = str(design.get("informationDensity") or "comfortable")
+    pages = [p for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("status") != "DEPRECATED"]
+
+    # WHOLE WORDS. "Persistent left sidebar on desktop" contains "top" and
+    # "bar", and read by substring it was a top bar (every app was, first
+    # time round).
+    # THE DESKTOP CLAUSE DECIDES THE FRAME. An approach reads "persistent
+    # left sidebar on desktop; collapses to a bottom tab bar on mobile" —
+    # the phone's tabs are the scaffold's own business, and read whole they
+    # made every app a dock. Only an approach that LEADS with the phone is
+    # mobile-first.
+    desktop = approach if approach.startswith(("mobile-first", "mobile first")) else \
+        re.split(r"\bcollaps|\bon (?:mobile|phones?|small screens|narrow)|\bmobile[:/]|;", approach)[0]
+    said = lambda *words: any(re.search(r"\b" + w + r"\b", desktop) for w in words)  # noqa: E731
+    if chrome not in CHROMES:
+        # `navigation.mobile: tabs` is nearly universal (a phone gets tabs
+        # either way) and says nothing about the desktop frame; only an
+        # approach that leads with the phone earns the dock.
+        if said("bottom tab bar", "tab bar", "bottom tabs", "mobile-first", "mobile first"):
+            chrome = "dock"
+        elif said("top bar", "topbar", "top nav", "top navigation", "header bar") or nav.get("style") == "topbar":
+            chrome = "topbar"
+        elif said("icon rail", "icons", "narrow rail", "minimal rail") or len(pages) <= 4:
+            chrome = "icon-rail"
+        elif said("right"):
+            chrome = "right-rail"
+        elif any(w in personality for w in ("editorial", "playful", "warm", "friendly", "calm")):
+            chrome = "floating-rail"
+        elif density == "compact" or len(pages) >= 14:
+            chrome = "wide-rail"
+        else:
+            chrome = "standard-rail"
+    if auth not in AUTH_LAYOUTS:
+        if chrome == "dock" or any(w in personality for w in ("consumer", "playful", "warm", "friendly")):
+            auth = "brand-wash"
+        elif any(w in personality for w in ("stark", "utility", "minimal", "tool")):
+            auth = "centered-minimal"
+        elif density == "compact" or any(w in personality for w in ("dense", "back-office", "operations")):
+            auth = "top-anchored"
+        elif chrome in ("right-rail", "topbar"):
+            auth = "split-reversed"
+        elif chrome == "icon-rail":
+            auth = "side-panel"
+        else:
+            auth = "split-editorial"
+    return {"chrome": chrome, "auth": auth, "density": density}
+
+
+def project_shell_identity(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write the frame the shell and the sign-in page read (see
+    :data:`SHELL_IDENTITY_PATH`). Idempotent: rewritten from the Blueprint on
+    every projection, like tokens.css."""
+    shell = derive_shell(doc)
+    out = Path(app_root) / SHELL_IDENTITY_PATH
+    out.parent.mkdir(parents=True, exist_ok=True)
+    body = {"_generated": "from the Living Blueprint (designSystem.shell) — edit the Blueprint, not this file",
+            "layout": {"chrome": shell["chrome"], "auth": shell["auth"], "density": shell["density"]},
+            "skin": ""}
+    out.write_text(json.dumps(body, indent=2) + "\n", "utf-8")
+    return {"files": [SHELL_IDENTITY_PATH], **shell}
+
+
 def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/app/tokens.css`` from ``designSystem``.
 

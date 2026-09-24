@@ -243,8 +243,15 @@ function frameClass(density?: string): string {
 
 async function shellIdentity(): Promise<ShellIdentity> {
   try {
-    const dp = path.join(process.cwd(), "src", "contracts", "design-spec.json");
-    const spec = JSON.parse(await fs.readFile(dp, "utf8"));
+    // OPTIONAL. Only the old pipeline writes design-spec.json; a Blueprint
+    // app has none, and reading it first threw straight to the fallback —
+    // before design-dna.json, which the Blueprint DOES write, was ever
+    // looked at. Every Blueprint app got the same rail for that alone.
+    let spec: any = {};
+    try {
+      const dp = path.join(process.cwd(), "src", "contracts", "design-spec.json");
+      spec = JSON.parse(await fs.readFile(dp, "utf8"));
+    } catch { /* no design-spec — the dna and the defaults decide */ }
     const pal = (spec?.colorPalette ?? {}) as Record<string, string>;
     const hex = (v?: string) => (typeof v === "string" && /^#[0-9a-fA-F]{6}/.test(v.trim())
       ? v.trim().slice(0, 7) : undefined);
@@ -280,14 +287,15 @@ async function shellIdentity(): Promise<ShellIdentity> {
     // shipping the identical hover-expand rail.
     let chrome = String((spec?.layout ?? {}).chrome ?? "standard-rail");
     let skin = String(spec?.skin ?? "");
+    let density = String((spec?.layout ?? {}).density ?? "comfortable");
     try {
       const dnaRaw = await fs.readFile(
         path.join(process.cwd(), "src", "contracts", "design-dna.json"), "utf8");
       const dna = JSON.parse(dnaRaw);
       chrome = String(dna?.layout?.chrome ?? dna?.shell?.chrome ?? chrome);
       skin = String(dna?.skin ?? "");
+      density = String(dna?.layout?.density ?? density);
     } catch { /* design-dna optional */ }
-    const density = String((spec?.layout ?? {}).density ?? "comfortable");
     return { frame, chrome, density, skin, ...(bg ? { bg } : {}), ...(text ? { text } : {}),
              ...(accent ? { accent } : {}), mode, primary: hex(pal.primary) };
   } catch {

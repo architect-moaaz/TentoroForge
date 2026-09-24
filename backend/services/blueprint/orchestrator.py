@@ -2899,7 +2899,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     from services.blueprint.projection import (
         apply_frontend_projection, project_brand_logo, project_design_tokens,
         project_middleware, project_public_resources, project_public_routes,
-        project_nav_flow, project_root_route, project_shell,
+        project_nav_flow, project_root_route, project_shell, project_shell_identity,
     )
 
     # NO SECOND COMPOSER. A landing page whose composition is refused leaves no
@@ -2928,6 +2928,9 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # the scaffold's near-black and every button came out the wrong colour.
     project_brand_logo(svc.doc, app_root)
     project_design_tokens(svc.doc, app_root)
+    # THE FRAME, BESIDE THE TOKENS: the shell chrome and the sign-in
+    # composition the design decided, written where the layout reads them.
+    project_shell_identity(svc.doc, app_root)
     result = apply_frontend_projection(svc, app_root)
     # THE DESIGNED PAGES, OVER THEIR FLOORS. The SDK they were compiled against
     # (the fixed half ships with the scaffold; the typed half is this

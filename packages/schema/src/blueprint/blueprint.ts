@@ -2012,6 +2012,20 @@ export const DesignSystem = z.object({
       }),
     )
     .default([]),
+  /**
+   * The application's frame, decided with the rest of the look: how the
+   * navigation is built (`chrome`) and how the sign-in screen is composed
+   * (`auth`). Every generated app shipped the same hover-expand rail and the
+   * same split sign-in because nothing carried this decision to the shell,
+   * which has six of each. Derived from `navigationApproach` and the
+   * personality when the design does not state it.
+   */
+  shell: z
+    .object({
+      chrome: z.enum(["standard-rail", "wide-rail", "icon-rail", "floating-rail", "right-rail", "topbar", "dock"]),
+      auth: z.enum(["split-editorial", "split-reversed", "side-panel", "centered-minimal", "brand-wash", "top-anchored"]),
+    })
+    .optional(),
   informationDensity: z.enum(["compact", "comfortable", "spacious"]).default("comfortable"),
   responsiveRules: z.array(z.string()).default([]),
   accessibilityRules: z.array(z.string()).default([]),
