@@ -40,9 +40,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 # headless Chromium through Playwright; without the browser in the image
 # every look is "unavailable" and pages ship unseen, as they did before it.
 # Installed to a path the non-root user below can read (the default is
-# root's own cache), with the system libraries Chromium needs.
+# root's own cache). The system libraries are named here rather than by
+# `playwright install --with-deps`: Playwright 1.49 does not know Debian 13
+# (this image's base) and falls back to Ubuntu 20.04's package names, two of
+# which do not exist, so the install fails (forge-v3, 2026-09-24). The list
+# was proven on python:3.12-slim: apt finds every one and Chromium launches.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN playwright install --with-deps chromium && chmod -R a+rX /ms-playwright
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libdbus-1-3 \
+      libdrm2 libgbm1 libglib2.0-0t64 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+      libpango-1.0-0 libcairo2 libasound2t64 libx11-6 libxcb1 libxext6 libxi6 libxtst6 libfontconfig1 \
+      fonts-liberation fonts-unifont fonts-noto-color-emoji && \
+    rm -rf /var/lib/apt/lists/* && \
+    playwright install chromium && chmod -R a+rX /ms-playwright
 
 # Copy application code
 COPY . .
