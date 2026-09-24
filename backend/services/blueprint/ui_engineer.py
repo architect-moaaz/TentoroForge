@@ -1042,9 +1042,13 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                     if best is None or seen[0] > best[0]:
                         best = seen
                     if verdict.get("verdict") != "pass" and looks_left and round_ < rounds:
+                        # THE REVIEW IS A REFUSAL, NOT A WISH. Handed as the
+                        # brief ("what is wanted of it now") the first trial's
+                        # rewrite of a list page changed one border and kept
+                        # every issue; as feedback it is what the writer is
+                        # told to fix, every one, keeping what worked.
                         current = {"load": load, "view": view}
-                        note = ""
-                        brief = page_look.look_brief(verdict)
+                        note = page_look.look_brief(verdict)
                         logger.info("[ui_engineer] %s sent back by the reviewer (%s/10)",
                                     page.get("id"), verdict.get("score"))
                         continue

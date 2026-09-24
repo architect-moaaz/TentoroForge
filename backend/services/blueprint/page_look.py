@@ -174,6 +174,16 @@ def look_at(doc: dict, page: dict, app_root: Path, load: str, view: str, client:
     shown = references.paths(app_root.parent) if getattr(client, "accepts_images", True) else []
     verdict, spent = judge(doc, page, look, client, references=shown)
     verdict["shots"] = look["shots"]
+    # WHAT WAS LOOKED AT AND WHAT WAS SAID, KEPT BESIDE THE SCREENSHOTS. The
+    # accepted version is the only code the Blueprint keeps; without these a
+    # reader cannot tell what the reviewer asked for or whether the rewrite
+    # did it (the first trial's rewrite of a list page changed one border).
+    try:
+        (out_dir / "view.tsx").write_text(view, encoding="utf-8")
+        (out_dir / "load.ts").write_text(load, encoding="utf-8")
+        (out_dir / "verdict.json").write_text(json.dumps(verdict, indent=1), encoding="utf-8")
+    except OSError:  # a record, never a gate
+        pass
     logger.info("[page_look] %s look %d: %s %s/10, %d issue(s), %d broken", page.get("id"), attempt,
                 verdict.get("verdict"), verdict.get("score"), len(verdict.get("issues") or []),
                 len(verdict.get("broken") or []))

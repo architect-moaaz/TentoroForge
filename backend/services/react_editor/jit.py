@@ -281,10 +281,15 @@ def bundle_source(project: Project, doc: dict, page: dict, view: str, load: str,
     target.mkdir(parents=True, exist_ok=True)
     (target / "view.tsx").write_text(view, encoding="utf-8")
     (target / "load.ts").write_text(load, encoding="utf-8")
+    # AN AUTH PAGE IS THE WHOLE SCREEN. The app draws sign-in and sign-up
+    # without the public top bar (`app_sdk`: the auth frame is a bare grid),
+    # so the look must not add one: the reviewer refused both auth pages of
+    # the first trial for "drawing their own top bar" that was this frame's.
+    access = "authenticated" if str(page.get("pattern") or "") == "auth" else (page.get("access") or "authenticated")
     payload = {
         "command": "page",
         "appRoot": str(project.app_root), "pageId": f"look-{page.get('id')}", "pageDir": page_dir,
-        "route": page.get("route"), "access": page.get("access") or "authenticated",
+        "route": page.get("route"), "access": access,
         "entities": _entities_for_samples(doc), "roles": [r.get("name") for r in _live(doc.get("roles")) if r.get("name")],
         "params": params, "searchParams": search, "shimsDir": str(SHIMS),
         "vendor": {"specifiers": shared["specifiers"], "candidates": shared["candidates"]},
