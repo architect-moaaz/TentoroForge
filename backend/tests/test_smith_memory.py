@@ -569,14 +569,4 @@ def test_build_memory_block_no_directive_when_no_blueprint():
     assert "reconcile the file to match" not in block
 
 
-def test_smith_agent_system_prompt_carries_blueprint_directive():
-    """The system prompt must tell Smith that the blueprint is his
-    primary reference and to consult it FIRST."""
-    from agents.smith_agent import build_system_prompt
-    sp = build_system_prompt()
-    assert "BLUEPRINT" in sp
-    assert "primary reference" in sp
-    assert "consult it FIRST" in sp or "consult" in sp.lower()
-
-
 import uuid  # placed at bottom on purpose — the mock-based tests import it

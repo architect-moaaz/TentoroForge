@@ -1,6 +1,6 @@
 # Smith v4 — the loop is the front door
 
-**Status:** built and measured 2026-09-25, uncommitted. Branch `smithv4`, from `fda48717`.
+**Status:** complete 2026-09-25 — front door, `write_section`, platform turns, both deletions. Branch `smithv4`.
 **Owner:** Smith
 **Companions:**
 - `2026-09-24-smith-as-a-loop.md` — §0 is the governing principle; S1–S3 and `write_page_code` are the parts v4 is built from
@@ -98,7 +98,9 @@ are the same reads, writes and verbs. That makes `agents/smith_agent.py` and
 `self_verify_pass`, `journey_verifier/smith_autofix`, the legacy route in
 `routers/generate.py`), as a second deletion after the front door's.
 
-- **`write_section`** — the entity, API and rules writers exposed to the loop the way `write_page_code` exposes the UI engineer. Closes `rename_entity`, `change_field_type`, `edit_api`.
+- ~~`write_section`~~ **Done** (`461de69a`): the loop briefs the agent that owns a section through `section_change.rerun`; `rename_entity`, `change_field_type` and `edit_api` are made through it, and a rename reports what still says the old name. `reorder` on a tree-laid page is the one honest refusal left.
+- ~~Self-heal, the verify pass, the journey verifier, verify & fix~~ **Done** (`aab8f955`): `smith4.platform.smith_result` is the one adapter — the crash, the fault report or the failed journey is the ask; it commits only when the caller measures in commits; a caller's turn budget is the loop's `max_steps`; `verify_pages(routes)` is the loop's own move over `review_coded_pages`.
+- ~~The second deletion~~ **Done**: `agents/smith_agent.py`, `agents/fix_chat_agent.py`, `agents/tool_app_modifier.py`, `services/smith_tools.py`, `smith_orchestrator`, `smith_architect_wire`, `smith_plan_and_apply`, `intent_classifier`, `fix_agent_tools`, `confirmation_gate`, `smith_move_dispatcher`, two stale scripts and 33 test files. The legacy `/chat` route's three agent branches are one v4 worker — attachments ride along so `set_logo` gets its file, history is the exchange, the turn is committed staged to what it touched — and the fix assistant's symptom is an ask the loop fixes rather than a proposal card. The legacy *generation* pipeline's bootstrap stage was never the front door; it is lifted unchanged into `services/bootstrap_stage.py`. Kept: `smith_agent_adapters`, `plan_wire_pipeline`, `smith_decide`, `smith_recent_edits`, `smith_memory`, `app_recall`, `fix_applier` and the workflow seams — the generation pipeline and the route's bookkeeping, none of which was the agent.
 - ~~Deleting the old front door~~ **Done 2026-09-25**, in two halves:
   - *Gone*: `understand_ask()` and its prompt (the module keeps only the shape
     of an understanding and the normalisers the loop applies); `SmithSession`'s
@@ -107,9 +109,8 @@ are the same reads, writes and verbs. That makes `agents/smith_agent.py` and
     `limits.cannot`; `capabilities.nearest` and its word arithmetic; the
     phrasebook's AST reading of the if-chain (it reads `PERFORM` now, and
     `move_requires` reads `tree_edit`).
-  - *Kept, deliberately*: `agents/smith_agent.py` + `smith_tools.py` and their
-    consumers — the second deletion, once self-heal, the verify pass and the
-    journey verifier exist on v4.
+  - *Kept until the second deletion*: `agents/smith_agent.py` + `smith_tools.py`
+    and their consumers — gone the same day, above.
   - The ~250 seam tests that drove `run_iteration` with an injected
     understanding now run through `tests/services/_front_door.py`, a
     test-only adapter that turns the understanding into a v4 turn's first
@@ -122,4 +123,5 @@ are the same reads, writes and verbs. That makes `agents/smith_agent.py` and
     "Which record?" — now ends the turn with those answers as chips rather
     than going back to the model. The 28 example sentences the old prompt
     quoted per verb live in `verbs.VERB_EXAMPLES` and render in the catalogue.
-- **Bootstrap** through the same loop.
+- **Bootstrap** through the same loop — still on `SmithSession.run_bootstrap`.
+- **Legacy (non-Blueprint) applications** get the v4 turn on `/chat` now; a page written the old way has no `pageCode` row, so `write_page_code` refuses it with the reason while the reads still work. Making them Blueprint apps is the migration, not a Smith change.

@@ -254,9 +254,3 @@ def test_the_turn_answers_and_changes_nothing(app, ledger):
     assert "not what you owe" in result.answer
 
 
-def test_the_tool_entry_answers_without_a_blueprint(tmp_path, ledger):
-    from services.smith_tools import _smith_spend
-
-    out = _smith_spend(str(tmp_path))
-    assert out["applied"] is True and out["edited_paths"] == []
-    assert "cannot see what it cost" in out["diff_summary"]

@@ -243,16 +243,6 @@ def test_the_verb_needs_nothing_because_all_of_them_names_no_entity():
     assert "Changes nothing" in VERB_HELP["export_data"]
 
 
-def test_the_model_and_the_tool_loop_both_know_about_it():
-    from services import smith_tools
-    from services.smith.tools import render as _catalogue
-
-    assert "export_data" in _catalogue() and "spreadsheet" in _catalogue()
-    assert "export_data" in smith_tools.READONLY_HANDLERS
-    entry = [t for t in smith_tools.TOOL_CATALOG if t["name"] == "export_data"][0]
-    assert "READS ONLY" in entry["desc"]
-
-
 def test_it_is_in_the_list_smith_gives_when_asked_what_it_can_do():
     from services.smith import capabilities
 

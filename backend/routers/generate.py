@@ -5911,7 +5911,7 @@ async def chat_with_project(
                         logger.info("[smith-arch] persisted profile=%s", _profile.id)
                     except Exception:  # noqa: BLE001 — never block on this
                         logger.exception("[smith-arch] persist profile failed")
-                from services.smith_architect_wire import run_bootstrap_stage
+                from services.bootstrap_stage import run_bootstrap_stage
                 # Bridge: run_bootstrap_stage → orchestrate_planner emit_fn
                 # → asyncio.Queue → SSE stream. Lets the Actor-Critic loop
                 # push critic_start/critic_verdict/critic_approved/… as
@@ -7799,9 +7799,13 @@ async def _handle_fix_proposal_agent(
         recall_block = ""
 
     try:
-        from agents.fix_chat_agent import run_fix_agent
+        # Smith v4: the symptom is the ask; the loop reads the code and fixes
+        # it through the build's seams. No proposal card — the fix lands, and
+        # the reply says what changed; a question comes back as a question.
+        from services.smith4.platform import smith_result as _smith_turn
         result = await asyncio.to_thread(
-            run_fix_agent, symptom, output_dir, recall_block,
+            _smith_turn, str(project.id), output_dir, symptom,
+            commit=True, commit_message=f"smith(fix): {symptom[:60]}",
         )
     except Exception as e:  # noqa: BLE001
         logger.exception("[fix] agent loop failed")
@@ -7857,6 +7861,16 @@ async def _handle_fix_proposal_agent(
         )
         yield fix_proposal_event(pending, changes)
         yield sse_event("message", {"text": _normalize_proposal_text(explanation)})
+        return
+
+    answer = result.get("answer") if isinstance(result, dict) else None
+    if answer and not question:
+        await _persist_assistant_message(
+            project.id, answer, MessageType.chat,
+            metadata={"intent": "FIX", "fix_agent_trace": trace,
+                      "edited_paths": result.get("edited_paths") or []},
+        )
+        yield sse_event("message", {"text": answer})
         return
 
     # Otherwise the agent ended with a clarifying question (or a forced one).
@@ -8057,7 +8071,7 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
     # in-loop path, but end users asking in plain language get the direct
     # route so we don't fall through to a screen-picking clarification.
     try:
-        from agents.smith_agent import _is_verify_intent as _is_verify
+        from routers.blueprint_generate import _is_verify_consent as _is_verify
         if _is_verify(message):
             from services.self_verify_pass import run_self_verify
             import asyncio as _asyncio_sv
@@ -8270,37 +8284,6 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
     # orchestrator returns an OrchestratorResult; downstream code below
     # expects the classic `run_smith_agent` shape, so we adapt.
     try:
-        def _arch_on_iter() -> bool:
-            return os.environ.get("FORGE_SMITH_ARCHITECT", "1") != "0"
-
-        # ── Smith thinking out loud ──────────────────────────────────────
-        # Reasoning chunks, tool chips and heartbeats, streamed the instant
-        # they land. A worker-thread callback pushes into `_smith_queue` via
-        # `loop.call_soon_threadsafe`; the drain below runs in the event loop
-        # and yields each one as a `smith_thought` event.
-        #
-        # HOISTED ABOVE THE BRANCH ON PURPOSE. All of this used to live inside
-        # the `else:` arm, and `FORGE_SMITH_ARCHITECT` defaults to ON — so on
-        # every real turn the queue was never created, `reasoning_callback` was
-        # never passed, and the user watched a spinner for the whole run while
-        # the machinery for showing them Smith's thinking sat in a branch
-        # nothing took. `_last_tool` was read by the timeout handler below and
-        # would have raised NameError there but for a bare `except`.
-        _smith_queue: asyncio.Queue = asyncio.Queue()
-        _smith_loop = asyncio.get_running_loop()
-        # Mutable holder so the progress callback (running in the worker
-        # thread) can update the last-seen tool for heartbeat labelling and
-        # timeout messages. Single-write from one thread is safe under the
-        # GIL; no lock needed.
-        _last_tool: dict = {"name": ""}
-        _reasoning_chunks_seen: list[str] = []
-        # Hard deadline on the whole Smith turn. The agent loop and its nested
-        # sub-agents call the model with NO timeout anywhere, so a stalled
-        # response used to hang the turn forever and the spinner never
-        # cleared. 180s default; a real turn is well under it.
-        _smith_timeout = int(os.getenv("FORGE_SMITH_TIMEOUT_S", "180"))
-        _HEARTBEAT_SECONDS = 12.0
-
         def _reasoning_cb(text: str) -> None:  # noqa: ANN001
             if isinstance(text, str) and text.strip():
                 _smith_loop.call_soon_threadsafe(
@@ -8387,273 +8370,42 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
                 if payload is not None:
                     yield payload
 
-        if _arch_on_iter():
-            # New Smith-as-architect path (Migration Step 3 wire-up):
-            # SmithSession → real seams → TurnResult verified against
-            # git + guards. Bootstrap (no domain) still falls back to
-            # the tactical stack — the ok_to_bootstrap branch below
-            # catches TurnResult.status == "not_enabled" for that case.
-            from services.smith_architect_wire import (
-                run_iteration_via_architect,
-                turn_result_to_legacy_dict,
-            )
-            # As a task, not an awaited thread, so the drain below can
-            # interleave Smith's thinking between its tool calls. Awaiting
-            # inline is what made this branch silent for the whole run.
-            _arch_worker = asyncio.create_task(asyncio.to_thread(
-                functools.partial(
-                    run_iteration_via_architect,
-                    message, output_dir, str(project.id) if project else "",
-                    memory_block,
-                    reasoning_callback=_reasoning_cb,
-                    progress_callback=_progress_cb,
-                ),
-            ))
-            _arch_started_at = time.monotonic()
+        # SMITH v4 — one worker. The message is the ask; the loop reads the
+        # application and writes through the build's seams; the reply is what
+        # the seams reported. Attachments ride along for the tool that has to
+        # do something with the bytes (`set_logo`); a spreadsheet went to the
+        # import inbox above. Committed here, staged to what the turn touched,
+        # so "undo that" has one commit to reverse.
+        scoped_tools = None
+        classifier_meta: dict = {}
+        _attach_files = []
+        if attachment_ids:
             try:
-                async for _payload in _drain_smith(_arch_worker,
-                                                   _arch_started_at):
-                    yield sse_event("smith_thought", _payload)
-                _turn_result = _arch_worker.result()
-            except asyncio.CancelledError:
-                raise asyncio.TimeoutError()
-            logger.info(
-                "[smith-arch] status=%s applied=%d",
-                _turn_result.status, len(_turn_result.touched_paths),
-            )
-            if _turn_result.status == "not_enabled":
-                # Fall back to the tactical orchestrator so bootstrap
-                # keeps working while narrator-mode adapters ship.
-                logger.info("[smith-arch] falling back to smith_orchestrator "
-                            "(bootstrap / not-enabled)")
-                from services.smith_orchestrator import run as _smith_orch_run
-                orch = await asyncio.to_thread(
-                    _smith_orch_run,
-                    message, output_dir,
-                    project_id=str(project.id) if project else None,
-                )
-                result = {
-                    "answer":       orch.answer if orch.status in ("resolved", "no_op", "rolled_back") else None,
-                    "question":     orch.question,
-                    "handoff":      orch.handoff,
-                    "diagnosis":    None,
-                    "edited_paths": orch.applied_paths,
-                    "trace":        orch.trace,
-                }
-            else:
-                result = turn_result_to_legacy_dict(_turn_result)
-                # Emit the smith_needs_user SSE event immediately if the
-                # session returned needs_user — the frontend has a
-                # dedicated NeedsUserCard renderer for it.
-                _needs = result.pop("_needs_user", None)
-                if _needs:
-                    yield sse_event("smith_needs_user", _needs)
-                # Streamed live from the queue above; suppress the post-hoc
-                # replay so a chunk is never shown twice.
-                result["_reasoning_chunks_streamed"] = True
-        elif os.environ.get("FORGE_SMITH_ORCH") == "1":
-            from services.smith_orchestrator import run as _smith_orch_run
-            orch = await asyncio.to_thread(
-                _smith_orch_run,
-                message, output_dir,
-                project_id=str(project.id) if project else None,
-            )
-            # Adapt to the run_smith_agent-shaped dict the rest of this
-            # handler expects (answer / question / handoff / edited_paths).
-            result = {
-                "answer":       orch.answer if orch.status in ("resolved", "no_op", "rolled_back") else None,
-                "question":     orch.question,
-                "handoff":      orch.handoff,
-                "diagnosis":    None,
-                "edited_paths": orch.applied_paths,
-                "trace":        orch.trace,
-            }
-            logger.info("[smith-orch] status=%s turns=%d applied=%d commit=%s",
-                        orch.status, orch.turns, len(orch.applied_paths), orch.commit)
-        else:
-            from agents.smith_agent import run_smith_agent
-
-            # Phase 0 — hard intent classifier at ingress. When
-            # confidence is high, we hand Smith a scoped tool subset.
-            # When it's low (ambiguous ask), scoped_tools is None and
-            # Smith uses the full 39-tool catalog exactly like before.
-            # Gated on FORGE_SMITH_CLASSIFIER so we can dark-launch and
-            # A/B test in prod without breaking existing users.
-            scoped_tools = None
-            classifier_meta: dict = {}
-            if os.getenv("FORGE_SMITH_CLASSIFIER", "0") == "1":
-                try:
-                    from services.intent_classifier import classify_intent
-                    intent_obj = await asyncio.to_thread(
-                        classify_intent, message,
-                    )
-                    scoped_tools = intent_obj.tools
-                    classifier_meta = {
-                        "intent": intent_obj.intent,
-                        "domain": intent_obj.domain,
-                        "target": intent_obj.target,
-                        "confidence": intent_obj.confidence,
-                        "scoped": intent_obj.tools is not None,
-                        "tool_count": (
-                            len(intent_obj.tools)
-                            if intent_obj.tools is not None else 0
-                        ),
-                    }
-                    logger.info(
-                        "[smith-classifier] intent=%s conf=%.2f scoped=%s tools=%d",
-                        intent_obj.intent, intent_obj.confidence,
-                        intent_obj.tools is not None,
-                        len(intent_obj.tools or []),
-                    )
-                except Exception:
-                    logger.exception("intent classifier failed — full catalog")
-
-
-            # The SERVER's record that the previous turn ended asking the user
-            # to confirm a destructive op. Without it, `_confirmed` was only
-            # honoured when the model relayed the tool's summary verbatim, so
-            # a paraphrase + "yes" left the op ungrantable forever
-            # (register S24-8).
-            _pending_confirmation = None
-            try:
-                from database import async_session as _async_session
-                from services.smith_memory import load_pending_confirmation
-                async with _async_session() as _sess:
-                    _pending_confirmation = await load_pending_confirmation(
-                        _sess, project.id,
-                    )
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "[smith] could not read the pending confirmation — the "
-                    "tool will ask again rather than act unconfirmed"
-                )
-
-            # Hard deadline on the whole Smith turn. The agent loop + its nested
-            # sub-agents call the model with NO timeout anywhere, so a slow/stalled
-            # Anthropic response used to hang the turn forever — the frontend
-            # spinner never cleared ("Smith stops responding"). wait_for guarantees
-            # the user always gets a response (the orphaned thread finishes on its
-            # own). 180s default; a real turn is well under that.
-            # Smith Auto-Act (recent_edits) — inject the per-project sliding
-            # window into memory so resolve_target can echo it back and get
-            # the +20 recency bias when the user asks about the same page
-            # they just edited. Empty list → no line rendered.
-            from services import smith_recent_edits as _sre
-            _recent = _sre.get(project.id)
-            _smith_memory = memory_block
-            # PHASE-3: read-only brief awareness. When a design brief exists
-            # on disk, prepend a one-line summary so Smith knows the palette,
-            # display font, and density before proposing aesthetic edits.
-            # No cost when no brief exists (silently skipped).
-            try:
-                from services.design_brief_editor import read_brief as _rb
-                _b_for_mem = _rb(output_dir)
-                if _b_for_mem is not None:
-                    _brief_line = (
-                        "<smith-design-brief>\n"
-                        f"Current brief: {_b_for_mem.summary_line()}\n"
-                        "For aesthetic asks (colors, fonts, density, feel), "
-                        "use get_brief to read the full contract and edit_brief "
-                        "to apply a partial patch.\n"
-                        "</smith-design-brief>\n"
-                    )
-                    _smith_memory = _brief_line + (_smith_memory or "")
-            except Exception:  # noqa: BLE001
-                pass
-            if _recent:
-                _recent_line = (
-                    "<smith-recent-edits>\n"
-                    + "Recently edited routes (newest first): "
-                    + ", ".join(_recent)
-                    + "\nWhen calling resolve_target, pass these as recent_edits.\n"
-                    + "</smith-recent-edits>\n"
-                )
-                _smith_memory = _recent_line + (_smith_memory or "")
-            # Launch the smith worker as a Task instead of awaiting inline,
-            # so this coroutine can interleave queue-drain yields between
-            # tool calls. The 180s deadline is enforced by wall-clock check
-            # in the drain loop (not by wait_for) — that way we can cancel
-            # the worker AND still emit a final "stopped while working on X"
-            # message with the last-seen tool.
-            # Attachments the user put on THIS turn. Resolved here rather
-            # than in the agent so the agent stays free of storage concerns
-            # and remains injectable in tests.
-            _attach_blocks = []
-            # The same attachments a second way: the records, with the path of
-            # each file. The blocks are what the MODEL sees; these are what a
-            # TOOL is handed when it has to do something with the bytes (see
-            # `smith_tools.TURN_FILE_TOOLS`). Resolved here for the same reason
-            # the blocks are — this is the layer that knows the project id the
-            # attachments are filed under, and `output_dir` is keyed by the
-            # project's short id, not by it.
-            _attach_files = []
-            if attachment_ids:
-                try:
-                    from services import chat_attachments
-                    # A SPREADSHEET IS NOT A DOCUMENT TO READ. An owner
-                    # attaching one means "load this in", so it goes to the
-                    # project's import inbox — where `import_data` reads it
-                    # from disk — and the turn gets a NOTE about it instead of
-                    # its rows. Four hundred customers in the prompt is
-                    # thousands of tokens the model must not read, and an
-                    # invitation to transcribe records it should never touch.
-                    _sheets = _sheets_to_inbox(project, output_dir,
-                                               list(attachment_ids))
-                    _rest = [a for a in attachment_ids
-                             if a not in {s["id"] for s in _sheets}]
-                    _root = chat_attachments.attachments_root()
-                    _attach_blocks = chat_attachments.load_blocks(
-                        _root, str(project.id), _rest)
-                    _attach_blocks += [{"type": "text", "text": n}
-                                       for n in (s["note"] for s in _sheets)]
-                    # The same files a second way: the records, with each
-                    # file's path, for a tool that has to do something with the
-                    # BYTES rather than look at them (`set_logo`). Built from
-                    # `_rest`, not from every id — a spreadsheet has already
-                    # gone to the import inbox, and offering it here too would
-                    # let one attachment be two different asks.
-                    _attach_files = chat_attachments.locate(
-                        _root, str(project.id), _rest)
-                    logger.info("smith turn: %d attachment block(s), %d spreadsheet(s)",
-                                len(_attach_blocks), len(_sheets))
-                except Exception as _e:  # noqa: BLE001 — never lose the turn
-                    logger.warning("attachment load failed: %s", _e)
-
-            _smith_worker = asyncio.create_task(asyncio.to_thread(
-                run_smith_agent, message, output_dir, recall_block, _smith_memory,
-                prior_messages=prior_messages,
-                attachment_blocks=_attach_blocks,
-                attachment_files=_attach_files,
-                scoped_tools=scoped_tools,
-                reasoning_callback=_reasoning_cb,
-                progress_callback=_progress_cb,
-                pending_confirmation=_pending_confirmation,
-                current_route=current_route,
-                # `export_records` and `back_up` answer with a download url,
-                # and that url is authorised against this project's row. The
-                # agent has never needed the id before — everything else it
-                # does is a path under `output_dir`.
-                project_id=str(project.id),
-            ))
-            _smith_started_at = time.monotonic()
-            try:
-                async for _payload in _drain_smith(_smith_worker,
-                                                   _smith_started_at):
-                    yield sse_event("smith_thought", _payload)
-                # Surface any exception raised inside the worker (LLM timeout
-                # upstream, tool crash). Re-raises into the outer handler.
-                result = _smith_worker.result()
-            except asyncio.CancelledError:
-                # Deadline path — re-raise as TimeoutError so the existing
-                # timeout branch handles the user-facing message.
-                raise asyncio.TimeoutError()
-
-            if classifier_meta and isinstance(result, dict):
-                result.setdefault("classifier", classifier_meta)
-            # Reasoning was streamed live from the queue; suppress the
-            # post-hoc chunk-emit loop below to avoid duplicates.
-            if isinstance(result, dict):
-                result["_reasoning_chunks_streamed"] = True
+                from services import chat_attachments
+                _sheets = _sheets_to_inbox(project, output_dir, list(attachment_ids))
+                _rest = [a for a in attachment_ids if a not in {s["id"] for s in _sheets}]
+                _root = chat_attachments.attachments_root()
+                _attach_files = chat_attachments.locate(_root, str(project.id), _rest)
+                logger.info("smith turn: %d attachment(s), %d spreadsheet(s)",
+                            len(_attach_files), len(_sheets))
+            except Exception as _e:  # noqa: BLE001 — never lose the turn
+                logger.warning("attachment load failed: %s", _e)
+        from services.smith4.platform import smith_result as _smith_turn
+        _smith_worker = asyncio.create_task(asyncio.to_thread(
+            _smith_turn, str(project.id), output_dir, message,
+            history=prior_messages, attachments=_attach_files,
+            reasoning=_reasoning_cb, commit=True,
+            commit_message=f"smith: {message.strip()[:60]}",
+        ))
+        _smith_started_at = time.monotonic()
+        try:
+            async for _payload in _drain_smith(_smith_worker, _smith_started_at):
+                yield sse_event("smith_thought", _payload)
+            result = _smith_worker.result()
+        except asyncio.CancelledError:
+            raise asyncio.TimeoutError()
+        if isinstance(result, dict):
+            result["_reasoning_chunks_streamed"] = True
     except (asyncio.TimeoutError, TimeoutError):
         _last = ""
         try:
@@ -8878,8 +8630,7 @@ async def _handle_smith_turn(project: Project, message: str, deferred: dict | No
     # A tool asked the user to confirm a destructive op this turn. Record it
     # on the assistant message so the NEXT turn can honour a "yes" regardless
     # of whether the model relayed the prompt verbatim (register S24-8).
-    from agents.smith_agent import _pending_confirmation_from
-    _pending_conf = _pending_confirmation_from(trace)
+    _pending_conf = None   # Smith v4 keeps a cascade's yes in `services.smith.confirm`, not in the trace
 
     # Smith Auto-Act (S3/S4) — harvest resolve_target results from the
     # trace into UI metadata. `harvest_metadata` returns

@@ -115,7 +115,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                     tool=tool, args=args, status="error",
                     said=(f"`{tool}` needs {', '.join(gaps)}, and the call did not carry them "
                           "and neither the message nor the application supplied them. Call it "
-                          "again with them, or ask.")))
+                          f"again with them, or ask. Ask: {question}")))
                 continue
             try:
                 step = perform(ctx, tool, understanding)

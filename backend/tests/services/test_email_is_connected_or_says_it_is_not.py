@@ -250,26 +250,3 @@ def test_a_sending_step_with_no_service_at_all_is_a_fact_in_the_context(svc):
     assert "Email the nurse in Register Nurse" in said
 
 
-def test_the_verb_is_offered_dispatched_and_tooled(monkeypatch, tmp_path):
-    """A verb nobody can reach is a verb that does not exist."""
-    import services.smith_tools as smith_tools
-    from services.smith.capabilities import GROUPS
-    from services.smith.tools import render as _catalogue
-    from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP
-
-    assert REQUIRED_BY_VERB["connect_service"] == {"integration"}
-    assert "connect_service" in VERB_HELP and "`connect_service`" in _catalogue()
-    assert any("connect_service" in verbs for _h, _w, verbs in GROUPS)
-    # The chips a person clicks when Smith has to ask which service.
-    from services.smith.slot_options import options_for
-    offered = options_for("integration", {}, {"verb": "connect_service"})
-    assert "Microsoft 365 / Outlook" in offered
-    assert all(ec.service_for(o) is not None for o in offered)
-
-    calls: list[str] = []
-    monkeypatch.setattr("services.smith.email_connect.run",
-                        lambda d, **k: calls.append(k.get("service") or "")
-                        or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
-    out = smith_tools.READONLY_HANDLERS["connect_service"](str(tmp_path), {"integration": "our Outlook"})
-    assert out["applied"] and calls == ["our Outlook"]
-    assert smith_tools.READONLY_HANDLERS["connect_service"](str(tmp_path), {})["applied"] is False

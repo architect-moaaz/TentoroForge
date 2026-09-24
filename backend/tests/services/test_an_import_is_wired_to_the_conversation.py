@@ -49,17 +49,6 @@ def test_it_is_in_the_list_smith_gives_when_asked_what_it_can_do():
     assert "spreadsheet" in groups[0][1]
 
 
-def test_the_tool_loop_can_call_it_too():
-    from services import smith_tools
-
-    assert "import_data" in smith_tools.READONLY_HANDLERS
-    entry = [t for t in smith_tools.TOOL_CATALOG if t["name"] == "import_data"]
-    assert len(entry) == 1
-    # The dry run is the thing the model must not skip past.
-    assert "WRITES NOTHING" in entry[0]["desc"]
-    assert "confirm=true" in entry[0]["desc"]
-
-
 def test_the_contract_declares_the_import_before_anything_writes_it():
     schema = json.loads(CONTRACT.read_text(encoding="utf-8"))
     data = schema["properties"]["data"]

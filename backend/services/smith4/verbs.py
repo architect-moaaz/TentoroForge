@@ -56,6 +56,11 @@ class Ctx:
     guards: Callable[[str], list[dict]] = lambda _out: []
     #: (understanding, output_dir) -> IterationMove | None — the tree edit.
     move: Optional[Callable[[dict, str], Any]] = None
+    #: The files attached to THIS turn, as `chat_attachments.locate` records
+    #: (each with its absolute `path`). A logo is a file, and a file is not
+    #: something a model can put in a field: the tool that needs the bytes
+    #: takes them from here.
+    attachments: list[dict] = field(default_factory=list)
 
     @property
     def out(self) -> str:
@@ -89,8 +94,16 @@ def restyle(ctx: Ctx, u: dict) -> Outcome:
 
 
 def logo(ctx: Ctx, u: dict) -> Outcome:
+    """The owner's mark in, or out. `set_logo` takes the first image attached
+    to the turn; asked with none, the seam says to attach one."""
     from services.smith.brand_logo_change import run
-    return from_seam(run(ctx.out, remove=(u["verb"] == "remove_logo"), reasoning=ctx.reasoning),
+    remove = u["verb"] == "remove_logo"
+    image = next((a for a in ctx.attachments
+                  if str(a.get("mime") or a.get("content_type") or "").startswith("image/")
+                  or str(a.get("filename") or a.get("path") or "").lower().endswith(
+                      (".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"))), None)
+    logo = {"file": str(image.get("path") or ""), "filename": str(image.get("filename") or "")} if image else None
+    return from_seam(run(ctx.out, logo=logo, remove=remove, reasoning=ctx.reasoning),
                      fail="I could not change the logo and have changed nothing.")
 
 

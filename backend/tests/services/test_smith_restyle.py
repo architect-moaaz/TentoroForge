@@ -133,29 +133,6 @@ def test_the_summary_says_what_moved(svc, tmp_path):
 
 # --- the two entry points share it ---------------------------------------------
 
-def test_the_verb_and_the_tool_both_reach_the_one_implementation(monkeypatch, tmp_path):
-    import services.smith_tools as smith_tools
-    from services.smith.verbs import REQUIRED_BY_VERB, missing_fields
-    from services.smith.tools import render as _catalogue
-    assert REQUIRED_BY_VERB["restyle"] == {"change"} and "`restyle`" in _catalogue() and "`restyle` (" in _catalogue()
-    assert missing_fields({"verb": "restyle"}) == ["change"]
-    entry = next(t for t in smith_tools.TOOL_CATALOG if t["name"] == "restyle")
-    assert "edit_page" in entry["desc"] and "restyle" in smith_tools.READONLY_HANDLERS
-    assert smith_tools.READONLY_HANDLERS["restyle"](str(tmp_path), {})["applied"] is False
-    called = []
-    monkeypatch.setattr("services.smith.restyle.run",
-                        lambda output_dir, change, **kw: called.append(change) or
-                        {"applied": True, "edited_paths": ["src/app/tokens.css"], "diff_summary": "Restyled."})
-    assert smith_tools.READONLY_HANDLERS["restyle"](str(tmp_path), {"change": "green"})["applied"]
-    from tests.services._front_door import SmithSession
-    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=lambda _d: [],
-                           understand_ask_fn=lambda m, c, history=None: {"verb": "restyle", "change": "green theme"},
-                           iteration_move_fn=lambda *a, **k: None)
-    result = session.run_iteration(user_message="change the theme colour to green")
-    assert result.status == "resolved" and result.touched_paths == ["src/app/tokens.css"]
-    assert called == ["green", "green theme"]
-
-
 
 def test_a_palette_returned_unchanged_is_refused_and_records_no_decision(svc, tmp_path):
     """Live, the agent read "use the colour the description names" over the

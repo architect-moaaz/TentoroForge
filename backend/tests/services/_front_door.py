@@ -61,6 +61,14 @@ def chooser_from(understand: Callable, *, reasoning: Any = None) -> Callable:
         made = [o for o in observations if o.tool == first["tool"] and o.status != "error"]
         if made:
             return {"tool": "done", "args": {}, "why": ""}
+        # The old front door asked for a missing slot; the loop names that
+        # question on the error it hands back, and this adapter asks it.
+        # Once, and then kept up: the loop sends a first question to look
+        # before it may stand, so the adapter asks again after that refusal.
+        slot = next((o for o in observations if o.tool == first["tool"] and o.status == "error"
+                     and " Ask: " in o.said), None)
+        if slot is not None:
+            return {"tool": "ask_user", "args": {"question": slot.said.split(" Ask: ", 1)[1].strip()}, "why": ""}
         return first
     return choose
 

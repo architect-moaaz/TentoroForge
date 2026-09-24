@@ -26,11 +26,15 @@ logger = logging.getLogger(__name__)
 
 
 def smith_result(project_id: str, output_dir: str, message: str, *,
+                 history: list | None = None, attachments: list[dict] | None = None,
                  max_steps: int | None = None, reasoning: Any = None,
                  commit: bool = False, commit_message: str = "") -> dict[str, Any]:
-    """Run one platform-started turn and return the legacy result shape."""
+    """Run one turn and return the legacy result shape. `history` is the
+    exchange (a chat turn has one; a crash has none); `attachments` the files
+    on this turn."""
     out = handle(project_id=str(project_id), output_dir=str(output_dir), message=message,
-                 history=[], reasoning=reasoning, max_steps=max_steps)
+                 history=list(history or []), reasoning=reasoning, max_steps=max_steps,
+                 attachments=list(attachments or []))
     touched = list(out.touched)
     if commit and touched:
         try:

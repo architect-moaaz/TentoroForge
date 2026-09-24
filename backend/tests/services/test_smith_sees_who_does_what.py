@@ -63,11 +63,6 @@ def test_a_small_budget_shortens_the_prose_and_keeps_the_pages_and_workflows():
     assert "shortened to fit" in text
 
 
-def test_the_architect_is_given_the_whole_app_not_its_name():
-    from services import smith_architect_wire
-    assert "ContextBudget(max_chars=1200)" not in inspect.getsource(smith_architect_wire)
-
-
 def test_a_new_field_is_taken_and_written_by_the_workflows_that_save_its_entity():
     """0l133sp2: "postcode when they create their profile" landed on an unused
     layout column; the workflow that saves a profile never took it."""

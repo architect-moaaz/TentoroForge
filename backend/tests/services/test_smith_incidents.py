@@ -253,14 +253,6 @@ def test_the_run_shape_is_the_one_a_tool_handler_needs(tmp_path):
     assert out["kind"] == "slow" and out["answer"]
 
 
-@pytest.mark.parametrize("verb", ["explain_crash", "explain_slowness"])
-def test_the_tool_catalogue_can_run_them(tmp_path, verb):
-    from services.smith_tools import READONLY_HANDLERS
-
-    out = READONLY_HANDLERS[verb](str(tmp_path), {})
-    assert out["applied"] is False and out["answer"]
-
-
 # --------------------------------------------------------------------------- #
 # The wire the application reports over
 # --------------------------------------------------------------------------- #

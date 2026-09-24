@@ -83,40 +83,6 @@ def test_a_turn_that_cannot_find_the_person_says_who_it_knows(project):
 # the tools
 # ---------------------------------------------------------------------------
 
-def test_each_verb_is_a_tool_the_agent_can_dispatch():
-    from services import smith_tools
-
-    catalog = {t["name"] for t in smith_tools.TOOL_CATALOG}
-    for name in ("add_login", "remove_login", "reset_login"):
-        assert name in catalog, name
-        assert name in smith_tools.READONLY_HANDLERS, name
-
-
-def test_no_tool_offers_to_take_a_password(project):
-    """There is no `password` argument anywhere, and one handed in is ignored
-    rather than honoured: a tool call is written to the conversation log."""
-    from services import smith_tools
-
-    for tool in smith_tools.TOOL_CATALOG:
-        if tool["name"].endswith("_login"):
-            assert "password" not in tool["signature"], tool["name"]
-
-    out = smith_tools.READONLY_HANDLERS["add_login"](
-        str(project), {"email": "dave@clinic.com", "password": "Summer2026"})
-    assert out["applied"] is True
-    assert "Summer2026" not in json.dumps(acc.load(project))
-    assert "Summer2026" not in out["diff_summary"]
-
-
-def test_a_tool_with_nobody_named_says_what_it_needs(project):
-    from services import smith_tools
-
-    out = smith_tools.READONLY_HANDLERS["reset_login"](str(project), {})
-    assert out["applied"] is False and "nobody named" in out["reason"]
-
-    out = smith_tools.READONLY_HANDLERS["add_login"](str(project), {})
-    assert out["applied"] is False and "no email address given" in out["reason"]
-
 
 # ---------------------------------------------------------------------------
 # where the link lands

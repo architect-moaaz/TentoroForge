@@ -188,30 +188,6 @@ def test_an_unknown_workflow_is_named_with_the_choices(svc):
         wc.edit_workflow(svc, "Delete Nurse", "", executor=lambda s: None)
 
 
-def test_the_verbs_and_the_tools_share_the_seam(monkeypatch, tmp_path):
-    import services.smith_tools as smith_tools
-    from services.smith.tools import render as _catalogue
-    from services.smith.verbs import REQUIRED_BY_VERB
-    for v in ("add_workflow", "edit_workflow", "remove_workflow"):
-        assert v in REQUIRED_BY_VERB and f"`{v}`" in _catalogue() and f"`{v}` (" in _catalogue()
-    assert REQUIRED_BY_VERB["edit_workflow"] == {"workflow", "change"}
-    calls = []
-    monkeypatch.setattr("services.smith.workflow_change.run",
-                        lambda output_dir, verb, **kw: calls.append((verb, kw)) or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
-    (tmp_path / ".forge" / "blueprint").mkdir(parents=True)
-    (tmp_path / ".forge" / "blueprint" / "current.json").write_text("{}")
-    assert smith_tools.READONLY_HANDLERS["add_workflow"](str(tmp_path), {"request": "email the admin"})["applied"]
-    assert smith_tools.READONLY_HANDLERS["remove_workflow"](str(tmp_path), {"workflow": "Delete Nurse"})["applied"]
-    assert [c[0] for c in calls] == ["add_workflow", "remove_workflow"]
-    assert calls[0][1]["workflow"] == "email the admin" and calls[1][1]["workflow"] == "Delete Nurse"
-    from tests.services._front_door import SmithSession
-    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=lambda _d: [],
-                           understand_ask_fn=lambda m, c, history=None: {"verb": "edit_workflow", "workflow": "Delete Nurse", "change": "ask for a reason"},
-                           iteration_move_fn=lambda *a, **k: None)
-    assert session.run_iteration(user_message="the delete should ask for a reason").status == "resolved"
-    assert calls[-1][0] == "edit_workflow" and calls[-1][1]["change"] == "ask for a reason"
-
-
 def test_steps_the_engine_would_refuse_are_fed_back_not_crashed(svc):
     """The contract refuses a step reading a value nothing declares; that is
     a rejection the retry is told, not an exception the turn dies on."""

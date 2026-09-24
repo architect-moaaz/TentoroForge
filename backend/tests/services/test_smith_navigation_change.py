@@ -109,20 +109,3 @@ def test_a_menu_returned_unchanged_is_not_a_change(svc):
         nc.change_navigation(svc, "put registration first", app_root=None, client=_client([same]))
 
 
-def test_the_verb_and_the_tool_share_the_seam(monkeypatch, tmp_path):
-    import services.smith_tools as smith_tools
-    from services.smith.tools import render as _catalogue
-    from services.smith.verbs import REQUIRED_BY_VERB
-    assert REQUIRED_BY_VERB["edit_navigation"] == {"change"} and "`edit_navigation`" in _catalogue() and "`edit_navigation` (" in _catalogue()
-    calls = []
-    monkeypatch.setattr("services.smith.navigation_change.run",
-                        lambda output_dir, change, **kw: calls.append(change) or {"applied": True, "edited_paths": ["src/schemas/shell.json"], "diff_summary": "ok"})
-    assert smith_tools.READONLY_HANDLERS["edit_navigation"](str(tmp_path), {})["applied"] is False
-    assert smith_tools.READONLY_HANDLERS["edit_navigation"](str(tmp_path), {"change": "put it first"})["applied"]
-    from tests.services._front_door import SmithSession
-    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=lambda _d: [],
-                           understand_ask_fn=lambda m, c, history=None: {"verb": "edit_navigation", "change": "open on master data"},
-                           iteration_move_fn=lambda *a, **k: None)
-    result = session.run_iteration(user_message="open on master data")
-    assert result.status == "resolved" and result.touched_paths == ["src/schemas/shell.json"]
-    assert calls == ["put it first", "open on master data"]
