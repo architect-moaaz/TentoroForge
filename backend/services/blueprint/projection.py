@@ -3544,14 +3544,30 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def landing_route(doc: dict) -> str:
-    """Where `/` should send someone when no page claims it.
+    """Where `/` should send someone when no page claims it — and where the
+    edge pages' "return to the app" link points.
 
     The declared landing route if navigation names one, else the first page
     that is not an auth screen — never a guess. The scaffold guessed `/home`,
     a route this application does not have, so the root redirected into a 404
     and the 404 redirected into the login gate.
+
+    THE BLUEPRINT SPELLS THE LANDING `navigation.initialRoute.default`. That
+    is the key the navigation agent writes and the key Smith's navigation
+    verb changes ("open on Master Data"), and it is what the rail's
+    `initialRoute` is read from — yet this read `landing`/`home`/`root`,
+    keys no Blueprint carries, so the root redirect and the 403 page's way
+    home fell through to the first page on the list on every application,
+    whatever the navigation said. Read the declared key first. A dynamic
+    route (`/nurses/[id]`) has no id to fill and "/" would forward to itself,
+    so neither counts as declared; the legacy keys still do.
     """
     nav = doc.get("navigation") or {}
+    initial = nav.get("initialRoute")
+    declared = initial.get("default") if isinstance(initial, dict) else initial
+    if isinstance(declared, str) and declared.startswith("/") and declared != "/" \
+            and "[" not in declared:
+        return declared
     for key in ("landing", "home", "root"):
         route = nav.get(key)
         if isinstance(route, str) and route.startswith("/"):
@@ -3650,6 +3666,28 @@ def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": written, "claimedBy": claimed,
             "removedStaleRoot": removed,
             "redirectsTo": None if root_page else landing_route(doc)}
+
+
+def project_navigation(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Everything the navigation section decides, written out together.
+
+    The navigation reaches the application in four places: the rail
+    (`shell.json`), the route graph (`nav-flow.json`), the root redirect
+    (`(dashboard)/page.tsx`) and the edge pages' way home — the `{{home_route}}`
+    the 403, 404 and error pages send someone back through. A build fills the
+    last of these when it lays the scaffold down; a change after the build
+    re-projected the first three and left the fourth as the build wrote it, so
+    "open on Master Data" moved the rail and the root and the 403 page still
+    returned people to the old landing. Every Smith verb that re-runs the
+    navigation's projection runs this, so the four cannot drift apart again.
+    """
+    from services.blueprint.assembly import relay_edge_pages
+
+    files: list[str] = []
+    for fn in (project_shell, project_nav_flow, project_root_route):
+        files += list((fn(doc, app_root) or {}).get("files") or [])
+    files += relay_edge_pages(app_root, doc)
+    return {"files": sorted(set(files))}
 
 
 #: Written into every route file this projector emits, and the only way the

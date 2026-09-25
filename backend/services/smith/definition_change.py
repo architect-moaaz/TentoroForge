@@ -238,9 +238,9 @@ def edit_product(svc: Any, change: str, *, app_root: str | None = None, client: 
                before=before, affected=[])
     files: list[str] = []
     if app_root and ("name" in changed):
-        from services.blueprint.projection import project_nav_flow, project_shell
-        files += list(project_shell(svc.doc, app_root).get("files") or [])
-        files += list(project_nav_flow(svc.doc, app_root).get("files") or [])
+        # The rail and the edge pages both carry the application's name.
+        from services.blueprint.projection import project_navigation
+        files += project_navigation(svc.doc, app_root)["files"]
     return {"applied": True, "changed": changed, "name": app.get("name"), "note": str(data.get("note") or "").strip(),
             "edited_paths": files}
 

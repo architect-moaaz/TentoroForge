@@ -336,22 +336,13 @@ PLACEHOLDER_PAGES: tuple[str, ...] = EDGE_PAGES + ("src/app/layout.tsx",)
 def _landing_route(doc: dict) -> str:
     """Where "back to the app" should point.
 
-    The declared landing page if navigation names one, else the first page that
-    is not an auth route — never a guess like "/dashboard" that may not exist.
+    The same answer the root redirect gives — one function, because the 403
+    page's "Return to the app" and `/` are two doors to the same place, and
+    when this had its own copy the two read different keys of the navigation.
     """
-    nav = doc.get("navigation") or {}
-    for key in ("landing", "home", "root"):
-        route = nav.get(key)
-        if isinstance(route, str) and route.startswith("/"):
-            return route
-    pages = [p for p in (doc.get("pages") or []) if p.get("status") != "DEPRECATED"]
-    for page in pages:
-        route = page.get("route") or ""
-        if route and route != "/" and not any(
-            k in route for k in ("sign-in", "signin", "login", "sign-up", "register")
-        ):
-            return route
-    return "/"
+    from services.blueprint.projection import landing_route
+
+    return landing_route(doc)
 
 
 def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
@@ -420,6 +411,39 @@ def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
             path.write_text(text, "utf-8")
             touched.append(rel)
     return touched
+
+
+def relay_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
+    """Lay the edge pages down from the scaffold again and fill them from the
+    Blueprint as it is now.
+
+    The fill consumes the placeholders: once `{{home_route}}` has become
+    "/nurse-registration" there is nothing left in the file for a later fill
+    to find, so `interpolate_edge_pages` on a built app is a no-op however the
+    navigation has changed since. A build never notices, because it copies the
+    scaffold fresh every time; a change after the build does not copy the
+    scaffold, and its 403 page kept returning people to whatever the landing
+    was the day the app was built. This copies only :data:`EDGE_PAGES` — the
+    files that carry a `{{home_route}}` — in scaffold order, later layer over
+    earlier, and fills them; the rest of the scaffold is left as it stands.
+
+    Returns the pages laid down, whether or not the fill changed them: a page
+    re-laid from the scaffold is a page that was written.
+    """
+    out = Path(app_root)
+    laid: list[str] = []
+    for layer in _template_dirs():
+        for rel in EDGE_PAGES:
+            src = layer / rel
+            if not src.is_file():
+                continue
+            dst = out / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            if rel not in laid:
+                laid.append(rel)
+    interpolate_edge_pages(out, doc)
+    return laid
 
 
 #: The auth scaffold files whose `ACCOUNT_TYPES` default the signup derivation
