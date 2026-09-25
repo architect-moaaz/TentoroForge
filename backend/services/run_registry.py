@@ -154,6 +154,19 @@ def finish(project_id: str, status: str, *, detail: str | None = None) -> None:
         run["error"] = detail
 
 
+def active_projects() -> list[str]:
+    """The projects with a turn in flight — a DAG running, or a chat turn
+    still writing its answer after the DAG ended.
+
+    THE LEDGER GOES QUIET BEFORE THE TURN DOES. A cutover's idle gate read
+    each project's newest run ledger and took `run:end` as idle; the turn
+    that had run that DAG was still composing its "here's what I understood"
+    message when the container was recreated under it (i3i950po, 2026-09-25
+    10:21 UTC), and the tester waited an hour for an answer that never came.
+    This is what a gate asks instead of the ledger."""
+    return sorted(pid for pid, run in _RUNS.items() if run.get("active"))
+
+
 def snapshot(project_id: str) -> dict[str, Any]:
     """What to tell a client that just loaded the page.
 

@@ -99,3 +99,14 @@ def test_a_look_is_served_by_name_never_by_path():
     src = (ROOT / "routers/blueprint_generate.py").read_text()
     assert '"/api/projects/{project_id}/looks/{page_id}/{attempt}/{name}"' in src
     assert 'name not in ("desktop", "mobile")' in src and 're.fullmatch(r"[A-Za-z0-9_-]+", page_id)' in src
+
+
+def test_a_gate_can_ask_which_projects_have_a_turn_in_flight():
+    """The ledger goes quiet at run:end while the turn still writes its
+    answer; the registry stays active until the turn finishes."""
+    run_registry.begin("gate-a", phase="define"); run_registry.begin("gate-b", phase="build")
+    assert {"gate-a", "gate-b"} <= set(run_registry.active_projects())
+    run_registry.finish("gate-a", "complete")
+    assert "gate-a" not in run_registry.active_projects() and "gate-b" in run_registry.active_projects()
+    run_registry.finish("gate-b", "error", detail="x")
+    assert "gate-b" not in run_registry.active_projects()
