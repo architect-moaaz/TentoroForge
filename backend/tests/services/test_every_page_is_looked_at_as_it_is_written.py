@@ -222,6 +222,9 @@ def test_a_look_lays_down_what_the_bundle_needs_before_assembly(monkeypatch, tmp
         seen["laid"] = all((app / dst).is_dir() for dst in LOOSE_LIBS.values())
         raise __import__("services.react_editor.service", fromlist=["EditorError"]).EditorError(422, "jit-build", "stop here")
     monkeypatch.setattr("services.react_editor.jit.bundle_source", fake_bundle)
+    projected = []
+    monkeypatch.setattr("services.blueprint.projection.project_design_tokens", lambda doc, root: projected.append(root))
     with pytest.raises(page_look.LookUnavailable):
         page_look.render(_doc(), _doc()["pages"][0], app, GOOD_LOAD, GOOD_VIEW, tmp_path / "out")
     assert seen["laid"] is True, "feel-lite is in the tree before the bundle is asked for"
+    assert projected == [app], "the design's tokens are projected before the bundle, not the scaffold's default theme"

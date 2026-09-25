@@ -74,6 +74,16 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
     # it worked here only on an app that had been assembled before.
     if any(not (app_root / dst).is_dir() for dst in LOOSE_LIBS.values()):
         copy_loose_libs(app_root)
+    # …AND THE DESIGN'S OWN TOKENS. `tokens.css` is written by the `frontend`
+    # projection, after every page; until then the scaffold's default theme
+    # is in the tree, and a look would judge the design's colours against a
+    # palette that is not the design's. The design system is decided long
+    # before any page, so its tokens are projected here, idempotently.
+    from services.blueprint.projection import project_design_tokens
+    try:
+        project_design_tokens(doc, app_root)
+    except Exception as exc:  # noqa: BLE001 — the scaffold's theme is still a theme
+        logger.info("[page_look] tokens not projected for the look (%s)", exc)
     project = Project(root=app_root.parent, app_root=app_root)
     try:
         bundle = bundle_source(project, doc, page, view, load)
