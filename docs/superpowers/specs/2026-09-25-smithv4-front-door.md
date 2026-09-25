@@ -140,4 +140,18 @@ are the same reads, writes and verbs. That makes `agents/smith_agent.py` and
   in production — is deleted with `SmithSession`; `smith_session.py` keeps the
   two result dataclasses. `handle_chat_v2` routes bootstrap and iteration to
   the same turn.
+
+  *Driven live, twice, on a fresh throwaway project* ("a shift roster for a
+  small care home…"). First run: `open_decisions` → ask (palette) →
+  `open_decisions` → ask (notifications) → **`ask_user {}`**, which ended the
+  turn as "Nothing needed doing" → a fourth turn defined it (252s, 11
+  requirements, `BLUEPRINT_REVIEW`). Two defects: an `ask_user` with no
+  question was a silent end (now an error the model sees; `answer` the same),
+  and the reply counted screens — "0 screen(s)" on a definition complete for
+  its step — and appended `definition.digest`, a fingerprint, not prose. The
+  reply now says what a definition is at this step: the requirements and the
+  product's capabilities, with screens, records and processes planned on
+  approval. Second run: one clarification (palette), then
+  `define_application` — **2 turns, 93s**, 6 requirements and 5 capabilities
+  named in the reply, `BLUEPRINT_REVIEW`.
 - **Legacy (non-Blueprint) applications** get the v4 turn on `/chat` now; a page written the old way has no `pageCode` row, so `write_page_code` refuses it with the reason while the reads still work. Making them Blueprint apps is the migration, not a Smith change.

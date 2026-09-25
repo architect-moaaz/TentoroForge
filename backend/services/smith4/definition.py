@@ -80,7 +80,6 @@ def define_application(ctx: Ctx, args: dict) -> dict:
     from services.blueprint.observer import anthropic_observer
     from services.blueprint.orchestrator import completed_nodes, nodes_recorded_done, run
     from services.blueprint.service import BlueprintService
-    from services.smith import definition as definition_mod
     from services.smith.smith import domain_nodes
 
     brief = str(args.get("brief") or "").strip() or brief_of(ctx)
@@ -121,17 +120,20 @@ def define_application(ctx: Ctx, args: dict) -> dict:
         return _finding(f"The definition did not complete — {type(exc).__name__}: {exc}")
     failed = list(getattr(report, "failed", None) or [])
     doc = svc.doc
-    n_req = len([r for r in doc.get("requirements") or [] if isinstance(r, dict)])
-    n_pages = len([p for p in doc.get("pages") or [] if isinstance(p, dict)])
-    n_ent = len([e for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)])
-    digest = ""
-    try:
-        digest = definition_mod.digest(definition_mod.derive(doc))
-    except Exception:  # noqa: BLE001 — the digest is a courtesy
-        pass
-    said = (f"Defined the application: {n_req} requirement(s), {n_ent} kind(s) of record, "
-            f"{n_pages} screen(s). It is ready to review — nothing is built until it is approved."
-            + (f"\n\n{digest}" if digest else ""))
+    # WHAT A DEFINITION IS AT THIS STEP. The domain nodes author the
+    # requirements and the product's capabilities — the two everything else
+    # reads; the screens, records and processes are planned from them after
+    # the person approves. Counting screens here read as "0 screens" on a
+    # definition that was complete for its step (live, 2026-09-25).
+    reqs = [r for r in doc.get("requirements") or [] if isinstance(r, dict)]
+    caps = [str(c.get("name") or "").strip() for c in (doc.get("product") or {}).get("capabilities") or []
+            if isinstance(c, dict) and str(c.get("name") or "").strip()]
+    name = str((doc.get("application") or {}).get("name") or ctx.app_name or "the application")
+    said = (f"Defined what **{name}** is: {len(reqs)} requirement(s)"
+            + (f" and {len(caps)} capabilit{'y' if len(caps) == 1 else 'ies'} — {', '.join(caps[:8])}"
+               + (", …" if len(caps) > 8 else "") if caps else "")
+            + ". It is ready to review. On approval the screens, records and processes are "
+              "planned from it; nothing is built until then.")
     finding = (f"These parts of the definition did not complete: {', '.join(failed)}. "
                "The rest stands; say what to do about them.") if failed else ""
     return {"applied": True, "said": said, "finding": finding,

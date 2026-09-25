@@ -295,3 +295,23 @@ def test_the_prompt_renders_and_reaches_the_provider():
     assert out["tool"] == "done" and out["why"] == ""
     assert "rename the button" in seen["prompt"] and "the slice" in seen["prompt"]
     assert "`read_page_code`" in seen["prompt"] and "`propose_plan`" in seen["prompt"]
+
+
+def test_a_question_with_no_words_is_an_error_not_a_silent_end(tmp_path):
+    """Live: `ask_user {}` ended a define turn with "Nothing needed doing"."""
+    _repo(tmp_path)
+    (tmp_path / "src").mkdir(); (tmp_path / "src" / "r.tsx").write_text("x\n")
+    chooser = _Chooser({"tool": "read_file", "args": {"path": "src/r.tsx"}, "why": ""},
+                       {"tool": "ask_user", "args": {}, "why": ""},
+                       {"tool": "ask_user", "args": {"question": "Which shift?"}, "why": ""})
+    result = _turn(tmp_path, chooser, "swap it")
+    assert chooser.seen[2][-1].status == "error" and "needs `question`" in chooser.seen[2][-1].said
+    assert result.status == "asked" and result.said == "Which shift?"
+
+
+def test_an_answer_with_no_words_is_an_error_too(tmp_path):
+    _repo(tmp_path)
+    chooser = _Chooser({"tool": "answer", "args": {}, "why": ""},
+                       {"tool": "answer", "args": {"text": "It does."}, "why": ""})
+    result = _turn(tmp_path, chooser, "does it?")
+    assert chooser.seen[1][-1].status == "error" and result.said == "It does."

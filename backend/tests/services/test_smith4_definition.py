@@ -103,20 +103,19 @@ def test_defining_runs_the_domain_nodes_and_stops_at_review(tmp_path, monkeypatc
 
     def run(s, executor, *, plan, commit, user_request, app_root, observer_agent):
         ran.update(plan=plan, request=user_request)
-        s.doc["requirements"] = [{"id": "REQ-001"}]; s.doc["pages"] = [{"id": "PAGE-001"}, {"id": "PAGE-002"}]
+        s.doc["requirements"] = [{"id": "REQ-001"}]
+        s.doc["product"] = {"capabilities": [{"name": "Shift Publishing"}, {"name": "Swap Requests"}]}
         return type("R", (), {"failed": []})()
     monkeypatch.setattr("services.blueprint.orchestrator.run", run)
     monkeypatch.setattr("services.smith.brief.advance_to_review", lambda s: ran.update(review=True))
-    monkeypatch.setattr("services.smith.definition.derive", lambda doc: {})
-    monkeypatch.setattr("services.smith.definition.digest", lambda d: "one requirement, two screens")
 
     out = definition.define_application(_ctx(tmp_path, "a roster for nurses"), {})
 
     assert out["applied"] and not out["finding"]
     assert ran["create"]["name"] == "Roster" and ran["create"]["description"] == "a roster for nurses"
     assert ran["plan"] == ["requirements", "data_model"] and ran["review"] is True
-    assert "1 requirement(s)" in out["said"] and "2 screen(s)" in out["said"] and "ready to review" in out["said"]
-    assert "one requirement, two screens" in out["said"]
+    assert "1 requirement(s) and 2 capabilities — Shift Publishing, Swap Requests" in out["said"]
+    assert "ready to review" in out["said"] and "nothing is built until then" in out["said"]
 
 
 def test_a_definition_that_did_not_complete_is_a_finding_on_what_stands(tmp_path, monkeypatch):

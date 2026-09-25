@@ -77,6 +77,17 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             continue
         if tool == "propose_plan":
             return _plan(ctx, args, landed, touched)
+        # A QUESTION WITH NO WORDS IS NOT A QUESTION. `ask_user {}` ended a live
+        # turn with "Nothing needed doing" — the model meant to ask and sent
+        # nothing to ask. An error it can see, not a silent end.
+        if tool == "ask_user" and not str(args.get("question") or "").strip():
+            observations.append(Observation(tool=tool, args=args, status="error",
+                                            said="`ask_user` needs `question`. Say what you are asking, or end another way."))
+            continue
+        if tool == "answer" and not str(args.get("text") or "").strip():
+            observations.append(Observation(tool=tool, args=args, status="error",
+                                            said="`answer` needs `text`. Say it, or end with `done`."))
+            continue
         if tool in tools.TERMINAL_NAMES or not tool:
             return _ended(tool, args, landed, touched, last)
         if not tools.is_tool(tool):
