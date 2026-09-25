@@ -6,8 +6,13 @@ looking at it shows that. So after the application is assembled, this:
 
 1. boots it the way a user would — `start.sh --seed-only` (its database,
    migrated and seeded) and the dev server;
-2. signs in and screenshots every page that has code (`scripts/page_shots.mjs`),
-   opening a `[id]` route on a real record;
+2. signs in AS SOMEONE THE PAGE IS FOR and screenshots every page that has
+   code (`scripts/page_shots.mjs`), opening a `[id]` route on a real record.
+   A page the seeded administrator's role opens is opened as them; a page
+   restricted to another role is opened with a session minted for that role
+   (`services.preview_session`), as a login of that role from the database
+   copy when there is one. nlwtcyz5's Parent-only /notifications was reviewed
+   as the Admin, scored the 403 page it got, and was rewritten twice for it;
 3. shows each screenshot to a reviewer model with the page's contract, the
    app's direction and the design principles, and gets a verdict: a score,
    what works, and each problem with where it is and how to fix it;
@@ -32,8 +37,11 @@ import socket
 import subprocess
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any
+
+from services.preview_session import Session, boot_env, cookie
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +49,10 @@ ROUNDS = 2
 PASS_SCORE = 8
 _BACKEND = Path(__file__).resolve().parents[2]
 _SHOTS = _BACKEND / "scripts/page_shots.mjs"
+
+#: The seeded administrator (`seed_backstop`): the one login every app has.
+ADMIN_EMAIL = "admin@example.com"
+ADMIN_PASSWORD = "admin1234"
 
 REVIEW_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -116,8 +128,8 @@ def _clone_database(app_root: Path) -> tuple[str, str, str] | None:
     """A copy of the app's database for the reviewer to click through.
 
     Pressing every control creates, updates and deletes rows. The person's own
-    database is theirs; the review works on `<name>_review`, cloned from it in
-    the app's own Postgres container and dropped afterwards. Returns
+    database is theirs; the review works on `<name>_review_<id>`, cloned from
+    it in the app's own Postgres container and dropped afterwards. Returns
     (container, copy name, the copy's URL), or None when it cannot be made."""
     url = _database_url(app_root) or ""
     import re as _re
@@ -125,7 +137,10 @@ def _clone_database(app_root: Path) -> tuple[str, str, str] | None:
     if not m:
         return None
     base, name = m.group(1), m.group(2)
-    copy = f"{name}_review"
+    # Its own name per review: two reviews of one app at once — Smith's
+    # `verify_pages` beside the platform's verify pass — each dropped and
+    # re-created `<name>_review` under the other (2026-09-25).
+    copy = f"{name}_review_{uuid.uuid4().hex[:6]}"
     # By the port it publishes: `start.sh` names the compose project through an
     # environment variable `.env` does not keep, so `docker compose ps` run
     # later from the app finds nothing. The port is what the app itself uses.
@@ -184,7 +199,10 @@ class RunningApp:
         self.proc = subprocess.Popen(
             ["npx", "next", "dev", "--port", str(self.port)], cwd=self.root,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
-            env={**os.environ, "BROWSER": "none", "NEXTAUTH_URL": self.base,
+            env={**os.environ, "BROWSER": "none",
+                 # The preview secret, so a session minted for a role the
+                 # administrator does not hold is a session this server accepts.
+                 **boot_env(self.base),
                  # Also what the SDK's empty state answers to: only this server
                  # builds into `.next-review`.
                  "NEXT_DIST_DIR": REVIEW_DIST_DIR, "DATABASE_URL": self.clone[2]})
@@ -216,8 +234,72 @@ class RunningApp:
         shutil.rmtree(self.root / REVIEW_DIST_DIR, ignore_errors=True)
 
 
+def _query(app: RunningApp, sql: str) -> list[list[str]]:
+    """Rows of `sql` against the database copy the app is reviewed on."""
+    if app.clone is None:
+        return []
+    container, copy, _ = app.clone
+    done = subprocess.run(["docker", "exec", container, "psql", "-U", "postgres", "-d", copy,
+                           "-tA", "-F", "\t", "-c", sql], capture_output=True, text=True, timeout=60)
+    if done.returncode != 0:
+        return []
+    return [line.split("\t") for line in done.stdout.splitlines() if line.strip()]
+
+
+def login_of_role(app: RunningApp, doc: dict, role: str) -> tuple[str, str] | None:
+    """`(id, name)` of a login in `role` on the database copy, the seeded
+    administrator aside: a login IS a row of the account entity (`myAccount`
+    reads it by the login's id), so opening a page as them shows the page as
+    a person of that role sees it, with their data. Else any account row
+    that is not the administrator's. Else None."""
+    from services.blueprint.account_model import account_entity
+    from services.blueprint.projection import to_snake
+    from services.seed_backstop import _ADMIN_UUID
+
+    cols = {r[0] for r in _query(app, "select column_name from information_schema.columns "
+                                     "where table_name = 'users'")}
+    by = [c for c in ("role", "account_type") if c in cols]
+    name = next((c for c in ("name", "email") if c in cols), "id")
+    safe = role.replace("'", "''")
+    if by:
+        where = " or ".join(f"{c} = '{safe}'" for c in by)
+        rows = _query(app, f"select id, {name} from users where ({where}) and id <> '{_ADMIN_UUID}' "
+                           "order by created_at limit 1" if "created_at" in cols else
+                      f"select id, {name} from users where ({where}) and id <> '{_ADMIN_UUID}' limit 1")
+        if rows and rows[0][0]:
+            return rows[0][0], rows[0][1] if len(rows[0]) > 1 else role
+    ent = account_entity(doc)
+    if ent:
+        table = str(ent.get("table") or to_snake(str(ent.get("name") or "")))
+        rows = _query(app, f"select id from {table} where id <> '{_ADMIN_UUID}' limit 1")
+        if rows and rows[0][0]:
+            return rows[0][0], f"{role} (preview)"
+    return None
+
+
+def who_opens(app: RunningApp, doc: dict, page: dict) -> dict[str, Any]:
+    """Who the browser is signed in as for `page`: `{"as": name}` and, for a
+    page the administrator's role does not open, the `cookie` of a session
+    minted for the page's first role."""
+    from services.blueprint.account_model import admin_role
+
+    roles = {str(r.get("id")): str(r.get("name") or r.get("id")) for r in doc.get("roles") or []
+             if isinstance(r, dict)}
+    admin = admin_role(doc)
+    users = [str(u) for u in page.get("users") or []]
+    if not users or any(roles.get(u) == admin for u in users):
+        return {"as": admin or "the administrator"}
+    role = roles.get(users[0], users[0])
+    found = login_of_role(app, doc, role)
+    who = Session(sub=found[0], name=found[1], email=f"{found[1].lower().replace(' ', '.')}@example.com",
+                  role=role) if found else \
+        Session(sub=f"preview-{users[0].lower()}", name=f"{role} (preview)",
+                email=f"{role.lower().replace(' ', '.')}@example.com", role=role)
+    return {"as": f"{who.name} ({role})", "cookie": cookie(who, base_url=app.base)}
+
+
 def shoot(app: RunningApp, doc: dict, page_ids: list[str], out_dir: Path) -> list[dict]:
-    """Screenshot the pages, signed in as the seeded administrator."""
+    """Screenshot the pages, each signed in as someone it is for."""
     modules = _playwright_modules()
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     pages = []
@@ -225,11 +307,11 @@ def shoot(app: RunningApp, doc: dict, page_ids: list[str], out_dir: Path) -> lis
         if str(p.get("id")) in page_ids:
             ent = ents.get(str((p.get("data") or {}).get("primaryEntity") or ""))
             pages.append({"id": p.get("id"), "route": p.get("route"),
-                          "entity": (ent or {}).get("name")})
+                          "entity": (ent or {}).get("name"), **who_opens(app, doc, p)})
     cfg = out_dir / "shots.json"
     out_dir.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(json.dumps({"baseUrl": app.base, "email": "admin@example.com",
-                               "password": "admin1234", "outDir": str(out_dir), "pages": pages,
+    cfg.write_text(json.dumps({"baseUrl": app.base, "email": ADMIN_EMAIL,
+                               "password": ADMIN_PASSWORD, "outDir": str(out_dir), "pages": pages,
                                "probe": True}))
     work = out_dir / "run"
     work.mkdir(exist_ok=True)
@@ -253,6 +335,18 @@ def shoot(app: RunningApp, doc: dict, page_ids: list[str], out_dir: Path) -> lis
 BROKEN_OUTCOMES = {"nothing": "does nothing when pressed", "error": "errors",
                    "broken-link": "leads to a page that is not there",
                    "workflow-failed": "runs a workflow that fails"}
+
+
+def forbidden(shot: dict) -> str:
+    """Why the page could not be looked at, when the app refused the person
+    it was opened as — the rendered 403 counts, not only the status, since a
+    streamed response sends the forbidden page as HTTP 200. Empty otherwise.
+    This is not a finding on the page's code: no rewrite mends it."""
+    if shot.get("status") == 403 or str(shot.get("state")) == "403":
+        return (f"the page cannot be opened as {shot.get('as') or 'the person it is for'}: the app "
+                f"answers 403 (forbidden), so its access guard does not admit the role the "
+                f"page is for")
+    return ""
 
 
 def hard_findings(shot: dict) -> list[str]:
@@ -395,6 +489,10 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
             def judge(pid: str) -> tuple[str, dict | None]:
                 if pid not in shots:
                     return pid, None
+                refused = forbidden(shots[pid])
+                if refused:
+                    return pid, {"score": 0, "verdict": "revise", "strengths": [], "issues": [],
+                                 "broken": [refused], "forbidden": True}
                 body, spent = critique(doc, pages[pid], shots[pid], client)
                 record("page_review", "page_reviewer", spent)
                 return pid, body
@@ -410,6 +508,8 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
                 report[pid]["scores"].append(v.get("score"))
                 report[pid]["review"] = v
                 report[pid]["passed"] = v.get("verdict") == "pass"
+                if v.get("forbidden"):
+                    continue                    # reported, not rewritten: the page was never seen
                 rank = (0 if v.get("broken") else 1, int(v.get("score") or 0))
                 latest[pid] = rank
                 row = next((r for r in doc.get("pageCode") or [] if str(r.get("page")) == pid), None)

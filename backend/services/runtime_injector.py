@@ -2323,7 +2323,13 @@ def _fix_common_agent_mistakes(output_path: Path) -> None:
                 "\n"
                 "const connectionString = process.env.DATABASE_URL!;\n"
                 "\n"
-                "export const client = postgres(connectionString, { prepare: false });\n"
+                "// One client per process. `next dev` re-evaluates this module on every\n"
+                "// recompile; a fresh `postgres()` each time is a fresh pool of ten, and after\n"
+                "// ten reloads Postgres answers \"too many clients already\" to everyone —\n"
+                "// the page reviewer's crawl of nlwtcyz5 took the database down that way.\n"
+                "const globalForDb = globalThis as unknown as { __forgeSql?: ReturnType<typeof postgres> };\n"
+                "export const client = globalForDb.__forgeSql ?? postgres(connectionString, { prepare: false });\n"
+                "if (process.env.NODE_ENV !== \"production\") globalForDb.__forgeSql = client;\n"
                 "export const db = drizzle(client, { schema });\n",
                 encoding="utf-8",
             )

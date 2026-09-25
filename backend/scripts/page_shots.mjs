@@ -41,13 +41,31 @@ const emptyCtx = await browser.newContext({ viewport });
 await emptyCtx.addCookies([...(await ctx.cookies()),
   { name: "forge-review-empty", value: "1", url: cfg.baseUrl }]);
 
+// A page restricted to a role the administrator does not hold arrives with
+// the `cookie` of a session minted for that role; it is opened — and its
+// controls pressed, and its record found — as that person. One pair of
+// contexts per distinct session.
+const byCookie = new Map();
+async function contextsFor(p) {
+  if (!p.cookie) return { ctx, emptyCtx };
+  const key = p.cookie.value;
+  if (!byCookie.has(key)) {
+    const own = await browser.newContext({ viewport });
+    await own.addCookies([p.cookie]);
+    const ownEmpty = await browser.newContext({ viewport });
+    await ownEmpty.addCookies([p.cookie, { name: "forge-review-empty", value: "1", url: cfg.baseUrl }]);
+    byCookie.set(key, { ctx: own, emptyCtx: ownEmpty });
+  }
+  return byCookie.get(key);
+}
+
 const MISSING_ID = "00000000-0000-4000-8000-000000000000";
 const MAX_CONTROLS = 24;
 
-async function firstId(entity) {
+async function firstId(context, entity) {
   if (!entity) return null;
   try {
-    const res = await ctx.request.get(`${cfg.baseUrl}/api/data/${encodeURIComponent(entity)}?limit=1`);
+    const res = await context.request.get(`${cfg.baseUrl}/api/data/${encodeURIComponent(entity)}?limit=1`);
     const body = await res.json();
     return body?.data?.[0]?.id ?? null;
   } catch { return null; }
@@ -160,8 +178,8 @@ function fingerprint(page) {
   });
 }
 
-async function press(url, control) {
-  const page = await ctx.newPage();
+async function press(context, url, control) {
+  const page = await context.newPage();
   const errors = watch(page);
   const calls = [];
   let dialog = null;
@@ -202,7 +220,7 @@ async function press(url, control) {
       outcome = bad ? "workflow-failed" : "workflow";
       detail = bad ? `HTTP ${bad.status}${bad.error ? ": " + bad.error : ""}` : `ran (${calls.length})`;
     } else if (after.url !== before.url) {
-      const res = await ctx.request.get(after.url).catch(() => null);
+      const res = await context.request.get(after.url).catch(() => null);
       const status = res?.status() ?? 0;
       // Where it landed, as the page says — a streamed not-found is HTTP 200.
       const landed = await page.locator("[data-forge-page-state]").first()
@@ -229,36 +247,37 @@ async function press(url, control) {
 const out = [];
 for (const p of cfg.pages) {
   let url = p.route;
+  const who = await contextsFor(p);
   const isRecord = /\[[^\]]+\]/.test(url);
   if (isRecord) {
-    const id = await firstId(p.entity);
+    const id = await firstId(who.ctx, p.entity);
     if (!id) { out.push({ id: p.id, route: p.route, skipped: "no record to open" }); continue; }
     url = url.replace(/\[[^\]]+\]/g, id);
   }
   const t0 = Date.now();
   const file = path.join(cfg.outDir, `${p.id}.png`);
-  const main = await open(ctx, url, { shot: file });
-  const result = { id: p.id, route: p.route, url, status: main.status, file,
-                   errors: [...new Set(main.errors)].slice(0, 12), states: {} };
+  const main = await open(who.ctx, url, { shot: file });
+  const result = { id: p.id, route: p.route, url, as: p.as ?? null, status: main.status, state: main.state,
+                   file, errors: [...new Set(main.errors)].slice(0, 12), states: {} };
   let found = [];
   if (cfg.probe) found = await controls(main.page).catch(() => []);
   await main.page.close();
 
   if (!isRecord) {
     const emptyShot = path.join(cfg.outDir, `${p.id}.empty.png`);
-    const e = await open(emptyCtx, url, { shot: emptyShot });
+    const e = await open(who.emptyCtx, url, { shot: emptyShot });
     result.states.empty = { status: e.status, errors: [...new Set(e.errors)].slice(0, 8), file: emptyShot };
     await e.page.close();
   } else {
     const missingUrl = p.route.replace(/\[[^\]]+\]/g, MISSING_ID);
-    const m = await open(ctx, missingUrl);
+    const m = await open(who.ctx, missingUrl);
     result.states.missing = { status: m.status, state: m.state, errors: [...new Set(m.errors)].slice(0, 8) };
     await m.page.close();
   }
 
   if (cfg.probe) {
     result.controls = [];
-    for (const c of found.slice(0, MAX_CONTROLS)) result.controls.push(await press(url, c));
+    for (const c of found.slice(0, MAX_CONTROLS)) result.controls.push(await press(who.ctx, url, c));
   }
   result.ms = Date.now() - t0;
   out.push(result);
