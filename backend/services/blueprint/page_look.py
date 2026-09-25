@@ -62,9 +62,18 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
 
     ``{"shots": {name: path}, "errors": [...]}`` — the errors are what the
     page itself threw (a render error, a failed load), proved in the browser."""
+    from services.blueprint.assembly import LOOSE_LIBS, copy_loose_libs
     from services.react_editor.jit import LOOK_DIR, bundle_source
     from services.react_editor.service import EditorError, Project
 
+    # WHAT THE BUNDLE NEEDS THAT ASSEMBLY HAS NOT LAID DOWN YET. The vendored
+    # renderer imports `@tentoroforge/feel-lite`, loose TypeScript that
+    # `assemble` copies into `src/lib/` — after every page is written. So on
+    # a fresh build every look failed to bundle and every page shipped
+    # "accepted as compiled" (i3i950po on UAT, 24 of 24 pages, 2026-09-25);
+    # it worked here only on an app that had been assembled before.
+    if any(not (app_root / dst).is_dir() for dst in LOOSE_LIBS.values()):
+        copy_loose_libs(app_root)
     project = Project(root=app_root.parent, app_root=app_root)
     try:
         bundle = bundle_source(project, doc, page, view, load)
