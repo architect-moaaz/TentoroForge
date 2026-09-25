@@ -496,12 +496,39 @@ class BlueprintService:
 
         merged = {**artifact, "id": artifact_id}
         merged.setdefault("status", "PROPOSED")
+        if section == "widgets":
+            self._key_widget(merged, bucket)
         for i, existing in enumerate(bucket):
             if existing.get("id") == artifact_id:
                 bucket[i] = {**existing, **merged}
                 return bucket[i]
         bucket.append(merged)
         return merged
+
+    @staticmethod
+    def _key_widget(merged: dict, bucket: list[dict]) -> None:
+        """A widget's SDK handle is decided here, once, and stored as `key`.
+
+        The generator (`app_sdk.widget_keys`) used to derive every key from
+        the label at projection time, numbering collisions in document order,
+        so any add, retire or reorder renumbered the neighbours and broke
+        the pages written against them. Now: an update keeps the key the row
+        already has; a new row gets the label derivation made unique against
+        every live key; and, first, every live row still without a key is
+        stamped with the key it reads by today, so this write freezes what
+        the pages were written against rather than shifting it.
+        """
+        from services.blueprint.app_sdk import stamp_widget_keys, widget_keys, widget_sdk_key
+
+        stamp_widget_keys({"widgets": bucket})
+        existing = next((w for w in bucket if w.get("id") == merged["id"]), None)
+        if merged.get("key"):
+            return
+        if existing is not None and existing.get("key"):
+            merged["key"] = existing["key"]
+            return
+        taken = {k for wid, k in widget_keys({"widgets": bucket}).items() if wid != merged["id"]}
+        merged["key"] = widget_sdk_key(merged, taken)
 
     # -- status (§22, §76) --------------------------------------------------
 

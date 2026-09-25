@@ -20,7 +20,7 @@ import uuid
 from typing import Any
 
 from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
-from services.blueprint.app_sdk import project_app_sdk, widget_keys, widget_query
+from services.blueprint.app_sdk import project_app_sdk, widget_keys, widget_query, widget_sdk_key
 from services.react_editor import adapter, service
 from services.react_editor.service import EditorError, Project, _live, load_blueprint
 
@@ -217,6 +217,14 @@ def update(project: Project, widget_id: str, spec: dict[str, Any], *, page_revis
     for k in ("id", "status", "requirements", "decisions", "confidence", "syncNote", "order"):
         if k in row:
             changed[k] = row[k]
+    # A widget's key is stored and stays put whatever happens around it; the
+    # one thing that moves it is the person retitling THIS chart, and then
+    # the page's references are renamed with it below.
+    if "label" in spec and changed.get("label") != row.get("label"):
+        others = {k for wid, k in widget_keys(doc).items() if wid != widget_id}
+        changed["key"] = widget_sdk_key(changed, others)
+    elif old_key:
+        changed["key"] = old_key
     _validate(doc, changed)
     with svc.lock:
         before = svc.snapshot()

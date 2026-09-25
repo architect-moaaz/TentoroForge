@@ -391,10 +391,61 @@ def emit_pages(doc: dict) -> str:
 # Widgets — the analytics the Blueprint attaches to pages
 # ---------------------------------------------------------------------------
 
+def widget_sdk_key(widget: dict, taken: Iterable[str]) -> str:
+    """The handle a page reads a widget by — `widgets.<key>` — derived from
+    its label and made unique against `taken` by a numeric suffix. Called
+    ONCE, when the widget is written, and the answer stored on the row as
+    `key` (see :func:`stamp_widget_keys`). It used to be recomputed on every
+    projection over the live rows in document order, so the suffixes were a
+    function of the whole list: adding, retiring or reordering one widget
+    renumbered its neighbours, and pages written against
+    `widgets.vaccinationHistory3` stopped type-checking when it became
+    `vaccinationHistory2` (nlwtcyz5, 22 errors across six pages)."""
+    have = set(taken)
+    base = camel(widget.get("label") or widget.get("id") or "")
+    key, n = base, 1
+    while key in have:
+        n += 1
+        key = f"{base}{n}"
+    return key
+
+
 def widget_keys(doc: dict) -> dict[str, str]:
+    """`{widget id: SDK key}` for the live widgets. A stored `key` is the
+    key; a row written before keys were stored reads as the label derivation
+    it always had, numbered against the stored ones and its unstamped
+    siblings in document order — so an application projected before this
+    field existed projects exactly as it did, until a write stamps it."""
     widgets = _live(doc.get("widgets"))
-    keys = _unique(camel(w.get("label") or w.get("id")) for w in widgets)
-    return {str(w.get("id")): k for w, k in zip(widgets, keys)}
+    keys: dict[str, str] = {}
+    taken: set[str] = set()
+    for w in widgets:
+        if w.get("key"):
+            keys[str(w.get("id"))] = str(w["key"])
+            taken.add(str(w["key"]))
+    for w in widgets:
+        if w.get("key"):
+            continue
+        k = widget_sdk_key(w, taken)
+        taken.add(k)
+        keys[str(w.get("id"))] = k
+    return keys
+
+
+def stamp_widget_keys(doc: dict) -> int:
+    """Store the key every live widget currently reads by, on the rows that
+    have none. Idempotent; a row with a key is never touched. The write seam
+    (`Blueprint.upsert`) calls this before it derives a new widget's key, so
+    the first write after this field existed freezes the handles the pages
+    were written against, and nothing added or retired afterwards can move
+    them. Returns how many rows were stamped."""
+    keys = widget_keys(doc)
+    stamped = 0
+    for w in _live(doc.get("widgets")):
+        if not w.get("key") and str(w.get("id")) in keys:
+            w["key"] = keys[str(w.get("id"))]
+            stamped += 1
+    return stamped
 
 
 def widget_query(doc: dict, widget: dict) -> dict | None:

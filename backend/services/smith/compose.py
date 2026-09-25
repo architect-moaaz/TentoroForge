@@ -666,6 +666,8 @@ def _with_widgets(doc: dict, props: Sequence[Any]) -> dict:
     """The document as it will be once `props` land — what the page is written
     against, so the SDK it compiles with already has the new widgets."""
     import copy
+
+    from services.blueprint.app_sdk import widget_keys, widget_sdk_key
     out = copy.deepcopy(doc)
     rows = out.setdefault("widgets", [])
     for i, prop in enumerate(props):
@@ -673,6 +675,12 @@ def _with_widgets(doc: dict, props: Sequence[Any]) -> dict:
         body.setdefault("id", str(prop.natural_key or f"WIDGET-NEW-{i}"))
         at = next((k for k, w in enumerate(rows) if str(w.get("id")) == str(body["id"])), None)
         if at is None:
+            # THE KEY THE PAGE IS WRITTEN AGAINST IS THE KEY THAT LANDS. The
+            # commit stores a new widget's key at the write; deciding it here,
+            # on the proposal itself, means the SDK the page compiles with
+            # and the SDK the application ships are the same file.
+            if not body.get("key"):
+                body["key"] = prop.body["key"] = widget_sdk_key(body, widget_keys(out).values())
             rows.append(body)
         else:
             rows[at] = {**rows[at], **body}

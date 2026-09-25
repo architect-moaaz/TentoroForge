@@ -90,6 +90,9 @@ def test_a_heatmap_on_a_coded_page_is_a_widget_and_the_code_that_draws_it(tmp_pa
     assert "widgets." in written["brief"]
     heat = next(w for w in svc.doc["widgets"] if w["label"] == HEATMAP["label"])
     assert heat["dataSource"]["dimensions"][0]["ranges"] == AGES
+    # the handle the page was compiled against is the one stored on the row
+    assert heat["key"] == keys_after["W"]
+    assert next(w for w in written["doc"]["widgets"] if w["label"] == HEATMAP["label"])["key"] == heat["key"]
     assert svc.doc["pageCode"][0]["rationale"] == "rewrite"
     # ONE change: one version, with the person's words on it — so one undo
     assert svc.doc["version"] == before + 1

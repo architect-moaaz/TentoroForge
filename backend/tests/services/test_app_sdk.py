@@ -354,6 +354,99 @@ def test_a_page_brief_lists_its_widgets_in_order():
     assert _page_brief(d, d["pages"][0])["widgets"] == []            # the retired one is gone
 
 
+# --- a widget's key is decided once, at the write, and stays put ---------------
+
+def _clinic_doc():
+    """An application from before keys were stored: two widgets with the same
+    label, keyed by the old derivation as `activePatients`, `activePatients2`."""
+    d = _doc()
+    d["pages"].append({"id": "PAGE-004", "name": "Clinic", "route": "/clinic", "pattern": "dashboard",
+                       "access": "authenticated", "data": {"primaryEntity": "ENTITY-001"}})
+    src = {"op": "query", "entity": "ENTITY-001", "filter": {},
+           "measures": [{"key": "n", "aggregation": "count"}], "dimensions": []}
+    d["widgets"] = [
+        {"id": "WIDGET-001", "page": "PAGE-003", "kind": "metric", "label": "Active Patients", "dataSource": src},
+        {"id": "WIDGET-002", "page": "PAGE-004", "kind": "metric", "label": "Active Patients", "dataSource": src},
+        {"id": "WIDGET-003", "page": "PAGE-004", "kind": "metric", "label": "Vaccination History", "dataSource": src},
+    ]
+    return d
+
+
+def test_adding_a_widget_with_a_colliding_label_does_not_move_the_keys_pages_were_written_against(tmp_path):
+    """nlwtcyz5: 57 widgets, keys derived from labels at every projection and
+    numbered in document order — one widget added on another page and
+    `widgets.vaccinationHistory3` became `vaccinationHistory2`, so six pages
+    stopped type-checking. The write seam now stores each widget's key once."""
+    from services.blueprint.app_sdk import widget_keys
+    from services.blueprint.service import BlueprintService
+
+    from services.blueprint.ids import IdAllocator
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Clinic", domain="health")
+    svc.doc.update(_clinic_doc())
+    with IdAllocator.session(output_dir=tmp_path) as alloc:          # ids the document already uses
+        for w in svc.doc["widgets"]:
+            alloc.bind(f"WIDGET:{w['page']}:{w['id']}", w["id"])
+    assert widget_keys(svc.doc) == {"WIDGET-001": "activePatients", "WIDGET-002": "activePatients2",
+                                    "WIDGET-003": "vaccinationHistory"}
+    assert not any(w.get("key") for w in svc.doc["widgets"]), "an old application carries no keys"
+
+    src = svc.doc["widgets"][0]["dataSource"]
+    new = svc.upsert("widgets", {"page": "PAGE-003", "kind": "metric", "label": "Active Patients", "dataSource": src},
+                     natural_key="WIDGET:/clinic:active-patients-3")
+    # the rows that were there are stamped with the keys they read by, and the
+    # newcomer takes the next free suffix rather than renumbering them
+    assert [w["key"] for w in svc.doc["widgets"]] == ["activePatients", "activePatients2", "vaccinationHistory", "activePatients3"]
+    assert new["key"] == "activePatients3"
+
+    # retiring the first and adding a fifth still leaves every survivor where it was
+    svc.doc["widgets"][0]["status"] = "DEPRECATED"
+    svc.upsert("widgets", {"page": "PAGE-004", "kind": "metric", "label": "Active Patients", "dataSource": src},
+               natural_key="WIDGET:/clinic:active-patients-5")
+    keys = widget_keys(svc.doc)
+    assert keys["WIDGET-002"] == "activePatients2" and keys[new["id"]] == "activePatients3"
+    assert keys["WIDGET-003"] == "vaccinationHistory"
+    # the retired handle is free again, so the newcomer is not `activePatients4`
+    assert keys[svc.doc["widgets"][-1]["id"]] == "activePatients"
+
+    # an update through the seam keeps the row's key even when its label changes:
+    # the handle in the page code is the row's identity, not its title
+    svc.upsert("widgets", {"id": "WIDGET-003", "page": "PAGE-004", "kind": "metric",
+                           "label": "Immunisation History", "dataSource": src},
+               natural_key="WIDGET:PAGE-004:WIDGET-003")
+    assert widget_keys(svc.doc)["WIDGET-003"] == "vaccinationHistory"
+    # `key` is in the contract: whatever else this sketch of a document lacks,
+    # nothing about a widget is refused
+    from services.blueprint.service import BlueprintInvalid
+    try:
+        svc.validate()
+    except BlueprintInvalid as exc:
+        assert not [e for e in exc.errors if e.startswith("widgets/")], exc.errors
+
+
+def test_the_generated_sdk_reads_the_stored_keys_and_derives_only_for_rows_without_one():
+    from services.blueprint.app_sdk import stamp_widget_keys, widget_keys
+    from services.blueprint.ui_engineer import page_widget_brief
+
+    d = _clinic_doc()
+    # a stored key wins whatever the label says and wherever the row sits;
+    # the unstamped rows read as before, numbered around it
+    d["widgets"][2]["key"] = "activePatients"
+    d["widgets"][1]["key"] = "activePatientsOnClinic"
+    widgets = sdk_files(d)["src/sdk/widgets.ts"]
+    assert "activePatients: {" in widgets and '"id": "WIDGET-003"' in widgets.split("activePatients: {")[1].split("\n")[0]
+    assert "activePatientsOnClinic: {" in widgets
+    assert "activePatients2: {" in widgets                              # WIDGET-001, derived around the stored ones
+    assert "vaccinationHistory" not in widgets
+    assert [w["sdkKey"] for w in page_widget_brief(d, d["pages"][3])] == ["activePatientsOnClinic", "activePatients"]
+
+    # stamping writes exactly those keys onto the rows that lack one, once
+    assert stamp_widget_keys(d) == 1
+    assert d["widgets"][0]["key"] == "activePatients2"
+    assert stamp_widget_keys(d) == 0
+    assert widget_keys(d) == {"WIDGET-001": "activePatients2", "WIDGET-002": "activePatientsOnClinic", "WIDGET-003": "activePatients"}
+
+
 # --- the root and the sign-in pages get the frame every other page has -------
 
 def test_a_coded_root_is_rendered_inside_the_shell_unless_it_is_public(tmp_path):

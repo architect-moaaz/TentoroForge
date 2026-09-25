@@ -1310,6 +1310,20 @@ export const Widget = z.object({
   kind: WidgetKind,
   label: z.string(),
   /**
+   * The handle a page reads it by: `widgets.<key>` in the generated SDK,
+   * `runWidget(widgets.<key>)` in `load.ts`. Derived from the label once,
+   * when the widget is created, and kept from then on. It used to be
+   * recomputed at every projection, numbering label collisions in document
+   * order — so adding, retiring or reordering one widget renumbered its
+   * neighbours (`vaccinationHistory3` became `vaccinationHistory2`) and
+   * every page written against the old handle stopped type-checking
+   * (nlwtcyz5, 22 errors across six pages). A valid identifier, unique
+   * among the application's live widgets. Optional only because rows
+   * written before it existed have none; those read as the old derivation
+   * until a write stamps them.
+   */
+  key: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/).optional(),
+  /**
    * Required, deliberately. `widget_data_source_guard` existed to rebind
    * hardcoded stat and list widgets to real sources; a widget that cannot be
    * written without a source has nothing to rebind.
