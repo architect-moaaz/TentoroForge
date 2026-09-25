@@ -34,7 +34,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from services.blueprint.app_sdk import (
     code_page_files, project_app_sdk, sdk_reference,
@@ -111,11 +111,84 @@ WRITE_MAX_TOKENS = 24000
 #: design quality is an A/B question, and this is the knob it turns.
 WRITE_EFFORT = "low"
 
+#: The page rhythm's vocabulary: each decision, its options, and what the
+#: page author does with each. One place, read by the direction agent's
+#: schema, its brief, the page prompt and the fallback.
+RHYTHM_OPTIONS: dict[str, dict[str, str]] = {
+    "header": {
+        "eyebrow-title": "a small eyebrow line (where you are) over the title, the one primary action on the right",
+        "title-only": "a large title with a one-line description under it; the primary action on the line below, left",
+        "band": "a full-width band at the top in `bg-brand-gradient` holding the title and the primary action; content starts under it",
+        "compact": "one line: title on the left, actions inline on the right, a hairline under it — no eyebrow, no description",
+    },
+    "lead": {
+        "dark-card": "one card in `bg-inverse text-inverse-foreground`",
+        "gradient-band": "one band in `bg-brand-gradient`, full width, its facts in large type",
+        "outlined-panel": "one panel on `bg-card` with a 2px `border-primary` left edge — no dark fill",
+        "type-only": "no container: the fact in `font-heading` display size (text-4xl) with its label above it and its action beside it",
+    },
+    "lists": {
+        "table": "a table inside a card: columns, a header row, sortable where it matters",
+        "cards": "a responsive grid of cards, one per record, the label as the card title and two or three facts under it",
+        "rows": "borderless rows separated by `divide-y`, each a flex line — label left, facts and status right — no card around the list",
+    },
+    "figures": {
+        "tiles": "a grid of tiles on `bg-card`, each a label and a big number",
+        "strip": "one horizontal strip on `bg-muted`: the figures side by side, separated by `divide-x`, no tiles",
+        "inline": "the figures inline under the page title as `label · value` pairs in `text-muted-foreground` — no tiles, no strip. "
+              "A DASHBOARD IS THE EXCEPTION: its KPI widgets are the page, drawn as tiles (`<WidgetView />`, with their change "
+              "against the period before), whatever this says for other pages",
+    },
+    "sections": {
+        "cards": "each section a card on `bg-card` with a `CardHeader`",
+        "open": "no cards: a section is an `h2` in `font-heading` with a hairline under it and its content on the page ground",
+        "dense": "tight panels with 12px padding and `bg-muted/40`, separated by `space-y-2` — for a screen worked all day",
+    },
+}
+
+#: What a Blueprint gets when its direction states no rhythm — the anatomy
+#: every app had before this existed, so nothing regresses.
+RHYTHM_DEFAULT: dict[str, str] = {"header": "eyebrow-title", "lead": "dark-card", "lists": "table",
+                                  "figures": "tiles", "sections": "cards"}
+
+
+def derive_rhythm(doc: dict) -> dict[str, str]:
+    """The rhythm the pages follow: the direction's own when it states one;
+    otherwise read off the design (density, personality) so that even a build
+    whose direction step was skipped does not get the default anatomy."""
+    comp = doc.get("composition") or {}
+    stated = comp.get("rhythm") if isinstance(comp.get("rhythm"), dict) else {}
+    out = dict(RHYTHM_DEFAULT)
+    design = doc.get("designSystem") or {}
+    density = str(design.get("informationDensity") or "comfortable")
+    personality = str(design.get("visualPersonality") or "").lower()
+    if density == "compact":
+        out.update(header="compact", figures="strip", sections="dense", lead="outlined-panel")
+    elif any(w in personality for w in ("warm", "editorial", "playful", "friendly", "consumer")):
+        out.update(header="band", lead="gradient-band", lists="cards", sections="open", figures="inline")
+    elif any(w in personality for w in ("stark", "minimal", "utility", "quiet")):
+        out.update(header="title-only", lead="type-only", lists="rows", sections="open")
+    for key, options in RHYTHM_OPTIONS.items():
+        if str(stated.get(key) or "") in options:
+            out[key] = str(stated[key])
+    return out
+
+
+def _rhythm(doc: dict) -> str:
+    """The rhythm as the page author reads it: each decision with what to do."""
+    r = derive_rhythm(doc)
+    return "\n".join(f"- {key}: `{r[key]}` — {RHYTHM_OPTIONS[key][r[key]]}" for key in RHYTHM_OPTIONS)
+
+
 DIRECTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["vision", "conventions"],
+    "required": ["vision", "conventions", "rhythm"],
     "properties": {
+        "rhythm": {
+            "type": "object", "additionalProperties": False, "required": list(RHYTHM_OPTIONS),
+            "properties": {key: {"type": "string", "enum": list(opts)} for key, opts in RHYTHM_OPTIONS.items()},
+        },
         "vision": {"type": "string"},
         "conventions": {
             "type": "array",
@@ -175,7 +248,8 @@ query(entity, { measures: { [key]: { fn: "count" } | { fn: "count_distinct" | "m
 myAccount(): Promise<Row | null>
    The signed-in person's own record — the account entity's row, whose id IS their login's id
    (`$user.id` in a workflow). Null when signed out or when the application has no account entity.
-runWidget(widgets.x, { range?, where? }): Promise<WidgetData>      // WidgetData = { rows: QueryRow[]; value: number | null }
+runWidget(widgets.x, { range?, where? }): Promise<WidgetData>      // WidgetData = { rows: QueryRow[]; value: number | null; previous?: number | null; delta?: number | null }
+                                                                    // a metric read with `range` carries `delta` vs the period before (0.12 = up 12%); <WidgetView /> shows it
    Reads one of the page's declared widgets exactly as the Blueprint defines it. `value` is the number of a
    metric or gauge. `where` narrows it (a record page passes its own id: { customerId: params.id }).
 similar(entity, { image?: ctx.searchParams.image, text?: ctx.searchParams.q, limit? }): Promise<{ rows: (Row & { similarity })[]; error: string | null }>
@@ -273,8 +347,9 @@ Every one of these renders on its own with plain props; pass resolved data, neve
   <MoneyDisplay value={1240.5} currency="GBP" />
   <Tag label="Urgent" variant="default" | "primary" | "success" | "warning" | "danger" />
 
-The library's props are typed loosely; the shapes above are the contract. Do not use
-any other library component."""
+The library's props are typed loosely; the shapes above are the contract. Nothing else the
+library exports is for a page (its other names are the engine's); what these do not cover,
+you write yourself."""
 
 
 DESIGN_PRINCIPLES = """\
@@ -302,13 +377,13 @@ What a finished page looks like:
   page in a max-width container or add outer page padding; fill the width you
   are given (a narrow form may sit in a card of its own width inside it).
 
-- ONE JOB, OBVIOUS. The page header says where you are (small eyebrow + title) and
-  shows the one primary action for the page on the right. Secondary actions are
+- ONE JOB, OBVIOUS. The page header says where you are and shows the one primary
+  action for the page, built as the rhythm's `header` says. Secondary actions are
   outline or ghost buttons, never a row of equal primaries.
 - THE ACCENT MARKS WHAT TO DO NOW — once per screen. The one action this screen is
   for (Submit claim, Book appointment, Send request) is the accent:
-  <Button variant="accent">, <WorkflowButton variant="accent">, or
-  <WorkflowForm submitVariant="accent">. The active status or the selected filter
+  <WorkflowButton variant="accent">, <WorkflowForm submitVariant="accent">, or your
+  own `bg-accent text-accent-foreground` button. The active status or the selected filter
   chip is its tint: bg-accent-subtle text-accent-subtle-foreground. Everything
   else stays in the primary and the neutrals; an accent on every row is no accent.
 - THE CONTENT PLAN IS THE PAGE. When the brief carries `content`, every fact in it
@@ -320,11 +395,12 @@ What a finished page looks like:
   steps. Add nothing the data cannot produce.
 - LEAD WITH WHAT MATTERS NOW. Before the list, decide what this person came to see
   first — the appointment that is next, the request waiting on them, the step
-  not yet done — and give it one card of its own at the top in the dark surface
-  (bg-inverse text-inverse-foreground, supporting text text-inverse-foreground/70)
-  with its facts in words ("Due in 1 day 6 hrs · Mon 18:00") and its action.
-  Then the rest, grouped by what the reader does with it (e.g. Active · Upcoming
-  · Past), not by table.
+  not yet done — and give it its own place at the top, built as the rhythm's
+  `lead` says (a dark card is `bg-inverse text-inverse-foreground`, supporting
+  text `text-inverse-foreground/70`), with its facts in words ("Due in 1 day
+  6 hrs · Mon 18:00") and its action. Then the rest, grouped by what the reader
+  does with it (e.g. Active · Upcoming · Past), built as the rhythm's `lists`
+  and `sections` say.
 - PLACES ARE DISTANCES. A `location` is never shown as numbers or a map pin of
   someone's home: show how far it is (formatDistance → "0.4 mi"), rank lists with
   near(…, await whereAmI(ctx)), offer <NearMe /> beside the search on a list of
@@ -340,11 +416,26 @@ What a finished page looks like:
   steps. Copy is written for the person, in the domain's words.
 - HIERARCHY BEFORE DECORATION. Size, weight and spacing carry the structure; colour
   is for meaning (status, priority, money in/out). Use tabular-nums for figures.
+- THE GRADIENT HAS THREE HOMES, AND NO OTHERS. `bg-brand-gradient` (its text is
+  already set) may paint the one leading card instead of bg-inverse, the sign-in
+  page's brand panel, and a hero band at the top of a home or dashboard — one of
+  these per screen at most, and where a photograph is given it goes UNDER the
+  photo as its scrim (`bg-brand-gradient` on the container, the <img> at
+  `opacity-80 mix-blend-multiply` or a `bg-gradient-to-t from-gradient-start/80`
+  overlay). Never behind body text, tables, forms or lists; never `from-blue-500`.
+  A number tile or a chart card stays on bg-card.
+- PHOTOGRAPHS, WHERE THEY EARN THEIR PLACE. When the look names a photograph for a
+  job, use it for that job and nothing else: `object-cover` in a container of
+  fixed height (the brand panel, a 40-56 px-tall hero band on `md`, the empty
+  state's picture), with `alt` as given and the credit in one small muted line —
+  `Photo by <a href=link>Name</a> on Unsplash` — beside or under it. A page never
+  loads a picture the look does not name, and never one from another host.
 - REAL CONTENT, REAL STATES. Every list has an empty state that says what to do next
   (and offers the action). Every record page handles a missing optional field with
   a quiet em dash, not "null". Long text truncates with a title attribute.
-- NUMBERS WITH CONTEXT. A KPI is a label, a big number and, where the data allows, a
-  comparison or a sparkline. Money is formatted with its currency; dates with
+- NUMBERS WITH CONTEXT. A figure is a label, a number and, where the data allows, a
+  comparison or a sparkline, laid out as the rhythm's `figures` says. Money is
+  formatted with its currency; dates with
   Intl.DateTimeFormat (en-GB unless the app says otherwise); relative times for
   recent events.
 - STATUS AS A SYSTEM. Map each enum value to one tone once (a Record<Enum, string> of
@@ -352,8 +443,9 @@ What a finished page looks like:
   bg-warning-subtle text-warning-subtle-foreground, bg-destructive/10 text-destructive,
   bg-muted text-muted-foreground, bg-primary/10 text-primary.
 - LISTS THAT WORK. Search box (writes ?q=), filter chips for the key enum (write
-  ?status=), sortable columns where it matters, a row that opens the record
-  (href(pages.x, { id })), row actions for the workflows that act on one record.
+  ?status=), each record opening its page (href(pages.x, { id })), row actions for
+  the workflows that act on one record — in the shape the rhythm's `lists` says
+  (sortable columns where it is a table).
 - PICTURES ARE SHOWN, NOT NAMED. An image field is a thumbnail (fileUrl) in a list
   and a real image on its record — never the id. The list of an entity that is
   "Findable by likeness" offers "Find similar": <ImageSearch /> beside the search
@@ -367,7 +459,8 @@ What a finished page looks like:
 - RESPONSIVE. Mobile first: stack below `md`, grids above. Nothing overflows at
   375px; wide tables scroll horizontally inside their card.
 - ACCESSIBLE. Real <button>/<a>, labels on inputs, aria-label on icon-only buttons,
-  visible focus (the kit handles it), sufficient contrast (use the tokens).
+  visible focus (`focus-visible:ring-2 ring-ring` on anything you build yourself),
+  sufficient contrast (use the tokens).
 - TOKENS, NOT HEX. Only the semantic classes, each for its job: bg-background (the
   ground), bg-card (panels), bg-muted / bg-secondary (quiet fills), text-foreground,
   text-muted-foreground, border, bg-primary / text-primary (brand, default button,
@@ -399,12 +492,23 @@ view.tsx — "use client" on the first line.
   export default function View(props: Props), with Props exactly what load returns:
     import type { load } from "./load";
     type Props = NonNullable<Awaited<ReturnType<typeof load>>>;
-  Imports allowed, and only these:
+  THE PAGE IS YOURS TO BUILD. It is plain React and Tailwind: write the markup the design
+  wants — your own cards, rows, tiles, panels, chips, grids, drawers — with the app's token
+  classes. Nothing obliges you to use a ready-made component; a page assembled from a kit is
+  the page every other app has. Reach for the kit or the library below when one of its parts
+  is exactly right (a dialog, a select, a chart), and write it yourself when it is not.
+  Imports that resolve in this application:
     react, next/link, next/navigation (useRouter, useSearchParams, usePathname),
-    lucide-react (icons), the UI kit and library below,
+    lucide-react (icons), clsx, tailwind-merge, class-variance-authority, sonner (toast),
+    the @radix-ui primitives the kit is built on, the UI kit and the library below (optional),
     "@/sdk" (entity types, workflows, pages, widgets, href, fileUrl), "@/sdk/client" (useWorkflow,
     WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm), and
     `import type { Page, SeriesPoint, QueryRow, WidgetData } from "@/sdk/server"`.
+  Nothing else is installed; an import of any other package fails to compile.
+  WHAT IS NOT YOURS TO REWRITE — these carry the wiring, and only they do:
+    <SignInForm /> and <SignUpForm /> (sign-in and sign-up), <WorkflowForm /> and <WorkflowButton />
+    (every change to data), <WidgetView /> and <Chart /> (every chart and metric — ECharts, themed),
+    <ImageSearch /> and <NearMe /> (likeness and nearness), and href(pages.x) for every link.
   - Links: <Link href={href(pages.someKey, { id: row.id })}> — never a hand-written path.
   - Changing data: only through a workflow — <WorkflowForm workflow={workflows.x} fields={…} />,
     <WorkflowButton workflow={workflows.x} input={{ … }} />, or useWorkflow(workflows.x).run(input).
@@ -445,7 +549,8 @@ def _look(doc: dict) -> str:
     classes = {"background": "bg-background", "surface": "bg-card", "textPrimary": "text-foreground",
                "textSecondary": "text-muted-foreground", "primary": "bg-primary / text-primary",
                "accent": "bg-accent / variant=\"accent\"", "accentSubtle": "bg-accent-subtle",
-               "inverse": "bg-inverse"}
+               "inverse": "bg-inverse", "gradientStart": "from-gradient-start",
+               "gradientEnd": "to-gradient-end"}
     from services.blueprint.verification import PALETTE_ROLES
     lines = [str(design.get("visualPersonality") or "")[:600]]
     for role, job in PALETTE_ROLES.items():
@@ -455,6 +560,11 @@ def _look(doc: dict) -> str:
     body = typo.get("fontFamilyBase") or typo.get("fontFamily") or typo.get("fontFamilyBody")
     if head or body:
         lines.append(f"- font-heading: {head or body}; body: {body or head}")
+    gs, ge = colors.get("gradientStart"), colors.get("gradientEnd")
+    lines.append("- bg-brand-gradient" + (f" ({gs} → {ge})" if gs and ge else " (primary → accent)")
+                 + ": the brand gradient — the leading card, the sign-in panel, a hero band; its text is set")
+    from services.blueprint.imagery import imagery_brief
+    lines.append(imagery_brief(doc))
     return "\n".join(x for x in lines if x)
 
 
@@ -492,6 +602,9 @@ the first line is how a page runs out of room and arrives empty.
 {comp.get('vision') or '(no vision stated — choose a calm, professional, information-dense style)'}
 {conventions}
 
+# Its page rhythm — decided once for this application; every page keeps to it
+{_rhythm(doc)}
+
 # Its look — what each colour class means here
 {_look(doc)}
 
@@ -509,14 +622,18 @@ This application's entities, workflows and pages:
 {sdk_reference(doc)}
 ```
 
-# The UI kit (shadcn, themed by the app's tokens)
+# Ready-made parts — there if one fits, never required
+A UI kit (shadcn, themed by the app's tokens). Use a part when it is exactly what the page needs;
+otherwise write the element yourself in Tailwind — your own button, badge, table or panel is as
+welcome as the kit's, and often better suited.
 ```ts
 {_kit_exports()}
 ```
 Button variants: default | secondary | outline | ghost | destructive | link; sizes: default | sm | lg | icon.
 Badge variants: default | secondary | destructive | outline | success | warning | muted.
 Icons: any lucide-react icon, e.g. `import {{ Plus, Search, Filter }} from "lucide-react"`.
-Charts: the library's Chart (ECharts) — every chart the page draws goes through it.
+Charts: the library's Chart (ECharts) — every chart the page draws goes through it (that one is
+not optional: it is what themes and validates the palette).
 
 # Analytics
 A page's brief lists the widgets the Blueprint attaches to it — its KPIs, charts and breakdowns. Every one
@@ -530,7 +647,7 @@ filter in the URL (`?from=&to=`, presets such as last 30 days / 90 days / 12 mon
 summarises through `onSelect`. You may add a chart the brief does not list when the page's job calls for it
 (use `query()`), never a number the data cannot produce.
 
-# The component library
+# The component library — the same rule: a part when it fits, your own markup when not
 ```ts
 {LIBRARY_PALETTE}
 ```
@@ -839,14 +956,27 @@ def _page_plan(doc: dict, page: dict, client: Any, system: str, spent: list[Any]
 
 def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                  feedback: str = "", brief: str = "", current: dict | None = None,
-                 usage: Any = None, node: str = "page_code") -> tuple[dict, list[Any]]:
+                 usage: Any = None, node: str = "page_code", critic: Any = None,
+                 on_look: Any = None) -> tuple[dict, list[Any]]:
     """Author one page and compile it, returning the accepted `pageCode` body
     and the usage of every call. Raises CompileError when the last round still
-    does not compile — the message carries the errors for the next attempt."""
+    does not compile — the message carries the errors for the next attempt.
+
+    With a ``critic``, a page that compiles is LOOKED AT before it is accepted
+    (`page_look`): rendered and judged, and sent back once with the review
+    as its brief. The better-scoring version is returned; a look that cannot
+    happen here accepts the page as the compiler did. The critic's calls are
+    in `spent` as `(usage, elapsed, "page_reviewer")`."""
+    from services.blueprint import page_look
+
     system = system_prompt(doc)
     spent: list[Any] = []
     note = feedback
     last_errors: list[str] = []
+    looks_left = page_look.LOOKS if critic is not None else 0
+    #: The best version seen by the reviewer: (rank, body). Returned when a
+    #: rewrite scores lower, fails to compile, or the rounds run out.
+    best: tuple[tuple[int, int], dict] | None = None
     # DECIDE, THEN WRITE — in two calls, because one budget holds both and
     # the deciding will take all of it. Skipped on a repair (the decisions
     # were made and the code exists; what is wanted now is a fix).
@@ -858,7 +988,11 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     # nothing at all. Without a plan the client is left as it was: that is the
     # old path, and it is what a repair round uses.
     writer = _with(client, effort=WRITE_EFFORT, max_tokens=WRITE_MAX_TOKENS) if plan else client
-    for round_ in range(1, COMPILE_ROUNDS + 1):
+    # A look's rewrite has its own round: the compile rounds are for
+    # compiling, and a page sent back by the reviewer on the last of them
+    # would have nowhere to go.
+    rounds = COMPILE_ROUNDS + (page_look.LOOKS - 1 if looks_left else 0)
+    for round_ in range(1, rounds + 1):
         t0 = time.monotonic()
         reply = writer(system=system, user=user_prompt(doc, page, feedback=note, brief=brief,
                                                        current=current, plan=plan),
@@ -878,12 +1012,50 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         # THE STYLE RULES ASK AGAIN; THEY NEVER COST A PAGE. A page that
         # compiles and runs is kept on the last round whatever its design
         # findings — losing the page is worse than an unaccented button.
-        if design and not errors and round_ == COMPILE_ROUNDS:
+        if design and not errors and round_ >= COMPILE_ROUNDS:
             logger.warning("[ui_engineer] %s accepted with design findings: %s",
                            page.get("id"), "; ".join(design)[:400])
         else:
             errors += design
         if not errors:
+            body = {"page": str(page.get("id")), "rationale": str(body.get("rationale") or ""),
+                    "load": load, "view": view,
+                    "requirements": list(page.get("requirements") or [])}
+            if looks_left:
+                # LOOK BEFORE ACCEPTING. Rendered with sample data and judged
+                # on the screenshots; a `revise` is one more round with the
+                # review as the brief. The reviewer's rank decides between
+                # the versions it saw — a rewrite is not always better.
+                looks_left -= 1
+                try:
+                    verdict, cost = page_look.look_at(doc, page, Path(app_root), load, view, critic,
+                                                      attempt=page_look.LOOKS - looks_left)
+                except page_look.LookUnavailable as exc:
+                    logger.info("[ui_engineer] %s not looked at (%s); accepted as compiled", page.get("id"), exc)
+                    looks_left = 0
+                else:
+                    if cost[0] is not None:
+                        spent.append((cost[0], cost[1], "page_reviewer"))
+                    if on_look is not None:
+                        try:
+                            on_look(verdict)
+                        except Exception:  # noqa: BLE001 — narration never fails a page
+                            pass
+                    seen = (page_look.rank(verdict), body)
+                    if best is None or seen[0] > best[0]:
+                        best = seen
+                    if verdict.get("verdict") != "pass" and looks_left and round_ < rounds:
+                        # THE REVIEW IS A REFUSAL, NOT A WISH. Handed as the
+                        # brief ("what is wanted of it now") the first trial's
+                        # rewrite of a list page changed one border and kept
+                        # every issue; as feedback it is what the writer is
+                        # told to fix, every one, keeping what worked.
+                        current = {"load": load, "view": view}
+                        note = page_look.look_brief(verdict)
+                        logger.info("[ui_engineer] %s sent back by the reviewer (%s/10)",
+                                    page.get("id"), verdict.get("score"))
+                        continue
+                    body = best[1]
             # WHAT IT COST, WHERE SOMEBODY CAN COUNT IT. This node is the
             # longest in a build — 343s of a 616s run on a ONE-PAGE
             # calculator — and nothing recorded whether that was one round or
@@ -895,17 +1067,20 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             # The loop already knows: one entry in `spent` per model call.
             logger.info("[ui_engineer] %s composed in %d round(s), %d chars "
                         "emitted (load %d + view %d)",
-                        page.get("id"), round_, len(load) + len(view),
-                        len(load), len(view))
-            return ({"page": str(page.get("id")), "rationale": str(body.get("rationale") or ""),
-                     "load": load, "view": view,
-                     "requirements": list(page.get("requirements") or [])}, spent)
+                        page.get("id"), round_, len(body["load"]) + len(body["view"]),
+                        len(body["load"]), len(body["view"]))
+            return body, spent
         last_errors = errors
         current = {"load": load, "view": view}
         note = ("The TypeScript compiler (strict) and the page rules refused it:\n"
                 + "\n".join(f"- {e}" for e in errors[:40]))
         logger.warning("[ui_engineer] %s round %d: %d error(s): %s", page.get("id"), round_,
                        len(errors), "; ".join(errors[:3])[:400])
+    if best is not None:
+        # The rewrite the reviewer asked for did not compile; the version it
+        # judged did. A look never loses a page.
+        logger.info("[ui_engineer] %s keeps the version the reviewer saw", page.get("id"))
+        return best[1], spent
     raise CompileError(f"{page.get('id')}: still does not compile after {COMPILE_ROUNDS} rounds — "
                        + "; ".join(last_errors[:12]))
 
@@ -934,17 +1109,38 @@ def direction_prompts(doc: dict) -> tuple[str, str]:
             f"{json.dumps({k: ds.get(k) for k in ('register', 'density', 'typography', 'radius', 'tone', 'personality') if ds.get(k)}, indent=1)[:3000]}\n\n"
             f"Its pages:\n{json.dumps(pages, indent=1)[:12000]}\n\n"
             "Return `vision` — one paragraph a page author reads before every page — and "
-            "8 to 14 `conventions`, each a topic and a precise rule.")
+            "8 to 14 `conventions`, each a topic and a precise rule.\n\n"
+            "AND THE PAGE RHYTHM — five anatomy decisions, made once, that every page then "
+            "shares and that make this product's pages differ from another's. Choose each "
+            "from its personality, its density and how it is used, not by habit:\n"
+            + "\n".join(f"- `{key}`: " + "; ".join(f"`{o}` ({what})" for o, what in opts.items())
+                        for key, opts in RHYTHM_OPTIONS.items())
+            + "\nA product read all day at a desk wants a compact header, figures in a strip "
+            "and dense sections; a consumer product wants a band, cards and open sections; a "
+            "quiet tool wants a title alone and rows. Make the vision agree with what you chose.")
     return system, user
 
 
-def compose_direction(doc: dict, client: Any) -> tuple[dict, Any]:
+def compose_direction(doc: dict, client: Any, *, references: Sequence[Path] = ()) -> tuple[dict, Any]:
+    """The director's decision — shown the user's reference images when
+    there are any, read for the feel (`references.READ_FOR["ui_direction"]`)."""
+    from services.blueprint.references import READ_FOR
+
     system, user = direction_prompts(doc)
-    reply = client(system=system, user=user, schema=DIRECTION_SCHEMA)
+    shown = [str(p) for p in references] if getattr(client, "accepts_images", False) else []
+    if shown:
+        user += (f"\n\nThe {len(shown)} image(s) attached are what the user showed to convey what "
+                 f"they mean. {READ_FOR['ui_direction']}")
+        reply = client(system=system, user=user, schema=DIRECTION_SCHEMA, images=shown)
+    else:
+        reply = client(system=system, user=user, schema=DIRECTION_SCHEMA)
     body = json.loads(getattr(reply, "text", reply))
+    rhythm = body.get("rhythm") if isinstance(body.get("rhythm"), dict) else {}
+    rhythm = {k: str(v) for k, v in rhythm.items() if k in RHYTHM_OPTIONS and str(v) in RHYTHM_OPTIONS[k]}
     return ({"vision": str(body.get("vision") or ""),
              "conventions": [{"topic": str(c.get("topic")), "rule": str(c.get("rule"))}
-                             for c in body.get("conventions") or []]},
+                             for c in body.get("conventions") or []],
+             **({"rhythm": rhythm} if len(rhythm) == len(RHYTHM_OPTIONS) else {})},
             getattr(reply, "usage", None))
 
 
@@ -993,7 +1189,7 @@ def settle_code_pages(svc: Any, app_root: str | Path, client: Any = None,
         except CompileError as exc:
             return pid, None, [str(exc)]
         if usage is not None:
-            for u, elapsed in spent:
+            for u, elapsed, *_ in spent:
                 usage.record(node="page_code", agent="ui_engineer", usage=u, elapsed_s=elapsed,
                              project=str((doc.get("application") or {}).get("id", "")))
         return pid, body, []

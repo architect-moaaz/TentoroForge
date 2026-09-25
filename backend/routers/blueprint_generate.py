@@ -565,6 +565,21 @@ def _unbuilt_pages(doc: dict | None) -> list[dict]:
         return []
 
 
+def _plan_event(plan: list[str], already: Any, awaiting: bool) -> dict:
+    """The plan as the panel and the office read it: the nodes, and — so the
+    office can seat the right people and show who works beside whom — the
+    agent behind each node and the concurrency levels of this plan."""
+    from services.blueprint.orchestrator import DAG, levels
+
+    in_plan = set(plan)
+    return {
+        "nodes": plan, "total": len(plan),
+        "alreadyComplete": sorted(already), "awaitingApproval": awaiting,
+        "agents": {k: DAG[k].agent for k in plan if k in DAG},
+        "levels": [[k for k in lvl if k in in_plan] for lvl in levels() if any(k in in_plan for k in lvl)],
+    }
+
+
 def _report_payload(report: Any, doc: dict | None = None) -> dict:
     """The run outcome, including what did *not* run — and what did not build.
 
@@ -853,9 +868,7 @@ async def generate_via_blueprint(
                 already = completed_nodes(svc.doc, confirmed=nodes_recorded_done(output_dir) or None)
                 plan = [k for k in plan if k not in already]
 
-            emit("plan", {"nodes": plan, "total": len(plan),
-                          "alreadyComplete": sorted(already),
-                          "awaitingApproval": awaiting and not req.approved})
+            emit("plan", _plan_event(plan, already, awaiting and not req.approved))
 
             # A single client rather than a router: per-node model choice is a
             # tuning decision, and defaulting every node to one model keeps the
@@ -1003,6 +1016,26 @@ async def read_run(
     """
     await get_project_with_auth(project_id, user, db)
     return run_registry.snapshot(str(project_id))
+
+
+@router.get("/api/projects/{project_id}/looks/{page_id}/{attempt}/{name}")
+async def read_look(
+    project_id: uuid.UUID, page_id: str, attempt: int, name: str,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """A screenshot the build took of a page as it wrote it (`page_look`) —
+    what the reviewer scored. Named parts only: a page id, a look number and
+    `desktop` or `mobile`; nothing here walks a path."""
+    from fastapi.responses import FileResponse
+
+    project = await get_project_with_auth(project_id, user, db)
+    if name not in ("desktop", "mobile") or not re.fullmatch(r"[A-Za-z0-9_-]+", page_id) or attempt < 1:
+        raise HTTPException(status_code=404, detail="no such look")
+    path = _output_dir(project) / ".forge" / "look" / page_id / f"look-{attempt}" / f"{name}.png"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no such look")
+    return FileResponse(str(path), media_type="image/png")
 
 
 @router.get("/api/projects/{project_id}/blueprint")
@@ -2008,9 +2041,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     already = completed_nodes(svc.doc, confirmed=nodes_recorded_done(output_dir) or None)
     plan = [k for k in plan if k not in already]
 
-    emit("plan", {"nodes": plan, "total": len(plan),
-                  "alreadyComplete": sorted(already),
-                  "awaitingApproval": not approved})
+    emit("plan", _plan_event(plan, already, not approved))
 
     usage = RunUsage.for_app(svc)
     router = tiered_router()

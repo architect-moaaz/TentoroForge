@@ -41,8 +41,14 @@ def test_the_api_gives_a_person_only_their_own():
 def test_every_shell_has_one_working_bell():
     layout = (_SHELL / "layout.tsx").read_text()
     assert 'import { NotificationBell } from "./NotificationBell";' in layout
+    # Rendered ONCE, as the frame's own controls (`cluster`), which every
+    # chrome places: a rail's footer, a top bar's right end, or the row above
+    # the page for the chromes with neither.
+    cluster = layout[layout.index("const cluster = "):layout.index("const chromeName")]
+    assert "<NotificationBell />" in cluster and layout.count("<NotificationBell />") == 1
+    assert layout.count("footer={cluster}") == 4 and "right={cluster}" in layout
     body = layout[layout.index("const body = ("):layout.index("const appName")]
-    assert "<NotificationBell />" in body, "in the body every frame renders"
+    assert "{cluster}" in body and "!clusterInRail && !clusterInBar" in body
     bell = (_SHELL / "NotificationBell.tsx").read_text()
     assert 'fetch("/api/notifications"' in bell and 'method: "PATCH"' in bell
     assert "forge:workflow-done" in bell

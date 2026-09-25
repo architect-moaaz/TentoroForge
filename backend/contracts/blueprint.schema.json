@@ -2397,6 +2397,102 @@
           "type": "string",
           "default": ""
         },
+        "imagery": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "auth",
+                  "hero",
+                  "empty"
+                ]
+              },
+              "query": {
+                "type": "string",
+                "minLength": 1
+              },
+              "alt": {
+                "type": "string",
+                "default": ""
+              },
+              "url": {
+                "type": "string",
+                "default": ""
+              },
+              "thumbUrl": {
+                "type": "string",
+                "default": ""
+              },
+              "credit": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "link": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "link"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "role",
+              "query"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "shell": {
+          "type": "object",
+          "properties": {
+            "chrome": {
+              "type": "string",
+              "enum": [
+                "standard-rail",
+                "wide-rail",
+                "icon-rail",
+                "floating-rail",
+                "right-rail",
+                "topbar",
+                "dock"
+              ]
+            },
+            "auth": {
+              "type": "string",
+              "enum": [
+                "split-editorial",
+                "split-reversed",
+                "side-panel",
+                "centered-minimal",
+                "brand-wash",
+                "top-anchored"
+              ]
+            },
+            "tone": {
+              "type": "string",
+              "enum": [
+                "dark",
+                "brand",
+                "light",
+                "tinted"
+              ]
+            }
+          },
+          "required": [
+            "chrome",
+            "auth"
+          ],
+          "additionalProperties": false
+        },
         "informationDensity": {
           "type": "string",
           "enum": [
@@ -2818,6 +2914,61 @@
             "additionalProperties": false
           },
           "default": []
+        },
+        "rhythm": {
+          "type": "object",
+          "properties": {
+            "header": {
+              "type": "string",
+              "enum": [
+                "eyebrow-title",
+                "title-only",
+                "band",
+                "compact"
+              ]
+            },
+            "lead": {
+              "type": "string",
+              "enum": [
+                "dark-card",
+                "gradient-band",
+                "outlined-panel",
+                "type-only"
+              ]
+            },
+            "lists": {
+              "type": "string",
+              "enum": [
+                "table",
+                "cards",
+                "rows"
+              ]
+            },
+            "figures": {
+              "type": "string",
+              "enum": [
+                "tiles",
+                "strip",
+                "inline"
+              ]
+            },
+            "sections": {
+              "type": "string",
+              "enum": [
+                "cards",
+                "open",
+                "dense"
+              ]
+            }
+          },
+          "required": [
+            "header",
+            "lead",
+            "lists",
+            "figures",
+            "sections"
+          ],
+          "additionalProperties": false
         },
         "pages": {
           "type": "array",

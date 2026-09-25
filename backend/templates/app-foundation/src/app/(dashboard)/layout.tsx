@@ -33,8 +33,10 @@ import { schemas } from "@/schemas/registry";
 // carries the dynamically chosen frame, palette, and grouped nav). Falls back to a
 // flat menu built from nav-flow.json if shell.json is absent.
 
-type Sub = { label: string; route: string; icon?: string; roles?: string[] };
-type Group = { label?: string; icon?: string; route?: string; items?: Sub[]; roles?: string[] };
+// `roles`: who MAY open it (a role-restricted page); `audience`: who it is
+// FOR (the page's users) — the projection writes both.
+type Sub = { label: string; route: string; icon?: string; roles?: string[]; audience?: string[] };
+type Group = { label?: string; icon?: string; route?: string; items?: Sub[]; roles?: string[]; audience?: string[] };
 type NavProps = {
   groups: Group[];
   appName?: string;
@@ -118,18 +120,32 @@ function findSideNav(node: unknown): { props?: NavProps } | null {
  */
 function visibleTo(groups: Group[], role: string): Group[] {
   const mayOpen = (roles?: string[]) => !roles?.length || roles.includes(role);
+  // A product with several kinds of user lists each kind's screens for that
+  // kind: a parent's dashboard is not on the administrator's rail. Only a
+  // signed-in role narrows it; a page for everyone names no audience.
+  const forMe = (audience?: string[]) => !role || !audience?.length || audience.includes(role);
   const out: Group[] = [];
   for (const group of groups) {
-    if (!mayOpen(group.roles)) continue;
+    if (!mayOpen(group.roles) || !forMe(group.audience)) continue;
     if (!group.items?.length) {
       out.push(group);
       continue;
     }
-    const items = group.items.filter((i) => mayOpen(i.roles));
+    const items = group.items.filter((i) => mayOpen(i.roles) && forMe(i.audience));
     // A heading whose every destination is somebody else's goes with them.
     if (items.length) out.push({ ...group, items });
   }
+  // ONE HEADING IS NO HEADING. When what is left is a single labelled group
+  // (the administrator's, after the parent's and the doctor's went), the
+  // label says what the rail already says; its destinations stand alone.
+  const labelled = out.filter((g) => g.items?.length);
+  if (labelled.length === 1 && out.length === 1) return labelled[0].items!.map((i) => ({ ...i }));
   return out;
+}
+
+/** Whether the rail was told who any destination is for. */
+function hasAudience(groups: Group[]): boolean {
+  return groups.some((g) => g.audience?.length || g.items?.some((i) => i.audience?.length));
 }
 
 const AUTH_ROUTES = new Set(["/login", "/signup"]);
@@ -243,8 +259,15 @@ function frameClass(density?: string): string {
 
 async function shellIdentity(): Promise<ShellIdentity> {
   try {
-    const dp = path.join(process.cwd(), "src", "contracts", "design-spec.json");
-    const spec = JSON.parse(await fs.readFile(dp, "utf8"));
+    // OPTIONAL. Only the old pipeline writes design-spec.json; a Blueprint
+    // app has none, and reading it first threw straight to the fallback —
+    // before design-dna.json, which the Blueprint DOES write, was ever
+    // looked at. Every Blueprint app got the same rail for that alone.
+    let spec: any = {};
+    try {
+      const dp = path.join(process.cwd(), "src", "contracts", "design-spec.json");
+      spec = JSON.parse(await fs.readFile(dp, "utf8"));
+    } catch { /* no design-spec — the dna and the defaults decide */ }
     const pal = (spec?.colorPalette ?? {}) as Record<string, string>;
     const hex = (v?: string) => (typeof v === "string" && /^#[0-9a-fA-F]{6}/.test(v.trim())
       ? v.trim().slice(0, 7) : undefined);
@@ -280,14 +303,15 @@ async function shellIdentity(): Promise<ShellIdentity> {
     // shipping the identical hover-expand rail.
     let chrome = String((spec?.layout ?? {}).chrome ?? "standard-rail");
     let skin = String(spec?.skin ?? "");
+    let density = String((spec?.layout ?? {}).density ?? "comfortable");
     try {
       const dnaRaw = await fs.readFile(
         path.join(process.cwd(), "src", "contracts", "design-dna.json"), "utf8");
       const dna = JSON.parse(dnaRaw);
       chrome = String(dna?.layout?.chrome ?? dna?.shell?.chrome ?? chrome);
       skin = String(dna?.skin ?? "");
+      density = String(dna?.layout?.density ?? density);
     } catch { /* design-dna optional */ }
-    const density = String((spec?.layout ?? {}).density ?? "comfortable");
     return { frame, chrome, density, skin, ...(bg ? { bg } : {}), ...(text ? { text } : {}),
              ...(accent ? { accent } : {}), mode, primary: hex(pal.primary) };
   } catch {
@@ -343,7 +367,7 @@ function flattenNav(groups: Group[]): Sub[] {
  * them). Mobile: the link row scrolls horizontally instead of collapsing, so
  * every destination stays reachable without client-side chrome.
  */
-function TopNav({ items, appName, id }: { items: Sub[]; appName: string; id: ShellIdentity }) {
+function TopNav({ items, appName, id, right }: { items: Sub[]; appName: string; id: ShellIdentity; right?: React.ReactNode }) {
   const dark = id.mode !== "light";
   const bg = id.bg ?? (dark ? "#101418" : "#ffffff");
   const text = id.text ?? (dark ? "#cbd5e1" : "#334155");
@@ -376,6 +400,7 @@ function TopNav({ items, appName, id }: { items: Sub[]; appName: string; id: She
           ))}
         </nav>
         <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: accent }} />
+        {right && <div className="flex shrink-0 items-center gap-2">{right}</div>}
       </header>
     </>
   );
@@ -718,7 +743,15 @@ function ShellBrand({ appName, height, children }: {
   return <>{children}</>;
 }
 
-function WideRail({ props, appName }: { props: NavProps; appName: string }) {
+function WideRail({ props, appName, caption, footer }: {
+  props: NavProps; appName: string;
+  /** Who this rail is for — the signed-in role, when the product has several. */
+  caption?: string;
+  /** The frame's own controls (notifications, the account) — in the rail,
+   *  not floating over the page's header where they collided with its
+   *  primary action. */
+  footer?: React.ReactNode;
+}) {
   const dark = props.mode !== "light";
   const bg = props.bg ?? (dark ? "#141a18" : "#ffffff");
   const text = props.text ?? (dark ? "#c9d2ce" : "#3f4a45");
@@ -728,13 +761,18 @@ function WideRail({ props, appName }: { props: NavProps; appName: string }) {
     <nav data-shell-nav="" className="hidden h-full shrink-0 flex-col overflow-y-auto md:flex"
       style={{ width: "var(--sk-nav-w, 272px)", background: bg, color: text,
                borderRight: dark ? "none" : "1px solid rgba(0,0,0,0.08)" }}>
-      <div className="flex items-center gap-2.5 px-5 pb-2 pt-5">
-        <ShellBrand appName={appName} height={32}>
-          <span className="grid h-8 w-8 place-items-center rounded-[var(--radius)] text-sm font-bold text-white"
-            style={{ background: accent }}>{appName.slice(0, 1)}</span>
-          <span className="text-[15px] font-semibold tracking-tight"
-            style={{ fontFamily: "var(--font-heading)" }}>{appName}</span>
-        </ShellBrand>
+      <div className="px-5 pb-2 pt-5">
+        <div className="flex items-center gap-2.5">
+          <ShellBrand appName={appName} height={32}>
+            <span className="grid h-8 w-8 place-items-center rounded-[var(--radius)] text-sm font-bold text-white"
+              style={{ background: accent }}>{appName.slice(0, 1)}</span>
+            <span className="text-[15px] font-semibold tracking-tight"
+              style={{ fontFamily: "var(--font-heading)" }}>{appName}</span>
+          </ShellBrand>
+        </div>
+        {caption && (
+          <div data-rail-caption="" className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.12em] opacity-60">{caption}</div>
+        )}
       </div>
       <div className="flex-1 px-3 py-3">
         {props.groups.map((g, gi) => (
@@ -764,18 +802,18 @@ function WideRail({ props, appName }: { props: NavProps; appName: string }) {
           </div>
         ))}
       </div>
-      <div className="mx-3 mb-4 flex items-center gap-2.5 rounded-[var(--radius)] px-3 py-2.5"
-        style={{ background: pillBg }}>
-        <span className="grid h-7 w-7 place-items-center rounded-full text-[11px] font-semibold text-white"
-          style={{ background: accent }}>A</span>
-        <span className="text-xs opacity-80">Account</span>
-      </div>
+      {footer && (
+        <div data-rail-footer="" className="mx-3 mb-4 flex items-center justify-between gap-2 rounded-[var(--radius)] px-2 py-2"
+          style={{ background: pillBg }}>
+          {footer}
+        </div>
+      )}
     </nav>
   );
 }
 
 /** Icon-only rail: 64px of pure glyphs — dense, technical, maximal canvas. */
-function IconRail({ props, appName }: { props: NavProps; appName: string }) {
+function IconRail({ props, appName, footer }: { props: NavProps; appName: string; footer?: React.ReactNode }) {
   const dark = props.mode !== "light";
   const bg = props.bg ?? (dark ? "#101418" : "#ffffff");
   const text = props.text ?? (dark ? "#c7d2de" : "#334155");
@@ -804,6 +842,7 @@ function IconRail({ props, appName }: { props: NavProps; appName: string }) {
           </a>
         ))}
       </div>
+      {footer && <div data-rail-footer="" className="mb-4 flex flex-col items-center gap-2">{footer}</div>}
     </nav>
   );
 }
@@ -847,9 +886,25 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
 
   const navProps = await loadNavProps();
-  navProps.groups = visibleTo(navProps.groups,
-                              String((session.user as { role?: string } | undefined)?.role ?? ""));
+  const role = String((session.user as { role?: string } | undefined)?.role ?? "");
+  const scoped = hasAudience(navProps.groups);
+  navProps.groups = visibleTo(navProps.groups, role);
   const identity = await shellIdentity();
+  // THE FRAME'S OWN CONTROLS. Rendered once, and placed where the frame has
+  // room for them: a rail's footer, a top bar's right end, or — for the
+  // chromes with neither — a row above the page. Floating over the page's
+  // header they sat on top of its primary action.
+  const cluster = session?.user ? (
+    <>
+      <NotificationBell />
+      <AccountMenu name={session.user.name} email={session.user.email}
+                   role={(session.user as { role?: string }).role} />
+    </>
+  ) : null;
+  const chromeName = identity.chrome ?? "standard-rail";
+  const clusterInRail = ["wide-rail", "icon-rail", "right-rail", "floating-rail"].includes(chromeName);
+  const clusterInBar = chromeName === "topbar" || identity.frame === "topbar";
+  const caption = scoped && role ? role : undefined;
   const routeTree = await loadRouteTree();
   // Every frame below renders `body` rather than `children` directly, so
   // the crumb lands above page content in all four shell shapes without
@@ -861,14 +916,10 @@ export default async function DashboardLayout({
       {/* The frame's own row: where you are, and what the app told you. */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1"><RouteBreadcrumb routes={routeTree} /></div>
-        {session?.user && (
-          <div className="flex shrink-0 items-center gap-2">
-            <NotificationBell />
-            {/* THE WAY OUT. Only the persona frame had one; every other app
-                shipped with no way to sign out at all. */}
-            <AccountMenu name={session.user.name} email={session.user.email}
-                         role={(session.user as { role?: string }).role} />
-          </div>
+        {/* THE WAY OUT. Only the persona frame had one; every other app
+            shipped with no way to sign out at all. */}
+        {cluster && !clusterInRail && !clusterInBar && (
+          <div className="flex shrink-0 items-center gap-2">{cluster}</div>
         )}
       </div>
       {children}
@@ -946,7 +997,7 @@ export default async function DashboardLayout({
         <AppNavigator>
           <div data-skin={identity.skin || undefined} className="flex h-screen flex-col overflow-hidden bg-background">
             {trackerTag}
-            <TopNav items={flattenNav(navProps.groups)} appName={appName} id={identity} />
+            <TopNav items={flattenNav(navProps.groups)} appName={appName} id={identity} right={cluster} />
             <main data-shell-main className="min-h-0 flex-1 overflow-y-auto">
               <div className={frameClass(identity.density)}>{body}</div>
             </main>
@@ -981,7 +1032,7 @@ export default async function DashboardLayout({
       <div className="flex h-screen flex-col overflow-hidden bg-background">
         {mobileNav}
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <WideRail props={navProps} appName={appName} />{main}
+          <WideRail props={navProps} appName={appName} caption={caption} footer={cluster} />{main}
         </div>
       </div>
     );
@@ -990,7 +1041,7 @@ export default async function DashboardLayout({
       <div className="flex h-screen flex-col overflow-hidden bg-background">
         {mobileNav}
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <IconRail props={navProps} appName={appName} />{main}
+          <IconRail props={navProps} appName={appName} footer={cluster} />{main}
         </div>
       </div>
     );
@@ -1014,7 +1065,7 @@ export default async function DashboardLayout({
       <div className="flex h-screen flex-col overflow-hidden bg-background">
         {mobileNav}
         <div className="flex min-h-0 flex-1 flex-row-reverse overflow-hidden">
-          <WideRail props={navProps} appName={appName} />{main}
+          <WideRail props={navProps} appName={appName} caption={caption} footer={cluster} />{main}
         </div>
       </div>
     );
@@ -1025,7 +1076,7 @@ export default async function DashboardLayout({
         {mobileNav}
         <div className="flex min-h-0 flex-1 gap-1 overflow-hidden p-3">
           <div className="hidden overflow-hidden rounded-2xl shadow-xl md:block">
-            <WideRail props={navProps} appName={appName} />
+            <WideRail props={navProps} appName={appName} caption={caption} footer={cluster} />
           </div>
           {main}
         </div>

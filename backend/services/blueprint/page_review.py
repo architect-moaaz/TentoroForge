@@ -377,12 +377,13 @@ def hard_findings(shot: dict) -> list[str]:
     return out
 
 
-def critique(doc: dict, page: dict, shot: dict, client: Any) -> tuple[dict, Any]:
-    """The reviewer's verdict on one screenshot."""
-    from services.blueprint.ui_engineer import DESIGN_PRINCIPLES, _page_brief
+def reviewer_system(doc: dict) -> str:
+    """Who the reviewer is and what it holds a page to — shared with
+    `page_look`, which asks the same reviewer as a page is written."""
+    from services.blueprint.ui_engineer import DESIGN_PRINCIPLES, _look, _rhythm
 
     comp = doc.get("composition") or {}
-    system = ("You review screens of a business application before they ship. You are a senior "
+    return ("You review screens of a business application before they ship. You are a senior "
               "product designer with the bar of Linear, Stripe, Notion and Vercel: exacting about "
               "hierarchy, spacing, alignment, density, typography, colour used for meaning, and "
               "whether the page does its job for the people who use it. The data is seeded demo "
@@ -390,13 +391,30 @@ def critique(doc: dict, page: dict, shot: dict, client: Any) -> tuple[dict, Any]
               "The app's frame (the sidebar or the public top bar, with the menu and the app's "
               "name) is the platform's and is the same on every page — judge the content. A page "
               "that draws its own sidebar, top navigation or app header is a high-severity issue: "
-              "remove it. "
+              "remove it. The sign-in and sign-up forms, workflow forms and buttons, charts and "
+              "metric tiles are the platform's components: judge where the page puts them and what "
+              "it says around them, never their internals (a field's required mark, an input's "
+              "border) — the page's author cannot change those. "
               "Be specific: every issue names where on the page it is and exactly what to change, "
               "in terms a front-end engineer can act on without seeing the screenshot.\n\n"
               f"The app's direction:\n{comp.get('vision') or '(none stated)'}\n"
               + "\n".join(f"- {c.get('topic')}: {c.get('rule')}" for c in comp.get("conventions") or [])
+              # THE REVIEWER KNOWS THE LOOK THE WRITER WAS GIVEN. Without it
+              # the accent on the one primary action was refused as
+              # "decorative colour against a calm palette" — the rule the
+              # writer had followed (first page_look trial, 2026-09-24).
+              + f"\n\nThe app's page rhythm, decided once for it:\n{_rhythm(doc)}"
+              f"\n\nIts look — what each colour class means here (the accent on the one "
+              f"primary action is the design's rule, not decoration):\n{_look(doc)}"
               + f"\n\nThe standard pages are held to:\n{DESIGN_PRINCIPLES}\n\n"
               f"Score 1-10. {PASS_SCORE} or more with no high-severity issue passes.")
+
+
+def critique(doc: dict, page: dict, shot: dict, client: Any) -> tuple[dict, Any]:
+    """The reviewer's verdict on one screenshot."""
+    from services.blueprint.ui_engineer import _page_brief
+
+    system = reviewer_system(doc)
     hard = hard_findings(shot)
     broken = "\n".join(f"- {h}" for h in hard) or "(none)"
     pressed = "\n".join(f"- {c.get('kind')} \"{c.get('label')}\": {c.get('outcome')} — {c.get('detail')}"

@@ -1128,6 +1128,22 @@ export const Composition = z.object({
   conventions: z
     .array(z.object({ topic: z.string(), rule: z.string() }))
     .default([]),
+  /**
+   * The page rhythm: five anatomy decisions made once per application, so
+   * its pages agree with each other and differ from another product's. The
+   * page author used to be handed one anatomy for every application (eyebrow
+   * and title, a dark leading card, KPI tiles, tables in cards), which is why
+   * two apps with different palettes still read as one product recoloured.
+   */
+  rhythm: z
+    .object({
+      header: z.enum(["eyebrow-title", "title-only", "band", "compact"]),
+      lead: z.enum(["dark-card", "gradient-band", "outlined-panel", "type-only"]),
+      lists: z.enum(["table", "cards", "rows"]),
+      figures: z.enum(["tiles", "strip", "inline"]),
+      sections: z.enum(["cards", "open", "dense"]),
+    })
+    .optional(),
   pages: z.array(PageSketch).default([]),
 });
 
@@ -1991,6 +2007,49 @@ export const DesignSystem = z.object({
   borders: z.record(z.string(), z.string()).default({}),
   elevation: z.record(z.string(), z.string()).default({}),
   navigationApproach: z.string().default(""),
+  /**
+   * The photographs the application uses, by the job each does: the sign-in
+   * page's brand panel (`auth`), the band that leads a dashboard (`hero`), an
+   * illustrated empty state (`empty`). The design agent writes the `query` and
+   * `alt`; the `imagery` service node fills `url`, `thumbUrl` and `credit` from
+   * Unsplash when the platform has a key, and pages fall back to the brand
+   * gradient when it has not. `credit` is shown beside the picture — the
+   * licence asks for it.
+   */
+  imagery: z
+    .array(
+      z.object({
+        role: z.enum(["auth", "hero", "empty"]),
+        query: z.string().min(1),
+        alt: z.string().default(""),
+        url: z.string().default(""),
+        thumbUrl: z.string().default(""),
+        credit: z.object({ name: z.string(), link: z.string() }).optional(),
+      }),
+    )
+    .default([]),
+  /**
+   * The application's frame, decided with the rest of the look: how the
+   * navigation is built (`chrome`) and how the sign-in screen is composed
+   * (`auth`). Every generated app shipped the same hover-expand rail and the
+   * same split sign-in because nothing carried this decision to the shell,
+   * which has six of each. Derived from `navigationApproach` and the
+   * personality when the design does not state it.
+   */
+  shell: z
+    .object({
+      chrome: z.enum(["standard-rail", "wide-rail", "icon-rail", "floating-rail", "right-rail", "topbar", "dock"]),
+      auth: z.enum(["split-editorial", "split-reversed", "side-panel", "centered-minimal", "brand-wash", "top-anchored"]),
+      /**
+       * What the navigation is painted with: `dark` (the design's inverse
+       * surface), `brand` (the primary colour), `light` (a card beside the
+       * page), `tinted` (the ground washed with the primary). Every rail was
+       * the inverse surface — the one navy rail on a warm pediatric app and a
+       * stark tool alike. Derived from the personality when not stated.
+       */
+      tone: z.enum(["dark", "brand", "light", "tinted"]).optional(),
+    })
+    .optional(),
   informationDensity: z.enum(["compact", "comfortable", "spacious"]).default("comfortable"),
   responsiveRules: z.array(z.string()).default([]),
   accessibilityRules: z.array(z.string()).default([]),

@@ -52,12 +52,22 @@ both are decided once and inherited by every screen:
   settles it outright, do not ask.
 
   COLOUR. If the description names no colours and points at no existing
-  design, propose two or three palettes the domain actually earns and ask
-  which. Name each one and say what it is for — "Ink and oxblood: quiet,
-  papery, for long reading", "Slate and amber: dense and operational, for a
-  queue worked all day". Not "blue or green": a choice between adjectives is
-  not a choice. Where colours are named or a reference is attached, do not
-  ask.
+  design, propose three palettes the domain actually earns and ask which.
+  THEY MUST BE THREE DIFFERENT DIRECTIONS, not three shades of one: one
+  warm, one cool, and one that is dark-grounded or otherwise characterful
+  (a deep green, an oxblood, a plum) — and never more than one of them a
+  slate, navy or charcoal scheme, which is what every app was offered and
+  what made every app look the same. Name each one and say what it is for —
+  "Ink and oxblood: quiet, papery, for long reading", "Slate and amber:
+  dense and operational, for a queue worked all day", "Forest and cream on
+  a dark ground: evening, a workshop". Not "blue or green": a choice between
+  adjectives is not a choice. The LAST option is always "Let the designer
+  choose from the domain" — many people have no preference and should not
+  be made to invent one. Where colours are named or a reference is
+  attached, do not ask. This question is also where taste is asked, so end
+  it by inviting a picture: "…or attach a screenshot of a product whose
+  look you like, and it will be designed to that standard." A screenshot
+  reaches the designer, the director and the reviewer; an adjective does not.
 
 Otherwise ask only what a definition cannot proceed honestly without: who uses
 this and whether they differ, whether records are shared or private, what

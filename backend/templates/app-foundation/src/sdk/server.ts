@@ -383,6 +383,20 @@ export async function query<E extends EntityName, M extends string>(
 export interface WidgetData {
   rows: QueryRow[];
   value: number | null;
+  /** For a single number read over a date range: the same number over the
+   *  period immediately before it, and the change as a fraction of it
+   *  (0.12 = up 12%). Null when there is no range, no time field, or no
+   *  previous value to compare against. */
+  previous?: number | null;
+  delta?: number | null;
+}
+
+/** The window of the same length that ends where `range` begins. */
+function previousRange(range: DateRange): DateRange | null {
+  if (!range.from || !range.to) return null;
+  const from = new Date(range.from).getTime(), to = new Date(range.to).getTime();
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return null;
+  return { from: new Date(from - (to - from)).toISOString(), to: new Date(from).toISOString() };
 }
 
 /** Read one of the page's widgets (`widgets` from "@/sdk"), exactly as the
@@ -410,5 +424,18 @@ export async function runWidget(
   const single = src.dimensions.length === 0;
   const first = src.measures[0]?.key;
   const v = single && first ? rows[0]?.[first] : null;
-  return { rows, value: single ? Number(v ?? 0) : null };
+  const value = single ? Number(v ?? 0) : null;
+  // A NUMBER WITH ITS CONTEXT. A KPI read over a window says how things
+  // stand; against the window before it says which way they are going.
+  const before = single && first && src.timeField && opts.range ? previousRange(opts.range) : null;
+  if (!before) return { rows, value };
+  const prior = await resolveQuery({
+    name: `${widget.id}:previous`, entity: src.entity, op: "query",
+    measures: src.measures, dimensions: src.dimensions,
+    filter: { ...src.filter, ...opts.where }, timeField: src.timeField,
+    range: before, sort: src.sort, limit: src.limit,
+  }, await actor());
+  const previous = Number(prior[0]?.[first] ?? 0);
+  const delta = previous > 0 && value != null ? (value - previous) / previous : null;
+  return { rows, value, previous, delta };
 }

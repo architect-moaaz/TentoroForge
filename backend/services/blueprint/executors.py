@@ -1181,12 +1181,44 @@ NODE_TASKS: dict[str, str] = {
         "colour theory rather than defaulting to blue.\n\n"
         "Whichever it is, pick a hue the domain earns — a workshop is not a "
         "clinic is not a reading app — then build the rest as a considered "
-        "scheme around it: an accent that is a true complement or a near-triad "
-        "rather than a second blue, subtle and hover variants derived from the "
-        "primary's own hue, and status colours that stay distinguishable for "
-        "the 8% of men with a red-green deficiency. Say in "
-        "`visualPersonality` which of the three this came from and why, so a "
-        "later change can argue with it.\n\n"
+        "scheme around it. NAME THE HARMONY you are using and keep to it: "
+        "complementary (the accent opposite the primary), split-complementary "
+        "(the accent one step either side of opposite), analogous (everything "
+        "within 60° — calm, editorial, needs a strong accent to point with) or "
+        "triadic. The accent is a true complement or a near-triad, never a "
+        "second blue. Subtle and hover variants are the primary's own hue at "
+        "another lightness. THE NEUTRALS ARE TINTED: the ground, the surface, "
+        "the borders and the secondary text all carry a trace of the primary's "
+        "hue (a few points of saturation), never pure grey — that is what makes "
+        "a palette read as one thing. Weight it 60/30/10: the ground and "
+        "surfaces carry the screen, the primary structures it, the accent is "
+        "the ten percent that says where to act. Status colours stay "
+        "distinguishable for the 8% of men with a red-green deficiency. Say in "
+        "`visualPersonality` which of the three sources this came from, which "
+        "harmony it is, and why, so a later change can argue with it.\n\n"
+        "THE GROUND CAN BE DARK. A product that lives in the evening, in media, "
+        "in a control room, or that wants drama, earns a dark ground with light "
+        "ink (`background` deep and tinted, `surface` one step lighter, "
+        "`inverse` then LIGHTER than the ground, not darker); a product read "
+        "all day at a desk earns a light one. Decide it from the personality, "
+        "not from habit, and keep every text pair readable either way.\n\n"
+        "A GRADIENT IS PART OF THE PALETTE. Name `gradientStart` and "
+        "`gradientEnd`: two stops of the primary's own family — the start is "
+        "the primary's hue, the end the same hue turned 20-40° round the wheel "
+        "(towards the warmer or cooler neighbour the personality wants), both "
+        "deep enough that light text reads on either. It paints the sign-in "
+        "panel, a hero band and the one leading card; it is never the accent, "
+        "and never two unrelated colours.\n\n"
+        "THE PICTURES. Name up to three photographs in `imagery`, one per job "
+        "the product needs — `auth` (the sign-in page's brand panel: the "
+        "world this product serves, not an office stock shot), `hero` (the "
+        "band that leads a dashboard or home) and `empty` (an illustrated "
+        "empty state) — each as a `query` a photo search would answer "
+        "(\"neighbours sharing garden tools\", \"child receiving a vaccine, "
+        "gentle\") and an `alt` a screen reader would say. Leave `url` empty: "
+        "the platform finds and credits the picture, and where it cannot, the "
+        "gradient stands in. A product that should carry no photography (a "
+        "stark tool, a dense back-office) names none and says so.\n\n"
         "Decide from the domain and who uses it. A recruiter working a "
         "pipeline all day and a customer buying once a year want different "
         "densities and different levels of visual quiet. Say why each choice "
@@ -1204,6 +1236,27 @@ NODE_TASKS: dict[str, str] = {
         "paper, a cool slate, a soft sage — pure `#FFFFFF` only when the "
         "product is stark by intent, never because white is the default. "
         "When the personality you describe is warm, the neutrals are warm.\n\n"
+        "THE FRAME IS A DECISION TOO. Name `shell.chrome` — how the navigation "
+        "is built: `wide-rail` (a labelled sidebar, for a product with many "
+        "destinations worked all day), `icon-rail` (a narrow rail of icons, for "
+        "a focused tool), `standard-rail` (a rail that expands on hover), "
+        "`floating-rail` (the rail as a raised card, for a lighter, editorial "
+        "feel), `right-rail` (navigation after the content), `topbar` (a "
+        "single bar across the top, for a few destinations or a consumer "
+        "product), `dock` (no rail; a floating dock at the bottom, for a "
+        "mobile-first product used on the go). And `shell.auth` — how the "
+        "sign-in screen is composed: `split-editorial` (brand panel left, form "
+        "right), `split-reversed`, `side-panel` (a narrower brand panel), "
+        "`centered-minimal` (the form alone, for a stark tool), `brand-wash` "
+        "(the form over the brand gradient, for a consumer product), "
+        "`top-anchored` (a compact header and the form, for a dense "
+        "back-office). And `shell.tone` — what the navigation is painted "
+        "with: `dark` (the inverse surface, for a product worked in low light "
+        "or a dense console), `brand` (the primary colour, when the brand "
+        "leads), `light` (a card beside the page, for a quiet tool), `tinted` "
+        "(the ground washed with the primary, for a warm or consumer "
+        "product). Choose all three from the personality and how the product "
+        "is used, and make them agree with `navigationApproach`.\n\n"
         "TYPE IS TWO DECISIONS. Name `typography.fontFamilyBase` (the body, a "
         "highly legible face) and `typography.fontFamilyHeading` (page and card "
         "titles — a display serif or a characterful sans when the personality "
@@ -1493,6 +1546,34 @@ NODE_TASKS: dict[str, str] = {
         "narrows to the record. A form, a wizard, a settings page or a tool "
         "carries none. Every widget serves a requirement or a persona's goal; "
         "never add a chart to fill space.\n\n"
+        "A DASHBOARD IS RICH, AND EVERYTHING ON IT IS ABOUT THIS APPLICATION. "
+        "Its widgets answer the questions its persona brings to it (the page's "
+        "purpose and primary tasks say which; the requirements and objectives "
+        "say why), in this order: three to five metrics that say how things "
+        "stand — each with `timeField` set to its entity's natural date where "
+        "one exists, so the page's date range narrows it and it shows its "
+        "change against the period before; then at least three charts of at "
+        "least two different marks: the trend over time (a `bucket` by week "
+        "or month, line or area), the breakdown by the status or type that "
+        "matters (donut or bar), the ranking of who or what leads (a "
+        "horizontal bar, `sort` and `limit`) — and, where the domain has "
+        "them, the stages records move through (funnel), the busy hours "
+        "(heatmap), the split by a second dimension (stacked bar). Name in "
+        "`requirements` the requirement each widget answers — a widget that "
+        "answers none does not belong — and write a `description` a reader "
+        "of this product would recognise. Never a generic “total records”: "
+        "the count of the thing this product is about, in its own words.\n\n"
+        "CHARTS SHOW UP ON EVERY RELEVANT PAGE — the contract refuses a reply "
+        "that leaves one bare. Every `dashboard` page carries at least three "
+        "`kind: chart` widgets of at least two marks beside its metrics, one "
+        "of them over time when the data has a date. Every `entity_list`, "
+        "`master_detail` or `approval_inbox` page whose entity has a status "
+        "or type (an enum), a date, an amount or a foreign key carries at "
+        "least one chart of what it lists: the breakdown by that status or "
+        "type, the trend over that date, the total by that amount. A record "
+        "page whose entity has dated records pointing at it carries that "
+        "history. The page writer draws every widget you declare, so a page "
+        "you leave bare stays bare.\n\n"
         "Every widget reads a `query` data source: measures (count, "
         "count_distinct, sum, avg, min, max — each with a `key` that names the "
         "number in each row, and a human `label`) by at most two dimensions "
@@ -3313,6 +3394,15 @@ EFFORT_BY_NODE: dict[str, str] = {
 #: 64000 is the value `__post_init__` already uses for xhigh/max effort, so
 #: this is the established headroom rather than a new one. These nodes are
 #: above STREAM_ABOVE either way, so they were already streaming.
+#: Effort by AGENT, for the ones that are not a node: the reviewer that
+#: looks at each page as it is written (`page_look`) gives a verdict on two
+#: screenshots against a contract — not a design from nothing. Measured on
+#: one list page: `high` 42s and 3,184 output tokens, `medium` 30s and 1,929,
+#: the same score and the same five issues.
+EFFORT_BY_AGENT: dict[str, str] = {
+    "page_reviewer": "medium",
+}
+
 MAX_TOKENS_BY_NODE: dict[str, int] = {
     # Names the entities and their relationships without a field; the 64k
     # the single call needed went on fields, which `entity_fields` writes one
@@ -3414,6 +3504,10 @@ def tiered_router(
                 reasoning=reasoning,
             )
             for node in tuned
+        },
+        by_agent={
+            agent: AnthropicModel(model=model, effort=effort, reasoning=reasoning)
+            for agent, effort in EFFORT_BY_AGENT.items()
         },
     )
 
@@ -3807,7 +3901,7 @@ def make_executor(
             doc = _copy.deepcopy(svc.doc)
         if spec.agent == "ui_director":
             t0 = time.monotonic()
-            body, u = ui_engineer.compose_direction(doc, client)
+            body, u = ui_engineer.compose_direction(doc, client, references=references.paths(svc.output_dir))
             record(u, time.monotonic() - t0)
             return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                                proposals=[ArtifactProposal(section="composition",
@@ -3818,15 +3912,45 @@ def make_executor(
         current = next((row for row in doc.get("pageCode") or []
                         if str(row.get("page")) == spec.subject), None)
         tell(reasoning, f"Writing {page.get('route')} in React.", "step", spec.node)
+        # THE PAGE IS LOOKED AT AS IT IS WRITTEN (`page_look`): the reviewer
+        # is the page reviewer's tier, and only a client that can see an
+        # image can review one.
+        critic = (model.for_task("page_look", "page_reviewer") if isinstance(model, ModelRouter) else model)
+        if not getattr(critic, "accepts_images", False):
+            critic = None
         body, spent = ui_engineer.compose_page(
             doc, page, Path(svc.output_dir) / "app", client,
             feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
-            current=current if (spec.feedback or getattr(spec, "brief", "")) else None)
-        for u, elapsed in spent:
-            record(u, elapsed)
+            current=current if (spec.feedback or getattr(spec, "brief", "")) else None,
+            critic=critic,
+            on_look=lambda v: _looked(svc, spec, page, v, reasoning))
+        for u, elapsed, *who in spent:
+            if usage is not None and u is not None:
+                usage.record(node=spec.node, agent=who[0] if who else spec.agent, usage=u,
+                             elapsed_s=elapsed, project=project)
         return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                            proposals=[ArtifactProposal(section="pageCode",
                                                        natural_key=spec.subject, body=body)])
+
+    def _looked(svc: Any, spec: TaskSpec, page: dict, v: dict, reasoning: Any) -> None:
+        """A look's verdict, told to whoever watches: the thoughts and the
+        run ledger (from which the panel draws the page's score and picture)."""
+        from services.llm_client import tell
+
+        issues = [str(i.get("problem") or "") for i in (v.get("issues") or []) if i.get("problem")]
+        tell(reasoning, f"Looked at {page.get('route')}: {v.get('score')}/10 — "
+             + ("passed." if v.get("verdict") == "pass" else "sent back: " + "; ".join(issues[:3])),
+             "step", spec.node)
+        ledger = getattr(svc, "run_ledger", None)
+        if ledger is None:
+            return
+        try:
+            ledger.page_look(spec.node, spec.subject, route=str(page.get("route") or ""),
+                             attempt=int(v.get("attempt") or 0), score=int(v.get("score") or 0),
+                             verdict=str(v.get("verdict") or ""), issues=issues,
+                             broken=len(v.get("broken") or []), shots=sorted(v.get("shots") or {}))
+        except Exception:  # noqa: BLE001 — the account of the run never ends it
+            pass
 
     def executor(spec: TaskSpec) -> AgentResult:
         if spec.agent in ("ui_director", "ui_engineer"):

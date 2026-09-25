@@ -50,6 +50,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in .env}
+      # Photographs for generated apps (designSystem.imagery). Optional: without
+      # it pages use the brand gradient. https://unsplash.com/developers
+      UNSPLASH_ACCESS_KEY: ${UNSPLASH_ACCESS_KEY:-}
       # The a2ui MCP composer is spawned over stdio from a checkout of the
       # a2ui repo (services/a2ui_authority.py resolves
       # `$A2UI_REPO/tools/a2ui-mcp/server.py`). The checkout is mounted

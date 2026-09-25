@@ -128,7 +128,7 @@ class RunLedger:
                      "at": _now()})
 
     def node_subject(self, key: str, subject: str, index: int, total: int,
-                     ok: bool = True) -> None:
+                     ok: bool = True, summary: str = "") -> None:
         """One artifact of a fanning-out node.
 
         "Which of the eighteen stopped it" was the question `node_failed`
@@ -138,7 +138,17 @@ class RunLedger:
         rather than a single silence.
         """
         self._write({"event": "node:subject", "node": key, "subject": subject,
-                     "index": index, "total": total, "ok": ok, "at": _now()})
+                     "index": index, "total": total, "ok": ok, "at": _now(),
+                     **({"summary": summary} if summary else {})})
+
+    def page_look(self, key: str, subject: str, *, route: str, attempt: int, score: int,
+                  verdict: str, issues: list[str], broken: int, shots: list[str]) -> None:
+        """A page looked at as it was written (`page_look`): what the reviewer
+        scored it, the first problems it named, and which screenshots exist —
+        by name, never by bytes; the panel fetches the picture it wants."""
+        self._write({"event": "page:look", "node": key, "subject": subject, "route": route,
+                     "attempt": attempt, "score": score, "verdict": verdict,
+                     "issues": list(issues)[:4], "broken": broken, "shots": list(shots), "at": _now()})
 
     def node_retry(self, key: str, subject: str, attempt: int, of: int,
                    reason: str) -> None:

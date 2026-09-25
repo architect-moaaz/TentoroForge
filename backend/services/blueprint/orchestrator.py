@@ -264,6 +264,11 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # which is also what blocks the theme-token projection.
     _n("design_system", "accessibility", ("application_model",), ("designSystem",),
        note="§37; must precede page design so composition has a language"),
+    # THE PICTURES THE DESIGN NAMED, FOUND. The design agent writes what each
+    # photograph is of; this looks them up (Unsplash, when the platform has a
+    # key) so the page authors are handed URLs and credits, not queries.
+    _n("imagery", "accessibility", ("design_system",), ("designSystem",), kind="service",
+       note="the design's photographs, found and credited; nothing without a key"),
     # THE PAGE SET IS DECIDED ONCE AND THE CONTRACTS ARE WRITTEN PER FEATURE.
     # This node answers the slot question — which features exist, which are
     # declined, and for each page its route, pattern, module and entity —
@@ -367,7 +372,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # degraded, never stopped. `install` because the compiler lives in the
     # app's node_modules; `workflow_steps` because a form collects inputs.
     _n("ui_direction", "ui_director",
-       ("page_details", "design_system", "figma_design_system"), ("composition",),
+       ("page_details", "design_system", "figma_design_system", "imagery"), ("composition",),
        optional=True, note="§34; the whole app's look and conventions, one call"),
     _n("page_code", "ui_engineer",
        ("ui_direction", "page_layouts", "workflow_steps", "install"), ("pageCode",),
@@ -451,10 +456,11 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # here" was asking a fair question.
     _n("assemble", "build", ("integration", "install"), ("runtime",),
        kind="projection"),
-    # NO `page_review` NODE. Looking at every page as it renders — the browser
-    # checks, the critique, the rewrites — is the user's call after the build,
-    # taken as "Verify & fix" (`review_coded_pages`), not minutes and money
-    # spent on every build whether it was wanted or not.
+    # NO `page_review` NODE. Each page is looked at as it is written, inside
+    # `page_code` (`page_look`: rendered with sample data, judged on the
+    # screenshots, sent back once). Looking at the BUILT application — the
+    # database, every control pressed — is the user's call after the build,
+    # taken as "Verify & fix" (`review_coded_pages`).
 )}
 
 
@@ -1195,6 +1201,16 @@ def _run_id() -> str:
     return _t.strftime("%Y%m%d-%H%M%S", _t.gmtime()) + "-" + _u.uuid4().hex[:6]
 
 
+def _landed(svc: Any, key: str, subject: str) -> str:
+    """One line on what `subject` is now that it is written (see `landed`)."""
+    from services.blueprint.landed import summarize_subject
+    try:
+        with svc.lock:
+            return summarize_subject(svc.doc, key, subject)
+    except Exception:  # noqa: BLE001 — a summary is a courtesy
+        return ""
+
+
 def _note(ledger: Any, method: str, *args: Any) -> None:
     """Record if there is a ledger. Never raise: the ledger describes the run,
     it does not get to end it.
@@ -1268,6 +1284,10 @@ def run(
     ledger = RunLedger(svc.output_dir, _run_id(),
                        phase="build" if commit else "dry", observer=observer)
     ledger.planned(order)
+    # WHERE AN EXECUTOR CAN FIND THE LEDGER. A page looked at as it is
+    # written (`page_look`) happens inside the executor, which was built
+    # before the run and has no ledger of its own; the run's is here for it.
+    svc.run_ledger = ledger
 
     # A PULSE WHILE THE LONG STEPS RUN. page_layouts and the observer repair go
     # minutes between events, so the ledger fell silent and a live run looked
@@ -2364,6 +2384,9 @@ def _run_deterministic(
 #: worth having and a fourth is just the same failure twice more.
 ATTEMPTS_BY_NODE: dict[str, int] = {
     "data_model": 4,
+    # One reply for every page's widgets: a refusal names several pages and
+    # the edit that answers it can leave one; the third attempt is an edit.
+    "analytics": 3,
 }
 
 #: Observer repair rounds per node, where the default (the observer's own
@@ -2383,9 +2406,9 @@ ATTEMPTS_BY_NODE: dict[str, int] = {
 #: `integrations`: 0 — sent back once and flagged. Product decision the same
 #: day, for time and spend.
 #: `page_code`: 0 — a page's code is judged by the compiler before it is
-#: accepted and by `page_review` as it renders; a critic reading the source
-#: had nothing either of those does not see better, and its repair would be a
-#: rewrite neither had asked for.
+#: accepted and by the reviewer on its screenshots (`page_look`, inside the
+#: writer's loop); a critic reading the source had nothing either of those
+#: does not see better, and its repair would be a rewrite neither had asked for.
 #: `ux_architecture`: 0 — 17 of 19 failed the first look and 9 were repaired;
 #: most findings judged what later nodes fill ("the module's pages array is
 #: empty" before any page exists, an empty `initialRoute`, a missing citation),
@@ -2574,7 +2597,8 @@ def _apply_subject(
                   f"refused the same way twice; not asking again — {reason}")
         if attempt >= max_attempts or repeated:
             report.failed.append(label)
-            report.failed_because[label] = reason
+            # The report's line is for reading; the retry above got the whole reason.
+            report.failed_because[label] = reason[:400]
             state.failed.append(subject)
             _note(ledger, "node_subject", key, subject, _at(), total, False)
             return "failed"
@@ -2636,7 +2660,7 @@ def _apply_subject(
         _act_on(svc, key, application.change_requests, report, commit=commit)
         state.authored.setdefault(subject, set()).update(
             _proposed_identities(outcome, application))
-        _note(ledger, "node_subject", key, subject, _at(), total, True)
+        _note(ledger, "node_subject", key, subject, _at(), total, True, _landed(svc, key, subject))
         return "applied"
     # A STAGE THAT REFUSES ITS OWN WORK IS THE ONE WORTH LISTENING TO. The
     # calculator's `entity_fields` came back at confidence 0.35 saying the
@@ -2761,9 +2785,17 @@ def _asked(application: Any) -> str:
     return (reason or "the agent declined without giving a reason")[:600]
 
 
+#: How much of a refusal survives into the retry. It was 400 characters —
+#: enough for a report line, and exactly wrong for a contract refusal that
+#: names five pages: the agent was told the first two, fixed them, and was
+#: failed for the third it never saw (nlwtcyz5 analytics, 2026-09-24). The
+#: reason IS the repair instruction; the level map shortens it for display.
+REASON_KEPT = 4000
+
+
 def _reason(exc: Exception) -> str:
-    """One line naming what went wrong, kept short enough to read in a report."""
-    return f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
+    """One line naming what went wrong — whole, so a retry is told all of it."""
+    return f"{type(exc).__name__}: {exc}".replace("\n", " ")[:REASON_KEPT]
 
 
 def _run_agent_subject(
@@ -2894,7 +2926,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     from services.blueprint.projection import (
         apply_frontend_projection, project_brand_logo, project_design_tokens,
         project_middleware, project_public_resources, project_public_routes,
-        project_nav_flow, project_root_route, project_shell,
+        project_nav_flow, project_root_route, project_shell, project_shell_identity,
     )
 
     # NO SECOND COMPOSER. A landing page whose composition is refused leaves no
@@ -2923,6 +2955,9 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # the scaffold's near-black and every button came out the wrong colour.
     project_brand_logo(svc.doc, app_root)
     project_design_tokens(svc.doc, app_root)
+    # THE FRAME, BESIDE THE TOKENS: the shell chrome and the sign-in
+    # composition the design decided, written where the layout reads them.
+    project_shell_identity(svc.doc, app_root)
     result = apply_frontend_projection(svc, app_root)
     # THE DESIGNED PAGES, OVER THEIR FLOORS. The SDK they were compiled against
     # (the fixed half ships with the scaffold; the typed half is this
@@ -3346,7 +3381,19 @@ def _project_company_language(svc: BlueprintService) -> None:
                 ", ".join(sorted(overlay)), svc.output_dir)
 
 
+def _find_imagery(svc: BlueprintService) -> None:
+    """Fill the design's `imagery` entries from Unsplash (see `imagery`)."""
+    from services.blueprint.imagery import fill_imagery
+
+    out = fill_imagery(svc.doc)
+    if out.get("found"):
+        svc.save()
+    logger.info("[imagery] found=%s kept=%s empty=%s %s", out.get("found"), out.get("kept"),
+                out.get("empty"), out.get("why") or "")
+
+
 SERVICE_HANDLERS: dict[str, Any] = {
+    "imagery": _find_imagery,
     "page_layouts": _compose_page_layouts,
     "auth_pages": _declare_auth_pages,
     "content_fields": _add_content_fields,

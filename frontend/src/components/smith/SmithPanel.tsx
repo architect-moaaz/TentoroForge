@@ -54,6 +54,8 @@ import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
+import { STAGE_VERB, labelFor } from "./stages";
+import { QuestMap } from "./QuestMap";
 import {
   AppTile,
   BlueprintSummary,
@@ -90,38 +92,6 @@ type Greeting = {
 /** Messages sent with each turn — Smith reads the last six; a little slack. */
 const SENT_HISTORY = 10;
 
-const STAGE_VERB: Record<string, string> = {
-  requirements: "Reading what you asked for",
-  application_model: "Modelling the product",
-  ux_architecture: "Arranging the application",
-  design_system: "Choosing the design language",
-  page_contracts: "Deciding the page set",
-  page_details: "Writing each feature's contracts",
-  content_fields: "Adding what the pages need to show",
-  data_model: "Naming the entities",
-  entity_fields: "Detailing the entities",
-  database: "Laying out the database",
-  workflows: "Declaring the workflows",
-  workflow_steps: "Authoring the workflow steps",
-  business_rules: "Writing the rules down",
-  apis: "Designing the endpoints",
-  figma_design_system: "Holding to the Figma design",
-  page_layouts: "Laying out each page",
-  ui_direction: "Setting the app's look and conventions",
-  page_code: "Writing each page in React",
-  assemble: "Building and starting the app",
-  figma_intelligence: "Reading the Figma design",
-  backend: "Generating the backend",
-  frontend: "Generating the frontend",
-  integration: "Wiring it together",
-  testing: "Writing the tests",
-  security: "Checking who may do what",
-  verification: "Checking its own work",
-  preview: "Starting the preview",
-  install: "Installing dependencies",
-  memory: "Remembering the decisions",
-  integrations: "Noting the third parties",
-};
 
 /** `4m 12s`, or `48s` — a duration a person reads at a glance. */
 function human(ms: number): string {
@@ -130,40 +100,7 @@ function human(ms: number): string {
                  : `${s}s`;
 }
 
-const STAGE_LABEL: Record<string, string> = {
-  requirements: "Requirements",
-  application_model: "Product Model",
-  ux_architecture: "Application Architecture",
-  design_system: "Design System",
-  page_contracts: "Page Set",
-  page_details: "Page Contracts",
-  content_fields: "Page Content Fields",
-  data_model: "Entities",
-  entity_fields: "Data Model",
-  database: "Database Schema",
-  workflows: "Workflows",
-  workflow_steps: "Workflow Steps",
-  business_rules: "Business Rules",
-  security: "Security & Roles",
-  integrations: "Integrations",
-  apis: "API Surface",
-  figma_design_system: "Figma Design System",
-  page_layouts: "Page Layouts",
-  ui_direction: "Design Direction",
-  page_code: "Pages (React)",
-  assemble: "Build",
-  figma_intelligence: "Figma Evidence",
-  frontend: "Frontend",
-  backend: "Backend",
-  integration: "Assembly",
-  testing: "Tests",
-  memory: "Decisions",
-  verification: "Verification",
-  preview: "Preview",
-  install: "Install",
-};
 
-const labelFor = (key: string) => STAGE_LABEL[key] ?? key;
 
 const _BASE_TITLE =
   typeof document !== "undefined" ? document.title : "Tentoro Forge";
@@ -1155,7 +1092,7 @@ export function SmithPanel({
               ← Back to the current run
             </button>
           )}
-          <StageList run={sidePlan} />
+          <StageList run={sidePlan} projectId={projectId ?? undefined} />
         </div>
       ) : hasDefinition ? (
         // THE BLUEPRINT. Read off the document rather than the run, so a
@@ -1208,8 +1145,10 @@ export function SmithPanel({
  */
 function StageList({
   run,
+  projectId,
 }: {
   run: ReturnType<typeof useBlueprintRun>["run"];
+  projectId?: string;
 }) {
   // WHEN THIS RUN BEGAN, and a clock that moves. Elapsed time read from a
   // static render would freeze at whatever it was when a node last landed —
@@ -1346,11 +1285,11 @@ function StageList({
           I had already worked this out — nothing needed redoing.
         </p>
       ) : (
-        <ul className="space-y-1">
-          {run.nodes.map((n) => (
-            <StageRow key={n.key} node={n} />
-          ))}
-        </ul>
+        // THE BUILD AS A LEVEL MAP, not a list. A list of stages ticking
+        // off said how far and nothing about what a build is: steps running
+        // side by side, a step that is twelve calls at once, the reviewer
+        // sending one back. See `questModel`.
+        <QuestMap run={run} projectId={projectId} />
       )}
 
       {run.alreadyComplete.length > 0 && (
@@ -1576,40 +1515,5 @@ function _duration(secs: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-function StageRow({ node }: { node: RunNode }) {
-  const Icon =
-    node.state === "done"
-      ? CheckCircle2
-      : node.state === "running"
-        ? Loader2
-        : node.state === "failed"
-          ? XCircle
-          : Circle;
-
-  return (
-    <li className="flex items-center gap-2 text-xs">
-      <Icon
-        className={cn(
-          "h-3.5 w-3.5 shrink-0",
-          node.state === "done" && "text-green-600",
-          node.state === "running" && "animate-spin text-primary",
-          node.state === "failed" && "text-destructive",
-          node.state === "waiting" && "text-muted-foreground/40",
-        )}
-      />
-      <span
-        className={cn(
-          node.state === "waiting" && "text-muted-foreground",
-          node.state === "done" && "text-foreground",
-        )}
-      >
-        {labelFor(node.key)}
-      </span>
-      {node.subject && (
-        <span className="truncate text-muted-foreground">{node.subject}</span>
-      )}
-    </li>
-  );
-}
 
 export default SmithPanel;

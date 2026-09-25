@@ -30,7 +30,12 @@ from typing import Any, Callable
 
 #: Ledger events passed through untouched, for the activity list.
 _FORWARDED = ("node:retry", "node:failed", "node:blocked", "node:skipped",
-              "observer:verdict", "observer:repair", "observer:unrepaired")
+              "observer:verdict", "observer:repair", "observer:unrepaired",
+              # An API that stopped answering, and a run that stopped for it:
+              # the office shows the wait and the strike.
+              "node:stalled", "run:paused",
+              # A page looked at as it was written: its score and screenshots.
+              "page:look")
 
 
 class Progress:
@@ -77,7 +82,8 @@ class Progress:
             self._emit("node:subject", {
                 "node": node, "subject": line.get("subject"),
                 "index": line.get("index"), "total": line.get("total"), "done": done,
-                "ok": bool(line.get("ok")), **counts})
+                "ok": bool(line.get("ok")),
+                **({"summary": line["summary"]} if line.get("summary") else {}), **counts})
             return
 
         if event == "node:done":

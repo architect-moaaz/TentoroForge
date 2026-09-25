@@ -939,6 +939,31 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     page_roles = {str(p.get("id")): sorted({role_names.get(str(u), str(u)) for u in p.get("users") or []})
                   for p in (doc.get("pages") or [])
                   if p.get("id") and str(p.get("access") or "") == "role_restricted"}
+    # WHO THE DESTINATION IS FOR — the menu's other half. A page's `users` is
+    # its audience, not a permission, and a product with several kinds of
+    # user (a parent, a doctor, an administrator) lists each kind's screens
+    # for that kind: the design of nlwtcyz5 said so ("listing only the
+    # current role's items") and the rail showed all three sets to
+    # everyone, headed PARENT / DOCTOR / ADMIN. The layout hides an
+    # audience the signed-in person is not part of; a page for everyone
+    # names none.
+    many_roles = len([r for r in role_names.values() if r]) > 1
+    page_audience = {str(p.get("id")): sorted({role_names.get(str(u), str(u)) for u in p.get("users") or []})
+                     for p in (doc.get("pages") or []) if p.get("id") and many_roles and p.get("users")}
+    # A ROLE'S LANDING PAGE IS THAT ROLE'S. `initialRoute` names where each
+    # kind of user opens ("parent": "/", "admin": "/admin"); a landing page
+    # that names no users is still for the kind that lands on it — "Parent
+    # Dashboard" stayed on the administrator's rail for want of this.
+    initial = nav.get("initialRoute") if isinstance(nav.get("initialRoute"), dict) else {}
+    by_lower = {name.lower(): name for name in role_names.values() if name}
+    for p in (doc.get("pages") or []):
+        pid = str(p.get("id") or "")
+        if not pid or not many_roles or page_audience.get(pid):
+            continue
+        landers = sorted({by_lower[k.lower()] for k, r in initial.items()
+                          if k.lower() in by_lower and str(r) == str(p.get("route") or "")})
+        if landers:
+            page_audience[pid] = landers
 
     # A DYNAMIC ROUTE IS NOT A RAIL DESTINATION. `/rentals/[id]/return` is
     # reached through a row or an action that fills a concrete id, never from the
@@ -968,6 +993,8 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             out["tab"] = True
         if page_roles.get(page_id):
             out["roles"] = page_roles[page_id]
+        if page_audience.get(page_id):
+            out["audience"] = page_audience[page_id]
         return out
 
     groups: list[dict[str, Any]] = []
@@ -986,6 +1013,9 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             kid_roles = [set(it.get("roles") or []) for it in group["items"]]
             if kid_roles and all(kid_roles):
                 group["roles"] = sorted(set.union(*kid_roles))
+            kid_audience = [set(it.get("audience") or []) for it in group["items"]]
+            if kid_audience and all(kid_audience):
+                group["audience"] = sorted(set.union(*kid_audience))
             if group["items"]:
                 groups.append(group)
         else:
@@ -1010,9 +1040,10 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # to the library's navy and a blue mark, on an app whose design is a warm
     # paper and a forest green (0l133sp2). The design's dark lead surface, its
     # text and its accent, as the tokens the page already reads.
-    rail: dict[str, Any] = {"groups": groups, "appName": app_name, "mode": "dark",
-                            "bg": "hsl(var(--inverse))", "text": "hsl(var(--inverse-foreground) / 0.82)",
-                            "muted": "hsl(var(--inverse-foreground) / 0.55)", "accent": "hsl(var(--accent))"}
+    # …AND IN THE TONE THE DESIGN CHOSE (`shell.tone`), not the inverse
+    # surface on every app: see `RAIL_PAINT`.
+    paint = RAIL_PAINT[derive_shell(doc)["tone"]]
+    rail: dict[str, Any] = {"groups": groups, "appName": app_name, **paint, "accent": "hsl(var(--accent))"}
     # THE OWNER'S MARK GOES WHERE THE APPLICATION'S NAME IS. The rail's brand
     # block draws a square with the first letter of the name in it; given a
     # logo it draws the logo instead. Only the reference is written here —
@@ -1570,6 +1601,127 @@ def _font_stack(value: str) -> str:
     return ", ".join(parts)
 
 
+#: What the shell reads its frame from. The scaffold's layout has six
+#: navigation chromes and its sign-in page six compositions, chosen from this
+#: file — which only the old pipeline wrote, so every Blueprint app fell back
+#: to the same rail and the same sign-in (0 of 70 apps had one, 2026-09-24).
+SHELL_IDENTITY_PATH = "src/contracts/design-dna.json"
+
+CHROMES = ("standard-rail", "wide-rail", "icon-rail", "floating-rail", "right-rail", "topbar", "dock")
+AUTH_LAYOUTS = ("split-editorial", "split-reversed", "side-panel", "centered-minimal", "brand-wash", "top-anchored")
+TONES = ("dark", "brand", "light", "tinted")
+
+#: What each tone paints the navigation with — the design's own tokens, so
+#: the rail is the app's palette and not a colour of its own. `mode` is
+#: what the chromes read for borders, hover and active treatment.
+RAIL_PAINT: dict[str, dict[str, str]] = {
+    "dark": {"mode": "dark", "bg": "hsl(var(--inverse))", "text": "hsl(var(--inverse-foreground) / 0.82)",
+             "muted": "hsl(var(--inverse-foreground) / 0.55)"},
+    "brand": {"mode": "dark", "bg": "hsl(var(--primary))", "text": "hsl(var(--primary-foreground) / 0.9)",
+              "muted": "hsl(var(--primary-foreground) / 0.6)"},
+    "light": {"mode": "light", "bg": "hsl(var(--card))", "text": "hsl(var(--foreground) / 0.85)",
+              "muted": "hsl(var(--muted-foreground))"},
+    "tinted": {"mode": "light", "bg": "color-mix(in srgb, hsl(var(--primary)) 9%, hsl(var(--background)))",
+               "text": "hsl(var(--foreground) / 0.88)", "muted": "hsl(var(--muted-foreground))"},
+}
+
+
+def derive_shell(doc: dict) -> dict[str, str]:
+    """The frame: the design's own `shell` when it states one, otherwise read
+    off what it did say — the navigation approach, the mobile style, the
+    density and the personality. Deterministic, so the same Blueprint always
+    gets the same frame."""
+    design = doc.get("designSystem") or {}
+    stated = design.get("shell") if isinstance(design.get("shell"), dict) else {}
+    chrome = str(stated.get("chrome") or "")
+    auth = str(stated.get("auth") or "")
+    tone = str(stated.get("tone") or "")
+    nav = doc.get("navigation") or {}
+    approach = str(design.get("navigationApproach") or "").lower()
+    personality = str(design.get("visualPersonality") or "").lower()
+    density = str(design.get("informationDensity") or "comfortable")
+    pages = [p for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("status") != "DEPRECATED"]
+
+    # WHOLE WORDS. "Persistent left sidebar on desktop" contains "top" and
+    # "bar", and read by substring it was a top bar (every app was, first
+    # time round).
+    # THE DESKTOP CLAUSE DECIDES THE FRAME. An approach reads "persistent
+    # left sidebar on desktop; collapses to a bottom tab bar on mobile" —
+    # the phone's tabs are the scaffold's own business, and read whole they
+    # made every app a dock. Only an approach that LEADS with the phone is
+    # mobile-first.
+    desktop = approach if approach.startswith(("mobile-first", "mobile first")) else \
+        re.split(r"\bcollaps|\bon (?:mobile|phones?|small screens|narrow)|\bmobile[:/]|;", approach)[0]
+    said = lambda *words: any(re.search(r"\b" + w + r"\b", desktop) for w in words)  # noqa: E731
+    if chrome not in CHROMES:
+        # `navigation.mobile: tabs` is nearly universal (a phone gets tabs
+        # either way) and says nothing about the desktop frame; only an
+        # approach that leads with the phone earns the dock.
+        if said("bottom tab bar", "tab bar", "bottom tabs", "mobile-first", "mobile first"):
+            chrome = "dock"
+        elif said("top bar", "topbar", "top nav", "top navigation", "header bar") or nav.get("style") == "topbar":
+            chrome = "topbar"
+        elif said("icon rail", "icons", "narrow rail", "minimal rail") or len(pages) <= 4:
+            chrome = "icon-rail"
+        elif said("right"):
+            chrome = "right-rail"
+        elif any(w in personality for w in ("editorial", "playful", "warm", "friendly", "calm")):
+            chrome = "floating-rail"
+        elif density == "compact" or len(pages) >= 14:
+            chrome = "wide-rail"
+        else:
+            chrome = "standard-rail"
+    if auth not in AUTH_LAYOUTS:
+        if chrome == "dock" or any(w in personality for w in ("consumer", "playful", "warm", "friendly")):
+            auth = "brand-wash"
+        elif any(w in personality for w in ("stark", "utility", "minimal", "tool")):
+            auth = "centered-minimal"
+        elif density == "compact" or any(w in personality for w in ("dense", "back-office", "operations")):
+            auth = "top-anchored"
+        elif chrome in ("right-rail", "topbar"):
+            auth = "split-reversed"
+        elif chrome == "icon-rail":
+            auth = "side-panel"
+        else:
+            auth = "split-editorial"
+    if tone not in TONES:
+        # THE RAIL'S PAINT IS THE PERSONALITY'S. Every Blueprint app's rail
+        # was the inverse surface — one navy rail on a warm pediatric app
+        # ("soft sky blue as the calm anchor for navigation", it said) and
+        # a stark tool alike. A design that says nothing gets a tone from its
+        # density, so two apps still differ.
+        # WHOLE WORDS, A SHORT LIST. A personality is a paragraph ("a warm
+        # paper background … not a complex hospital system"), and substrings
+        # read off it made every app one tone.
+        felt = lambda *words: any(re.search(r"\b" + w + r"\b", personality) for w in words)  # noqa: E731
+        if felt("stark", "utility", "minimal", "tool"):
+            tone = "light"
+        elif felt("bold", "vivid", "energetic", "confident", "brand-forward"):
+            tone = "brand"
+        elif felt("warm", "friendly", "playful", "child", "children", "family", "consumer", "gentle"):
+            tone = "tinted"
+        elif density == "compact" or felt("dense", "operations", "back-office", "console"):
+            tone = "dark"
+        else:
+            tone = {"spacious": "light", "comfortable": "tinted"}.get(density, "dark")
+    return {"chrome": chrome, "auth": auth, "tone": tone, "density": density}
+
+
+def project_shell_identity(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write the frame the shell and the sign-in page read (see
+    :data:`SHELL_IDENTITY_PATH`). Idempotent: rewritten from the Blueprint on
+    every projection, like tokens.css."""
+    shell = derive_shell(doc)
+    out = Path(app_root) / SHELL_IDENTITY_PATH
+    out.parent.mkdir(parents=True, exist_ok=True)
+    body = {"_generated": "from the Living Blueprint (designSystem.shell) — edit the Blueprint, not this file",
+            "layout": {"chrome": shell["chrome"], "auth": shell["auth"], "tone": shell["tone"],
+                       "density": shell["density"]},
+            "skin": ""}
+    out.write_text(json.dumps(body, indent=2) + "\n", "utf-8")
+    return {"files": [SHELL_IDENTITY_PATH], **shell}
+
+
 def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/app/tokens.css`` from ``designSystem``.
 
@@ -1709,6 +1861,17 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
         # Headings in the display face without every page having to ask.
         body_rule += ("h1, h2, h3, .font-heading {\n  font-family: var(--font-heading), "
                       "var(--font-body), ui-sans-serif, system-ui, sans-serif;\n}\n")
+    # THE BRAND GRADIENT, AS TWO CLASSES. `bg-gradient-to-br from-gradient-start
+    # to-gradient-end` works too (the tailwind config names both stops); these
+    # are the short spelling pages are told to use, with the primary and the
+    # accent standing in when the design states no gradient of its own.
+    body_rule += (
+        ".bg-brand-gradient {\n  background-image: linear-gradient(135deg, "
+        "hsl(var(--gradient-start, var(--primary))), hsl(var(--gradient-end, var(--accent))));\n"
+        "  color: hsl(var(--gradient-foreground, var(--primary-foreground)));\n}\n"
+        ".text-brand-gradient {\n  background-image: linear-gradient(135deg, "
+        "hsl(var(--gradient-start, var(--primary))), hsl(var(--gradient-end, var(--accent))));\n"
+        "  -webkit-background-clip: text;\n  background-clip: text;\n  color: transparent;\n}\n")
     body = (fonts_import + "html:root {\n" + "\n".join(lines) + "\n}\n" + body_rule) if lines else (
         "/* designSystem states no colour roles yet — the scaffold's own\n"
         "   defaults stand rather than inventing a palette here. */\n")
@@ -2491,7 +2654,7 @@ def _seed_value(field: dict, entity_name: str, row: int,
     if field.get("references") and tables_by_id is not None:
         parent = tables_by_id.get(str(field.get("references")))
         if parent:
-            return f"ref:{parent}[{(row - 1) % 3}]"
+            return f"ref:{parent}[{(row - 1) % SEED_ROWS}]"
     from services.blueprint.page_planner import enum_values
 
     kind = str(field.get("type") or "text").lower()
@@ -2515,7 +2678,13 @@ def _seed_value(field: dict, entity_name: str, row: int,
     if kind in ("bool", "boolean"):
         return row % 2 == 1
     if kind in ("date", "datetime", "timestamp"):
-        return f"2026-0{(row % 9) + 1}-15T09:00:00Z"
+        # Across the six months before today, so a trend has a line to draw.
+        import datetime as _dt
+        first = _dt.date.today().replace(day=1)
+        month = first.month - (row % 6)
+        year = first.year + (month - 1) // 12
+        month = (month - 1) % 12 + 1
+        return f"{year:04d}-{month:02d}-{1 + (row * 5) % 27:02d}T{9 + row % 8:02d}:00:00Z"
     if kind == "email":
         return f"{to_snake(entity_name)}{row}@example.com"
     return f"{entity_name} {row}" if name.lower() in ("name", "title") else \
@@ -2583,7 +2752,13 @@ def _link_target(doc: dict, entity: dict, field: dict) -> str | None:
     return str(account.get("id")) if account and str(account.get("id")) != eid else None
 
 
-def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, Any]:
+#: Demo rows per entity. Three drew a trend chart as one point and a
+#: breakdown as three equal slices; a dozen gives a dashboard something to
+#: say without pretending to be data.
+SEED_ROWS = 12
+
+
+def project_seed(doc: dict, app_root: str | Path, rows: int = SEED_ROWS) -> dict[str, Any]:
     """Write ``src/db/seed.json`` — a few rows per entity.
 
     A preview of an empty database shows empty states everywhere, which looks

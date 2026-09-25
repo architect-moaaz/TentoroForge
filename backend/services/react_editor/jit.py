@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -115,7 +116,23 @@ def _vendored_stamp(project: Project) -> str:
     return h.hexdigest()[:12]
 
 
+_VENDOR_LOCKS: dict[str, threading.Lock] = {}
+_VENDOR_LOCKS_GUARD = threading.Lock()
+
+
+def _vendor_lock(project: Project) -> threading.Lock:
+    """One lock per application: pages looked at in parallel (`page_look`)
+    would otherwise each build the shared script at once."""
+    with _VENDOR_LOCKS_GUARD:
+        return _VENDOR_LOCKS.setdefault(str(project.app_root), threading.Lock())
+
+
 def vendor(project: Project, *, fresh: bool = False, timeout: float = 180.0) -> dict[str, Any]:
+    with _vendor_lock(project):
+        return _vendor(project, fresh=fresh, timeout=timeout)
+
+
+def _vendor(project: Project, *, fresh: bool = False, timeout: float = 180.0) -> dict[str, Any]:
     """The shared script every page of this app runs on — React, the library,
     the icons — built once and cached by what it contains. ``{key, js, specifiers,
     candidates, ms, cached}``; the page build reads the key and candidates."""
@@ -237,6 +254,49 @@ def build(project: Project, page_id: str, *, params: dict[str, str] | None = Non
     for old in builds[5:]:
         old.unlink(missing_ok=True)
     return out
+
+
+LOOK_DIR = "src/.forge-look"
+
+
+def bundle_source(project: Project, doc: dict, page: dict, view: str, load: str, *,
+                  params: dict[str, str] | None = None, search: dict[str, str] | None = None,
+                  timeout: float = 120.0) -> dict[str, Any]:
+    """A page bundled from source that is not (yet) in the Blueprint —
+    `page_look` rendering a candidate as it is written. ``{js, css, vendor}``,
+    the shared script included so the caller can make one document of it.
+
+    The candidate lives in its own place in the tree (`LOOK_DIR`), never in
+    the page's directory: what the app serves stays what was accepted."""
+    params, search = dict(params or {}), dict(search or {})
+    for name in re.findall(r"\[+\.{0,3}([^\].]+)\]+", str(page.get("route") or "")):
+        if not params.get(name):
+            ent = next((e for e in _live((doc.get("data") or {}).get("entities"))
+                        if str(e.get("id")) == str((page.get("data") or {}).get("primaryEntity") or "")), None)
+            params[name] = f"sample-{str(ent.get('name')).lower()}-1" if ent and ent.get("name") else "sample-1"
+    shared = vendor(project)
+    _require_toolchain(project)
+    page_dir = f"{LOOK_DIR}/{page.get('id')}"
+    target = project.app_root / page_dir
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "view.tsx").write_text(view, encoding="utf-8")
+    (target / "load.ts").write_text(load, encoding="utf-8")
+    # AN AUTH PAGE IS THE WHOLE SCREEN. The app draws sign-in and sign-up
+    # without the public top bar (`app_sdk`: the auth frame is a bare grid),
+    # so the look must not add one: the reviewer refused both auth pages of
+    # the first trial for "drawing their own top bar" that was this frame's.
+    access = "authenticated" if str(page.get("pattern") or "") == "auth" else (page.get("access") or "authenticated")
+    payload = {
+        "command": "page",
+        "appRoot": str(project.app_root), "pageId": f"look-{page.get('id')}", "pageDir": page_dir,
+        "route": page.get("route"), "access": access,
+        "entities": _entities_for_samples(doc), "roles": [r.get("name") for r in _live(doc.get("roles")) if r.get("name")],
+        "params": params, "searchParams": search, "shimsDir": str(SHIMS),
+        "vendor": {"specifiers": shared["specifiers"], "candidates": shared["candidates"]},
+    }
+    result = _run(project, payload, timeout=timeout)
+    return {"js": result["js"], "css": result["css"], "vendor": shared["js"],
+            "warnings": result.get("warnings") or []}
 
 
 def _entities_for_samples(doc: dict) -> list[dict]:

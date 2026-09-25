@@ -175,7 +175,9 @@ def test_a_view_of_a_page_is_its_own_destination(tmp_path):
     rail = shell["children"][0]["props"]
     assert [g["route"] for g in rail["groups"]] == ["/tools", "/tools?view=mine", "/tools"]
     assert [t["route"] for t in shell["mobile"]["tabs"]] == ["/tools", "/tools?view=mine"], "one tab per address"
-    assert rail["bg"] == "hsl(var(--inverse))" and rail["accent"] == "hsl(var(--accent))", "painted from the design"
+    from services.blueprint.projection import RAIL_PAINT, derive_shell
+    assert rail["bg"] == RAIL_PAINT[derive_shell(doc)["tone"]]["bg"] and rail["accent"] == "hsl(var(--accent))", \
+        "painted from the design, in the tone it decided"
     bar = (_SHELL / "MobileTabBar.tsx").read_text()
     assert "key={`${t.route}:${t.label}`}" in bar
     layout = (_SHELL / "layout.tsx").read_text()
