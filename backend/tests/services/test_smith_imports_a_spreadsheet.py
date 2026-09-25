@@ -26,7 +26,7 @@ import json
 
 import pytest
 
-from services.blueprint.projection import project_seed
+from services.blueprint.projection import SEED_ROWS, project_seed
 from services.blueprint.service import BlueprintService
 from services.smith import data_import as di
 
@@ -227,7 +227,7 @@ def test_an_imported_entity_stops_being_given_demo_rows(svc, tmp_path):
                     {"name": "name", "type": "string"}]})
     project_seed(svc.doc, app)
     before = json.loads((app / "src" / "db" / "seed.json").read_text())
-    assert len(before["customers"]) == 3        # the demo rows a preview needs
+    assert len(before["customers"]) == SEED_ROWS   # the demo rows a preview needs
 
     _attach(tmp_path)
     report = di.plan(svc.doc, tmp_path, "customers", ignore_columns=["Credit"],
@@ -236,7 +236,7 @@ def test_an_imported_entity_stops_being_given_demo_rows(svc, tmp_path):
 
     after = json.loads((app / "src" / "db" / "seed.json").read_text())
     assert "customers" not in after, "an entity holding real records wants no Customer 1"
-    assert len(after["suppliers"]) == 3, "an entity nobody imported into keeps its demo rows"
+    assert len(after["suppliers"]) == SEED_ROWS, "an entity nobody imported into keeps its demo rows"
 
 
 def test_the_same_file_twice_is_the_same_import(svc, tmp_path):
@@ -370,7 +370,7 @@ def test_undoing_an_import_stops_it_being_loaded(svc, tmp_path):
     assert not payload.exists(), "the payload outlived the declaration"
     # And the demo rows come back, because the entity holds nothing again.
     seed = json.loads((app / "src" / "db" / "seed.json").read_text())
-    assert len(seed["customers"]) == 3
+    assert len(seed["customers"]) == SEED_ROWS
 
 
 def test_what_it_says_about_a_second_attempt_is_true(svc, tmp_path):
