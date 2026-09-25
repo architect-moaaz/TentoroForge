@@ -182,10 +182,10 @@ def remove_entity(svc: Any, ref: str, *, app_root: str | None = None, reasoning:
     files = _project_data(svc, app_root)
     if app_root:
         from services.blueprint.orchestrator import _project_integration
-        from services.blueprint.projection import apply_frontend_projection, project_nav_flow, project_shell
+        from services.blueprint.projection import apply_frontend_projection, project_navigation
         _project_integration(svc, app_root)
         files += [str(f) for f in (apply_frontend_projection(svc, app_root) or {}).get("files", [])]
-        files += list(project_shell(svc.doc, app_root).get("files") or []) + list(project_nav_flow(svc.doc, app_root).get("files") or [])
+        files += project_navigation(svc.doc, app_root)["files"]
     return {"applied": True, "entity": eid, "name": str(ent.get("name")), "pages": routes, "workflows": retired_wfs,
             "relationships": len(deps["relationships"]), "pointing": deps["pointing"], "edited_paths": sorted(set(files))}
 

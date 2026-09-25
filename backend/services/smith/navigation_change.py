@@ -231,10 +231,8 @@ def change_navigation(svc: Any, change: str, *, app_root: str | None = None,
         raise NavigationChangeError(str(out.reason or "the change was refused"))
     files: list[str] = []
     if app_root:
-        from services.blueprint.projection import project_nav_flow, project_root_route, project_shell
-        files += project_shell(svc.doc, app_root).get("files") or []
-        files += project_nav_flow(svc.doc, app_root).get("files") or []
-        files += project_root_route(svc.doc, app_root).get("files") or []
+        from services.blueprint.projection import project_navigation
+        files += project_navigation(svc.doc, app_root)["files"]
     after = svc.doc.get("navigation") or {}
     return {"applied": True, "before": _labels(before), "after": _labels(after),
             "landing": ((after.get("initialRoute") or {}).get("default") if isinstance(after.get("initialRoute"), dict) else None),
