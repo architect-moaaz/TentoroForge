@@ -371,10 +371,38 @@ def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
     tag = str((doc.get("product") or {}).get("locale") or "").strip() or "en"
     base = tag.replace("_", "-").split("-")[0].lower()
 
+    # WHERE "RETURN TO" GOES IS WHO IS ASKING. nav-flow carries the per-role
+    # landing map (`initialFor`, written by `project_nav_flow` from the
+    # Blueprint's `navigation.initialRoute`) and the signed-in front door
+    # (`entries.authenticated`); the 403 page inlines the map and falls back
+    # to the door. One route for everyone sent an administrator "back" to the
+    # doctor's page and so straight back to the 403 (nlwtcyz5). The map is
+    # read through the emitter's reader — the same one the root redirect
+    # uses — so there is one per-role map, not two. Before nav-flow exists
+    # (the scaffold is laid down at second zero and filled again on
+    # assembly) the map is empty and the door is derived from the pages.
+    from services.app_emitter import landing_for, landing_map_literal
+
+    nav_flow: dict = {}
+    nav_path = Path(app_root) / "src" / "contracts" / "nav-flow.json"
+    if nav_path.is_file():
+        try:
+            loaded = json.loads(nav_path.read_text("utf-8"))
+            nav_flow = loaded if isinstance(loaded, dict) else {}
+        except Exception:  # noqa: BLE001
+            nav_flow = {}
+    entries = nav_flow.get("entries") if isinstance(nav_flow.get("entries"), dict) else {}
+    door = entries.get("authenticated")
+    if isinstance(door, str) and door.startswith("/") and "[" not in door:
+        home_route = door
+    else:
+        home_route = _landing_route(doc)
+
     values = {
         "{{app_name}}": app_name,
         "{{app_initial}}": initial,
-        "{{home_route}}": _landing_route(doc),
+        "{{home_route}}": home_route,
+        "{{landing_for}}": landing_map_literal(landing_for(nav_flow)),
         "__APP_LOCALE__": tag,
         "__APP_DIR__": "rtl" if base in _RTL_LANGUAGES else "ltr",
     }

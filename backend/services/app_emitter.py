@@ -239,6 +239,34 @@ def _is_safe_landing(route: object, page: object = None) -> bool:
     return True
 
 
+def landing_for(nav: dict) -> dict[str, str]:
+    """Where each role lands, from nav-flow's ``initialFor`` — the ONE per-role
+    map a generated app carries. The root redirect reads it (through
+    :func:`derive_root_redirect`, which also refuses "/" because a root
+    redirect to "/" loops) and the 403 page reads it for its "Return to"
+    link, where "/" is a perfectly good destination.
+
+    Only linkable routes survive: a pattern like ``/survey/[slug]`` has no id
+    to fill and Next refuses it as an href.
+    """
+    raw = nav.get("initialFor") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {role.strip(): route for role, route in raw.items()
+            if isinstance(role, str) and role.strip()
+            and isinstance(route, str) and route.startswith("/") and "[" not in route}
+
+
+def landing_map_literal(routes: dict[str, str]) -> str:
+    """``{role: route}`` as a TypeScript object literal, inlined at generation
+    time so the page needs no JSON import at runtime."""
+    entries = ",\n".join(
+        f'  {_json.dumps(role)}: {_json.dumps(route)}'
+        for role, route in sorted(routes.items())
+    )
+    return "{\n" + entries + "\n}" if entries else "{}"
+
+
 def derive_root_redirect(nav: dict) -> tuple[dict[str, str], str]:
     """Compute (INITIAL_FOR per-role map, DEFAULT_INITIAL) for a generated app's
     root redirect (src/app/page.tsx) from its nav-flow. Every returned route is
@@ -256,12 +284,8 @@ def derive_root_redirect(nav: dict) -> tuple[dict[str, str], str]:
     by_id = {p.get("id"): p for p in pages if isinstance(p, dict)}
     by_route = {p.get("route"): p for p in pages if isinstance(p, dict)}
 
-    initial_for: dict[str, str] = {}
-    raw_map = nav.get("initialFor") or {}
-    if isinstance(raw_map, dict):
-        for role, route in raw_map.items():
-            if isinstance(role, str) and _is_safe_landing(route, by_route.get(route)):
-                initial_for[role.strip()] = route
+    initial_for = {role: route for role, route in landing_for(nav).items()
+                   if _is_safe_landing(route, by_route.get(route))}
 
     _ip = by_id.get(nav.get("initialPage")) or {}
     candidates = [
@@ -433,11 +457,7 @@ def emit_standalone_app(*, output_dir: str | Path, project_short_id: str) -> Non
         # Emit the session-aware root redirect. The map is inlined at
         # generation time so we don't need `import json from "..."` at
         # runtime — simpler + one less thing that can break.
-        map_entries = ",\n".join(
-            f'  {_json.dumps(role)}: {_json.dumps(route)}'
-            for role, route in sorted(initial_for.items())
-        )
-        map_body = "{\n" + map_entries + "\n}" if map_entries else "{}"
+        map_body = landing_map_literal(initial_for)
         _page_tsx = out / "src" / "app" / "page.tsx"
         if default_initial == "/" and not initial_for:
             # "/" is already served by the (dashboard) route group; a root

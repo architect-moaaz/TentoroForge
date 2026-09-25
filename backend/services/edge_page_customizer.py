@@ -1,7 +1,7 @@
 """Spec C5 — Edge-page customizer.
 
-Substitutes ``{{app_name}}``, ``{{app_initial}}``, ``{{home_route}}``
-templates in the copied edge pages (``not-found.tsx``, ``error.tsx``,
+Substitutes ``{{app_name}}``, ``{{app_initial}}``, ``{{home_route}}``,
+``{{landing_for}}`` templates in the copied edge pages (``not-found.tsx``, ``error.tsx``,
 ``forbidden.tsx``, ``loading.tsx``, ``maintenance.tsx`` +
 ``components/EdgePageFrame.tsx``) with per-app values pulled from
 project settings + nav-flow.
@@ -125,6 +125,16 @@ def _derive_home_route(output_dir: Path) -> str:
     return "/"
 
 
+def _derive_landing_for(output_dir: Path) -> str:
+    """The 403 page's per-role "Return to" map, as a TS literal: nav-flow's
+    ``initialFor`` through the emitter's one reader, ``{}`` when there is none
+    (the page then falls back to ``home_route`` for everyone)."""
+    from services.app_emitter import landing_for, landing_map_literal
+
+    nav = _read_json(output_dir / "src/contracts/nav-flow.json")
+    return landing_map_literal(landing_for(nav if isinstance(nav, dict) else {}))
+
+
 def _substitute(text: str, subs: dict[str, str]) -> str:
     def _sub(m: re.Match) -> str:
         key = m.group(1).lower()
@@ -162,6 +172,7 @@ def customize_edge_pages(
         "app_name": name,
         "app_initial": _initial(name),
         "home_route": home,
+        "landing_for": _derive_landing_for(root),
     }
 
     files_changed = 0

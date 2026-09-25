@@ -1136,11 +1136,29 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
         if concrete:
             entry_by_access["authenticated"] = concrete
 
+    # WHERE EACH KIND OF USER LANDS. The Blueprint's `navigation.initialRoute`
+    # says it per role ("admin": "/admin", "parent": "/"); the session carries
+    # the role's NAME, so the map is keyed by that, matched to the Blueprint's
+    # keys case-insensitively. `default` and any key naming no role are not
+    # a person's landing and are left out. This is the `initialFor` the
+    # emitter's root redirect has always read and the 403 page's "Return to"
+    # link now reads — one map, projected once.
+    by_lower = {str(r.get("name")).lower(): str(r.get("name"))
+                for r in roles.values() if isinstance(r, dict) and r.get("name")}
+    declared = (doc.get("navigation") or {}).get("initialRoute")
+    initial_for: dict[str, str] = {}
+    for key, route in (declared.items() if isinstance(declared, dict) else ()):
+        name = by_lower.get(str(key).strip().lower())
+        if name and isinstance(route, str) and route.startswith("/") and "[" not in route:
+            initial_for[name] = route
+
     out = Path(app_root) / "src" / "contracts"
     out.mkdir(parents=True, exist_ok=True)
     (out / "nav-flow.json").write_text(json.dumps({
         "version": "1.0",
         "pages": entries,
+        # Per role, by the role's name. Absent when the Blueprint names none.
+        **({"initialFor": initial_for} if initial_for else {}),
         # The guards read this as "reachable without a session".
         "public_routes": sorted(set(public_routes)),
         "auth_routes": sorted(set(gated_routes)),
