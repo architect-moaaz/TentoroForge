@@ -167,6 +167,7 @@ def test_a_section_change_is_committed_and_reprojected(tmp_path, monkeypatch):
     monkeypatch.setattr("services.smith.entity_change._project_data", lambda s, root: ["app/src/db/schema/nurses.ts"])
     out = writes.write_section(str(tmp_path), "data.entities", "rename Nurse to Colleague")
     assert out["applied"] and out["version"] == 8 and "nurse" in out["said"]
+    assert "the kinds of record it keeps" in out["said"] and "data.entities" not in out["said"]
     assert out["touched"] == ["app/src/db/schema/nurses.ts"]
     assert briefs[0][0] == "entity_fields" and "THIS IS A CHANGE" in briefs[0][1]
 
@@ -190,3 +191,7 @@ def test_the_three_refusals_now_go_through_write_section(tmp_path, monkeypatch):
     assert "Nurse List" in out.said                     # what still says the old name
     section_write(ctx, {"verb": "edit_api", "api": "GET /api/x", "change": "take a range"})
     assert calls[1][0] == "apis" and "GET /api/x" in calls[1][1]
+
+
+def test_every_section_the_loop_can_change_has_words_for_the_person():
+    assert set(writes.SECTION_WORDS) == set(writes.SECTION_NODE)

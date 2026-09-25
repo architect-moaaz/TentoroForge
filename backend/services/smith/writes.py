@@ -71,6 +71,29 @@ SECTION_NODE: dict[str, str] = {
     "widgets": "analytics",
 }
 
+#: What each section is called to the person. The key is for the tool call;
+#: "Changed **data.entities**" is a sentence nobody outside the platform can
+#: read.
+SECTION_WORDS: dict[str, str] = {
+    "data.entities": "the kinds of record it keeps",
+    "data.relationships": "how its records relate",
+    "data.constraints": "the constraints on its records",
+    "apis": "its endpoints",
+    "integrations": "the outside services it talks to",
+    "businessRules": "its rules",
+    "permissions": "who may do what",
+    "roles": "its roles",
+    "security": "its security model",
+    "workflows": "its processes",
+    "designSystem": "how it looks",
+    "navigation": "its menu",
+    "modules": "how it is organised",
+    "pages": "its screens",
+    "requirements": "what it has to do",
+    "product": "what it is",
+    "widgets": "its charts and counts",
+}
+
 WRITES = WRITES + (
     ("write_section",
      "Change one section of the Blueprint by briefing the agent that owns it — "
@@ -190,9 +213,9 @@ def write_section(output_dir: str, section: str, brief: str, *, subject: str = "
     after = int(svc.doc.get("version") or before)
     changed = ", ".join(sorted({str(getattr(p, "natural_key", "") or "") for p in props if getattr(p, "natural_key", "")})[:8])
     return {"applied": True, "finding": "", "touched": touched, "version": after,
-            "said": (f"Changed **{section}** (version {after})"
+            "said": (f"Changed {SECTION_WORDS.get(section, section)} (version {after})"
                      + (f": {changed}" if changed else "") + "."
-                     + (f" Re-projected: {', '.join(touched[:6])}." if touched else ""))}
+                     + (f" Updated: {', '.join(touched[:6])}." if touched else ""))}
 
 
 def _reproject(svc: Any, app_root: str, section: str) -> list[str]:
@@ -283,4 +306,4 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     raise KeyError(name)
 
 
-__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "run", "verify_pages", "write_page_code", "write_section"]
+__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "SECTION_WORDS", "run", "verify_pages", "write_page_code", "write_section"]

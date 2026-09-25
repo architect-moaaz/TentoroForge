@@ -315,3 +315,11 @@ def test_an_answer_with_no_words_is_an_error_too(tmp_path):
                        {"tool": "answer", "args": {"text": "It does."}, "why": ""})
     result = _turn(tmp_path, chooser, "does it?")
     assert chooser.seen[1][-1].status == "error" and result.said == "It does."
+
+
+def test_the_prompt_forbids_the_platforms_own_words():
+    """Live on smithv2: "a personal health matter the Blueprint does not cover".
+    The person has never heard of the Blueprint; it is their application."""
+    from services.smith.loop import _PROMPT
+    assert "SPEAK THE PERSON'S LANGUAGE" in _PROMPT
+    assert 'never "the Blueprint"' in _PROMPT and "PAGE-014" in _PROMPT
