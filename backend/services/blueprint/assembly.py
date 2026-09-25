@@ -874,11 +874,14 @@ def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
     shortfall should end a run is the caller's decision, and `_project_assemble`
     records it either way. Reporting it is the part that was missing.
     """
+    from services.blueprint.app_sdk import code_page_dir
+
     root = Path(app_root)
-    planned = {
-        str(p.get("route")) for p in (doc.get("pages") or [])
-        if isinstance(p, dict) and p.get("route")
-    }
+    # A RETIRED PAGE IS NOT A PLANNED PAGE. /doctor, retired during the
+    # build, was counted as planned and reported "not served" (i3i950po).
+    live = [p for p in (doc.get("pages") or [])
+            if isinstance(p, dict) and p.get("route") and p.get("status") != "DEPRECATED"]
+    planned = {str(p.get("route")) for p in live}
     registry = root / "src" / "schemas" / "registry.ts"
     served: set[str] = set()
     if registry.exists():
@@ -886,6 +889,17 @@ def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
         # per line. Read rather than re-derived, so this cannot agree with the
         # Blueprint by construction and disagree with the app.
         served = set(re.findall(r'"([^"]+)":\s*\(\)\s*=>', registry.read_text("utf-8")))
+    # A PAGE WRITTEN AS REACT IS SERVED BY ITS OWN FILE, NOT THE REGISTRY.
+    # The registry lists the engine-rendered schemas; a coded page lives at
+    # its directory under src/app with its view and load. Read off the tree,
+    # like the registry, so a page whose code was never projected still
+    # counts as missing. /login, /signup and /appointments were coded, on
+    # disk and serving, and reported "not served" (i3i950po, 2026-09-25).
+    coded = {str(r.get("page")): r for r in (doc.get("pageCode") or [])
+             if isinstance(r, dict) and r.get("status") != "DEPRECATED"}
+    for page in live:
+        if str(page.get("id")) in coded and (root / code_page_dir(page) / "view.tsx").is_file():
+            served.add(str(page.get("route")))
 
     # A FALLBACK IS A ROUTE THAT ANSWERS, NOT A PAGE THAT WAS BUILT. The
     # placeholder `plan_pages` writes for a page nothing composed is

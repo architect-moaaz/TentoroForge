@@ -2927,6 +2927,18 @@ def pin_page_identity(svc: Any, subject: str, result: AgentResult) -> None:
     declared = feature_pages(svc.doc, subject)
     by_id = {str(p.get("id")): p for p in declared}
     by_route = {page_key(str(p.get("route") or "")): p for p in declared}
+    # A PAGE THAT MOVED SUBJECTS IS STILL A DECLARED PAGE. Subjects are read
+    # off the document each time (`_feature_groups`: an entity's pages, or a
+    # page with no entity on its own), so a contract that ADDS its primary
+    # entity — which the content check asks for by name — moves the page
+    # into the entity's subject, and the next reply for the old subject
+    # finds nothing declared under it: /doctor was dropped and, the reply
+    # replacing what stood, retired (i3i950po, 2026-09-25). What this guard
+    # is for is a page the author invented; a page declared anywhere in the
+    # document is not that, whichever subject writes it now.
+    live = [p for p in (svc.doc.get("pages") or []) if isinstance(p, dict) and p.get("status") != "DEPRECATED"]
+    any_id = {str(p.get("id")): p for p in live}
+    any_route = {page_key(str(p.get("route") or "")): p for p in live}
     try:
         alloc = IdAllocator.load(output_dir=svc.output_dir)
     except Exception:  # noqa: BLE001 — fall back to the route, which bound it
@@ -2940,7 +2952,9 @@ def pin_page_identity(svc: Any, subject: str, result: AgentResult) -> None:
         body = dict(proposal.body or {})
         row = by_id.get(str(body.get("id") or "")) \
             or by_route.get(page_key(str(body.get("route") or ""))) \
-            or by_route.get(page_key(str(proposal.natural_key or "").removeprefix("PAGE:")))
+            or by_route.get(page_key(str(proposal.natural_key or "").removeprefix("PAGE:"))) \
+            or any_id.get(str(body.get("id") or "")) \
+            or any_route.get(page_key(str(body.get("route") or "")))
         if row is None:
             logger.warning("[page_details] %s: dropped a page outside the feature: %s",
                            subject, body.get("route") or proposal.natural_key)
