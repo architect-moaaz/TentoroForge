@@ -141,3 +141,18 @@ def test_each_role_is_a_distinguishable_user():
     subs = {s.sub for s in out.values()}
     assert len(subs) == 3
     assert out["ROLE-002"].email == "hiring.manager@example.com"
+
+
+# --- the app's own cookie name ----------------------------------------------
+
+def test_the_cookie_is_also_named_the_way_the_app_names_it():
+    """session-cookie.ts: `forge-<FNV-1a of the secret>.session-token`. The
+    fingerprints are the template's own function run in node on these
+    secrets, so a drift in the Python port is caught here, not by a review
+    landing on /login."""
+    from services.preview_session import cookie_names, cookies
+    assert cookie_names(PREVIEW_SECRET) == ["forge-dfdcd746.session-token", "next-auth.session-token"]
+    assert cookie_names("dev-secret")[0] == "forge-9543efe3.session-token"
+    both = cookies(Session(), base_url="http://localhost:3000")
+    assert [c["name"] for c in both] == cookie_names(PREVIEW_SECRET)
+    assert len({c["value"] for c in both}) == 1 and all(c["domain"] == "localhost" for c in both)

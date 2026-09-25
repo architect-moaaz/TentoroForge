@@ -42,18 +42,18 @@ await emptyCtx.addCookies([...(await ctx.cookies()),
   { name: "forge-review-empty", value: "1", url: cfg.baseUrl }]);
 
 // A page restricted to a role the administrator does not hold arrives with
-// the `cookie` of a session minted for that role; it is opened — and its
-// controls pressed, and its record found — as that person. One pair of
-// contexts per distinct session.
+// the `cookies` of a session minted for that role (one per name the app
+// might read); it is opened — and its controls pressed, and its record
+// found — as that person. One pair of contexts per distinct session.
 const byCookie = new Map();
 async function contextsFor(p) {
-  if (!p.cookie) return { ctx, emptyCtx };
-  const key = p.cookie.value;
+  if (!p.cookies?.length) return { ctx, emptyCtx };
+  const key = p.cookies[0].value;
   if (!byCookie.has(key)) {
     const own = await browser.newContext({ viewport });
-    await own.addCookies([p.cookie]);
+    await own.addCookies(p.cookies);
     const ownEmpty = await browser.newContext({ viewport });
-    await ownEmpty.addCookies([p.cookie, { name: "forge-review-empty", value: "1", url: cfg.baseUrl }]);
+    await ownEmpty.addCookies([...p.cookies, { name: "forge-review-empty", value: "1", url: cfg.baseUrl }]);
     byCookie.set(key, { ctx: own, emptyCtx: ownEmpty });
   }
   return byCookie.get(key);

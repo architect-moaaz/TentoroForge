@@ -41,7 +41,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from services.preview_session import Session, boot_env, cookie
+from services.preview_session import Session, boot_env, cookies
 
 logger = logging.getLogger(__name__)
 
@@ -279,8 +279,8 @@ def login_of_role(app: RunningApp, doc: dict, role: str) -> tuple[str, str] | No
 
 def who_opens(app: RunningApp, doc: dict, page: dict) -> dict[str, Any]:
     """Who the browser is signed in as for `page`: `{"as": name}` and, for a
-    page the administrator's role does not open, the `cookie` of a session
-    minted for the page's first role."""
+    page the administrator's role does not open, the `cookies` of a session
+    minted for the page's first role (one per name the app might read)."""
     from services.blueprint.account_model import admin_role
 
     roles = {str(r.get("id")): str(r.get("name") or r.get("id")) for r in doc.get("roles") or []
@@ -295,7 +295,7 @@ def who_opens(app: RunningApp, doc: dict, page: dict) -> dict[str, Any]:
                   role=role) if found else \
         Session(sub=f"preview-{users[0].lower()}", name=f"{role} (preview)",
                 email=f"{role.lower().replace(' ', '.')}@example.com", role=role)
-    return {"as": f"{who.name} ({role})", "cookie": cookie(who, base_url=app.base)}
+    return {"as": f"{who.name} ({role})", "cookies": cookies(who, base_url=app.base)}
 
 
 def shoot(app: RunningApp, doc: dict, page_ids: list[str], out_dir: Path) -> list[dict]:

@@ -44,9 +44,10 @@ def _app(rows=None):
     return app
 
 
-def _claims(cookie: dict) -> dict:
+def _claims(cookie: dict | list) -> dict:
     from jose import jwe
-    return json.loads(jwe.decrypt(cookie["value"], derive_key(PREVIEW_SECRET)))
+    first = cookie[0] if isinstance(cookie, list) else cookie
+    return json.loads(jwe.decrypt(first["value"], derive_key(PREVIEW_SECRET)))
 
 
 def test_a_page_the_administrator_opens_is_opened_as_them(monkeypatch):
@@ -69,10 +70,12 @@ def test_a_page_for_another_role_is_opened_as_a_login_of_that_role(monkeypatch):
     monkeypatch.setattr(pr, "_query", query)
     who = pr.who_opens(_app(), DOC, DOC["pages"][2])
     assert who["as"] == "Max (Parent)"
-    claims = _claims(who["cookie"])
+    claims = _claims(who["cookies"])
     assert claims["id"] == claims["sub"] == "a45fb2de-1c30-41c1-9576-bf04b508a822"
     assert claims["role"] == "Parent"                 # the NAME: what the app's guards compare
-    assert who["cookie"]["name"] == "next-auth.session-token"
+    # The app's own cookie name first (session-cookie.ts derives it from the
+    # secret), next-auth's default for apps built before that.
+    assert [c["name"] for c in who["cookies"]] == ["forge-dfdcd746.session-token", "next-auth.session-token"]
 
 
 def test_with_no_login_of_the_role_any_account_row_stands_in(monkeypatch):
@@ -85,14 +88,14 @@ def test_with_no_login_of_the_role_any_account_row_stands_in(monkeypatch):
     monkeypatch.setattr(pr, "_query", query)
     who = pr.who_opens(_app(), DOC, DOC["pages"][2])
     assert who["as"] == "Parent (preview) (Parent)"
-    assert _claims(who["cookie"])["sub"] == "c06ab306-5c30-4dac-b5de-94c757300cfb"
+    assert _claims(who["cookies"])["sub"] == "c06ab306-5c30-4dac-b5de-94c757300cfb"
 
 
 def test_with_nothing_in_the_database_the_role_alone_is_minted(monkeypatch):
     monkeypatch.setattr(pr, "_query", lambda app, sql: [])
     who = pr.who_opens(_app(), DOC, DOC["pages"][2])
-    assert _claims(who["cookie"])["sub"] == "preview-role-001"
-    assert _claims(who["cookie"])["role"] == "Parent"
+    assert _claims(who["cookies"])["sub"] == "preview-role-001"
+    assert _claims(who["cookies"])["role"] == "Parent"
 
 
 def test_the_shot_config_carries_who_opens_each_page(monkeypatch, tmp_path):
@@ -108,8 +111,8 @@ def test_the_shot_config_carries_who_opens_each_page(monkeypatch, tmp_path):
     pr.shoot(_app(), DOC, ["PAGE-003", "PAGE-009"], tmp_path / "round-1")
     pages = {p["id"]: p for p in seen["cfg"]["pages"]}
     assert seen["cfg"]["email"] == pr.ADMIN_EMAIL
-    assert pages["PAGE-003"]["as"] == "Admin" and "cookie" not in pages["PAGE-003"]
-    assert pages["PAGE-009"]["as"] == "Parent (preview) (Parent)" and pages["PAGE-009"]["cookie"]["value"]
+    assert pages["PAGE-003"]["as"] == "Admin" and "cookies" not in pages["PAGE-003"]
+    assert pages["PAGE-009"]["as"] == "Parent (preview) (Parent)" and len(pages["PAGE-009"]["cookies"]) == 2
 
 
 def test_the_review_server_is_booted_with_the_preview_secret():
@@ -119,7 +122,7 @@ def test_the_review_server_is_booted_with_the_preview_secret():
 
 def test_the_shot_script_opens_a_page_in_its_own_session():
     src = pr._SHOTS.read_text()
-    assert "contextsFor(p)" in src and "own.addCookies([p.cookie])" in src
+    assert "contextsFor(p)" in src and "own.addCookies(p.cookies)" in src
     assert "press(who.ctx, url, c)" in src and "firstId(who.ctx, p.entity)" in src
     assert "as: p.as" in src and "state: main.state" in src
 

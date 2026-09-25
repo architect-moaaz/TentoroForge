@@ -150,6 +150,36 @@ def cookie(
     }
 
 
+def _fnv1a(secret: str) -> str:
+    """The app's `fingerprint` (templates/app-foundation/src/lib/session-cookie.ts):
+    FNV-1a over the secret's UTF-16 code units, as eight hex digits."""
+    h = 0x811C9DC5
+    for ch in secret:
+        h ^= ord(ch)
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return f"{h:08x}"
+
+
+def cookie_names(secret: str = PREVIEW_SECRET) -> list[str]:
+    """The names a generated app reads its session from, over http.
+
+    An app names its cookie `forge-<fingerprint of its secret>.session-token`
+    so two apps on localhost stop overwriting each other's session
+    (session-cookie.ts, 2026-09-21); apps built before that read next-auth's
+    default. A browser given both signs in to either — the review of
+    nlwtcyz5 as a Parent landed on /login until it did (2026-09-25)."""
+    return [f"forge-{_fnv1a(secret)}.session-token", COOKIE_NAME]
+
+
+def cookies(
+    session: Session, *, base_url: str, secret: str = PREVIEW_SECRET,
+    now: int | None = None,
+) -> list[dict[str, Any]]:
+    """One cookie per name the app might read, all carrying the session."""
+    first = cookie(session, base_url=base_url, secret=secret, now=now)
+    return [{**first, "name": name} for name in cookie_names(secret)]
+
+
 def boot_env(base_url: str, secret: str = PREVIEW_SECRET) -> dict[str, str]:
     """What the preview must be booted with for the cookie to be accepted.
 
