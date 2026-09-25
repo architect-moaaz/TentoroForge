@@ -150,3 +150,16 @@ def test_the_loop_reads_the_open_decisions_then_asks_one(tmp_path, monkeypatch):
                  move=lambda u, o: None)
     assert chooser.seen[1][-1].status == "read" and "Which language?" in chooser.seen[1][-1].said
     assert out.status == "asked" and out.options == ["English", "Arabic"]
+
+
+def test_the_routers_work_does_not_rebind_the_chat_handler_locally():
+    """Live: "cannot access local variable 'handle_chat_v2' where it is not
+    associated with a value". A local import inside `work()` made the name
+    local to the whole function; the defined path skipped the import."""
+    import ast, inspect
+    import routers.blueprint_generate as bg
+    tree = ast.parse(inspect.getsource(bg.smith_chat))
+    work = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "work")
+    bound_locally = {a.asname or a.name for n in ast.walk(work) if isinstance(n, ast.ImportFrom)
+                     for a in n.names}
+    assert "handle_chat_v2" not in bound_locally and "ChatV2Request" not in bound_locally

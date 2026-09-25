@@ -1582,7 +1582,10 @@ async def smith_chat(
                 from services.smith.figma_connect import find_in as _figma_in
                 from services.smith.uxpilot_connect import find_in as _uxpilot_in
                 from services.smith4.context import defined as _defined_now
-                from services.smith_chat_v2 import ChatV2Request, handle_chat_v2
+                # `ChatV2Request` / `handle_chat_v2` come from the enclosing
+                # scope. Importing them HERE made both local to `work()`, and
+                # the defined path — which skips this branch — met
+                # `handle_chat_v2` unbound (live, 2026-09-25).
 
                 _the_brief = _brief_with_documents(_brief_from(req.history, req.message), req.evidence)
                 named_design = _figma_in(_the_brief) or _uxpilot_in(_the_brief)
