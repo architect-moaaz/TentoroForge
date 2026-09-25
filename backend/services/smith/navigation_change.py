@@ -44,7 +44,18 @@ NAV_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "style": {"type": "string", "enum": ["sidebar", "topbar", "hybrid"]},
-        "initialRoute": {"type": "string", "description": "the route the app opens on, e.g. /master-data; \"\" to keep"},
+        "initialRoute": {
+            "type": "array",
+            "description": "where the app opens, per kind of user: `for` is \"default\" or one of the role "
+                           "names given, `route` a route from the pages given. Only the landings the request "
+                           "changes; [] keeps every landing as it is",
+            "items": {
+                "type": "object",
+                "properties": {"for": {"type": "string"}, "route": {"type": "string"}},
+                "required": ["for", "route"],
+                "additionalProperties": False,
+            },
+        },
         "tree": {
             "type": "array",
             "items": {
@@ -123,18 +134,65 @@ def validate(doc: dict, nav: dict) -> list[str]:
             seen.add(pid)
         elif not kids:
             problems.append(f"{n.get('label')!r} opens nothing and holds nothing")
+    # EVERY LANDING, NOT JUST THE DEFAULT. `initialRoute` is a map per kind of
+    # user, and each entry is a door someone is sent through.
     initial = nav.get("initialRoute")
-    if isinstance(initial, dict):
-        initial = initial.get("default")
-    if initial and (str(initial) not in routes or not _navigable(str(initial))):
-        problems.append(f"the landing route {initial!r} is not a page's concrete route")
+    landings = initial if isinstance(initial, dict) else ({"default": initial} if initial else {})
+    kinds = {"default"} | {k.lower() for k in _role_keys(doc)}
+    for who, route in landings.items():
+        if str(who).lower() not in kinds:
+            problems.append(f"{who!r} is not a kind of user of this application, so it has no landing")
+        if route and (str(route) not in routes or not _navigable(str(route))):
+            problems.append(f"the landing route {route!r} for {who} is not a page's concrete route")
     if nav.get("style") and nav["style"] not in ("sidebar", "topbar", "hybrid"):
         problems.append(f"style {nav['style']!r} is not sidebar, topbar or hybrid")
     return problems
 
 
+def _role_keys(doc: dict) -> list[str]:
+    """The kinds of user a landing may be declared for: each role's name and
+    id, as the Blueprint's `initialRoute` may be keyed by either."""
+    out: list[str] = []
+    for r in doc.get("roles") or []:
+        if not isinstance(r, dict) or r.get("status") == "DEPRECATED":
+            continue
+        out += [str(v) for v in (r.get("name"), r.get("id")) if v]
+    return out
+
+
+def _landings(doc: dict, before: dict, answer: Any) -> dict:
+    """The landing map after the answer: the entries it names laid over the
+    ones that stand.
+
+    The map is per kind of user ("default", and one per role). The reply used
+    to carry one string and the verb wrote `{"default": it}` — so "put Master
+    Data first" silently took away every role's own landing, and the 403 page's
+    per-role map emptied with it. Now an entry changes only the kind it names;
+    a role the reply is silent about keeps its door. A key is matched to the
+    map's own spelling case-insensitively ("admin" answers for "Admin"), and a
+    bare string still means the default.
+    """
+    current = dict(before.get("initialRoute") or {}) if isinstance(before.get("initialRoute"), dict) else {}
+    if isinstance(answer, str):
+        entries = [{"for": "default", "route": answer}] if answer else []
+    elif isinstance(answer, dict):
+        entries = [{"for": k, "route": v} for k, v in answer.items()]
+    else:
+        entries = [e for e in (answer or []) if isinstance(e, dict)]
+    spelled = {k.lower(): k for k in current}
+    spelled.update({k.lower(): k for k in _role_keys(doc) if k.lower() not in spelled})
+    for e in entries:
+        who, route = str(e.get("for") or "").strip(), str(e.get("route") or "").strip()
+        if not who or not route:
+            continue
+        current[spelled.get(who.lower(), who)] = route
+    return current
+
+
 def _prompt(doc: dict, change: str) -> tuple[str, str]:
     nav = doc.get("navigation") or {}
+    roles = [str(r.get("name")) for r in (doc.get("roles") or [])
+             if isinstance(r, dict) and r.get("name") and r.get("status") != "DEPRECATED"]
     system = (
         "You revise the navigation of an application that is already built — the menu the "
         "app shell renders: its entries, their order, their labels and icons, optional group "
@@ -147,13 +205,17 @@ def _prompt(doc: dict, change: str) -> tuple[str, str]:
         "- A page appears at most once. Removing a page from the menu hides it; the page "
         "still exists.\n"
         "- A group heading has children and no page; it must hold at least one entry.\n"
-        "- `initialRoute` is a route from the pages given, or \"\" to leave it as it is.\n"
+        "- `initialRoute` is where the app opens, per kind of user: an entry for \"default\" and "
+        "one per role name given, each a route from the pages given. Return only the landings the "
+        "request changes; a kind of user you leave out keeps its landing.\n"
         "- If part of the request cannot be honoured (the page does not exist, the entry is "
         "already as asked), do what can be done and say the rest in `note`."
     )
+    kinds_note = '(one kind of user; only "default" applies)'
     user = (
         f"The request: \"{change}\".\n\n"
         f"The pages:\n{json.dumps(pages_brief(doc), indent=1)}\n\n"
+        f"The kinds of user (roles): {', '.join(roles) or kinds_note}\n\n"
         f"The navigation as it stands:\n{json.dumps(nav, indent=1)}\n\n"
         "Return the whole navigation as it should be after the change."
     )
@@ -203,8 +265,7 @@ def change_navigation(svc: Any, change: str, *, app_root: str | None = None,
             continue
         revised = {"style": data.get("style") or before.get("style") or "sidebar",
                    "tree": data.get("tree") or [],
-                   "initialRoute": ({"default": data["initialRoute"]} if data.get("initialRoute")
-                                    else (before.get("initialRoute") or {}))}
+                   "initialRoute": _landings(svc.doc, before, data.get("initialRoute"))}
         for n in _walk(revised["tree"]):
             if "children" in n and not n["children"]:
                 n.pop("children")
@@ -234,8 +295,11 @@ def change_navigation(svc: Any, change: str, *, app_root: str | None = None,
         from services.blueprint.projection import project_navigation
         files += project_navigation(svc.doc, app_root)["files"]
     after = svc.doc.get("navigation") or {}
+    landings = after.get("initialRoute") if isinstance(after.get("initialRoute"), dict) else {}
     return {"applied": True, "before": _labels(before), "after": _labels(after),
-            "landing": ((after.get("initialRoute") or {}).get("default") if isinstance(after.get("initialRoute"), dict) else None),
+            "landing": landings.get("default"),
+            "landings": {k: v for k, v in landings.items() if k != "default"
+                         and v != (before.get("initialRoute") or {}).get(k)},
             "style": after.get("style"), "note": note, "version": out.version, "edited_paths": files}
 
 
@@ -246,6 +310,8 @@ def summary_of(out: dict, change: str) -> str:
     s += "."
     if out.get("landing"):
         s += f" The app opens on {out['landing']}."
+    for who, route in (out.get("landings") or {}).items():
+        s += f" {who} opens on {route}."
     if out.get("note"):
         s += f" {out['note']}"
     return s

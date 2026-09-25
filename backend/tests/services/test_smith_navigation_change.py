@@ -109,3 +109,69 @@ def test_a_menu_returned_unchanged_is_not_a_change(svc):
         nc.change_navigation(svc, "put registration first", app_root=None, client=_client([same]))
 
 
+
+
+def _with_roles(svc):
+    """Three kinds of user, each with a door of its own."""
+    svc.doc["roles"] = [{"id": "ROLE-001", "name": "Admin"}, {"id": "ROLE-002", "name": "Nurse"}]
+    svc.doc["navigation"]["initialRoute"] = {"default": "/nurse-registration", "admin": "/master-data",
+                                             "Nurse": "/nurse-registration"}
+    svc.save()
+    return svc
+
+
+def test_changing_the_default_landing_keeps_every_role_its_own(svc, tmp_path):
+    """The reply used to carry one string and the verb wrote {"default": it}:
+    "open on Master Data" took away the administrator's and the nurse's own
+    landings, and the 403 page's per-role map emptied with them."""
+    _with_roles(svc)
+    app = tmp_path / "app"
+    from services.blueprint import assembly
+    assembly.copy_scaffold(app, project_short_id="t")
+    same_tree = [{"label": "Nurse Registration", "page": svc._t.form["id"], "icon": "user-plus"},
+                 {"label": "Master Data", "page": svc._t.lst["id"], "icon": "table"}]
+    out = nc.change_navigation(svc, "open on Master Data", app_root=str(app),
+                               client=_client([{"tree": same_tree, "initialRoute": "/master-data", "note": ""}]))
+    nav = BlueprintService.load(output_dir=str(tmp_path)).doc["navigation"]
+    assert nav["initialRoute"] == {"default": "/master-data", "admin": "/master-data", "Nurse": "/nurse-registration"}
+    assert out["landing"] == "/master-data" and out["landings"] == {}
+    nav_flow = json.loads((app / "src/contracts/nav-flow.json").read_text())
+    assert nav_flow["initialFor"] == {"Admin": "/master-data", "Nurse": "/nurse-registration"}
+    import re
+    page = (app / "src/app/forbidden.tsx").read_text()
+    inlined = re.search(r"const LANDING_FOR: Record<string, string> = (\{.*?\});", page, re.S)
+    assert inlined and json.loads(inlined.group(1)) == {"Admin": "/master-data", "Nurse": "/nurse-registration"}
+    assert 'const LANDING = "/master-data";' in page
+
+
+def test_one_role_s_landing_is_changed_alone_and_spelled_as_the_map_spells_it(svc, tmp_path):
+    _with_roles(svc)
+    same_tree = [{"label": "Nurse Registration", "page": svc._t.form["id"], "icon": "user-plus"},
+                 {"label": "Master Data", "page": svc._t.lst["id"], "icon": "table"}]
+    out = nc.change_navigation(svc, "nurses should open on Master Data", app_root=None,
+                               client=_client([{"tree": same_tree, "note": "",
+                                                "initialRoute": [{"for": "nurse", "route": "/master-data"}]}]))
+    nav = BlueprintService.load(output_dir=str(tmp_path)).doc["navigation"]
+    assert nav["initialRoute"] == {"default": "/nurse-registration", "admin": "/master-data", "Nurse": "/master-data"}
+    assert out["landings"] == {"Nurse": "/master-data"}
+    assert "Nurse opens on /master-data" in nc.summary_of(out, "nurses should open on Master Data")
+
+
+def test_a_landing_for_nobody_or_on_a_record_route_is_refused(svc):
+    _with_roles(svc)
+    ok = [{"label": "A", "page": svc._t.form["id"]}]
+    assert any("not a kind of user" in p for p in
+               nc.validate(svc.doc, {"tree": ok, "initialRoute": {"default": "/master-data", "guest": "/master-data"}}))
+    assert any("for admin" in p for p in
+               nc.validate(svc.doc, {"tree": ok, "initialRoute": {"admin": "/nurse-registration/[id]"}}))
+    assert nc.validate(svc.doc, {"tree": ok, "initialRoute": {"default": "/master-data", "ADMIN": "/master-data",
+                                                              "ROLE-002": "/master-data"}}) == []
+    assert nc._landings(svc.doc, svc.doc["navigation"], [{"for": "ADMIN", "route": "/nurse-registration"}]) == {
+        "default": "/nurse-registration", "admin": "/nurse-registration", "Nurse": "/nurse-registration"}
+    assert nc._landings(svc.doc, svc.doc["navigation"], "") == svc.doc["navigation"]["initialRoute"]
+
+
+def test_the_model_is_told_the_kinds_of_user(svc):
+    _with_roles(svc)
+    system, user = nc._prompt(svc.doc, "open on Master Data")
+    assert "per kind of user" in system and "The kinds of user (roles): Admin, Nurse" in user
