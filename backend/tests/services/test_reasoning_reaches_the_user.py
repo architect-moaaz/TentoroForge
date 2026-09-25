@@ -122,10 +122,9 @@ def test_the_router_gives_chat_v2_a_sink_that_emits():
            'emit("thought"' in src, "the sink emits no thought event"
 
 
-def test_chat_v2_passes_the_sink_into_the_session():
+def test_chat_v2_passes_the_sink_into_the_turn():
     import inspect
 
     from services import smith_chat_v2
 
-    assert "reasoning_fn=req.reasoning_fn" in inspect.getsource(
-        smith_chat_v2._build_session)
+    assert "reasoning=req.reasoning_fn" in inspect.getsource(smith_chat_v2.handle_chat_v2)

@@ -64,7 +64,8 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
     last: Outcome | None = None
 
     for _step in range(1, max_steps + 1):
-        page = opening(ctx.project_id, ctx.out, ctx.ask)
+        from services.smith4.definition import brief_of
+        page = opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx))
         chosen = choose(ctx.ask, page, observations, history) or {}
         tool = str(chosen.get("tool") or "").strip()
         args = chosen.get("args") if isinstance(chosen.get("args"), dict) else {}
@@ -91,6 +92,23 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         if tools.is_read(tool):
             seen = reads.run(tool, args, output_dir=ctx.out, doc=ctx.doc())
             observations.append(Observation(tool=tool, args=args, status="read", said=seen))
+            continue
+
+        if tools.is_definition(tool):
+            from services.smith4 import definition as definition_mod
+            step = definition_mod.run(ctx, tool, args)
+            if step.status == "read":
+                observations.append(Observation(tool=tool, args=args, status="read", said=step.said))
+                continue
+            observations.append(Observation(
+                tool=tool, args=args, status="finding" if step.finding else step.status,
+                said=step.finding or step.said, touched=list(step.touched)))
+            if step.said and not step.finding:
+                landed.append(step.said)
+            touched += [p for p in step.touched if p not in touched]
+            last = step
+            if not step.done and not step.finding:
+                return _finished(landed, touched, step)
             continue
 
         if tools.is_write(tool):

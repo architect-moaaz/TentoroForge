@@ -61,6 +61,13 @@ class Ctx:
     #: something a model can put in a field: the tool that needs the bytes
     #: takes them from here.
     attachments: list[dict] = field(default_factory=list)
+    #: The exchange, oldest first, as (role, text). Before there is an
+    #: application the brief IS the exchange, so the definition tools read it.
+    history: list = field(default_factory=list)
+    #: Documents supplied with the ask (a spec, a policy), as text.
+    evidence: list[str] = field(default_factory=list)
+    #: What the project is called, for a Blueprint created on this turn.
+    app_name: str = ""
 
     @property
     def out(self) -> str:

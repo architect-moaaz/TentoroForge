@@ -27,11 +27,6 @@ from tests.services._front_door import (
     TurnResult,
     IterationMove,
 )
-from services.narrator_artifacts import (
-    DiscoveryArtifact,
-    PlannerArtifact,
-    GeneratorArtifact,
-)
 
 
 # --------------------------------------------------------------------------- #
@@ -51,30 +46,6 @@ def _init_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@dataclass
-class _StubDiscovery:
-    dossier: dict
-
-    def __call__(self, message: str, blueprint_ctx: str) -> DiscoveryArtifact:
-        return DiscoveryArtifact.from_dict(self.dossier)
-
-
-@dataclass
-class _StubPlanner:
-    plan: dict
-
-    def __call__(self, discovery: DiscoveryArtifact) -> PlannerArtifact:
-        return PlannerArtifact.from_dict(self.plan)
-
-
-@dataclass
-class _StubGenerator:
-    payload: dict
-
-    def __call__(self, plan: PlannerArtifact, output_dir: str) -> GeneratorArtifact:
-        return GeneratorArtifact.from_dict(self.payload)
-
-
 def _no_op_guards(_out: str) -> list[dict[str, Any]]:
     return []
 
@@ -82,73 +53,6 @@ def _no_op_guards(_out: str) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 # Bootstrap flow (§5.1, S6)
 # --------------------------------------------------------------------------- #
-
-def test_bootstrap_writes_domain_entities_workflows_pages_into_blueprint(tmp_path):
-    _init_repo(tmp_path)
-    session = SmithSession(
-        project_id="p1", output_dir=str(tmp_path),
-        discovery_fn=_StubDiscovery({
-            "domain_name": "ATS", "actors": ["recruiter"],
-            "verbs": ["apply"], "distinctive_shape": "kanban",
-            "proposed_entities": [{"name": "Candidate", "why": ""}],
-            "open_questions": [],
-        }),
-        planner_fn=_StubPlanner({
-            "entities": [{"name": "Candidate", "table": "candidates",
-                          "purpose": "applicant", "key_fields": ["email"],
-                          "why_shaped_this_way": "MVP"}],
-            "workflows": [{"name": "CreateCandidate", "purpose": "capture",
-                           "trigger": "form", "why": "manual"}],
-            "pages": [{"route": "/candidates", "schema_path": "src/schemas/candidates/index.json",
-                       "role": "list"}],
-        }),
-        generator_fn=_StubGenerator({
-            "generated_files": ["src/schemas/candidates/index.json"],
-            "warnings": [], "notes": [],
-        }),
-        guards_fn=_no_op_guards,
-    )
-
-    result = session.run_bootstrap(user_message="build an ATS")
-
-    assert result.status == "resolved"
-    # Blueprint now reflects everything.
-    bp = Blueprint.load(project_id="p1", output_dir=str(tmp_path))
-    assert bp.domain and bp.domain["name"] == "ATS"
-    assert [e["name"] for e in bp.entities] == ["Candidate"]
-    assert [w["name"] for w in bp.workflows] == ["CreateCandidate"]
-    assert [p["route"] for p in bp.pages] == ["/candidates"]
-    # change_log recorded the bootstrap under source=smith.
-    assert bp.change_log
-    assert bp.change_log[-1]["source"] == "smith"
-    assert "bootstrap" in bp.change_log[-1]["smith_move"].lower()
-
-
-def test_bootstrap_answer_uses_generator_and_discovery_narrator_summaries(tmp_path):
-    _init_repo(tmp_path)
-    session = SmithSession(
-        project_id="p1", output_dir=str(tmp_path),
-        discovery_fn=_StubDiscovery({
-            "domain_name": "ATS", "actors": ["recruiter"],
-            "verbs": ["apply"], "distinctive_shape": "kanban pipeline",
-            "proposed_entities": [], "open_questions": [],
-        }),
-        planner_fn=_StubPlanner({
-            "entities": [{"name": "Candidate", "table": "c", "purpose": "",
-                          "key_fields": [], "why_shaped_this_way": ""}],
-            "workflows": [], "pages": [],
-        }),
-        generator_fn=_StubGenerator({
-            "generated_files": ["src/schemas/candidates/index.json"],
-            "warnings": [], "notes": [],
-        }),
-        guards_fn=_no_op_guards,
-    )
-    result = session.run_bootstrap(user_message="build ATS")
-    # The final answer references both the domain (from discovery) and
-    # the fact that files were generated (from generator).
-    assert "ATS" in result.answer
-    assert "1 file" in result.answer or "1 file(s)" in result.answer
 
 
 # --------------------------------------------------------------------------- #

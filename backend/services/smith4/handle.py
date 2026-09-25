@@ -24,7 +24,9 @@ def handle(*, project_id: str, output_dir: str, message: str,
            guards: Callable | None = None,
            reasoning: Any = None,
            max_steps: int | None = None,
-           attachments: list[dict] | None = None) -> Outcome:
+           attachments: list[dict] | None = None,
+           evidence: list[str] | None = None,
+           app_name: str = "") -> Outcome:
     """One turn on a built application. `choose` decides each step; absent,
     `services.smith.loop.next_step` on the real model. `move` is the tree
     editor for layout pages; absent, `move_dispatcher`."""
@@ -37,7 +39,9 @@ def handle(*, project_id: str, output_dir: str, message: str,
     def ctx_for(ask: str) -> Ctx:
         return Ctx(output_dir=str(output_dir), project_id=str(project_id), message=typed,
                    ask=ask, reasoning=reasoning, guards=guards or (lambda _o: []), move=move,
-                   attachments=list(attachments or []))
+                   attachments=list(attachments or []), history=list(history or []),
+                   evidence=[str(e) for e in (evidence or []) if str(e).strip()],
+                   app_name=str(app_name or ""))
 
     # AGREED, SO DO THE FIRST ONE NOW.
     if plan_mod.peek(output_dir) and (plan_mod.wants_next(typed)

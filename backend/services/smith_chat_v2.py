@@ -9,9 +9,7 @@ When the flag is on:
   1. Load the blueprint for the project.
   2. Run the chat router (services/smith_chat_router.py) to decide
      bootstrap / iteration / ask_user.
-  3. Instantiate SmithSession with the real (or test-injected)
-     seams.
-  4. Run the chosen flow, return a ChatV2Response.
+  3. Run the v4 turn (`services.smith4.handle`) and return a ChatV2Response.
 
 This module is a PURE HANDLER (no FastAPI decorators, no SSE) so
 tests exercise it directly. The FastAPI route that actually wires
@@ -30,7 +28,6 @@ from typing import Any, Callable
 
 from services.smith_blueprint import Blueprint
 from services.smith_chat_router import ChatIntent, route_chat_message
-from services.smith_session import SmithSession, TurnResult
 
 
 logger = logging.getLogger(__name__)
@@ -61,6 +58,10 @@ class ChatV2Request:
     # For tests + gradual wiring: caller can override any SmithSession
     # seam. Prod passes {} and the handler wires the real defaults.
     session_overrides: dict[str, Callable[..., Any]] = field(default_factory=dict)
+    #: Documents supplied with the ask, as text — a spec, a policy.
+    evidence: list[str] = field(default_factory=list)
+    #: What the project is called, for a Blueprint created on this turn.
+    app_name: str = ""
 
 
 @dataclass
@@ -95,17 +96,11 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
             status="asked", answer=intent.message, intent="ask_user",
         )
 
-    session = _build_session(req, blueprint)
+    # Bootstrap and iteration are the same turn since Smith v4: before there
+    # is an application the loop's page says so and its moves are
+    # `open_decisions` and `define_application`; after, the verbs. The router
+    # still says which it decided, for the caller's bookkeeping.
 
-    if intent.kind == "bootstrap":
-        try:
-            result = session.run_bootstrap(user_message=intent.message)
-        except AssertionError as exc:
-            return _seams_missing("bootstrap", str(exc))
-        return _to_response(result, intent="bootstrap")
-
-    # kind == "iteration" — Smith v4: the loop is the front door. No
-    # interpretation call before it; `understand_ask_fn` is no longer a seam.
     # `next_step_fn` (the chooser), `iteration_move_fn` and `guards_fn` still
     # win when injected, which is what keeps the handler testable.
     from services.smith4 import handle as smith4_handle
@@ -117,57 +112,15 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
         move=overrides.get("iteration_move_fn"),
         guards=overrides.get("guards_fn"),
         reasoning=req.reasoning_fn,
+        evidence=list(req.evidence or []),
+        app_name=req.app_name,
     )
     return ChatV2Response(status=out.status, answer=out.said, options=list(out.options),
                           diff_summary=out.diff_summary, touched_paths=list(out.touched),
-                          intent="iteration")
+                          intent=intent.kind)
 
 
 # --------------------------------------------------------------------------- #
 # Internals
 # --------------------------------------------------------------------------- #
 
-def _build_session(
-    req: ChatV2Request, blueprint: Blueprint,
-) -> SmithSession:
-    """Compose a SmithSession from request overrides + prod defaults.
-
-    Overrides win. Any seam not provided AND not wired at the module
-    level surfaces at flow-time as an AssertionError, which the
-    handler converts to a `not_enabled_seam` response."""
-    overrides = req.session_overrides or {}
-    return SmithSession(
-        project_id=req.project_id,
-        output_dir=req.output_dir,
-        discovery_fn=overrides.get("discovery_fn"),
-        planner_fn=overrides.get("planner_fn"),
-        generator_fn=overrides.get("generator_fn"),
-        guards_fn=overrides.get("guards_fn"),
-        reasoning_fn=req.reasoning_fn,
-    )
-
-
-def _to_response(result: TurnResult, *, intent: str) -> ChatV2Response:
-    return ChatV2Response(
-        status=result.status, answer=result.answer,
-        options=list(result.options),
-        diff_summary=result.diff_summary,
-        touched_paths=list(result.touched_paths),
-        intent=intent,
-    )
-
-
-def _seams_missing(flow: str, detail: str) -> ChatV2Response:
-    """Prod wiring for {discovery,planner,generator,understand,move}
-    seams lands in Migration Step 4 (live acceptance). Until then
-    the handler surfaces a specific message so the caller sees
-    exactly what's not wired instead of a 500."""
-    return ChatV2Response(
-        status="not_enabled",
-        answer=(
-            f"The {flow} flow needs seams that aren't wired yet on this "
-            "backend. Live orchestrators for discovery / planner / "
-            "generator / understand_ask / move_dispatcher land in "
-            f"Migration Step 4. Detail: {detail}"
-        ),
-    )

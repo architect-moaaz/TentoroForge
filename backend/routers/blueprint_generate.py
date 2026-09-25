@@ -47,6 +47,15 @@ from services.project_service import get_project_with_auth
 
 logger = logging.getLogger(__name__)
 
+# Lifted into services.smith.brief so the loop reads the same brief.
+from services.smith import brief as _brief_mod
+_brief_from = _brief_mod.brief_from
+_brief_with_documents = _brief_mod.with_documents
+_is_functionless_brief = _brief_mod.is_functionless
+_has_design_references = _brief_mod.has_design_references
+_design_language_offer = _brief_mod.design_language_offer
+_advance_state_to_review = _brief_mod.advance_to_review
+
 #: Runs that outlived the reader watching them.
 #:
 #: A generation writes to the Blueprint, not to the response — the stream is a
@@ -482,51 +491,17 @@ def _requirement_report(doc: dict, req_id: str) -> str:
 #: Action verbs whose presence means the app actually DOES something. A brief
 #: with none of these and an explicit "just/only shows text" shape is a page
 #: that does nothing (DEFECT-C-06).
-_ACTION_HINTS = (
-    "create", "add", "manage", "track", "edit", "update", "delete", "remove",
-    "approve", "schedule", "book", "assign", "submit", "review", "record",
-    "store", "save", "search", "filter", "report", "upload", "download",
-    "sign in", "log in", "login", "register", "post", "comment", "vote",
-    "order", "pay", "invoice", "notify", "email", "list of", "dashboard",
-    "workflow", "role", "user", "account", "database", "form", "calculate",
-)
-_FUNCTIONLESS_SHAPE = (
-    "just says", "just shows", "just displays", "only says", "only shows",
-    "only displays", "simply says", "that says", "which says", "displaying the text",
-    "shows the text", "says welcome", "says hello",
-)
 
 
-def _is_functionless_brief(brief: str) -> bool:
-    """True for a brief that describes a page with no function — a static bit of
-    text and nothing to do (DEFECT-C-06). Conservative: it must BOTH look like a
-    static-text page AND name no capability, so a real app is never refused."""
-    b = (brief or "").lower()
-    if len(b) > 400:  # a substantial brief is not a one-line 'welcome' page
-        return False
-    looks_static = any(s in b for s in _FUNCTIONLESS_SHAPE)
-    has_action = any(h in b for h in _ACTION_HINTS)
-    return looks_static and not has_action
 
 
 #: The §94 chain a define walks through, all ungated. Used to advance a live
 #: define run to the review gate (DEFECT-B-07: state stuck at DISCOVERY).
-_DEFINE_STATE_CHAIN = ("DISCOVERY", "CLARIFICATION", "DEFINITION", "BLUEPRINT_REVIEW")
+_DEFINE_STATE_CHAIN = _brief_mod._DEFINE_STATE_CHAIN
+_ACTION_HINTS = _brief_mod._ACTION_HINTS
+_FUNCTIONLESS_SHAPE = _brief_mod._FUNCTIONLESS_SHAPE
 
 
-def _advance_state_to_review(svc) -> None:
-    """Walk the Blueprint state from wherever it is up to BLUEPRINT_REVIEW after
-    a define, so GET /blueprint reports the review gate instead of DISCOVERY.
-    Best-effort: a refused/illegal step just stops the walk."""
-    from services.blueprint.orchestrator import transition, IllegalTransition
-    cur = svc.doc.get("state", "DISCOVERY")
-    if cur not in _DEFINE_STATE_CHAIN:
-        return
-    for nxt in _DEFINE_STATE_CHAIN[_DEFINE_STATE_CHAIN.index(cur) + 1:]:
-        try:
-            transition(svc, nxt)
-        except IllegalTransition:
-            break
 
 
 class BlueprintGenerateRequest(BaseModel):
@@ -741,34 +716,8 @@ def _output_dir(project: Any) -> Path:
     return project_root(str(project.id))
 
 
-def _brief_with_documents(brief: str, evidence: Any) -> str:
-    """The brief plus the supplied documents, labelled so the reader can tell
-    what the person said from what a document said.
-
-    For the turn's own reading — the clarifier, the design-link scan — not
-    for the Blueprint: the documents are stored beside it by `_run_dag`
-    (services.blueprint.documents) and the agents read them from there, so
-    `application.description` stays the user's words.
-    """
-    from services.blueprint import documents as _documents
-    block = _documents.labelled(evidence)
-    return f"{brief}\n\n{block}" if block else brief
 
 
-def _has_design_references(project_id: str) -> bool:
-    """Whether the user has designated an upload as design direction.
-
-    The clarifier is told when a design travels with the brief so it does not
-    ask which palette fits a design that has already chosen its own — and it
-    only knew about a Figma or UX Pilot link in the prose. A screenshot
-    attached and marked "read as design direction" is the same fact.
-    """
-    from services import chat_attachments, design_reference
-    try:
-        return bool(design_reference.read_design_references(
-            chat_attachments.attachments_root(), str(project_id)))
-    except Exception:  # noqa: BLE001 — no designation readable is no designation
-        return False
 
 
 def _with_evidence(req: "BlueprintGenerateRequest") -> str:
@@ -1227,29 +1176,6 @@ def _attach_named_design(output_dir: Any, named: dict, emit) -> None:
                          "status": "needs_user"})
 
 
-def _brief_from(history: Any, message: str) -> str:
-    """Everything the user has said, in order, as one brief.
-
-    Smith's questions are dropped: a definition is written from what was
-    asked for, and "which language should the interface be in?" is not part
-    of the request. The answers are, and they read as qualifications of the
-    sentences above them — which is how somebody would have written it had
-    they thought of it first.
-    """
-    said: list[str] = []
-    for turn in history or []:
-        role = getattr(turn, "role", None) or (
-            turn.get("role") if isinstance(turn, dict) else None)
-        text = getattr(turn, "text", None) or (
-            turn.get("text") if isinstance(turn, dict) else None)
-        if str(role) == "user" and str(text or "").strip():
-            said.append(str(text).strip())
-    if str(message or "").strip():
-        said.append(str(message).strip())
-    # De-duplicated in order: a resent message must not appear twice.
-    seen: set[str] = set()
-    out = [t for t in said if not (t in seen or seen.add(t))]
-    return "\n\n".join(out)
 
 
 def _remember(loop: Any, project_id: Any, role: str, content: str,
@@ -1645,144 +1571,54 @@ async def smith_chat(
                 return {"status": "verified"}
 
             if not defined:
-                # §16 BEFORE THE EXPENSIVE PART. Whatever the brief leaves
-                # unsaid gets decided by twenty agents, each inventing an
-                # answer, and every later node builds on it. A question worth
-                # thirty seconds here saves a rebuild.
-                #
-                # Asked in turns, one at a time, until the open decisions are
-                # settled or a turn cap is reached (see below) — not batched
-                # into a single opening wall of questions.
-                # THE DESIGN THE BRIEF NAMES. "Import from Figma" is an opening
-                # message with the file link in it; read as prose the link was
-                # lost — the definition ran, the clarifier asked which palette,
-                # and nothing was fetched. Found here, it shapes the questions
-                # and is attached the moment the definition has made a
-                # Blueprint to attach it to, in this same turn.
+                # SMITH v4 — THE TURN BEFORE THERE IS AN APPLICATION IS THE SAME
+                # TURN AS ANY OTHER. The loop's page says nothing is defined and
+                # what the person has said so far is the brief; its moves are
+                # `open_decisions` (the clarifier as a read — one question a
+                # turn, capped) and `define_application` (the DAG's domain
+                # nodes, stopped at review). This router used to run that
+                # phase as its own state machine; now it emits what the turn
+                # said and, when a definition landed, draws the card.
                 from services.smith.figma_connect import find_in as _figma_in
                 from services.smith.uxpilot_connect import find_in as _uxpilot_in
+                from services.smith4.context import defined as _defined_now
+                from services.smith_chat_v2 import ChatV2Request, handle_chat_v2
 
                 _the_brief = _brief_with_documents(_brief_from(req.history, req.message), req.evidence)
                 named_design = _figma_in(_the_brief) or _uxpilot_in(_the_brief)
-
-                # §16 asks rather than assumes — but ONE decision at a time, in
-                # turns, so each question gets a considered answer instead of a
-                # wall of them arriving together. Runs on every turn against the
-                # accumulated brief (which now carries the earlier answers), so
-                # `clarify_brief` asks the NEXT open decision and returns nothing
-                # once they are settled. Bounded rather than one-shot: a
-                # clarifier that can fire twice could fire forever, so a turn cap
-                # stops it — after the cap, define with what is known.
-                #
-                # The cap counts prior USER turns — the same turns `_brief_from`
-                # folds into the brief, so it is guaranteed consistent with what
-                # was actually accumulated (it does not depend on whether the
-                # frontend echoes Smith's own questions back in `history`). Zero
-                # on the opening message, one after the first answer, and so on:
-                # a cap of 4 permits a question on the opening turn and after
-                # each of the next three answers.
-                _MAX_CLARIFY_TURNS = 4
-                _user_turns = sum(
-                    1 for t in (req.history or [])
-                    if str(getattr(t, "role", None)
-                           or (t.get("role") if isinstance(t, dict) else "")
-                           ) == "user"
-                    and str(getattr(t, "text", None)
-                            or (t.get("text") if isinstance(t, dict) else "")
-                            ).strip())
-                if _user_turns < _MAX_CLARIFY_TURNS:
-                    from services.smith.clarify_brief import clarify_brief
-
-                    # WHAT THE ORGANISATION ALREADY LOOKS LIKE. Without this
-                    # the clarifier asked "which colour palette should this
-                    # use?" of a company that had told us during onboarding
-                    # exactly what it looks like, and offered every answer
-                    # except their own. Being asked to retype something the
-                    # product already holds is the failure the discovery
-                    # exists to prevent.
-                    _clar = _design_language_offer(output_dir)
-                    asked = clarify_brief(
-                        _the_brief,
-                        design_attached=bool(named_design)
-                        or _has_design_references(str(project_id)),
-                        company_palette=(
-                            clarify_company_option(_clar[0], _clar[1])
-                            if _clar else ""))
-                    if asked:
-                        # ONE question this turn — it carries its own options,
-                        # and its answer reaches the next turn through `history`,
-                        # where it joins the brief rather than replacing it. The
-                        # next turn re-asks against the fuller brief and moves on
-                        # to whatever is still open.
-                        item = asked[0]
-                        emit("message", {
-                            "text": item["question"],
-                            "options": item.get("options") or [],
-                            "status": "asked",
-                        })
-                        return {"status": "asked"}
-
-                # DEFECT-C-06: a page that would do nothing is refused, not
-                # defined. A static 'just says Welcome' brief with no capability
-                # gets a what-should-it-do question instead of the expensive
-                # define fan-out and an approvable blank application.
-                if _is_functionless_brief(_the_brief):
-                    emit("message", {
-                        "text": "That describes a page with nothing to do — it "
-                                "would only show some text. What should the app "
-                                "let people DO (create or manage something, sign "
-                                "in, run a workflow)? Tell me that and I'll define "
-                                "it.",
-                        "status": "asked",
-                    })
-                    return {"status": "asked"}
-
-                # NOTE on DEFECT-B-07 ("define must be explicit"): NOT enforced
-                # here on purpose. The workbook contradicts itself — GP-01 (P0)
-                # and C-01 (P0, precondition "B-03 done") both expect the
-                # definition to be READY right after the clarifications are
-                # answered, with no `define` step between them, i.e. an
-                # auto-define. Making define explicit would satisfy B-07 (P1) by
-                # regressing those P0 cases (C-01 would wait forever for a
-                # definition that never auto-drafts). The concrete B-07 symptom
-                # that WAS a bug — the `status` command triggering a define — is
-                # fixed by the lifecycle-verb guard above. The auto-define on a
-                # genuine answer is what the golden path relies on, so it stays;
-                # resolving the spec contradiction is a product call.
-                emit("message", {
-                    "text": "Let me define that first — I'll show you what I "
-                            "understood before building anything.",
-                })
-                # THE WHOLE ASK, NOT THE LAST LINE OF IT. When Smith asks a
-                # question the answer arrives as the next message, and on this
-                # path no Blueprint exists yet — so `create` took the answer as
-                # the entire description and the request that prompted it was
-                # never written down. A noticeboard for a community centre in
-                # Ramallah became "Arabic. Olive and sand. Anyone can post
-                # freely."
-                #
-                # 99d217e fixed the same loss on the load path, where a
-                # Blueprint already existed to append to. This is the create
-                # path, which had no prior text to append to and needed the
-                # conversation instead.
-                defined_now = _run_dag(str(output_dir), app_root,
-                                       _brief_from(req.history, req.message),
-                                       approved=req.approved, emit=emit,
-                                       app_name=getattr(project, "name", "") or "",
-                                       documents=req.evidence)
+                turn_result = handle_chat_v2(ChatV2Request(
+                    project_id=str(project_id), output_dir=str(output_dir),
+                    message=req.message,
+                    history=[(t.role, t.text) for t in req.history if t.text][-10:],
+                    evidence=list(req.evidence or []),
+                    app_name=getattr(project, "name", "") or "",
+                    reasoning_fn=lambda text, kind="reasoning", node="": emit(
+                        "thought", {"text": text, "kind": kind, "node": node}),
+                ))
+                answer_text = (turn_result.answer or "").strip() or (
+                    "Tell me what the application is for and what people should be "
+                    "able to do in it, and I will define it.")
+                emit("message", {"text": answer_text, "options": turn_result.options,
+                                 "status": turn_result.status})
+                if not _defined_now(str(output_dir)):
+                    return {"status": turn_result.status}
+                # A DEFINITION LANDED THIS TURN: the design it named, the answers
+                # that shaped it, and the card.
+                from services.blueprint.plan_forecast import forecast as _forecast
+                svc = BlueprintService.load(output_dir=str(output_dir))
                 if named_design:
                     _attach_named_design(output_dir, named_design, emit)
-                # DEFECT-B-03: the answers that shaped this definition are
-                # recorded as `source: user` decisions now that the Blueprint
-                # exists to hold them — so `status` shows "N from you", the
-                # Decisions view has content, and "why did you decide X" can
-                # cite them. Best-effort; never fails the define.
                 _record_discovery_answers(
                     output_dir,
                     [(t.role, t.text) for t in req.history if t.text]
                     + [("user", req.message)],
                     emit=emit)
-                return defined_now
+                counts = _forecast(svc.doc)
+                state = str(svc.doc.get("state") or "")
+                emit("forecast", counts)
+                emit("state", {"state": state})
+                return {"awaitingApproval": True, "forecast": counts, "state": state,
+                        "report": {"completed": [], "skipped": [], "blocked": [], "failed": []}}
 
             # DEFECT-C-03/B-09: A DEFINITION exists but the app is NOT built
             # yet, and this is a request to change what will be built. That is
@@ -2021,24 +1857,6 @@ async def _adopt_brand_language(output_dir: Path, project: Any,
     return True
 
 
-def _design_language_offer(output_dir: Path) -> tuple[str, str] | None:
-    """`(company_name, summary)` when there is a language to offer, else None.
-
-    Read off what was adopted rather than out of the database, so the gate
-    asks about exactly the language the build would use — the two cannot
-    disagree about which palette is on offer.
-    """
-    from services.blueprint import brand_language
-    from services.smith import design_language
-
-    if not brand_language.available(output_dir):
-        return None
-    tokens = brand_language.tokens(output_dir)
-    if not tokens:
-        return None
-    name = str(tokens.get("_companyName") or "")
-    return name, design_language.summary_of(
-        {k: v for k, v in tokens.items() if not k.startswith("_")})
 
 
 def _adopt_design_references(output_dir: Path, project_id: str) -> list[str]:

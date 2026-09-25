@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from services.smith_session import IterationMove, SmithSession as _Bootstrap, TurnResult  # noqa: F401
+from services.smith_session import IterationMove, TurnResult  # noqa: F401
 from services.smith4 import handle
 from services.smith4.outcome import Outcome
 
@@ -87,12 +87,6 @@ class SmithSession:
     next_step_fn: Optional[Callable] = None
     reasoning_fn: Any = None
     _ask: str = field(default="", init=False)
-
-    def run_bootstrap(self, user_message: str) -> TurnResult:
-        return _Bootstrap(project_id=self.project_id, output_dir=self.output_dir,
-                          discovery_fn=self.discovery_fn, planner_fn=self.planner_fn,
-                          generator_fn=self.generator_fn, guards_fn=self.guards_fn,
-                          reasoning_fn=self.reasoning_fn).run_bootstrap(user_message)
 
     def run_iteration(self, user_message: str,
                       history: list | None = None) -> TurnResult:

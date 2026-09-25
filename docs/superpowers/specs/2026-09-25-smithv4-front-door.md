@@ -1,6 +1,6 @@
 # Smith v4 — the loop is the front door
 
-**Status:** complete 2026-09-25 — front door, `write_section`, platform turns, both deletions. Branch `smithv4`.
+**Status:** complete 2026-09-25 — front door, `write_section`, platform turns, both deletions, bootstrap. Branch `smithv4`.
 **Owner:** Smith
 **Companions:**
 - `2026-09-24-smith-as-a-loop.md` — §0 is the governing principle; S1–S3 and `write_page_code` are the parts v4 is built from
@@ -123,5 +123,21 @@ are the same reads, writes and verbs. That makes `agents/smith_agent.py` and
     "Which record?" — now ends the turn with those answers as chips rather
     than going back to the model. The 28 example sentences the old prompt
     quoted per verb live in `verbs.VERB_EXAMPLES` and render in the catalogue.
-- **Bootstrap** through the same loop — still on `SmithSession.run_bootstrap`.
+- ~~Bootstrap~~ **Done, through the same loop.** Before there is an application
+  the loop's opening page says so and shows the brief — everything the person
+  has said, with their documents labelled — and two moves apply:
+  `open_decisions`, the clarifier (`clarify_brief`) as a read that returns
+  what the brief leaves unsaid with the answers as chips, silent when it
+  stands on its own and capped after four of the person's turns; and
+  `define_application`, the DAG's domain nodes through the same executor and
+  observer a build uses, stopped at review, with a page that would do nothing
+  refused as a finding that names the question to ask. The Blueprint router's
+  pre-definition state machine (clarify one question a turn, refuse, "Let me
+  define that first") is that turn now; the router emits what the turn said
+  and, when a definition landed, draws the card. The brief helpers it read are
+  lifted into `services/smith/brief.py` so the loop reads the same brief. The
+  v2 `run_bootstrap` — discovery/planner/generator seams that were never wired
+  in production — is deleted with `SmithSession`; `smith_session.py` keeps the
+  two result dataclasses. `handle_chat_v2` routes bootstrap and iteration to
+  the same turn.
 - **Legacy (non-Blueprint) applications** get the v4 turn on `/chat` now; a page written the old way has no `pageCode` row, so `write_page_code` refuses it with the reason while the reads still work. Making them Blueprint apps is the migration, not a Smith change.
