@@ -301,3 +301,23 @@ def test_retiring_a_record_takes_the_links_to_its_screens_too(project, tmp_path)
     table = next(c for c in root["children"] if c["type"] == "Table")
     assert "rowHref" not in table["props"]                     # no link to a retired screen survives
     assert not any(c["type"] == "Button" for c in root["children"])
+
+
+def test_retiring_a_landing_page_takes_only_the_doors_that_led_to_it(project, tmp_path):
+    """The whole landing map was emptied when the default's page went, which
+    took every role's own landing with it — and with those the 403 page's
+    per-role map and the root redirect's. Only the doors that led to the
+    retired page come off; a role whose door stands keeps it."""
+    project.doc["roles"] = [{"id": "ROLE-001", "name": "Admin"}, {"id": "ROLE-002", "name": "Nurse"}]
+    project.doc["navigation"]["initialRoute"] = {"default": "/nurse-registration", "admin": "/reports",
+                                                 "nurse": "/nurse-registration"}
+    project.save()
+    said = pc.consequences(project.doc, "/reports")
+    assert said["landing"] is True                       # the administrator's door, though not the default
+
+    out = pc.run(str(tmp_path), route="/nurse-registration")
+    assert out["applied"], out.get("reason")
+    fresh = BlueprintService.load(output_dir=str(tmp_path))
+    assert fresh.doc["navigation"]["initialRoute"] == {"admin": "/reports"}
+    nav_flow = json.loads((tmp_path / "app" / "src" / "contracts" / "nav-flow.json").read_text())
+    assert nav_flow["initialFor"] == {"Admin": "/reports"}

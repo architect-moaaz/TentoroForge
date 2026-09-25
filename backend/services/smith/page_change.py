@@ -211,7 +211,9 @@ def inbound(doc: dict, page: dict) -> dict:
     shapes = {_shape(route)} if route else set()
     nav = doc.get("navigation") or {}
     initial = nav.get("initialRoute")
-    initial = initial.get("default") if isinstance(initial, dict) else initial
+    # Every kind of user's door, not only the default's: a page an
+    # administrator lands on is a landing page whoever else opens elsewhere.
+    landings = {str(v) for v in initial.values()} if isinstance(initial, dict) else ({str(initial)} if initial else set())
 
     others = [p for p in _live(doc) if str(p.get("id")) != pid]
     layouts = _layouts(doc)
@@ -227,7 +229,7 @@ def inbound(doc: dict, page: dict) -> dict:
     return {
         "menu": [str(n.get("label")) for n in _walk_nav(nav.get("tree"))
                  if str(n.get("page") or "") == pid],
-        "landing": bool(initial) and str(initial) == route,
+        "landing": bool(route) and route in landings,
         "links": links,
         "arrows": [str(p.get("name") or p.get("route")) for p in others
                    if pid in (p.get("navigatesTo") or [])],
@@ -354,10 +356,14 @@ def retire(svc: Any, pages: list[dict]) -> dict:
     if nav.get("tree"):
         nav["tree"] = prune(nav["tree"])
     gone_routes = [str(p.get("route")) for p in pages]
-    initial = (nav.get("initialRoute") or {}).get("default") if isinstance(nav.get("initialRoute"), dict) else None
-    landing = initial in gone_routes
-    if landing:
-        nav["initialRoute"] = {}
+    # ONLY THE DOORS THAT LED HERE COME OFF. The whole map was emptied when
+    # the default landing was retired, which took every role's own landing
+    # with it — and the 403 page's per-role map, and the root redirect's.
+    initial = nav.get("initialRoute") if isinstance(nav.get("initialRoute"), dict) else {}
+    dropped = {k for k, v in initial.items() if str(v) in gone_routes}
+    landing = bool(dropped)
+    if dropped:
+        nav["initialRoute"] = {k: v for k, v in initial.items() if k not in dropped}
 
     for page in pages:
         page["status"] = "DEPRECATED"
