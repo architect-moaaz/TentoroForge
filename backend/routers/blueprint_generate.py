@@ -29,6 +29,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 import uuid
 from typing import Any
 
@@ -1014,8 +1015,18 @@ async def read_run(
     Answers about THIS process only: the run is a detached task here, so if the
     process is gone the run is too, and reporting one would be a lie.
     """
-    await get_project_with_auth(project_id, user, db)
-    return run_registry.snapshot(str(project_id))
+    project = await get_project_with_auth(project_id, user, db)
+    snap = run_registry.snapshot(str(project_id))
+    if snap.get("active") or snap.get("status") not in (None, "idle"):
+        return snap
+    # THIS WORKER NEVER SAW THE RUN. The registry is one process's memory
+    # and the backend runs two; the ledger on disk is what every worker can
+    # read. A run it shows as ended more than a couple of minutes ago is not
+    # this visit's run — the same rule the registry keeps.
+    ledger = run_registry.ledger_snapshot(_output_dir(project))
+    if ledger and (ledger.get("active") or (time.time() - float(ledger.get("endedAt") or 0)) < 120):
+        return ledger
+    return snap
 
 
 @router.get("/api/projects/{project_id}/looks/{page_id}/{attempt}/{name}")

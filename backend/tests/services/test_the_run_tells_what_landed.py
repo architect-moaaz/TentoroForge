@@ -110,3 +110,48 @@ def test_a_gate_can_ask_which_projects_have_a_turn_in_flight():
     assert "gate-a" not in run_registry.active_projects() and "gate-b" in run_registry.active_projects()
     run_registry.finish("gate-b", "error", detail="x")
     assert "gate-b" not in run_registry.active_projects()
+
+
+def _ledger(tmp_path, lines, *, age_s=0):
+    import os, time
+    d = tmp_path / ".forge" / "runs"; d.mkdir(parents=True, exist_ok=True)
+    f = d / "20260925-210900-abc.jsonl"
+    f.write_text("\n".join(json.dumps(l) for l in lines) + "\n")
+    if age_s:
+        os.utime(f, (time.time() - age_s, time.time() - age_s))
+    return tmp_path
+
+
+def test_a_worker_that_never_saw_the_run_reads_it_off_the_ledger(tmp_path):
+    """The registry is one process's memory and the backend runs two: a
+    reload mid-build showed 17 of 28 steps as nothing at all (rafm22pm)."""
+    lines = [
+        {"event": "run:start", "phase": "build", "at": "2026-09-25T21:09:00Z"},
+        {"event": "plan", "nodes": ["requirements", "entity_fields", "page_code"], "levels": [["requirements"], ["entity_fields"], ["page_code"]]},
+        {"event": "node:start", "node": "requirements"}, {"event": "node:done", "node": "requirements"},
+        {"event": "node:start", "node": "entity_fields", "subjects": 3},
+        {"event": "node:subject", "node": "entity_fields", "subject": "ENTITY-001", "index": 1, "total": 3, "done": 1, "ok": True, "summary": "Doctor — 5 fields", "at": "x"},
+        {"event": "observer:verdict", "node": "entity_fields", "subject": "ENTITY-001", "ok": True},
+        {"event": "run:heartbeat", "at": "2026-09-25T21:09:40Z"},
+    ]
+    snap = run_registry.ledger_snapshot(_ledger(tmp_path, lines))
+    assert snap["active"] is True and snap["status"] == "running" and snap["phase"] == "build"
+    assert snap["nodesTotal"] == 3 and snap["nodesDone"] == 1 and snap["stage"] == "entity_fields"
+    assert [n["state"] for n in snap["nodes"]] == ["done", "running", "waiting"]
+    assert snap["nodes"][1]["subject"] == "1 of 3" and snap["callsDone"] == 2
+    assert [m["event"] for m in snap["moments"]] == ["node:subject", "observer:verdict"]
+    assert snap["moments"][0]["summary"] == "Doctor — 5 fields" and "at" not in snap["moments"][0]
+    assert snap["levels"] == [["requirements"], ["entity_fields"], ["page_code"]]
+    assert snap["elapsedMs"] > 0 and snap["source"] == "ledger"
+
+
+def test_a_ledger_that_ended_or_went_quiet_is_not_a_live_run(tmp_path):
+    ended = [{"event": "run:start", "phase": "build", "at": "2026-09-25T21:09:00Z"},
+             {"event": "plan", "nodes": ["a"]}, {"event": "node:start", "node": "a"}, {"event": "node:done", "node": "a"},
+             {"event": "run:end", "at": "2026-09-25T21:10:00Z", "completed": ["a"]}]
+    snap = run_registry.ledger_snapshot(_ledger(tmp_path / "ended", ended))
+    assert snap["active"] is False and snap["status"] == "complete" and snap["nodesDone"] == 1
+    quiet = ended[:-1]
+    snap = run_registry.ledger_snapshot(_ledger(tmp_path / "quiet", quiet, age_s=run_registry.LEDGER_STALE_S + 10))
+    assert snap["active"] is False and snap["status"] == "error" and "process is gone" in snap["error"]
+    assert run_registry.ledger_snapshot(tmp_path / "none") is None
