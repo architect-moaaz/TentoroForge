@@ -156,3 +156,23 @@ def test_the_cookie_is_also_named_the_way_the_app_names_it():
     both = cookies(Session(), base_url="http://localhost:3000")
     assert [c["name"] for c in both] == cookie_names(PREVIEW_SECRET)
     assert len({c["value"] for c in both}) == 1 and all(c["domain"] == "localhost" for c in both)
+
+
+def test_the_token_is_a_jwe_the_apps_next_auth_can_open():
+    """`jose` (what next-auth decodes with) requires a 12-byte IV for GCM and
+    python-jose wrote 16, so no minted token ever opened a real app. Pinned
+    here: the IV length, and a decrypt over `cryptography` alone — proven
+    once against nlwtcyz5's next-auth 4.24.15 `decode` (2026-09-25)."""
+    import base64
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    def unb64(s: str) -> bytes:
+        return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+    token = session_token(Session(sub="a45fb2de", role="Parent"), secret=PREVIEW_SECRET)
+    header, key, iv, body, tag = token.split(".")
+    assert key == "" and json.loads(unb64(header)) == {"alg": "dir", "enc": "A256GCM"}
+    assert len(unb64(iv)) == 12
+    claims = json.loads(AESGCM(derive_key(PREVIEW_SECRET)).decrypt(
+        unb64(iv), unb64(body) + unb64(tag), header.encode("ascii")))
+    assert claims["sub"] == claims["id"] == "a45fb2de" and claims["role"] == "Parent"

@@ -118,17 +118,32 @@ def session_token(
     session: Session, *, secret: str = PREVIEW_SECRET,
     now: int | None = None, ttl_s: int = DEFAULT_TTL_S,
 ) -> str:
-    """The encrypted JWT NextAuth expects in its session cookie."""
-    from jose import jwe
+    """The encrypted JWT NextAuth expects in its session cookie.
+
+    Compact JWE, `dir` + A256GCM, written by hand over `cryptography`:
+    python-jose's encrypt draws a 16-byte IV for GCM, and the `jose` next-auth
+    decodes with refuses anything but 12 ("Invalid Initialization Vector
+    length") — so every token minted here before was found by the app and
+    thrown away (nlwtcyz5 reviewed as a Parent landed on /login, 2026-09-25).
+    """
+    import base64
+    import os
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    def b64(b: bytes) -> str:
+        return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
 
     payload = json.dumps(
         session.claims(now=int(now if now is not None else time.time()),
                        ttl_s=ttl_s),
         separators=(",", ":"), sort_keys=True,
-    )
-    token = jwe.encrypt(payload, derive_key(secret),
-                        algorithm="dir", encryption="A256GCM")
-    return token.decode("ascii") if isinstance(token, bytes) else token
+    ).encode("utf-8")
+    header = b64(json.dumps({"alg": "dir", "enc": "A256GCM"}, separators=(",", ":")).encode())
+    iv = os.urandom(12)
+    sealed = AESGCM(derive_key(secret)).encrypt(iv, payload, header.encode("ascii"))
+    ciphertext, tag = sealed[:-16], sealed[-16:]
+    return ".".join([header, "", b64(iv), b64(ciphertext), b64(tag)])
 
 
 def cookie(
