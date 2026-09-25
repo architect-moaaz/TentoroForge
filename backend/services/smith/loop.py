@@ -248,25 +248,39 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
     that were verified when they were made, and throwing the turn away would
     not unmake them.
     """
-    from services.smith.understand_ask import (_default_provider, _parse,
-                                                _render_history)
+    from services.smith.understand_ask import (_default_provider, _did_not_follow,
+                                                _looks_cut_off, _parse, _render_history)
 
     call = provider or (lambda prompt: _default_provider(prompt, reasoning))
+    prompt = _PROMPT.format(ask=(ask or "").strip(), history=_render_history(history),
+                            ctx=ctx or "(nothing yet)", observations=_render(observations),
+                            catalogue=tools.render())
     try:
-        raw = call(_PROMPT.format(ask=(ask or "").strip(),
-                                  history=_render_history(history),
-                                  ctx=ctx or "(nothing yet)",
-                                  observations=_render(observations),
-                                  catalogue=tools.render()))
+        raw = call(prompt)
     except Exception:  # noqa: BLE001 — a turn degrades, it does not crash
         logger.warning("smith loop: provider unreachable; ending the turn")
         return {"tool": "done", "args": {},
                 "why": "I could not reach my reasoning service for the next step."}
 
     data = _parse(raw)
+    if data is None and _looks_cut_off(raw):
+        # THE REPLY RAN OUT OF ROOM MID-OBJECT (smithv2, 1be5ce23). Asking again
+        # costs one call; telling the person they were unclear costs their
+        # next three messages. Prose is not retried — asking the same way
+        # again rarely changes it.
+        logger.info("smith loop: reply did not parse (%d chars, looks cut off) — asking once more",
+                    len(raw or ""))
+        try:
+            raw = call(prompt + "\n\nReply with the JSON object only — no prose before or "
+                                "after it, and keep it short.")
+        except Exception:  # noqa: BLE001
+            raw = ""
+        data = _parse(raw)
     if data is None:
-        logger.warning("smith loop: unparseable next step; ending the turn")
-        return {"tool": "done", "args": {}, "why": ""}
+        # NOT A SILENT END. A reply nobody could read is not "done"; it is a
+        # turn that must ask, in the person's own words, for one thing.
+        logger.warning("smith loop: gave up on a reply of %d chars", len(raw or ""))
+        return {"tool": "ask_user", "args": {"question": _did_not_follow(ask)}, "why": ""}
 
     tool = str(data.get("tool") or "").strip()
     args = data.get("args")

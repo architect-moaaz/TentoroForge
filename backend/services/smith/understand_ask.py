@@ -51,7 +51,11 @@ def _env_name_only(raw: object) -> str:
 def _default_provider(prompt: str, reasoning: Callable[[str], None] | None = None) -> str:
     from services.llm_client import complete
 
-    return complete(content=prompt, max_tokens=1200,
+    # 1200 CUT THE ANSWER OFF, AND THE USER WAS TOLD IT WAS THEIR FAULT
+    # (smithv2, 1be5ce23). A chooser's reply is a small object, but an
+    # `answer` carries the whole answer — the rentals explanation was a
+    # thousand characters — and the model reasons before it writes.
+    return complete(content=prompt, max_tokens=4000,
                     reasoning_callback=reasoning)
 
 
@@ -186,3 +190,30 @@ def _escape_inner_quotes(text: str) -> str:
         out.append(ch)
         i += 1
     return "".join(out)
+
+
+def _looks_cut_off(raw: str) -> bool:
+    """Whether a reply is an object that stops mid-flight, rather than prose.
+
+    An answer cut off at the token ceiling is the one case worth paying for a
+    second call: the model understood, we did not let it finish.
+    """
+    text = (raw or "").strip()
+    return bool(text) and "{" in text and text.count("{") > text.count("}")
+
+
+def _did_not_follow(ask: str) -> str:
+    """Ask again in the person's own words.
+
+    "I did not follow that. Which screen should I change, and what on it?"
+    was returned for a request that named the screen and the change in the
+    same breath, and the person simply retyped it. Quoting what they said
+    shows what Smith actually has, and asking for one thing at a time is the
+    answer they can give.
+    """
+    said = " ".join((ask or "").split())
+    if len(said) > 120:
+        said = said[:117].rstrip() + "\u2026"
+    return (f"I could not turn that into a change I am sure of. You said: "
+            f"\u201c{said}\u201d. Tell me the first thing to change and the "
+            f"screen it is on, and I will do that one, then we take the next.")

@@ -226,8 +226,9 @@ def test_an_unreachable_chooser_ends_the_turn_on_what_landed():
     def boom(_prompt: str) -> str:
         raise RuntimeError("no network")
 
-    assert next_step("x", "ctx", [], provider=boom)["tool"] == "done"
-    assert next_step("x", "ctx", [], provider=lambda _p: "I think we should…")["tool"] == "done"
+    assert next_step("x", "ctx", [], provider=boom)["tool"] == "done"      # unreachable: end on what landed
+    prose = next_step("x", "ctx", [], provider=lambda _p: "I think we should…")
+    assert prose["tool"] == "ask_user" and "You said" in prose["args"]["question"]   # unreadable: ask, never silence
 
 
 def test_a_refused_read_is_an_observation_the_loop_carries_on_from(tmp_path):
