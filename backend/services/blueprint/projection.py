@@ -3543,6 +3543,19 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # the root route — `/` is not reachable by the catch-all
 # ---------------------------------------------------------------------------
 
+def declared_landing(doc: dict) -> str | None:
+    """`navigation.initialRoute.default` when it is a route a link can carry:
+    concrete (no `[id]` to fill) and not "/" (a root that forwards to itself).
+    None when the Blueprint declares nothing usable, so the caller falls back."""
+    nav = doc.get("navigation") or {}
+    initial = nav.get("initialRoute")
+    declared = initial.get("default") if isinstance(initial, dict) else initial
+    if isinstance(declared, str) and declared.startswith("/") and declared != "/" \
+            and "[" not in declared:
+        return declared
+    return None
+
+
 def landing_route(doc: dict) -> str:
     """Where `/` should send someone when no page claims it — and where the
     edge pages' "return to the app" link points.
@@ -3562,12 +3575,10 @@ def landing_route(doc: dict) -> str:
     route (`/nurses/[id]`) has no id to fill and "/" would forward to itself,
     so neither counts as declared; the legacy keys still do.
     """
-    nav = doc.get("navigation") or {}
-    initial = nav.get("initialRoute")
-    declared = initial.get("default") if isinstance(initial, dict) else initial
-    if isinstance(declared, str) and declared.startswith("/") and declared != "/" \
-            and "[" not in declared:
+    declared = declared_landing(doc)
+    if declared:
         return declared
+    nav = doc.get("navigation") or {}
     for key in ("landing", "home", "root"):
         route = nav.get(key)
         if isinstance(route, str) and route.startswith("/"):

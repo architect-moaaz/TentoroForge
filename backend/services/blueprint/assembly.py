@@ -382,9 +382,18 @@ def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
             nav_flow = loaded if isinstance(loaded, dict) else {}
         except Exception:  # noqa: BLE001
             nav_flow = {}
+    # THE DECLARED LANDING COMES FIRST. `navigation.initialRoute.default` is
+    # what the navigation agent writes and what "open on Master Data" changes;
+    # the root redirect reads it, so the 403 page's fallback reads it too, or
+    # the two doors part ways the moment the landing is changed. The signed-in
+    # front door from nav-flow stands in when the Blueprint declares none.
+    from services.blueprint.projection import declared_landing
+
     entries = nav_flow.get("entries") if isinstance(nav_flow.get("entries"), dict) else {}
     door = entries.get("authenticated")
-    if isinstance(door, str) and door.startswith("/") and "[" not in door:
+    if declared_landing(doc):
+        home_route = declared_landing(doc)
+    elif isinstance(door, str) and door.startswith("/") and "[" not in door:
         home_route = door
     else:
         home_route = _landing_route(doc)

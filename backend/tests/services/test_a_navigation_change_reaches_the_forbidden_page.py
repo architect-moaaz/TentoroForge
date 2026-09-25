@@ -58,7 +58,7 @@ def test_a_changed_landing_route_reaches_the_forbidden_page(svc, tmp_path):
     # THE BUILD: the scaffold laid down and filled from the Blueprint of the day.
     assembly.copy_scaffold(app, project_short_id="t")
     assembly.interpolate_edge_pages(app, svc.doc)
-    assert 'href="/nurse-registration"' in _href(app, "src/app/forbidden.tsx")
+    assert 'const LANDING = "/nurse-registration";' in _href(app, "src/app/forbidden.tsx")
     # The fill consumed the placeholder: filling again finds nothing to fill.
     assert assembly.interpolate_edge_pages(app, svc.doc) == []
 
@@ -68,8 +68,12 @@ def test_a_changed_landing_route_reaches_the_forbidden_page(svc, tmp_path):
                                                         {"label": "Master Data", "page": svc._t.lst["id"]}],
                                                "initialRoute": "/master-data", "note": ""}))
     assert out["landing"] == "/master-data"
-    for rel in ("src/app/forbidden.tsx", "src/app/error.tsx", "src/app/not-found.tsx"):
+    # The 403 page computes its link per role and falls back to the landing;
+    # the 404 and error pages link to it outright.
+    assert 'const LANDING = "/master-data";' in _href(app, "src/app/forbidden.tsx")
+    for rel in ("src/app/error.tsx", "src/app/not-found.tsx"):
         assert 'href="/master-data"' in _href(app, rel), rel
+    for rel in ("src/app/forbidden.tsx", "src/app/error.tsx", "src/app/not-found.tsx"):
         assert rel in out["edited_paths"]
     # …and the four doors agree: the rail, the route graph, the root, the 403.
     assert json.loads((app / "src/schemas/shell.json").read_text())["initialRoute"] == "/master-data"
@@ -98,10 +102,12 @@ def test_the_edge_pages_are_relaid_from_the_scaffold_before_the_fill(tmp_path):
                      {"id": "PAGE-002", "name": "Entries", "route": "/entries"}]}
     laid = assembly.relay_edge_pages(app, doc)
     assert "src/app/forbidden.tsx" in laid and "src/components/EdgePageFrame.tsx" in laid
-    assert 'href="/books"' in _href(app, "src/app/forbidden.tsx")
+    assert 'const LANDING = "/books";' in _href(app, "src/app/forbidden.tsx")
+    assert 'href="/books"' in _href(app, "src/app/not-found.tsx")
     doc["navigation"]["initialRoute"]["default"] = "/entries"
     assembly.relay_edge_pages(app, doc)
-    assert 'href="/entries"' in _href(app, "src/app/forbidden.tsx")
+    assert 'const LANDING = "/entries";' in _href(app, "src/app/forbidden.tsx")
+    assert 'href="/entries"' in _href(app, "src/app/not-found.tsx")
     # One helper for every verb: the bundle writes all four doors.
     files = project_navigation(doc, app)["files"]
     assert {"src/schemas/shell.json", "src/contracts/nav-flow.json",
