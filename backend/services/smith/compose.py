@@ -793,9 +793,17 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
             brief += ("\n\nDraw these new widgets, each with `WidgetView` from the page's `runWidget` data: "
                       + ", ".join(f"widgets.{keys.get(str(w.body.get('id')), '?')} ({w.body.get('label')})"
                                   for w in widgets))
-        llm = client or tiered_router(reasoning=reasoning).for_task("page_code", "ui_engineer")
+        router = tiered_router(reasoning=reasoning)
+        llm = client or router.for_task("page_code", "ui_engineer")
+        # A REWRITE IS LOOKED AT LIKE A FIRST WRITE. Smith's rewrites of a
+        # page went out compiled and unseen — the one path a person had just
+        # complained about (rafm22pm: "nothing was written on it?").
+        critic = router.for_task("page_look", "page_reviewer")
+        if not getattr(critic, "accepts_images", False):
+            critic = None
         try:
-            body, spent = compose_page(doc, page, root, llm, brief=brief, current=row, node="page_code")
+            body, spent = compose_page(doc, page, root, llm, brief=brief, current=row, node="page_code",
+                                       critic=critic)
         except CompileError as exc:
             raise ComposeError(f"the new {route} did not compile, so nothing was changed: {exc}") from exc
         for u, elapsed in spent:

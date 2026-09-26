@@ -30,7 +30,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
     """One turn on a built application. `choose` decides each step; absent,
     `services.smith.loop.next_step` on the real model. `move` is the tree
     editor for layout pages; absent, `move_dispatcher`."""
-    choose = choose or _default_choose(reasoning)
+    choose = choose or _default_choose(reasoning, images=_image_paths(attachments))
     if move is None:
         from services.smith.move_dispatcher import move_dispatcher
         move = move_dispatcher
@@ -77,11 +77,22 @@ def handle(*, project_id: str, output_dir: str, message: str,
     return result
 
 
-def _default_choose(reasoning: Any) -> Callable:
+def _image_paths(attachments: list[dict] | None) -> list[str]:
+    """The pictures attached to this turn, by path — what the person sees."""
+    out = []
+    for a in attachments or []:
+        kind = str(a.get("mime") or a.get("content_type") or "")
+        name = str(a.get("filename") or a.get("path") or "").lower()
+        if (kind.startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))) and a.get("path"):
+            out.append(str(a["path"]))
+    return out
+
+
+def _default_choose(reasoning: Any, images: list[str] | None = None) -> Callable:
     from services.smith.loop import next_step
 
     def choose(ask: str, page: str, observations: list, history: list) -> dict:
-        return next_step(ask, page, observations, history, reasoning=reasoning)
+        return next_step(ask, page, observations, history, reasoning=reasoning, images=images or [])
 
     return choose
 

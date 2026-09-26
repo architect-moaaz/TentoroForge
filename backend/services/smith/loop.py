@@ -43,7 +43,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Sequence, Any, Callable
 
 from services.smith import tools
 
@@ -234,7 +234,8 @@ def _render(observations: list[Observation]) -> str:
 def next_step(ask: str, ctx: str, observations: list[Observation],
               history: list | None = None, *,
               provider: Callable[[str], str] | None = None,
-              reasoning: Callable[[str], None] | None = None) -> dict[str, Any]:
+              reasoning: Callable[[str], None] | None = None,
+              images: Sequence[str] = ()) -> dict[str, Any]:
     """The next step, or a terminal move. Never raises.
 
     `history` is the exchange, rendered the way `understand_ask` renders it.
@@ -251,8 +252,10 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
     from services.smith.understand_ask import (_default_provider, _did_not_follow,
                                                 _looks_cut_off, _parse, _render_history)
 
-    call = provider or (lambda prompt: _default_provider(prompt, reasoning))
-    prompt = _PROMPT.format(ask=(ask or "").strip(), history=_render_history(history),
+    call = provider or (lambda prompt: _default_provider(prompt, reasoning, images=images))
+    shown = (f"\n\n[{len(images)} screenshot{'s' if len(images) != 1 else ''} attached by the person, shown above "
+             "the text: what they see on screen. Read it as their evidence.]" if images else "")
+    prompt = _PROMPT.format(ask=(ask or "").strip() + shown, history=_render_history(history),
                             ctx=ctx or "(nothing yet)", observations=_render(observations),
                             catalogue=tools.render())
     try:

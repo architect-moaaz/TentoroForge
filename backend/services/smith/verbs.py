@@ -413,7 +413,12 @@ VERB_HELP: dict[str, str] = {
     "explain_crash": (
         "Something in the RUNNING application broke and they are telling "
         "you: \"it crashed\", \"the app crashed\", \"I got an error\", "
-        "\"it broke when I clicked save\", \"something went wrong\". I read "
+        "\"it broke when I clicked save\", \"something went wrong\". NOT "
+        "a page that shows 404, \"not found\", or nothing: that is a page "
+        "answering as written — its loader returned null, or the preview "
+        "has no such record — and is a change to that page, not an incident "
+        "(a tester's \"it's showing 404\" was answered with the crash "
+        "ledger, 2026-09-26). I read "
         "what the application itself reported — what failed, where, how often "
         "and what it said — and offer the repair when the crash names one. "
         "Needs nothing: not knowing what broke is the reason they are asking."

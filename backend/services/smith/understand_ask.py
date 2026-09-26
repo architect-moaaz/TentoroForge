@@ -10,9 +10,14 @@ loop applies to a tool call before handing it on: `_blank` gives every key,
 """
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 import json
 import re
-from typing import Any, Callable
+logger = logging.getLogger(__name__)
+
+from typing import Sequence, Any, Callable
 
 def _design_scope(raw: object) -> str:
     """`evidence`, `specification`, or "" when they have not said.
@@ -48,14 +53,31 @@ def _env_name_only(raw: object) -> str:
     return text if all(c.isalnum() or c == "_" for c in text) else ""
 
 
-def _default_provider(prompt: str, reasoning: Callable[[str], None] | None = None) -> str:
+def _default_provider(prompt: str, reasoning: Callable[[str], None] | None = None,
+                      images: Sequence[str | Path] = ()) -> str:
     from services.llm_client import complete
 
     # 1200 CUT THE ANSWER OFF, AND THE USER WAS TOLD IT WAS THEIR FAULT
     # (smithv2, 1be5ce23). A chooser's reply is a small object, but an
     # `answer` carries the whole answer — the rentals explanation was a
     # thousand characters — and the model reasons before it writes.
-    return complete(content=prompt, max_tokens=4000,
+    #
+    # WHAT THE PERSON ATTACHED, SHOWN. A screenshot attached to "check the
+    # attached image" was stored, designated a reference, and never put in
+    # front of the model, which answered "I cannot see the attached image"
+    # (rafm22pm, 2026-09-26). The images lead the text, as everywhere else.
+    content: Any = prompt
+    if images:
+        from services.blueprint.executors import image_block
+        blocks: list[dict] = []
+        for path in images:
+            try:
+                blocks.append(image_block(path))
+            except Exception as exc:  # noqa: BLE001 — a picture that will not load is left out, said
+                logger.info("[smith] attachment not shown to the model (%s)", exc)
+        if blocks:
+            content = [*blocks, {"type": "text", "text": prompt}]
+    return complete(content=content, max_tokens=4000,
                     reasoning_callback=reasoning)
 
 

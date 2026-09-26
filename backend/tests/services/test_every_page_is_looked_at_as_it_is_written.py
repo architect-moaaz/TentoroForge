@@ -228,3 +228,21 @@ def test_a_look_lays_down_what_the_bundle_needs_before_assembly(monkeypatch, tmp
         page_look.render(_doc(), _doc()["pages"][0], app, GOOD_LOAD, GOOD_VIEW, tmp_path / "out")
     assert seen["laid"] is True, "feel-lite is in the tree before the bundle is asked for"
     assert projected == [app], "the design's tokens are projected before the bundle, not the scaffold's default theme"
+
+
+def test_the_sample_person_owns_the_sample_rows():
+    """A record shown only to its owner rendered "Not found" in the editor and
+    in every look: the sample user was nobody's parent (rafm22pm, 2026-09-26)."""
+    import json, subprocess
+    shim = ROOT / "static/jit-samples.mjs"
+    src = subprocess.run(["node", "-e", f"""
+      import({json.dumps(str(shim))}).then(m => {{
+        const ents = [{{name: "Parent", account: true, fields: [{{name: "id", type: "uuid"}}, {{name: "fullName", type: "string"}}, {{name: "email", type: "string"}}]}},
+                      {{name: "Child", fields: [{{name: "id", type: "uuid"}}, {{name: "parentId", type: "uuid"}}]}}];
+        const s = m.sampleServer(ents, ["parent"]);
+        const child = m.sampleRow(ents[1], 0, ents);
+        console.log(JSON.stringify({{server: s, childParent: child.parentId}}));
+      }})"""], capture_output=True, text=True, check=True).stdout
+    out = json.loads(src)
+    assert '"id":"sample-parent-1"' in out["server"].replace(" ", ""), "currentUser() is the account's first sample row"
+    assert out["childParent"] == "sample-parent-1", "and the first child points at it"
