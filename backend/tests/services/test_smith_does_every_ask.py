@@ -197,3 +197,6 @@ def test_a_turn_that_changed_the_app_leaves_it_in_step_with_its_definition(tmp_p
     _in_step(str(tmp_path), Outcome(status="asked", said="Which one?"))
     _in_step(str(tmp_path), Outcome(status="resolved", said="Nothing to change."))
     assert len(synced) == 1, "a question, or a turn that changed nothing, writes nothing"
+    # A turn that changed a page and then gave up on the rest still changed it.
+    _in_step(str(tmp_path), Outcome(status="needs_user", said="I could not…", touched=["src/app/x/view.tsx"]))
+    assert len(synced) == 2

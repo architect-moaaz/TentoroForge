@@ -100,7 +100,11 @@ def _in_step(output_dir: str, result: Outcome) -> Outcome:
     Writing everything out after every change makes drift last one turn, not
     until somebody diagnoses it. Deterministic and quick; a failure here is
     logged and never costs the turn."""
-    if not (result.done and result.touched):
+    # WHATEVER THE TURN ENDED ON. A turn that changed a page and then gave up
+    # on the rest ("I could not turn that into a change I am sure of") still
+    # changed the application; it was left out of step exactly when it most
+    # needed not to be (Test2, 2026-09-28).
+    if not result.touched:
         return result
     from pathlib import Path
 
