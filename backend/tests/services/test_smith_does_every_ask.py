@@ -174,3 +174,26 @@ def test_doing_all_of_it_stops_between_steps_when_the_time_is_spent(tmp_path):
                      budget_s=480.0, clock=lambda: next(ticks))
     assert "Did one." in out.said and "Did two." not in out.said
     assert "Still to do" in out.said and plan.peek(str(tmp_path)) == ["two", "three"]
+
+
+def test_a_turn_that_changed_the_app_leaves_it_in_step_with_its_definition(tmp_path, monkeypatch):
+    """Test2, 2026-09-28: asked twice why Location Data listed no areas over
+    twelve rows, Smith rewrote the page twice — the engine's list of records
+    predated the record. Every change-making turn now writes the application
+    out again from its definition, so drift lasts one turn."""
+    from services.smith import sync_app
+    from services.smith4.handle import _in_step
+    from services.smith4.outcome import Outcome
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app/package.json").write_text("{}")
+    monkeypatch.setattr("services.blueprint.service.BlueprintService.load",
+                        classmethod(lambda cls, output_dir: object()))
+    synced = []
+    monkeypatch.setattr(sync_app, "sync", lambda svc, app_root: synced.append(app_root) or
+                        {"changed": ["src/lib/data-init.ts"], "added": [], "removed": []})
+    out = _in_step(str(tmp_path), Outcome(status="resolved", said="Rewrote it.", touched=["src/app/x/view.tsx"]))
+    assert synced == [str(tmp_path / "app")]
+    assert out.touched == ["src/app/x/view.tsx", "src/lib/data-init.ts"]
+    _in_step(str(tmp_path), Outcome(status="asked", said="Which one?"))
+    _in_step(str(tmp_path), Outcome(status="resolved", said="Nothing to change."))
+    assert len(synced) == 1, "a question, or a turn that changed nothing, writes nothing"

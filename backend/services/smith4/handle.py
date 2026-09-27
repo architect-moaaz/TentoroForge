@@ -51,8 +51,8 @@ def handle(*, project_id: str, output_dir: str, message: str,
     # turn; the run stops at the first that asks something or cannot be done,
     # and at a time budget, and says what is still to do either way.
     if plan_mod.peek(output_dir) and typed == plan_mod.ALL_LABEL:
-        return _all_steps(output_dir, lambda step: turn(ctx_for(step), choose=choose, history=history,
-                                                      max_steps=max_steps))
+        return _in_step(output_dir, _all_steps(output_dir, lambda step: turn(
+            ctx_for(step), choose=choose, history=history, max_steps=max_steps)))
     # AGREED, SO DO THE FIRST ONE NOW.
     if plan_mod.peek(output_dir) and (plan_mod.wants_next(typed)
                                       or typed in (plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL)):
@@ -65,7 +65,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
             note = plan_mod.remaining_note(plan_mod.peek(output_dir))
             if note and result.status == "resolved":
                 result.said += note
-            return result
+            return _in_step(output_dir, result)
     # AGREED, SO LOAD THEM NOW — under the mapping that was shown.
     from services.smith import data_import
     if data_import.wants(data_import.peek(output_dir), typed):
@@ -84,6 +84,38 @@ def handle(*, project_id: str, output_dir: str, message: str,
         note = plan_mod.remaining_note(plan_mod.peek(output_dir))
         if note and note.strip() not in result.said:
             result.said += note
+    return _in_step(output_dir, result)
+
+
+def _in_step(output_dir: str, result: Outcome) -> Outcome:
+    """A turn that changed the application leaves it in step with its
+    definition — every generated file and the database schema.
+
+    The Blueprint is what the application is; the files are what it was last
+    written out as. A seam that re-projects less than it changed, a platform
+    fix to a projection, a hand edit — each leaves the two apart, and Smith,
+    reading the definition, cannot see what the person sees. Asked twice why
+    Location Data listed no areas over twelve rows, it rewrote the page twice:
+    the engine's list of records predated the record (Test2, 2026-09-28).
+    Writing everything out after every change makes drift last one turn, not
+    until somebody diagnoses it. Deterministic and quick; a failure here is
+    logged and never costs the turn."""
+    if not (result.done and result.touched):
+        return result
+    from pathlib import Path
+
+    app_root = Path(output_dir) / "app"
+    if not (app_root / "package.json").is_file():
+        return result
+    try:
+        from services.blueprint.service import BlueprintService
+        from services.smith.sync_app import sync
+        out = sync(BlueprintService.load(output_dir=str(output_dir)), str(app_root))
+        moved = out["changed"] + out["added"] + out["removed"]
+        result.touched = list(dict.fromkeys([*result.touched, *moved]))
+    except Exception:  # noqa: BLE001 — the change stands; the next turn catches up
+        import logging
+        logging.getLogger(__name__).exception("[smith] bringing %s in step failed", output_dir)
     return result
 
 
