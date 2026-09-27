@@ -91,7 +91,20 @@ def _name_from_route(route: str) -> str:
     return " ".join(w.capitalize() for w in tail.split())
 
 
-def _ensure_page(svc: Any, route: str, request: str = "") -> dict:
+def _entity_id(doc: dict, ref: str) -> str:
+    """The live entity `ref` names — its id, name or table, any case."""
+    want = (ref or "").strip().lower()
+    if not want:
+        return ""
+    for e in (doc.get("data") or {}).get("entities") or []:
+        if isinstance(e, dict) and e.get("status") != "DEPRECATED" and want in (
+                str(e.get("id") or "").lower(), str(e.get("name") or "").lower(),
+                str(e.get("table") or "").lower()):
+            return str(e.get("id"))
+    return ""
+
+
+def _ensure_page(svc: Any, route: str, request: str = "", entity: str = "") -> dict:
     """The page contract for `route`, CREATING a minimal one when the
     definition does not have it yet.
 
@@ -142,6 +155,14 @@ def _ensure_page(svc: Any, route: str, request: str = "") -> dict:
     from services.blueprint.account_model import has_sign_in
     if not has_sign_in(svc.doc):
         body["access"] = "public"
+    # THE RECORD THE SCREEN IS ABOUT, when Smith named one. Without it the new
+    # page declared no actions and no workflows, and a screen asked to add,
+    # edit and delete areas imported `create`/`update`/`remove` functions that
+    # do not exist, four compile rounds running (Test2's Location Data,
+    # 2026-09-28) — there was no workflow it could have called instead.
+    eid = _entity_id(svc.doc, entity)
+    if eid:
+        body["data"] = {"primaryEntity": eid}
     # ALLOCATING A NEW ID, unlike every write compose did before — recompose and
     # add_widgets only ever UPDATE a page already in the definition. A new id
     # collides if the allocator registry has fallen behind the document (a
@@ -878,7 +899,7 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
 
 def run(output_dir: str, verb: str, *, route: str = "",
         widgets: Sequence[str] = (), request: str = "",
-        reasoning: Any = None) -> dict:
+        reasoning: Any = None, entity: str = "") -> dict:
     """One composition, from an `output_dir` — the shape a tool handler needs.
 
     THE ONLY ENTRY POINT WITH BOTH CALLERS ON IT. The ReAct loop dispatches by
@@ -906,6 +927,14 @@ def run(output_dir: str, verb: str, *, route: str = "",
         return {"applied": False, "edited_paths": [],
                 "reason": f"unknown compose verb {verb!r}; "
                           f"expected one of {', '.join(VERBS)}"}
+    # A SCREEN THAT NAMES NO RECORD ADOPTS THE ONE SMITH NAMED — a page made
+    # before screens were given one (Test2's Location Data) could otherwise
+    # never be prepared: no record, no actions, no workflows to call.
+    existing = _page_for_route(svc.doc, route)
+    eid = _entity_id(svc.doc, entity)
+    if existing is not None and eid and not (existing.get("data") or {}).get("primaryEntity"):
+        existing["data"] = {**(existing.get("data") or {}), "primaryEntity": eid}
+        svc.save()
     try:
         prepared = prepare_capabilities(svc, route, f"{request} {' '.join(wanted)}",
                                         app_root=app_root, reasoning=reasoning)
@@ -924,9 +953,21 @@ def run(output_dir: str, verb: str, *, route: str = "",
     # is not there" (UAT jubyt8jk). Declared, put in the menu, then written.
     created = False
     if page is None and verb == "compose_route" and coded_app(svc.doc):
-        page = _ensure_page(svc, route, request)
+        page = _ensure_page(svc, route, request, entity=entity)
         _into_menu(svc, page, app_root)
         created = True
+        # …AND PREPARED LIKE ANY PAGE. The preparation above ran before this
+        # page existed and so declared nothing: the actions the request names,
+        # and the workflows that perform them, are declared now.
+        try:
+            again = prepare_capabilities(svc, route, f"{request} {' '.join(wanted)}",
+                                         app_root=app_root, reasoning=reasoning)
+        except Exception:  # noqa: BLE001 — the page is still written; its controls are held to what exists
+            logger.exception("[smith] preparing new page %s failed", route)
+            again = {"declared": [], "created": []}
+        if again["declared"]:
+            extra += f"; declared {', '.join(again['declared'])} on it"
+        page = _page_for_route(svc.doc, route) or page
     if page is not None and (code_row(svc.doc, str(page.get("id"))) is not None or coded_app(svc.doc)):
         try:
             out = recode_page(svc, route, app_root=app_root, request=request, wanted=wanted,

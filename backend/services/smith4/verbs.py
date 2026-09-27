@@ -267,7 +267,7 @@ def compose(ctx: Ctx, u: dict) -> Outcome:
     change = _s(u, "change")
     request = f"{change}\n\n(In their words: \"{ctx.ask}\")" if change else ctx.ask
     out = run(ctx.out, verb, route=route, widgets=[str(w) for w in (u.get("widgets") or [])],
-              request=request, reasoning=ctx.reasoning)
+              request=request, reasoning=ctx.reasoning, entity=_s(u, "entity"))
     if not out.get("applied"):
         reason = str(out.get("reason") or f"I could not {verb.replace('_', ' ')} {route} "
                                           "and have changed nothing.")

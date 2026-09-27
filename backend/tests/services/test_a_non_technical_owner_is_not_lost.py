@@ -146,3 +146,51 @@ def test_a_new_page_brings_the_whole_app_in_step_and_a_rewrite_does_not(tmp_path
     assert len(synced) == 1
     compose.run(str(tmp_path), "compose_route", route="/tools", request="tighter")
     assert len(synced) == 1, "a rewrite of an existing page is not a new door"
+
+
+def test_a_new_screen_about_a_record_is_prepared_with_that_record(tmp_path, monkeypatch):
+    """Test2, 2026-09-28: "a Location Data screen where you can add, edit and
+    delete areas" — the new page named no record, so no action or workflow was
+    declared, and the writer imported create/update/remove functions that do
+    not exist, four compile rounds running."""
+    from services.blueprint.service import BlueprintService
+    from services.smith import compose, sync_app
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="T", domain="d")
+    svc.doc["data"] = {"entities": [{"id": "ENTITY-002", "name": "Area", "table": "areas",
+                                     "fields": [{"name": "areaName", "type": "string"}]}]}
+    svc.upsert("pages", {"name": "Tools", "route": "/tools", "purpose": "x"}, natural_key="PAGE:/tools")
+    svc.doc["pageCode"] = [{"page": svc.doc["pages"][0]["id"], "load": "", "view": "x"}]
+    svc.save()
+    declared_for = []
+    monkeypatch.setattr(compose, "declare_capabilities",
+                        lambda svc, page, request: declared_for.append(
+                            (page["route"], (page.get("data") or {}).get("primaryEntity"))) or ["edit", "delete"])
+    monkeypatch.setattr(compose, "recode_page", lambda svc, route, **k:
+                        {"applied": True, "committed": [], "version": 2, "reason": "", "missing": [], "widgets": []})
+    monkeypatch.setattr(sync_app, "sync", lambda svc, app_root: {})
+    out = compose.run(str(tmp_path), "compose_route", route="/location-data", entity="Area",
+                      request="a screen to add, edit and delete areas")
+    assert declared_for == [("/location-data", "ENTITY-002")]
+    assert "declared edit, delete on it" in out["diff_summary"]
+
+
+def test_an_existing_screen_with_no_record_adopts_the_one_named(tmp_path, monkeypatch):
+    from services.blueprint.service import BlueprintService
+    from services.smith import compose
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="T", domain="d")
+    svc.doc["data"] = {"entities": [{"id": "ENTITY-002", "name": "Area", "table": "areas",
+                                     "fields": [{"name": "areaName", "type": "string"}]}]}
+    svc.upsert("pages", {"name": "Location Data", "route": "/location-data", "purpose": "x"},
+               natural_key="PAGE:/location-data")
+    svc.doc["pageCode"] = [{"page": svc.doc["pages"][0]["id"], "load": "", "view": "x"}]
+    svc.save()
+    seen = []
+    monkeypatch.setattr(compose, "declare_capabilities",
+                        lambda svc, page, request: seen.append((page.get("data") or {}).get("primaryEntity")) or [])
+    monkeypatch.setattr(compose, "recode_page", lambda svc, route, **k:
+                        {"applied": True, "committed": [], "version": 2, "reason": "", "missing": [], "widgets": []})
+    compose.run(str(tmp_path), "compose_route", route="/location-data", entity="areas",
+                request="let me add, edit and delete areas here")
+    assert seen == ["ENTITY-002"]

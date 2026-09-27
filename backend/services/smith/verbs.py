@@ -341,7 +341,10 @@ VERB_HELP: dict[str, str] = {
     ),
     "compose_route": (
         "Build or rebuild the screen at a route — when a route renders "
-        "nothing, or the user wants it laid out again from scratch."
+        "nothing, or the user wants it laid out again from scratch. For a NEW "
+        "screen about one kind of record (a list of areas, a screen to manage "
+        "suppliers), also pass `entity`: that record's name — its add, edit and "
+        "delete are then declared as workflows the screen can call."
     ),
     "add_widgets": (
         "Add named sections or widgets to a screen that exists: "
