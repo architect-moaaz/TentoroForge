@@ -2760,6 +2760,10 @@ def _seed_value(field: dict, entity_name: str, row: int,
     examples = [str(x) for x in (field.get("examples") or []) if str(x).strip()]
     if row <= len(examples) and kind in ("string", "text", "varchar"):
         return examples[row - 1]        # each once — a demo list never lists a title twice
+    # …but a category's examples repeat: "Country 4" is not a country (the
+    # editor's sampler follows the same rule; see `UNIQUE_TEXT` there).
+    if examples and kind in ("string", "text", "varchar") and not _UNIQUE_TEXT.search(str(name)):
+        return examples[(row - 1) % len(examples)]
     lo, hi = field.get("min"), field.get("max")
     if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and hi >= lo \
             and kind in ("integer", "int", "number", "decimal", "float", "numeric", "currency", "money"):
@@ -2791,6 +2795,28 @@ def _seed_value(field: dict, entity_name: str, row: int,
         return f"{to_snake(entity_name)}{row}@example.com"
     return f"{entity_name} {row}" if name.lower() in ("name", "title") else \
         f"{_humanise_field(name)} {row}"
+
+
+#: A text field whose values are each a different thing — a name, a title.
+_UNIQUE_TEXT = re.compile(r"(^|_)(name|title|subject|label|headline|email)$|[a-z](Name|Title)$")
+
+
+def years_within_age(record: dict, fields: list[dict]) -> dict:
+    """A count of someone's years (experience, service, tenure) is at most
+    their age less the youngest age the Blueprint allows. The two were drawn
+    apart, and a 27-year-old had 51 years' experience (Test2, 2026-09-28)."""
+    age = next((f for f in fields if str(f.get("name") or "").lower() == "age"), None)
+    if not age or not isinstance(record.get(age.get("name")), (int, float)):
+        return record
+    floor = age.get("min") if isinstance(age.get("min"), (int, float)) else 16
+    most = max(0, record[age["name"]] - floor)
+    for f in fields:
+        key = f.get("name")
+        if f is age or not isinstance(record.get(key), (int, float)) or isinstance(record.get(key), bool):
+            continue
+        if re.search(r"years|experience|tenure|service", str(key), re.I) and record[key] > most:
+            record[key] = int(most * 0.6) if isinstance(record[key], int) else round(most * 0.6, 1)
+    return record
 
 
 def _humanise_field(name: str) -> str:
@@ -2912,7 +2938,7 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = SEED_ROWS) -> dict
                 if is_image_field(field) or is_embedding_field(field):
                     continue
                 record[field.get("name")] = _seed_value(field, name, row, tables_by_id)
-            out_rows.append(record)
+            out_rows.append(years_within_age(record, entity.get("fields") or []))
         seed[table] = out_rows
 
     out = Path(app_root) / "src" / "db"

@@ -1068,6 +1068,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     #: time, a changed page was rewritten whole, scored 7/10 again and cost
     #: two minutes for nothing (live, 2026-09-28).
     changing = current is not None
+    #: What the reviewer is told was asked of the page, when it is changed.
+    change = (brief or feedback or "").strip() if changing else ""
     #: The best version seen by the reviewer: (rank, body). Returned when a
     #: rewrite scores lower, fails to compile, or the rounds run out.
     best: tuple[tuple[int, int], dict] | None = None
@@ -1142,7 +1144,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                 looks_left -= 1
                 try:
                     verdict, cost = page_look.look_at(doc, page, Path(app_root), load, view, critic,
-                                                      attempt=page_look.LOOKS - looks_left)
+                                                      attempt=page_look.LOOKS - looks_left,
+                                                      change=change)
                 except page_look.LookUnavailable as exc:
                     logger.info("[ui_engineer] %s not looked at (%s); accepted as compiled", page.get("id"), exc)
                     looks_left = 0
@@ -1157,9 +1160,10 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                     seen = (page_look.rank(verdict), body)
                     if best is None or seen[0] > best[0]:
                         best = seen
-                    must_fix = verdict.get("verdict") != "pass" and (
-                        not changing or verdict.get("broken")
-                        or any(i.get("severity") == "high" for i in verdict.get("issues") or []))
+                    # A CHANGE GOES BACK FOR WHAT IT CAUSED: something proved
+                    # broken, or an issue the reviewer marks as the change's.
+                    must_fix = (verdict.get("verdict") != "pass" and not changing) or (
+                        changing and bool(verdict.get("broken") or page_look.caused_by_change(verdict)))
                     if must_fix and looks_left and round_ < rounds:
                         # THE REVIEW IS A REFUSAL, NOT A WISH. Handed as the
                         # brief ("what is wanted of it now") the first trial's
@@ -1167,7 +1171,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                         # every issue; as feedback it is what the writer is
                         # told to fix, every one, keeping what worked.
                         current = {"load": load, "view": view}
-                        note = page_look.look_brief(verdict)
+                        note = page_look.look_brief(verdict, change_only=changing)
                         logger.info("[ui_engineer] %s sent back by the reviewer (%s/10)",
                                     page.get("id"), verdict.get("score"))
                         continue

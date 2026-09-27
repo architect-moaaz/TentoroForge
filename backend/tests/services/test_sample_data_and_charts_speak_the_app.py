@@ -156,3 +156,40 @@ def test_sample_examples_are_used_once_and_a_numeric_axis_ascends():
     assert out == "ok"
     assert _seed_value({"name": "title", "type": "string", "examples": ["Circe", "Educated"]}, "Book", 3) != "Circe", \
         "the demo seed uses each example once"
+
+
+#: Test2's worker (2026-09-28): the reviewer judged a Master Data page whose
+#: Country column read 12, 15, 18, 21, 24 — "country" contains "count", so
+#: once its three examples ran out it was sampled as a count — and whose
+#: 27-year-old had 51 years' experience.
+WORKER = {"name": "Worker", "fields": [
+    {"name": "id", "type": "uuid"},
+    {"name": "name", "type": "string", "examples": ["Ramesh Kumar", "Suresh Yadav"]},
+    {"name": "age", "type": "integer", "min": 16, "max": 75},
+    {"name": "yearsOfExperience", "type": "number", "min": 0, "max": 60},
+    {"name": "country", "type": "string", "examples": ["India", "Nepal", "Bangladesh"]},
+    {"name": "state", "type": "string"},
+    {"name": "city", "type": "string"}]}
+
+
+def test_a_category_repeats_its_examples_and_text_is_never_a_number():
+    rows = _sample_rows([WORKER], 8)
+    assert [r["country"] for r in rows] == ["India", "Nepal", "Bangladesh"] * 2 + ["India", "Nepal"]
+    assert all(isinstance(r["state"], str) and r["state"] not in ("Open", "In progress", "Done", "On hold")
+               for r in rows), "a state beside a city is where someone lives, not a status"
+    # A name is still each example once.
+    assert [r["name"] for r in rows[:2]] == ["Ramesh Kumar", "Suresh Yadav"] and rows[2]["name"] != "Ramesh Kumar"
+
+
+def test_nobody_has_more_years_of_experience_than_their_age_allows():
+    for r in _sample_rows([WORKER], 8):
+        assert r["yearsOfExperience"] <= r["age"] - 16, r
+
+
+def test_the_demo_seed_follows_the_same_two_rules():
+    from services.blueprint.projection import years_within_age
+    fields = WORKER["fields"]
+    rows = [years_within_age({f["name"]: _seed_value(f, "Worker", r) for f in fields if f["name"] != "id"}, fields)
+            for r in range(1, 9)]
+    assert [r["country"] for r in rows[:4]] == ["India", "Nepal", "Bangladesh", "India"]
+    assert all(r["yearsOfExperience"] <= r["age"] - 16 for r in rows), rows

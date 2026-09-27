@@ -122,7 +122,15 @@ def test_the_one_fixed_first_line_is_put_there_not_asked_for(tmp_path):
 TASTE = {"score": 7, "verdict": "revise", "strengths": ["clear"],
          "issues": [{"severity": "medium", "where": "header", "problem": "tight spacing", "fix": "more air"}]}
 BROKE = {"score": 4, "verdict": "revise", "strengths": [],
-         "issues": [{"severity": "high", "where": "form", "problem": "submit is off-screen", "fix": "move it"}]}
+         "issues": [{"severity": "high", "where": "form", "problem": "submit is off-screen", "fix": "move it",
+                     "fromChange": True}]}
+#: What Test2's Master Data was sent back for (2026-09-28): high-severity,
+#: and on the page before the skill filter was ever asked for.
+OLD = {"score": 4, "verdict": "revise", "strengths": [],
+       "issues": [{"severity": "high", "where": "table, Country column", "problem": "shows numbers",
+                   "fix": "show names", "fromChange": False},
+                  {"severity": "high", "where": "phone", "problem": "drops five columns", "fix": "stack them",
+                   "fromChange": False}]}
 
 
 def test_a_changed_page_is_not_sent_back_for_taste(tmp_path):
@@ -158,3 +166,45 @@ def test_the_edit_schema_carries_no_keyword_the_api_refuses():
     text = json.dumps(PAGE_EDIT_SCHEMA)
     for k in ("maxItems", "minItems", "maxLength", "minLength", "pattern", "uniqueItems"):
         assert f'"{k}"' not in text
+
+
+def test_a_change_is_not_sent_back_for_what_the_page_already_had(tmp_path):
+    critic = _Critic([OLD])
+    writer = _Writer([_reply(_edit('<input name="country" />', SELECT))])
+    compose_page(_doc(), _doc()["pages"][0], tmp_path, writer, critic=critic,
+                 brief="add a filter on skill", current={"load": LOAD, "view": VIEW})
+    assert critic.seen == 1 and len(writer.calls) == 1
+
+
+def test_the_reviewer_is_told_the_change_and_asked_what_it_caused(tmp_path, monkeypatch):
+    seen = {}
+
+    class _Looking(_Critic):
+        def __call__(self, *, system, user, schema, images=()):
+            seen.update(user=user, schema=schema)
+            return super().__call__(system=system, user=user, schema=schema, images=images)
+    writer = _Writer([_reply(_edit('<input name="country" />', SELECT))])
+    compose_page(_doc(), _doc()["pages"][0], tmp_path, writer, critic=_Looking([TASTE]),
+                 brief="add a filter on skill", current={"load": LOAD, "view": VIEW})
+    assert "JUST CHANGED" in seen["user"] and "add a filter on skill" in seen["user"]
+    assert "fromChange" in seen["schema"]["properties"]["issues"]["items"]["required"]
+
+
+def test_a_first_write_is_judged_whole_with_the_shared_schema(tmp_path):
+    from services.blueprint.page_review import REVIEW_SCHEMA
+    seen = {}
+
+    class _Looking(_Critic):
+        def __call__(self, *, system, user, schema, images=()):
+            seen.update(user=user, schema=schema)
+            return super().__call__(system=system, user=user, schema=schema, images=images)
+    writer = _Writer([{"rationale": "", "load": LOAD, "view": VIEW}])
+    compose_page(_doc(), _doc()["pages"][0], tmp_path, writer,
+                 critic=_Looking([{"score": 9, "verdict": "pass", "strengths": [], "issues": []}]))
+    assert seen["schema"] is REVIEW_SCHEMA and "JUST CHANGED" not in seen["user"]
+
+
+def test_the_send_back_of_a_change_lists_only_what_it_caused():
+    verdict = {"score": 4, "issues": [OLD["issues"][0], BROKE["issues"][0]]}
+    brief = page_look.look_brief(verdict, change_only=True)
+    assert "submit is off-screen" in brief and "shows numbers" not in brief

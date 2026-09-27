@@ -232,10 +232,18 @@ export async function series(entity: string, opts: any): Promise<SeriesPoint[]> 
 `;
 }
 
+//: A field whose values are each a different thing (a person's name, a
+//: book's title): each example once, then a generic value. Any other text
+//: field with examples is a category (a trade, a country) and its examples
+//: repeat — "Country 4" is not a country.
+const UNIQUE_TEXT = /(^|_)(name|title|subject|label|headline|email)$|[a-z](Name|Title)$/;
+
 export function sampleRow(entity, i, entities) {
   const row = {};
   const fields = entity.fields || [];
   const name = entity.name;
+  //: "state" beside a city or a country is where someone lives, not a status.
+  const address = fields.some((f) => /^(city|country|town|postcode|zip|address)/i.test(f.name));
   for (const f of fields) {
     const fname = f.name;
     const type = String(f.type || "string").toLowerCase();
@@ -246,10 +254,16 @@ export function sampleRow(entity, i, entities) {
     // full of books called "Quarterly review 1" rated "13.5 / 5".
     const examples = Array.isArray(f.examples) ? f.examples.filter((x) => typeof x === "string" && x) : [];
     const bounded = typeof f.min === "number" && typeof f.max === "number" && f.max >= f.min;
+    // TEXT IS NEVER A NUMBER. The name-based guesses below look for "count",
+    // "age", "total" inside a field's name, and "country" contains "count":
+    // a Country column read 12, 15, 18, 21, 24 once its examples ran out
+    // (Test2, 2026-09-28).
+    const text = /string|text|varchar/.test(type);
     if (lower === "id") row[fname] = `sample-${name.toLowerCase()}-${i + 1}`;
     // EACH EXAMPLE ONCE. Cycling them over eight rows listed "Circe" and
     // "Educated" twice; rows beyond the examples take the generic value.
-    else if (i < examples.length && /string|text/.test(type) && !opts.length) row[fname] = examples[i];
+    else if (i < examples.length && text && !opts.length) row[fname] = examples[i];
+    else if (examples.length && text && !opts.length && !UNIQUE_TEXT.test(fname)) row[fname] = examples[i % examples.length];
     else if (/^(author|writer|artist|composer|director|creator|instructor|coach|host|speaker)(name)?$/.test(lower) && /string|text/.test(type))
       row[fname] = `${FIRST[(i + 3) % FIRST.length]} ${LAST[(i + 5) % LAST.length]}`;
     else if (bounded && /int|number|decimal|float|numeric|money|currency|rating|score/.test(type + lower)) {
@@ -279,12 +293,12 @@ export function sampleRow(entity, i, entities) {
     }
     else if (/description|notes?|summary|body|comment/.test(lower)) row[fname] = `Sample ${lower} for ${name.toLowerCase()} ${i + 1} — placeholder text shown while designing.`;
     else if (/url|link|website/.test(lower)) row[fname] = `https://example.com/${name.toLowerCase()}/${i + 1}`;
-    else if (/status|state|stage/.test(lower)) row[fname] = ["Open", "In progress", "Done", "On hold"][i % 4];
+    else if (/status|stage/.test(lower) || (lower === "state" && !address)) row[fname] = ["Open", "In progress", "Done", "On hold"][i % 4];
     else if (/^(uuid|id)$/.test(type) || /(^|_)id$|Id$/.test(fname)) {
       const target = (entities || []).find((e) => lower.startsWith(e.name.toLowerCase())) || entities?.[0];
       row[fname] = `sample-${(target ? target.name : name).toLowerCase()}-${(i % 3) + 1}`;
     }
-    else if (/int|number|decimal|float|numeric|money|currency|amount|price|count|age|quantity/.test(type) || /amount|price|total|count|qty|age|score/.test(lower)) {
+    else if (/int|number|decimal|float|numeric|money|currency|amount|price|count|age|quantity/.test(type) || (!text && /amount|price|total|count|qty|age|score/.test(lower))) {
       const base = /age/.test(lower) ? 22 + ((i * 7) % 45) : /price|amount|total|money|currency/.test(lower + type) ? (i + 1) * 125.5
         : /rating|stars/.test(lower) ? 1 + ((i * 2 + 1) % 5) : (i + 1) * 3;
       row[fname] = /int|count|age|qty|quantity/.test(type + lower) ? Math.round(base) : Number(base.toFixed(2));
@@ -303,6 +317,23 @@ export function sampleRow(entity, i, entities) {
     else row[fname] = `${humanise(fname)} ${i + 1}`;
   }
   if (!("id" in row)) row.id = `sample-${name.toLowerCase()}-${i + 1}`;
+  return yearsWithinAge(row, fields);
+}
+
+//: A count of someone's years (experience, service, tenure) cannot exceed
+//: their age less the youngest age the Blueprint allows — the two were drawn
+//: apart, and a 27-year-old had 51 years' experience (Test2, 2026-09-28).
+export function yearsWithinAge(row, fields) {
+  const age = fields.find((f) => /^age$/i.test(f.name));
+  if (!age || typeof row[age.name] !== "number") return row;
+  const floor = typeof age.min === "number" ? age.min : 16;
+  const most = Math.max(0, row[age.name] - floor);
+  for (const f of fields) {
+    if (f === age || typeof row[f.name] !== "number") continue;
+    if (/years|experience|tenure|service/i.test(f.name) && row[f.name] > most) {
+      row[f.name] = Number.isInteger(row[f.name]) ? Math.floor(most * 0.6) : Number((most * 0.6).toFixed(1));
+    }
+  }
   return row;
 }
 

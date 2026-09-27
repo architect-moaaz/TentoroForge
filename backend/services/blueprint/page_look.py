@@ -148,9 +148,40 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
     return {"shots": shots, "errors": seen[:12]}
 
 
-def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Path] = ()) -> tuple[dict, Any]:
+def change_review_schema() -> dict[str, Any]:
+    """The review's reply, with each issue saying whether the change caused it."""
+    import copy
+
+    from services.blueprint.page_review import REVIEW_SCHEMA
+    schema = copy.deepcopy(REVIEW_SCHEMA)
+    item = schema["properties"]["issues"]["items"]
+    item["properties"]["fromChange"] = {
+        "type": "boolean",
+        "description": ("true when the change caused this, or the change is not done; false for "
+                        "anything the page already had before it"),
+    }
+    item["required"] = [*item["required"], "fromChange"]
+    return schema
+
+
+def caused_by_change(verdict: dict) -> list[dict]:
+    """The issues a change must fix before it is accepted: what it broke, or
+    what it left undone — at more than low severity."""
+    return [i for i in verdict.get("issues") or []
+            if i.get("fromChange") and i.get("severity") in ("high", "medium")]
+
+
+def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Path] = (),
+          change: str = "") -> tuple[dict, Any]:
     """The reviewer's verdict on the screenshots. Returns the verdict and
-    what the call cost, as `(usage, elapsed)`."""
+    what the call cost, as `(usage, elapsed)`.
+
+    ``change`` is what was just asked of a page that already existed. The
+    reviewer is then judging the change: it still lists what it sees, and
+    says of each issue whether the change caused it. Asked to judge the
+    whole page, it sent a skill filter back for a country column and a phone
+    layout that predated it (Test2, 2026-09-28) — a round and a look spent on
+    problems nobody had asked about, which were still there afterwards."""
     from services.blueprint.page_review import PASS_SCORE, REVIEW_SCHEMA, reviewer_system
     from services.blueprint.references import READ_FOR
     from services.blueprint.ui_engineer import _page_brief
@@ -163,13 +194,20 @@ def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Pa
             f"What the browser proved broken:\n{proved}\n\n"
             + "The screenshots, in order: " + ", ".join(f"{n} ({VIEWPORTS[n][0]}px wide)" for n in names)
             + ". Judge both: a page that is right at a desk and broken on a phone does not pass.")
+    if change:
+        user += ("\n\nTHIS PAGE ALREADY EXISTED AND WAS JUST CHANGED. What was asked:\n"
+                 + change.strip()[:2000]
+                 + "\n\nJudge the change: is it done, and did it break or worsen anything on the page? "
+                 "List every issue you see, and mark each with `fromChange`: true when the change "
+                 "caused it or is not done, false when the page already had it.")
     images = [look["shots"][n] for n in names]
     if references:
         user += (f"\n\nThe last {len(references)} image(s) are what the user showed as the standard "
                  f"they want: {READ_FOR['page_look']}")
         images += [str(p) for p in references]
     t0 = time.monotonic()
-    reply = client(system=reviewer_system(doc), user=user, schema=REVIEW_SCHEMA, images=images)
+    reply = client(system=reviewer_system(doc), user=user,
+                   schema=change_review_schema() if change else REVIEW_SCHEMA, images=images)
     body = json.loads(getattr(reply, "text", reply))
     body["broken"] = list(look.get("errors") or [])
     if body["broken"] or any(i.get("severity") == "high" for i in body.get("issues") or []) \
@@ -178,16 +216,20 @@ def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Pa
     return body, (getattr(reply, "usage", None), time.monotonic() - t0)
 
 
-def look_brief(verdict: dict) -> str:
-    """The review as the writer's brief for its next round."""
+def look_brief(verdict: dict, *, change_only: bool = False) -> str:
+    """The review as the writer's brief for its next round. For a change,
+    only what the change caused — the rest is not this round's to fix."""
     lines = [f"A reviewer looked at your page as it renders (desk and phone) and scored it "
              f"{verdict.get('score')}/10. Keep what works and fix every issue:"]
+    if change_only:
+        lines = ["A reviewer looked at your change as the page renders (desk and phone). Keep what "
+                 "works and fix what the change broke or left undone:"]
     for s in verdict.get("strengths") or []:
         lines.append(f"  + {s}")
     if verdict.get("broken"):
         lines.append("BROKEN — proved in the browser, fix every one first:")
         lines += [f"  ! {b}" for b in verdict["broken"]]
-    for i in verdict.get("issues") or []:
+    for i in (caused_by_change(verdict) if change_only else verdict.get("issues") or []):
         lines.append(f"  - [{i.get('severity')}] {i.get('where')}: {i.get('problem')} → {i.get('fix')}")
     return "\n".join(lines)
 
@@ -199,14 +241,14 @@ def rank(verdict: dict) -> tuple[int, int]:
 
 
 def look_at(doc: dict, page: dict, app_root: Path, load: str, view: str, client: Any, *,
-            attempt: int = 1) -> tuple[dict, Any]:
+            attempt: int = 1, change: str = "") -> tuple[dict, Any]:
     """Render, then judge. Raises LookUnavailable when this machine cannot."""
     from services.blueprint import references
 
     out_dir = Path(app_root).parent / ".forge" / "look" / str(page.get("id")) / f"look-{attempt}"
     look = render(doc, page, Path(app_root), load, view, out_dir)
     shown = references.paths(app_root.parent) if getattr(client, "accepts_images", True) else []
-    verdict, spent = judge(doc, page, look, client, references=shown)
+    verdict, spent = judge(doc, page, look, client, references=shown, change=change)
     verdict["shots"] = look["shots"]
     verdict["attempt"] = attempt
     # WHAT WAS LOOKED AT AND WHAT WAS SAID, KEPT BESIDE THE SCREENSHOTS. The
