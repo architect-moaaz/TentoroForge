@@ -697,6 +697,15 @@ def _entry_route(doc: dict | None) -> str:
     if "/" in routes:
         return ""
 
+    # WHAT THE NAVIGATION DECLARES COMES FIRST. `initialRoute.default` is what
+    # Smith's "open on Master Data" changes and what the rail and the edge
+    # pages read (`landing_route`); this read only `entry` flags and the tree,
+    # so the root went one place and the rail another (Test2: the registry
+    # said /register, the root redirect /master-data, 2026-09-28).
+    declared = declared_landing(doc or {})
+    if declared and declared in routes:
+        return declared
+
     for page in live:
         if page.get("entry") and str(page.get("route") or "").startswith("/"):
             return str(page["route"])
@@ -3754,6 +3763,30 @@ def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
                       if (p.get("route") or "") == "/"), None)
     app = Path(app_root) / "src" / "app"
     out = app / "(dashboard)"
+    # THE OPTIONAL CATCH-ALL ALREADY SERVES "/". The scaffold's catch-all is
+    # `[[...slug]]` now: it renders a page at "/" and forwards the root to the
+    # registry's `entryRoute` otherwise. A second file for "/" beside it stops
+    # `next dev` from starting ("You cannot define a route with the same
+    # specificity as a optional catch-all route"). Assembly retires that file
+    # on every build, but a navigation change after the build ran this
+    # projection alone and wrote it back — Test2 stopped booting after "add
+    # Location Explorer to the menu" (2026-09-28). So here the root is left
+    # to the catch-all, and what it forwards to is updated in the registry.
+    if (app / "[[...slug]]").is_dir():
+        removed = [rel for rel in ("page.tsx", "(dashboard)/page.tsx") if (app / rel).is_file()]
+        for rel in removed:
+            (app / rel).unlink()
+        entry = _entry_route(doc)
+        registry = Path(app_root) / "src" / "schemas" / "registry.ts"
+        files: list[str] = []
+        if registry.is_file():
+            text = registry.read_text("utf-8")
+            new = re.sub(r'export const entryRoute = "[^"]*";', f'export const entryRoute = "{entry}";', text)
+            if new != text:
+                registry.write_text(new, "utf-8")
+                files.append("src/schemas/registry.ts")
+        return {"files": files, "claimedBy": root_page.get("id") if root_page else None,
+                "removedStaleRoot": bool(removed), "redirectsTo": entry or None}
     out.mkdir(parents=True, exist_ok=True)
 
     # A root page from a previous build shadows the in-group one. Removed

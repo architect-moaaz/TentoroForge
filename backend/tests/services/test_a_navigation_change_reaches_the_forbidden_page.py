@@ -77,7 +77,12 @@ def test_a_changed_landing_route_reaches_the_forbidden_page(svc, tmp_path):
         assert rel in out["edited_paths"]
     # …and the four doors agree: the rail, the route graph, the root, the 403.
     assert json.loads((app / "src/schemas/shell.json").read_text())["initialRoute"] == "/master-data"
-    assert 'redirect("/master-data")' in (app / "src/app/(dashboard)/page.tsx").read_text()
+    # The root is the optional catch-all's, which forwards to the registry's
+    # `entryRoute`: a second file for "/" beside it stops `next dev` from
+    # starting (Test2, 2026-09-28), so none is written.
+    assert not (app / "src/app/(dashboard)/page.tsx").exists()
+    from services.blueprint.projection import _entry_route
+    assert _entry_route(svc.doc) == "/master-data"
     assert "Return to Med Registration" in _href(app, "src/app/forbidden.tsx")
 
 
@@ -113,3 +118,29 @@ def test_the_edge_pages_are_relaid_from_the_scaffold_before_the_fill(tmp_path):
     assert {"src/schemas/shell.json", "src/contracts/nav-flow.json",
             "src/app/(dashboard)/page.tsx", "src/app/forbidden.tsx"} <= set(files)
     assert project_root_route(doc, app)["redirectsTo"] == "/entries"
+
+
+def test_a_navigation_change_never_writes_a_second_root_beside_the_catch_all(svc, tmp_path):
+    """Test2, 2026-09-28: "add Location Explorer to the menu" re-projected the
+    navigation after the build, `project_root_route` wrote
+    `(dashboard)/page.tsx` back, and the dev server refused to start —
+    "You cannot define a route with the same specificity as a optional
+    catch-all route". The stray file goes, and the root's destination moves
+    in the registry the catch-all reads."""
+    from services.blueprint.projection import project_navigation
+    app = tmp_path / "app"
+    assembly.copy_scaffold(app, project_short_id="t")
+    assert (app / "src/app/[[...slug]]").is_dir()
+    stray = app / "src/app/(dashboard)/page.tsx"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_text('export default function RootPage() { return null; }\n')
+    registry = app / "src/schemas/registry.ts"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text('export const schemas = {};\nexport const entryRoute = "/nurse-registration";\n')
+    svc.doc.setdefault("navigation", {})["initialRoute"] = {"default": "/master-data"}
+
+    out = project_navigation(svc.doc, app)
+
+    assert not stray.exists()
+    assert 'export const entryRoute = "/master-data";' in registry.read_text()
+    assert "src/schemas/registry.ts" in out["files"]
