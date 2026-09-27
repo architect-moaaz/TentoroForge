@@ -1389,6 +1389,19 @@ export const Field = z.object({
    * all currently guess at too.
    */
   references: EntityId.optional(),
+  /**
+   * The range a number is bounded to, when the request or the domain fixes
+   * one — a rating 1–5, a percentage 0–100. A rating written as a bare
+   * integer was seeded 3…24 and a page showed "average rating 13.5 / 5".
+   */
+  min: z.number().optional(),
+  max: z.number().optional(),
+  /**
+   * Two to four realistic values of a field people read — a book's title, a
+   * clinic's name — so sample and demo data speak the application's language.
+   * A reading list was reviewed full of books called "Quarterly review 1".
+   */
+  examples: z.array(z.string()).max(6).optional(),
   /** Declared on a `type: "vector"` field; see FieldEmbedding. */
   embedding: FieldEmbedding.optional(),
   description: z.string().default(""),

@@ -133,12 +133,17 @@ export interface WidgetViewProps {
   onSelect?: (selection: ChartSelection) => void;
   /** Something for the card's header — a "View all" link, a period picker. */
   action?: React.ReactNode;
+  /** The card draws the widget's own title and description. Pass `false`
+   *  when the page already heads this chart — the title shown twice
+   *  ("Books by Status" as a section heading and again in the card) was the
+   *  reviewer's commonest complaint on dashboards. */
+  title?: boolean;
   className?: string;
 }
 
 /** Draws one widget as the Blueprint declares it: a KPI tile, a gauge, a
  *  chart (with a table view for the numbers behind it) or a list. */
-export function WidgetView({ widget, data, height = 260, currency = "USD", onSelect, action, className }: WidgetViewProps) {
+export function WidgetView({ widget, data, height = 260, currency = "USD", onSelect, action, title = true, className }: WidgetViewProps) {
   const [asTable, setAsTable] = React.useState(false);
   const rows = data?.rows ?? [];
   const format = formatOf(widget.unit);
@@ -185,8 +190,8 @@ export function WidgetView({ widget, data, height = 260, currency = "USD", onSel
     <Card className={className}>
       <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-2">
         <div className="min-w-0">
-          <CardTitle className="text-sm font-medium">{widget.label}</CardTitle>
-          {widget.description ? <CardDescription className="mt-1 text-xs">{widget.description}</CardDescription> : null}
+          {title ? <CardTitle className="text-sm font-medium">{widget.label}</CardTitle> : <span className="sr-only">{widget.label}</span>}
+          {title && widget.description ? <CardDescription className="mt-1 text-xs">{widget.description}</CardDescription> : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {action}

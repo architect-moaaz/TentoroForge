@@ -233,7 +233,21 @@ export function sampleRow(entity, i, entities) {
     const type = String(f.type || "string").toLowerCase();
     const opts = f.enumValues || f.options || [];
     const lower = fname.toLowerCase();
+    // WHAT THE BLUEPRINT SAYS THE FIELD HOLDS COMES FIRST: its own examples,
+    // and the range a bounded number keeps to. A reading list was reviewed
+    // full of books called "Quarterly review 1" rated "13.5 / 5".
+    const examples = Array.isArray(f.examples) ? f.examples.filter((x) => typeof x === "string" && x) : [];
+    const bounded = typeof f.min === "number" && typeof f.max === "number" && f.max >= f.min;
     if (lower === "id") row[fname] = `sample-${name.toLowerCase()}-${i + 1}`;
+    else if (examples.length && /string|text/.test(type) && !opts.length) row[fname] = examples[i % examples.length];
+    else if (/^(author|writer|artist|composer|director|creator|instructor|coach|host|speaker)(name)?$/.test(lower) && /string|text/.test(type))
+      row[fname] = `${FIRST[(i + 3) % FIRST.length]} ${LAST[(i + 5) % LAST.length]}`;
+    else if (bounded && /int|number|decimal|float|numeric|money|currency|rating|score/.test(type + lower)) {
+      const span = f.max - f.min;
+      row[fname] = /int/.test(type) || Number.isInteger(f.min) && Number.isInteger(f.max) && span <= 20
+        ? f.min + ((i * 2 + 1) % (Math.round(span) + 1))
+        : Number((f.min + span * (((i * 37) % 100) / 100)).toFixed(2));
+    }
     else if (/^(location|geo|geopoint|geo_point|coordinates|latlng|point)$/.test(type)) row[fname] = { lat: Number((51.507 + 0.004 * (i + 1)).toFixed(3)), lng: Number((-0.128 + 0.006 * (i + 1)).toFixed(3)) };
     else if (opts.length) row[fname] = opts[i % opts.length];
     else if (/email/.test(lower)) row[fname] = `${FIRST[i % FIRST.length].toLowerCase()}.${LAST[i % LAST.length].toLowerCase()}@example.com`;
@@ -247,8 +261,7 @@ export function sampleRow(entity, i, entities) {
       row[fname] = /first/.test(lower) ? FIRST[i % FIRST.length]
         : /last|sur/.test(lower) ? LAST[i % LAST.length]
         : person ? `${FIRST[i % FIRST.length]} ${LAST[i % LAST.length]}`
-        : /^name$|label/.test(lower) ? `${humanise(name)} ${i + 1}`
-        : `${WORDS[i % WORDS.length]} ${i + 1}`;
+        : `${humanise(name)} ${i + 1}`;
     }
     else if (/description|notes?|summary|body|comment/.test(lower)) row[fname] = `Sample ${lower} for ${name.toLowerCase()} ${i + 1} — placeholder text shown while designing.`;
     else if (/url|link|website/.test(lower)) row[fname] = `https://example.com/${name.toLowerCase()}/${i + 1}`;
@@ -258,7 +271,8 @@ export function sampleRow(entity, i, entities) {
       row[fname] = `sample-${(target ? target.name : name).toLowerCase()}-${(i % 3) + 1}`;
     }
     else if (/int|number|decimal|float|numeric|money|currency|amount|price|count|age|quantity/.test(type) || /amount|price|total|count|qty|age|score/.test(lower)) {
-      const base = /age/.test(lower) ? 22 + ((i * 7) % 45) : /price|amount|total|money|currency/.test(lower + type) ? (i + 1) * 125.5 : (i + 1) * 3;
+      const base = /age/.test(lower) ? 22 + ((i * 7) % 45) : /price|amount|total|money|currency/.test(lower + type) ? (i + 1) * 125.5
+        : /rating|stars/.test(lower) ? 1 + ((i * 2 + 1) % 5) : (i + 1) * 3;
       row[fname] = /int|count|age|qty|quantity/.test(type + lower) ? Math.round(base) : Number(base.toFixed(2));
     }
     else if (/bool/.test(type)) row[fname] = i % 2 === 0;

@@ -1330,6 +1330,19 @@
                       "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
                       "description": "Stable ENTITY identifier (§12)"
                     },
+                    "min": {
+                      "type": "number"
+                    },
+                    "max": {
+                      "type": "number"
+                    },
+                    "examples": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "maxItems": 6
+                    },
                     "embedding": {
                       "type": "object",
                       "properties": {

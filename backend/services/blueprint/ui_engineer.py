@@ -293,9 +293,12 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
 <ImageSearch label?="Find products that look like this" />
    The search box for similar(): an upload that sets ?image= to the picked picture (and clears it).
 
-<WidgetView widget={widgets.x} data={props.x} height?={260} currency?="GBP" action?={<Link …/>}
+<WidgetView widget={widgets.x} data={props.x} height?={260} currency?="GBP" action?={<Link …/>} title?={false}
             onSelect?={(s) => router.push(href(pages.list, {}, { status: s.category }))} />
    Draws a declared widget as its card: a KPI tile, a gauge, a chart with a table toggle, or a list.
+   The card shows the widget's own label and description as its title. Say a chart's name ONCE:
+   either let the card title it, or head it yourself (a section heading) and pass title={false} —
+   never both.
 
 // ---- @/sdk — anywhere ----
 Entity types (Case, User, …), `workflows`, `pages`, `href(page, params?, query?)`,

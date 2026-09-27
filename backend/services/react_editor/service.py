@@ -180,7 +180,8 @@ def _entity_refs(doc: dict) -> list[dict]:
     for e in _live((doc.get("data") or {}).get("entities")):
         fields = [{"name": f.get("name"), "type": f.get("type") or "string", "required": bool(f.get("required")),
                    "label": f.get("label") or _humanise(str(f.get("name") or "")),
-                   "options": list(f.get("enumValues") or [])}
+                   "options": list(f.get("enumValues") or []),
+                   **{k: f[k] for k in ("min", "max", "examples") if f.get(k) is not None}}
                   for f in (e.get("fields") or []) if isinstance(f, dict) and f.get("name")]
         out.append({"id": str(e.get("id")), "name": e.get("name"), "typeName": pascal(str(e.get("name") or e.get("id"))),
                     "table": e.get("table"), "fields": fields, "account": bool(e.get("account"))})
@@ -189,7 +190,8 @@ def _entity_refs(doc: dict) -> list[dict]:
 
 def _entities_for_samples(doc: dict) -> list[dict]:
     return [{"name": e["name"], "account": e.get("account", False),
-             "fields": [{"name": f["name"], "type": f["type"], "enumValues": f["options"]} for f in e["fields"]]}
+             "fields": [{"name": f["name"], "type": f["type"], "enumValues": f["options"],
+                         **{k: f[k] for k in ("min", "max", "examples") if k in f}} for f in e["fields"]]}
             for e in _entity_refs(doc)]
 
 

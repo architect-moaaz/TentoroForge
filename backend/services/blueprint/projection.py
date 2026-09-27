@@ -1446,6 +1446,49 @@ def resolved_palette(doc: dict, theme: str = "light") -> dict[str, str]:
     return {k: v for k, v in out.items() if v}
 
 
+#: How many series colours the Chart reads (`--chart-1` … `--chart-6`).
+CHART_SLOTS = 6
+
+
+def chart_palette(colors: dict) -> list[str]:
+    """The chart series colours, as HSL triplets, from the design's own palette.
+
+    THE CHARTS WERE EVERY APP'S. The Chart reads `--chart-1…6` and nothing
+    wrote them, so every generated app drew the library's stock blue, orange
+    and green whatever its design said — the reviewer refused a bar chart "in
+    a generic blue that is not one of the app's tokens" (looktest0927,
+    2026-09-27), and it was one more reason two apps looked alike.
+
+    The primary leads and the accent follows; the rest are the primary's
+    hue turned around the wheel, at a saturation and lightness a mark reads
+    at on a light card — so the set is the design's, distinct, and legible.
+    """
+    import colorsys
+
+    def parse(value: Any) -> tuple[float, float, float] | None:
+        trip = _hsl_triplet(str(value)) if isinstance(value, str) else None
+        if not trip:
+            return None
+        h, sat, light = trip.split()
+        return float(h), float(sat.rstrip("%")), float(light.rstrip("%"))
+
+    primary = parse(colors.get("primary"))
+    if primary is None:
+        return []
+    accent = parse(colors.get("accent")) or parse(colors.get("secondary"))
+    h0, s0, _ = primary
+    sat = min(72.0, max(45.0, s0))
+    out = [primary]
+    if accent and abs(((accent[0] - h0 + 180) % 360) - 180) >= 25:
+        out.append(accent)
+    for turn in (150, 210, 60, 300, 100, 260):
+        if len(out) >= CHART_SLOTS:
+            break
+        out.append(((h0 + turn) % 360, sat, 44.0 + (len(out) % 2) * 8))
+    del colorsys
+    return [f"{h:.0f} {sv:.0f}% {lv:.0f}%" for h, sv, lv in out[:CHART_SLOTS]]
+
+
 def _project_contract_colors(colors: dict) -> list[str]:
     """Emit every contract token the Blueprint feeds, in the contract's order.
 
@@ -1771,7 +1814,10 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # projector falls back to the legacy alias emission below rather than
     # emitting nothing.
     lines.extend(_project_contract_colors(colors))
-    if not lines:
+    # The chart series, in the design's colours (see `chart_palette`).
+    for i, trip in enumerate(chart_palette(colors), 1):
+        lines.append(f"  --chart-{i}: {trip};")
+    if not [l for l in lines if not l.startswith("  --chart-")]:
         # THE NAMES THE SCAFFOLD WRAPS IN hsl(). Legacy path — kept for a tree
         # that carries no token-contract.json. The wrapped set is shadcn's,
         # which is what the scaffold is.
@@ -2665,6 +2711,19 @@ def _seed_value(field: dict, entity_name: str, row: int,
         # demo tool "4995 mi" away. A place is the people's own, shared from
         # their browser; demo rows have none.
         return None
+    # THE BLUEPRINT'S OWN EXAMPLES AND RANGES FIRST, as the editor's sample
+    # server does: a demo reading list is real titles rated 1–5, not
+    # "Title 3" rated 300.
+    examples = [str(x) for x in (field.get("examples") or []) if str(x).strip()]
+    if examples and kind in ("string", "text", "varchar"):
+        return examples[(row - 1) % len(examples)]
+    lo, hi = field.get("min"), field.get("max")
+    if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and hi >= lo \
+            and kind in ("integer", "int", "number", "decimal", "float", "numeric", "currency", "money"):
+        span = hi - lo
+        if kind in ("integer", "int") or (float(lo).is_integer() and float(hi).is_integer() and span <= 20):
+            return int(lo + ((row * 2 - 1) % (int(span) + 1)))
+        return round(lo + span * (((row * 37) % 100) / 100), 2)
     # Spread across rows on purpose: with three rows and three states, the
     # seeded data holds one record in each, which is what lets a page that only
     # means something once something is submitted be reviewed at all.

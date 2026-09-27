@@ -440,7 +440,7 @@ def test_the_jit_bundles_a_page_with_sample_data_and_no_dev_server(tmp_path, mon
     js = out["js"]
     assert len(js) < 60_000 and "react.development" not in js and "__forgeVendor" in js, "the page carries its own code and reads React from the shared script"
     assert "All cases" in js and "Home" in js, "the page and its public frame are in the bundle"
-    assert '"Quarterly review 1"' in js and '"Open"' in js and '"sample-case-1"' in js, "sample rows come from the entity's fields"
+    assert '"Case 1"' in js and '"Open"' in js and '"sample-case-1"' in js, "sample rows come from the entity's fields, named as the entity"
     assert "forge-editor:navigate" in js and "forge-editor:action" in js, "moves and workflow runs are reported to the editor"
     assert "pushState" not in js.split("__forgeGo")[1][:2000], "the shims never touch the History API"
     assert (project.app_root / "src/app/cases/view.tsx").read_text().count("data-fid") == 5, "the bundled copy carries the ids"

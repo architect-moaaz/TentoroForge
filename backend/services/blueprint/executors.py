@@ -1338,6 +1338,13 @@ NODE_TASKS: dict[str, str] = {
         "terms, when) related to the record being agreed."
     ),
     "entity_fields": (
+        "A NUMBER WITH A FIXED RANGE SAYS SO: a rating from 1 to 5, a "
+        "percentage, a score out of 10 — whatever the request states or the "
+        "domain fixes — declares `min` and `max`. A TEXT FIELD PEOPLE READ — a "
+        "title, a name, a subject — gives two to four realistic `examples` from "
+        "this application's own world (for a reading list, real book titles; "
+        "for a clinic, real-sounding clinic names), so the sample and demo data "
+        "the pages are reviewed and shown with speak its language.\n\n"
         "Author the fields of ONE entity, the one given below. Its `name` and "
         "`table` are decided and every other entity is named beside it; keep "
         "them exactly as given and return exactly one entry in `entities`, "
@@ -2513,6 +2520,13 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                 "enumValues": {
                                     "type": "array",
                                     "items": {"type": "string"},
+                                },
+                                "min": {"type": "number", "description": "The lowest value a bounded number may take (a rating's 1)."},
+                                "max": {"type": "number", "description": "The highest value a bounded number may take (a rating's 5)."},
+                                "examples": {
+                                    "type": "array", "items": {"type": "string"}, "maxItems": 6,
+                                    "description": ("Two to four realistic values of a text field people read "
+                                                    "(a title, a name) in this application's own world."),
                                 },
                                 "embedding": {
                                     "type": "object",
