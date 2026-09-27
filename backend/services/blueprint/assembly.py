@@ -897,9 +897,11 @@ def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # disk and serving, and reported "not served" (i3i950po, 2026-09-25).
     coded = {str(r.get("page")): r for r in (doc.get("pageCode") or [])
              if isinstance(r, dict) and r.get("status") != "DEPRECATED"}
+    by_code: set[str] = set()
     for page in live:
         if str(page.get("id")) in coded and (root / code_page_dir(page) / "view.tsx").is_file():
-            served.add(str(page.get("route")))
+            by_code.add(str(page.get("route")))
+    served |= by_code
 
     # A FALLBACK IS A ROUTE THAT ANSWERS, NOT A PAGE THAT WAS BUILT. The
     # placeholder `plan_pages` writes for a page nothing composed is
@@ -911,7 +913,11 @@ def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # shape stays what `runtime.pages` accepts (§12: a new key is declared in
     # the contract first); which of the missing routes carry a placeholder
     # is in the projection's own `fellBack`.
-    fallback = _fallback_routes(root / "src" / "schemas")
+    # A route whose page is written as React is served by that code, whatever
+    # placeholder schema the projection also wrote for it: the coded route
+    # file wins. /books, /login and /signup were coded, on disk and serving,
+    # and counted missing for their placeholders (looktest0927, 2026-09-27).
+    fallback = _fallback_routes(root / "src" / "schemas") - by_code
     missing = sorted((planned - served) | (planned & fallback))
     return {
         "planned": len(planned),

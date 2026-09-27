@@ -64,3 +64,20 @@ def test_a_coded_page_is_served_and_a_retired_page_is_not_planned(tmp_path):
     assert f["planned"] == 3 and f["served"] == 3 and f["status"] == "complete"
     (app / code_page_dir(doc["pages"][0]) / "view.tsx").unlink()
     assert page_funnel(doc, app)["missing"] == ["/appointments"], "a coded page whose file is not there is missing"
+
+
+def test_a_coded_page_is_served_though_a_placeholder_schema_names_its_route(tmp_path):
+    """looktest0927: /books, /login and /signup were coded and on disk; the
+    projection also wrote placeholder schemas for them, and the funnel's
+    placeholder rule counted them missing again."""
+    doc = {"pages": [{"id": "PAGE-001", "route": "/books", "pattern": "entity_list"},
+                     {"id": "PAGE-002", "route": "/reports", "pattern": "entity_list"}],
+           "pageCode": [{"page": "PAGE-001", "view": "v", "load": "l"}]}
+    app = tmp_path / "app"; schemas = app / "src/schemas"; schemas.mkdir(parents=True)
+    (schemas / "registry.ts").write_text('export const schemas = {\n  "/books": () => import("./books.json"),\n  "/reports": () => import("./reports.json"),\n};\n')
+    for route, name in (("/books", "books"), ("/reports", "reports")):
+        (schemas / f"{name}.json").write_text(json.dumps({"route": route, "meta": {"fallback": True}}))
+    d = app / code_page_dir(doc["pages"][0]); d.mkdir(parents=True); (d / "view.tsx").write_text("x")
+    f = page_funnel(doc, app)
+    assert f["missing"] == ["/reports"], "a placeholder with no code is still missing; a coded page is served"
+    assert f["served"] == 1
