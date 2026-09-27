@@ -254,3 +254,24 @@ def test_a_one_record_page_is_not_reported_as_missing_from_the_menu(tmp_path):
                              "purpose": "x", "data": {"primaryEntity": "ENTITY-001"}})
     said = _where(svc, "/dashboard/[id]")
     assert "not in the menu" not in said and "one record's page" in said and "Dashboard" in said
+
+
+def test_a_rewrite_the_reviewer_looked_at_is_saved_and_its_calls_are_charged(tmp_path, monkeypatch, quiet):
+    """A reviewed rewrite's `spent` carries `(usage, elapsed, "page_reviewer")`
+    beside the engineer's `(usage, elapsed)`; unpacking two names from it
+    failed every reviewed rewrite after the page was written (live,
+    2026-09-27, /register: "too many values to unpack")."""
+    svc = _svc(tmp_path)
+    quiet(VIEW)
+
+    def reviewed(doc, page, root, client, **kw):
+        return ({"page": page["id"], "rationale": "rewrite", "load": LOAD, "view": VIEW.replace("p-6", "p-4")},
+                [("engineer-usage", 1.0), ("reviewer-usage", 2.0, "page_reviewer")])
+    monkeypatch.setattr(ui_engineer, "compose_page", reviewed)
+    charged = []
+    monkeypatch.setattr("services.blueprint.executors.RunUsage.record",
+                        lambda self, **k: charged.append((k.get("agent"), k.get("usage"))), raising=False)
+    out = recode_page(svc, "/dashboard", app_root=str(tmp_path / "app"),
+                      request="tighter", executor=_Run([]), client=object())
+    assert out["applied"] and "p-4" in svc.doc["pageCode"][0]["view"]
+    assert ("page_reviewer", "reviewer-usage") in charged and ("ui_engineer", "engineer-usage") in charged

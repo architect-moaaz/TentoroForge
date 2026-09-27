@@ -336,7 +336,7 @@ TURN_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "required": ["kind", "answer", "brief", "parts", "remove", "move", "rename", "newRequirements",
-                 "requirementsChange"],
+                 "requirementsChange", "reword"],
     "properties": {
         "kind": {"type": "string", "enum": ["change", "question", "approve", "other"]},
         "answer": {"type": "string", "description": "for a question: the answer, briefly"},
@@ -360,6 +360,11 @@ TURN_SCHEMA: dict[str, Any] = {
             "properties": {"description": {"type": "string"}, "area": {"type": "string"}}},
             "description": ("product model only: behaviour the change adds that no approved "
                             "requirement covers, each as one testable statement")},
+        "reword": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["id", "description"],
+            "properties": {"id": {"type": "string"}, "description": {"type": "string"}}},
+            "description": ("existing requirements the change rewords: the id, and the whole "
+                            "requirement as it should now read")},
         "requirementsChange": {"type": "string", "description": (
             "product model only: when the person rewords or retires an APPROVED requirement, "
             "that change restated for the requirements' author, naming the requirement by id. "
@@ -369,8 +374,10 @@ TURN_SCHEMA: dict[str, Any] = {
 
 _WHAT = {
     REQUIREMENTS: ("the requirements — what the application must do, before anything is designed",
-                   "Retire a requirement by listing its id in `remove`. Anything added or reworded "
-                   "goes in `brief`. Leave `parts`, `move` and `newRequirements` empty."),
+                   "Retire a requirement by listing its id in `remove`. When the change alters what an "
+                   "existing requirement says, put it in `reword` with its id and its whole new "
+                   "wording — never restate it as a new one. Only requirements that do not exist "
+                   "yet go in `brief`. Leave `parts`, `move` and `newRequirements` empty."),
     PRODUCT_MODEL: ("the product model — the application's modules and, in each, the screens, "
                     "records, processes and connections that will be generated",
                     "Retire items by id in `remove` (a module, screen, record, connection or role; "
@@ -380,8 +387,8 @@ _WHAT = {
                     "`rename`. Anything added or reworded goes in `brief`, with `parts` naming "
                     "which parts it touches. When the change adds behaviour none of the approved "
                     "requirements states, add it to `newRequirements`. When it rewords or retires "
-                    "an approved requirement, put that in `requirementsChange`, and put what it "
-                    "means for the model in `brief` and `parts`."),
+                    "an approved requirement, put the new wording in `reword` (or a retirement in "
+                    "`remove`), and put what it means for the model in `brief` and `parts`."),
 }
 
 
@@ -496,6 +503,28 @@ def carry_ids(svc: Any, rows: list[tuple[str, Mapping[str, Any]]]) -> None:
         bind_ids(svc)
 
 
+def _reword(svc: Any, rewords: list[dict]) -> list[str]:
+    """Existing requirements, reworded in place — same id, new text.
+
+    Applied here rather than asked of the requirements agent: told that a
+    reworded requirement keeps its id, it wrote a second requirement beside
+    the first (live, 2026-09-27: "capture country, state and city" left
+    REQ-001 and a new REQ-009 saying the same with a location). Rewording is
+    the same edit whatever the domain, like retiring or renaming."""
+    live = {str(r.get("id")): r for r in _live(svc.doc.get("requirements"))}
+    done = []
+    for rw in rewords:
+        row = live.get(str(rw.get("id") or ""))
+        text = str(rw.get("description") or "").strip()
+        if row is not None and text and row.get("description") != text:
+            row["description"] = text
+            done.append(str(row.get("id")))
+    if done:
+        from services.smith.section_change import bind_ids
+        bind_ids(svc)   # the reworded text is the requirement's identity now; same id
+    return done
+
+
 def _rename(svc: Any, renames: list[dict]) -> list[str]:
     done = []
     by_id = {str(r.get("id")): str(r.get("name") or "").strip() for r in renames if r.get("name")}
@@ -572,13 +601,14 @@ _NOTHING_TO_ADD = "this part had nothing to add for the change"
 
 _REVISE_REQUIREMENTS = (
     "The person is reviewing the requirements and asked for this change:\n\n{brief}\n\n"
-    "Revise the requirements accordingly and return only those this change adds or rewords. "
-    "A reworded requirement keeps its `id`. Give every requirement you return an `area` that "
-    "matches the area names already in use where it belongs to one of them.")
+    "Return only the NEW requirements this change calls for — ones no existing requirement "
+    "states. The existing ones it alters have already been reworded; do not restate any of "
+    "them. Give every requirement you return an `area` that matches the area names already in "
+    "use where it belongs to one of them.")
 
 
-def revise_requirements(svc: Any, brief: str, *, remove: list[str] = (), request: str = "",
-                        executor: Any = None, reasoning: Any = None) -> dict:
+def revise_requirements(svc: Any, brief: str, *, remove: list[str] = (), reword: list[dict] = (),
+                        request: str = "", executor: Any = None, reasoning: Any = None) -> dict:
     """Redraft the requirements for one change, and say what moved."""
     output_dir = svc.output_dir
     before_items = requirement_items(svc.doc)
@@ -586,10 +616,12 @@ def revise_requirements(svc: Any, brief: str, *, remove: list[str] = (), request
         record_version(output_dir, REQUIREMENTS, svc.doc)
     request = request or brief
     with _all_or_nothing(svc):
-        if remove:
+        if remove or reword:
             before = svc.snapshot()
-            if _retire(svc, [r for r in remove if str(r).startswith("REQ")]):
-                _commit(svc, request, "retire requirements at the review gate", before)
+            retired = _retire(svc, [r for r in remove if str(r).startswith("REQ")])
+            reworded = _reword(svc, list(reword))
+            if retired or reworded:
+                _commit(svc, request, "retire or reword requirements at the review gate", before)
         if brief.strip():
             tell(reasoning, "Redrafting the requirements.", "step")
             _rerun(svc, "requirements", _REVISE_REQUIREMENTS.format(brief=brief), request,
@@ -646,11 +678,11 @@ def revise_model(svc: Any, turn: Mapping[str, Any], *, request: str = "", execut
         # stays approved — the person changed it themselves, in this message.
         # The model follows it through the brief below.
         rewording = str(turn.get("requirementsChange") or "").strip()
-        if rewording:
+        if rewording or turn.get("reword"):
             from services.blueprint import approval
             was_approved = approval.is_approved(svc.doc, APPROVAL_GATE[REQUIREMENTS])
-            reworded = revise_requirements(svc, rewording, request=request, executor=executor,
-                                           reasoning=reasoning)
+            reworded = revise_requirements(svc, rewording, reword=list(turn.get("reword") or []),
+                                           request=request, executor=executor, reasoning=reasoning)
             if was_approved:
                 approval.record(svc, APPROVAL_GATE[REQUIREMENTS],
                                 note=f"changed while reviewing the model: {request}")

@@ -536,3 +536,28 @@ def test_rewording_an_approved_requirement_at_the_model_keeps_it_approved(svc):
     assert out["reworded"]["diff"]["changed"][0]["id"] == "REQ-002"
     assert approval.state_of(svc.doc, "understanding") == "approved"
     assert "stay approved" in gates.say_model_change(out)
+
+
+def test_a_reworded_requirement_keeps_its_id_and_is_not_restated_beside_itself(svc):
+    """Live, 2026-09-27: "capture country, state and city as well" — the
+    requirements agent, told a reworded requirement keeps its id, wrote a
+    second one beside it. Rewording is applied here; the agent is asked only
+    for what is new, and here nothing is."""
+    svc.doc["state"] = "BLUEPRINT_REVIEW"
+
+    def must_not_be_asked(spec):
+        raise AssertionError("a rewording alone must not reach the agent")
+    out = gates.revise_requirements(
+        svc, "", request="capture the location as well",
+        reword=[{"id": "REQ-001", "description": "A parent books a visit for a child, "
+                                                 "giving the clinic's city."}],
+        executor=must_not_be_asked)
+    reqs = {r["id"]: r["description"] for r in gates.requirement_items(svc.doc)}
+    assert reqs["REQ-001"].endswith("giving the clinic's city.")
+    assert len(reqs) == 3, "no second requirement beside the reworded one"
+    assert out["diff"] == {"added": [], "removed": [],
+                           "changed": [{"id": "REQ-001", "was": "A parent books a visit for a child."}]}
+    # The id stays writable under its new wording: the next redraft updates it.
+    from services.blueprint.ids import IdAllocator, natural_key_for
+    alloc = IdAllocator.load(output_dir=svc.output_dir)
+    assert alloc.lookup(natural_key_for("requirements", {"description": reqs["REQ-001"]})) == "REQ-001"

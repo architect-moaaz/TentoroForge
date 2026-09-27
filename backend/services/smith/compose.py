@@ -806,8 +806,13 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
                                        critic=critic)
         except CompileError as exc:
             raise ComposeError(f"the new {route} did not compile, so nothing was changed: {exc}") from exc
-        for u, elapsed in spent:
-            usage.record(node="page_code", agent="ui_engineer", usage=u, elapsed_s=elapsed)
+        # A reviewed rewrite's calls carry who made them — `(usage, elapsed,
+        # "page_reviewer")` beside the engineer's `(usage, elapsed)` — and the
+        # two-name unpack failed every rewrite the reviewer looked at (live,
+        # 2026-09-27: /register, after the page was written).
+        for u, elapsed, *who in spent:
+            usage.record(node="page_code", agent=who[0] if who else "ui_engineer",
+                         usage=u, elapsed_s=elapsed)
         # EACH SECTION BY THE AGENT THAT OWNS IT (§30) — the widgets are the
         # analytics agent's, the code the UI engineer's — and ONE commit for
         # both, so the change is one version and one undo. `apply_change`

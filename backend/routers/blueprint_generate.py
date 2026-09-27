@@ -2339,6 +2339,7 @@ def _gate_turn(svc: Any, gate: str, output_dir: str, app_root: str, req: Any, *,
         if gate == _gates.REQUIREMENTS:
             out = _gates.revise_requirements(svc, str(turn.get("brief") or ""),
                                              remove=list(turn.get("remove") or []),
+                                             reword=list(turn.get("reword") or []),
                                              request=req.message, reasoning=reasoning)
             text = _gates.say_requirements_change(out["diff"], out["version"])
         else:
