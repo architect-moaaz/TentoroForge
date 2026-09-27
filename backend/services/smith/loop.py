@@ -266,6 +266,22 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
                 "why": "I could not reach my reasoning service for the next step."}
 
     data = _parse(raw)
+    if data is None and raw and not _looks_cut_off(raw):
+        # AN UNREADABLE REPLY IS ASKED FOR AGAIN, NOT TAKEN AS CONFUSION. A
+        # 601-character reply that did not parse ended a turn on "I could not
+        # turn that into a change I am sure of" — the person's third report
+        # of the same missing list, answered as if they had been unclear
+        # (Test2, 2026-09-28). One more call costs seconds; the dead end cost
+        # the turn. What the model said is logged, so the next one can be read.
+        logger.warning("smith loop: reply did not parse (%d chars): %r — asking once more",
+                       len(raw), raw[:300])
+        try:
+            raw = call(prompt + "\n\nYour last reply could not be read. Reply with the JSON "
+                                "object only — {\"tool\": …, \"args\": …, \"why\": …} — with no "
+                                "prose before or after it.")
+        except Exception:  # noqa: BLE001
+            raw = ""
+        data = _parse(raw)
     if data is None and _looks_cut_off(raw):
         # THE REPLY RAN OUT OF ROOM MID-OBJECT (smithv2, 1be5ce23). Asking again
         # costs one call; telling the person they were unclear costs their
@@ -282,7 +298,7 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
     if data is None:
         # NOT A SILENT END. A reply nobody could read is not "done"; it is a
         # turn that must ask, in the person's own words, for one thing.
-        logger.warning("smith loop: gave up on a reply of %d chars", len(raw or ""))
+        logger.warning("smith loop: gave up on a reply of %d chars: %r", len(raw or ""), (raw or "")[:300])
         return {"tool": "ask_user", "args": {"question": _did_not_follow(ask)}, "why": ""}
 
     tool = str(data.get("tool") or "").strip()

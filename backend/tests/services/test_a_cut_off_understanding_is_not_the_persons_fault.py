@@ -40,9 +40,12 @@ def test_a_good_reply_is_not_asked_twice():
     assert len(calls) == 1
 
 
-def test_prose_is_not_retried_and_the_turn_asks_in_the_persons_words():
+def test_prose_is_asked_for_again_once_then_the_turn_asks_in_the_persons_words():
     """Not every unparseable reply is truncation; prose means the model
-    answered the wrong way. The turn ends asking — never as a silent `done`."""
+    answered the wrong way. It is told so and asked once more for the object
+    — a 601-character reply ended a turn on "I could not turn that into a
+    change" (Test2, 2026-09-28). Still prose, the turn ends asking — never as
+    a silent `done`."""
     calls = []
 
     def provider(prompt):
@@ -50,7 +53,7 @@ def test_prose_is_not_retried_and_the_turn_asks_in_the_persons_words():
         return "I think she means the home page."
 
     out = next_step(ASK, "ctx", [], [], provider=provider)
-    assert len(calls) == 1
+    assert len(calls) == 2 and "could not be read" in calls[1]
     assert out["tool"] == "ask_user"
     said = out["args"]["question"]
     assert "good visuals and images" in said, "her words, so she can see what landed"
@@ -62,3 +65,10 @@ def test_only_an_unclosed_object_counts_as_cut_off():
     assert not _looks_cut_off('{"tool": "done", "args": {}}')
     assert not _looks_cut_off("I did not understand the request.")
     assert not _looks_cut_off("")
+
+
+def test_prose_then_an_object_is_the_step():
+    replies = iter(["Let me think about the menus first.",
+                    '{"tool": "sync_app", "args": {}, "why": "the app is out of step"}'])
+    out = next_step(ASK, "ctx", [], [], provider=lambda prompt: next(replies))
+    assert out["tool"] == "sync_app"
