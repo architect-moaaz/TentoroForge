@@ -54,6 +54,8 @@ def sync(svc: Any, app_root: str) -> dict:
     """Write every projection from `svc.doc`; what changed, added and went."""
     from services.smith.reproject import everything
 
+    from services.blueprint.schema_push import push_now
+
     root = Path(app_root)
     before = _fingerprint(root)
     everything(svc, app_root)
@@ -61,18 +63,26 @@ def sync(svc: Any, app_root: str) -> dict:
     changed = sorted(k for k in after if k in before and before[k] != after[k])
     added = sorted(k for k in after if k not in before)
     removed = sorted(k for k in before if k not in after)
-    return {"changed": changed, "added": added, "removed": removed}
+    # THE DATABASE IS PART OF THE APPLICATION TOO. A record added before its
+    # table could be created (Test2's Area) is in the schema files and not in
+    # the database; bringing the app in step brings that in step as well.
+    pushed = push_now(root)
+    return {"changed": changed, "added": added, "removed": removed,
+            "database": "in step" if pushed["applied"] else pushed["reason"]}
 
 
 def summary_of(out: dict) -> str:
     moved = out["changed"] + out["added"] + out["removed"]
+    db = out.get("database") or ""
+    db_line = (" Its database schema is in step too." if db == "in step"
+               else f" The database schema could not be brought in step now: {db}." if db else "")
     if not moved:
-        return ("The application already matches its definition — nothing was out of step. "
-                "If something still looks wrong, tell me what you see and where.")
+        return ("The application already matches its definition — nothing was out of step." + db_line
+                + " If something still looks wrong, tell me what you see and where.")
     head = ", ".join(moved[:6]) + (f" and {len(moved) - 6} more" if len(moved) > 6 else "")
     return (f"The application was out of step with its definition, so I wrote it out again from "
-            f"what it says: {len(moved)} file(s) brought back in line ({head}). Reload the preview "
-            f"to see it.")
+            f"what it says: {len(moved)} file(s) brought back in line ({head}).{db_line} Reload the "
+            f"preview to see it.")
 
 
 def run(output_dir: str, *, reasoning: Any = None) -> dict:

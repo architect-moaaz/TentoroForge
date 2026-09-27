@@ -108,7 +108,8 @@ def test_an_agreed_plan_step_is_a_turn_of_its_own(tmp_path):
     writes = _Writes(tmp_path)
     chooser = _Chooser(_rename("src/a.json", "A"))
 
-    result = _turn(tmp_path, chooser, plan_mod.ALL_LABEL, move=writes)
+    # "next" works one step per turn; "Do them in order" runs them all (below).
+    result = _turn(tmp_path, chooser, "next", move=writes)
 
     assert [c["target_file"] for c in writes.calls] == ["src/a.json"]
     assert result.status == "resolved" and "rename B" in result.said   # the remaining note

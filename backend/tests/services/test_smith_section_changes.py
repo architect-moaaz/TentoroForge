@@ -177,7 +177,11 @@ def test_an_entity_is_declared_then_authored_then_projected(svc, tmp_path):
     assert [f["name"] for f in ents["Ward"]["fields"]] == ["id", "name", "capacity"]          # the declaration's sneaky field never landed
     assert out["requirement"] in ents["Ward"]["requirements"]
     assert (tmp_path / "app" / "src" / "db" / "schema" / "ward.ts").exists()
-    assert "migration on the next install" in ec.summary_of("add_entity", out)
+    # Not installed here, so the table waits for the preview — and says why.
+    assert not out["pushed"]
+    assert "created the next time the preview starts (the application is not installed yet)" \
+        in ec.summary_of("add_entity", out)
+    assert "in the application's database now" in ec.summary_of("add_entity", {**out, "pushed": True})
 
 
 def test_retiring_an_entity_takes_its_screens_workflows_and_menu_entry_with_it(svc, tmp_path):

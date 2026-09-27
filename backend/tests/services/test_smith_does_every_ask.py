@@ -65,20 +65,21 @@ def test_the_plan_is_shown_and_nothing_is_done_before_the_yes(project):
     assert plan.peek(project.output_dir) == STEPS
 
 
-def test_agreeing_does_the_first_one_now_and_says_what_is_left(project):
+def test_agreeing_to_all_of_it_does_all_of_it(project):
+    """Test2, 2026-09-28: "Do them in order" did the first step and said
+    "say next" — the person had just agreed to the whole plan."""
     done: list[str] = []
     _session(project, done, STEPS).run_iteration(user_message=STEPS[0])
     result = _session(project, done).run_iteration(user_message=plan.ALL_LABEL)
-    assert result.status == "resolved" and done == ["did it"]
-    assert "Still to do:" in result.answer
-    assert STEPS[1] in result.answer and STEPS[2] in result.answer
-    assert plan.peek(project.output_dir) == STEPS[1:]
+    assert result.status == "resolved" and done == ["did it"] * len(STEPS)
+    assert "Still to do" not in result.answer
+    assert plan.peek(project.output_dir) == []
 
 
 def test_next_works_through_the_rest_one_at_a_time(project):
     done: list[str] = []
     _session(project, done, STEPS).run_iteration(user_message=STEPS[0])
-    _session(project, done).run_iteration(user_message=plan.ALL_LABEL)
+    _session(project, done).run_iteration(user_message="next")
     second = _session(project, done).run_iteration(user_message="next")
     assert len(done) == 2 and plan.peek(project.output_dir) == [STEPS[2]]
     assert f"Still to do: **{STEPS[2]}**" in second.answer
@@ -143,3 +144,33 @@ def test_carrying_on_is_a_whole_message():
     assert plan.wants_next("next") and plan.wants_next("go on") and plan.wants_next("Continue.")
     for said in ("next week it should email them", "go on the dashboard", "", "nope"):
         assert not plan.wants_next(said), said
+
+
+def test_doing_all_of_it_stops_at_a_step_that_asks_and_keeps_the_rest(tmp_path):
+    from services.smith4.handle import _all_steps
+    from services.smith4.outcome import Outcome
+    plan.remember(str(tmp_path), ["add a record", "add its screen", "use it on the form"])
+    seen: list[str] = []
+
+    def run(step):
+        seen.append(step)
+        if step == "add its screen":
+            return Outcome(status="asked", said="Which fields on the screen?", options=["All", "Some"])
+        return Outcome(status="resolved", said=f"Did {step}.", touched=[step])
+
+    out = _all_steps(str(tmp_path), run)
+    assert seen == ["add a record", "add its screen"]
+    assert out.status == "asked" and "Did add a record." in out.said and "Which fields" in out.said
+    assert out.options == ["All", "Some"]
+    assert plan.peek(str(tmp_path)) == ["use it on the form"]
+
+
+def test_doing_all_of_it_stops_between_steps_when_the_time_is_spent(tmp_path):
+    from services.smith4.handle import _all_steps
+    from services.smith4.outcome import Outcome
+    plan.remember(str(tmp_path), ["one", "two", "three"])
+    ticks = iter([0.0, 500.0, 1000.0, 1500.0])
+    out = _all_steps(str(tmp_path), lambda s: Outcome(status="resolved", said=f"Did {s}."),
+                     budget_s=480.0, clock=lambda: next(ticks))
+    assert "Did one." in out.said and "Did two." not in out.said
+    assert "Still to do" in out.said and plan.peek(str(tmp_path)) == ["two", "three"]

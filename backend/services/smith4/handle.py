@@ -8,6 +8,7 @@ loop: it decides what the ask IS. Everything after that is the loop's.
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Callable
 
 from services.smith import pending_ask
@@ -43,6 +44,15 @@ def handle(*, project_id: str, output_dir: str, message: str,
                    evidence=[str(e) for e in (evidence or []) if str(e).strip()],
                    app_name=str(app_name or ""))
 
+    # AGREED TO ALL OF IT, SO DO ALL OF IT. "Do them in order" did the first
+    # step and said "say next" — the person had just said the whole plan
+    # (Test2, 2026-09-28: an Area record added, and the screen, the explorer
+    # and the form left waiting on three more messages). Each step is a normal
+    # turn; the run stops at the first that asks something or cannot be done,
+    # and at a time budget, and says what is still to do either way.
+    if plan_mod.peek(output_dir) and typed == plan_mod.ALL_LABEL:
+        return _all_steps(output_dir, lambda step: turn(ctx_for(step), choose=choose, history=history,
+                                                      max_steps=max_steps))
     # AGREED, SO DO THE FIRST ONE NOW.
     if plan_mod.peek(output_dir) and (plan_mod.wants_next(typed)
                                       or typed in (plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL)):
@@ -75,6 +85,44 @@ def handle(*, project_id: str, output_dir: str, message: str,
         if note and note.strip() not in result.said:
             result.said += note
     return result
+
+
+#: How long one "do them in order" may keep working before it stops between
+#: steps and says what is left — inside the chat turn's own bound, so the
+#: person hears from Smith rather than from the timeout.
+PLAN_BUDGET_S = 480.0
+
+
+def _all_steps(output_dir: str, run_step: Callable[[str], Outcome],
+               budget_s: float = PLAN_BUDGET_S, clock: Callable[[], float] = time.monotonic) -> Outcome:
+    """Every step of the agreed plan, in order, as one reply."""
+    started = clock()
+    said: list[str] = []
+    touched: list[str] = []
+    steps: list[str] = []
+    last = Outcome(status="no_op")
+    while True:
+        step = plan_mod.take_next(output_dir)
+        if not step:
+            break
+        pending_ask.clear(output_dir)
+        last = run_step(step)
+        if last.said.strip():
+            said.append(last.said.strip())
+        touched += [t for t in last.touched if t not in touched]
+        steps += list(last.steps)
+        if not last.done:
+            if last.status == "asked":
+                # Its answer continues the plan: the rest stays waiting.
+                pending_ask.remember(output_dir, step)
+            break
+        if clock() - started > budget_s:
+            break
+    note = plan_mod.remaining_note(plan_mod.peek(output_dir))
+    return Outcome(status=last.status, said="\n\n".join(said) + (note if last.done else ""),
+                   options=list(last.options), touched=touched,
+                   diff_summary=", ".join(touched[:8]) if touched else "", finding=last.finding,
+                   steps=steps)
 
 
 def _image_paths(attachments: list[dict] | None) -> list[str]:

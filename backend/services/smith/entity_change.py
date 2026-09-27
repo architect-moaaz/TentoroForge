@@ -108,9 +108,18 @@ def add_entity(svc: Any, request: str, *, app_root: str | None = None, executor:
     if req.get("id") and req["id"] not in (ent.get("requirements") or []):
         ent["requirements"] = list(ent.get("requirements") or []) + [req["id"]]
         svc.save()
+    files = _project_data(svc, app_root)
+    # IN THE DATABASE NOW, NOT AT THE NEXT INSTALL: a screen built for this
+    # record next must have a table to save into (see `schema_push`).
+    pushed = {"applied": False, "reason": "the application is not built yet"}
+    if app_root:
+        from services.blueprint.schema_push import push_now
+        tell(reasoning, f"Creating the {name} table in the running database.", "step")
+        pushed = push_now(app_root)
     return {"applied": True, "entity": eid, "name": name, "table": ent.get("table"),
             "fields": [str(f.get("name")) for f in (ent.get("fields") or []) if isinstance(f, dict)],
-            "requirement": req.get("id"), "edited_paths": _project_data(svc, app_root)}
+            "requirement": req.get("id"), "edited_paths": files,
+            "pushed": bool(pushed.get("applied")), "push_reason": str(pushed.get("reason") or "")}
 
 
 def dependents(doc: dict, eid: str) -> dict:
@@ -192,9 +201,12 @@ def remove_entity(svc: Any, ref: str, *, app_root: str | None = None, reasoning:
 
 def summary_of(verb: str, out: dict) -> str:
     if verb == "add_entity":
+        where = ("The table is in the application's database now, with sample rows."
+                 if out.get("pushed") else
+                 f"The table is created the next time the preview starts ({out.get('push_reason') or 'the database was not reachable'}).")
         return (f"Added the entity {out['name']} ({out['entity']}, table {out['table']}) with "
-                f"{', '.join(out['fields']) or 'no fields'}; recorded as {out['requirement']}. The table lands as a "
-                "migration on the next install. Say \"add a screen for " + str(out['name']) + "\" and I will compose it.")
+                f"{', '.join(out['fields']) or 'no fields'}; recorded as {out['requirement']}. {where} "
+                "Say \"add a screen for " + str(out['name']) + "\" and I will compose it.")
     s = f"Retired the entity {out['name']} ({out['entity']})."
     if out.get("pages"):
         s += f" Its screens are retired and off the menu: {', '.join(out['pages'])}."
