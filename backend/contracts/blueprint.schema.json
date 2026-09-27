@@ -319,6 +319,9 @@
             },
             "default": []
           },
+          "deferred": {
+            "type": "boolean"
+          },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
           },
@@ -3187,6 +3190,9 @@
             "default": []
           },
           "assumption": {
+            "type": "string"
+          },
+          "area": {
             "type": "string"
           },
           "owner": {

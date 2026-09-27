@@ -114,8 +114,11 @@ def test_defining_runs_the_domain_nodes_and_stops_at_review(tmp_path, monkeypatc
     assert out["applied"] and not out["finding"]
     assert ran["create"]["name"] == "Roster" and ran["create"]["description"] == "a roster for nurses"
     assert ran["plan"] == ["requirements", "data_model"] and ran["review"] is True
-    assert "1 requirement(s) and 2 capabilities — Shift Publishing, Swap Requests" in out["said"]
-    assert "ready to review" in out["said"] and "nothing is built until then" in out["said"]
+    # The first review is the requirements: what the app must do, and the
+    # question that keeps the review going until the person agrees.
+    assert "**1 requirement**" in out["said"] and "lock these in" in out["said"]
+    from services.smith import gates
+    assert gates.versions(str(tmp_path), gates.REQUIREMENTS)[-1]["version"] == 1
 
 
 def test_a_definition_that_did_not_complete_is_a_finding_on_what_stands(tmp_path, monkeypatch):

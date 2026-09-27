@@ -141,7 +141,7 @@ def test_a_page_that_fails_to_project_does_not_take_the_colours_with_it(monkeypa
     monkeypatch.setattr(projection, "project_brand_logo", lambda doc, root: written.append("logo"))
     monkeypatch.setattr(projection, "project_design_tokens", lambda doc, root: written.append("tokens"))
 
-    def refuse(svc, root):
+    def refuse(svc, root, **_):
         raise ValueError("route segment '[scanId]' contains unsafe characters")
     monkeypatch.setattr(projection, "apply_frontend_projection", refuse)
 

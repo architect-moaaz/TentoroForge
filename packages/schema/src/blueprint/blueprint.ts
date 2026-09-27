@@ -177,6 +177,13 @@ export const Module = z.object({
   name: z.string(),
   description: z.string().default(""),
   pages: z.array(PageId).default([]),
+  /**
+   * The person chose, at the product-model gate, not to build this module
+   * yet. Its screens are declared but not written or served; its records and
+   * processes are built with the rest, so building it later adds screens to a
+   * working application rather than a second application beside it.
+   */
+  deferred: z.boolean().optional(),
   ...artifactBase,
 });
 
@@ -2114,6 +2121,12 @@ export const Requirement = z.object({
   acceptanceCriteria: z.array(z.string()).default([]),
   /** Recorded when confidence sat in the 0.70–0.90 band (§17). */
   assumption: z.string().optional(),
+  /**
+   * The capability area this requirement belongs to, in the product's own
+   * words ("Booking", "Clinic admin"). The requirements review groups by it,
+   * so a person reads fourteen requirements as six things the app does.
+   */
+  area: z.string().optional(),
   /**
    * The Blueprint section that SATISFIES this requirement — a `SECTION_OWNER`
    * key (`designSystem`, `security`, `pageLayouts`, `workflows`, …). A global

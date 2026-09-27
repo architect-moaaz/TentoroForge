@@ -126,12 +126,30 @@ APPROVE_WALK: tuple[str, ...] = ("PLANNING", "PLAN_REVIEW")
 GATES: frozenset[str] = frozenset({"BLUEPRINT_REVIEW", "PLAN_REVIEW"})
 
 
-#: §107 step 6 — the nodes that author what the application *is*, as opposed to
-#: what it will be made of. Between them they write ``requirements`` and
-#: ``product``: the objectives, the personas, the domain's own vocabulary, the
-#: capabilities. Named rather than derived, because "is this a domain claim"
-#: is a judgement about meaning and not a property of the graph.
-DOMAIN_NODES: tuple[str, ...] = ("requirements", "application_model")
+#: §107 step 6 — the nodes that author what the application must DO, which is
+#: the first thing a person is asked to agree to. Only the requirements: the
+#: product frame (personas, capabilities) is read off them after they are
+#: agreed, with the rest of the product model, so a person who corrects a
+#: requirement does not pay for a frame built on the version they rejected.
+#: Named rather than derived, because "is this a domain claim" is a judgement
+#: about meaning and not a property of the graph.
+DOMAIN_NODES: tuple[str, ...] = ("requirements",)
+
+#: The product model — the second gate. What the application is MADE of,
+#: named and described, and nothing written in detail: the product frame, the
+#: modules, the records and their fields, the screens with their routes and
+#: modules, who signs in, what it talks to. Everything a person can recognise
+#: and change in a sentence ("merge these two modules", "no online
+#: payments"), and nothing they would have to read code to judge. Page
+#: contracts, workflows, layouts and code come after they agree, so a
+#: redrafted model costs a handful of calls, not a build.
+#:
+#: `entity_fields` is here because `page_contracts` waits on it: the page set
+#: is decided knowing what each record holds.
+MODEL_NODES: tuple[str, ...] = (
+    "application_model", "ux_architecture", "data_model", "entity_fields",
+    "page_contracts", "security", "integrations",
+)
 
 
 
@@ -147,6 +165,12 @@ def domain_nodes() -> list[str]:
     """
     order = [k for lvl in levels() for k in lvl]
     return [k for k in order if k in DOMAIN_NODES]
+
+
+def model_nodes() -> list[str]:
+    """The product model's nodes, in the graph's order (see `MODEL_NODES`)."""
+    order = [k for lvl in levels() for k in lvl]
+    return [k for k in order if k in MODEL_NODES]
 
 
 def definition_nodes() -> list[str]:

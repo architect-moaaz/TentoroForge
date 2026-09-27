@@ -60,12 +60,13 @@ NEXT_ACT: dict[str, tuple[str, str]] = {
     "CLARIFICATION": ("I have questions outstanding.",
                       "Answer them, or say `define` to work with what I have."),
     "DEFINITION": ("I am drafting the description.", ""),
-    "BLUEPRINT_REVIEW": ("Here is what I understood. Nothing is built yet.",
-                         "Say `approve` if that is right, or tell me what to "
+    "BLUEPRINT_REVIEW": ("The requirements are ready for you. Nothing is built yet.",
+                         "Say `approve` if they are right, or tell me what to "
                          "change."),
-    "PLANNING": ("I am working out the plan.", ""),
-    "PLAN_REVIEW": ("The plan is ready and nothing has been built yet.",
-                    "Say `build` to authorise it, or tell me what to change."),
+    "PLANNING": ("I am working out the product model — the modules and what is in them.", ""),
+    "PLAN_REVIEW": ("The product model is ready and nothing has been built yet.",
+                    "Say `build` for the whole app, pick modules on the right, "
+                    "or tell me what to change."),
     "IMPLEMENTATION": ("The build is running.", ""),
     "DATABASE_PROVISIONING": ("Setting up the database.", ""),
     "BUILD": ("Generating the application.", ""),

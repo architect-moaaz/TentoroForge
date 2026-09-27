@@ -65,6 +65,13 @@ import {
   type BlueprintStatus,
 } from "./BlueprintSummary";
 import {
+  ProductModelReview,
+  RequirementsReview,
+  WaitingModules,
+  gateCardLine,
+  useGates,
+} from "./GateReview";
+import {
   useBlueprintRun,
   type RunNode,
   type RunEvent as RunEventT,
@@ -235,6 +242,10 @@ export function SmithPanel({
   className,
 }: SmithPanelProps) {
   const { run, start, stop } = useBlueprintRun(projectId);
+  // THE TWO REVIEWS — requirements, then the product model. Re-read whenever
+  // the Blueprint does, which is after every turn and every run.
+  const gates = useGates(projectId, blueprint);
+  const [wideModel, setWideModel] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [greeting, setGreeting] = useState<Greeting | null>(null);
   const [draft, setDraft] = useState("");
@@ -257,6 +268,7 @@ export function SmithPanel({
         setOpenPlan(run);
       }
       onRunComplete?.();
+      void gates.reload();
       // A build runs for ten minutes or more, so nobody watches it finish.
       // Told where they actually are rather than only in a pane they have
       // left: the tab title carries it back, and a notification reaches them
@@ -713,6 +725,29 @@ export function SmithPanel({
     void start({ description: brief.text, evidence, approved: true });
   };
 
+  // THE REQUIREMENTS' YES. Said in the conversation, so the transcript shows
+  // who agreed to what; the server locks them and works out the product model.
+  const approveRequirements = () => {
+    const prior = messages.slice(-SENT_HISTORY).map((m) => ({ role: m.role, text: m.text }));
+    setMessages((m) => [...m, { role: "user", text: "Approve requirements", at: Date.now() }]);
+    void start({ description: "Approve requirements", evidence, history: prior,
+                 approved: true, gate: "requirements" });
+  };
+
+  // THE PRODUCT MODEL'S YES: build all of it, or the modules ticked.
+  const buildModules = (modules: string[] | null) => {
+    const all = gates.data?.product_model.items.modules ?? [];
+    const names = modules
+      ? all.filter((m) => modules.includes(m.id)).map((m) => m.name)
+      : [];
+    const text = modules ? `Build ${names.join(", ") || "the selected modules"}` : "Build app";
+    const prior = messages.slice(-SENT_HISTORY).map((m) => ({ role: m.role, text: m.text }));
+    setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
+    void start({ description: text, evidence, history: prior, approved: true,
+                 gate: "product_model", modules });
+  };
+  const openGate = busy ? null : gates.data?.gate ?? null;
+
   // A definition exists and nothing has been built from it. Read off the
   // Blueprint so it survives reloads and later turns, unlike `awaitingApproval`.
   // "Not built" means FEWER LAYOUTS THAN PAGES, not zero layouts. A run that
@@ -864,9 +899,11 @@ export function SmithPanel({
                   <span className="block truncate text-sm font-semibold">
                     {blueprintName(blueprint)}
                   </span>
-                  <span className="block text-xs text-muted-foreground">App Blueprint</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {gateCardLine(gates.data)?.label ?? "App Blueprint"}
+                  </span>
                   <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                    {blueprintCountsLine(blueprint)}
+                    {gateCardLine(gates.data)?.line ?? blueprintCountsLine(blueprint)}
                   </span>
                 </span>
                 <span className="flex shrink-0 items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
@@ -1079,7 +1116,14 @@ export function SmithPanel({
       less than the Blueprint; below 360px the card's two-column rows broke.
       So it takes just over a third of what is available, between those bounds.
     */}
-    <aside className="hidden w-[clamp(360px,36%,440px)] shrink-0 flex-col border-l bg-muted/30 lg:flex">
+    <aside
+      className={cn(
+        "hidden shrink-0 flex-col border-l bg-muted/30 lg:flex",
+        openGate === "product_model" && wideModel
+          ? "w-[clamp(420px,60%,920px)]"
+          : "w-[clamp(360px,36%,440px)]",
+      )}
+    >
       {sidePlan &&
       !(sidePlan.awaitingApproval && sidePlan.status === "complete") ? (
         // A RUN IN PROGRESS, OR ONE PICKED FROM THE TRANSCRIPT: its stages.
@@ -1095,6 +1139,28 @@ export function SmithPanel({
           )}
           <StageList run={sidePlan} projectId={projectId ?? undefined} />
         </div>
+      ) : openGate === "requirements" && gates.data ? (
+        // THE FIRST REVIEW: what the app must do.
+        <RequirementsReview
+          doc={bp}
+          data={gates.data.requirements}
+          busy={busy}
+          onApprove={approveRequirements}
+          onEdit={() => composerRef.current?.focus()}
+          className="min-h-0 flex-1"
+        />
+      ) : openGate === "product_model" && gates.data ? (
+        // THE SECOND: what it is made of, module by module.
+        <ProductModelReview
+          doc={bp}
+          gates={gates.data}
+          busy={busy}
+          wide={wideModel}
+          onToggleWide={() => setWideModel((w) => !w)}
+          onBuild={buildModules}
+          onEdit={() => composerRef.current?.focus()}
+          className="min-h-0 flex-1"
+        />
       ) : hasDefinition ? (
         // THE BLUEPRINT. Read off the document rather than the run, so a
         // reload or a later turn — connecting a design, answering a question
@@ -1110,6 +1176,9 @@ export function SmithPanel({
             >
               ← Back to the current run
             </button>
+          )}
+          {gates.data && (
+            <WaitingModules gates={gates.data} busy={busy} onBuild={buildModules} />
           )}
           <BlueprintSummary
             doc={bp}

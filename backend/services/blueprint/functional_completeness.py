@@ -601,9 +601,14 @@ def page_findings(doc: dict) -> list[dict]:
     # controls were held to the workflows by the compile gate, not here.
     coded = {str(c.get("page")) for c in doc.get("pageCode") or []
              if isinstance(c, dict) and str(c.get("view") or "").strip()}
+    # A screen in a module the person chose to build later is not missing.
+    from services.blueprint.scope import deferred_page_ids
+    held = deferred_page_ids(doc)
 
     for page in _live(doc.get("pages")):
         pid = str(page.get("id") or "")
+        if pid in held:
+            continue
         route = page.get("route") or pid
         layout = layouts.get(pid)
 

@@ -226,6 +226,13 @@ export interface StartOptions {
   defineOnly?: boolean;
   /** Start over rather than resuming an existing Blueprint. */
   fresh?: boolean;
+  /**
+   * Which review `approved` answers: `requirements` locks them and works out
+   * the product model; `product_model` builds. Omitted, the open one.
+   */
+  gate?: "requirements" | "product_model";
+  /** At the product model's review: the modules to build. Omitted is all. */
+  modules?: string[] | null;
 }
 
 export function useBlueprintRun(projectId: string | null) {
@@ -472,6 +479,8 @@ export function useBlueprintRun(projectId: string | null) {
               // §14 — the documents attached on /blueprint/new. Carried on
               // every turn: the definition re-reads the whole brief each time.
               evidence: opts.evidence ?? [],
+              ...(opts.gate ? { gate: opts.gate } : {}),
+              ...(opts.modules ? { modules: opts.modules } : {}),
             }),
           },
         );

@@ -636,6 +636,17 @@ def _build_complete_message(doc: dict | None) -> str | None:
     """
     if not doc:
         return None
+    # THE MODULES THAT WAIT ARE NOT A SHORTFALL. Their screens are declared
+    # and deliberately not built (see `scope`); counting them as planned
+    # would report a partial build the person chose as a failed one.
+    from services.blueprint.scope import built_view, deferred_modules
+    full = doc
+    doc = built_view(doc)
+    waiting = [str(m.get("name") or m.get("id")) for m in full.get("modules") or []
+               if isinstance(m, dict) and str(m.get("id")) in deferred_modules(full)]
+    later = (f" Not built yet, as you chose: {', '.join(waiting)} — build "
+             f"{'it' if len(waiting) == 1 else 'them'} from the product model whenever you're ready."
+             if waiting else "")
     served_pages = [p for p in (doc.get("pages") or [])
                     if str(p.get("status") or "").upper() != "REMOVED"]
     unbuilt = _unbuilt_pages(doc)
@@ -655,7 +666,7 @@ def _build_complete_message(doc: dict | None) -> str | None:
     if not unbuilt:
         s = "" if planned == 1 else "s"
         return (f"Your application is built — {planned} page{s} ready. Open the "
-                f"preview to see it, or Publish when you're happy with it.")
+                f"preview to see it, or Publish when you're happy with it." + later)
 
     # Honest about the shortfall: a dropped page 404s, and telling the user it
     # is "built" without saying which route is missing is the silent-loss this
@@ -669,7 +680,7 @@ def _build_complete_message(doc: dict | None) -> str | None:
             f"to preview. {n} {page_word} couldn't be composed "
             f"({', '.join(routes)}) and {'is' if n == 1 else 'are'} not served "
             f"yet; everything else works. Preview what's there, or tell me to "
-            f"retry {'it' if n == 1 else 'them'}.")
+            f"retry {'it' if n == 1 else 'them'}." + later)
 
 
 #: What Smith offers after a build. The first is the consent that runs the
@@ -1069,6 +1080,28 @@ async def read_blueprint(
     return svc.doc
 
 
+@router.get("/api/projects/{project_id}/gates")
+async def read_gates(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The two reviews before a build, as the panel draws them: which one is
+    open, the requirements grouped with what the last change moved, and the
+    product model module by module (see `services.smith.gates`)."""
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.service import BlueprintService
+    from services.smith import gates as _gates
+
+    output_dir = _output_dir(project)
+    try:
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404,
+                            detail="no Blueprint for this project") from None
+    return _gates.payload(svc.doc, output_dir)
+
+
 @router.get("/api/projects/{project_id}/blueprint/verification")
 async def read_verification(
     project_id: uuid.UUID,
@@ -1187,6 +1220,14 @@ class SmithChatRequest(BaseModel):
     #: and dropped at this door — the requirements were written from the
     #: one-line brief alone and cited no document.
     evidence: list[str] = Field(default_factory=list)
+    #: Which review an `approved` answers — `requirements` (lock them and work
+    #: out the product model) or `product_model` (build). Empty means the
+    #: review the application is waiting on, which is what an older panel
+    #: that only knew one button meant.
+    gate: str = ""
+    #: The modules to build, when the person picked some at the product-model
+    #: review. Absent means the whole application.
+    modules: list[str] | None = None
 
 
 def _attach_named_design(output_dir: Any, named: dict, emit) -> None:
@@ -1527,6 +1568,17 @@ async def smith_chat(
                     svc, design_language.COMPANY, company_name=_offer[0],
                     reason="Chosen from the palette question while defining.")
 
+            # WHICH REVIEW THE APPLICATION IS WAITING ON (services.smith.gates):
+            # the requirements, then the product model. An approval answers the
+            # one it names, or the one that is open.
+            from services.smith import gates as _gates
+            _gate = _gates.current(svc.doc, output_dir) if svc is not None else None
+            if req.approved and svc is not None \
+                    and (req.gate or _gate) == _gates.REQUIREMENTS:
+                return _approve_requirements(str(output_dir), app_root, emit=emit,
+                                             app_name=getattr(project, "name", "") or "",
+                                             message=req.message)
+
             if req.approved:
                 # ONE QUESTION FIRST, AND ONLY WHEN THERE IS SOMETHING TO ASK
                 # ABOUT. Both nodes that consume the answer run inside the
@@ -1548,9 +1600,12 @@ async def smith_chat(
                 # (see there), so a build that outran its turn still delivers the
                 # offer. The review runs on the next turn, only if the user takes
                 # it (see `_is_verify_consent`).
-                built = _run_dag(str(output_dir), app_root, req.message,
+                # A review's button is a decision, not more brief.
+                built = _run_dag(str(output_dir), app_root,
+                                 "" if req.gate else req.message,
                                  approved=True, emit=emit,
-                                 app_name=getattr(project, "name", "") or "")
+                                 app_name=getattr(project, "name", "") or "",
+                                 modules=req.modules)
                 return built
 
             # "BUILD IT" IS A DOOR, NOT A SIGNPOST. Typed by a layman it was
@@ -1559,6 +1614,14 @@ async def smith_chat(
             # the approval the same way the card does, so a definition changed
             # since the last approval is still refused as stale — the refusal
             # just happens after the click rather than instead of it.
+            if _gate == _gates.REQUIREMENTS and (_is_build_consent(req.message)
+                                                 or _is_gate_consent(req.message)):
+                # "Go" said at the requirements review is yes to THEM — the
+                # product model is worked out next, and nothing is built
+                # until the person has seen that too.
+                return _approve_requirements(str(output_dir), app_root, emit=emit,
+                                             app_name=getattr(project, "name", "") or "",
+                                             message=req.message)
             if svc is not None and defined and _is_build_consent(req.message):
                 from services.blueprint import approval as _approval
                 if _is_built(output_dir) and _approval.state_of(svc.doc, "plan") == "approved":
@@ -1586,7 +1649,8 @@ async def smith_chat(
             # DECLINING IS AN ANSWER. "Not now" is one of the options Smith
             # itself offers, and it used to fall through to the architect,
             # which read it as a change to reason about.
-            if " ".join((req.message or "").strip().lower().rstrip(".!").split()) in _DECLINED:
+            if _gate is None and \
+                    " ".join((req.message or "").strip().lower().rstrip(".!").split()) in _DECLINED:
                 emit("message", {"text": ("Right — nothing run. Say `verify` "
                                           "whenever you want me to read the pages, "
                                           "or just tell me what to change."),
@@ -1686,6 +1750,17 @@ async def smith_chat(
             # to change before the build has run. Only clear edits redraft; a
             # question ("what does this app do?") still falls through to be
             # answered.
+            # AT A REVIEW, SMITH REVIEWS. A message while the requirements or
+            # the product model are on screen is about them: a change is made
+            # and shown as what moved, a question is answered from them, a yes
+            # is a yes. Anything else — connecting a design, a colour — is an
+            # ordinary turn below.
+            if _gate is not None:
+                handled = _gate_turn(svc, _gate, str(output_dir), app_root, req, emit=emit,
+                                     app_name=getattr(project, "name", "") or "")
+                if handled is not None:
+                    return handled
+
             if svc is not None and not _is_built(output_dir) \
                     and _definition_edit(req.message):
                 return _run_dag(str(output_dir), app_root, req.message,
@@ -1979,7 +2054,8 @@ def busy_message(run: dict) -> str:
 def _run_dag(output_dir: str, app_root: str, description: str, *,
              approved: bool, emit, app_name: str = "",
              announce_completion: bool = True,
-             documents: Any = None) -> dict:
+             documents: Any = None, phase: str = "",
+             modules: list[str] | None = None) -> dict:
     """Invoke §28's graph and narrate it. Never reorders it (§116).
 
     When an approved build reaches completion it offers to verify — as part of
@@ -1999,7 +2075,12 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     from services.blueprint.orchestrator import completed_nodes, levels, run, nodes_recorded_done
     from services.blueprint.plan_forecast import forecast
     from services.blueprint.service import BlueprintService
-    from services.smith.smith import domain_nodes
+    from services.smith.smith import domain_nodes, model_nodes
+
+    # THREE RUNS, BY WHAT THEY END IN: `define` writes the requirements and
+    # stops at their review; `model` works out what the application is made
+    # of and stops at the product model's review; `build` builds it.
+    phase = phase or ("build" if approved else "define")
 
     # ONE BUILD OF AN APPLICATION AT A TIME. Every entry point lands here, and
     # none of them asked whether a run was already writing the same tree: a
@@ -2026,11 +2107,19 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             # The review's re-compose passes announce_completion=False and
             # records nothing: nobody approved anything there.
             from services.blueprint import approval as _approval
-            if _approval.state_of(svc.doc, "plan") != "approved":
-                try:
-                    _approval.record(svc, "plan")
-                except Exception:  # noqa: BLE001 — a gate that cannot be written must not stop the build
-                    logger.exception("could not record the plan approval for %s", output_dir)
+            # WHICH MODULES, BEFORE ANYTHING IS APPROVED: the choice is part
+            # of what the person said yes to (see `scope`). None is all.
+            from services.blueprint.scope import choose as _choose_modules
+            _choose_modules(svc, modules)
+            # §95 Gate 2 is the product model the person was looking at when
+            # they pressed Build; Gate 3 is the build itself. One click, two
+            # facts, both fingerprinted against this document.
+            for _g in ("blueprint", "plan"):
+                if _approval.state_of(svc.doc, _g) != "approved":
+                    try:
+                        _approval.record(svc, _g)
+                    except Exception:  # noqa: BLE001 — a gate that cannot be written must not stop the build
+                        logger.exception("could not record the %s approval for %s", _g, output_dir)
         if description:
             # AN ANSWER ADDS TO THE BRIEF, IT DOES NOT REPLACE IT. This
             # assigned, so a clarifying exchange destroyed the request that
@@ -2083,15 +2172,17 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         _documents.store(output_dir, documents)
 
     plan = [k for lvl in levels() for k in lvl]
-    if not approved:
-        # §25 — the definition is two calls, what follows is a dozen more.
+    if phase == "define":
+        # §25 — the definition is one call, what follows is a dozen more.
         # `domain_nodes` rather than a list spelled out here: the gate is one
         # fact about the lifecycle, and three copies of it drift.
         plan = domain_nodes()
+    elif phase == "model":
+        plan = model_nodes()
     already = completed_nodes(svc.doc, confirmed=nodes_recorded_done(output_dir) or None)
     plan = [k for k in plan if k not in already]
 
-    emit("plan", _plan_event(plan, already, not approved))
+    emit("plan", _plan_event(plan, already, phase != "build"))
 
     usage = RunUsage.for_app(svc)
     router = tiered_router()
@@ -2107,8 +2198,19 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     # approve/build gates were unreachable. A define that produced requirements
     # has reached the review gate — advance the §94 state to BLUEPRINT_REVIEW.
     # (Not on the approved/build pass; that path moves past review on its own.)
-    if not approved and (svc.doc.get("requirements") or svc.doc.get("pages")):
+    if phase == "define" and (svc.doc.get("requirements") or svc.doc.get("pages")):
         _advance_state_to_review(svc)
+        from services.smith import gates as _gates
+        _gates.record_version(output_dir, _gates.REQUIREMENTS, svc.doc, request=description)
+    if phase == "model" and svc.doc.get("pages"):
+        from services.blueprint.orchestrator import IllegalTransition, transition
+        from services.smith import gates as _gates
+        try:
+            transition(svc, "PLAN_REVIEW")
+        except IllegalTransition:
+            logger.info("[blueprint] %s: model drafted at %s", Path(output_dir).name,
+                        svc.doc.get("state"))
+        _gates.record_version(output_dir, _gates.PRODUCT_MODEL, svc.doc)
     state = str(svc.doc.get("state") or "")
     if approved:
         # THE BUILD USED TO LEAVE THE STATE WHERE THE DEFINITION LEFT IT. This
@@ -2134,9 +2236,123 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     emit("forecast", counts)
     emit("usage", usage.summary())
     emit("state", {"state": state})
-    return {"awaitingApproval": not approved, "forecast": counts,
-            "state": state,
+    return {"awaitingApproval": phase != "build", "forecast": counts,
+            "state": state, "phase": phase,
             "report": _report_payload(report, svc.doc)}
+
+
+def _approve_requirements(output_dir: str, app_root: str, *, emit, app_name: str = "",
+                          message: str = "") -> dict:
+    """Yes to the requirements: lock them, then work out the product model.
+
+    The answer is recorded against exactly the requirements on screen (§95
+    `understanding`, fingerprinted over their text), the state walks from the
+    requirements' review into PLANNING, and the model's nodes run. The run
+    stops at the product model's review; nothing is built from here."""
+    from services.blueprint import approval as _approval
+    from services.blueprint.orchestrator import IllegalTransition, transition
+    from services.blueprint.service import BlueprintService
+    from services.smith import gates as _gates
+
+    running = build_in_flight(output_dir)
+    if running is not None:
+        emit("message", {"text": busy_message(running), "status": "reported"})
+        return {"status": "busy", "run": running}
+    svc = BlueprintService.load(output_dir=output_dir)
+    _advance_state_to_review(svc)
+    _approval.record(svc, _gates.APPROVAL_GATE[_gates.REQUIREMENTS], message_id=message[:200])
+    try:
+        transition(svc, "PLANNING")
+    except IllegalTransition:
+        logger.info("[blueprint] %s: requirements approved at %s", Path(output_dir).name,
+                    svc.doc.get("state"))
+    shown = _gates.versions(output_dir, _gates.REQUIREMENTS)
+    version = f" v{shown[-1]['version']}" if shown else ""
+    emit("message", {"text": (f"Requirements{version} are locked. Now I'm working out what the app is "
+                              "made of — its modules, and in each the screens, records and "
+                              "connections — so you can see all of it before anything is built.")})
+    out = _run_dag(output_dir, app_root, "", approved=False, emit=emit, app_name=app_name,
+                   phase="model")
+    doc = BlueprintService.load(output_dir=output_dir).doc
+    failed = [f.get("node") for f in ((out.get("report") or {}).get("failed") or [])]
+    if doc.get("pages") and not failed:
+        emit("message", {"text": _gates.say_model(doc), "status": "asked"})
+    elif out.get("status") != "busy":
+        # SAID, NOT LEFT FOR THE STAGE LIST TO IMPLY. The review still shows
+        # what was worked out; Build finishes the rest before building.
+        emit("message", {"text": ("I couldn't finish working out the product model"
+                                  + (f" ({', '.join(labelled for labelled in failed if labelled)})"
+                                     if failed else "")
+                                  + ". What I have is on the right. Tell me what to change, or "
+                                  "press Build app — the build finishes the model first."),
+                         "status": "needs_user"})
+    return out
+
+
+def _detail_new_records(svc: Any, reasoning: Any = None) -> None:
+    """Fields for records a model change just named — the DAG's own
+    `entity_fields`, which authors only the records that have none yet."""
+    from services.blueprint.executors import RunUsage, make_executor, tiered_router
+    from services.blueprint.orchestrator import run
+
+    router = tiered_router(reasoning=reasoning)
+    run(svc, make_executor(svc, router, usage=RunUsage.for_app(svc, phase="change"),
+                           reasoning=reasoning),
+        plan=["entity_fields"], commit=True)
+
+
+def _gate_turn(svc: Any, gate: str, output_dir: str, app_root: str, req: Any, *, emit,
+               app_name: str = "") -> dict | None:
+    """One message at a review. None when it is not about what is on screen,
+    so the ordinary turn takes it."""
+    from services.smith import gates as _gates
+
+    history = [(t.role, t.text) for t in req.history if t.text]
+    try:
+        turn = _gates.interpret(svc.doc, gate, req.message, history)
+    except Exception as exc:  # noqa: BLE001 — an unread message goes to the ordinary turn
+        logger.warning("[gates] could not interpret %r: %s", req.message[:80], exc)
+        return None
+    kind = str(turn.get("kind") or "other")
+    if kind == "other":
+        return None
+    if kind == "question":
+        emit("message", {"text": str(turn.get("answer") or "").strip()
+                         or "Ask me about any of it — I'll answer from what's on the right.",
+                         "status": "reported"})
+        return {"status": "reported"}
+    if kind == "approve":
+        if gate == _gates.REQUIREMENTS:
+            return _approve_requirements(output_dir, app_root, emit=emit, app_name=app_name,
+                                         message=req.message)
+        emit("message", {"text": ("Good. Build the whole app now, or tick the modules on the right "
+                                  "and build only those first?"),
+                         "options": ["Build the whole app"], "status": "asked"})
+        return {"status": "asked"}
+    running = build_in_flight(output_dir)
+    if running is not None:
+        emit("message", {"text": busy_message(running), "status": "reported"})
+        return {"status": "busy"}
+    reasoning = lambda text, kind="reasoning", node="": emit(  # noqa: E731
+        "thought", {"text": text, "kind": kind, "node": node})
+    try:
+        if gate == _gates.REQUIREMENTS:
+            out = _gates.revise_requirements(svc, str(turn.get("brief") or ""),
+                                             remove=list(turn.get("remove") or []),
+                                             request=req.message, reasoning=reasoning)
+            text = _gates.say_requirements_change(out["diff"], out["version"])
+        else:
+            out = _gates.revise_model(svc, turn, request=req.message, reasoning=reasoning,
+                                      detail=lambda s: _detail_new_records(s, reasoning))
+            text = _gates.say_model_change(out)
+    except _gates.GateChangeError as exc:
+        emit("message", {"text": f"I couldn't make that change: {exc} Nothing was changed — "
+                                 "say it another way, or name the item you mean.",
+                         "status": "needs_user"})
+        return {"status": "needs_user"}
+    emit("message", {"text": text, "status": "resolved"})
+    emit("state", {"state": str(svc.doc.get("state") or "")})
+    return {"status": "resolved", "gate": gate, "version": out.get("version")}
 
 
 def _is_verify_consent(message: str) -> bool:
@@ -2174,7 +2390,24 @@ _BUILD_CONSENT = frozenset({
     "go on then", "go ahead", "do it", "start", "start it", "yes build it",
     "build it now", "approve and build", "yes, build it", "go", "proceed",
     "ok build it", "let's build it", "lets build it",
+    "build the whole app", "build app", "build the whole application",
 })
+
+
+#: Yes to a review, typed — the requirements' button in words. A whole
+#: message, like the build consent above, so "approve the refund flow" is a
+#: change to reason about and not a click.
+_GATE_CONSENT = frozenset({
+    "approve", "approved", "approve requirements", "approve the requirements",
+    "looks good", "look good", "lgtm", "that's right", "thats right", "correct",
+    "yes", "yes that's right", "lock them in", "lock these in", "lock it in",
+    "all good", "perfect", "great", "fine", "ok", "okay",
+})
+
+
+def _is_gate_consent(message: str) -> bool:
+    m = " ".join((message or "").strip().lower().rstrip(".!").split())
+    return m in _GATE_CONSENT
 
 
 def _is_build_consent(message: str) -> bool:

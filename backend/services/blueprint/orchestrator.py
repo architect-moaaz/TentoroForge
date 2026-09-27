@@ -474,9 +474,11 @@ FANOUT: dict[str, Any] = {
     "design_sources": lambda doc: [
         s["id"] for s in (doc.get("designSources") or []) if s.get("id")
     ],
+    # A deferred module's screens are declared and not written (see `scope`).
     "pages": lambda doc: [
         p["id"] for p in (doc.get("pages") or [])
         if p.get("id") and p.get("status") != "DEPRECATED"
+        and p["id"] not in _deferred_pages(doc)
     ],
     # §107 step 16 — one call per declared workflow.
     "workflows": lambda doc: [
@@ -493,6 +495,11 @@ FANOUT: dict[str, Any] = {
     # primary record) on its own.
     "page_features": lambda doc: page_features(doc),
 }
+
+
+def _deferred_pages(doc: Mapping[str, Any]) -> set[str]:
+    from services.blueprint.scope import deferred_page_ids
+    return deferred_page_ids(doc)
 
 
 #: The most pages one `page_details` call writes.
@@ -516,9 +523,11 @@ def _feature_groups(doc: Mapping[str, Any]) -> dict[str, list[dict]]:
     and a page that belongs to no entity on its own. An auth page is declared
     whole by `auth_pages` and belongs to no feature."""
     groups: dict[str, list[dict]] = {}
+    held = _deferred_pages(doc)
     for page in doc.get("pages") or []:
         if not isinstance(page, dict) or not page.get("id") \
-                or page.get("status") == "DEPRECATED" or page.get("pattern") == "auth":
+                or page.get("status") == "DEPRECATED" or page.get("pattern") == "auth" \
+                or page["id"] in held:
             continue
         key = str((page.get("data") or {}).get("primaryEntity") or "") or str(page["id"])
         groups.setdefault(key, []).append(page)
@@ -2958,7 +2967,13 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # THE FRAME, BESIDE THE TOKENS: the shell chrome and the sign-in
     # composition the design decided, written where the layout reads them.
     project_shell_identity(svc.doc, app_root)
-    result = apply_frontend_projection(svc, app_root)
+    # WHAT IS BUILT, NOT EVERYTHING DECLARED. A module the person chose not
+    # to build yet keeps its screens in the Blueprint and gets no route, no
+    # rail entry and no front door here (see `scope`). With nothing deferred
+    # the view is the document itself.
+    from services.blueprint.scope import built_view
+    view = built_view(svc.doc)
+    result = apply_frontend_projection(svc, app_root, doc=view)
     # THE DESIGNED PAGES, OVER THEIR FLOORS. The SDK they were compiled against
     # (the fixed half ships with the scaffold; the typed half is this
     # document), then each `pageCode` row as its route's page/load/view — a
@@ -2968,7 +2983,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     from services.blueprint.ui_engineer import ensure_sdk
 
     ensure_sdk(svc.doc, Path(app_root))
-    project_code_pages(svc.doc, app_root)
+    project_code_pages(view, app_root)
     # Who signs in and where a new account goes — read by signup and the SDK.
     from services.blueprint.account_model import project_account
     project_account(svc.doc, app_root)
@@ -2998,24 +3013,24 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # So they are run first and the refusal is raised after: the node still
     # fails, the retry still happens, and what the failure destroys is now the
     # page that failed rather than everything around it.
-    project_nav_flow(svc.doc, app_root)
+    project_nav_flow(view, app_root)
     # The rail itself, from the same tree the route graph was read from:
     # `shell.json` is what the scaffold's layout builds its sidebar from, and
     # nothing wrote it, so every rail was the flat fallback.
-    project_shell(svc.doc, app_root)
+    project_shell(view, app_root)
     # The rail references `/brand/<digest>.<ext>`; this is what puts the file
     # there. After `project_shell`, so the two are read together, and before
     # the tokens for no reason but that the look belongs in one place.
-    project_middleware(svc.doc, app_root)
+    project_middleware(view, app_root)
     # The data route needs the same list the matcher was built from.
-    project_public_resources(svc.doc, app_root)
+    project_public_resources(view, app_root)
     # …and a page the matcher lets through needs a door that is not inside
     # `(dashboard)`, whose layout redirects anyone without a session. After
     # the middleware, because the two are one statement about the same pages.
-    project_public_routes(svc.doc, app_root)
+    project_public_routes(view, app_root)
     from services.blueprint.projection import project_public_nav
-    project_public_nav(svc.doc, app_root)
-    project_root_route(svc.doc, app_root)
+    project_public_nav(view, app_root)
+    project_root_route(view, app_root)
 
     # DROP-AND-CONTINUE, NOT DROP-THE-APPLICATION. A page whose authored tree
     # the planner cannot render is dropped — its route 404s — which is exactly
@@ -3170,7 +3185,10 @@ def _project_assemble(svc: BlueprintService, app_root: str) -> None:
     # because every node downstream of composition faithfully projected what
     # survived. Recorded on every run, `complete` included: a missing key would
     # mean the check did not run, which is a different fact from no shortfall.
-    runtime["pages"] = page_funnel(svc.doc, app_root)
+    # Planned means planned to be built now: a deferred module's screens are
+    # waiting by choice, not missing (see `scope`).
+    from services.blueprint.scope import built_view
+    runtime["pages"] = page_funnel(built_view(svc.doc), app_root)
     if runtime["pages"]["missing"]:
         logger.warning(
             "[assemble] %d of %d planned pages are not served: %s",
@@ -3261,9 +3279,10 @@ def _compose_page_layouts(svc: BlueprintService) -> None:
     from services.blueprint.template_page import template_layout
 
     have = {str(l.get("page")) for l in svc.doc.get("pageLayouts") or [] if isinstance(l, dict)}
+    held = _deferred_pages(svc.doc)
     for page in list(svc.doc.get("pages") or []):
         pid = str(page.get("id") or "")
-        if not pid or page.get("status") == "DEPRECATED" or pid in have:
+        if not pid or page.get("status") == "DEPRECATED" or pid in have or pid in held:
             continue
         if page.get("pattern") == "auth":
             continue            # its floor is the template's sign-in page, not a tree

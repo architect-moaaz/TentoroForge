@@ -1274,7 +1274,19 @@ NODE_TASKS: dict[str, str] = {
         "under SUPPLIED DOCUMENTS cites evidence of type `document`, with `source` "
         "naming the document (\"document 1\") and `message` quoting the sentence it "
         "came from — so the application can say which requirements the uploaded "
-        "document produced. A requirement supported by both cites both."
+        "document produced. A requirement supported by both cites both.\n\n"
+        "GROUP THEM BY WHAT THE PRODUCT DOES. Give every requirement an `area`: "
+        "the capability it belongs to, named in the two or three words the "
+        "person asking would use for that part of their product. Requirements "
+        "that belong together share one area name exactly; most applications "
+        "have between three and seven areas, and an area with one requirement "
+        "is usually part of a neighbour.\n\n"
+        "WHEN THE REQUIREMENTS ALREADY EXIST AND SMITH'S BRIEF ASKS FOR A "
+        "CHANGE, revise rather than restart. Return only the requirements the "
+        "change adds, rewords or retires. A reworded requirement keeps its "
+        "`id`. A retired one is returned exactly as it was, with `status: "
+        "\"DEPRECATED\"`. Everything the brief does not touch is left out of "
+        "your reply and stays exactly as it is."
     ),
     "application_model": (
         "FIRST, THE LANGUAGE. If the request says what language the INTERFACE "
@@ -2284,6 +2296,8 @@ def build_prompt(
                 "not a failure \u2014 the design does not show them. Never guess "
                 "an id, and never give one frame to two pages."
             )
+        if brief:
+            user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
         if feedback:
             user += "\n\nYour previous attempt was rejected:\n\n" + feedback
         return system, user
@@ -2415,6 +2429,11 @@ def build_prompt(
                 "absence is visible rather than silent."
             )
 
+    # SMITH'S BRIEF, ON THE NODES WITH NO BRANCH OF THEIR OWN. The branches
+    # above append it; this one did not, so a requirements redraft asked for
+    # at the review gate re-ran the agent with nothing saying what to change.
+    if brief:
+        user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
     if feedback:
         user += "\n\nYour previous attempt was rejected:\n\n" + feedback
     return system, user

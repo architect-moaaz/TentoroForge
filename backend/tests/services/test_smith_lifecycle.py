@@ -180,8 +180,11 @@ def test_the_three_phases_partition_the_dag():
 def test_the_domain_phase_authors_what_everything_else_reads():
     """The split is only worth making if the cheap half is the half the rest
     of the DAG depends on."""
-    assert set(domain_nodes()) == {"requirements", "application_model"}
+    assert set(domain_nodes()) == {"requirements"}
     downstream = set(definition_nodes())
+    # The product model is the first thing worked out once they are agreed.
+    from services.smith.smith import model_nodes
+    assert set(model_nodes()) <= downstream
     assert all(
         DAG[k].depends_on <= set(domain_nodes()) | downstream | set(build_nodes())
         for k in downstream

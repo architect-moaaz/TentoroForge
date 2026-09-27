@@ -77,7 +77,7 @@ def test_define_only_stops_before_the_expensive_half():
 
     src = inspect.getsource(blueprint_generate.generate_via_blueprint)
     assert "define_only" in src and "domain_nodes()" in src
-    assert domain_nodes() == ["requirements", "application_model"]
+    assert domain_nodes() == ["requirements"]
 
 
 def test_every_path_into_the_dag_uses_the_same_definition_of_the_gate():

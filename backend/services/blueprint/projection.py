@@ -662,9 +662,13 @@ def _route_slug(route: str) -> str:
     return slugify_route(route or "/")
 
 
-def apply_frontend_projection(svc: Any, app_root: str | Path) -> dict[str, Any]:
-    """Project pages, then record each file in ``codeMap`` (§21)."""
-    result = project_frontend(svc.doc, app_root)
+def apply_frontend_projection(svc: Any, app_root: str | Path,
+                              doc: dict | None = None) -> dict[str, Any]:
+    """Project pages, then record each file in ``codeMap`` (§21).
+
+    ``doc`` is what to project when it is not the whole document — the built
+    view, when some modules are not built yet (see `scope.built_view`)."""
+    result = project_frontend(svc.doc if doc is None else doc, app_root)
     for entry in result["codeMap"]:
         svc.upsert("codeMap", entry, natural_key=entry["artifact"])
     svc.save()

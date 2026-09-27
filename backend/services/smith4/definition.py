@@ -120,20 +120,15 @@ def define_application(ctx: Ctx, args: dict) -> dict:
         return _finding(f"The definition did not complete — {type(exc).__name__}: {exc}")
     failed = list(getattr(report, "failed", None) or [])
     doc = svc.doc
-    # WHAT A DEFINITION IS AT THIS STEP. The domain nodes author the
-    # requirements and the product's capabilities — the two everything else
-    # reads; the screens, records and processes are planned from them after
-    # the person approves. Counting screens here read as "0 screens" on a
-    # definition that was complete for its step (live, 2026-09-25).
-    reqs = [r for r in doc.get("requirements") or [] if isinstance(r, dict)]
-    caps = [str(c.get("name") or "").strip() for c in (doc.get("product") or {}).get("capabilities") or []
-            if isinstance(c, dict) and str(c.get("name") or "").strip()]
-    name = str((doc.get("application") or {}).get("name") or ctx.app_name or "the application")
-    said = (f"Defined what **{name}** is: {len(reqs)} requirement(s)"
-            + (f" and {len(caps)} capabilit{'y' if len(caps) == 1 else 'ies'} — {', '.join(caps[:8])}"
-               + (", …" if len(caps) > 8 else "") if caps else "")
-            + ". It is ready to review. On approval the screens, records and processes are "
-              "planned from it; nothing is built until then.")
+    # WHAT A DEFINITION IS AT THIS STEP: the requirements, and only them —
+    # the first of the two reviews (see `services.smith.gates`). The modules,
+    # screens and records are worked out from them once the person agrees.
+    # Counting screens here read as "0 screens" on a definition that was
+    # complete for its step (live, 2026-09-25).
+    from services.smith import gates
+    if doc.get("requirements"):
+        gates.record_version(output_dir, gates.REQUIREMENTS, doc, request=brief)
+    said = gates.say_requirements(doc)
     finding = (f"These parts of the definition did not complete: {', '.join(failed)}. "
                "The rest stands; say what to do about them.") if failed else ""
     return {"applied": True, "said": said, "finding": finding,
