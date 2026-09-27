@@ -77,3 +77,29 @@ def test_a_chart_is_named_once():
     view = (ROOT / "templates/app-foundation/src/sdk/widget-view.tsx").read_text()
     assert "title?: boolean;" in view and "title = true" in view and "sr-only" in view
     assert "title?={false}" in SDK_GUIDE and "Say a chart's name ONCE" in SDK_GUIDE
+
+
+#: JSON-schema keywords the model API's structured output refuses. One
+#: `maxItems` on the new `examples` array failed every build at data_model
+#: (UAT, 2026-09-27 04:38) — the model never answered, the request was
+#: refused. Bounds belong in the contract and the prompt, not the reply schema.
+UNSUPPORTED = {"maxItems", "minItems", "maxLength", "minLength", "pattern", "maximum", "minimum",
+               "exclusiveMaximum", "exclusiveMinimum", "uniqueItems", "multipleOf"}
+
+
+def test_no_reply_schema_carries_a_keyword_the_api_refuses():
+    from services.blueprint.executors import PROPOSAL_SCHEMA
+    hits: list[str] = []
+
+    def walk(o, path):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k in UNSUPPORTED and not path.endswith("properties"):
+                    hits.append(f"{path}.{k}")
+                walk(v, f"{path}.{k}")
+        elif isinstance(o, list):
+            for i, v in enumerate(o):
+                walk(v, f"{path}[{i}]")
+    for node, schema in {**SCHEMA_BY_NODE, "proposal": PROPOSAL_SCHEMA}.items():
+        walk(schema, node)
+    assert hits == [], hits

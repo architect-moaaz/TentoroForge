@@ -2523,8 +2523,12 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                 },
                                 "min": {"type": "number", "description": "The lowest value a bounded number may take (a rating's 1)."},
                                 "max": {"type": "number", "description": "The highest value a bounded number may take (a rating's 5)."},
+                                # NO maxItems: the API's structured output refuses it on
+                                # an array ("property 'maxItems' is not supported") and
+                                # every build failed at data_model (UAT, 2026-09-27 04:38).
+                                # The contract bounds it; the description asks for 2-4.
                                 "examples": {
-                                    "type": "array", "items": {"type": "string"}, "maxItems": 6,
+                                    "type": "array", "items": {"type": "string"},
                                     "description": ("Two to four realistic values of a text field people read "
                                                     "(a title, a name) in this application's own world."),
                                 },
