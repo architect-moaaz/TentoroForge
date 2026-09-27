@@ -68,6 +68,9 @@ class Ctx:
     evidence: list[str] = field(default_factory=list)
     #: What the project is called, for a Blueprint created on this turn.
     app_name: str = ""
+    #: What earlier steps of THIS turn changed in the application, in their
+    #: own words — so a later step answers knowing it ("rebuild" after a fix).
+    applied: list[str] = field(default_factory=list)
 
     @property
     def out(self) -> str:
@@ -624,16 +627,29 @@ def rebuild(ctx: Ctx, u: dict) -> Outcome:
                          "since and must be reviewed again")
         except Exception:  # noqa: BLE001 — a gate that cannot be read does not block the answer
             logger.exception("could not read the plan gate")
+    # WHAT WAS JUST CHANGED IS ALREADY BUILT. "Fix this, rebuild and launch":
+    # the fix went into the app as it was made, and this answered with the
+    # card to press for a whole rebuild — then, asked "can I republish?", the
+    # next turn said yes, the fix is in place (aszjcc2k, 2026-09-27). Both
+    # cannot be true; the second was. Say it the first time.
+    if ctx.applied:
+        return Outcome(status="resolved", said=(
+            "That change is already in the application — nothing needs rebuilding. "
+            "Launch the preview to try it, or Publish to put it live."))
     if stale:
         return Outcome(status="needs_user", said=(
             f"Not building on the current approval: {stale}. Open the “Definition ready to "
             "review” card above and press “Approve and build” to renew it against the "
-            "definition as it now stands; the build then proceeds."))
+            "definition as it now stands; the build then proceeds.\n\nChanges I make "
+            "from chat are already in the application as I make them; Publish carries "
+            "them live without a rebuild."))
     return Outcome(status="needs_user", said=(
         "Building the whole application is started from the definition, not from chat: open "
         "the “Definition ready to review” card above and press “Approve and build”. That runs "
-        "the pages, the data and the workflows, which takes a few minutes.\n\nI can still "
-        "change one screen from here — name the route and I will rebuild that."))
+        "the pages, the data and the workflows, which takes a few minutes.\n\nChanges I "
+        "make from chat are already in the application as I make them; Publish carries "
+        "them live without a rebuild. I can also change one screen from here — name the "
+        "route and I will rebuild that."))
 
 
 def section_write(ctx: Ctx, u: dict) -> Outcome:

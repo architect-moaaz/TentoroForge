@@ -78,6 +78,8 @@ PROJECTED_PATHS: tuple[str, ...] = (
     "src/app/(dashboard)/page.tsx",
     "src/lib/sensitive-columns.ts", "src/lib/searchable-columns.ts",
     "src/lib/embedding-columns.ts",
+    # Every name each entity goes by (`projection.entity_alias_map`).
+    "src/lib/entity-aliases.ts",
     # Who signs in (`account_model.project_account`).
     "src/lib/account.ts", "src/lib/account-table.ts",
     "src/lib/append-only-entities.ts",

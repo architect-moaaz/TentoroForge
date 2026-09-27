@@ -441,7 +441,46 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
     (root / "index.ts").write_text("\n".join(barrel) + "\n", "utf-8")
     written.append("src/db/schema/index.ts")
 
+    aliases = Path(app_root) / ENTITY_ALIASES_PATH
+    aliases.parent.mkdir(parents=True, exist_ok=True)
+    aliases.write_text(entity_aliases_module(entities), "utf-8")
+    written.append(ENTITY_ALIASES_PATH)
+
     return {"files": written, "entities": len(entities), "codeMap": code_map}
+
+
+#: Where the data engine learns every name an entity goes by.
+ENTITY_ALIASES_PATH = "src/lib/entity-aliases.ts"
+
+
+def entity_alias_map(entities: list[dict]) -> dict[str, list[str]]:
+    """Every name each entity goes by, keyed by the canonical form of each.
+
+    A page asks for `Child`; the schema exports `children`. The engine's
+    singular/plural guess bridges `Doctor`/`doctors` and not `Child`/`children`
+    or `Person`/`people`, so `list("Child")` was an unknown entity — swallowed
+    into an empty list, and a parent who had just added a child was shown
+    "add your first child" (aszjcc2k, 2026-09-27). The Blueprint declares both
+    names, so the engine is told them rather than left to guess.
+    """
+    out: dict[str, list[str]] = {}
+    for entity in entities:
+        name, table = entity.get("name") or "", entity.get("table") or ""
+        forms: list[str] = []
+        for form in (name, table, _var_name(entity), _module_name(entity),
+                     to_snake(name).replace("_", "-"), table.replace("_", "-")):
+            if form and form not in forms:
+                forms.append(form)
+        for form in forms:
+            key = _canonical_key(form)
+            if key:
+                out.setdefault(key, forms)
+    return out
+
+
+def entity_aliases_module(entities: list[dict]) -> str:
+    from services.runtime_injector import render_entity_aliases
+    return render_entity_aliases(entity_alias_map(entities), source="the Blueprint's entities")
 
 
 #: Every derived endpoint is served by one catch-all route, so an API has no

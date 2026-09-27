@@ -28,12 +28,14 @@ export type CountWhere<E> = any; export type Related = any;
 const ROWS: Record<string, any[]> = ${JSON.stringify(rows)};
 export const __forgeEntities = ${JSON.stringify(entities.map((e) => e.name))};
 const wait = () => new Promise<void>((r) => setTimeout(r, 30));
+// $user.id in a filter is the person reading, as the data engine reads it.
+const READER = ${JSON.stringify(user.id)};
 function filter(entity: string, opts: any = {}) {
   let out = [...(ROWS[entity] ?? [])];
   if (opts.where) for (const [k, v] of Object.entries(opts.where)) {
     // { in, where } — the record this foreign key points at matches where.
     const rel = v && typeof v === "object" ? (v as any) : null;
-    out = !rel ? out.filter((r) => String(r[k]) === String(v))
+    out = !rel ? out.filter((r) => String(r[k]) === String(v === "$user.id" ? READER : v))
       : out.filter((r) => { const t = (ROWS[rel.in] ?? []).find((x: any) => x.id === r[k]); return !!t && Object.entries(rel.where ?? {}).every(([f, w]) => String(t[f]) === String(w)); });
   }
   if (opts.search) { const q = String(opts.search).toLowerCase(); out = out.filter((r) => Object.values(r).some((v) => String(v).toLowerCase().includes(q))); }

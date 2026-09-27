@@ -1133,7 +1133,7 @@ def _generate_data_api_route(output_path: Path) -> None:
 
     # Register under the registry's alias set (authority-driven) when available, so
     # the API route resolves entities by every known form — matches the SSR path.
-    if _build_entity_alias_map(output_path):
+    if _has_entity_aliases(output_path):
         content = content.replace(
             '} from "@/lib/data-engine";',
             '} from "@/lib/data-engine";\nimport { aliasesFor } from "@/lib/entity-aliases";',
@@ -1266,12 +1266,24 @@ def _generate_entity_aliases_module(output_path: Path) -> None:
     under EVERY name the authority knows, instead of heuristically guessing."""
     alias_map = _build_entity_alias_map(output_path)
     if not alias_map:
+        # A Blueprint app has no registry: its projection wrote this file from
+        # the entities themselves, and that is the one to keep.
         return
+    lib_dir = output_path / "src" / "lib"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    (lib_dir / "entity-aliases.ts").write_text(
+        render_entity_aliases(alias_map, source="resource-registry.json"), encoding="utf-8")
+    logger.info("Wrote src/lib/entity-aliases.ts (%d entities)", len(set(map(id, alias_map.values()))))
+
+
+def render_entity_aliases(alias_map: dict[str, list[str]], *, source: str) -> str:
+    """`src/lib/entity-aliases.ts` for an alias map: every name one entity goes
+    by, looked up by the canonical key of any of them."""
     entries = ",\n".join(
         f"  {json.dumps(k)}: {json.dumps(v)}" for k, v in sorted(alias_map.items())
     )
-    content = (
-        "// Registry-declared entity aliases. Generated from resource-registry.json so\n"
+    return (
+        f"// Declared entity aliases. Generated from {source} so\n"
         "// the data engine registers each entity under every known form (Pascal name,\n"
         "// snake table, kebab slug, camel accessor) — authority, not a heuristic guess.\n"
         "const ENTITY_ALIASES: Record<string, string[]> = {\n"
@@ -1280,15 +1292,18 @@ def _generate_entity_aliases_module(output_path: Path) -> None:
         "function canonKey(s: string): string {\n"
         '  return (s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();\n'
         "}\n\n"
-        "/** Every registry-declared form of the entity a schema export identifies. */\n"
+        "/** Every declared form of the entity a schema export identifies. */\n"
         "export function aliasesFor(name: string): string[] {\n"
         "  return ENTITY_ALIASES[canonKey(name)] || [];\n"
         "}\n"
     )
-    lib_dir = output_path / "src" / "lib"
-    lib_dir.mkdir(parents=True, exist_ok=True)
-    (lib_dir / "entity-aliases.ts").write_text(content, encoding="utf-8")
-    logger.info("Wrote src/lib/entity-aliases.ts (%d entities)", len(set(map(id, alias_map.values()))))
+
+
+def _has_entity_aliases(output_path: Path) -> bool:
+    """Whether registration can name every entity by its declared forms — the
+    legacy registry, or the file a Blueprint's projection wrote."""
+    return bool(_build_entity_alias_map(output_path)) or (
+        output_path / "src" / "lib" / "entity-aliases.ts").is_file()
 
 
 def _generate_data_init_module(output_path: Path) -> None:
@@ -1308,7 +1323,7 @@ def _generate_data_init_module(output_path: Path) -> None:
     imports = "\n".join(f'      import("@/db/schema/{n}"),' for n in names)
     # Register under the registry's alias set when it's available, so the SSR path
     # resolves every entity by every known form (authority-driven, not guessed).
-    has_aliases = bool(_build_entity_alias_map(output_path))
+    has_aliases = _has_entity_aliases(output_path)
     alias_import = 'import { aliasesFor } from "./entity-aliases";\n' if has_aliases else ""
     register_call = (
         "        registerEntity(name, value as any, { slug: name, aliases: aliasesFor(name) });\n"

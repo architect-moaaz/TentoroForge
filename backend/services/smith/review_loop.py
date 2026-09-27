@@ -54,6 +54,9 @@ class ReviewOutcome:
     #: Set when the loop could not run at all (no screenshots) — not a failure,
     #: a degradation: the build still shipped.
     skipped: str | None = None
+    #: What the render said when it could not be checked — the page and the
+    #: preview's answer — so the person hears a reason, not a shrug.
+    skipped_because: str | None = None
 
     @property
     def converged(self) -> bool:
@@ -64,6 +67,7 @@ class ReviewOutcome:
         return {"rounds": self.rounds, "recomposed": list(self.recomposed),
                 "remaining": sorted(self.remaining), "refused": sorted(self.refused),
                 "unrepaired": sorted(self.unrepaired), "skipped": self.skipped,
+                "skippedBecause": self.skipped_because,
                 "converged": self.converged}
 
 
@@ -126,6 +130,10 @@ def run_review_loop(
             outcome.skipped = ("the app could not be rendered for review"
                                if outcome.rounds == 0 else
                                "the rebuilt app could not be rendered to check it")
+            # WHY, IN WORDS. "Could not be rendered — open it and have a look"
+            # was the last thing a person heard after a 27-minute verify
+            # (aszjcc2k, 2026-09-26): no reason, nothing to do about it.
+            outcome.skipped_because = getattr(critique, "problem", None)
             return outcome
         briefs = dict(repair_briefs_from_visual_qa(report, read_doc())) if report else {}
         for pid, note in settled.items():

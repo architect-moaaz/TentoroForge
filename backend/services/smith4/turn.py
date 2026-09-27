@@ -116,6 +116,8 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 said=step.finding or step.said, touched=list(step.touched)))
             if step.said and not step.finding:
                 landed.append(step.said)
+                if step.touched and step.status == "resolved":
+                    ctx.applied.append(step.said)
             touched += [p for p in step.touched if p not in touched]
             last = step
             if not step.done and not step.finding:
@@ -158,6 +160,8 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             said=step.finding or step.said, touched=list(step.touched)))
         if step.said and not step.finding:
             landed.append(step.said)
+            if step.touched and step.status == "resolved":
+                ctx.applied.append(step.said)
         touched += [p for p in step.touched if p not in touched]
         last = step
         if not step.done and not step.finding:

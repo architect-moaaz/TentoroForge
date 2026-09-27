@@ -22,6 +22,7 @@ import asyncio
 import base64
 import logging
 import os
+import time
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping
@@ -35,6 +36,10 @@ _VERIFY_URL = "FORGE_VERIFY_URL"
 _PREVIEW_BASE = "FORGE_PREVIEW_BASE_URL"
 
 
+#: How long a rebuilt preview is given to finish compiling before a second look.
+RENDER_RETRY_S = 20
+
+
 def _preview_url(output_dir: str, route: str, doc: Mapping[str, Any]) -> str:
     base = os.getenv(_PREVIEW_BASE, "http://localhost:6503/p").rstrip("/")
     short_id = str((doc.get("application") or {}).get("id")
@@ -45,11 +50,16 @@ def _preview_url(output_dir: str, route: str, doc: Mapping[str, Any]) -> str:
 
 def _screenshot(url: str) -> bytes | None:
     """PNG of ``url`` from the Playwright sidecar, or ``None`` on any failure."""
+    return _screenshot_or_reason(url)[0]
+
+
+def _screenshot_or_reason(url: str) -> tuple[bytes | None, str | None]:
+    """The PNG, or why there is none — in words a person can act on."""
     verify = os.getenv(_VERIFY_URL, "http://localhost:6600").rstrip("/")
     try:
         import httpx
     except Exception:  # noqa: BLE001
-        return None
+        return None, "the screenshot service is not installed here"
     try:
         resp = httpx.post(f"{verify}/screenshot",
                           json={"url": url, "fullPage": True,
@@ -57,11 +67,18 @@ def _screenshot(url: str) -> bytes | None:
                           timeout=45.0)
     except Exception as exc:  # noqa: BLE001
         logger.info("[review] screenshot request failed for %s: %s", url, exc)
-        return None
+        return None, f"the screenshot service did not answer ({type(exc).__name__})"
     if resp.status_code != 200 or resp.content[:8] != b"\x89PNG\r\n\x1a\n":
         logger.info("[review] screenshot %s -> %s", url, resp.status_code)
-        return None
-    return resp.content
+        detail = ""
+        try:
+            detail = str((resp.json() or {}).get("error") or "")
+        except Exception:  # noqa: BLE001 — not JSON; the status says enough
+            detail = ""
+        detail = detail.splitlines()[0][:160] if detail else ""
+        return None, (f"the preview did not render ({resp.status_code}"
+                      f"{': ' + detail if detail else ''})")
+    return resp.content, None
 
 
 def _data_uri(png: bytes) -> str:
@@ -226,7 +243,8 @@ def _slug_for(route: str, doc: Mapping[str, Any]) -> str:
 
 
 def _capture_pages(output_dir: str, doc: Mapping[str, Any],
-                   routes: Iterable[str] | None = None) -> list[dict]:
+                   routes: Iterable[str] | None = None,
+                   problems: list[str] | None = None) -> list[dict]:
     """``[{route, png}]`` for the pages the sidecar could screenshot. Empty when
     nothing rendered — the loop then degrades to a clean no-op. Dynamic routes
     (``/x/[id]``) are skipped: they need a concrete id to serve. ``routes``
@@ -241,9 +259,11 @@ def _capture_pages(output_dir: str, doc: Mapping[str, Any],
             continue
         if only is not None and (route.rstrip("/") or "/") not in only:
             continue
-        png = _screenshot(_preview_url(output_dir, route, doc))
+        png, why = _screenshot_or_reason(_preview_url(output_dir, route, doc))
         if png:
             shots.append({"route": route, "png": png})
+        elif why and problems is not None:
+            problems.append(f"{route}: {why}")
     return shots
 
 
@@ -351,7 +371,15 @@ def make_critique(
     """
     def critique() -> dict | None:
         doc = read_doc()
-        shots = _capture_pages(output_dir, doc, routes)
+        problems: list[str] = []
+        shots = _capture_pages(output_dir, doc, routes, problems)
+        if not shots and problems:
+            # A rebuilt app's preview is still compiling for a while after the
+            # build lands; one wait before calling it unrenderable.
+            time.sleep(RENDER_RETRY_S)
+            problems = []
+            shots = _capture_pages(output_dir, doc, routes, problems)
+        critique.problem = problems[0] if (problems and not shots) else None
         # The contract's findings need no screenshot — they reach the pages
         # the capture cannot (a dynamic route) and stand when nothing rendered.
         contract = _contract_findings(doc, routes)
@@ -385,6 +413,7 @@ def make_critique(
         reviewed = [s["route"] for s in shots]
         reviewed += sorted({c["route"] for c in contract} - set(reviewed))
         return {"pages_reviewed": reviewed, "findings": findings}
+    critique.problem = None
     return critique
 
 

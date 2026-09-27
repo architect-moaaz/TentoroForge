@@ -1598,6 +1598,15 @@ async def smith_chat(
             # to twenty-five minutes of composing. Asked once, with the same
             # three scopes the chip offers — and the answer is itself a verify
             # consent, so the next turn runs it.
+            # A BUILD STILL RUNNING IS NOT A BUILT APP. `_is_built` is true from
+            # the install step on, minutes before the pages exist; a review then
+            # reads placeholders and re-composes all of them.
+            if svc is not None and _is_verify_consent(req.message):
+                running = build_in_flight(output_dir)
+                if running is not None:
+                    emit("message", {"text": busy_message(running), "status": "reported"})
+                    return {"status": "busy"}
+
             if svc is not None and _is_built(output_dir) \
                     and _is_verify_consent(req.message) \
                     and _verify_scope(req.message) is None \
@@ -1611,7 +1620,7 @@ async def smith_chat(
                     and _is_verify_consent(req.message):
                 _run_smith_review(str(output_dir), app_root, emit=emit,
                                   app_name=getattr(project, "name", "") or "",
-                                  routes=_verify_scope(req.message))
+                                  routes=_verify_scope(req.message, svc.doc))
                 return {"status": "verified"}
 
             if not defined:
@@ -1950,6 +1959,23 @@ def _adopt_design_references(output_dir: Path, project_id: str) -> list[str]:
     return adopted
 
 
+def build_in_flight(output_dir: str | Path) -> dict | None:
+    """The run writing this application now, as its ledger tells it — read
+    from disk because the backend runs two workers and either may hold it."""
+    from services.run_registry import ledger_snapshot
+    snap = ledger_snapshot(output_dir)
+    return snap if snap and snap.get("active") else None
+
+
+def busy_message(run: dict) -> str:
+    """What a person is told when they ask for work while a build is running."""
+    done, total = int(run.get("nodesDone") or 0), int(run.get("nodesTotal") or 0)
+    where = f" — {done} of {total} steps done" if total else ""
+    return (f"The application is still being built{where}. I've left that build "
+            "to finish rather than start another on top of it. When it lands "
+            "you'll see it here, with the offer to verify it; ask again then.")
+
+
 def _run_dag(output_dir: str, app_root: str, description: str, *,
              approved: bool, emit, app_name: str = "",
              announce_completion: bool = True,
@@ -1974,6 +2000,19 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     from services.blueprint.plan_forecast import forecast
     from services.blueprint.service import BlueprintService
     from services.smith.smith import domain_nodes
+
+    # ONE BUILD OF AN APPLICATION AT A TIME. Every entry point lands here, and
+    # none of them asked whether a run was already writing the same tree: a
+    # verify started at 17:00 while the first build ran until 17:13, and a
+    # "continue" started a third run at 17:24 while the verify's rebuild ran
+    # until 17:28 — three runs re-composing one app, a review of a half-built
+    # one ("25 pages need work"), and a last check that could not render what
+    # the next run was rewriting (aszjcc2k, 2026-09-26). The running build is
+    # left to finish; the person is told where it is.
+    running = build_in_flight(output_dir)
+    if running is not None:
+        emit("message", {"text": busy_message(running), "status": "reported"})
+        return {"status": "busy", "run": running}
 
     existing = Path(output_dir) / ".forge" / "blueprint" / "current.json"
     if existing.is_file():
@@ -2184,10 +2223,13 @@ def _verify_scope_question(doc: dict) -> str:
             "should I look at?")
 
 
-def _verify_scope(message: str) -> list[str] | None:
+def _verify_scope(message: str, doc: dict | None = None) -> list[str] | None:
     """The routes a verify ask narrows to — "verify only the current page:
-    /admin/foo" — or ``None`` for the whole app. The chip's "critical journeys"
-    scope has no journey notion in the review; it reviews the app."""
+    /admin/foo", or the critical journeys the Blueprint declares
+    (`journeys.critical_journey_routes`) — or ``None`` for the whole app."""
+    if doc is not None and "critical journey" in " ".join((message or "").lower().split()):
+        from services.blueprint.journeys import critical_journey_routes
+        return critical_journey_routes(doc) or None
     m = re.search(r"only\s+the\s+current\s+page[:\s]+([/\w\-\[\]\.]+)",
                   message or "", re.IGNORECASE)
     if not m:
@@ -2355,9 +2397,13 @@ def _run_smith_review(output_dir: str, app_root: str, *, emit,
     n = len(outcome.recomposed)
     page_word = "page" if n == 1 else "pages"
     if outcome.skipped:
-        emit("message", {"text":
-            f"I re-composed {n} {page_word}, but {outcome.skipped} — open it and "
-            f"have a look."})
+        why = f" ({outcome.skipped_because})" if outcome.skipped_because else ""
+        emit("message", {
+            "text": (f"I re-composed {n} {page_word} and the build finished, but I "
+                     f"could not open the rebuilt app to check them{why}. The "
+                     f"pages are in place. Say verify and I'll look at them again."),
+            "options": ["Verify & fix"],
+        })
         return
     if outcome.converged:
         emit("message", {"text":

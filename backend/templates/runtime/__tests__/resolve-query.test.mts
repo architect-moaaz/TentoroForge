@@ -209,6 +209,21 @@ console.log("a breakdown by a number reads in the number's order, not as a ranki
   ok(ranked.length === 5, "a declared sort still wins");
 }
 
+console.log("$user.id in a filter is the person reading");
+{
+  // "My children by gender" sent the literal "$user.id" to a uuid column and
+  // the chart was empty (aszjcc2k, 2026-09-27).
+  const mine = { entity: "orders", op: "query" as const, measures: [count], filter: { ownerId: "$user.id" } };
+  eqJson(await engine.resolveQuery(mine, admin), [{ orders: 0 }],
+         "the admin reads every row, and none of them is the admin's own");
+  eqJson(await engine.resolveQuery(mine, alice), [{ orders: 4 }], "Alice's own four");
+  eqJson(await engine.resolveQuery({ ...mine, dimensions: [{ field: "region" }] }, alice).then((r: any[]) => r.length), 3,
+         "and broken down, still only hers");
+  eqJson(engine.withReader({ ownerId: "$user.id", status: "PAID" }, {}),
+         { ownerId: "00000000-0000-0000-0000-000000000000", status: "PAID" },
+         "with nobody signed in it matches nothing, never everything");
+}
+
 console.log("a metric: no dimension, one row, one number");
 {
   const rows = await engine.resolveQuery({ entity: "orders", op: "query", measures: [count, revenue] }, alice);

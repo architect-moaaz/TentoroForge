@@ -268,6 +268,28 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
 }
 
 
+// ─── The reader in a filter ──────────────────────────────────────────────
+
+/** Matches no row: a well-formed id nothing has. */
+const NO_READER = "00000000-0000-0000-0000-000000000000";
+
+/** A filter with `$user.id` read as the person reading — the same sentinel a
+ *  workflow step writes. "My children by gender" is a widget filter on the
+ *  parent's own id; sent to the database as the literal text it failed on
+ *  every uuid column, and the chart was empty (aszjcc2k, 2026-09-27). With no
+ *  one signed in it matches nothing, never everything. */
+export function withReader(
+  filter: Record<string, any> | undefined | null,
+  ctx: DataEngineContext,
+): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(filter || {})) {
+    out[k] = v === "$user.id" ? (ctx?.user?.id ?? NO_READER) : v;
+  }
+  return out;
+}
+
+
 // ─── Row-level scoping ───────────────────────────────────────────────────
 
 /** The actor value a rule compares against, or undefined when we have none. */
@@ -1002,7 +1024,7 @@ export async function query(
 
   // Filters
   if (filters) {
-    for (const [key, value] of Object.entries(filters)) {
+    for (const [key, value] of Object.entries(withReader(filters, ctx))) {
       if (value && value !== "undefined" && entity.table[key]) {
         conditions.push(eq(entity.table[key], value));
       }
@@ -1185,7 +1207,7 @@ async function computeSimple(
   const start = range ? range.start : windowStart(m.window);
   if (start && dateCol) conds.push(gte(dateCol, start));
   if (range?.end && dateCol) conds.push(lt(dateCol, range.end));
-  for (const [k, v] of Object.entries(m.filter || {})) {
+  for (const [k, v] of Object.entries(withReader(m.filter, ctx))) {
     if (cols[k] !== undefined && (v === null || typeof v !== "object")) { conds.push(eq(cols[k], v as any)); continue; }
     const joined = cols[k] !== undefined ? await joinedCondition(cols[k], v, ctx) : null;
     if (joined) { conds.push(joined); continue; }
@@ -1347,7 +1369,7 @@ export async function resolveSeries(
     const orderCol = cols[orderName];
     if (orderCol === undefined) return [];
     const conds: SQL[] = [...scope];
-    for (const [k, v] of Object.entries(source.filter || {})) {
+    for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
     }
     try {
@@ -1390,7 +1412,7 @@ export async function resolveSeries(
   const labelExpr: any = bucket ? sql`date_trunc(${bucket}, ${groupCol})` : groupCol;
 
   const conds: SQL[] = [...scope];
-  for (const [k, v] of Object.entries(source.filter || {})) {
+  for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
     if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
   }
 
@@ -1569,7 +1591,7 @@ export async function resolveQuery(
                                 max(c);
   });
 
-  for (const [k, v] of Object.entries(source.filter || {})) {
+  for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
     if (cols[k] === undefined || v === undefined) continue;
     if (Array.isArray(v)) { if (v.length) conds.push(inArray(cols[k], v as any[])); }
     else conds.push(eq(cols[k], v as any));
@@ -1783,7 +1805,7 @@ export async function resolveSearch(
       sql`${vectorExpr} @@ ${tsq}`,
       ...await accessConditions(entityName, entity, ctx),
     ];
-    for (const [k, v] of Object.entries(source.filter || {})) {
+    for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
     }
 
