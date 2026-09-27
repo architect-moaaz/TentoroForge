@@ -56,6 +56,7 @@ import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
 import { STAGE_VERB, labelFor } from "./stages";
 import { QuestMap } from "./QuestMap";
+import { progressMark, slowStepNote } from "./slowStep";
 import {
   AppTile,
   BlueprintSummary,
@@ -1143,7 +1144,7 @@ export function SmithPanel({
  * — `page_layouts` makes one per page. Showing calls as nodes is what made an
  * earlier progress display read "44 of 22" and keep climbing.
  */
-function StageList({
+export function StageList({
   run,
   projectId,
 }: {
@@ -1168,6 +1169,16 @@ function StageList({
     return () => clearInterval(t);
   }, [run.status]);
   const started = startedAt.current;
+  // WHEN THE BUILD LAST MOVED. A slow call that is still alive changes
+  // nothing but the clock; after a while the panel says it is still working.
+  const lastMark = useRef<string | null>(null);
+  const lastMovedAt = useRef<number>(Date.now());
+  const mark = progressMark(run);
+  if (mark !== lastMark.current) {
+    lastMark.current = mark;
+    lastMovedAt.current = Date.now();
+  }
+  const slowNote = run.status === "running" ? slowStepNote(now - lastMovedAt.current) : null;
 
   return (
     <div className="rounded-lg border bg-card p-3">
@@ -1251,6 +1262,11 @@ function StageList({
             </span>
           </div>
         </div>
+      )}
+      {slowNote && (
+        <p role="status" className="mb-2 text-xs text-muted-foreground">
+          {slowNote}
+        </p>
       )}
 
       {/*
