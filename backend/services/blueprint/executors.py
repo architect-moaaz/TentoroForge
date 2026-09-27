@@ -1341,7 +1341,7 @@ NODE_TASKS: dict[str, str] = {
         "A NUMBER WITH A FIXED RANGE SAYS SO: a rating from 1 to 5, a "
         "percentage, a score out of 10 — whatever the request states or the "
         "domain fixes — declares `min` and `max`. A TEXT FIELD PEOPLE READ — a "
-        "title, a name, a subject — gives two to four realistic `examples` from "
+        "title, a name, a subject — gives six to eight realistic, distinct `examples` from "
         "this application's own world (for a reading list, real book titles; "
         "for a clinic, real-sounding clinic names), so the sample and demo data "
         "the pages are reviewed and shown with speak its language.\n\n"
@@ -2529,7 +2529,7 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                 # The contract bounds it; the description asks for 2-4.
                                 "examples": {
                                     "type": "array", "items": {"type": "string"},
-                                    "description": ("Two to four realistic values of a text field people read "
+                                    "description": ("Six to eight realistic, distinct values of a text field people read "
                                                     "(a title, a name) in this application's own world."),
                                 },
                                 "embedding": {

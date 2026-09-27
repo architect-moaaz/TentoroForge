@@ -1637,12 +1637,21 @@ export async function resolveQuery(
 
   // The same order again in JS: the driver's order for a bucketed label is
   // the timestamp's, and this keeps the result right whatever produced it.
+  // A BREAKDOWN BY A NUMBER READS IN THE NUMBER'S ORDER. A rating
+  // distribution came back as a ranking — 2, 4, 1, 3, 5 on the axis, most
+  // books first (looktest on UAT, 2026-09-27). With no sort declared, an
+  // axis whose every value is a number is ordered by it, ascending.
+  const numeric0 = !sortBy && !ordered0 && dims.length > 0 && rows.length > 0
+    && rows.every((r) => r[keyOf(0)] !== null && r[keyOf(0)] !== "" && Number.isFinite(Number(r[keyOf(0)])));
+  if (numeric0) {
+    for (const r of rows) r[keyOf(0)] = Number(r[keyOf(0)]);
+  }
   const sortKey = sortMeasure >= 0 ? measures[sortMeasure].key
     : sortDim >= 0 ? keyOf(sortDim)
-    : ordered0 ? keyOf(0)
+    : ordered0 || numeric0 ? keyOf(0)
     : dims.length ? measures[0].key : undefined;
   if (sortKey) {
-    const dir = order === "asc" ? 1 : -1;
+    const dir = (numeric0 ? "asc" : order) === "asc" ? 1 : -1;
     // A band sorts by its position, not its label ("under 18" before "18–30").
     const bandIdx = dims.findIndex((d) => d.field === sortKey);
     const rank = bandIdx >= 0 && bands[bandIdx].length ? bandOrder[bandIdx] : null;

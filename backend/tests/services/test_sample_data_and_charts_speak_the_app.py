@@ -131,3 +131,28 @@ def test_charts_are_not_reserved_to_the_dashboard():
     system = reviewer_system({"application": {"name": "A"}, "designSystem": {"colors": {"primary": "#123456"}},
                               "composition": {"vision": "v", "conventions": []}, "pages": []})
     assert "never whether it belongs on the page" in system
+
+
+def test_the_data_engines_numeric_axis_order_is_proven_by_its_own_suite():
+    out = subprocess.run(["bash", str(ROOT / "templates/runtime/__tests__/run-query-tests.sh")],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout[-1500:] + out.stderr[-1500:]
+    assert "a numeric axis ascends by its value" in (ROOT / "templates/runtime/__tests__/resolve-query.test.mts").read_text()
+
+
+def test_sample_examples_are_used_once_and_a_numeric_axis_ascends():
+    book = {"name": "Book", "fields": [{"name": "id", "type": "uuid"},
+                                       {"name": "title", "type": "string", "examples": ["Circe", "Educated", "Beloved"]},
+                                       {"name": "rating", "type": "integer", "min": 1, "max": 5}]}
+    rows = _sample_rows([book], 8)
+    titles = [r["title"] for r in rows]
+    assert titles[:3] == ["Circe", "Educated", "Beloved"] and len(set(titles)) == len(titles), titles
+    shim = ROOT / "static/jit-samples.mjs"
+    out = subprocess.run(["node", "-e", f"""
+      import({json.dumps(str(shim))}).then(async m => {{
+        const src = m.sampleServer([{json.dumps(book)}], ["reader"]);
+        console.log(src.includes("numeric0") ? "ok" : "missing");
+      }})"""], capture_output=True, text=True, check=True).stdout.strip()
+    assert out == "ok"
+    assert _seed_value({"name": "title", "type": "string", "examples": ["Circe", "Educated"]}, "Book", 3) != "Circe", \
+        "the demo seed uses each example once"

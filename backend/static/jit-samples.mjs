@@ -157,7 +157,10 @@ function runQuery(entity: string, q: { measures: any[]; dimensions?: any[]; wher
     for (const m of q.measures) row[m.key] = aggregate(m, rows);
     return row;
   });
-  const bucketed = dims.find((d: any) => d.bucket || d.ranges?.length);
+  // A breakdown by a number reads in the number's order, as the data engine's does.
+  const numeric0 = !q.sort && dims.length > 0 && out.length > 0 && !dims[0].bucket && !dims[0].ranges?.length
+    && out.every((r: any) => r[dims[0].field] !== null && Number.isFinite(Number(r[dims[0].field])));
+  const bucketed = dims.find((d: any) => d.bucket || d.ranges?.length) ?? (numeric0 ? dims[0] : undefined);
   const by = q.sort?.by ?? (bucketed ? bucketed.field : q.measures[0]?.key);
   const order = q.sort?.order ?? (bucketed && !q.sort ? "asc" : "desc");
   const banded = dims.find((d: any) => d.field === by && d.ranges?.length);
@@ -166,7 +169,10 @@ function runQuery(entity: string, q: { measures: any[]; dimensions?: any[]; wher
     out.sort((a: any, b: any) => (rank[a[by]] - rank[b[by]]) * (order === "desc" ? -1 : 1));
     return q.limit ? out.slice(0, q.limit) : out;
   }
-  if (by) out.sort((a, b) => ((a[by] ?? "") > (b[by] ?? "") ? 1 : (a[by] ?? "") < (b[by] ?? "") ? -1 : 0) * (order === "desc" ? -1 : 1));
+  if (by) out.sort((a, b) => {
+    const x = numeric0 && by === dims[0].field ? Number(a[by]) : (a[by] ?? ""), y = numeric0 && by === dims[0].field ? Number(b[by]) : (b[by] ?? "");
+    return (x > y ? 1 : x < y ? -1 : 0) * (order === "desc" ? -1 : 1);
+  });
   if (q.limit) out = out.slice(0, q.limit);
   return out;
 }
@@ -239,7 +245,9 @@ export function sampleRow(entity, i, entities) {
     const examples = Array.isArray(f.examples) ? f.examples.filter((x) => typeof x === "string" && x) : [];
     const bounded = typeof f.min === "number" && typeof f.max === "number" && f.max >= f.min;
     if (lower === "id") row[fname] = `sample-${name.toLowerCase()}-${i + 1}`;
-    else if (examples.length && /string|text/.test(type) && !opts.length) row[fname] = examples[i % examples.length];
+    // EACH EXAMPLE ONCE. Cycling them over eight rows listed "Circe" and
+    // "Educated" twice; rows beyond the examples take the generic value.
+    else if (i < examples.length && /string|text/.test(type) && !opts.length) row[fname] = examples[i];
     else if (/^(author|writer|artist|composer|director|creator|instructor|coach|host|speaker)(name)?$/.test(lower) && /string|text/.test(type))
       row[fname] = `${FIRST[(i + 3) % FIRST.length]} ${LAST[(i + 5) % LAST.length]}`;
     else if (bounded && /int|number|decimal|float|numeric|money|currency|rating|score/.test(type + lower)) {

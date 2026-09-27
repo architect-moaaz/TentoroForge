@@ -198,6 +198,17 @@ const admin = { user: { id: "root", role: "admin" } };
 const count = { key: "orders", aggregation: "count" as const };
 const revenue = { key: "revenue", aggregation: "sum" as const, field: "total" };
 
+console.log("a breakdown by a number reads in the number's order, not as a ranking");
+{
+  // A rating distribution came back 2, 4, 1, 3, 5 — most books first (UAT, 2026-09-27).
+  const rows = await engine.resolveQuery(
+    { entity: "orders", op: "query", measures: [count], dimensions: [{ field: "total" }] }, admin);
+  eqJson(rows.map((r: any) => r.total), [20, 50, 100, 300, 999], "a numeric axis ascends by its value");
+  const ranked = await engine.resolveQuery(
+    { entity: "orders", op: "query", measures: [count], dimensions: [{ field: "total" }], sort: { by: "orders", order: "desc" } }, admin);
+  ok(ranked.length === 5, "a declared sort still wins");
+}
+
 console.log("a metric: no dimension, one row, one number");
 {
   const rows = await engine.resolveQuery({ entity: "orders", op: "query", measures: [count, revenue] }, alice);

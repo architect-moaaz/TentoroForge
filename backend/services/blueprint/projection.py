@@ -2715,8 +2715,8 @@ def _seed_value(field: dict, entity_name: str, row: int,
     # server does: a demo reading list is real titles rated 1–5, not
     # "Title 3" rated 300.
     examples = [str(x) for x in (field.get("examples") or []) if str(x).strip()]
-    if examples and kind in ("string", "text", "varchar"):
-        return examples[(row - 1) % len(examples)]
+    if row <= len(examples) and kind in ("string", "text", "varchar"):
+        return examples[row - 1]        # each once — a demo list never lists a title twice
     lo, hi = field.get("min"), field.get("max")
     if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and hi >= lo \
             and kind in ("integer", "int", "number", "decimal", "float", "numeric", "currency", "money"):

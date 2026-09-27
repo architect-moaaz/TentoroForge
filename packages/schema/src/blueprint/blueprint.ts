@@ -1397,11 +1397,11 @@ export const Field = z.object({
   min: z.number().optional(),
   max: z.number().optional(),
   /**
-   * Two to four realistic values of a field people read — a book's title, a
+   * Six to eight realistic values of a field people read — a book's title, a
    * clinic's name — so sample and demo data speak the application's language.
    * A reading list was reviewed full of books called "Quarterly review 1".
    */
-  examples: z.array(z.string()).max(6).optional(),
+  examples: z.array(z.string()).max(8).optional(),
   /** Declared on a `type: "vector"` field; see FieldEmbedding. */
   embedding: FieldEmbedding.optional(),
   description: z.string().default(""),

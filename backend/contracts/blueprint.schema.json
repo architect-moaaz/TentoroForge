@@ -1341,7 +1341,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "maxItems": 6
+                      "maxItems": 8
                     },
                     "embedding": {
                       "type": "object",
