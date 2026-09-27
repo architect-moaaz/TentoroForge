@@ -557,6 +557,13 @@ def revert(ctx: Ctx, u: dict) -> Outcome:
     return from_seam(run(ctx.out, reasoning=ctx.reasoning), ok="Undone.", fail="I could not undo that.")
 
 
+def sync_app(ctx: Ctx, u: dict) -> Outcome:
+    """The application written out again from its definition (`sync_app`)."""
+    from services.smith.sync_app import run
+    return from_seam(run(ctx.out, reasoning=ctx.reasoning), ok="The application is back in step.",
+                     fail="I could not bring the application back in step with its definition.")
+
+
 def guide(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.handover import run, summary_of
     out = run(ctx.out, app_root=str(Path(ctx.out) / "app"), reasoning=ctx.reasoning)
@@ -748,7 +755,7 @@ PERFORM: dict[str, Perform] = {
     "connect_service": connect_service, "connect_figma": connect_figma,
     "connect_uxpilot": connect_uxpilot, "disconnect_design": disconnect_design,
     "compose_route": compose, "add_widgets": compose, "remove_page": remove_page,
-    "revert": revert, "write_guide": guide, "spend": spend,
+    "revert": revert, "write_guide": guide, "spend": spend, "sync_app": sync_app,
     "import_data": import_data, "export_data": export_data,
     "add_login": accounts, "remove_login": accounts, "reset_login": accounts,
     "explain_crash": incident, "explain_slowness": incident, "back_up": records_out,

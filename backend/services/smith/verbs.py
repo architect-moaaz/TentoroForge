@@ -191,6 +191,9 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "edit_api": {"api"},
     "reorder": {"route"},
     "rebuild": set(),
+    # THE APP AND ITS DEFINITION, BACK IN STEP. Needs nothing: it is always
+    # this application, written out again from what it already says.
+    "sync_app": set(),
 }
 
 #: What each verb is for, in the words a model should recognise. Shown in the
@@ -466,6 +469,17 @@ VERB_HELP: dict[str, str] = {
         "Regenerate the application from its definition. The honest answer "
         "when a change is larger than a single screen."
     ),
+    "sync_app": (
+        "Bring the running application back in step with its definition: the "
+        "definition already says what the person is asking for, but they report "
+        "the application does not show it — \"I still can't see it in the "
+        "menu\", \"I made it public and it still asks me to sign in\", \"it "
+        "says it's there but it isn't\". Every file of the application is "
+        "written out again from the definition, in seconds and with no model "
+        "call, and what was out of step is named. Use it BEFORE concluding "
+        "there is nothing to change, whenever what you read and what the person "
+        "sees disagree. Needs nothing."
+    ),
     "spend": (
         "What this application has cost to run: \"how much has this cost "
         "me?\", \"what has this spent so far\", \"show me the usage\", "
@@ -547,6 +561,10 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'rebuild': (
         'rebuild everything',
         'generate the app',
+    ),
+    'sync_app': (
+        'I still cannot see it in the menu',
+        'it says it is public but it still asks me to sign in',
     ),
     'back_up': (
         'what happens if I lose all this?',

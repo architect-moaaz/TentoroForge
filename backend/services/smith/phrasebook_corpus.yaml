@@ -649,6 +649,20 @@ sentences:
     checked: {colour: acts, via: handler}
     source: code
     reaches: {verb: write_guide, states: []}
+  # -- The application and its definition, back in step --------------------
+
+  - id: sync-app-still-cannot-see-it-in-the-menu
+    say: "I still cannot see it in the menu"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: sync_app, states: []}
+
+  - id: sync-app-public-but-asks-to-sign-in
+    say: "it says it is public but it still asks me to sign in"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: sync_app, states: []}
+
   # -- What it has cost to run ---------------------------------------------
 
   - id: spend-how-much-has-this-cost-me

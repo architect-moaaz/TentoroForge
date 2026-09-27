@@ -71,7 +71,11 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
     # a build writes.
     _run("integrations", lambda: _project_integration(svc, app_root))
     files += ["src/lib/workflows/definitions", "src/lib/integrations/connected.ts"]
-    _run("frontend", lambda: apply_frontend_projection(svc, app_root))
+    # WHAT IS BUILT, NOT EVERYTHING DECLARED: a module left for later has no
+    # screens in the running app (see `scope.built_view`).
+    from services.blueprint.scope import built_view
+    view = built_view(svc.doc)
+    _run("frontend", lambda: apply_frontend_projection(svc, app_root, doc=view))
     # THE DESIGNED PAGES. `apply_frontend_projection` writes page schemas, not
     # a page's React code or the SDK it compiles against: an undo that put a
     # page's earlier code back into the document left the app serving the
@@ -111,7 +115,14 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
     # under `public/`; the bytes of a mark that is no longer referenced are
     # left where they are, unread and harmless, rather than deleted from a
     # tree this function does not own.
-    _run("shell", lambda: project_shell(svc.doc, app_root))
+    # THE WAYS AROUND THE APP, ALL OF THEM. `project_shell` alone wrote the
+    # signed-in rail and left the route graph, the root and the edge pages as
+    # they were — and the PUBLIC menu, which is the only menu an application
+    # without sign-in shows (Test2, 2026-09-28: a page made public never
+    # reached it). `project_navigation` is the navigation's own set.
+    from services.blueprint.projection import project_navigation, project_public_nav
+    _run("navigation", lambda: project_navigation(view, app_root))
+    _run("public_nav", lambda: {"files": [project_public_nav(view, app_root)]})
     _run("brand_logo", lambda: project_brand_logo(svc.doc, app_root))
     return sorted(set(f for f in files if f))
 

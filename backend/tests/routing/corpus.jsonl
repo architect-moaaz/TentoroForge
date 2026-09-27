@@ -267,3 +267,5 @@
 {"say": "what happens if I lose all this?", "verb": "back_up"}
 {"say": "can I take a backup?", "verb": "back_up"}
 {"say": "is any of this stored anywhere else?", "verb": "back_up"}
+{"say": "I still cannot see it in the menu", "verb": "sync_app", "note": "Test2 2026-09-28: the definition had it, the app did not"}
+{"say": "it says it is public but it still asks me to sign in", "verb": "sync_app"}

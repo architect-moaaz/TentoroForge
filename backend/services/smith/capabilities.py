@@ -101,8 +101,9 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "application so you can print it or pass the file on.",
      frozenset({"write_guide"})),
     ("The whole application",
-     "Regenerate it from its definition.",
-     frozenset({"rebuild"})),
+     "Regenerate it from its definition, or — when it shows something other "
+     "than what it says — write it out again so the two agree.",
+     frozenset({"rebuild", "sync_app"})),
     ("What it has cost to run",
      "Ask what building it spent and what the changes since have spent. The "
      "figure is what the models cost to run, never a bill.",
