@@ -106,7 +106,10 @@ def test_rules_the_compiler_cannot_see_are_refused_too(monkeypatch, tmp_path):
     client = _Client([{"rationale": "", "load": GOOD_LOAD, "view": bad}] * ui_engineer.COMPILE_ROUNDS)
     with pytest.raises(CompileError) as e:
         compose_page(_doc(), _doc()["pages"][0], tmp_path, client)
-    assert "use client" in str(e.value) and "hex colour" in str(e.value)
+    assert "hex colour" in str(e.value)
+    # The missing first line is put there, not sent back: a round of the
+    # model for one fixed line is a round of the whole page.
+    assert "use client" not in str(e.value)
 
 
 def test_the_designed_page_sits_on_its_floor():

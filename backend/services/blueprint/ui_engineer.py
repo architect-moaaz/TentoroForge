@@ -63,6 +63,84 @@ PAGE_CODE_SCHEMA: dict[str, Any] = {
     },
 }
 
+#: The reply when the page already has code — a change Smith was asked for, a
+#: compile error to fix, a reviewer's send-back. EDITS, NOT THE PAGE AGAIN.
+#: Every round used to return both files whole: a request to make three
+#: fields linked dropdowns came back as 16,438 characters three times over
+#: (live, 2026-09-28 — one round to add the change, one to fix a missing
+#: first line, one for the reviewer), 60-80s a round, and output is what a
+#: run pays for. An edit quotes the text it replaces, so the rest of the page
+#: is untouched by construction rather than by the writer's restraint.
+PAGE_EDIT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["rationale", "edits", "load", "view"],
+    "properties": {
+        "rationale": {"type": "string", "description": "One or two sentences: what you changed and why."},
+        "edits": {
+            "type": "array",
+            "description": "The changes, applied in order to the current files.",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["file", "find", "replace"],
+                "properties": {
+                    "file": {"type": "string", "enum": ["load", "view"]},
+                    "find": {"type": "string", "description": (
+                        "Text copied exactly from the current file, whitespace included, long "
+                        "enough to occur exactly once.")},
+                    "replace": {"type": "string", "description": "What it becomes."},
+                },
+            },
+        },
+        "load": {"type": "string", "description": (
+            "Empty — unless load.ts is being rewritten whole, then its full contents.")},
+        "view": {"type": "string", "description": (
+            "Empty — unless view.tsx is being rewritten whole, then its full contents.")},
+    },
+}
+
+
+class EditsDidNotApply(ValueError):
+    """An edit's `find` is not in the file exactly once; nothing was applied."""
+
+
+def apply_edits(current: dict, edits: list[dict]) -> dict[str, str]:
+    """``{"load": …, "view": …}`` with each edit applied in order, or raise
+    `EditsDidNotApply` naming every edit that could not be — all or nothing,
+    so a half-applied change is never compiled as if it were the page."""
+    files = {"load": str(current.get("load") or ""), "view": str(current.get("view") or "")}
+    problems: list[str] = []
+    for i, e in enumerate(edits, 1):
+        name = "load.ts" if e.get("file") == "load" else "view.tsx"
+        key = "load" if e.get("file") == "load" else "view"
+        find, replace = str(e.get("find") or ""), str(e.get("replace") or "")
+        if not find:
+            problems.append(f"edit {i} ({name}): `find` is empty — quote the text it replaces.")
+            continue
+        n = files[key].count(find)
+        if n != 1:
+            head = find.strip().splitlines()[0][:80] if find.strip() else find[:80]
+            problems.append(
+                f"edit {i} ({name}): `find` occurs {n} times" + (" — copy it exactly from the current code"
+                                                                  if n == 0 else " — include more of the "
+                                                                  "surrounding lines so it is unique")
+                + f" (it begins `{head}`).")
+            continue
+        files[key] = files[key].replace(find, replace, 1)
+    if problems:
+        raise EditsDidNotApply("\n".join(problems))
+    return files
+
+
+def _use_client_first(view: str) -> str:
+    """The first line a view must have, put there rather than asked for — a
+    round of the model to add one fixed line is a round of the whole page."""
+    if view.strip() and not view.lstrip().startswith(('"use client"', "'use client'")):
+        return '"use client";\n' + view
+    return view
+
+
 #: What the writer decides BEFORE it writes, in a call of its own.
 #:
 #: Thinking and code come out of one budget (`max_tokens` caps both, and this
@@ -748,8 +826,15 @@ def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "",
     if brief:
         out.append(f"\nWhat is wanted of it now:\n{brief}")
     if current:
-        out.append("\nIts current code, to improve rather than start over:\n"
+        out.append("\nIts current code:\n"
                    f"```ts\n// load.ts\n{current.get('load')}\n```\n```tsx\n// view.tsx\n{current.get('view')}\n```")
+        out.append(
+            "\nTHIS PAGE EXISTS — CHANGE IT WITH EDITS, NOT BY WRITING IT AGAIN. Reply with `edits`: "
+            "each names the file (`load` or `view`), a `find` copied exactly from the current code "
+            "above (whitespace included, long enough to occur once) and its `replace`. They apply "
+            "in order. Touch only what this change needs; everything else stays as it is. Leave "
+            "`load` and `view` empty — fill one with a file's full contents only when most of that "
+            "file must change.")
     if feedback:
         out.append(f"\nYour previous version was refused. Fix every one of these and keep what worked:\n{feedback}")
     return "\n".join(out)
@@ -977,6 +1062,12 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     note = feedback
     last_errors: list[str] = []
     looks_left = page_look.LOOKS if critic is not None else 0
+    #: A page that already existed is being CHANGED: the reviewer checks the
+    #: change did not break it, and sends it back only for that. Its taste
+    #: notes are about the page as it was — sent back for a 7/10 the first
+    #: time, a changed page was rewritten whole, scored 7/10 again and cost
+    #: two minutes for nothing (live, 2026-09-28).
+    changing = current is not None
     #: The best version seen by the reviewer: (rank, body). Returned when a
     #: rewrite scores lower, fails to compile, or the rounds run out.
     best: tuple[tuple[int, int], dict] | None = None
@@ -997,9 +1088,10 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     rounds = COMPILE_ROUNDS + (page_look.LOOKS - 1 if looks_left else 0)
     for round_ in range(1, rounds + 1):
         t0 = time.monotonic()
+        editing = current is not None
         reply = writer(system=system, user=user_prompt(doc, page, feedback=note, brief=brief,
                                                        current=current, plan=plan),
-                       schema=PAGE_CODE_SCHEMA)
+                       schema=PAGE_EDIT_SCHEMA if editing else PAGE_CODE_SCHEMA)
         text = getattr(reply, "text", reply)
         if getattr(reply, "usage", None) is not None:
             spent.append((reply.usage, time.monotonic() - t0))
@@ -1009,6 +1101,24 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             note = f"Your reply was not valid JSON ({exc}). Return the object only."
             continue
         load, view = str(body.get("load") or ""), str(body.get("view") or "")
+        emitted = len(load) + len(view)
+        if editing:
+            # A file left empty keeps its current contents; the edits apply
+            # to whatever each file then is.
+            base = {"load": load or str(current.get("load") or ""),
+                    "view": view or str(current.get("view") or "")}
+            edits = [e for e in body.get("edits") or [] if isinstance(e, dict)]
+            emitted += sum(len(str(e.get("find") or "")) + len(str(e.get("replace") or "")) for e in edits)
+            try:
+                files = apply_edits(base, edits)
+            except EditsDidNotApply as exc:
+                note = ("Nothing was applied — these edits did not match the current code exactly:\n"
+                        f"{exc}\nThe current code is unchanged; quote from it exactly.")
+                logger.warning("[ui_engineer] %s round %d: edits did not apply: %s",
+                               page.get("id"), round_, str(exc)[:300])
+                continue
+            load, view = files["load"], files["view"]
+        view = _use_client_first(view)
         design = _design_findings(doc, page, view)
         errors = (_static_findings(load, view) + _unwired_actions(doc, page, view)
                   + typecheck(doc, app_root, str(page.get("id")), load, view))
@@ -1047,7 +1157,10 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                     seen = (page_look.rank(verdict), body)
                     if best is None or seen[0] > best[0]:
                         best = seen
-                    if verdict.get("verdict") != "pass" and looks_left and round_ < rounds:
+                    must_fix = verdict.get("verdict") != "pass" and (
+                        not changing or verdict.get("broken")
+                        or any(i.get("severity") == "high" for i in verdict.get("issues") or []))
+                    if must_fix and looks_left and round_ < rounds:
                         # THE REVIEW IS A REFUSAL, NOT A WISH. Handed as the
                         # brief ("what is wanted of it now") the first trial's
                         # rewrite of a list page changed one border and kept
@@ -1068,10 +1181,9 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             # the 36k-character system prompt can be tuned on a guess.
             #
             # The loop already knows: one entry in `spent` per model call.
-            logger.info("[ui_engineer] %s composed in %d round(s), %d chars "
-                        "emitted (load %d + view %d)",
-                        page.get("id"), round_, len(body["load"]) + len(body["view"]),
-                        len(body["load"]), len(body["view"]))
+            logger.info("[ui_engineer] %s composed in %d round(s), %d chars emitted "
+                        "(page now load %d + view %d)",
+                        page.get("id"), round_, emitted, len(body["load"]), len(body["view"]))
             return body, spent
         last_errors = errors
         current = {"load": load, "view": view}
