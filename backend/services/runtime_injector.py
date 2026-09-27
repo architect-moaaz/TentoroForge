@@ -1334,11 +1334,14 @@ def _generate_data_init_module(output_path: Path) -> None:
         "// Shared data-engine initialiser. The SSR render path (data-engine-bridge)\n"
         "// does not pass through the API route where entities are registered, so it\n"
         "// must populate the registry itself. Idempotent + concurrency-safe.\n"
-        'import { isInitialized, markInitialized, registerEntity } from "./data-engine";\n'
+        'import { markInitialized, registerEntity } from "./data-engine";\n'
         f"{alias_import}\n"
         "let _initPromise: Promise<void> | null = null;\n\n"
+        "// Once per load of THIS module, not once per server: when a record is added\n"
+        "// the list above is regenerated, the dev server reloads this module, and the\n"
+        "// new record registers. Gating on the engine's own flag kept a record added\n"
+        "// after start unknown until a restart. Registering twice is harmless.\n"
         "export function ensureDataEngineInitialized(): Promise<void> {\n"
-        "  if (isInitialized()) return Promise.resolve();\n"
         "  if (_initPromise) return _initPromise;\n"
         "  _initPromise = (async () => {\n"
         "    const modules = await Promise.allSettled([\n"

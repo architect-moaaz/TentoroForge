@@ -43,3 +43,20 @@ def test_a_push_that_fails_names_what_failed(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess(cmd, 1, "", "error: relation exists"))
     out = schema_push.push_now(app)
     assert not out["applied"] and "drizzle-kit push" in out["reason"] and "relation exists" in out["reason"]
+
+
+def test_a_record_added_after_the_build_is_registered_with_the_data_engine(tmp_path):
+    """Test2, 2026-09-28: Area had a table, twelve rows and a schema file,
+    and Location Data said "No areas registered yet" — `data-init.ts`, the
+    engine's list of records, was only ever written by the build."""
+    from services.blueprint.projection import project_data_layer
+    app = tmp_path / "app"
+    (app / "src/lib").mkdir(parents=True)
+    (app / "src/lib/data-init.ts").write_text('import("@/db/schema/worker"),\n')   # as the build left it
+    doc = {"data": {"entities": [
+        {"id": "ENTITY-001", "name": "Worker", "table": "workers", "fields": [{"name": "name", "type": "string"}]},
+        {"id": "ENTITY-002", "name": "Area", "table": "areas", "fields": [{"name": "areaName", "type": "string"}]}]}}
+    out = project_data_layer(doc, app)
+    init = (app / "src/lib/data-init.ts").read_text()
+    assert 'import("@/db/schema/area")' in init and 'import("@/db/schema/worker")' in init
+    assert "src/lib/data-init.ts" in out["files"]

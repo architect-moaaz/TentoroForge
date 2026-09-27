@@ -446,6 +446,19 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
     aliases.write_text(entity_aliases_module(entities), "utf-8")
     written.append(ENTITY_ALIASES_PATH)
 
+    # THE ENGINE'S LIST OF RECORDS FOLLOWS THE SCHEMA. `data-init.ts` (what the
+    # server registers before a page loads) and the data API route import one
+    # module per schema file, and only the runtime injection at build wrote
+    # them — so a record added after the build had a table, rows and a schema
+    # file, and the engine did not know it: Location Data listed "No areas
+    # registered yet" over twelve rows (Test2, 2026-09-28). Regenerated from
+    # the schema directory whenever it is written; only in a built app.
+    if (Path(app_root) / "src" / "lib" / "data-init.ts").is_file():
+        from services.runtime_injector import _generate_data_api_route, _generate_data_init_module
+        _generate_data_api_route(Path(app_root))
+        _generate_data_init_module(Path(app_root))
+        written += ["src/lib/data-init.ts", "src/app/api/data/[...path]/route.ts"]
+
     return {"files": written, "entities": len(entities), "codeMap": code_map}
 
 
