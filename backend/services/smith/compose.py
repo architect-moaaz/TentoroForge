@@ -133,6 +133,15 @@ def _ensure_page(svc: Any, route: str, request: str = "") -> dict:
         "purpose": (" ".join(request.split()) or f"The {name} screen.")[:280],
         "primaryTasks": [],
     }
+    # AN APPLICATION WITH NO SIGN-IN HAS NO SIGNED-IN SCREENS. A page's access
+    # defaults to `authenticated`, so a page added to an app whose security is
+    # `authentication: none` went behind a login the app does not have: into
+    # the signed-in area, off the public menu every other page is on, and a
+    # sign-in redirect at its own address (Test2's Location Explorer,
+    # 2026-09-28 — "I cannot see Location Explorer in the menu", twice).
+    from services.blueprint.account_model import has_sign_in
+    if not has_sign_in(svc.doc):
+        body["access"] = "public"
     # ALLOCATING A NEW ID, unlike every write compose did before — recompose and
     # add_widgets only ever UPDATE a page already in the definition. A new id
     # collides if the allocator registry has fallen behind the document (a

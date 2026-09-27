@@ -332,3 +332,19 @@ def test_the_attempt_budget_matches_the_dag():
 
     dag_default = inspect.signature(orchestrator.run).parameters["max_attempts"].default
     assert MAX_ATTEMPTS == dag_default
+
+
+def test_a_page_added_to_an_app_with_no_sign_in_is_public(tmp_path):
+    """Test2, 2026-09-28: every page public, `authentication: none`, and the
+    Location Explorer Smith added defaulted to `authenticated` — behind a
+    login the app does not have, and off the public menu the owner was
+    looking at ("I cannot see Location Explorer in the menu", twice)."""
+    from services.blueprint.service import BlueprintService
+    from services.smith.compose import _ensure_page
+
+    open_app = BlueprintService.create(output_dir=tmp_path / "open", app_id="o", name="Open", domain="ops")
+    open_app.doc["security"] = {"authentication": "none"}
+    assert _ensure_page(open_app, "/location-explorer", "a page of dropdowns")["access"] == "public"
+
+    gated = BlueprintService.create(output_dir=tmp_path / "gated", app_id="g", name="Gated", domain="ops")
+    assert _ensure_page(gated, "/reports", "a report").get("access", "authenticated") == "authenticated"
