@@ -113,7 +113,7 @@ def test_a_new_field_is_added_and_shown_where_the_entity_is_edited_or_listed(svc
                                {"page": "Master Data", "route": "/master-data", "where": "form field"}]
     assert fresh.doc["changeHistory"][-1]["userRequest"] == "add Nurse.fathersName"
     said = fc.summary_of("add_field", out)
-    assert "**fathersName**" in said and "`/master-data`" in said and "form field" in said and "migration" in said
+    assert "**fathersName**" in said and "`/master-data`" in said and "form field" in said and "existing rows keep their data" in said
     with pytest.raises(sc.SectionChangeError, match="already has a field named fathersName"):
         fc.add_field(svc, "Nurse", {"name": "fathersname"})
     with pytest.raises(sc.SectionChangeError, match="not a field name"):

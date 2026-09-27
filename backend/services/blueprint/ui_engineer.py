@@ -598,6 +598,9 @@ view.tsx — "use client" on the first line.
   - Search / filters: update the URL with router.push(href(pages.thisPage, params?, query)).
   - TypeScript strict: no `any`, no non-null assertions on data that can be null, handle
     null fields. Keep it one file; small local components are fine.
+  - Browser storage (localStorage, sessionStorage) can be refused — a private window, an
+    embedded frame, a blocked site. Touch it only inside try/catch, in an effect or an event
+    handler, never while rendering; the page renders fully without it, on a default.
   - No placeholder copy ("Lorem", "TODO", "Coming soon"), no fake data, no alert().
 """
 

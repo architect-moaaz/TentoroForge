@@ -922,9 +922,11 @@ def run(output_dir: str, verb: str, *, route: str = "",
     # composer (seven minutes), whose tree the frontend then dropped — "I laid
     # out Home" about a page that was not served: "built the discover page it
     # is not there" (UAT jubyt8jk). Declared, put in the menu, then written.
+    created = False
     if page is None and verb == "compose_route" and coded_app(svc.doc):
         page = _ensure_page(svc, route, request)
         _into_menu(svc, page, app_root)
+        created = True
     if page is not None and (code_row(svc.doc, str(page.get("id"))) is not None or coded_app(svc.doc)):
         try:
             out = recode_page(svc, route, app_root=app_root, request=request, wanted=wanted,
@@ -934,6 +936,17 @@ def run(output_dir: str, verb: str, *, route: str = "",
         except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
             logger.exception("[smith] rewriting %s failed", route)
             return {"applied": False, "edited_paths": [], "reason": f"{type(exc).__name__}: {exc}"}
+        if created and out.get("applied"):
+            # A NEW PAGE IS A NEW DOOR, AND EVERY PART OF THE APP HAS TO KNOW IT.
+            # The code landed and the rail was written; the sign-in gate, the
+            # public menu and the route graph were not, so a public page Smith
+            # just built answered with the sign-in screen (Test2's Location
+            # Data, 2026-09-28). The whole app in step, and its database.
+            from services.smith.sync_app import sync
+            try:
+                sync(svc, app_root)
+            except Exception:  # noqa: BLE001 — the page stands; the next sync catches up
+                logger.exception("[smith] bringing the app in step after adding %s failed", route)
         added = out.get("widgets") or []
         did = (f"I rewrote {_where(svc, route)}{extra}"
                + (f", adding {', '.join(added)}" if added else "")

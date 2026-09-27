@@ -122,3 +122,27 @@ def test_a_second_restyle_supersedes_the_first_not_the_original():
          "reason": "Asked in conversation after the build; the design system's palette and theme were re-decided"},
     ]}
     assert palette_decision(doc)["id"] == "DEC-033"
+
+
+def test_a_new_page_brings_the_whole_app_in_step_and_a_rewrite_does_not(tmp_path, monkeypatch):
+    """Test2, 2026-09-28: Location Data was built public and answered with the
+    sign-in screen — the code and the rail were written, the sign-in gate and
+    the public menu were not. A page Smith CREATES brings the whole app in
+    step (and its database); rewriting a page that already exists does not
+    need to."""
+    from services.blueprint.service import BlueprintService
+    from services.smith import compose, sync_app
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="a", name="T", domain="d")
+    svc.upsert("pages", {"name": "Tools", "route": "/tools", "purpose": "x"}, natural_key="PAGE:/tools")
+    svc.doc["pageCode"] = [{"page": svc.doc["pages"][0]["id"], "load": "", "view": "x"}]
+    svc.save()
+    monkeypatch.setattr(compose, "prepare_capabilities", lambda *a, **k: {"declared": [], "created": []})
+    monkeypatch.setattr(compose, "recode_page", lambda svc, route, **k:
+                        {"applied": True, "committed": [], "version": 2, "reason": "", "missing": [], "widgets": []})
+    synced = []
+    monkeypatch.setattr(sync_app, "sync", lambda svc, app_root: synced.append(app_root) or {})
+    compose.run(str(tmp_path), "compose_route", route="/places", request="a page of places")
+    assert len(synced) == 1
+    compose.run(str(tmp_path), "compose_route", route="/tools", request="tighter")
+    assert len(synced) == 1, "a rewrite of an existing page is not a new door"

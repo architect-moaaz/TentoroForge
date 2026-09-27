@@ -199,7 +199,11 @@ def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Pa
                  + change.strip()[:2000]
                  + "\n\nJudge the change: is it done, and did it break or worsen anything on the page? "
                  "List every issue you see, and mark each with `fromChange`: true when the change "
-                 "caused it or is not done, false when the page already had it.")
+                 "caused it or is not done, false when the page already had it.\n\n"
+                 "WHAT WAS ASKED OUTRANKS THE APP'S CONVENTIONS. The conventions were written before "
+                 "this request; where the two disagree the request is the owner's newer decision, "
+                 "and doing what was asked is not an issue. Judge how well it was done, never "
+                 "whether it should have been.")
     images = [look["shots"][n] for n in names]
     if references:
         user += (f"\n\nThe last {len(references)} image(s) are what the user showed as the standard "

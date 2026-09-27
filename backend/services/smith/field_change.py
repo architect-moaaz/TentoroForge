@@ -398,8 +398,15 @@ def add_field(svc: Any, entity_ref: str, field: dict, *, app_root: str | None = 
     edited = _project(svc, app_root)
     if app_root:
         surfaced += _recode_form_pages(svc, flows, declared, label, app_root, reasoning)
+    # IN THE DATABASE NOW (see `schema_push`): the forms just given this field
+    # save into a column that has to exist.
+    pushed = {"applied": False, "reason": ""}
+    if app_root:
+        from services.blueprint.schema_push import push_now
+        pushed = push_now(app_root)
     return {"applied": True, "entity": eid, "name": ename, "field": name, "type": ftype, "label": label,
-            "surfaced": surfaced, "workflows": [w.get("name") for w in flows], "edited_paths": edited}
+            "surfaced": surfaced, "workflows": [w.get("name") for w in flows], "edited_paths": edited,
+            "pushed": bool(pushed.get("applied")), "push_reason": str(pushed.get("reason") or "")}
 
 
 def _extend_form_workflows(svc: Any, ent: dict, field: dict, known: set[str], label: str) -> list[dict]:
@@ -643,7 +650,12 @@ def summary_of(verb: str, out: dict) -> str:
         else:
             lead += (f". No screen edits or lists {out['name']} records through a form or a table "
                      "yet, so it is not on a page \u2014 say which screen should show it.")
-        return lead + "\n\nThe column is added as a migration; existing rows keep their data."
+        where = ("The column is in the database now; existing rows keep their data."
+                 if out.get("pushed") else
+                 "The column is added when the preview next starts"
+                 + (f" ({out['push_reason']})" if out.get("push_reason") else "")
+                 + "; existing rows keep their data.")
+        return lead + "\n\n" + where
     if verb == "rename_field":
         s = (f"Renamed {out['name']}.{out['old']} to {out['new']} in {len(out['hits'])} place(s): "
              f"{'; '.join(out['hits'][:8])}{'…' if len(out['hits']) > 8 else ''}. The column is renamed on the next "

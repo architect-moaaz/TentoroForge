@@ -208,3 +208,19 @@ def test_the_send_back_of_a_change_lists_only_what_it_caused():
     verdict = {"score": 4, "issues": [OLD["issues"][0], BROKE["issues"][0]]}
     brief = page_look.look_brief(verdict, change_only=True)
     assert "submit is off-screen" in brief and "shows numbers" not in brief
+
+
+def test_the_reviewer_of_a_change_is_told_the_ask_outranks_the_apps_conventions(tmp_path):
+    """Test2, 2026-09-28: asked to add an Area to the location fields, the
+    reviewer sent the form back — "high", caused by the change — because the
+    build's conventions said the location panel holds exactly three fields."""
+    seen = {}
+
+    class _Looking(_Critic):
+        def __call__(self, *, system, user, schema, images=()):
+            seen["user"] = user
+            return super().__call__(system=system, user=user, schema=schema, images=images)
+    writer = _Writer([_reply(_edit('<input name="country" />', SELECT))])
+    compose_page(_doc(), _doc()["pages"][0], tmp_path, writer, critic=_Looking([TASTE]),
+                 brief="add an Area field", current={"load": LOAD, "view": VIEW})
+    assert "OUTRANKS THE APP'S CONVENTIONS" in seen["user"]
