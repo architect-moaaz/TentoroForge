@@ -147,6 +147,27 @@ def _project(svc: Any, app_root: str | None) -> list[str]:
             files += list((fn(svc.doc, app_root) or {}).get("files") or [])
         except Exception as exc:  # noqa: BLE001 — a projector that cannot run here is said, not hidden
             logger.warning("[access] %s failed: %s", fn.__name__, exc)
+    # WHERE A PAGE LIVES FOLLOWS WHO MAY OPEN IT. A public page is served
+    # outside the signed-in area and listed on the public menu; a signed-in
+    # one inside it. This re-projected only the gate, so "make Location
+    # Explorer public" set the page public and the middleware open, and left
+    # its files inside `(dashboard)` behind a login the app does not have and
+    # off the public menu (Test2, 2026-09-28). In the build's order: the code
+    # pages (moved, the old copy swept by its marker), the public routes and
+    # menu, then the navigation that reads them.
+    from services.blueprint.app_sdk import project_code_pages
+    from services.blueprint.projection import project_navigation, project_public_nav, project_public_routes
+    steps = (
+        ("project_code_pages", lambda: {"files": project_code_pages(svc.doc, app_root)}),
+        ("project_public_routes", lambda: project_public_routes(svc.doc, app_root)),
+        ("project_public_nav", lambda: {"files": [project_public_nav(svc.doc, app_root)]}),
+        ("project_navigation", lambda: project_navigation(svc.doc, app_root)),
+    )
+    for name, step in steps:
+        try:
+            files += [str(f) for f in ((step() or {}).get("files") or []) if f]
+        except Exception as exc:  # noqa: BLE001 — a projector that cannot run here is said, not hidden
+            logger.warning("[access] %s failed: %s", name, exc)
     try:
         project_seed(svc.doc, app_root)
         files.append("src/db/seed.json")
