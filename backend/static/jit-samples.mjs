@@ -249,7 +249,11 @@ export function sampleRow(entity, i, entities) {
         : Number((f.min + span * (((i * 37) % 100) / 100)).toFixed(2));
     }
     else if (/^(location|geo|geopoint|geo_point|coordinates|latlng|point)$/.test(type)) row[fname] = { lat: Number((51.507 + 0.004 * (i + 1)).toFixed(3)), lng: Number((-0.128 + 0.006 * (i + 1)).toFixed(3)) };
-    else if (opts.length) row[fname] = opts[i % opts.length];
+    // A PERSON'S OWN RECORDS COVER EVERY STATUS. Owned rows point at the
+    // signed-in sample person every third row; statuses repeating every row
+    // then gave that person one status only (a reading list whose reader had
+    // nothing but "Want to read", 2026-09-27). Offset by the row's third.
+    else if (opts.length) row[fname] = opts[(i % 3 + Math.floor(i / 3)) % opts.length];
     else if (/email/.test(lower)) row[fname] = `${FIRST[i % FIRST.length].toLowerCase()}.${LAST[i % LAST.length].toLowerCase()}@example.com`;
     else if (/phone|tel/.test(lower)) row[fname] = `+1 555 01${String(i).padStart(2, "0")} ${String(1000 + i * 37).slice(0, 4)}`;
     else if (/name|title|subject/.test(lower) && /string|text/.test(type)) {

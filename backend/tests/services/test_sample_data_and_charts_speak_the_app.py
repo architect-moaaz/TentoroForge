@@ -103,3 +103,31 @@ def test_no_reply_schema_carries_a_keyword_the_api_refuses():
     for node, schema in {**SCHEMA_BY_NODE, "proposal": PROPOSAL_SCHEMA}.items():
         walk(schema, node)
     assert hits == [], hits
+
+
+def test_a_persons_own_sample_records_cover_every_status():
+    """Owned rows point at the sample person every third row; a reader whose
+    books were all "Want to read" made the list page's chart one ring."""
+    ents = [{"name": "Reader", "account": True, "fields": [{"name": "id", "type": "uuid"}]},
+            {"name": "Book", "fields": [{"name": "id", "type": "uuid"}, {"name": "readerId", "type": "uuid"},
+                                        {"name": "status", "type": "string", "enumValues": ["Want to read", "Reading", "Finished"]}]}]
+    shim = ROOT / "static/jit-samples.mjs"
+    out = subprocess.run(["node", "-e", f"""
+      import({json.dumps(str(shim))}).then(m => {{
+        const ents = {json.dumps(ents)};
+        console.log(JSON.stringify([...Array(8).keys()].map(i => m.sampleRow(ents[1], i, ents))));
+      }})"""], capture_output=True, text=True, check=True).stdout
+    rows = json.loads(out)
+    mine = [r["status"] for r in rows if r["readerId"] == "sample-reader-1"]
+    assert set(mine) == {"Want to read", "Reading", "Finished"}, mine
+    assert {r["status"] for r in rows} == {"Want to read", "Reading", "Finished"}
+
+
+def test_charts_are_not_reserved_to_the_dashboard():
+    from services.blueprint.page_review import reviewer_system
+    from services.blueprint.ui_engineer import direction_prompts
+    _, user = direction_prompts({"application": {"name": "A"}, "designSystem": {}, "pages": [], "roles": []})
+    assert "CHARTS GO WHERE THE ANALYTICS PUTS THEM" in user and "never reserves charts" in user
+    system = reviewer_system({"application": {"name": "A"}, "designSystem": {"colors": {"primary": "#123456"}},
+                              "composition": {"vision": "v", "conventions": []}, "pages": []})
+    assert "never whether it belongs on the page" in system
