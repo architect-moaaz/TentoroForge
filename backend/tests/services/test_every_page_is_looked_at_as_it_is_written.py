@@ -246,3 +246,22 @@ def test_the_sample_person_owns_the_sample_rows():
     out = json.loads(src)
     assert '"id":"sample-parent-1"' in out["server"].replace(" ", ""), "currentUser() is the account's first sample row"
     assert out["childParent"] == "sample-parent-1", "and the first child points at it"
+
+
+def test_a_look_lays_down_feel_lite_where_there_is_no_frontend_checkout(monkeypatch, tmp_path):
+    """In the backend image the loose libraries' checkout source does not
+    exist and `copy_loose_libs` copies nothing; the look must take the
+    runtime template the app itself ships with (UAT, SnapIT and RK_Test)."""
+    from services.blueprint import assembly, page_look
+    app = tmp_path / "app"; (app / "src").mkdir(parents=True)
+    monkeypatch.setattr(assembly, "LOOSE_LIBS", {"no/such/checkout/feel-lite": "src/lib/feel-lite"})
+    seen = {}
+
+    def fake_bundle(project, doc, page, view, load, **_):
+        seen["laid"] = (app / "src/lib/feel-lite/index.ts").is_file()
+        raise __import__("services.react_editor.service", fromlist=["EditorError"]).EditorError(422, "jit-build", "stop")
+    monkeypatch.setattr("services.react_editor.jit.bundle_source", fake_bundle)
+    monkeypatch.setattr("services.blueprint.projection.project_design_tokens", lambda doc, root: None)
+    with pytest.raises(page_look.LookUnavailable):
+        page_look.render(_doc(), _doc()["pages"][0], app, GOOD_LOAD, GOOD_VIEW, tmp_path / "out")
+    assert seen["laid"] is True, "feel-lite came from the runtime templates"

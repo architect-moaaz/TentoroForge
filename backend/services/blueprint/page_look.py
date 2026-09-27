@@ -74,6 +74,21 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
     # it worked here only on an app that had been assembled before.
     if any(not (app_root / dst).is_dir() for dst in LOOSE_LIBS.values()):
         copy_loose_libs(app_root)
+    # …FROM WHERE THE APP'S OWN COPY COMES, NOT ONLY A CHECKOUT'S. The loose
+    # libraries' source is `<repo>/frontend/src/lib`, and the backend image
+    # has no `frontend/`: in the container the copy above resolves to `/` and
+    # copies nothing, silently — so the first fix passed every local test and
+    # every UAT look still failed to bundle (SnapIT, RK_Test, 2026-09-26: 27
+    # of 27 pages "not looked at"). Every assembled app gets feel-lite from
+    # the runtime templates (`inject_runtime`), which the image does carry.
+    from services.runtime_injector import _TEMPLATE_DIR
+    for dst in LOOSE_LIBS.values():
+        target = app_root / dst
+        source = _TEMPLATE_DIR / Path(dst).name
+        if not target.is_dir() and source.is_dir():
+            shutil.copytree(source, target)
+        if not target.is_dir():
+            logger.warning("[page_look] %s is not in the tree and has no source here; looks will not bundle", dst)
     # …AND THE DESIGN'S OWN TOKENS. `tokens.css` is written by the `frontend`
     # projection, after every page; until then the scaffold's default theme
     # is in the tree, and a look would judge the design's colours against a
