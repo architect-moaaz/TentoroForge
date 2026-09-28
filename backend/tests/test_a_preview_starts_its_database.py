@@ -37,3 +37,12 @@ def test_sign_in_is_told_the_preview_prefix(tmp_path):
     p.write_text("return (<SessionProvider>{children}</SessionProvider>);")
     preview._session_under_prefix(str(tmp_path))
     assert 'basePath={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/auth`}' in p.read_text()
+
+
+def test_the_preview_proxy_passes_every_cookie():
+    import httpx
+    from routers.preview_proxy import _filter_headers
+    h = httpx.Headers([("set-cookie", "a=1; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT"),
+                       ("set-cookie", "b=2; Path=/"), ("content-type", "application/json")])
+    cookies = [v for k, v in _filter_headers(h) if k.lower() == "set-cookie"]
+    assert cookies == ["a=1; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT", "b=2; Path=/"]
