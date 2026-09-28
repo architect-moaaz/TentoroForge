@@ -104,6 +104,10 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "Regenerate it from its definition, or — when it shows something other "
      "than what it says — write it out again so the two agree.",
      frozenset({"rebuild", "sync_app"})),
+    ("The sample records",
+     "Rewrite the records a kind of data starts with when they are wrong or "
+     "out of scope; the rows people entered are left as they are.",
+     frozenset({"refresh_sample_data"})),
     ("What it has cost to run",
      "Ask what building it spent and what the changes since have spent. The "
      "figure is what the models cost to run, never a bill.",

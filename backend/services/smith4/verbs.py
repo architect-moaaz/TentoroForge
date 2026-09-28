@@ -564,6 +564,14 @@ def sync_app(ctx: Ctx, u: dict) -> Outcome:
                      fail="I could not bring the application back in step with its definition.")
 
 
+def refresh_sample_data(ctx: Ctx, u: dict) -> Outcome:
+    """A record type's sample records re-authored and replaced (`refresh_sample_data`)."""
+    from services.smith.sample_data import run
+    out = run(ctx.out, entity=_s(u, "entity"), change=_s(u, "change") or ctx.ask, reasoning=ctx.reasoning)
+    return from_seam(out, ok="The sample records are rewritten.",
+                     fail="I could not rewrite the sample records.")
+
+
 def guide(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.handover import run, summary_of
     out = run(ctx.out, app_root=str(Path(ctx.out) / "app"), reasoning=ctx.reasoning)
@@ -756,6 +764,7 @@ PERFORM: dict[str, Perform] = {
     "connect_uxpilot": connect_uxpilot, "disconnect_design": disconnect_design,
     "compose_route": compose, "add_widgets": compose, "remove_page": remove_page,
     "revert": revert, "write_guide": guide, "spend": spend, "sync_app": sync_app,
+    "refresh_sample_data": refresh_sample_data,
     "import_data": import_data, "export_data": export_data,
     "add_login": accounts, "remove_login": accounts, "reset_login": accounts,
     "explain_crash": incident, "explain_slowness": incident, "back_up": records_out,

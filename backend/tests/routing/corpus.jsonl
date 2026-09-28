@@ -269,3 +269,5 @@
 {"say": "is any of this stored anywhere else?", "verb": "back_up"}
 {"say": "I still cannot see it in the menu", "verb": "sync_app", "note": "Test2 2026-09-28: the definition had it, the app did not"}
 {"say": "it says it is public but it still asks me to sign in", "verb": "sync_app"}
+{"say": "the sample areas are wrong, make them real India and Sri Lanka ones", "verb": "refresh_sample_data", "note": "Test2 2026-09-28: Nepal paired with Uttar Pradesh"}
+{"say": "fix the demo data so each country has its own states", "verb": "refresh_sample_data"}

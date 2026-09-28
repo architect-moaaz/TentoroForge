@@ -41,7 +41,8 @@ logger = logging.getLogger(__name__)
 Choose = Callable[[str, str, list, list], dict]
 
 LOOK_FIRST = ("Nothing has been read this turn. Read the page (`read_page_code`, "
-              "`grep`, `read_section`) — the application usually answers this. "
+              "`grep`, `read_section`) or its data (`read_rows`) — the application "
+              "usually answers this. "
               "Ask again only if it still stands.")
 
 

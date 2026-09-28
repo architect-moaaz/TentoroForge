@@ -194,6 +194,7 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # THE APP AND ITS DEFINITION, BACK IN STEP. Needs nothing: it is always
     # this application, written out again from what it already says.
     "sync_app": set(),
+    "refresh_sample_data": {"entity"},
 }
 
 #: What each verb is for, in the words a model should recognise. Shown in the
@@ -472,6 +473,14 @@ VERB_HELP: dict[str, str] = {
         "Regenerate the application from its definition. The honest answer "
         "when a change is larger than a single screen."
     ),
+    "refresh_sample_data": (
+        "Rewrite the sample records a record type starts with, when they are "
+        "wrong: \"the sample areas pair Nepal with Uttar Pradesh\", \"make the "
+        "demo products real ones\", \"the sample data should only be India and "
+        "Sri Lanka\". Needs WHICH record type; `change` carries what they said. "
+        "The examples are re-authored row by row and exactly the old sample "
+        "rows in the running app are replaced; rows people entered stay."
+    ),
     "sync_app": (
         "Bring the running application back in step with its definition: the "
         "definition already says what the person is asking for, but they report "
@@ -564,6 +573,10 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'rebuild': (
         'rebuild everything',
         'generate the app',
+    ),
+    'refresh_sample_data': (
+        'the sample areas are wrong, make them real India and Sri Lanka ones',
+        'fix the demo data so each country has its own states',
     ),
     'sync_app': (
         'I still cannot see it in the menu',

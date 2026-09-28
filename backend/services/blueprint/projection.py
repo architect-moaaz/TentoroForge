@@ -2930,6 +2930,19 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = SEED_ROWS) -> dict
     (`services.smith.data_import`); the rows themselves are in the app's own
     database, never here.
     """
+    seed = seed_rows(doc, rows)
+    out = Path(app_root) / "src" / "db"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "seed.json").write_text(
+        json.dumps(seed, indent=2, sort_keys=True) + "\n", "utf-8")
+    return {"files": ["src/db/seed.json"], "tables": len(seed),
+            "rows": sum(len(v) for v in seed.values())}
+
+
+def seed_rows(doc: dict, rows: int = SEED_ROWS) -> dict[str, list[dict]]:
+    """The demo rows, by table — what `project_seed` writes, without writing
+    it. `services.smith.sample_data` compares the rows a definition seeds
+    before and after its examples change, to replace exactly those."""
     entities = [e for e in (doc.get("data") or {}).get("entities") or []
                 if e.get("status") != "DEPRECATED"]
     imported = {str(i.get("entity")) for i in ((doc.get("data") or {}).get("imports") or [])
@@ -2962,13 +2975,7 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = SEED_ROWS) -> dict
                 record[field.get("name")] = _seed_value(field, name, row, tables_by_id)
             out_rows.append(years_within_age(record, entity.get("fields") or []))
         seed[table] = out_rows
-
-    out = Path(app_root) / "src" / "db"
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "seed.json").write_text(
-        json.dumps(seed, indent=2, sort_keys=True) + "\n", "utf-8")
-    return {"files": ["src/db/seed.json"], "tables": len(seed),
-            "rows": sum(len(v) for v in seed.values())}
+    return seed
 
 
 # ---------------------------------------------------------------------------

@@ -663,6 +663,20 @@ sentences:
     source: code
     reaches: {verb: sync_app, states: []}
 
+  # -- The sample records ---------------------------------------------------
+
+  - id: refresh-sample-data-real-india-and-sri-lanka
+    say: "the sample areas are wrong, make them real India and Sri Lanka ones"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: code
+    reaches: {verb: refresh_sample_data, states: []}
+
+  - id: refresh-sample-data-each-country-its-own-states
+    say: "fix the demo data so each country has its own states"
+    checked: {colour: asks, via: none, missing: [entity]}
+    source: code
+    reaches: {verb: refresh_sample_data, states: []}
+
   # -- What it has cost to run ---------------------------------------------
 
   - id: spend-how-much-has-this-cost-me
