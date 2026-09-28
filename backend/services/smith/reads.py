@@ -220,6 +220,50 @@ def grep(output_dir: str, pattern: str, path: str = "", glob: str = "") -> str:
     return head + "\n" + "\n".join(scrub(h) for h in hits[:MAX_MATCHES])
 
 
+#: Rows one look shows. Enough to see a pattern in the data, few enough that
+#: an observation stays a page long.
+ROWS_SHOWN = 25
+
+
+def read_rows(doc: dict, output_dir: str, entity_ref: str) -> str:
+    """Rows of one record type, as the running application holds them.
+
+    Test2, 2026-09-28: "why do some areas have Nepal with Uttar Pradesh?" was
+    answered from the definition — the fields are plain text, so anything can
+    be typed — when the rows themselves showed the cause: Nepal is not one of
+    the app's countries, so nobody typed it; the sample data put it there.
+    A question about what the app shows is answered by looking at it.
+
+    The declared, non-sensitive fields only (the export's rule, for the same
+    reason: an observation is written to the conversation).
+    """
+    from services.blueprint.schema_push import database_url as app_database_url
+    from services.smith import data_export
+    from services.smith.data_import import database_url, entities_of
+    from services.smith.section_change import find_named
+
+    entities = entities_of(doc)
+    entity = find_named(entities, entity_ref, id_prefix="ENT-")
+    if entity is None:
+        names = ", ".join(str(e.get("name")) for e in entities) or "none"
+        raise ReadRefused(f"No record type called {entity_ref!r}. The app has: {names}.")
+    url = database_url(output_dir) or app_database_url(Path(output_dir) / "app")
+    if not url:
+        raise ReadRefused("The application's database is not running, so its rows cannot be read now.")
+    try:
+        sheet = data_export.one_sheet(doc, url, entity, limit=ROWS_SHOWN)
+    except data_export.ExportRefused as refused:
+        raise ReadRefused(str(refused)) from refused
+    except Exception as exc:  # noqa: BLE001 — a database that does not answer is an observation
+        raise ReadRefused(f"The database did not answer: {type(exc).__name__}: {str(exc)[:200]}") from exc
+    head = f"{sheet['entity']} ({sheet['table']}): {len(sheet['rows'])} row(s)"
+    if sheet["truncated"]:
+        head += f", the first {ROWS_SHOWN} shown"
+    if sheet["withheld"]:
+        head += f"; sensitive fields not shown: {', '.join(sheet['withheld'])}"
+    return scrub(head + "\n" + sheet["csv"])
+
+
 def read_section(doc: dict, name: str) -> str:
     """One section of the Blueprint, as JSON. Dotted names reach inside:
     `data.entities`, `navigation`, `pages`, `workflows`, `rules`,
@@ -374,6 +418,11 @@ READS: tuple[tuple[str, str, dict[str, str]], ...] = (
      "The React a page is written as — its `load.ts` and `view.tsx` — by route. "
      "This is what the screen actually runs.",
      {"route": "string"}),
+    ("read_rows",
+     "Rows of one record type as the running application holds them — up to "
+     f"{ROWS_SHOWN}, declared fields only. Look here before explaining what a "
+     "screen shows: where odd values came from is in the data.",
+     {"entity": "string"}),
     ("dependents",
      "What refers to an artifact and what it refers to: the pages a workflow "
      "is launched from, the entity a field belongs to, the rules on a page.",
@@ -402,6 +451,8 @@ def run(name: str, args: dict, *, output_dir: str, doc: dict) -> str:
             return find(doc, str(args.get("query") or ""))
         if name == "read_page_code":
             return read_page_code(doc, str(args.get("route") or ""))
+        if name == "read_rows":
+            return read_rows(doc, output_dir, str(args.get("entity") or ""))
         if name == "dependents":
             return dependents(doc, str(args.get("artifact_id") or ""))
     except ReadRefused as refused:
@@ -411,6 +462,6 @@ def run(name: str, args: dict, *, output_dir: str, doc: dict) -> str:
     raise KeyError(name)
 
 
-__all__ = ["READS", "READ_NAMES", "ReadRefused", "run", "read_file", "list_files",
+__all__ = ["READS", "READ_NAMES", "ReadRefused", "run", "read_file", "read_rows", "list_files",
            "grep", "read_section", "find", "read_page_code", "dependents",
            "MAX_LINES", "MAX_MATCHES", "SECRET_NAMES", "SKIP_DIRS"]

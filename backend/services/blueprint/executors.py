@@ -1357,6 +1357,14 @@ NODE_TASKS: dict[str, str] = {
         "this application's own world (for a reading list, real book titles; "
         "for a clinic, real-sounding clinic names), so the sample and demo data "
         "the pages are reviewed and shown with speak its language.\n\n"
+        "EXAMPLES ARE READ ROW BY ROW. The first example of every field of "
+        "this entity makes the first sample record, the second the second, and "
+        "so on. Fields whose values depend on each other — a place and the "
+        "region it is in, an item and its price, a person and their role — "
+        "give the same number of examples in the same order, so every sample "
+        "record is true as a whole, and every value stays inside the scope the "
+        "requirements set (the places, kinds and ranges this application is "
+        "for, not their neighbours).\n\n"
         "Author the fields of ONE entity, the one given below. Its `name` and "
         "`table` are decided and every other entity is named beside it; keep "
         "them exactly as given and return exactly one entry in `entities`, "
@@ -2549,7 +2557,8 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                 "examples": {
                                     "type": "array", "items": {"type": "string"},
                                     "description": ("Six to eight realistic, distinct values of a text field people read "
-                                                    "(a title, a name) in this application's own world."),
+                                                    "(a title, a name) in this application's own world. Example k of "
+                                                    "every field together is sample record k."),
                                 },
                                 "embedding": {
                                     "type": "object",

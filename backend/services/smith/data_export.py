@@ -191,7 +191,7 @@ def _stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def one_sheet(doc: dict, url: str, entity: dict) -> dict:
+def one_sheet(doc: dict, url: str, entity: dict, *, limit: int = MAX_ROWS) -> dict:
     """One entity's rows as a sheet, plus what it left out and why."""
     table = table_of(entity)
     fields = exported_fields(entity)
@@ -220,7 +220,7 @@ def one_sheet(doc: dict, url: str, entity: dict) -> dict:
             f"a sheet. The database is older than the definition — start the "
             f"app once so its tables catch up.")
 
-    rows = read_rows(url, table, [a for _, a in use])
+    rows = read_rows(url, table, [a for _, a in use], limit)
     renamed = [{declared: row.get(actual) for declared, actual in use} for row in rows]
     return {
         "entity": str(entity.get("name") or ""), "table": table,
@@ -228,7 +228,7 @@ def one_sheet(doc: dict, url: str, entity: dict) -> dict:
         "csv": to_csv([d for d, _ in use], renamed),
         "withheld": withheld(entity),
         "missing": [n for n in wanted if n not in {d for d, _ in use}],
-        "truncated": len(rows) >= MAX_ROWS,
+        "truncated": len(rows) >= limit,
     }
 
 
