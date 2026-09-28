@@ -472,10 +472,24 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
     for proposal in proposals:
         name = proposal.body.get("name") or proposal.natural_key
         problems.extend(f"{name}/{e}" for e in catalog.workflow_errors(proposal.body))
+    # A LOOP'S STEPS ARE STEPS: its shape, then each inner action against the
+    # catalog like any other, then (below) every check on the laid-out body.
+    from services.blueprint.functional_completeness import loop_step_errors, with_loop_bodies
+    for proposal in proposals:
+        problems.extend(loop_step_errors(proposal.body))
+        name = proposal.body.get("name") or proposal.natural_key
+        for st in proposal.body.get("steps") or []:
+            cfg = (st or {}).get("config") or {} if isinstance(st, dict) else {}
+            if cfg.get("actionType") != "for_each":
+                continue
+            for inner in cfg.get("steps") or []:
+                if isinstance(inner, dict) and isinstance(inner.get("config"), dict):
+                    problems.extend(f"{name}/{st.get('key')}/{inner.get('key')}: {e}" for e in
+                                    catalog.step_errors({"type": "action", "config": inner["config"]}))
     # A TOOL STEP NAMES A SERVER THAT EXISTS, A TOOL IT HAS, AND ITS INPUTS.
     from services.blueprint.mcp_catalog import workflow_errors as mcp_errors
     for proposal in proposals:
-        problems.extend(mcp_errors(proposal.body, mcp_servers))
+        problems.extend(mcp_errors(with_loop_bodies(proposal.body), mcp_servers))
     # WOULD THE ENGINE RUN IT. A step whose condition the engine's parser
     # refuses, a function the engine lacks, a template naming what the engine
     # never holds — each is a workflow the author can fix now and nobody can

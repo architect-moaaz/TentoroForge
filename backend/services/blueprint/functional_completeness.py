@@ -27,6 +27,7 @@ not composed correctly, and the composer is the thing that should hear about it.
 from __future__ import annotations
 
 import functools
+import json
 import re
 from typing import Any, Iterator
 
@@ -853,11 +854,64 @@ def platform_write_findings(doc: dict) -> list[dict]:
     return out
 
 
+def with_loop_bodies(workflow: dict) -> dict:
+    """The workflow as its checks read it: each `for_each` step followed by
+    the item's name (as a variable) and its inner steps, in order. The engine
+    runs those steps once per item with the item and each earlier inner
+    output in scope, which is exactly what a step after the loop sees here —
+    so every check (templates, inserts, columns, formulas, MCP) holds the
+    inner steps to the same rules as any other."""
+    steps: list = []
+    for st in workflow.get("steps") or []:
+        if not isinstance(st, dict):
+            steps.append(st)
+            continue
+        cfg = st.get("config") or {}
+        if cfg.get("actionType") != "for_each":
+            steps.append(st)
+            continue
+        steps.append({**st, "config": {k: v for k, v in cfg.items() if k != "steps"}})
+        name = str(cfg.get("as") or "item")
+        for var in (name, f"{name}Index"):
+            steps.append({"key": f"__{st.get('key')}_{var}", "type": "action",
+                          "config": {"actionType": "set_variable", "variableName": var}})
+        for inner in cfg.get("steps") or []:
+            if isinstance(inner, dict):
+                steps.append({"type": "action", "name": inner.get("name") or inner.get("key"),
+                              **inner, "key": inner.get("key")})
+    return {**workflow, "steps": steps}
+
+
+def loop_step_errors(workflow: dict) -> list[str]:
+    """What is wrong with a `for_each` step's own shape."""
+    out: list[str] = []
+    name = workflow.get("name") or workflow.get("id") or "workflow"
+    for st in workflow.get("steps") or []:
+        cfg = (st or {}).get("config") or {} if isinstance(st, dict) else {}
+        if cfg.get("actionType") != "for_each":
+            continue
+        key = st.get("key")
+        inner = cfg.get("steps")
+        if not isinstance(inner, list) or not inner:
+            out.append(f"{name}/{key}: a for_each runs `steps`, a list of {{key, config}} actions — it has none")
+            continue
+        for s in inner:
+            c = (s or {}).get("config") if isinstance(s, dict) else None
+            if not isinstance(s, dict) or not s.get("key") or not isinstance(c, dict) or not c.get("actionType"):
+                out.append(f"{name}/{key}: each step it runs is {{key, config}} with a `config.actionType` — "
+                           f"got {json.dumps(s)[:120]}")
+            elif c.get("actionType") == "for_each":
+                out.append(f"{name}/{key}: a for_each inside a for_each is not run — flatten it")
+    return out
+
+
 def authoring_findings(doc: dict) -> list[dict]:
     """What the engine would refuse in a workflow or rule as written — the
     author's refusals. Kept apart from :func:`page_findings` because a page
     composer cannot fix a workflow: on 2026-09-05 one workflow's `concat(...)`
     refused seven pages that had nothing to do with it."""
+    doc = {**doc, "workflows": [with_loop_bodies(w) if isinstance(w, dict) else w
+                                for w in doc.get("workflows") or []]}
     out: list[dict] = []
     out.extend(rule_findings(doc))
     out.extend(expression_findings(doc))

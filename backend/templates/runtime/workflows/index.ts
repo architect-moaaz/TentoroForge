@@ -1115,6 +1115,21 @@ export function registerDefaultActions(): void {
         if (rs.errors.length) return { error: rs.errors.join("; ") };
         Object.assign(raw, rs.patches);
       } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
+      // FIND, OR CREATE. `findBy` names the columns that identify the record
+      // (a merchant by its domain); a row that already has those values is
+      // the step's output and nothing is inserted — so the same merchant met
+      // on two listings is one merchant, not a unique-key failure.
+      const findBy = Array.isArray((config as any).findBy) ? ((config as any).findBy as string[]) : [];
+      if (findBy.length && findBy.every((k) => raw[k] !== undefined && raw[k] !== null && raw[k] !== "")
+          && findBy.every((k) => (table as any)[k] !== undefined)) {
+        const cond = and(...findBy.map((k) => eq((table as any)[k], raw[k] as any)));
+        const [existing] = await (db as any).select().from(table).where(cond).limit(1);
+        if (existing) {
+          const nid = (config as any).__nodeId;
+          if (nid) ctx.variables[nid] = existing;
+          return { ...(existing as Record<string, unknown>), inserted: existing, found: true };
+        }
+      }
       const values = _finalizeInsert(table, raw, ctx);
       const rows = await (db as any).insert(table).values(values).returning();
       const row = Array.isArray(rows) ? rows[0] : rows;
@@ -1145,6 +1160,62 @@ export function registerDefaultActions(): void {
       });
       return { error: String(err) };
     }
+  });
+
+  // FOR EACH ITEM, THESE STEPS. The engine had no way to do something once
+  // per record: SnapIT's listings each need a merchant, a merchant product
+  // pointing at it, and a search result pointing at both, and a list insert
+  // writes one table without carrying each new id to the next (2026-09-29).
+  // Config: `items` (a list, or a step output holding one), `as` (the name
+  // each item goes by, default `item`), `steps` (actions run in order per
+  // item; each output is `{{<step key>.<field>}}` for the steps after it).
+  // An item whose step fails stops there and is reported; the rest go on.
+  registerActionHandler("for_each", async (config, ctx) => {
+    const cfg = config as any;
+    let list: unknown = typeof cfg.items === "string" ? _resolveRef(cfg.items, ctx) : cfg.items;
+    if (list && !Array.isArray(list) && typeof list === "object") {
+      for (const k of ["items", "rows", "data", "output", "result", "results"]) {
+        const inner = (list as Record<string, unknown>)[k];
+        if (Array.isArray(inner)) { list = inner; break; }
+      }
+    }
+    const items = Array.isArray(list) ? list : [];
+    const as = String(cfg.as || "item");
+    const steps = (Array.isArray(cfg.steps) ? cfg.steps : []).filter((s: any) => s && typeof s === "object");
+    const limit = Math.max(0, Math.min(Number(cfg.maxItems ?? 200) || 200, 500));
+    const names = [as, `${as}Index`, ...steps.map((s: any) => String(s.key || ""))].filter(Boolean);
+    const before: Record<string, unknown> = {};
+    for (const n of names) if (n in ctx.variables) before[n] = ctx.variables[n];
+    const results: Record<string, unknown>[] = [];
+    const errors: { index: number; step: string; error: string }[] = [];
+    for (const [index, item] of items.slice(0, limit).entries()) {
+      ctx.variables[as] = item;
+      ctx.variables[`${as}Index`] = index;
+      const outputs: Record<string, unknown> = { index };
+      for (const step of steps) {
+        const key = String(step.key || "");
+        const stepCfg = { ...(step.config || {}), __nodeId: key };
+        const handler = getActionHandler(String(stepCfg.actionType || ""));
+        if (!handler) {
+          errors.push({ index, step: key, error: `no action ${stepCfg.actionType}` });
+          break;
+        }
+        const out = await handler(stepCfg as any, ctx);
+        if (key) ctx.variables[key] = out;
+        outputs[key] = out;
+        const err = out && typeof out === "object" ? (out as any).error : undefined;
+        if (err) { errors.push({ index, step: key, error: String(err) }); break; }
+      }
+      results.push(outputs);
+    }
+    // The loop's names are its own; what the workflow held before comes back.
+    for (const n of names) {
+      if (n in before) ctx.variables[n] = before[n];
+      else delete ctx.variables[n];
+    }
+    return { count: results.length, done: results.length - errors.length, failed: errors.length,
+             errors, results, output: results,
+             ...(items.length > limit ? { notice: `Only the first ${limit} of ${items.length} were processed.` } : {}) };
   });
 
   registerActionHandler("db_update", async (config, ctx) => {

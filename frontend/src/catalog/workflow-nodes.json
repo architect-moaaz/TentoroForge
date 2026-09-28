@@ -369,6 +369,26 @@
           }
         },
         {
+          "key": "for_each",
+          "label": "For Each",
+          "icon": "Repeat",
+          "gradient": "bg-gradient-to-br from-sky-400 to-blue-600",
+          "description": "Run steps once per item of a list — items: the list (\"{{extract_listings.output}}\"), as: the item's name, steps: [{key, config}] actions run in order per item, each output read by the steps after it as {{key.field}}",
+          "config": {
+            "required": [
+              [
+                "items"
+              ],
+              [
+                "steps"
+              ]
+            ],
+            "defaults": {
+              "as": "item"
+            }
+          }
+        },
+        {
           "key": "emit_event",
           "label": "Emit Event",
           "icon": "Zap",
