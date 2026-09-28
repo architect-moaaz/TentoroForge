@@ -36,6 +36,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
         from services.smith.move_dispatcher import move_dispatcher
         move = move_dispatcher
     typed = (message or "").strip()
+    version_before = _version(output_dir)
 
     def ctx_for(ask: str) -> Ctx:
         return Ctx(output_dir=str(output_dir), project_id=str(project_id), message=typed,
@@ -51,7 +52,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
     # turn; the run stops at the first that asks something or cannot be done,
     # and at a time budget, and says what is still to do either way.
     if plan_mod.peek(output_dir) and typed == plan_mod.ALL_LABEL:
-        return _in_step(output_dir, _all_steps(output_dir, lambda step: turn(
+        return _in_step(output_dir, version_before, _all_steps(output_dir, lambda step: turn(
             ctx_for(step), choose=choose, history=history, max_steps=max_steps)))
     # AGREED, SO DO THE FIRST ONE NOW.
     if plan_mod.peek(output_dir) and (plan_mod.wants_next(typed)
@@ -65,7 +66,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
             note = plan_mod.remaining_note(plan_mod.peek(output_dir))
             if note and result.status == "resolved":
                 result.said += note
-            return _in_step(output_dir, result)
+            return _in_step(output_dir, version_before, result)
     # AGREED, SO LOAD THEM NOW — under the mapping that was shown.
     from services.smith import data_import
     if data_import.wants(data_import.peek(output_dir), typed):
@@ -84,10 +85,21 @@ def handle(*, project_id: str, output_dir: str, message: str,
         note = plan_mod.remaining_note(plan_mod.peek(output_dir))
         if note and note.strip() not in result.said:
             result.said += note
-    return _in_step(output_dir, result)
+    return _in_step(output_dir, version_before, result)
 
 
-def _in_step(output_dir: str, result: Outcome) -> Outcome:
+def _version(output_dir: str) -> int:
+    """The Blueprint's version — every change commits and moves it."""
+    import json
+    from pathlib import Path
+    try:
+        doc = json.loads((Path(output_dir) / ".forge" / "blueprint" / "current.json").read_text("utf-8"))
+        return int(doc.get("version") or 0)
+    except (OSError, ValueError, TypeError):
+        return 0
+
+
+def _in_step(output_dir: str, version_before: int, result: Outcome) -> Outcome:
     """A turn that changed the application leaves it in step with its
     definition — every generated file and the database schema.
 
@@ -104,7 +116,10 @@ def _in_step(output_dir: str, result: Outcome) -> Outcome:
     # on the rest ("I could not turn that into a change I am sure of") still
     # changed the application; it was left out of step exactly when it most
     # needed not to be (Test2, 2026-09-28).
-    if not result.touched:
+    # Files named, or the definition moved: a code rewrite reports no files
+    # (its commit list comes back empty), and its version is what says it
+    # landed.
+    if not result.touched and _version(output_dir) == version_before:
         return result
     from pathlib import Path
 

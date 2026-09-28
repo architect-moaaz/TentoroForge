@@ -191,12 +191,34 @@ def test_a_turn_that_changed_the_app_leaves_it_in_step_with_its_definition(tmp_p
     synced = []
     monkeypatch.setattr(sync_app, "sync", lambda svc, app_root: synced.append(app_root) or
                         {"changed": ["src/lib/data-init.ts"], "added": [], "removed": []})
-    out = _in_step(str(tmp_path), Outcome(status="resolved", said="Rewrote it.", touched=["src/app/x/view.tsx"]))
+    out = _in_step(str(tmp_path), 0, Outcome(status="resolved", said="Rewrote it.", touched=["src/app/x/view.tsx"]))
     assert synced == [str(tmp_path / "app")]
     assert out.touched == ["src/app/x/view.tsx", "src/lib/data-init.ts"]
-    _in_step(str(tmp_path), Outcome(status="asked", said="Which one?"))
-    _in_step(str(tmp_path), Outcome(status="resolved", said="Nothing to change."))
+    _in_step(str(tmp_path), 0, Outcome(status="asked", said="Which one?"))
+    _in_step(str(tmp_path), 0, Outcome(status="resolved", said="Nothing to change."))
     assert len(synced) == 1, "a question, or a turn that changed nothing, writes nothing"
     # A turn that changed a page and then gave up on the rest still changed it.
-    _in_step(str(tmp_path), Outcome(status="needs_user", said="I could not…", touched=["src/app/x/view.tsx"]))
+    _in_step(str(tmp_path), 0, Outcome(status="needs_user", said="I could not…", touched=["src/app/x/view.tsx"]))
     assert len(synced) == 2
+
+
+def test_a_turn_whose_change_reported_no_files_is_still_brought_in_step(tmp_path, monkeypatch):
+    """A code rewrite reports no files — its commit list comes back empty —
+    and the definition's version is what says it landed."""
+    import json
+    from services.smith import sync_app
+    from services.smith4.handle import _in_step
+    from services.smith4.outcome import Outcome
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app/package.json").write_text("{}")
+    (tmp_path / ".forge/blueprint").mkdir(parents=True)
+    (tmp_path / ".forge/blueprint/current.json").write_text(json.dumps({"version": 53}))
+    monkeypatch.setattr("services.blueprint.service.BlueprintService.load",
+                        classmethod(lambda cls, output_dir: object()))
+    synced = []
+    monkeypatch.setattr(sync_app, "sync", lambda svc, app_root: synced.append(1) or
+                        {"changed": [], "added": [], "removed": []})
+    _in_step(str(tmp_path), 52, Outcome(status="resolved", said="Rewrote /x (version 53)."))
+    assert synced == [1]
+    _in_step(str(tmp_path), 53, Outcome(status="resolved", said="Nothing changed."))
+    assert synced == [1]
