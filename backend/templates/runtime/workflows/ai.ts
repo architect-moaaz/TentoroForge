@@ -339,9 +339,16 @@ export async function aiExtract(config: NodeConfig, ctx: WorkflowExecutionContex
   const fields = extractFieldNames(c.aiExtractFields);
   const fieldList = fields.length ? fields : ["name", "email", "phone"];
   const extra = resolveString(c.aiPrompt ?? "", vars);
+  // ONE RECORD, OR EVERY ONE. Search results hold many listings; extracted as
+  // a single object, SnapIT kept one listing of twenty-five and its "persist"
+  // step had nothing to save row by row (2026-09-29). `aiExtractMany` asks
+  // for an array, which a db_insert then writes one row per item.
+  const many = c.aiExtractMany === true || c.aiExtractMany === "true";
   const system = c.aiSystemPrompt
     ? resolveString(c.aiSystemPrompt, vars)
-    : `You are a precise data-extraction assistant. Extract EXACTLY these fields from the input and respond with a SINGLE JSON object whose keys are exactly: [${fieldList.join(", ")}]. Use null when a field is absent. No commentary.`;
+    : many
+      ? `You are a precise data-extraction assistant. Find EVERY record in the input and respond with a JSON ARRAY of objects, one per record, each with keys exactly: [${fieldList.join(", ")}]. Use null when a field is absent. An input with no records is []. No commentary.`
+      : `You are a precise data-extraction assistant. Extract EXACTLY these fields from the input and respond with a SINGLE JSON object whose keys are exactly: [${fieldList.join(", ")}]. Use null when a field is absent. No commentary.`;
   const user =
     [extra, text && `Input:\n${text}`].filter(Boolean).join("\n\n") ||
     (docs.length ? "Extract the fields from the attached document." : "Extract the fields.");
@@ -349,9 +356,14 @@ export async function aiExtract(config: NodeConfig, ctx: WorkflowExecutionContex
     system,
     user,
     model: await aiModel(c),
-    maxTokens: num(c.aiMaxTokens, 2048),
+    maxTokens: num(c.aiMaxTokens, many ? 8192 : 2048),
     documents: docs,
   });
+  if (many) {
+    const list = raw ? parseJsonArray(raw) : [mockExtract(fieldList)];
+    const items = list.filter((x) => x && typeof x === "object" && !Array.isArray(x)) as Record<string, unknown>[];
+    return { data: items, items, count: items.length, extracted: items, output: items };
+  }
   const parsed = raw ? parseJson(raw) ?? {} : mockExtract(fieldList);
   // Expose each extracted field as a top-level process variable so a downstream
   // db_insert/db_update can bind it directly (values: { column: "{{field}}" }).
@@ -392,6 +404,23 @@ export async function aiDecide(config: NodeConfig, ctx: WorkflowExecutionContext
     rationale: reasoning,
     output: decision,
   };
+}
+
+/** A JSON array from a model's reply — bare, fenced, or the first `[…]` in it. */
+function parseJsonArray(raw: string): unknown[] {
+  const text = String(raw).trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  for (const candidate of [text, text.slice(text.indexOf("["), text.lastIndexOf("]") + 1)]) {
+    try {
+      const v = JSON.parse(candidate);
+      if (Array.isArray(v)) return v;
+      if (v && typeof v === "object") {
+        for (const k of ["items", "records", "data", "results"]) {
+          if (Array.isArray((v as Record<string, unknown>)[k])) return (v as Record<string, unknown[]>)[k];
+        }
+      }
+    } catch { /* try the next shape */ }
+  }
+  return [];
 }
 
 function mockExtract(fields: string[]): Record<string, unknown> {

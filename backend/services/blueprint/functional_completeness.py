@@ -1731,9 +1731,10 @@ def expression_findings(doc: dict) -> list[dict]:
                                   f"workflow's variables, and the engine cannot parse {expr[:160]!r} — "
                                   f"{errors[i]}. Code is never instructions in words: work described in "
                                   f"words (writing a query, reading fields out of pages, scoring a match) "
-                                  f"is an `ai_generate` or `ai_extract` step; saving many rows is one "
-                                  f"`db_insert` whose value is the list (one row per item); a value worked "
-                                  f"out from others is a formula such as `count(listings) > 0`."})
+                                  f"is an `ai_generate` or `ai_extract` step; many records at once are an "
+                                  f"`ai_extract` with `aiExtractMany: true`, saved by one `db_insert` whose "
+                                  f"`values` carry that whole list (one row per item); a value worked out "
+                                  f"from others is a formula such as `count(listings) > 0`."})
             continue
         if i in errors:
             out.append({"rule": "expression-invalid", "page": i.split("/")[0],
@@ -1827,6 +1828,27 @@ def _entity_for_table(doc: dict, table: str | None) -> dict | None:
     return None
 
 
+_WHOLE_REF = re.compile(r"^\s*\{\{\s*([A-Za-z_][\w]*)(?:\.(output|data|items|extracted))?\s*\}\}\s*$")
+
+
+def list_source(wf: dict, value: Any) -> list[str] | None:
+    """The fields each item carries, when `value` is the whole list an
+    `ai_extract` step with `aiExtractMany` returns — the engine then writes one
+    row per item, the item's fields beside the insert's other values. None when
+    it is anything else."""
+    if not isinstance(value, str):
+        return None
+    m = _WHOLE_REF.match(value)
+    if not m:
+        return None
+    step = next((s for s in wf.get("steps") or [] if isinstance(s, dict) and s.get("key") == m.group(1)), None)
+    cfg = (step or {}).get("config") or {}
+    if (step or {}).get("type") != "ai_extract" or cfg.get("aiExtractMany") not in (True, "true"):
+        return None
+    fields = cfg.get("aiExtractFields") or []
+    return [str(f.get("name") if isinstance(f, dict) else f) for f in fields if f]
+
+
 def insert_findings(doc: dict) -> list[dict]:
     out: list[dict] = []
     for wf in _live(doc.get("workflows")):
@@ -1840,7 +1862,10 @@ def insert_findings(doc: dict) -> list[dict]:
             if entity is None:
                 continue
             values = cfg.get("values") if isinstance(cfg.get("values"), dict) else {}
-            given = {str(k) for k in values}
+            # A LIST WRITES A ROW PER ITEM, and each item brings its fields.
+            listed = {k: list_source(wf, v) for k, v in values.items()}
+            given = {str(k) for k, f in listed.items() if f is None}
+            given |= {f for fields in listed.values() if fields for f in fields}
             missing = [f["name"] for f in entity.get("fields") or []
                        if f.get("required") and not f.get("primaryKey") and f.get("name") not in given
                        and not (f.get("references") and f["name"] in ("createdById", "updatedById"))]
@@ -1888,7 +1913,9 @@ def column_findings(doc: dict) -> list[dict]:
             for key in ("values", "where"):
                 block = cfg.get(key)
                 if isinstance(block, dict):
-                    columns |= {str(k) for k in block}
+                    # The key that carries a list of rows names no column.
+                    columns |= {str(k) for k, v in block.items()
+                                if not (key == "values" and list_source(wf, v) is not None)}
             unknown = sorted(
                 c for c in columns
                 if c not in fields and c.lower().replace("_", "") not in _SYSTEM_COLUMNS

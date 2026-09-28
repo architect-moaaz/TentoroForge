@@ -762,7 +762,7 @@
       "label": "AI Extract",
       "icon": "ScanText",
       "gradient": "bg-gradient-to-br from-fuchsia-500 to-fuchsia-700",
-      "description": "Extract structured data",
+      "description": "Extract structured data (aiExtractFields) — one record, or with aiExtractMany: true a list of every record, which a db_insert writes one row per item",
       "handles": {
         "in": true,
         "out": true,
