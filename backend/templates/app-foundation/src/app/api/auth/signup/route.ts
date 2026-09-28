@@ -102,7 +102,21 @@ export async function POST(request: Request) {
         } as any)
         .returning();
       if (ACCOUNT && accountTable && account.values) {
-        await tx.insert(accountTable).values({ ...account.values, id: created.id });
+        if ((accountTable as unknown) === (users as unknown)) {
+          // THE PERSON'S RECORD IS THE LOGIN'S OWN ROW. An account entity on
+          // the platform's `users` table (SnapIT's "User") folds into it; a
+          // second insert into that table wrote a row with no password and
+          // every signup failed (2026-09-29). The row just made is completed
+          // with the columns the table has — a field folded into a platform
+          // column (displayName → name) is already there.
+          const own: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(account.values)) {
+            if (k in (users as any) && !["id", "email", "password"].includes(k)) own[k] = v;
+          }
+          if (Object.keys(own).length) await tx.update(users).set(own as any).where(eq(users.id, created.id));
+        } else {
+          await tx.insert(accountTable).values({ ...account.values, id: created.id });
+        }
       }
       return created;
     });

@@ -36,7 +36,7 @@ installHarness({
     "./ai": "export const registerAIActions = () => {};",
     "./ocr": "export const registerOcrActions = () => {};",
     "../events/emit-node": "export const makeEmitEventHandler = () => async () => ({});",
-    "../feel-lite": "export const evaluateExpression = () => null;",
+    "../feel-lite": "export const evaluateExpression = (e, v) => e === 'listing.price != null' ? v.listing?.price != null : null;",
     "./types": noop,
     fs: "export const promises = {}; export default { promises };",
     path: "export default { join: (...a) => a.join('/'), resolve: (...a) => a.join('/') }; export const join = (...a) => a.join('/');",
@@ -88,5 +88,14 @@ ok(!("merchant" in ctx.variables), "and an inner step's output does not leak pas
 
 const none = await h.for_each({ ...config, items: "{{nothing}}" }, { user: {}, variables: {} });
 eqJson([none.count, none.failed], [0, 0], "no list is no work, never a crash");
+
+rows.merchants.length = 0; rows.merchant_products.length = 0; rows.search_results.length = 0;
+const priced: any = { user: {}, variables: { create_search: { id: "search-2" }, extract_listings: { output: [
+  { domain: "a.example", seller: "A", title: "One", url: "https://a.example/1", matchScore: 0.9, price: 100 },
+  { domain: "b.example", seller: "B", title: "Category page", url: "https://b.example/all", matchScore: 0.3, price: null },
+] } } };
+const kept = await h.for_each({ ...config, where: "listing.price != null" }, priced);
+eqJson([kept.count, kept.skipped, kept.failed], [1, 1, 0], "an item the where rejects is skipped, not failed");
+eqJson(rows.merchant_products.map((r: any) => r.url), ["https://a.example/1"], "and nothing of it is saved");
 
 done("for_each carries each id forward");

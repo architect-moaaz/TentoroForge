@@ -1753,6 +1753,8 @@ def _expressions(doc: dict) -> list[tuple[str, str, str]]:
                                 f"{wf.get('name') or wf.get('id')}, step {step.get('key') or step.get('id')!r}",
                                 code))
                 continue
+            if not (isinstance(expr, str) and expr.strip()) and cfg.get("actionType") == "for_each":
+                expr = cfg.get("where")
             if isinstance(expr, str) and expr.strip():
                 out.append((f"workflow#{n}/{step.get('key') or step.get('id') or m}",
                             f"{wf.get('name') or wf.get('id')}, step {step.get('key') or step.get('id')!r}", expr))

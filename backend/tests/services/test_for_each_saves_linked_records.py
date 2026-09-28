@@ -107,3 +107,22 @@ def test_the_author_is_told_when_to_loop_and_how_to_find_or_create():
     from services.blueprint.executors import NODE_TASKS
     text = NODE_TASKS["workflow_steps"]
     assert "it is one `for_each` action" in text and "`findBy: [the columns that identify it]`" in text
+
+
+def test_a_where_that_does_not_parse_is_named():
+    flow = _flow()
+    flow["steps"][3]["config"]["where"] = "listing.price != null and"
+    assert any("save_listings" in f["detail"] and "cannot parse" in f["detail"]
+               for f in authoring_findings(_doc(flow)))
+    flow["steps"][3]["config"]["where"] = "listing.price != null"
+    assert authoring_findings(_doc(flow)) == []
+
+
+def test_signup_completes_the_login_row_when_the_account_lives_in_it():
+    """SnapIT's account entity is "User" on the platform's `users` table; a
+    second insert there had no password and every signup failed."""
+    from pathlib import Path
+    route = (Path(__file__).resolve().parents[2] / "templates/app-foundation/src/app/api/auth/signup/route.ts").read_text()
+    assert "(accountTable as unknown) === (users as unknown)" in route
+    assert "tx.update(users).set(own as any).where(eq(users.id, created.id))" in route
+    assert '!["id", "email", "password"].includes(k)' in route

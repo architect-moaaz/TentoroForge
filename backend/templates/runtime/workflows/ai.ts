@@ -338,7 +338,8 @@ export async function aiExtract(config: NodeConfig, ctx: WorkflowExecutionContex
   }
   const fields = extractFieldNames(c.aiExtractFields);
   const fieldList = fields.length ? fields : ["name", "email", "phone"];
-  const extra = resolveString(c.aiPrompt ?? "", vars);
+  // What the author said to look for, under whichever name it wrote it.
+  const extra = resolveString(c.aiPrompt ?? c.prompt ?? c.instruction ?? c.instructions ?? "", vars);
   // ONE RECORD, OR EVERY ONE. Search results hold many listings; extracted as
   // a single object, SnapIT kept one listing of twenty-five and its "persist"
   // step had nothing to save row by row (2026-09-29). `aiExtractMany` asks
@@ -356,7 +357,7 @@ export async function aiExtract(config: NodeConfig, ctx: WorkflowExecutionContex
     system,
     user,
     model: await aiModel(c),
-    maxTokens: num(c.aiMaxTokens, many ? 8192 : 2048),
+    maxTokens: num(c.aiMaxTokens, many ? 16000 : 2048),
     documents: docs,
   });
   if (many) {
@@ -374,8 +375,12 @@ export async function aiExtract(config: NodeConfig, ctx: WorkflowExecutionContex
       if (k && !reserved.has(k)) (ctx.variables as Record<string, unknown>)[k] = v;
     }
   }
-  // Include contract-declared `data` alongside legacy names.
-  return { data: parsed, extracted_fields: parsed, extracted: parsed, output: parsed };
+  // Include contract-declared `data` alongside legacy names — and each field
+  // on the step itself, so `{{extract_profile.brand}}` reads the brand the
+  // way `{{insert_case.id}}` reads an inserted row's id. SnapIT's product
+  // was saved with no name because only `.data.brand` held it (2026-09-29).
+  const own = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  return { ...own, data: parsed, extracted_fields: parsed, extracted: parsed, output: parsed };
 }
 
 export async function aiDecide(config: NodeConfig, ctx: WorkflowExecutionContext): Promise<Record<string, unknown>> {
@@ -406,8 +411,11 @@ export async function aiDecide(config: NodeConfig, ctx: WorkflowExecutionContext
   };
 }
 
-/** A JSON array from a model's reply — bare, fenced, or the first `[…]` in it. */
-function parseJsonArray(raw: string): unknown[] {
+/** A JSON array from a model's reply — bare, fenced, or the first `[…]` in it;
+ *  and when the reply was cut off mid-list, every record that was finished.
+ *  SnapIT's listing extraction ran out of room on the 13th listing and the
+ *  unparseable remainder cost all twelve before it (2026-09-29). */
+export function parseJsonArray(raw: string): unknown[] {
   const text = String(raw).trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
   for (const candidate of [text, text.slice(text.indexOf("["), text.lastIndexOf("]") + 1)]) {
     try {
@@ -420,7 +428,34 @@ function parseJsonArray(raw: string): unknown[] {
       }
     } catch { /* try the next shape */ }
   }
-  return [];
+  return finishedRecords(text);
+}
+
+/** The complete top-level `{…}` objects of a list that never closed. */
+function finishedRecords(text: string): unknown[] {
+  const start = text.indexOf("[");
+  if (start === -1) return [];
+  const out: unknown[] = [];
+  let depth = 0, from = -1, inString = false, escaped = false;
+  for (let i = start + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") { if (depth === 0) from = i; depth++; }
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0 && from !== -1) {
+        try { out.push(JSON.parse(text.slice(from, i + 1))); } catch { /* a broken record is skipped */ }
+        from = -1;
+      }
+    } else if (ch === "]" && depth === 0) break;
+  }
+  return out;
 }
 
 function mockExtract(fields: string[]): Record<string, unknown> {

@@ -1188,9 +1188,19 @@ export function registerDefaultActions(): void {
     for (const n of names) if (n in ctx.variables) before[n] = ctx.variables[n];
     const results: Record<string, unknown>[] = [];
     const errors: { index: number; step: string; error: string }[] = [];
+    // `where`: a FEEL condition over the item — the items it rejects are
+    // skipped, not failed (a search result with no price is not a product
+    // offered for sale, and saving it would only fail on the price).
+    const where = typeof cfg.where === "string" && cfg.where.trim() ? cfg.where : "";
+    let skipped = 0;
     for (const [index, item] of items.slice(0, limit).entries()) {
       ctx.variables[as] = item;
       ctx.variables[`${as}Index`] = index;
+      if (where) {
+        let keep = false;
+        try { keep = !!evaluateExpression(where, ctx.variables as Record<string, unknown>); } catch { keep = false; }
+        if (!keep) { skipped++; continue; }
+      }
       const outputs: Record<string, unknown> = { index };
       for (const step of steps) {
         const key = String(step.key || "");
@@ -1213,7 +1223,7 @@ export function registerDefaultActions(): void {
       if (n in before) ctx.variables[n] = before[n];
       else delete ctx.variables[n];
     }
-    return { count: results.length, done: results.length - errors.length, failed: errors.length,
+    return { count: results.length, done: results.length - errors.length, failed: errors.length, skipped,
              errors, results, output: results,
              ...(items.length > limit ? { notice: `Only the first ${limit} of ${items.length} were processed.` } : {}) };
   });
@@ -1395,8 +1405,14 @@ export function registerDefaultActions(): void {
       if (textBlocks) {
         try { parsed = JSON.parse(textBlocks); } catch { parsed = textBlocks; }
       }
+      // `output` and `data` beside `result`: a step reads the one before it as
+      // `{{search.output}}`, as it does every other step's, and SnapIT's
+      // listing extraction read nothing from a Firecrawl search that had
+      // answered (2026-09-29).
       return {
         result: parsed,
+        output: parsed,
+        data: parsed,
         text: textBlocks,
         isError: !!result?.isError,
         raw: result,

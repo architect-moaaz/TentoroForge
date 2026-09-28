@@ -30,6 +30,10 @@ g.__forgeStubResponse = '{"results":[{"title":"Only one","url":"https://c"}]}';
 out = await aiExtract({ aiExtractMany: true, aiExtractFields: fields, aiInput: "{{crawl}}" } as any, ctx());
 eq(out.output, [{ title: "Only one", url: "https://c" }], "a list wrapped in an object is still read");
 
+g.__forgeStubResponse = '[{"title":"One","url":"https://a","note":"has } and { and \\" inside"},{"title":"Two","url":"https://b"},{"title":"Thr';
+out = await aiExtract({ aiExtractMany: true, aiExtractFields: fields, aiInput: "{{crawl}}" } as any, ctx());
+eq(out.output.map((r: any) => r.title), ["One", "Two"], "a reply cut off mid-list keeps every record that was finished");
+
 g.__forgeStubResponse = "no listings here";
 out = await aiExtract({ aiExtractMany: "true", aiExtractFields: fields, aiInput: "{{crawl}}" } as any, ctx());
 eq(out.output, [], "a reply with no list is an empty list, never a crash");
