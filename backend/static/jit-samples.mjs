@@ -5,7 +5,10 @@ const WORDS = ["Quarterly review", "Site visit", "Renewal", "Onboarding", "Follo
 
 export function sampleServer(entities, roles) {
   const rows = {};
-  for (const e of entities) rows[e.name] = Array.from({ length: 8 }, (_, i) => sampleRow(e, i, entities));
+  // AS MANY RECORDS AS THE EXAMPLES DESCRIBE, the seeder's rule
+  // (`projection.seed_rows`): past the last example a unique field became
+  // "Area Name 7", a row the running app never holds.
+  for (const e of entities) rows[e.name] = Array.from({ length: described(e) }, (_, i) => sampleRow(e, i, entities));
   // THE SIGNED-IN SAMPLE PERSON OWNS SOMETHING. A page that shows a record
   // only to its owner (`child.parentId !== user.id` → not found) rendered
   // "Not found" for every record in the editor and in every look, because
@@ -237,6 +240,13 @@ export async function series(entity: string, opts: any): Promise<SeriesPoint[]> 
 //: field with examples is a category (a trade, a country) and its examples
 //: repeat — "Country 4" is not a country.
 const UNIQUE_TEXT = /(^|_)(name|title|subject|label|headline|email)$|[a-z](Name|Title)$/;
+
+export function described(entity) {
+  const text = (f) => ["string", "text", "varchar"].includes(String(f.type || "text").toLowerCase());
+  const n = Math.max(0, ...(entity.fields || []).filter(text)
+    .map((f) => (Array.isArray(f.examples) ? f.examples.filter((x) => typeof x === "string" && x.trim()).length : 0)));
+  return n >= 3 ? Math.min(n, 8) : 8;
+}
 
 export function sampleRow(entity, i, entities) {
   const row = {};
