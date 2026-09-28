@@ -46,3 +46,18 @@ def test_the_preview_proxy_passes_every_cookie():
                        ("set-cookie", "b=2; Path=/"), ("content-type", "application/json")])
     cookies = [v for k, v in _filter_headers(h) if k.lower() == "set-cookie"]
     assert cookies == ["a=1; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT", "b=2; Path=/"]
+
+
+def test_a_stray_dev_server_in_the_same_app_is_stopped(tmp_path, monkeypatch):
+    seen = []
+
+    class P:
+        async def wait(self):
+            return 1
+
+    async def fake(*args, **kw):
+        seen.append(args)
+        return P()
+    monkeypatch.setattr(preview.asyncio, "create_subprocess_exec", fake)
+    asyncio.run(preview._stop_strays(str(tmp_path)))
+    assert seen == [("pkill", "-f", f"{tmp_path.resolve()}/node_modules/.bin/next dev")]

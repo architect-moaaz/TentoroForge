@@ -32,6 +32,24 @@ _previews: dict[str, dict] = {}
 _health_tasks: dict[str, asyncio.Task] = {}
 
 
+async def _stop_strays(output_dir: str) -> None:
+    """A `next dev` left running in this app from before the platform
+    restarted. The registry of previews is in memory, so a restart forgot it
+    and the next start spawned a second server in the same folder; the two
+    shared `.next` and pages came back with unprefixed asset URLs, stuck on
+    "Loading…" (Test4, 2026-09-28)."""
+    binary = str(Path(output_dir).resolve() / "node_modules" / ".bin" / "next")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pkill", "-f", f"{binary} dev",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        if await proc.wait() == 0:
+            logger.info("[preview] stopped a stray dev server in %s", output_dir)
+            await asyncio.sleep(1)
+    except OSError:
+        pass
+
+
 _BARE_PROVIDER = "<SessionProvider>"
 _PREFIXED_PROVIDER = '<SessionProvider basePath={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/auth`}>'
 
@@ -108,6 +126,7 @@ async def start_preview(project_id: str, output_dir: str) -> int:
         await install.wait()
 
     await _ensure_database(output_dir)
+    await _stop_strays(output_dir)
 
     # basePath so Next generates page + asset URLs under the platform
     # proxy path. Reads next.config.ts (env-gated PREVIEW_BASE_PATH).
