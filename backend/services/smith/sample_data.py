@@ -183,9 +183,41 @@ def replace_rows(url: str, table: str, text_names: list[str],
     return {"removed": removed, "kept": kept, "inserted": inserted, "failed": failed}
 
 
+def past_sample_rows(svc: Any, table: str) -> list[dict]:
+    """Every row any version of the definition could have seeded into `table`.
+
+    A sample row is one the definition put there — not only the current
+    examples': Test2's second refresh left "Area Name 10" beside Nepal,
+    seeded from the examples before it, and under the full default count
+    rather than the examples' own (2026-09-28). Each version's rows are
+    derived at the full count; duplicates are dropped.
+    """
+    from services.blueprint.projection import seed_rows
+
+    docs = [svc.doc]
+    for v in reversed(getattr(svc, "versions", lambda: [])()):
+        try:
+            docs.append(json.loads(svc.version_path(v).read_text("utf-8")))
+        except (OSError, ValueError):
+            continue
+    out: list[dict] = []
+    seen: set[str] = set()
+    for doc in docs:
+        try:
+            rows = seed_rows(doc, as_described=False).get(table) or []
+        except Exception:  # noqa: BLE001 — an old version that no longer derives is skipped
+            continue
+        for row in rows:
+            key = json.dumps(row, sort_keys=True, default=str)
+            if key not in seen:
+                seen.add(key)
+                out.append(row)
+    return out
+
+
 def refresh(svc: Any, output_dir: str, entity_ref: str, change: str = "", *,
             client: Any = None, reasoning: Any = None) -> dict:
-    from services.blueprint.projection import project_seed, seed_rows, to_snake
+    from services.blueprint.projection import project_seed, seed_rows, to_snake  # noqa: F401
     from services.blueprint.schema_push import database_url as app_database_url
     from services.smith.data_import import database_url, entities_of, imports_of
 
@@ -198,7 +230,7 @@ def refresh(svc: Any, output_dir: str, entity_ref: str, change: str = "", *,
         raise SectionChangeError(f"{ent.get('name')} holds data you imported, not sample records, "
                                  "so there are no sample records to replace.")
     table = str(ent.get("table") or to_snake(str(ent.get("name") or "")))
-    old_rows = seed_rows(svc.doc).get(table) or []
+    old_rows = past_sample_rows(svc, table)
     tell(reasoning, f"Writing new sample {ent.get('name')} records, row by row.", "step")
     lists = author(svc.doc, ent, change, client=client)
 

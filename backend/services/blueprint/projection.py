@@ -2939,7 +2939,7 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = SEED_ROWS) -> dict
             "rows": sum(len(v) for v in seed.values())}
 
 
-def seed_rows(doc: dict, rows: int = SEED_ROWS) -> dict[str, list[dict]]:
+def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) -> dict[str, list[dict]]:
     """The demo rows, by table — what `project_seed` writes, without writing
     it. `services.smith.sample_data` compares the rows a definition seeds
     before and after its examples change, to replace exactly those."""
@@ -2965,7 +2965,7 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS) -> dict[str, list[dict]]:
                          for f in entity.get("fields") or []
                          if str(f.get("type") or "text").lower() in ("string", "text", "varchar")),
                         default=0)
-        for row in range(1, (min(described, rows) if described >= 3 else rows) + 1):
+        for row in range(1, (min(described, rows) if as_described and described >= 3 else rows) + 1):
             record = {}
             for field in entity.get("fields") or []:
                 if field.get("primaryKey"):

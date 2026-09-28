@@ -110,3 +110,17 @@ def test_a_record_type_seeds_as_many_records_as_its_examples_describe():
     rows = seed_rows(doc)
     assert [r["areaName"] for r in rows["areas"]] == ["Andheri East", "Whitefield", "Colpetty", "Peradeniya"]
     assert len(rows["notes"]) == SEED_ROWS
+
+
+def test_the_rows_an_older_seed_wrote_past_the_examples_are_sample_rows_too(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr("services.smith.data_import.database_url", lambda o: "postgresql://x/y")
+    monkeypatch.setattr(sample_data, "replace_rows",
+                        lambda url, table, names, old, new: seen.update(old=old, new=new) or
+                        {"removed": 0, "kept": 0, "inserted": 0, "failed": []})
+    from services.blueprint.projection import SEED_ROWS
+    fake = Fake({"fields": [{"name": "country", "examples": ["India", "Sri Lanka", "India"]},
+                            {"name": "state", "examples": ["Goa", "Uva Province", "Assam"]},
+                            {"name": "pincode", "examples": ["403001", "90000", "781001"]}]})
+    sample_data.refresh(Svc(DOC), str(tmp_path), "Area", "", client=fake)
+    assert len(seen["old"]) == SEED_ROWS and len(seen["new"]) == 3
