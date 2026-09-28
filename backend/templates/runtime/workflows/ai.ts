@@ -149,6 +149,16 @@ function asDocuments(val: unknown): { docs: Doc[]; text: string } {
       if (mt.includes("pdf")) docs.push({ kind: "pdf", base64: data, mediaType: "application/pdf", filename: f.filename });
       else if (mt.startsWith("image/")) docs.push({ kind: "image", base64: data, mediaType: mt, filename: f.filename });
       else texts.push(typeof f.text === "string" ? f.text : "");
+    } else if (typeof it === "string" && /^data:(image\/[\w.+-]+|application\/pdf);base64,/i.test(it.trim())) {
+      // A PICTURE IS A PICTURE. A page hands a captured or pasted image to its
+      // workflow as a data URL; read as text, the model got 70k characters of
+      // base64 and every field of SnapIT's photo analysis came back null
+      // (2026-09-29).
+      const [, mediaType, base64] = it.trim().match(/^data:([^;]+);base64,(.*)$/is) ?? [];
+      if (mediaType && base64) {
+        if (/pdf/i.test(mediaType)) docs.push({ kind: "pdf", base64, mediaType: "application/pdf" });
+        else docs.push({ kind: "image", base64, mediaType: mediaType.toLowerCase() });
+      }
     } else if (typeof it === "string") {
       texts.push(it);
     } else if (it != null) {

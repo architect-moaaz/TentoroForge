@@ -44,5 +44,15 @@ out = await aiExtract({ aiExtractFields: fields, aiInput: "{{crawl}}" } as any, 
 eq(out.output, { title: "Air Max 90", url: "https://a" }, "without it, one record as before");
 eq(c1.variables.title, "Air Max 90", "with its fields on the variables as before");
 
+g.__forgeCaptured = null;
+g.__forgeStubResponse = '{"title":"Air Max 90","url":null}';
+const withPicture = { variables: { inputImage: "data:image/png;base64,iVBORw0KGgo=" }, input: {}, log: [] } as any;
+out = await aiExtract({ aiExtractFields: fields, aiInput: "{{inputImage}}" } as any, withPicture);
+const sent = g.__forgeLastRequest;
+const blocks = (sent?.messages?.[0]?.content ?? []) as any[];
+eq(blocks.some((b: any) => b.type === "image" && b.source?.media_type === "image/png" && b.source?.data === "iVBORw0KGgo="), true,
+   "a data-URL picture reaches the model as an image, not as text");
+eq(blocks.some((b: any) => b.type === "text" && String(b.text).includes("base64")), false, "and none of it as text");
+
 console.log(failed ? `\n${failed} failed` : "\nAll ai_extract list tests passed.");
 process.exit(failed ? 1 : 0);
