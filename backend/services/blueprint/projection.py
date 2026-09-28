@@ -2957,7 +2957,15 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS) -> dict[str, list[dict]]:
         if str(entity.get("id")) in imported:
             continue
         out_rows = []
-        for row in range(1, rows + 1):
+        # AS MANY RECORDS AS THE EXAMPLES DESCRIBE. Example k of every text
+        # field is record k; past the last example a unique field became
+        # "Area Name 8" beside a real city (Test2, 2026-09-28). A record type
+        # with no examples keeps the default count.
+        described = max((len([x for x in (f.get("examples") or []) if str(x).strip()])
+                         for f in entity.get("fields") or []
+                         if str(f.get("type") or "text").lower() in ("string", "text", "varchar")),
+                        default=0)
+        for row in range(1, (min(described, rows) if described >= 3 else rows) + 1):
             record = {}
             for field in entity.get("fields") or []:
                 if field.get("primaryKey"):

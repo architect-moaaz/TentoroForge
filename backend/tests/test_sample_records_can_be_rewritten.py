@@ -92,3 +92,21 @@ def test_imported_data_is_not_sample_data(tmp_path):
     doc = {**DOC, "data": {**DOC["data"], "imports": [{"entity": "ENT-002"}]}}
     with pytest.raises(SectionChangeError, match="imported"):
         sample_data.refresh(Svc(doc), str(tmp_path), "Area", "", client=Fake({}))
+
+
+def test_a_record_type_seeds_as_many_records_as_its_examples_describe():
+    from services.blueprint.projection import SEED_ROWS, seed_rows
+    doc = {"data": {"entities": [
+        {"id": "ENT-1", "name": "Area", "table": "areas", "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "country", "type": "string", "examples": ["India", "India", "Sri Lanka", "Sri Lanka"]},
+            {"name": "areaName", "type": "string", "examples": ["Andheri East", "Whitefield", "Colpetty", "Peradeniya"]},
+        ]},
+        {"id": "ENT-2", "name": "Note", "table": "notes", "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "body", "type": "text"},
+        ]},
+    ]}}
+    rows = seed_rows(doc)
+    assert [r["areaName"] for r in rows["areas"]] == ["Andheri East", "Whitefield", "Colpetty", "Peradeniya"]
+    assert len(rows["notes"]) == SEED_ROWS

@@ -86,6 +86,8 @@ def author(doc: dict, entity: dict, change: str, *, client: Any = None) -> dict[
         "fields": [{"name": f["name"], "examples": f.get("examples") or []} for f in fields],
         "requirements": [r.get("description") for r in (doc.get("requirements") or [])
                          if isinstance(r, dict) and r.get("status") not in ("DEPRECATED", "SUPERSEDED")],
+        "screens": [p.get("purpose") for p in (doc.get("pages") or [])
+                    if isinstance(p, dict) and p.get("purpose") and p.get("status") != "DEPRECATED"],
         "asked": change or "Make the sample records true as a whole and inside the app's scope.",
     }, ensure_ascii=False)
     raw = (client or _client())(system=SYSTEM, user=user, schema=SCHEMA)
