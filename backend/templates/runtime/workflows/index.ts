@@ -1276,18 +1276,29 @@ export function registerDefaultActions(): void {
   registerActionHandler("mcp_tool_call", async (config, ctx) => {
     const cfg = config as any;
     let serverId: string | undefined = cfg.mcp_server_id;
+    // The servers this app was given: MCP_SERVER_<slug>_URL, with _NAME.
+    const servers = Object.keys(process.env)
+      .filter((k) => k.startsWith("MCP_SERVER_") && k.endsWith("_URL"))
+      .map((k) => {
+        const slug = k.slice("MCP_SERVER_".length, -"_URL".length);
+        return { slug, name: String(process.env[`MCP_SERVER_${slug}_NAME`] ?? "") };
+      });
+    const flat = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
     if (!serverId && cfg.mcp_server_name) {
-      // Iterate env for a NAME match. env_writer emits MCP_SERVER_<slug>_NAME
-      // when the platform config carries a human name; if not present we
-      // fall through to error so the author sees the config gap.
-      const target = String(cfg.mcp_server_name).toLowerCase();
-      for (const [k, v] of Object.entries(process.env)) {
-        if (k.startsWith("MCP_SERVER_") && k.endsWith("_NAME") &&
-            String(v ?? "").toLowerCase() === target) {
-          serverId = k.slice("MCP_SERVER_".length, -"_NAME".length);
-          break;
-        }
-      }
+      // By name — exactly, then loosely: a step written against the
+      // integration ("FireCrawl MCP") finds the server ("Firecrawl").
+      const target = flat(cfg.mcp_server_name);
+      const hit = servers.find((s) => flat(s.name) === target)
+        ?? servers.find((s) => flat(s.name) && (target.includes(flat(s.name)) || flat(s.name).includes(target)));
+      serverId = hit?.slug;
+    }
+    if (!serverId && !cfg.mcp_server_name) {
+      // NO SERVER NAMED: the app's only one, or the one the tool is named
+      // for (`firecrawl_search` → Firecrawl). SnapIT's steps named none and
+      // failed "no server matched" with Firecrawl configured (2026-09-28).
+      const prefix = flat(String(cfg.mcp_tool_name ?? "").split("_")[0]);
+      serverId = servers.length === 1 ? servers[0].slug
+        : servers.find((s) => prefix && flat(s.name).startsWith(prefix))?.slug;
     }
     if (!serverId) {
       const msg = `mcp_tool_call: no server matched (id=${cfg.mcp_server_id ?? ""} name=${cfg.mcp_server_name ?? ""})`;

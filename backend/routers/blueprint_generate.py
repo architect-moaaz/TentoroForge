@@ -1326,6 +1326,29 @@ def _remember(loop: Any, project_id: Any, role: str, content: str,
         pass
 
 
+async def _adopt_mcp_servers(output_dir: Path, project: Any, db: AsyncSession) -> None:
+    """The organisation's MCP servers, read into the project on every turn:
+    their tools for the step author and the contract
+    (`.forge/mcp-servers.json`), their addresses for the app
+    (`app/.env.local`). Nothing did this for a Blueprint app, so SnapIT's
+    Firecrawl steps named no server and the app had none to match
+    (2026-09-28). Best-effort: a server that is down never stops a turn."""
+    org_id = getattr(project, "org_id", None)
+    if org_id is None:
+        return
+    try:
+        from services.blueprint import mcp_catalog
+        await mcp_catalog.refresh(output_dir, org_id, db)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[smith-chat] MCP servers not read for %s: %s", output_dir.name, exc)
+    if (output_dir / "app" / "package.json").is_file():
+        try:
+            from services.env_writer import write_env_local_from_platform
+            await write_env_local_from_platform(output_dir, org_id, db)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[smith-chat] app settings not written for %s: %s", output_dir.name, exc)
+
+
 @router.post("/api/projects/{project_id}/smith/chat")
 async def smith_chat(
     project_id: uuid.UUID,
@@ -1372,6 +1395,7 @@ async def smith_chat(
     # the gate — see `_adopt_brand_language`.
     await _adopt_brand_language(output_dir, project, db)
     app_root = str(output_dir / "app")
+    await _adopt_mcp_servers(output_dir, project, db)
 
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()

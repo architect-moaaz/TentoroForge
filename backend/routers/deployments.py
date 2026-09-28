@@ -102,6 +102,15 @@ async def _collect_integrations(
                 "skipping corrupted integration row org=%s key=%s: %s",
                 row.org_id, row.key, e,
             )
+    # THE ORGANISATION'S MCP SERVERS TRAVEL WITH IT. A published app's
+    # `mcp_tool_call` resolves a server from MCP_SERVER_* in its environment,
+    # and nothing put them there, so a Firecrawl step that ran nowhere else
+    # could not run published either.
+    from models.platform_mcp_server import PlatformMcpServer
+    from services.env_writer import mcp_env
+    mcp = await db.execute(select(PlatformMcpServer).where(
+        PlatformMcpServer.org_id == org_id, PlatformMcpServer.enabled.is_(True)))
+    out.update(mcp_env(mcp.scalars().all()))
     return out
 
 

@@ -354,9 +354,13 @@
           "label": "MCP Tool Call",
           "icon": "Plug",
           "gradient": "bg-gradient-to-br from-violet-400 to-indigo-600",
-          "description": "Call a tool on a configured MCP server",
+          "description": "Call a tool on a configured MCP server: the server by name, one of its tools, and the tool's inputs in args",
           "config": {
             "required": [
+              [
+                "mcp_server_name",
+                "mcp_server_id"
+              ],
               [
                 "mcp_tool_name"
               ]

@@ -57,6 +57,42 @@ def _mcp_id_slug(server_id) -> str:
     return str(server_id).replace("-", "")[:12].upper()
 
 
+def app_env_dir(output_dir: str | Path) -> Path:
+    """Where the app reads its settings. A Blueprint project keeps its app in
+    `<project>/app`; the settings written beside it at the project root were
+    read by nothing (SnapIT, 2026-09-28: the Firecrawl server landed in
+    `ho6irnp6/.env.local`, the app read `ho6irnp6/app/.env.local`)."""
+    root = Path(output_dir)
+    return root / "app" if (root / "app" / "package.json").is_file() else root
+
+
+def mcp_env(rows: list, skipped: list[dict[str, str]] | None = None) -> dict[str, str]:
+    """The env vars that let an app call each enabled MCP server — up to five
+    per server (URL, TRANSPORT, AUTH_KIND, NAME, SECRET, AUTH_HEADER). Used for
+    `.env.local` and for a publish, so a published app calls the same servers."""
+    out: dict[str, str] = {}
+    for srv in rows:
+        if getattr(srv, "enabled", True) is False:
+            continue
+        slug = _mcp_id_slug(srv.id)
+        prefix = f"{_MCP_ENV_PREFIX}{slug}_"
+        out[f"{prefix}URL"] = srv.server_url
+        out[f"{prefix}TRANSPORT"] = srv.transport
+        out[f"{prefix}AUTH_KIND"] = srv.auth_kind
+        # NAME lets workflow mcp_tool_call resolve by name instead of slug.
+        out[f"{prefix}NAME"] = srv.name
+        if srv.auth_kind != "none" and srv.auth_secret_ct and srv.auth_secret_iv:
+            try:
+                out[f"{prefix}SECRET"] = decrypt("mcp", srv.auth_secret_ct, srv.auth_secret_iv)
+            except CryptoError as e:
+                if skipped is not None:
+                    skipped.append({"key": f"{prefix}SECRET", "reason": f"decrypt_failed: {e}"})
+                log.warning("[env_writer] mcp decrypt failed for %s: %s", srv.id, e)
+        if srv.auth_kind == "apikey_header" and srv.auth_header_name:
+            out[f"{prefix}AUTH_HEADER"] = srv.auth_header_name
+    return out
+
+
 def _known_keys() -> set[str]:
     """Every env-var name the spec registry declares. Only these are touched
     by the writer; user-supplied keys (DATABASE_URL etc.) are left alone."""
@@ -84,7 +120,7 @@ async def write_env_local_from_platform(
           "mcp_servers": int,          — count of enabled MCP servers written
         }
     """
-    root = Path(output_dir)
+    root = app_env_dir(output_dir)
     env_path = root / ".env.local"
     known = _known_keys()
 
@@ -123,29 +159,8 @@ async def write_env_local_from_platform(
         )
     )
     mcp_rows = mcp_res.scalars().all()
-    mcp_count = 0
-    for srv in mcp_rows:
-        slug = _mcp_id_slug(srv.id)
-        prefix = f"{_MCP_ENV_PREFIX}{slug}_"
-        desired[f"{prefix}URL"] = srv.server_url
-        desired[f"{prefix}TRANSPORT"] = srv.transport
-        desired[f"{prefix}AUTH_KIND"] = srv.auth_kind
-        # NAME lets workflow mcp_tool_call resolve by name instead of slug.
-        desired[f"{prefix}NAME"] = srv.name
-        if srv.auth_kind != "none" and srv.auth_secret_ct and srv.auth_secret_iv:
-            try:
-                desired[f"{prefix}SECRET"] = decrypt(
-                    "mcp", srv.auth_secret_ct, srv.auth_secret_iv,
-                )
-            except CryptoError as e:
-                skipped.append({
-                    "key": f"{prefix}SECRET",
-                    "reason": f"decrypt_failed: {e}",
-                })
-                log.warning("[env_writer] mcp decrypt failed for %s: %s", srv.id, e)
-        if srv.auth_kind == "apikey_header" and srv.auth_header_name:
-            desired[f"{prefix}AUTH_HEADER"] = srv.auth_header_name
-        mcp_count += 1
+    desired.update(mcp_env(mcp_rows, skipped))
+    mcp_count = len(mcp_rows)
 
     # Read existing .env.local, filter out managed keys, keep everything else.
     existing_lines: list[str] = []

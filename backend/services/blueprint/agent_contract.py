@@ -451,7 +451,8 @@ class InvalidWorkflowStep(AuthorRefusal):
     leaves a node's declared configuration empty."""
 
 
-def check_workflow_steps(result: "AgentResult", doc: dict | None = None) -> None:
+def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
+                         mcp_servers: list[dict] | None = None) -> None:
     """Reject workflows whose steps are not configured catalog nodes.
 
     The same argument as :func:`check_pattern_templates`: accepting a step
@@ -471,6 +472,10 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None) -> None
     for proposal in proposals:
         name = proposal.body.get("name") or proposal.natural_key
         problems.extend(f"{name}/{e}" for e in catalog.workflow_errors(proposal.body))
+    # A TOOL STEP NAMES A SERVER THAT EXISTS, A TOOL IT HAS, AND ITS INPUTS.
+    from services.blueprint.mcp_catalog import workflow_errors as mcp_errors
+    for proposal in proposals:
+        problems.extend(mcp_errors(proposal.body, mcp_servers))
     # WOULD THE ENGINE RUN IT. A step whose condition the engine's parser
     # refuses, a function the engine lacks, a template naming what the engine
     # never holds — each is a workflow the author can fix now and nobody can
@@ -1058,7 +1063,8 @@ def apply_agent_result(
     from services.blueprint.layout_vocabulary import translate_layout_vocabulary
     translate_layout_vocabulary(result, svc.doc)
     check_pattern_templates(result, svc.doc)
-    check_workflow_steps(result, svc.doc)
+    from services.blueprint.mcp_catalog import load as _mcp_servers
+    check_workflow_steps(result, svc.doc, _mcp_servers(getattr(svc, "output_dir", None)))
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)

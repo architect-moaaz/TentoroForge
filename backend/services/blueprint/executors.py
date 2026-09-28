@@ -2696,6 +2696,8 @@ def _workflow_steps_prompt(doc: dict, system: str, subject: str,
     from services.catalog import workflow_nodes
 
     system += WORKFLOW_CATALOG_ADDENDUM.format(catalog=workflow_nodes().digest())
+    from services.blueprint.mcp_catalog import load as _mcp_servers, prompt_block
+    system += prompt_block(_mcp_servers(output_dir))
 
     row = declared_workflow(doc, subject) or {"id": subject}
     context = context_for(doc, "workflow")
