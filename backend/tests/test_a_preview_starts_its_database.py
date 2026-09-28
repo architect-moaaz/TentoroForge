@@ -26,3 +26,14 @@ def test_a_database_that_answers_is_left_alone(tmp_path, monkeypatch):
     monkeypatch.setattr("services.blueprint.schema_push.database_exists", lambda url: True)
     asyncio.run(preview._ensure_database(str(app)))
     assert not (app / "ran.txt").exists()
+
+
+def test_sign_in_is_told_the_preview_prefix(tmp_path):
+    from pathlib import Path
+    tpl = Path(__file__).resolve().parents[1] / "templates/app-foundation/src/app/providers.tsx"
+    assert "NEXT_PUBLIC_BASE_PATH" in tpl.read_text()
+    p = tmp_path / "src/app/providers.tsx"
+    p.parent.mkdir(parents=True)
+    p.write_text("return (<SessionProvider>{children}</SessionProvider>);")
+    preview._session_under_prefix(str(tmp_path))
+    assert 'basePath={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/auth`}' in p.read_text()

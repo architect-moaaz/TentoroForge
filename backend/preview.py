@@ -32,6 +32,22 @@ _previews: dict[str, dict] = {}
 _health_tasks: dict[str, asyncio.Task] = {}
 
 
+_BARE_PROVIDER = "<SessionProvider>"
+_PREFIXED_PROVIDER = '<SessionProvider basePath={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/auth`}>'
+
+
+def _session_under_prefix(output_dir: str) -> None:
+    """An app scaffolded before the template carried the base path gets it:
+    `providers.tsx` is the platform's file, not the app's content."""
+    p = Path(output_dir) / "src" / "app" / "providers.tsx"
+    try:
+        text = p.read_text("utf-8")
+        if _BARE_PROVIDER in text:
+            p.write_text(text.replace(_BARE_PROVIDER, _PREFIXED_PROVIDER), "utf-8")
+    except OSError:
+        pass
+
+
 async def _ensure_database(output_dir: str) -> None:
     """The app's own database, up, migrated and seeded, before its preview.
 
@@ -103,7 +119,13 @@ async def start_preview(project_id: str, output_dir: str) -> int:
         **os.environ,
         "NEXT_BASE_PATH": prefix,
         "NEXT_ASSET_PREFIX": prefix,
+        # SIGN-IN UNDER THE PREFIX. next-auth's client posts to /api/auth at
+        # the origin's root unless told the base path; behind the proxy that
+        # reached the platform, and every preview sign-in ended on
+        # /api/auth/error (Test4, 2026-09-28). Inlined by next dev.
+        "NEXT_PUBLIC_BASE_PATH": prefix,
     }
+    _session_under_prefix(output_dir)
 
     # Start the dev server
     proc = await asyncio.create_subprocess_exec(

@@ -20,7 +20,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <SessionProvider>
+    <SessionProvider basePath={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/auth`}>
       <QueryClientProvider client={queryClient}>
         {children}
         <Toaster position="top-right" richColors />
