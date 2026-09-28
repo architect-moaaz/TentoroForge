@@ -241,11 +241,22 @@ export async function series(entity: string, opts: any): Promise<SeriesPoint[]> 
 //: repeat — "Country 4" is not a country.
 const UNIQUE_TEXT = /(^|_)(name|title|subject|label|headline|email)$|[a-z](Name|Title)$/;
 
+export function labelExamples(entity) {
+  const fields = entity.fields || [];
+  const text = (f) => ["string", "text", "varchar"].includes(String(f.type || "text").toLowerCase());
+  const label = fields.find((f) => f.name === entity.labelField);
+  for (const f of [label, ...fields].filter(Boolean)) {
+    const ex = Array.isArray(f.examples) ? f.examples.filter((x) => typeof x === "string" && x.trim()) : [];
+    if (text(f) && ex.length) return ex;
+  }
+  return [];
+}
+
 export function described(entity) {
   const text = (f) => ["string", "text", "varchar"].includes(String(f.type || "text").toLowerCase());
   const n = Math.max(0, ...(entity.fields || []).filter(text)
     .map((f) => (Array.isArray(f.examples) ? f.examples.filter((x) => typeof x === "string" && x.trim()).length : 0)));
-  return n >= 3 ? Math.min(n, 8) : 8;
+  return n ? Math.min(n, 8) : 8;
 }
 
 export function sampleRow(entity, i, entities) {
@@ -306,7 +317,12 @@ export function sampleRow(entity, i, entities) {
     else if (/status|stage/.test(lower) || (lower === "state" && !address)) row[fname] = ["Open", "In progress", "Done", "On hold"][i % 4];
     else if (/^(uuid|id)$/.test(type) || /(^|_)id$|Id$/.test(fname)) {
       const target = (entities || []).find((e) => lower.startsWith(e.name.toLowerCase())) || entities?.[0];
-      row[fname] = `sample-${(target ? target.name : name).toLowerCase()}-${(i % 3) + 1}`;
+      // THE RECORD ITS EXAMPLE NAMES, as the seeder resolves it
+      // (`projection._ref_by_label`), else by position.
+      const named = Array.isArray(f.examples) ? f.examples.filter((x) => typeof x === "string" && x.trim()) : [];
+      const labels = target ? labelExamples(target).map((x) => x.toLowerCase()) : [];
+      const at = named.length ? labels.indexOf(named[i % named.length].toLowerCase()) : -1;
+      row[fname] = `sample-${(target ? target.name : name).toLowerCase()}-${at >= 0 ? at + 1 : (i % 3) + 1}`;
     }
     else if (/int|number|decimal|float|numeric|money|currency|amount|price|count|age|quantity/.test(type) || (!text && /amount|price|total|count|qty|age|score/.test(lower))) {
       const base = /age/.test(lower) ? 22 + ((i * 7) % 45) : /price|amount|total|money|currency/.test(lower + type) ? (i + 1) * 125.5

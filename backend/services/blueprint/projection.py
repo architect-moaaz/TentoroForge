@@ -2939,6 +2939,36 @@ def project_seed(doc: dict, app_root: str | Path, rows: int = SEED_ROWS) -> dict
             "rows": sum(len(v) for v in seed.values())}
 
 
+def label_examples(entity: dict) -> list[str]:
+    """The examples that name each sample record of `entity`: its label
+    field's, else the first text field that has any."""
+    fields = [f for f in entity.get("fields") or [] if isinstance(f, dict)]
+    label = next((f for f in fields if f.get("name") == entity.get("labelField")), None)
+    for f in ([label] if label else []) + fields:
+        if str(f.get("type") or "text").lower() in ("string", "text", "varchar"):
+            ex = [str(x) for x in (f.get("examples") or []) if str(x).strip()]
+            if ex:
+                return ex
+    return []
+
+
+def _ref_by_label(field: dict, row: int, tables_by_id: dict, labels_by_id: dict) -> str | None:
+    """A reference whose examples name the parent record, resolved to it.
+
+    Position paired them otherwise: a state's country was "parent row k", so
+    Tamil Nadu sat in Sri Lanka and Pune in Tamil Nadu (Test3, 2026-09-28).
+    """
+    target = str(field.get("references") or "")
+    names = [str(x).strip() for x in (field.get("examples") or []) if str(x).strip()]
+    if not target or not names or target not in tables_by_id:
+        return None
+    labels = [x.lower() for x in labels_by_id.get(target) or []]
+    want = names[(row - 1) % len(names)].lower()
+    if want not in labels:
+        return None
+    return f"ref:{tables_by_id[target]}[{labels.index(want)}]"
+
+
 def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) -> dict[str, list[dict]]:
     """The demo rows, by table — what `project_seed` writes, without writing
     it. `services.smith.sample_data` compares the rows a definition seeds
@@ -2949,6 +2979,7 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                 if isinstance(i, dict) and i.get("entity")}
     tables_by_id = {str(e.get("id")): (e.get("table") or to_snake(e.get("name") or "entity"))
                     for e in entities if e.get("id")}
+    labels_by_id = {str(e.get("id")): label_examples(e) for e in entities if e.get("id")}
 
     seed: dict[str, list[dict]] = {}
     for entity in entities:
@@ -2965,7 +2996,7 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                          for f in entity.get("fields") or []
                          if str(f.get("type") or "text").lower() in ("string", "text", "varchar")),
                         default=0)
-        for row in range(1, (min(described, rows) if as_described and described >= 3 else rows) + 1):
+        for row in range(1, (min(described, rows) if as_described and described else rows) + 1):
             record = {}
             for field in entity.get("fields") or []:
                 if field.get("primaryKey"):
@@ -2980,7 +3011,8 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                 # plus an embedding that fails; the vector is the platform's.
                 if is_image_field(field) or is_embedding_field(field):
                     continue
-                record[field.get("name")] = _seed_value(field, name, row, tables_by_id)
+                record[field.get("name")] = (_ref_by_label(field, row, tables_by_id, labels_by_id)
+                                             or _seed_value(field, name, row, tables_by_id))
             out_rows.append(years_within_age(record, entity.get("fields") or []))
         seed[table] = out_rows
     return seed

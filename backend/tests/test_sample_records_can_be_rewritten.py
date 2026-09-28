@@ -124,3 +124,26 @@ def test_the_rows_an_older_seed_wrote_past_the_examples_are_sample_rows_too(monk
                             {"name": "pincode", "examples": ["403001", "90000", "781001"]}]})
     sample_data.refresh(Svc(DOC), str(tmp_path), "Area", "", client=fake)
     assert len(seen["old"]) == SEED_ROWS and len(seen["new"]) == 3
+
+
+def test_a_reference_follows_the_label_its_example_names():
+    # Test3, 2026-09-28: by position, Tamil Nadu sat in Sri Lanka.
+    from services.blueprint.projection import seed_rows
+    doc = {"data": {"entities": [
+        {"id": "ENT-1", "name": "Country", "table": "countries", "labelField": "name", "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "name", "type": "string", "examples": ["India", "Sri Lanka"]}]},
+        {"id": "ENT-2", "name": "State", "table": "states", "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "name", "type": "string", "examples": ["Maharashtra", "Tamil Nadu", "Western Province"]},
+            {"name": "countryId", "type": "uuid", "references": "ENT-1",
+             "examples": ["India", "India", "Sri Lanka"]}]},
+    ]}}
+    rows = seed_rows(doc)
+    assert [r["name"] for r in rows["countries"]] == ["India", "Sri Lanka"]      # two, not twelve
+    assert [r["countryId"] for r in rows["states"]] == ["ref:countries[0]", "ref:countries[0]", "ref:countries[1]"]
+
+
+def test_the_field_prompt_asks_references_for_the_parent_label():
+    from services.blueprint.executors import NODE_TASKS
+    assert "the LABEL of the record it points at" in NODE_TASKS["entity_fields"]
