@@ -1722,6 +1722,12 @@ NODE_TASKS: dict[str, str] = {
         "other end says `config.refused: false`; a refused run is reported "
         "to the person as a failure, never as the success message. Any step "
         "that mutates an entity must name a real one.\n\n"
+        "A `custom` or `transform` step's `code` is ONE FEEL formula the engine "
+        "evaluates, never instructions in words. Work you would describe in "
+        "words — write a search query, read fields out of pages, judge how well "
+        "a listing matches — is an `ai_generate` or `ai_extract` step; saving "
+        "many rows is one `db_insert` whose value is the list, written one row "
+        "per item.\n\n"
         + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
         + "\n\nTELL THE OTHER PERSON. When a step changes something another person "
         "must act on or would want to know — a request arrives for them, their "

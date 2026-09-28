@@ -145,7 +145,7 @@
           "label": "Custom Action",
           "icon": "Play",
           "gradient": "bg-gradient-to-br from-teal-400 to-teal-600",
-          "description": "Execute custom logic",
+          "description": "Evaluate ONE FEEL formula over the workflow's variables (in code or expression) — never instructions in words; work described in words is an AI step",
           "config": {
             "required": [
               [
@@ -315,7 +315,7 @@
           "label": "Transform",
           "icon": "Hash",
           "gradient": "bg-gradient-to-br from-stone-400 to-stone-600",
-          "description": "Transform/map data",
+          "description": "Transform/map data — an expression or code is ONE FEEL formula, never instructions in words",
           "config": {
             "required": [
               [

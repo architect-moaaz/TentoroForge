@@ -1687,6 +1687,18 @@ def _expressions(doc: dict) -> list[tuple[str, str, str]]:
                 continue
             cfg = step.get("config") or {}
             expr = cfg.get("expression") or cfg.get("condition")
+            # A CUSTOM STEP'S CODE IS A FORMULA TOO. The engine evaluates
+            # `code` exactly as it evaluates a condition; SnapIT's author wrote
+            # "For each deduplicated listing … upsert a Merchant …" there, and
+            # three steps failed at run time with "Unexpected token … each"
+            # because only conditions were ever parsed here (2026-09-29).
+            if not (isinstance(expr, str) and expr.strip()) and _is_formula_step(step):
+                code = cfg.get("code") or cfg.get("script")
+                if isinstance(code, str) and code.strip() and not code.strip().startswith("//"):
+                    out.append((f"workflow#{n}/{step.get('key') or step.get('id') or m}#code",
+                                f"{wf.get('name') or wf.get('id')}, step {step.get('key') or step.get('id')!r}",
+                                code))
+                continue
             if isinstance(expr, str) and expr.strip():
                 out.append((f"workflow#{n}/{step.get('key') or step.get('id') or m}",
                             f"{wf.get('name') or wf.get('id')}, step {step.get('key') or step.get('id')!r}", expr))
@@ -1694,6 +1706,15 @@ def _expressions(doc: dict) -> list[tuple[str, str, str]]:
         if rule.get("kind") == "condition_action" and isinstance(rule.get("when"), str) and rule["when"].strip():
             out.append((f"rule#{n}/when", f"rule {rule.get('name') or rule.get('id')}", rule["when"]))
     return out
+
+
+#: Steps whose config is evaluated as one FEEL formula by the engine.
+FORMULA_ACTIONS = frozenset({"custom", "transform"})
+
+
+def _is_formula_step(step: dict) -> bool:
+    cfg = step.get("config") or {}
+    return cfg.get("actionType") in FORMULA_ACTIONS or step.get("type") in FORMULA_ACTIONS
 
 
 def expression_findings(doc: dict) -> list[dict]:
@@ -1704,6 +1725,16 @@ def expression_findings(doc: dict) -> list[dict]:
     errors = check_expressions([(i, e) for i, _w, e in items])
     out = []
     for i, where, expr in items:
+        if i in errors and i.endswith("#code"):
+            out.append({"rule": "expression-invalid", "page": i.split("/")[0],
+                        "detail": f"{where}: its `code` is evaluated as ONE FEEL formula over the "
+                                  f"workflow's variables, and the engine cannot parse {expr[:160]!r} — "
+                                  f"{errors[i]}. Code is never instructions in words: work described in "
+                                  f"words (writing a query, reading fields out of pages, scoring a match) "
+                                  f"is an `ai_generate` or `ai_extract` step; saving many rows is one "
+                                  f"`db_insert` whose value is the list (one row per item); a value worked "
+                                  f"out from others is a formula such as `count(listings) > 0`."})
+            continue
         if i in errors:
             out.append({"rule": "expression-invalid", "page": i.split("/")[0],
                         "detail": f"{where}: the engine cannot parse {expr!r} — {errors[i]}. "
