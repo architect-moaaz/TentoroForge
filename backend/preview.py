@@ -32,6 +32,35 @@ _previews: dict[str, dict] = {}
 _health_tasks: dict[str, asyncio.Task] = {}
 
 
+async def _ensure_database(output_dir: str) -> None:
+    """The app's own database, up, migrated and seeded, before its preview.
+
+    `next dev` alone read a DATABASE_URL nothing was listening on: a fresh
+    build's preview showed empty dropdowns and saved nothing (Test4,
+    2026-09-28). The app's `start.sh --seed-only` is the one way it boots
+    its database (Docker Postgres on a free port, drizzle push, seed) and
+    rewrites .env.local to match; it runs here when the database does not
+    answer. A preview without Docker still starts, and says why it has no data.
+    """
+    from services.blueprint.schema_push import _answers, database_url
+
+    script = Path(output_dir) / "start.sh"
+    url = database_url(output_dir)
+    if not script.is_file() or (url and _answers(url)):
+        return
+    log = Path(output_dir) / ".forge-preview-db.log"
+    try:
+        with open(log, "w") as out:
+            proc = await asyncio.create_subprocess_exec(
+                "bash", "start.sh", "--seed-only", cwd=output_dir,
+                stdin=asyncio.subprocess.DEVNULL, stdout=out, stderr=out)
+            code = await asyncio.wait_for(proc.wait(), timeout=300)
+        if code != 0:
+            logger.warning("[preview] %s: database did not come up (exit %s); see %s", output_dir, code, log)
+    except (OSError, asyncio.TimeoutError) as exc:
+        logger.warning("[preview] %s: database did not come up: %s", output_dir, exc)
+
+
 async def start_preview(project_id: str, output_dir: str) -> int:
     """Spawn `npx next dev` for a project, poll until ready, return port.
 
@@ -62,6 +91,8 @@ async def start_preview(project_id: str, output_dir: str) -> int:
             stderr=asyncio.subprocess.DEVNULL,
         )
         await install.wait()
+
+    await _ensure_database(output_dir)
 
     # basePath so Next generates page + asset URLs under the platform
     # proxy path. Reads next.config.ts (env-gated PREVIEW_BASE_PATH).
