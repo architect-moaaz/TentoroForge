@@ -126,3 +126,15 @@ def test_signup_completes_the_login_row_when_the_account_lives_in_it():
     assert "(accountTable as unknown) === (users as unknown)" in route
     assert "tx.update(users).set(own as any).where(eq(users.id, created.id))" in route
     assert '!["id", "email", "password"].includes(k)' in route
+
+
+def test_a_template_that_computes_is_refused():
+    """`{{count(list_results)}}` reached the database as that text."""
+    from services.blueprint.functional_completeness import template_findings
+    flow = {"id": "F", "name": "Snap", "inputs": [], "steps": [
+        {"key": "list_results", "type": "action", "config": {"actionType": "db_query", "table": "search_results"}},
+        {"key": "finalize", "type": "action", "config": {"actionType": "db_update", "table": "searches",
+            "values": {"resultCount": "{{count(list_results)}}", "fine": "{{list_results.count}}",
+                       "also": "{{ list_results.rows[0].id }}"}}}]}
+    found = [f["detail"] for f in template_findings({"workflows": [flow]})]
+    assert len(found) == 1 and "{{count(list_results)}} computes" in found[0]

@@ -1812,6 +1812,8 @@ def expression_findings(doc: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 _TEMPLATE_RE = re.compile(r"\{\{\s*([\w.\[\]|:]+)\s*\}\}")
+#: Anything written between double braces, name or not.
+_ANY_TEMPLATE_RE = re.compile(r"\{\{(.*?)\}\}")
 _WRONG_ROOTS = {
     "now": "the sentinel `$now` as the whole value",
     "today": "the sentinel `$today` as the whole value",
@@ -1847,6 +1849,19 @@ def template_findings(doc: dict) -> list[dict]:
         seen: set[str] = set()
         for st in steps:
             for text in _strings(st.get("config") or {}):
+                # A TEMPLATE NAMES A VALUE; IT DOES NOT COMPUTE ONE.
+                # `{{count(list_results)}}` reached the database as that text
+                # and SnapIT's last step failed on it (2026-09-29): the pattern
+                # below only matches names, so a formula inside braces was
+                # never seen here at all.
+                for inner in _ANY_TEMPLATE_RE.findall(text):
+                    if _TEMPLATE_RE.fullmatch("{{" + inner + "}}") is None:
+                        out.append({"rule": "template-computes", "page": str(wf.get("id")),
+                                    "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
+                                              f"{{{{{inner.strip()}}}}} computes, and a template only names a "
+                                              f"value the engine holds — a step's field (`{{{{list_results.count}}}}`, "
+                                              f"`{{{{persist_listings.done}}}}`) or an input; work a value out in "
+                                              f"a `custom` step whose `code` is the formula, then name its result"})
                 for ref in _TEMPLATE_RE.findall(text):
                     root = ref.split(".")[0].split("[")[0].split("|")[0]
                     if root in known or (root, str(st.get("key"))) in seen:

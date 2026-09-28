@@ -833,6 +833,24 @@ const _LEGACY_OWNER_FK_RE =
 // Drop keys the table doesn't have or that are empty "" / undefined (so they don't
 // clobber DB defaults or crash type coercion, e.g. "" into a timestamp), and default
 // an ACTOR FK to the acting user when missing.
+/** The number written in `text`: "₹12,995" → 12995, "20%" → 20,
+ *  "$1,299.00" → 1299, "1.299,50 €" → 1299.5; null when there is none. */
+export function _numberIn(text: string): number | null {
+  const m = String(text).match(/-?\d[\d.,\s]*/);
+  if (!m) return null;
+  let s = m[0].replace(/\s/g, "").replace(/[.,]$/, "");
+  const lastDot = s.lastIndexOf("."), lastComma = s.lastIndexOf(",");
+  if (lastComma > lastDot) {
+    // "1.299,50" or "12,995": a comma followed by exactly three digits is a
+    // thousands separator; otherwise it is the decimal mark.
+    s = /,\d{3}$/.test(s) && lastDot === -1 ? s.replace(/,/g, "") : s.replace(/\./g, "").replace(",", ".");
+  } else {
+    s = s.replace(/,/g, "");
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function _finalizeInsert(
   table: any, values: Record<string, unknown>, ctx: WorkflowExecutionContext,
 ): Record<string, unknown> {
@@ -885,6 +903,22 @@ export function _finalizeInsert(
       out[k] = isDateName
         ? (/time/i.test(col.columnType) ? v.toISOString() : v.toISOString().slice(0, 10))
         : v.toISOString();
+      continue;
+    }
+    // A NUMBER COLUMN TAKES THE NUMBER IN THE TEXT. A price read off a page
+    // arrives as "₹12,995", a discount as "20%"; postgres refused them and
+    // four of SnapIT's thirteen listings were lost (2026-09-29). The number
+    // is taken out of the text; text with none is dropped (the column's
+    // default fires) rather than failing the whole row.
+    const isNumberCol = typeof (col && col.columnType) === "string" &&
+      /numeric|decimal|integer|int\b|smallint|bigint|real|double|serial/i.test(col.columnType);
+    if (isNumberCol && typeof v === "string" && !/^\s*-?\d+(\.\d+)?\s*$/.test(v)) {
+      const n = _numberIn(v);
+      if (n === null) {
+        console.warn(`[workflow] db_insert: dropping ${k} — no number in ${JSON.stringify(v).slice(0, 60)}.`);
+        continue;
+      }
+      out[k] = dataType === "string" ? String(n) : n;
       continue;
     }
     out[k] = v;

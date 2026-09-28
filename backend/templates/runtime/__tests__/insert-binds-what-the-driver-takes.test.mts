@@ -63,6 +63,14 @@ const outText = _finalizeInsert(table, {
 ok(typeof outText.title === "string",
    "a Date into a TEXT column is stringified, never passed raw to the driver");
 eqJson(outText.title, "2026-09-05T10:00:00.000Z", "a text column takes the full ISO string");
+const num = mod._numberIn;
+eqJson([num("₹12,995"), num("20%"), num("$1,299.00"), num("1.299,50 €"), num("Rs. 4,999.50 only"), num("free")],
+       [12995, 20, 1299, 1299.5, 4999.5, null], "the number in a price or a discount read off a page");
+const priceTable = { __name: "p", price: { columnType: "PgNumeric", dataType: "string" },
+                     discount: { columnType: "PgInteger", dataType: "number" }, note: { columnType: "PgText", dataType: "string" } };
+eqJson(_finalizeInsert(priceTable, { price: "₹12,995", discount: "20%", note: "20% off" }, ctx),
+       { price: "12995", discount: 20, note: "20% off" }, "a number column takes the number, a text column the text");
+eqJson(_finalizeInsert(priceTable, { price: "call for price" }, ctx), {}, "text with no number is dropped, not the row");
 const resolve = mod._resolveRef;
 const a = resolve("$uuid", ctx), b = resolve("$uuid", ctx);
 ok(typeof a === "string" && /^[0-9a-f-]{36}$/.test(a), "$uuid is a fresh identifier");
