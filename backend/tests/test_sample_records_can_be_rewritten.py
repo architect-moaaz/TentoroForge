@@ -147,3 +147,22 @@ def test_a_reference_follows_the_label_its_example_names():
 def test_the_field_prompt_asks_references_for_the_parent_label():
     from services.blueprint.executors import NODE_TASKS
     assert "the LABEL of the record it points at" in NODE_TASKS["entity_fields"]
+
+
+def test_a_sample_reference_to_a_missing_parent_goes_back_to_its_author():
+    # Test4, 2026-09-28: City named Gujarat; State's samples had no Gujarat.
+    from services.blueprint.data_gate import sample_findings
+    doc = {"data": {"entities": [
+        {"id": "ENT-1", "name": "State", "table": "states", "labelField": "name", "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "name", "type": "string", "examples": ["Maharashtra", "Western Province"]}]},
+        {"id": "ENT-2", "name": "City", "table": "cities", "fields": [
+            {"name": "id", "type": "uuid", "primaryKey": True},
+            {"name": "name", "type": "string", "examples": ["Mumbai", "Ahmedabad"]},
+            {"name": "stateId", "type": "uuid", "references": "ENT-1", "examples": ["Maharashtra", "Gujarat"]}]},
+    ]}}
+    found = sample_findings(doc)
+    assert [f.artifact_id for f in found] == ["ENT-2"]
+    assert "Gujarat" in found[0].detail and "Maharashtra, Western Province" in found[0].detail
+    doc["data"]["entities"][1]["fields"][2]["examples"] = ["Maharashtra", "Western Province"]
+    assert sample_findings(doc) == []

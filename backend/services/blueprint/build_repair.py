@@ -111,14 +111,17 @@ def database_with_repair(svc: Any, app_root: str, issues: list[dict], *, usage: 
     result: dict = {}
     for round_ in range(REPAIR_ROUNDS + 1):
         result = data_gate.run(app_root, seed=True)
-        if result.get("skipped") or result.get("ok"):
+        # A SAMPLE THAT NAMES A MISSING PARENT is refused like a row the
+        # database refused: it seeds, but beside the wrong record.
+        samples = data_gate.sample_findings(svc.doc)
+        if result.get("skipped") or (result.get("ok") and not samples):
             break
-        found = data_gate.findings(svc.doc, result, app_root)
+        found = samples + data_gate.findings(svc.doc, result, app_root)
         feedback: dict[str, str] = {}
         for f in found:
             if f.artifact_id:
                 feedback.setdefault(f.artifact_id, "The build created this application's tables and demo "
-                                    "rows in a real database, and it refused:")
+                                    "rows in a real database, and found:")
                 feedback[f.artifact_id] += "\n- " + f.detail
         if round_ == REPAIR_ROUNDS or not feedback or not repair(svc, "entity_fields", feedback, usage=usage):
             issues.extend({"kind": "database", "entity": f.artifact_id, "detail": f.detail} for f in found)

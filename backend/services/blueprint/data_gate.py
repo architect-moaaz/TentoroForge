@@ -233,21 +233,62 @@ def findings(doc: dict, result: dict, app_root: str | Path | None = None) -> lis
     return out
 
 
+def sample_findings(doc: dict) -> list[Any]:
+    """A sample reference that names a record its parent's samples lack.
+
+    Each record type's fields are written on their own, in parallel, so a
+    City's sample could name "Gujarat" when State's samples have no Gujarat.
+    The seeder resolves a reference by the label it names
+    (`projection._ref_by_label`); a label with no record fell back to
+    position, and Jaffna sat in Karnataka (Test4, 2026-09-28). Filed against
+    the record type that names it, with the labels it can choose from.
+    """
+    from services.blueprint.projection import _link_target, label_examples
+    from services.blueprint.verification import Finding
+
+    ents = _entities(doc)
+    by_id = {str(e.get("id")): e for e in ents}
+    out = []
+    for e in ents:
+        for f in e.get("fields") or []:
+            if not isinstance(f, dict):
+                continue
+            target = str(f.get("references") or _link_target(doc, e, f) or "")
+            parent = by_id.get(target)
+            named = [str(x).strip() for x in (f.get("examples") or []) if str(x).strip()]
+            if parent is None or not named:
+                continue
+            labels = label_examples(parent)
+            if not labels:
+                continue
+            have = {x.lower() for x in labels}
+            missing = sorted({n for n in named if n.lower() not in have})
+            if missing:
+                out.append(Finding(EDGE, section="data.entities", artifact_id=str(e.get("id") or ""),
+                                   detail=f"the sample values of {e.get('name')}.{f.get('name')} name "
+                                          f"{', '.join(missing)} as the {parent.get('name')} they belong to, "
+                                          f"and {parent.get('name')}'s sample records are only: "
+                                          f"{', '.join(labels)}. Name one of those in each row, and keep "
+                                          f"the rest of that row true to it."))
+    return out
+
+
 def early_findings(doc: dict, app_root: str | Path) -> list[Any]:
     """After the data model is written: project its tables and push them.
     No seed yet — the rest of the app is not on disk."""
     from services.blueprint.projection import project_data_layer
 
+    samples = sample_findings(doc)
     try:
         project_data_layer(doc, app_root)
     except Exception as exc:  # noqa: BLE001 — a projection fault is reported, not raised here
         logger.warning("[data_gate] could not project the data layer: %s", exc)
-        return []
+        return samples
     result = run(app_root, seed=False)
     if result.get("skipped"):
         logger.info("[data_gate] skipped: %s", result["skipped"])
-        return []
-    return findings(doc, result, app_root)
+        return samples
+    return samples + findings(doc, result, app_root)
 
 
-__all__ = ["EDGE", "early_findings", "findings", "gate_server", "run", "throwaway_database"]
+__all__ = ["EDGE", "early_findings", "findings", "gate_server", "run", "sample_findings", "throwaway_database"]
