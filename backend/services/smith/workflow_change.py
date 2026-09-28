@@ -362,20 +362,32 @@ def add_workflow(svc: Any, request: str, *, route: str = "", app_root: str | Non
     files = _project_runtime(svc, app_root)
 
     # 3. the screen it starts from
-    composed, offered = None, False
+    composed, offered, page_refused, start = None, False, "", None
     if str((wf.get("trigger") or {}).get("kind") or "") == "manual":
         start = page or pick_page(svc.doc, wf)
         if start is not None:
             if start.get("id") not in (wf.get("launchedFrom") or []):
                 wf["launchedFrom"] = list(wf.get("launchedFrom") or []) + [str(start["id"])]
                 svc.save()
-            from services.smith.compose import compose_route
+            from services.smith.compose import ComposeError, compose_route
             tell(reasoning, f"Composing {start.get('route')} so it offers {new_name}.", "step")
-            compose_route(svc, str(start.get("route")), app_root=app_root,
-                          request=f"add a control that runs the {new_name} workflow ({new_id})",
-                          executor=run, reasoning=reasoning)
-            composed = str(start.get("route"))
-            files.append(f"src/schemas{start.get('route')}.json")
+            try:
+                result = compose_route(
+                    svc, str(start.get("route")), app_root=app_root,
+                    request=(f"add a control that runs the {new_name} workflow — "
+                             f"{wf.get('purpose') or new_name}. It is the only way this change "
+                             "reaches the records; wire the control to it, never to screen state "
+                             f"({new_id})"),
+                    executor=run, reasoning=reasoning)
+            except ComposeError as exc:
+                # THE WORKFLOW LANDED; ONLY THE SCREEN DID NOT. Raised through,
+                # this ended the step as "nothing has been changed" while the
+                # workflow stood in the definition and the app (Test 5).
+                page_refused = str(exc)
+            else:
+                composed = str(start.get("route"))
+                files += list(getattr(result, "committed", None) or []) if getattr(result, "coded", False) \
+                    else [f"src/schemas{start.get('route')}.json"]
             # SAY WHAT LANDED, NOT WHAT WAS ASKED. The composer binds a control
             # only where one makes sense; a screen whose form already submits
             # a workflow with the same inputs gets none, and "composed so it
@@ -383,11 +395,20 @@ def add_workflow(svc: Any, request: str, *, route: str = "", app_root: str | Non
             offered = _offers(svc.doc, str(start.get("id")), new_id)
     return {"applied": True, "workflow": new_id, "name": new_name, "requirement": req.get("id"),
             "steps": len(wf.get("steps") or []), "trigger": str((wf.get("trigger") or {}).get("kind") or ""),
-            "composed": composed, "offered": offered, "edited_paths": files}
+            "composed": composed, "offered": offered, "edited_paths": files,
+            "page_refused": page_refused, "start_route": str((start or {}).get("route") or "")}
 
 
 def _offers(doc: dict, page_id: str, wf_id: str) -> bool:
-    """Whether the page's live layout has a control bound to `wf_id`."""
+    """Whether the page has a control bound to `wf_id` — in its code when it
+    is written as code, else in its live layout."""
+    from services.smith.compose import code_row
+    row = code_row(doc, page_id)
+    if row is not None:
+        from services.blueprint.app_sdk import workflow_keys
+        key = workflow_keys(doc).get(str(wf_id))
+        return bool(key) and re.search(r"\bworkflows\." + re.escape(key) + r"\b",
+                                       str(row.get("view") or "")) is not None
     layout = next((l for l in doc.get("pageLayouts") or []
                    if isinstance(l, dict) and str(l.get("page")) == page_id
                    and l.get("status") not in ("SUPERSEDED", "DEPRECATED")), None)
@@ -558,8 +579,11 @@ def summary_of(verb: str, out: dict) -> str:
     if verb == "add_workflow":
         s = (f"Added the workflow {out['name']} ({out['workflow']}): {out['steps']} step(s), "
              f"trigger {out['trigger'] or 'manual'}, recorded as {out['requirement']}.")
-        if out.get("composed") and out.get("offered"):
-            s += f" Composed {out['composed']} again so it offers it."
+        if out.get("page_refused"):
+            s += (f" The workflow is in the app, but {out.get('start_route') or 'its screen'} could not "
+                  f"be changed to offer it: {str(out['page_refused'])[:300]}")
+        elif out.get("composed") and out.get("offered"):
+            s += f" Changed {out['composed']} so it offers it."
         elif out.get("composed"):
             s += (f" Composed {out['composed']} again, but the composer placed no control for it there — "
                   "the screen already runs a workflow with the same inputs. Tell me which screen should "

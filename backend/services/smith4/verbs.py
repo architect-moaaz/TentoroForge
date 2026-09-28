@@ -126,9 +126,17 @@ def navigation(ctx: Ctx, u: dict) -> Outcome:
 def workflow(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.workflow_change import run
     verb = u["verb"]
-    return from_seam(run(ctx.out, verb, workflow=_s(u, "workflow") or ctx.ask,
-                         change=_s(u, "change"), route=_s(u, "route"), reasoning=ctx.reasoning),
-                     fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+    out = run(ctx.out, verb, workflow=_s(u, "workflow") or ctx.ask,
+              change=_s(u, "change"), route=_s(u, "route"), reasoning=ctx.reasoning)
+    step = from_seam(out, fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+    if out.get("applied") and out.get("page_refused"):
+        # The workflow landed and its screen did not: a finding the loop can
+        # act on (`write_page_code` naming the workflow), not a success.
+        step.finding = (f"{out.get('name')} ({out.get('workflow')}) is added and runs, but "
+                        f"{out.get('start_route') or 'its screen'} does not offer it yet: "
+                        f"{str(out['page_refused'])[:400]} — change the page with `write_page_code`, "
+                        f"naming workflows for {out.get('name')}.")
+    return step
 
 
 def access(ctx: Ctx, u: dict) -> Outcome:

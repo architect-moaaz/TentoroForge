@@ -177,6 +177,14 @@ change in the code's own terms: the constant, the component, the line. The
 compiler's verdict comes back as an observation; a page that did not compile
 is a brief to sharpen, not a reason to stop.
 
+A CHANGE TO RECORDS IS A WORKFLOW, AND IT COMES FIRST. Adding, deleting,
+approving or updating records happens only through a workflow; a page's code
+cannot do it on its own. When the ask needs one the application does not have
+("a delete button"), `add_workflow` first — it also puts its control on the
+page — and only then change the page's code for what is left. A plan orders
+its steps the same way. A page that reports it needs a workflow is telling you
+which one to add.
+
 A step that reported it changed nothing is INFORMATION, not a reason to repeat
 it. "I looked for X and could not find it" means X is not what it is called, or
 the change belongs to a different tool — read what the observation actually

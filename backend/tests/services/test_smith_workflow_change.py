@@ -110,7 +110,10 @@ def test_a_new_workflow_is_declared_authored_and_offered_on_its_screen(svc, monk
     assert [w["name"] for w in fresh.doc["workflows"] if w["name"] in ("Register Nurse", "Delete Nurse")] == ["Register Nurse", "Delete Nurse"]
     assert next(w for w in fresh.doc["workflows"] if w["name"] == "Delete Nurse")["steps"]      # untouched
     assert "THE TRIGGER COMES FROM THE WORDS" not in brief          # a screen was named: manual, there
-    assert composed == [("/master-data", f"add a control that runs the Reset Nurse Location workflow ({out['workflow']})")]
+    assert composed == [("/master-data", f"add a control that runs the Reset Nurse Location workflow — "
+                                         f"{wf.get('purpose') or wf['name']}. It is the only way this change "
+                                         "reaches the records; wire the control to it, never to screen state "
+                                         f"({out['workflow']})")]
     # the stub composer placed no control, and the reply says so instead of claiming one
     assert out["composed"] == "/master-data" and out["offered"] is False
     assert "placed no control for it" in wc.summary_of("add_workflow", out)

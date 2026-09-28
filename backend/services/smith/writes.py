@@ -41,7 +41,9 @@ WRITES: tuple[tuple[str, str, dict[str, str]], ...] = (
      "terms of the code you read, not the user's sentence. The page is "
      "rewritten by the engineer that wrote it, type-checked against the SDK, "
      "and committed as one version. The compiler's verdict comes back to you. "
-     "For a page that does not exist yet, `compose_route`.",
+     "It cannot make records change by itself: a change to data (add, delete, "
+     "approve, update) runs a workflow, so when none does what is asked, "
+     "`add_workflow` first. For a page that does not exist yet, `compose_route`.",
      {"route": "string", "brief": "string"}),
 )
 
@@ -243,7 +245,8 @@ def write_page_code(output_dir: str, route: str, brief: str, *,
     `{applied, said, finding, touched, version}` — `finding` set when an
     oracle refused, in its words; `said` for the person either way."""
     from services.blueprint.service import BlueprintService
-    from services.smith.compose import ComposeError, _page_for_route, code_row, coded_app, recode_page
+    from services.smith.compose import (ComposeError, NeedsWorkflowError, _page_for_route, code_row,
+                                        coded_app, recode_page)
 
     route = (route or "").strip()
     brief = (brief or "").strip()
@@ -265,6 +268,9 @@ def write_page_code(output_dir: str, route: str, brief: str, *,
     app_root = str(Path(output_dir) / "app")
     try:
         out = recode_page(svc, route, app_root=app_root, request=brief, reasoning=reasoning)
+    except NeedsWorkflowError as exc:
+        # WORKFLOW FIRST: the page said what it needs; the next step adds it.
+        return _finding(str(exc))
     except ComposeError as exc:
         # The compiler's (or the contract's) own words, unparaphrased.
         return _finding(f"{route} was not changed: {exc}")
@@ -275,7 +281,11 @@ def write_page_code(output_dir: str, route: str, brief: str, *,
         return _finding(f"{route} was not changed: {out.get('reason') or 'the change was refused'}")
     missing = [str(m) for m in out.get("missing") or []]
     version = int(out.get("version") or 0)
-    said = f"Rewrote **{route}** (version {version})."
+    # WHAT CHANGED, NOT ONLY THAT SOMETHING DID. "Rewrote /register
+    # (version 27)" was the whole report of a rewrite that took the Delete
+    # button away (Test 5); the writer's own account of the change is said.
+    what = str(out.get("rationale") or "").strip()
+    said = f"Rewrote **{route}** (version {version})" + (f": {what}" if what else ".")
     if missing:
         return {"applied": True, "said": said, "touched": list(out.get("committed") or []),
                 "version": version,

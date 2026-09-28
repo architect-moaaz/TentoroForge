@@ -59,6 +59,20 @@ class ComposeError(RuntimeError):
     """The request named something the Blueprint does not have."""
 
 
+class NeedsWorkflowError(ComposeError):
+    """The page cannot make the change: records must change in a way none of
+    the application's workflows does. Nothing was written; `needs` says what
+    the missing workflow is for, so the caller adds it and asks again."""
+
+    def __init__(self, route: str, needs: list[str]):
+        self.route, self.needs = route, list(needs)
+        super().__init__(
+            f"{route} was not changed: the change needs records to {'; '.join(self.needs)}, and "
+            "no workflow of this application does that. Add it with `add_workflow` — describe what "
+            f"it changes and start it from {route}; that also puts its control on the page. A page "
+            "only changes records through a workflow, so nothing was faked in the meantime.")
+
+
 def _page_for_route(doc: dict, route: str) -> dict | None:
     """The page contract for a route, tolerant about how a user typed it."""
     want = (route or "").strip()
@@ -225,6 +239,24 @@ def compose_route(
     # route is returned unchanged and only a genuinely new one grows the
     # definition before it is laid out.
     page = _ensure_page(svc, route, request)
+
+    # A PAGE WRITTEN AS CODE IS CHANGED AS CODE. The verb path already sent
+    # coded pages to `recode_page`; the seams that compose a page as a side
+    # effect — a new workflow's start screen, a restated requirement, a new
+    # edit screen — called this directly, and the layout composer redrew a
+    # React page as a layout tree. /register was refused twice over a Form
+    # prop and Smith said "nothing has been changed" with the workflow
+    # already added (Test 5, 2026-09-28).
+    if code_row(svc.doc, str(page.get("id"))) is not None or coded_app(svc.doc):
+        from types import SimpleNamespace
+        root = app_root or str(Path(svc.output_dir) / "app")
+        out = recode_page(svc, str(page.get("route") or route), app_root=root,
+                          request=request or f"compose {route}", reasoning=reasoning)
+        if not out.get("applied"):
+            raise ComposeError(f"{route} was not changed: {out.get('reason') or 'the rewrite was refused'}")
+        return SimpleNamespace(committed=list(out.get("committed") or []),
+                               version=out.get("version"), missing=list(out.get("missing") or []),
+                               coded=True)
 
     # The composition is the slow part of the turn — around a minute behind a
     # single message. `reasoning` is how that minute becomes legible: the
@@ -781,7 +813,7 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
     from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
     from services.blueprint.app_sdk import project_code_pages, widget_keys
     from services.blueprint.executors import RunUsage, make_executor, tiered_router
-    from services.blueprint.ui_engineer import CompileError, compose_page, ensure_sdk
+    from services.blueprint.ui_engineer import CompileError, NeedsWorkflow, compose_page, ensure_sdk
 
     page = _page_for_route(svc.doc, route)
     row = code_row(svc.doc, str((page or {}).get("id")))
@@ -834,6 +866,8 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
         try:
             body, spent = compose_page(doc, page, root, llm, brief=brief, current=row, node="page_code",
                                        critic=critic)
+        except NeedsWorkflow as exc:
+            raise NeedsWorkflowError(route, exc.needs) from exc
         except CompileError as exc:
             raise ComposeError(f"the new {route} did not compile, so nothing was changed: {exc}") from exc
         # A reviewed rewrite's calls carry who made them — `(usage, elapsed,
@@ -894,7 +928,8 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
         if name and name not in view:
             missing.append(w)
     return {"applied": True, "committed": committed, "version": version,
-            "reason": "", "missing": missing, "widgets": sorted(declared)}
+            "reason": "", "missing": missing, "widgets": sorted(declared),
+            "rationale": str(body.get("rationale") or "").strip()}
 
 
 def run(output_dir: str, verb: str, *, route: str = "",

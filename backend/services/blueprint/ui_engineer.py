@@ -74,7 +74,7 @@ PAGE_CODE_SCHEMA: dict[str, Any] = {
 PAGE_EDIT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["rationale", "edits", "load", "view"],
+    "required": ["rationale", "edits", "load", "view", "needs"],
     "properties": {
         "rationale": {"type": "string", "description": "One or two sentences: what you changed and why."},
         "edits": {
@@ -97,8 +97,26 @@ PAGE_EDIT_SCHEMA: dict[str, Any] = {
             "Empty — unless load.ts is being rewritten whole, then its full contents.")},
         "view": {"type": "string", "description": (
             "Empty — unless view.tsx is being rewritten whole, then its full contents.")},
+        "needs": {
+            "type": "array",
+            "description": (
+                "Each change to records the brief asks for that none of the application's "
+                "workflows makes, in a few words (\"delete a Worker\"). Empty when every change "
+                "runs a listed workflow. When it is not empty, nothing is written: the missing "
+                "workflow is added first and the page is changed after."),
+            "items": {"type": "string"},
+        },
     },
 }
+
+
+class NeedsWorkflow(RuntimeError):
+    """The change asks for records to change in a way no workflow does. Carries
+    what is needed, in the writer's words, so the workflow is added first."""
+
+    def __init__(self, needs: list[str]):
+        self.needs = [str(n).strip() for n in needs if str(n).strip()]
+        super().__init__("needs a workflow that does not exist yet: " + "; ".join(self.needs))
 
 
 class EditsDidNotApply(ValueError):
@@ -595,6 +613,12 @@ view.tsx — "use client" on the first line.
     <WorkflowButton workflow={workflows.x} input={{ … }} />, or useWorkflow(workflows.x).run(input).
     `fields` has one entry per workflow input, keyed by the input's name; an input the page
     already knows (the record's id, a fixed decision) is { value: … } and renders nothing.
+    A CHANGE NO WORKFLOW MAKES IS NEVER SIMULATED. There is no delete, save or update
+    function besides the workflows listed for this application; do not invent one, and do
+    not fake one — removing a row from React state, a timer that "saves", a success toast
+    over nothing. The row comes back on reload and the person has been told a lie. When a
+    change the brief asks for is made by none of the listed workflows, leave its control
+    out and name the change in `needs` (when the reply has it).
   - Search / filters: update the URL with router.push(href(pages.thisPage, params?, query)).
   - TypeScript strict: no `any`, no non-null assertions on data that can be null, handle
     null fields. Keep it one file; small local components are fine.
@@ -957,6 +981,98 @@ def _unwired_actions(doc: dict, page: dict, view: str) -> list[str]:
     return out
 
 
+#: A pause dressed as work: `await new Promise((r) => setTimeout(r, 300))`.
+_TIMED_PRETENCE = re.compile(r"await\s+new\s+Promise\s*\([^)]*=>\s*setTimeout\s*\(")
+#: A row taken out of the page's own copy of the records.
+_STATE_REMOVAL = re.compile(r"\bset[A-Z]\w*\(\s*\(?\s*\w+\s*\)?\s*=>\s*\w+\.filter\(")
+#: Something that actually reaches the records.
+_REAL_WRITE = re.compile(r"\brun\(|\bworkflows\.\w+|\.mutate(?:Async)?\(")
+
+
+def _function_bodies(src: str) -> list[str]:
+    """The body of each `=> {` / `function … {` in `src`, by brace matching."""
+    bodies = []
+    for m in re.finditer(r"=>\s*\{|\bfunction\b[^{(]*\([^)]*\)[^{]*\{", src):
+        depth, i = 1, m.end()
+        while i < len(src) and depth:
+            depth += {"{": 1, "}": -1}.get(src[i], 0)
+            i += 1
+        bodies.append(src[m.end():i - 1])
+    return bodies
+
+
+def _simulated_writes(view: str) -> list[str]:
+    """A change to records the page only pretends to make.
+
+    Test 5's Delete (2026-09-28) waited 300ms and filtered the row out of
+    React state; it compiled, the reviewer scored it 8/10, and the person
+    watched it come back on every reload. Only a workflow reaches the records,
+    so a handler that removes a row or waits on a timer without running one is
+    refused, with the way out: say the change is needed."""
+    out = []
+    for body in _function_bodies(view):
+        if _REAL_WRITE.search(body):
+            continue
+        if _TIMED_PRETENCE.search(body) or _STATE_REMOVAL.search(body):
+            out.append("view.tsx: a handler removes a row from the page's state or waits on a timer "
+                       "without running a workflow — the records do not change and the row comes "
+                       "back on reload. Run the workflow that makes this change; when none of the "
+                       "application's workflows does, leave the control out and name the change "
+                       "in `needs`.")
+            break
+    return out
+
+
+#: A button or form, its attributes read through `{…}` so an `=>` inside one
+#: does not end the tag.
+_CONTROL = re.compile(r"<(Button|WorkflowButton|WorkflowForm)\b((?:[^>{]|\{(?:[^{}]|\{[^{}]*\})*\})*)>(.*?)</\1>",
+                      re.S)
+#: Words that say a control is to go or to be renamed.
+_TAKE_AWAY = re.compile(r"\b(remove|hide|drop|get rid of|take (?:it )?(?:off|away|out)|without|rename|relabel|"
+                        r"call it|instead of|replace)\b", re.I)
+
+
+def _control_labels(view: str) -> list[str]:
+    """What each button and form in a view says — its literal text, the
+    strings it switches between, a form's submit label."""
+    labels: list[str] = []
+    for m in _CONTROL.finditer(view):
+        attrs, inner = m.group(2), m.group(3)
+        texts = re.findall(r'"([^"{}<>]{2,80})"', inner)
+        texts += [s.strip() for s in re.sub(r"\{[^{}]*\}|<[^>]*>", "\n", inner).split("\n")]
+        for s in texts:
+            s = s.strip()
+            if len(s) >= 2 and re.search(r"\w", s) and s not in labels:
+                labels.append(s)
+    for s in re.findall(r'submitLabel="([^"]+)"', view):
+        if s not in labels:
+            labels.append(s)
+    return labels
+
+
+def _dropped_controls(before: str, after: str, brief: str) -> list[str]:
+    """Controls the page had that the rewrite no longer has, when the brief
+    did not ask for them to go.
+
+    "It's not deleting from the table" came back as a page with no Delete
+    button, reported as "Rewrote /register (version 27)" (Test 5,
+    2026-09-28). A control disappears only when the ask says so — a word
+    of the control's label beside a word for taking it away or renaming it."""
+    asked = brief.lower()
+    out = []
+    for label in _control_labels(before):
+        if label in after:
+            continue
+        stems = [w[:5] for w in re.findall(r"[a-z]{3,}", label.lower())]
+        if _TAKE_AWAY.search(brief) and any(s in asked for s in stems):
+            continue
+        out.append(label)
+    gone = sorted(set(re.findall(r"\bworkflows\.(\w+)", before)) - set(re.findall(r"\bworkflows\.(\w+)", after)))
+    if gone and not _TAKE_AWAY.search(brief):
+        out += [f"the control that runs workflows.{k}" for k in gone]
+    return out
+
+
 def _static_findings(load: str, view: str) -> list[str]:
     """What the compiler cannot see and the rules forbid."""
     out = []
@@ -1071,6 +1187,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     #: time, a changed page was rewritten whole, scored 7/10 again and cost
     #: two minutes for nothing (live, 2026-09-28).
     changing = current is not None
+    #: The page as it was before this change, to hold the rewrite to it.
+    original_view = str((current or {}).get("view") or "")
     #: What the reviewer is told was asked of the page, when it is changed.
     change = (brief or feedback or "").strip() if changing else ""
     #: The best version seen by the reviewer: (rank, body). Returned when a
@@ -1107,6 +1225,10 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             continue
         load, view = str(body.get("load") or ""), str(body.get("view") or "")
         emitted = len(load) + len(view)
+        if editing and [n for n in body.get("needs") or [] if str(n).strip()]:
+            # NOTHING IS WRITTEN AROUND A MISSING WORKFLOW. The writer says
+            # what the change needs; the caller adds it and asks again.
+            raise NeedsWorkflow(list(body.get("needs") or []))
         if editing:
             # A file left empty keeps its current contents; the edits apply
             # to whatever each file then is.
@@ -1125,8 +1247,14 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             load, view = files["load"], files["view"]
         view = _use_client_first(view)
         design = _design_findings(doc, page, view)
-        errors = (_static_findings(load, view) + _unwired_actions(doc, page, view)
+        errors = (_static_findings(load, view) + _simulated_writes(view) + _unwired_actions(doc, page, view)
                   + typecheck(doc, app_root, str(page.get("id")), load, view))
+        if changing and original_view:
+            dropped = _dropped_controls(original_view, view, change)
+            if dropped:
+                errors.append("view.tsx: the rewrite took away what the page had and the ask did not "
+                              "say to remove: " + "; ".join(f"`{d}`" for d in dropped[:6]) + " — keep "
+                              "them; if one cannot work as asked, keep it and name the change in `needs`.")
         # THE STYLE RULES ASK AGAIN; THEY NEVER COST A PAGE. A page that
         # compiles and runs is kept on the last round whatever its design
         # findings — losing the page is worse than an unaccented button.
