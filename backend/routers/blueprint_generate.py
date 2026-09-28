@@ -377,7 +377,15 @@ def _cite_from_blueprint(doc: dict, message: str) -> str | None:
     no guess (§116).
     """
     low = (message or "").lower().strip()
-    if not (low.startswith("why") or any(p in low for p in _WHY_LEADS)):
+    # A QUESTION ABOUT A DECISION, NOT EVERY "WHY". "Why do some areas have
+    # Nepal with Uttar Pradesh?" is about what the application shows, and was
+    # answered by quoting REQ-010 — the requirement that shared the most
+    # words, not one that explained anything (Test2, 2026-09-28). Only a
+    # question about what Smith or the definition chose is cited from it;
+    # everything else reaches the loop, which can look before it answers.
+    about_a_choice = bool(re.search(r"\bwhy (did|do|would|have|has) (you|smith|we|it)\b", low)) \
+        or any(p in low for p in _WHY_LEADS if p != "why")
+    if not about_a_choice:
         return None
     words = {w for w in re.findall(r"[a-z0-9]+", low) if len(w) >= 3
              and w not in _CITE_STOPWORDS}

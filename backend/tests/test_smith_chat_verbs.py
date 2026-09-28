@@ -234,13 +234,30 @@ def test_why_question_cites_the_matching_decision():
     assert "which screen" not in out.lower()
 
 
-def test_why_question_falls_back_to_a_requirement_when_no_decision_matches():
+def test_why_did_you_falls_back_to_a_requirement_when_no_decision_matches():
     doc = {"requirements": [
         {"id": "REQ-014",
          "description": "Interview scheduling emails the candidate the date and time."},
     ]}
-    out = _cite_from_blueprint(doc, "why does scheduling send an email to the candidate?")
+    out = _cite_from_blueprint(doc, "why did you make scheduling send an email to the candidate?")
     assert out is not None and "REQ-014" in out
+
+
+def test_a_why_about_what_the_app_shows_reaches_the_loop():
+    # Test2, 2026-09-28: "Why do some areas on Location Data have a Country
+    # like Nepal with a State like Uttar Pradesh?" was answered by quoting the
+    # requirement that shared the most words. A question about what the
+    # application does is not a question about a choice; the loop answers it.
+    doc = {"requirements": [
+        {"id": "REQ-010",
+         "description": "Staff can view a table listing all saved worker records, including "
+                        "location (Country, State, City), on the Location Data screen."},
+    ]}
+    assert _cite_from_blueprint(
+        doc, "Why do some areas on Location Data have a Country like Nepal with a State "
+             "like Uttar Pradesh?") is None
+    assert _cite_from_blueprint(
+        doc, "why does scheduling send an email to the candidate?") is None
 
 
 def test_non_why_and_weak_matches_fall_through_to_the_model():
