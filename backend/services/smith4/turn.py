@@ -63,11 +63,22 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
     touched: list[str] = []
     last: Outcome | None = None
 
+    import time as _time
+    turn_started = _time.monotonic()
     for _step in range(1, max_steps + 1):
         from services.smith4.definition import brief_of
+        t0 = _time.monotonic()
         page = opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx))
+        t1 = _time.monotonic()
         chosen = choose(ctx.ask, page, observations, history) or {}
+        t2 = _time.monotonic()
         tool = str(chosen.get("tool") or "").strip()
+        # WHERE A TURN'S TIME GOES, ONE LINE A STEP. Turns ran seven to ten
+        # minutes with nothing saying whether the model, the page, or the step
+        # itself was slow (Test2, 2026-09-28).
+        logger.info("[smith-step] %d %s: page %.1fs (%d chars), choose %.1fs, seen %d chars, at %.0fs",
+                    _step, tool or "-", t1 - t0, len(page), t2 - t1,
+                    sum(len(o.said or "") for o in observations), t2 - turn_started)
         args = chosen.get("args") if isinstance(chosen.get("args"), dict) else {}
         args = {k: v for k, v in args.items() if v not in (None, "")}
 
