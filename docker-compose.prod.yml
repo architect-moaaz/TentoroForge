@@ -66,6 +66,11 @@ services:
       VERCEL_TEAM_ID: ${VERCEL_TEAM_ID:-}
       NEON_API_KEY: ${NEON_API_KEY:-}
       NEON_ORG_ID: ${NEON_ORG_ID:-}
+      # --- integration keys at rest (services/platform_integrations_crypto.py) ---
+      # Encrypts every connected service's key; ≥16 chars. Never rotate it once
+      # keys are stored: every stored value becomes unreadable. Without it the
+      # Integrations page refuses to save.
+      FORGE_INTEGRATIONS_SECRET: ${FORGE_INTEGRATIONS_SECRET:-}
       # --- feature flags (mirror local dev defaults) ---
       FORGE_SMITH_ARCHITECT: ${FORGE_SMITH_ARCHITECT:-0}
       FORGE_SELF_HEAL: ${FORGE_SELF_HEAL:-1}
