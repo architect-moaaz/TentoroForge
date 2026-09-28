@@ -23,6 +23,6 @@ def test_the_app_boots_its_database_when_none_answers(tmp_path):
 
 def test_a_database_that_answers_is_left_alone(tmp_path, monkeypatch):
     app = _app(tmp_path, "postgresql://postgres:postgres@localhost:5555/app")
-    monkeypatch.setattr("services.blueprint.schema_push._answers", lambda url: True)
+    monkeypatch.setattr("services.blueprint.schema_push.database_exists", lambda url: True)
     asyncio.run(preview._ensure_database(str(app)))
     assert not (app / "ran.txt").exists()

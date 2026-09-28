@@ -49,6 +49,20 @@ def _answers(url: str) -> bool:
         return False
 
 
+def database_exists(url: str) -> bool:
+    """Whether the database itself accepts a connection — not only its port.
+    A Postgres on 5432 answered for a database it did not have (Test4,
+    2026-09-28)."""
+    if not url or not _answers(url):
+        return False
+    try:
+        import psycopg2
+        psycopg2.connect(url, connect_timeout=3).close()
+        return True
+    except Exception:  # noqa: BLE001 — any refusal means it is not there to use
+        return False
+
+
 def push_now(app_root: str | Path) -> dict:
     """``{"applied": bool, "reason": str}`` — pushed and seeded, or why not."""
     root = Path(app_root)
@@ -75,4 +89,4 @@ def push_now(app_root: str | Path) -> dict:
     return {"applied": True, "reason": ""}
 
 
-__all__ = ["database_url", "push_now"]
+__all__ = ["database_exists", "database_url", "push_now"]

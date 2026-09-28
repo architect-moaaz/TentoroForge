@@ -42,11 +42,10 @@ async def _ensure_database(output_dir: str) -> None:
     rewrites .env.local to match; it runs here when the database does not
     answer. A preview without Docker still starts, and says why it has no data.
     """
-    from services.blueprint.schema_push import _answers, database_url
+    from services.blueprint.schema_push import database_exists, database_url
 
     script = Path(output_dir) / "start.sh"
-    url = database_url(output_dir)
-    if not script.is_file() or (url and _answers(url)):
+    if not script.is_file() or database_exists(database_url(output_dir)):
         return
     log = Path(output_dir) / ".forge-preview-db.log"
     try:
