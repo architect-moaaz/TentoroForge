@@ -1646,7 +1646,17 @@ async def smith_chat(
             # the approval the same way the card does, so a definition changed
             # since the last approval is still refused as stale — the refusal
             # just happens after the click rather than instead of it.
-            if _gate == _gates.REQUIREMENTS and (_is_build_consent(req.message)
+            # A YES TO SMITH'S OWN QUESTION IS SMITH'S. Med Tracker's tester
+            # asked to remove a field; Smith showed what that takes and asked
+            # "Shall I go ahead?"; "Go ahead" is also a build consent, so it
+            # was answered here — "It is already built … nothing has changed"
+            # — and the removal never ran. Three times (2026-09-29).
+            _answers_smith = _smith_is_waiting(output_dir, req.message)
+            _guard_answer = None if _answers_smith else _rebuild_guard_answer(req.message, svc.doc if svc is not None else {})
+            if _guard_answer is not None:
+                emit("message", {"text": _guard_answer, "status": "reported"})
+                return {"status": "reported"}
+            if not _answers_smith and _gate == _gates.REQUIREMENTS and (_is_build_consent(req.message)
                                                  or _is_gate_consent(req.message)):
                 # "Go" said at the requirements review is yes to THEM — the
                 # product model is worked out next, and nothing is built
@@ -1654,9 +1664,11 @@ async def smith_chat(
                 return _approve_requirements(str(output_dir), app_root, emit=emit,
                                              app_name=getattr(project, "name", "") or "",
                                              message=req.message)
-            if svc is not None and defined and _is_build_consent(req.message):
+            if svc is not None and defined and not _answers_smith \
+                    and (_is_build_consent(req.message) or _is_forced_rebuild(req.message)):
                 from services.blueprint import approval as _approval
-                if _is_built(output_dir) and _approval.state_of(svc.doc, "plan") == "approved":
+                if not _is_forced_rebuild(req.message) and _is_built(output_dir) \
+                        and _approval.state_of(svc.doc, "plan") == "approved":
                     # Already built, and nothing has changed since it was
                     # approved: rebuilding costs minutes and money for the
                     # same application, so it is asked rather than assumed.
@@ -2441,6 +2453,53 @@ _GATE_CONSENT = frozenset({
 def _is_gate_consent(message: str) -> bool:
     m = " ".join((message or "").strip().lower().rstrip(".!").split())
     return m in _GATE_CONSENT
+
+
+def _said(message: str) -> str:
+    return " ".join((message or "").strip().lower().rstrip(".!").split())
+
+
+def _smith_is_waiting(output_dir: Any, message: str) -> bool:
+    """Whether this message is a plain yes to a question Smith asked and has
+    not had answered — a confirmation, a plan, a clarifying question — so it
+    goes to Smith and not to the build shortcuts here. Only a plain yes:
+    "build app" said while Smith waits is still a build."""
+    from pathlib import Path as _P
+    from services.smith import confirm, pending_ask, plan
+    if not confirm.is_yes(message):
+        return False
+    return any((_P(output_dir) / p).exists()
+               for p in (confirm.PENDING_PATH, plan.PENDING_PATH, pending_ask.PENDING_PATH))
+
+
+#: The rebuild question's own buttons (see "It is already built from this
+#: definition"). Each does what it says: none of them fell anywhere before —
+#: "Build it again anyway" and "Show me the screens" reached Smith as changes.
+_FORCED_REBUILD = frozenset({"build it again anyway", "build it again", "rebuild it anyway",
+                             "rebuild anyway"})
+_SHOW_SCREENS = "show me the screens"
+_CHANGE_FIRST = "nothing, i'll change something first"
+
+
+def _is_forced_rebuild(message: str) -> bool:
+    return _said(message) in _FORCED_REBUILD
+
+
+def _rebuild_guard_answer(message: str, doc: dict) -> str | None:
+    """The reply to "Show me the screens" or "Nothing, I'll change something
+    first", or None for anything else."""
+    m = _said(message)
+    if m == _CHANGE_FIRST.rstrip("."):
+        return "Right — nothing rebuilt. Tell me what to change and I will make it."
+    if m != _SHOW_SCREENS:
+        return None
+    pages = [p for p in (doc or {}).get("pages") or []
+             if isinstance(p, dict) and str(p.get("status") or "").upper() != "DEPRECATED"]
+    if not pages:
+        return "There are no screens yet. Tell me what the app should show."
+    lines = [f"- **{p.get('name') or p.get('id')}** — `{p.get('route') or ''}`" for p in pages]
+    return ("These are the screens, as built:\n" + "\n".join(lines)
+            + "\n\nOpen the Preview to click through them, or tell me what to change.")
 
 
 def _is_build_consent(message: str) -> bool:

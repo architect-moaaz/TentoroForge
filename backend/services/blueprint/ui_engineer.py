@@ -377,7 +377,8 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
    page — do not add your own asterisks, required markers or reset logic.
    Each entry is either { value: … } (fixed — the record's id, a decided value; renders nothing)
    or a field: { label, kind?, options?, placeholder?, help? }, where kind follows the input's type:
-     string   → "text" (default) | "textarea" | "email" | "date" | "datetime" | "select" | "password" | "url" | "tel"
+     string   → "text" (default) | "textarea" | "email" | "date" | "time" | "datetime" | "select" | "password" | "url" | "tel"
+                (a time of day is "time" — a picker whose value is 24-hour HH:MM — never text with a format hint)
      enum     → "select" with options (one per value, human labels)
      number   → "number" (min?, max?, step?)
      boolean  → "checkbox" | "switch"

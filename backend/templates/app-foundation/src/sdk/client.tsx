@@ -111,7 +111,7 @@ export type FieldSpec<V> =
           : V extends GeoPoint
             ? { label: string; span?: "full"; kind: "location"; help?: string }
           : { label: string; span?: "full";
-              kind?: "text" | "textarea" | "email" | "date" | "datetime" | "select" | "password" | "url" | "tel" | "image";
+              kind?: "text" | "textarea" | "email" | "date" | "time" | "datetime" | "select" | "password" | "url" | "tel" | "image";
               options?: Option[]; placeholder?: string; help?: string });
 
 type RequiredKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? never : K }[keyof T];
@@ -183,6 +183,9 @@ function Field({ name, spec, value, required, onChange }: {
       value={value === undefined || value === null ? "" : String(value)}
       onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))} />;
   } else {
+    // "time" is the browser's own picker; its value is always 24-hour HH:MM.
+    // Med Tracker's "Preferred time" had to be a text box with a format hint
+    // because this list had no time (2026-09-29).
     const type = kind === "datetime" ? "datetime-local" : kind;
     control = <input id={id} type={type} required={required} className={inputClass}
       placeholder={spec.placeholder as string | undefined}

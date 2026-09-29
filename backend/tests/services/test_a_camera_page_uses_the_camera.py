@@ -131,3 +131,10 @@ def test_a_scan_hands_over_the_frame_it_read():
     camera = (SDK / "camera.tsx").read_text()
     assert "image?: string" in camera and 'hit.image = c!.toDataURL("image/jpeg", 0.85)' in camera
     assert "onScan={({ value, format, image })" in SDK_GUIDE
+
+
+def test_a_form_has_a_time_field():
+    # Med Tracker's "Preferred time" was a text box with a format hint: no kind said time.
+    client = (SDK / "client.tsx").read_text()
+    assert '"date" | "time" | "datetime"' in client
+    assert '"time" — a picker whose value is 24-hour HH:MM' in SDK_GUIDE

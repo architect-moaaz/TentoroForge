@@ -163,6 +163,12 @@ describe("templates", () => {
     expect(jsx).toContain("columns={2}");
   });
 
+  it("asks for a time of day with a time field", () => {
+    // Med Tracker's "Preferred time" was a text box with a format hint (2026-09-29).
+    const timed = { ...wf, inputs: [{ name: "preferredTime", kind: "field", type: "time", required: true, description: "", entity: null, options: [] }] } as WorkflowRef;
+    expect(formJsx(timed)).toContain('preferredTime: { label: "Preferred Time", kind: "time" },');
+  });
+
   it("writes a table over the page's data with an empty state", () => {
     const jsx = tableJsx("rows", entityColumns({ id: "E", name: "Record", typeName: "Record",
       fields: [{ name: "id", type: "uuid", required: true, label: "Id", options: [] },

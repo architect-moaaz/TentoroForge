@@ -23,6 +23,7 @@ function fieldKind(input: WorkflowInput): string {
   if (t !== "text" && t.includes("text") && !t.includes("string")) return "textarea";
   if (t === "email") return "email";
   if (t === "date") return "date";
+  if (t === "time") return "time";
   if (t === "timestamp" || t === "datetime") return "datetime";
   if (t === "boolean" || t === "bool") return "checkbox";
   if (["number", "integer", "int", "decimal", "float"].includes(t)) return "number";
