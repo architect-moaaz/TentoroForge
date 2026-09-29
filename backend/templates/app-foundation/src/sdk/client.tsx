@@ -68,8 +68,12 @@ export function useWorkflow<I extends Json>(
       if (!options.silent) toast.success(options.successMessage ?? `${workflow.name} — done`);
       // The notification bell looks again: this run may have told someone something.
       if (typeof window !== "undefined") window.dispatchEvent(new Event("forge:workflow-done"));
+      // AFTER the caller's own next step. A page that opens what the run made
+      // (`router.push(href(pages.x, { id: result.id }))` right after `await run()`)
+      // navigates first; a refresh queued ahead of it could leave the page where
+      // it was — SnapIT stayed on "Identifying product" with its result loaded.
       if (options.redirectTo) router.push(options.redirectTo);
-      else router.refresh();
+      else setTimeout(() => router.refresh(), 0);
       return { ok: true, result, error: null };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

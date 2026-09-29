@@ -392,6 +392,20 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
 <ImageSearch label?="Find products that look like this" />
    The search box for similar(): an upload that sets ?image= to the picked picture (and clears it).
 
+// ---- @/sdk/camera — view.tsx, only on a page that uses the camera ----
+<CameraCapture onCapture={(dataUrl) => …} label?="Take photo" facing?="environment" | "user" className? />
+   The live camera: a viewfinder and a shutter. onCapture gets the frame as an image data URL — what a
+   workflow's image input takes. Where the device has no camera or the person declines it, it offers a
+   picture from the device instead, so the page needs no second path. There is no flash control.
+   Each is ONE frame (4:5 unless className sizes it) with its own controls on it — the shutter, "Scan
+   again" — so set it where the viewfinder goes and draw no shutter or frame of your own.
+<BarcodeScanner onScan={({ value, format }) => …} label? className? />
+   Reads a barcode or QR code from the live camera, continuously, and calls onScan once with the value and
+   its format ("EAN-13", "UPC-A", "QR", "CODE-128", …); "Scan again" starts over. Where there is no camera it
+   says why — keep a typed entry beside it for that case.
+   A page that takes a picture or reads a code uses these: never a placeholder frame standing in for a
+   camera, and never a file picker labelled as one.
+
 <WidgetView widget={widgets.x} data={props.x} height?={260} currency?="GBP" action?={<Link …/>} title?={false}
             onSelect?={(s) => router.push(href(pages.list, {}, { status: s.category }))} />
    Draws a declared widget as its card: a KPI tile, a gauge, a chart with a table toggle, or a list.
@@ -552,6 +566,10 @@ What a finished page looks like:
   and a real image on its record — never the id. The list of an entity that is
   "Findable by likeness" offers "Find similar": <ImageSearch /> beside the search
   box, and while ?image= (or ?q=) is set, the rows are similar()'s, closest first.
+- NOTHING HIDES UNDER THE APP'S OWN BARS. On a phone the application's tab bar may sit on the
+  bottom edge. A bar the page fixes to the bottom (a sticky primary action) sits above it —
+  `bottom-[var(--app-bottom-inset,0px)]`, never `bottom-0` — and the page leaves that room under
+  its last row.
 - RECORD PAGES TELL THE STORY. Title with its status badge, key facts in a
   definition grid, the related records (notes, activity) as a timeline or table,
   and the actions available in the record's current state — nothing that cannot
@@ -604,13 +622,15 @@ view.tsx — "use client" on the first line.
     lucide-react (icons), clsx, tailwind-merge, class-variance-authority, sonner (toast),
     the @radix-ui primitives the kit is built on, the UI kit and the library below (optional),
     "@/sdk" (entity types, workflows, pages, widgets, href, fileUrl), "@/sdk/client" (useWorkflow,
-    WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm), and
+    WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm),
+    "@/sdk/camera" (CameraCapture, BarcodeScanner), and
     `import type { Page, SeriesPoint, QueryRow, WidgetData } from "@/sdk/server"`.
   Nothing else is installed; an import of any other package fails to compile.
   WHAT IS NOT YOURS TO REWRITE — these carry the wiring, and only they do:
     <SignInForm /> and <SignUpForm /> (sign-in and sign-up), <WorkflowForm /> and <WorkflowButton />
     (every change to data), <WidgetView /> and <Chart /> (every chart and metric — ECharts, themed),
-    <ImageSearch /> and <NearMe /> (likeness and nearness), and href(pages.x) for every link.
+    <ImageSearch /> and <NearMe /> (likeness and nearness), <CameraCapture /> and <BarcodeScanner />
+    (the camera), and href(pages.x) for every link.
   - Links: <Link href={href(pages.someKey, { id: row.id })}> — never a hand-written path.
   - Changing data: only through a workflow — <WorkflowForm workflow={workflows.x} fields={…} />,
     <WorkflowButton workflow={workflows.x} input={{ … }} />, or useWorkflow(workflows.x).run(input).
@@ -898,6 +918,62 @@ def ensure_sdk(doc: dict, app_root: Path) -> None:
         project_app_sdk(doc, app_root)
 
 
+#: SDK modules built on a package the scaffold did not always carry: a page
+#: that imports one needs it in the tree it compiles and runs in.
+SDK_PACKAGES: dict[str, tuple[str, ...]] = {"@/sdk/camera": ("@zxing/browser", "@zxing/library")}
+
+
+def ensure_sdk_packages(app_root: Path, view: str) -> list[str]:
+    """A page that imports an SDK module built on a package gets that package:
+    listed in the app's package.json (what a publish installs) and installed in
+    the tree when it is missing. Apps built before the camera had neither, and
+    an import that does not resolve fails the whole build. Returns what it added."""
+    need = [p for mod, pkgs in SDK_PACKAGES.items() if f'"{mod}"' in view or f"'{mod}'" in view for p in pkgs]
+    if not need:
+        return []
+    versions = json.loads((_SDK_TEMPLATE.parents[1] / "package.json").read_text(encoding="utf-8"))["dependencies"]
+    with _SDK_LOCK:
+        pj = app_root / "package.json"
+        data = json.loads(pj.read_text(encoding="utf-8")) if pj.exists() else {}
+        deps = data.setdefault("dependencies", {})
+        added = [p for p in need if p not in deps]
+        if added:
+            deps.update({p: versions[p] for p in added})
+            pj.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        modules = app_root / "node_modules"
+        missing = [p for p in need if not (modules / p / "package.json").exists()]
+        if missing and modules.is_dir():
+            _install_beside(modules, [f"{p}@{versions[p]}" for p in missing])
+        return added
+
+
+def _install_beside(modules: Path, specs: list[str]) -> None:
+    """Install into a scratch folder and copy in only the packages the tree
+    lacks. `npm install` in the app itself reifies the WHOLE tree: on a local
+    copy whose node_modules links into another app's, a failed run left both
+    with packages renamed away (@swc/helpers, @babel/runtime) and every page 500."""
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="forge-sdk-pkg-") as tmp:
+        (Path(tmp) / "package.json").write_text('{"name": "sdk-packages", "private": true}', encoding="utf-8")
+        proc = subprocess.run(["npm", "install", "--no-audit", "--no-fund", "--no-package-lock", *specs],
+                              cwd=tmp, capture_output=True, text=True, timeout=300)
+        if proc.returncode:
+            logger.warning("installing %s failed: %s", specs, proc.stderr[-500:])
+            return
+        got = Path(tmp) / "node_modules"
+        for pkg in got.glob("*/package.json"):
+            _copy_package(pkg.parent, modules / pkg.parent.name)
+        for pkg in got.glob("@*/*/package.json"):
+            _copy_package(pkg.parent, modules / pkg.parent.parent.name / pkg.parent.name)
+
+
+def _copy_package(src: Path, dst: Path) -> None:
+    if dst.exists() or dst.is_symlink():
+        return  # the tree's own copy wins
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, dst, symlinks=True)
+
+
 class CompileError(RuntimeError):
     """The page's code did not type-check; the message is the compiler's."""
 
@@ -921,6 +997,7 @@ def typecheck(doc: dict, app_root: Path, page_id: str, load: str, view: str,
         raise RuntimeError(f"no TypeScript compiler under {app_root} — install has not run")
     tsc = Path(tsc_path)
     ensure_sdk(doc, app_root)
+    ensure_sdk_packages(app_root, view)
     files = code_page_files(doc, {"page": page_id, "load": load, "view": view})
     if not files:
         return [f"{page_id} is not a live page"]
@@ -1086,7 +1163,7 @@ def _static_findings(load: str, view: str) -> list[str]:
     if re.search(r"\bfetch\(", load + view):
         out.append("load.ts/view.tsx: calls fetch — read through @/sdk/server, write through workflows.")
     if re.search(r"@/lib/|@/db", load + view):
-        out.append("load.ts/view.tsx: imports app internals — only @/sdk, @/sdk/server, @/sdk/client.")
+        out.append("load.ts/view.tsx: imports app internals — only @/sdk, @/sdk/server, @/sdk/client, @/sdk/camera.")
     if re.search(r"lorem ipsum|coming soon", view, re.I) or re.search(r"\bTODO\b", view):
         out.append("view.tsx: placeholder copy.")
     return out

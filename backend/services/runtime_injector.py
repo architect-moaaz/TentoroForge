@@ -1613,8 +1613,20 @@ export async function POST(
       }
     }
     const _first = Object.values(_records)[0];
+    // THE REPLY IS A RECEIPT, NOT THE RUN. `output` (the run's variables) and
+    // each log entry's `output` carry every step's result — a snapped photo in
+    // most of them. SnapIT's reply was 20.8 MB, over the 4.5 MB a Vercel
+    // function may answer with, and the page never opened its result
+    // (2026-09-29). A page reads status, id, records and error; each step
+    // keeps its id, status and error.
+    const { output: _vars, log: _log, ..._rest } = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+    void _vars;
+    const _steps = (Array.isArray(_log) ? _log : []).map((e: any) => ({
+      nodeId: e?.nodeId, status: e?.status,
+      ...(e?.output?.error ? { error: String(e.output.error).slice(0, 500) } : {}),
+    }));
     const _body = result && typeof result === "object"
-      ? { ...(result as Record<string, unknown>), ...(!(result as any).id && _first ? { id: _first } : {}), records: _records }
+      ? { ..._rest, ...(!(result as any).id && _first ? { id: _first } : {}), records: _records, log: _steps }
       : result;
     return NextResponse.json(_body, _wfFailed ? { status: 422 } : undefined);
   } catch (error) {

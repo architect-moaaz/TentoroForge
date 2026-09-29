@@ -28,6 +28,10 @@ export function MobileTabBar({ tabs }: { tabs: Tab[] }) {
     <nav aria-label="Main" data-mobile-tabs=""
       className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur md:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+      {/* THE ROOM THE BAR TAKES, for a page's own bottom bar to sit above it.
+          SnapIT's "Find matches" was fixed at bottom-0, under this bar, and
+          could not be tapped on a phone (2026-09-29). Unset where no bar is. */}
+      <style>{`@media (max-width: 767px){:root{--app-bottom-inset:calc(4rem + env(safe-area-inset-bottom))}}`}</style>
       <ul className="mx-auto flex max-w-lg items-stretch justify-around">
         {tabs.map((t) => {
           const on = active(here, t.route, exact);
