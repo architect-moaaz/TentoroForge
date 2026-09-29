@@ -159,3 +159,20 @@ def test_a_task_for_the_person_running_it_is_theirs():
     engine = (Path(__file__).resolve().parents[2] / "templates/runtime/workflows/engine.ts").read_text()
     assert 'v === "$user.id" ? (((ctx as any).user?.id as string | undefined) ?? v) : v' in engine
     assert "assignee: _who(config.assignee || (config as any).assignTarget" in engine
+
+
+def test_a_fallback_template_is_checked_side_by_side():
+    """`{{analyze_image.brand ?? "Unbranded"}}` — a brand a photo does not show."""
+    from services.blueprint.functional_completeness import template_findings
+    from services.blueprint.executors import NODE_TASKS
+    flow = {"id": "F", "name": "Snap", "inputs": [], "steps": [
+        {"key": "analyze_image", "type": "ai_extract", "config": {"aiExtractFields": ["brand"]}},
+        {"key": "resolve", "type": "action", "config": {"actionType": "db_insert", "table": "products", "values": {
+            "brand": '{{analyze_image.brand ?? "Unbranded"}}', "n": "{{analyze_image.count ?? 0}}"}}}]}
+    assert template_findings({"workflows": [flow]}) == []
+    flow["steps"][1]["config"]["values"]["bad"] = '{{nowhere.brand ?? "x"}}'
+    flow["steps"][1]["config"]["values"]["worse"] = "{{analyze_image.brand ?? count(x)}}"
+    found = " | ".join(f["detail"] for f in template_findings({"workflows": [flow]}))
+    assert "'nowhere.brand' is neither" in found and "'count(x)' is neither" in found
+    assert '`{{analyze_image.brand ?? \\"Unbranded\\"}}`' in NODE_TASKS["workflow_steps"] or \
+           '{{analyze_image.brand ?? "Unbranded"}}' in NODE_TASKS["workflow_steps"]

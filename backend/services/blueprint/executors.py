@@ -1742,7 +1742,10 @@ NODE_TASKS: dict[str, str] = {
         "it]`, which returns the existing row instead of inserting a second. An "
         "item that cannot be saved — a search result with no price where the "
         "record requires one — is skipped with the loop's `where`, a FEEL "
-        "condition over the item (`listing.price != null`), not left to fail.\n\n"
+        "condition over the item (`listing.price != null`), not left to fail. A "
+        "required field filled from something that may be missing — the brand "
+        "a photo does not show — gets a fallback in its template: "
+        "`{{analyze_image.brand ?? \"Unbranded\"}}` (each side a value or a literal).\n\n"
         + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
         + "\n\nTELL THE OTHER PERSON. When a step changes something another person "
         "must act on or would want to know — a request arrives for them, their "

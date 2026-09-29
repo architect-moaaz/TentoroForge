@@ -557,6 +557,29 @@ function _firstRowFallback(path: string, vars: Record<string, unknown>): unknown
   return _walkPath(base.rows[0], m[2]);
 }
 
+/** The first side of `a ?? "b" ?? c` that holds something — a path walked in
+ *  the workflow's variables, or a literal ("text", 'text', a number, true,
+ *  false). Empty text and null count as nothing, as a missing value does. */
+export function _firstPresent(inner: string, ctx: WorkflowExecutionContext): unknown {
+  for (const raw of inner.split("??")) {
+    const part = raw.trim();
+    let v: unknown;
+    const quoted = part.match(/^"(.*)"$|^'(.*)'$/s);
+    if (quoted) v = quoted[1] ?? quoted[2];
+    else if (/^-?\d+(\.\d+)?$/.test(part)) v = Number(part);
+    else if (part === "true" || part === "false") v = part === "true";
+    else if (/^[\w.[\]]+$/.test(part)) {
+      v = ctx.variables[part];
+      if (v === undefined && (part.includes(".") || part.includes("["))) {
+        v = _walkPath(ctx.variables, part);
+        if (v === undefined) v = _firstRowFallback(part, ctx.variables) ?? _recordIdFallback(part, ctx.variables);
+      }
+    }
+    if (v !== undefined && v !== null && v !== "") return v;
+  }
+  return null;
+}
+
 function _walkPath(root: unknown, path: string): unknown {
   if (root == null) return undefined;
   // Split "a.b[0].c" into ["a", "b", 0, "c"]. `\d+` inside `[]` becomes a
@@ -628,11 +651,21 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
       return walked !== undefined ? walked
         : _firstRowFallback(key, ctx.variables) ?? _recordIdFallback(key, ctx.variables);
     }
+    // A VALUE, OR ELSE ANOTHER: `{{analyze_image.brand ?? "Unbranded"}}`.
+    // A photo with no visible brand gave SnapIT's product a null brand and the
+    // required column refused the row (2026-09-29). Each side is a path or a
+    // literal ("text", a number, true/false); the first that is not empty wins.
+    const soleOr = ref.match(/^\s*\{\{([^{}]*\?\?[^{}]*)\}\}\s*$/);
+    if (soleOr) return _firstPresent(soleOr[1], ctx);
     // Accept dotted paths PLUS bracket-index segments: `search.result.data.web[0].url`.
     // Feel-lite (used elsewhere for expressions) refuses `[` in identifier
     // paths — but a workflow binding is a walk, not an expression, so route
     // it through the walker directly. Mirrors packages/renderer/src/runtime
     // BIND-FIX #211 which fixed the same class of failure in the UI layer.
+    ref = ref.replace(/\{\{([^{}]*\?\?[^{}]*)\}\}/g, (_m, inner) => {
+      const v = _firstPresent(inner as string, ctx);
+      return v == null ? "" : String(v);
+    });
     return ref.replace(/\{\{\s*([\w.[\]]+)\s*\}\}/g, (_m, k) => {
       const key = k as string;
       // Fast path: flat lookup, then bracket-free dot-walk (legacy behaviour

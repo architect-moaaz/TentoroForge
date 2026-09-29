@@ -1814,6 +1814,9 @@ def expression_findings(doc: dict) -> list[dict]:
 _TEMPLATE_RE = re.compile(r"\{\{\s*([\w.\[\]|:]+)\s*\}\}")
 #: Anything written between double braces, name or not.
 _ANY_TEMPLATE_RE = re.compile(r"\{\{(.*?)\}\}")
+#: One side of `??`: a name the engine walks, or a literal.
+_NAME_RE = re.compile(r"[\w.\[\]]+")
+_LITERAL_RE = re.compile(r'"[^"]*"|\'[^\']*\'|-?\d+(\.\d+)?|true|false')
 _WRONG_ROOTS = {
     "now": "the sentinel `$now` as the whole value",
     "today": "the sentinel `$today` as the whole value",
@@ -1855,6 +1858,20 @@ def template_findings(doc: dict) -> list[dict]:
                 # below only matches names, so a formula inside braces was
                 # never seen here at all.
                 for inner in _ANY_TEMPLATE_RE.findall(text):
+                    if "??" in inner:
+                        # `{{a.b ?? "text"}}`: each side a name or a literal;
+                        # a name's root must be something the engine holds.
+                        sides = [s.strip() for s in inner.split("??")]
+                        bad = [s for s in sides if not (_LITERAL_RE.fullmatch(s) or _NAME_RE.fullmatch(s))]
+                        unknown = [s for s in sides if _NAME_RE.fullmatch(s) and not _LITERAL_RE.fullmatch(s)
+                                   and s.split(".")[0].split("[")[0] not in known]
+                        if bad or unknown:
+                            out.append({"rule": "template-unknown", "page": str(wf.get("id")),
+                                        "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
+                                                  f"{{{{{inner.strip()}}}}} — each side of `??` is a value the engine "
+                                                  f"holds or a literal (\"text\", a number, true/false); "
+                                                  f"{', '.join(repr(s) for s in bad + unknown)} is neither"})
+                        continue
                     if _TEMPLATE_RE.fullmatch("{{" + inner + "}}") is None:
                         out.append({"rule": "template-computes", "page": str(wf.get("id")),
                                     "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "

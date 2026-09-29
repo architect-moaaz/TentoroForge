@@ -71,6 +71,14 @@ const priceTable = { __name: "p", price: { columnType: "PgNumeric", dataType: "s
 eqJson(_finalizeInsert(priceTable, { price: "₹12,995", discount: "20%", note: "20% off" }, ctx),
        { price: "12995", discount: 20, note: "20% off" }, "a number column takes the number, a text column the text");
 eqJson(_finalizeInsert(priceTable, { price: "call for price" }, ctx), {}, "text with no number is dropped, not the row");
+const r0 = mod._resolveRef;
+const photo: any = { variables: { analyze_image: { brand: null, productName: "French Press", category: "" }, count: 0 } };
+eqJson(r0('{{analyze_image.brand ?? "Unbranded"}}', photo), "Unbranded", "a missing value takes its fallback");
+eqJson(r0('{{analyze_image.productName ?? "Unnamed"}}', photo), "French Press", "a present value is kept");
+eqJson(r0('{{analyze_image.category ?? analyze_image.productName ?? "Other"}}', photo), "French Press", "empty text is nothing; the next side is tried");
+eqJson(r0('{{analyze_image.brand ?? 0}}', photo), 0, "a number literal stays a number");
+eqJson(r0('Searching for {{analyze_image.brand ?? "any brand"}} {{analyze_image.productName}}', photo),
+       "Searching for any brand French Press", "and inside text too");
 const resolve = mod._resolveRef;
 const a = resolve("$uuid", ctx), b = resolve("$uuid", ctx);
 ok(typeof a === "string" && /^[0-9a-f-]{36}$/.test(a), "$uuid is a fresh identifier");
