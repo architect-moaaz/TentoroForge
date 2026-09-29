@@ -29,6 +29,10 @@ import httpx
 
 BASE = "https://api.vercel.com"
 
+#: Pauses between retries of one file upload (seconds); its length is the
+#: number of retries. Module-level so a test can make them instant.
+UPLOAD_BACKOFF_S: tuple[float, ...] = (1.0, 3.0, 8.0)
+
 
 def _raise_with_body(r: httpx.Response, op: str) -> None:
     """Bare `raise_for_status()` on Vercel gives only URL + status; a 400
@@ -231,16 +235,33 @@ class VercelClient:
         and then referencing them sha-only in the deployment body drops
         the deploy request to a few KB regardless of file count.
         """
-        r = await self._client.post(
-            f"{BASE}/v2/files",
-            params=self._params(),
-            headers={
-                "Content-Type": "application/octet-stream",
-                "x-vercel-digest": sha,
-            },
-            content=raw,
-        )
-        _raise_with_body(r, f"upload_file sha={sha!r} size={len(raw)}")
+        # A PASSING FAULT IS TRIED AGAIN. One 500 from Vercel on one 789-byte
+        # file failed Med Tracker's whole publish (forge-v3, 2026-09-29).
+        # An upload is idempotent by SHA, so a 5xx, a 429 or a dropped
+        # connection is retried with a short backoff; a 4xx is an answer.
+        import asyncio
+        attempts = len(UPLOAD_BACKOFF_S) + 1
+        for attempt in range(attempts):
+            try:
+                r = await self._client.post(
+                    f"{BASE}/v2/files",
+                    params=self._params(),
+                    headers={
+                        "Content-Type": "application/octet-stream",
+                        "x-vercel-digest": sha,
+                    },
+                    content=raw,
+                )
+            except httpx.TransportError:
+                if attempt == attempts - 1:
+                    raise
+                await asyncio.sleep(UPLOAD_BACKOFF_S[attempt])
+                continue
+            if (r.status_code >= 500 or r.status_code == 429) and attempt < attempts - 1:
+                await asyncio.sleep(UPLOAD_BACKOFF_S[attempt])
+                continue
+            _raise_with_body(r, f"upload_file sha={sha!r} size={len(raw)}")
+            return
 
     async def create_deployment(
         self,

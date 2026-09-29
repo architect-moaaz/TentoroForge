@@ -84,6 +84,39 @@ async def test_upload_file_posts_bytes_with_sha_digest_header() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_passing_vercel_fault_is_tried_again(monkeypatch) -> None:
+    """Med Tracker's publish died on one 500 for one 789-byte file."""
+    from services.deploy import vercel_client
+    monkeypatch.setattr(vercel_client, "UPLOAD_BACKOFF_S", (0.0, 0.0, 0.0))
+    async with respx.mock(assert_all_called=True) as rmock:
+        route = rmock.post("https://api.vercel.com/v2/files").mock(
+            side_effect=[Response(500, text="Internal Server Error"), Response(429), Response(200)])
+        c = VercelClient(token="tk", team_id="tm")
+        try:
+            await c.upload_file(sha="abc123", raw=b"hello")
+        finally:
+            await c.close()
+        assert route.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_is_not_retried_and_a_lasting_fault_still_fails(monkeypatch) -> None:
+    from services.deploy import vercel_client
+    monkeypatch.setattr(vercel_client, "UPLOAD_BACKOFF_S", (0.0, 0.0, 0.0))
+    async with respx.mock() as rmock:
+        route = rmock.post("https://api.vercel.com/v2/files").mock(return_value=Response(400, json={"error": "digest mismatch"}))
+        c = VercelClient(token="tk", team_id="tm")
+        with pytest.raises(RuntimeError, match="status=400"):
+            await c.upload_file(sha="abc123", raw=b"hello")
+        assert route.call_count == 1
+        route.mock(return_value=Response(500, text="Internal Server Error"))
+        with pytest.raises(RuntimeError, match="status=500"):
+            await c.upload_file(sha="abc123", raw=b"hello")
+        assert route.call_count == 1 + 4
+        await c.close()
+
+
+@pytest.mark.asyncio
 async def test_create_deployment_specifies_nextjs_framework() -> None:
     async with respx.mock(assert_all_called=True) as rmock:
         rmock.post("https://api.vercel.com/v13/deployments").mock(
