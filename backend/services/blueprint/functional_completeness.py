@@ -910,9 +910,9 @@ def authoring_findings(doc: dict) -> list[dict]:
     author's refusals. Kept apart from :func:`page_findings` because a page
     composer cannot fix a workflow: on 2026-09-05 one workflow's `concat(...)`
     refused seven pages that had nothing to do with it."""
+    out: list[dict] = list(item_value_findings(doc))
     doc = {**doc, "workflows": [with_loop_bodies(w) if isinstance(w, dict) else w
                                 for w in doc.get("workflows") or []]}
-    out: list[dict] = []
     out.extend(rule_findings(doc))
     out.extend(expression_findings(doc))
     out.extend(template_findings(doc))
@@ -1935,6 +1935,51 @@ def list_source(wf: dict, value: Any) -> list[str] | None:
         return None
     fields = cfg.get("aiExtractFields") or []
     return [str(f.get("name") if isinstance(f, dict) else f) for f in fields if f]
+
+
+def _fixed(value: Any) -> bool:
+    """A literal: the same for every row — not a template, not a sentinel."""
+    if isinstance(value, bool) or isinstance(value, (int, float)):
+        return True
+    return isinstance(value, str) and "{{" not in value and not value.startswith("$")
+
+
+def item_value_findings(doc: dict) -> list[dict]:
+    """A FIELD EACH ITEM CARRIES IS READ FROM THE ITEM. SnapIT extracted every
+    listing's `currency`, then saved each one with the literal "INR", so a
+    StockX price of $60 read as ₹60 (2026-09-29). A value written as a literal,
+    for a field the list's items bring themselves, says the same for all of
+    them and drops what each one said."""
+    out: list[dict] = []
+    for wf in _live(doc.get("workflows")):
+        name = wf.get("name") or wf.get("id")
+        for st in wf.get("steps") or []:
+            cfg = (st or {}).get("config") or {} if isinstance(st, dict) else {}
+            writes: list[tuple[str, list[str], str, dict]] = []  # (step key, item fields, item name, values)
+            if cfg.get("actionType") == "for_each":
+                fields = list_source(wf, cfg.get("items"))
+                if fields:
+                    item = str(cfg.get("as") or "item")
+                    for inner in cfg.get("steps") or []:
+                        ic = (inner or {}).get("config") or {} if isinstance(inner, dict) else {}
+                        if isinstance(ic.get("values"), dict):
+                            writes.append((str(inner.get("key")), fields, item, ic["values"]))
+            elif cfg.get("actionType") == "db_insert" and isinstance(cfg.get("values"), dict):
+                for v in cfg["values"].values():
+                    fields = list_source(wf, v)
+                    if fields:
+                        writes.append((str(st.get("key")), fields, "", cfg["values"]))
+                        break
+            for key, fields, item, values in writes:
+                for field, value in values.items():
+                    if field in fields and _fixed(value):
+                        read = f"`{{{{{item}.{field} ?? {json.dumps(value)}}}}}`" if item else \
+                               f"the item's own `{field}` (leave it out of the shared values)"
+                        out.append({"rule": "item-value-fixed", "page": str(wf.get("id")),
+                                    "detail": f"{name}, step {key!r}: writes {field!r} as {json.dumps(value)} for "
+                                              f"every item, but each item carries its own {field!r} — read it "
+                                              f"from the item: {read}"})
+    return out
 
 
 def insert_findings(doc: dict) -> list[dict]:

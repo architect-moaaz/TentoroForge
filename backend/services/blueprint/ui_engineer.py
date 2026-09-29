@@ -566,6 +566,9 @@ What a finished page looks like:
   and a real image on its record — never the id. The list of an entity that is
   "Findable by likeness" offers "Find similar": <ImageSearch /> beside the search
   box, and while ?image= (or ?q=) is set, the rows are similar()'s, closest first.
+- MONEY SAYS ITS CURRENCY. A price is shown in the currency its record carries
+  (Intl.NumberFormat with that currency), never a fixed symbol; amounts in different
+  currencies are never added, compared or put in one range — group them by currency.
 - NOTHING HIDES UNDER THE APP'S OWN BARS. On a phone the application's tab bar may sit on the
   bottom edge. A bar the page fixes to the bottom (a sticky primary action) sits above it —
   `bottom-[var(--app-bottom-inset,0px)]`, never `bottom-0` — and the page leaves that room under
