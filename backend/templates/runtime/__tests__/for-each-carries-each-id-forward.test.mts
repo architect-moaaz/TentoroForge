@@ -43,7 +43,7 @@ installHarness({
     "./ai": "export const registerAIActions = () => {};",
     "./ocr": "export const registerOcrActions = () => {};",
     "../events/emit-node": "export const makeEmitEventHandler = () => async () => ({});",
-    "../feel-lite": "export const evaluateExpression = (e, v) => e === 'listing.price != null' ? v.listing?.price != null : null;",
+    "../feel-lite": "export const evaluateExpression = (e, v) => e === 'listing.price != null' ? v.listing?.price != null : e === 'if t < \"12:00\" then \"Morning\" else \"Night\"' ? (v.t < '12:00' ? 'Morning' : 'Night') : null;",
     "./types": noop,
     fs: "export const promises = {}; export default { promises };",
     path: "export default { join: (...a) => a.join('/'), resolve: (...a) => a.join('/') }; export const join = (...a) => a.join('/');",
@@ -127,5 +127,13 @@ eqJson(every.rows.length, 2, "an empty where written on purpose still reads ever
 const one = await h.db_query({ actionType: "db_query", table: "merchants", where: { domain: "{{d}}" } },
                              { user: {}, variables: { d: "b.example" } });
 eqJson([one.count, one.id], [1, "m-2"], "and a key that resolved finds its row");
+
+// A FORMULA STEP ANSWERS TO `output`, as every other step does — Med Tracker's
+// insert read {{compute_time_of_day.output}} and the required column got null.
+const formula = await h.custom({ actionType: "custom", expression: 'if t < "12:00" then "Morning" else "Night"' },
+                               { user: {}, variables: { t: "09:00" } });
+eqJson([formula.output, formula.result, formula.value], ["Morning", "Morning", "Morning"], "a custom formula's answer is its output, result and value");
+eqJson(mod._resolveRef("{{compute_time_of_day.output}}", { user: {}, variables: { compute_time_of_day: formula } }), "Morning",
+       "and {{step.output}} reads it");
 
 done("for_each carries each id forward");

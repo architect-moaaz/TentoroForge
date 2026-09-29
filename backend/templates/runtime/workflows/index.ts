@@ -1786,7 +1786,11 @@ export function registerDefaultActions(): void {
       // A0-3: the contract advertises an output named `value`; this returned
       // only `{ran, result}`. Both names are returned so neither the contract
       // nor any existing {{n.output.result}} reference breaks.
-      return { ran: true, result, value: result };
+      // …AND `output`, the name every other step answers to. Med Tracker's
+      // "Save Medicine" wrote `timeOfDay: {{compute_time_of_day.output}}`; the
+      // formula was right, the name was not there, and the required column
+      // got null (2026-09-29).
+      return { ran: true, result, value: result, output: result };
     } catch (err) {
       console.warn("[workflow] custom expression failed:", err);
       return { ran: false, error: String(err) };

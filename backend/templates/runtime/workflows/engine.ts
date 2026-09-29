@@ -1209,15 +1209,16 @@ async function handleAction(
     // which is where applyOutputMappings runs — so an outputMapping on a
     // set_variable node was silently ignored no matter what this returned.
     // finishInline() runs the same tail every other action goes through.
-    return finishInline({ [config.variableName as string]: value, value });
+    return finishInline({ [config.variableName as string]: value, value, output: value });
   }
 
   // Handle transform inline. Panel emits `config.expression`; legacy
   // shape used `config.transformExpression`. Accept either.
   if (actionType === "transform") {
     // A14-3: same double-evaluation risk as set_variable.
+    // Each answers to `output` as well — the name authors reach for (see custom).
     if (preEvaluated.has("expression")) {
-      return finishInline({ value: (config as any).expression });
+      return finishInline({ value: (config as any).expression, output: (config as any).expression });
     }
     const expr =
       (config as any).transformExpression ??
@@ -1228,14 +1229,15 @@ async function handleAction(
       // from. Wrapping it makes the declared path resolvable.
       // A0-8: same early-return problem as set_variable — see above.
       try {
-        return finishInline({ value: evaluateExpression(String(expr), ctx.variables) });
+        const value = evaluateExpression(String(expr), ctx.variables);
+        return finishInline({ value, output: value });
       } catch {
-        return finishInline({ value: null });
+        return finishInline({ value: null, output: null });
       }
     }
     // Same shape on the no-expression path, so a downstream binding always
     // finds `value` whether or not the node was configured.
-    return finishInline({ value: null });
+    return finishInline({ value: null, output: null });
   }
 
   const handler = actionHandlers.get(actionType);
