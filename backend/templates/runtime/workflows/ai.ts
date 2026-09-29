@@ -336,6 +336,19 @@ export async function aiClassify(config: NodeConfig, ctx: WorkflowExecutionConte
   };
 }
 
+/** AN EMPTY ANSWER IS NO ANSWER. Told to "leave productName empty" when the
+ *  pages named nothing, the model returned "" — and `not(productName = null)`
+ *  read that as found, so SnapIT tried to save a product with no name
+ *  (2026-09-29). A field extracted as blank text is null. */
+export function blankIsNull<T>(record: T): T {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(record as Record<string, unknown>)) {
+    out[k] = typeof v === "string" && !v.trim() ? null : v;
+  }
+  return out as T;
+}
+
 export async function aiExtract(config: NodeConfig, ctx: WorkflowExecutionContext): Promise<Record<string, unknown>> {
   const c = config as Cfg;
   const vars = (ctx.variables ?? {}) as Record<string, unknown>;
@@ -372,10 +385,10 @@ export async function aiExtract(config: NodeConfig, ctx: WorkflowExecutionContex
   });
   if (many) {
     const list = raw ? parseJsonArray(raw) : [mockExtract(fieldList)];
-    const items = list.filter((x) => x && typeof x === "object" && !Array.isArray(x)) as Record<string, unknown>[];
+    const items = list.filter((x) => x && typeof x === "object" && !Array.isArray(x)).map(blankIsNull) as Record<string, unknown>[];
     return { data: items, items, count: items.length, extracted: items, output: items };
   }
-  const parsed = raw ? parseJson(raw) ?? {} : mockExtract(fieldList);
+  const parsed = blankIsNull(raw ? parseJson(raw) ?? {} : mockExtract(fieldList));
   // Expose each extracted field as a top-level process variable so a downstream
   // db_insert/db_update can bind it directly (values: { column: "{{field}}" }).
   // Reserved roots are never overwritten.

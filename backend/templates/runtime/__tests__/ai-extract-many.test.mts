@@ -54,5 +54,13 @@ eq(blocks.some((b: any) => b.type === "image" && b.source?.media_type === "image
    "a data-URL picture reaches the model as an image, not as text");
 eq(blocks.some((b: any) => b.type === "text" && String(b.text).includes("base64")), false, "and none of it as text");
 
+// An empty answer is no answer: "" and blanks read as null, one record or many.
+g.__forgeStubResponse = '{"title":"","url":"   ","brand":"Nike"}';
+out = await aiExtract({ aiExtractFields: fields, aiInput: "{{crawl}}" } as any, ctx());
+eq([out.title, out.url, out.brand], [null, null, "Nike"], "a blank field is null, a real one stays");
+g.__forgeStubResponse = '[{"title":"","url":"https://a.example"}]';
+out = await aiExtract({ aiExtractMany: true, aiExtractFields: fields, aiInput: "{{crawl}}" } as any, ctx());
+eq(out.items[0].title, null, "and in each record of a list");
+
 console.log(failed ? `\n${failed} failed` : "\nAll ai_extract list tests passed.");
 process.exit(failed ? 1 : 0);

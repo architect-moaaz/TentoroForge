@@ -10,7 +10,9 @@
 
 import * as React from "react";
 
-export type ScannedCode = { value: string; format: string };
+/** What a scan read, and the frame it read it from (an image data URL) —
+ *  so a code no catalogue knows can still be identified from the picture. */
+export type ScannedCode = { value: string; format: string; image?: string };
 
 type CameraState = { status: "starting" | "live" | "unavailable"; reason: string };
 
@@ -198,6 +200,7 @@ export function BarcodeScanner({
         if (stop) return;
         if (hit && hit.value) {
           stop = true;
+          try { hit.image = c!.toDataURL("image/jpeg", 0.85); } catch { /* a tainted frame keeps the code only */ }
           if (typeof navigator !== "undefined") navigator.vibrate?.(40);
           setFound(hit);
           onScanRef.current(hit);

@@ -979,6 +979,9 @@ export function _finalizeInsert(
   return out;
 }
 
+/** A lookup whose key is missing: it matches no row (see `_buildWhere`). */
+export const MATCHES_NOTHING = Symbol("matches-nothing");
+
 export function _buildWhere(
   table: any, where: unknown, ctx: WorkflowExecutionContext,
   opts: { strict?: boolean } = { strict: true },
@@ -1026,6 +1029,16 @@ export function _buildWhere(
       return eq(table[field], _coerceValue(v, table[field]));
     })
     .filter(Boolean) as any[];
+  // A LOOKUP WITH A MISSING KEY FINDS NOTHING. Dropping the empty condition
+  // widened the SELECT to the whole table: SnapIT looked up the product of a
+  // barcode it did not know (`id = {{lookup_identifier.productId}}`, empty)
+  // and got every product back — with one product in the table, an unknown
+  // barcode would have been "found" as it (2026-09-29). `where: {}` written
+  // on purpose still reads every row; a key that resolved to nothing does not.
+  if (!opts.strict && emptyRefs.length) {
+    console.warn(`[workflow] db_query: ${emptyRefs.join(", ")} resolved to nothing — no row matches`);
+    return MATCHES_NOTHING;
+  }
   if (conds.length === 0) {
     // Config was provided but every entry filtered out (or {} was passed).
     // For destructive ops (db_update/db_delete) THIS IS DANGEROUS —
@@ -1416,6 +1429,7 @@ export function registerDefaultActions(): void {
       // ops (db_update/db_delete) below still use strict:true, gated by
       // _requireWhereOrThrow, so unfiltered writes remain impossible.
       const where = _buildWhere(table, (config as any).where, ctx, { strict: false });
+      if (where === MATCHES_NOTHING) return queryResult([]);
       const rows = await (where ? q.where(where) : q);
       // THE ONE ROW A LOOKUP LOOKED UP, READABLE AS ITSELF. A step written to
       // fetch one record is read as that record — `check_member_verified.

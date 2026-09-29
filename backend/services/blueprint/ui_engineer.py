@@ -399,9 +399,10 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
    picture from the device instead, so the page needs no second path. There is no flash control.
    Each is ONE frame (4:5 unless className sizes it) with its own controls on it — the shutter, "Scan
    again" — so set it where the viewfinder goes and draw no shutter or frame of your own.
-<BarcodeScanner onScan={({ value, format }) => …} label? className? />
-   Reads a barcode or QR code from the live camera, continuously, and calls onScan once with the value and
-   its format ("EAN-13", "UPC-A", "QR", "CODE-128", …); "Scan again" starts over. Where there is no camera it
+<BarcodeScanner onScan={({ value, format, image }) => …} label? className? />
+   Reads a barcode or QR code from the live camera, continuously, and calls onScan once with the value,
+   its format ("EAN-13", "UPC-A", "QR", "CODE-128", …) and `image`, the frame it was read from (an image
+   data URL) — pass it on where a workflow can identify from a picture; "Scan again" starts over. Where there is no camera it
    says why — keep a typed entry beside it for that case.
    A page that takes a picture or reads a code uses these: never a placeholder frame standing in for a
    camera, and never a file picker labelled as one.

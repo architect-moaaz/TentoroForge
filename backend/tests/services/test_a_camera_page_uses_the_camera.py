@@ -124,3 +124,10 @@ def test_the_generated_execute_route_parses(tmp_path):
               "process.exit(r.diagnostics.length?1:0)")
     proc = subprocess.run(["node", "-e", script, str(ts), str(route)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_a_scan_hands_over_the_frame_it_read():
+    # An unknown barcode (a reseller's own label) can still be identified from the picture.
+    camera = (SDK / "camera.tsx").read_text()
+    assert "image?: string" in camera and 'hit.image = c!.toDataURL("image/jpeg", 0.85)' in camera
+    assert "onScan={({ value, format, image })" in SDK_GUIDE

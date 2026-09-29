@@ -20,7 +20,12 @@ installHarness({
         insert: (t) => ({ values: (v) => ({ returning: async () => {
           if (v.url === "https://broken.example") throw new Error("price is not a number");
           const row = { id: t.__name + "-" + (++n), ...v }; globalThis.__rows[t.__name].push(row); return [row]; } }) }),
-        select: () => ({ from: (t) => ({ where: (cond) => ({ limit: async () => globalThis.__rows[t.__name].filter((r) => match(r, cond)).slice(0, 1) }) }) }),
+        select: () => ({ from: (t) => {
+          const all = () => globalThis.__rows[t.__name];
+          const where = (cond) => { const hit = all().filter((r) => match(r, cond));
+            return Object.assign(Promise.resolve(hit), { limit: async (n) => hit.slice(0, n) }); };
+          return Object.assign(Promise.resolve(all()), { where });
+        } }),
         update: (t) => ({ set: (s) => ({ where: (cond) => ({ returning: async () => {
           const hit = globalThis.__rows[t.__name].filter((r) => match(r, cond)); hit.forEach((r) => Object.assign(r, s)); return hit; } }) }) }),
       };`,
@@ -110,5 +115,17 @@ const first = await h.db_insert(find, { user: {}, variables: { seller: "Shop C" 
 eqJson([first.id, first.found, rows.merchants[0].name], ["m-bare", true, "Shop C"], "a found row's empty column takes the step's value");
 await h.db_insert(find, { user: {}, variables: { seller: "Another name" } });
 eqJson([rows.merchants.length, rows.merchants[0].name], [1, "Shop C"], "a filled column is never overwritten, and no second row is made");
+
+// A LOOKUP WITH A MISSING KEY FINDS NOTHING — never the whole table.
+rows.merchants.length = 0;
+rows.merchants.push({ id: "m-1", domain: "a.example", name: "A" }, { id: "m-2", domain: "b.example", name: "B" });
+const lost = await h.db_query({ actionType: "db_query", table: "merchants", where: { id: "{{lookup.merchantId}}" } },
+                              { user: {}, variables: { lookup: { rows: [], count: 0 } } });
+eqJson([lost.count, lost.rows.length, lost.id], [0, 0, undefined], "a key that resolved to nothing matches no row");
+const every = await h.db_query({ actionType: "db_query", table: "merchants", where: {} }, { user: {}, variables: {} });
+eqJson(every.rows.length, 2, "an empty where written on purpose still reads every row");
+const one = await h.db_query({ actionType: "db_query", table: "merchants", where: { domain: "{{d}}" } },
+                             { user: {}, variables: { d: "b.example" } });
+eqJson([one.count, one.id], [1, "m-2"], "and a key that resolved finds its row");
 
 done("for_each carries each id forward");
