@@ -1190,8 +1190,24 @@ export function registerDefaultActions(): void {
       if (findBy.length && findBy.every((k) => raw[k] !== undefined && raw[k] !== null && raw[k] !== "")
           && findBy.every((k) => (table as any)[k] !== undefined)) {
         const cond = and(...findBy.map((k) => eq((table as any)[k], raw[k] as any)));
-        const [existing] = await (db as any).select().from(table).where(cond).limit(1);
+        let [existing] = await (db as any).select().from(table).where(cond).limit(1);
         if (existing) {
+          // …AND WHAT IT LACKED IS FILLED IN. SnapIT's Air Jordan was first
+          // saved with no picture; every later search found that row and the
+          // results page showed an empty frame (2026-09-29). A column the
+          // found row leaves empty takes this step's value; a filled one is
+          // never overwritten, and only the author's own values count.
+          const given = _finalizeInsert(table, raw, ctx);
+          const fill: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(given)) {
+            if (!(k in raw) || findBy.includes(k) || v == null) continue;
+            const had = (existing as Record<string, unknown>)[k];
+            if (had == null || had === "") fill[k] = v;
+          }
+          if (Object.keys(fill).length) {
+            const [updated] = await (db as any).update(table).set(fill).where(cond).returning();
+            if (updated) existing = updated;
+          }
           const nid = (config as any).__nodeId;
           if (nid) ctx.variables[nid] = existing;
           return { ...(existing as Record<string, unknown>), inserted: existing, found: true };

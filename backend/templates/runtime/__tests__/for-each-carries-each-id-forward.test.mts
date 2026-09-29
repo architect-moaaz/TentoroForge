@@ -21,6 +21,8 @@ installHarness({
           if (v.url === "https://broken.example") throw new Error("price is not a number");
           const row = { id: t.__name + "-" + (++n), ...v }; globalThis.__rows[t.__name].push(row); return [row]; } }) }),
         select: () => ({ from: (t) => ({ where: (cond) => ({ limit: async () => globalThis.__rows[t.__name].filter((r) => match(r, cond)).slice(0, 1) }) }) }),
+        update: (t) => ({ set: (s) => ({ where: (cond) => ({ returning: async () => {
+          const hit = globalThis.__rows[t.__name].filter((r) => match(r, cond)); hit.forEach((r) => Object.assign(r, s)); return hit; } }) }) }),
       };`,
     "./embedding-columns": "export const EMBEDDING_DIMENSIONS = 512;\nexport const embeddingColumnsFor = () => [];\n",
     "@/db/schema": `
@@ -97,5 +99,16 @@ const priced: any = { user: {}, variables: { create_search: { id: "search-2" }, 
 const kept = await h.for_each({ ...config, where: "listing.price != null" }, priced);
 eqJson([kept.count, kept.skipped, kept.failed], [1, 1, 0], "an item the where rejects is skipped, not failed");
 eqJson(rows.merchant_products.map((r: any) => r.url), ["https://a.example/1"], "and nothing of it is saved");
+
+// FOUND, AND WHAT IT LACKED FILLED IN — never overwritten. SnapIT's product was
+// first saved without a picture and every later search found that bare row.
+rows.merchants.length = 0;
+rows.merchants.push({ id: "m-bare", domain: "c.example", name: null });
+const find = { actionType: "db_insert", table: "merchants", findBy: ["domain"],
+               values: { domain: "c.example", name: "{{seller}}" } };
+const first = await h.db_insert(find, { user: {}, variables: { seller: "Shop C" } });
+eqJson([first.id, first.found, rows.merchants[0].name], ["m-bare", true, "Shop C"], "a found row's empty column takes the step's value");
+await h.db_insert(find, { user: {}, variables: { seller: "Another name" } });
+eqJson([rows.merchants.length, rows.merchants[0].name], [1, "Shop C"], "a filled column is never overwritten, and no second row is made");
 
 done("for_each carries each id forward");
