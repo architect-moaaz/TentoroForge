@@ -358,6 +358,9 @@ similar(entity, { image?: ctx.searchParams.image, text?: ctx.searchParams.q, lim
 // ---- @/sdk/client — view.tsx ----
 useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
    → { run(input): Promise<{ ok: boolean; result: Record<string, unknown>; error: string | null }>, pending: boolean, error: string | null }
+   result.id is the id of the first record the run created (open it with href(pages.x, { id: result.id }));
+   result.records maps each insert step's key to the id it created; result.status is "completed", or
+   "paused" when the run waits on a person's task (the record exists; its id is still in result.id).
    On success the page's data refreshes (or it navigates to redirectTo) and a toast is shown.
    When the workflow's own rules refuse the input, `ok` is false and `error` is the workflow's
    sentence, shown as an error toast — `successMessage` is only ever shown for a real success.

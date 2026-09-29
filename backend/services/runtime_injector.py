@@ -1600,7 +1600,23 @@ export async function POST(
     // error instead of a false success; the body still carries status + message.
     const _wfFailed =
       result && typeof result === "object" && (result as any).status === "failed";
-    return NextResponse.json(result, _wfFailed ? { status: 422 } : undefined);
+    // WHAT THE RUN MADE, BY ID. A page that starts a workflow and then opens
+    // what it created reads `result.id`; the run's reply carried only its
+    // log, so SnapIT's Snap page said "identified this snap but the result
+    // could not be opened" on every snap (2026-09-29). `id` is the first
+    // record the run inserted; `records` names each insert step's.
+    const _records: Record<string, string> = {};
+    for (const e of ((result as any)?.log ?? []) as any[]) {
+      const out = e?.output;
+      if (out && typeof out === "object" && out.inserted && typeof out.id === "string" && e.nodeId) {
+        _records[String(e.nodeId)] = out.id;
+      }
+    }
+    const _first = Object.values(_records)[0];
+    const _body = result && typeof result === "object"
+      ? { ...(result as Record<string, unknown>), ...(!(result as any).id && _first ? { id: _first } : {}), records: _records }
+      : result;
+    return NextResponse.json(_body, _wfFailed ? { status: 422 } : undefined);
   } catch (error) {
     reportFromError(error, {
       kind: "api_route",

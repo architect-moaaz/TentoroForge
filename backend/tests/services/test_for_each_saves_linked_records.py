@@ -138,3 +138,16 @@ def test_a_template_that_computes_is_refused():
                        "also": "{{ list_results.rows[0].id }}"}}}]}
     found = [f["detail"] for f in template_findings({"workflows": [flow]})]
     assert len(found) == 1 and "{{count(list_results)}} computes" in found[0]
+
+
+def test_a_run_reply_carries_the_id_of_what_it_created(tmp_path):
+    """SnapIT's Snap page opened `result.id`; the reply had only the log, so
+    every snap said "identified this snap but the result could not be opened"."""
+    from services.runtime_injector import _generate_workflow_api_route
+    _generate_workflow_api_route(tmp_path)
+    route = (tmp_path / "src/app/api/workflows/[id]/execute/route.ts").read_text()
+    assert "out.inserted && typeof out.id === \"string\"" in route
+    assert "records: _records" in route and "id: _first" in route
+    from services.blueprint.ui_engineer import system_prompt
+    assert "result.id is the id of the first record the run created" in system_prompt(
+        {"application": {"name": "x"}, "data": {"entities": []}, "pages": [], "workflows": []})
