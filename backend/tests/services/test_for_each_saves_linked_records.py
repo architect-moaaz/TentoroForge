@@ -151,3 +151,11 @@ def test_a_run_reply_carries_the_id_of_what_it_created(tmp_path):
     from services.blueprint.ui_engineer import system_prompt
     assert "result.id is the id of the first record the run created" in system_prompt(
         {"application": {"name": "x"}, "data": {"entities": []}, "pages": [], "workflows": []})
+
+
+def test_a_task_for_the_person_running_it_is_theirs():
+    """SnapIT's "which product?" task was assigned to the text `$user.id`."""
+    from pathlib import Path
+    engine = (Path(__file__).resolve().parents[2] / "templates/runtime/workflows/engine.ts").read_text()
+    assert 'v === "$user.id" ? (((ctx as any).user?.id as string | undefined) ?? v) : v' in engine
+    assert "assignee: _who(config.assignee || (config as any).assignTarget" in engine

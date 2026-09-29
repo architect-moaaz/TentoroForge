@@ -690,10 +690,15 @@ async function executeNode(
         // also accept flat fields. The persist layer resolves the actual assignee
         // from the pool when strategy is round_robin / load_balanced.
         const _asn = (config as any).assignment || {};
+        // `$user.id` is the person running the workflow, here as in any step:
+        // stored as the literal text, SnapIT's "which product?" task was
+        // assigned to nobody and the search waited for ever (2026-09-29).
+        const _who = (v: unknown) =>
+          v === "$user.id" ? (((ctx as any).user?.id as string | undefined) ?? v) : v;
         logEntry.output = {
           taskCreated: true,
           taskType: node.type,
-          assignee: config.assignee || _asn.value || config.assigneeRole || "admin",
+          assignee: _who(config.assignee || (config as any).assignTarget || _asn.value || config.assigneeRole || "admin"),
           assigneeRole: config.assigneeRole || _asn.value,
           assignmentStrategy: (config as any).assignmentStrategy ?? _asn.strategy,
           assigneePool: (config as any).assigneePool ?? _asn.pool,
