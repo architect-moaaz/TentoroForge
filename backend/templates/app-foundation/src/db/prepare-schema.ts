@@ -61,6 +61,61 @@ export function declaredUniques(): Map<string, Unique[]> {
 
 const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
+/** Postgres' name for a type (information_schema.data_type) -> drizzle's. */
+const PG_NAME: Record<string, string> = {
+  "timestamp without time zone": "timestamp", "time without time zone": "time",
+  "date": "date", "integer": "integer", "numeric": "numeric", "text": "text",
+};
+
+/**
+ * A COLUMN WHOSE TYPE THE DEFINITION CHANGED IS CONVERTED HERE, FIRST — when
+ * the old value means the same thing in the new type. Push reads any type
+ * change as data loss and offers to empty the table; with `--force` it says
+ * yes. Med Tracker's `preferred_time` was projected a timestamp for a time of
+ * day; correcting it to `time` would have emptied every medicine (2026-09-29).
+ * Only these conversions are made; any other change is left to push, as before.
+ */
+const KEEPS_ITS_MEANING: Record<string, string[]> = {
+  timestamp: ["time", "date"],
+  date: ["timestamp"],
+  integer: ["numeric"],
+};
+
+/** Every column's declared SQL type, per table. */
+export function declaredTypes(): Map<string, Map<string, string>> {
+  const out = new Map<string, Map<string, string>>();
+  for (const value of Object.values(schema as Record<string, unknown>)) {
+    if (!is(value, PgTable)) continue;
+    const config = getTableConfig(value as PgTable);
+    const cols = new Map<string, string>();
+    for (const column of config.columns) cols.set(column.name, column.getSQLType().toLowerCase());
+    out.set(config.name, cols);
+  }
+  return out;
+}
+
+async function convertTypes(sql: ReturnType<typeof postgres>): Promise<number> {
+  let converted = 0;
+  for (const [table, cols] of declaredTypes()) {
+    const present = await sql<{ column_name: string; data_type: string }[]>`
+      SELECT column_name, data_type FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ${table}
+    `;
+    for (const { column_name, data_type } of present) {
+      const want = cols.get(column_name);
+      const have = PG_NAME[data_type];
+      if (!want || !have || want === have) continue;
+      if (!(KEEPS_ITS_MEANING[have] ?? []).includes(want)) continue;
+      await sql.unsafe(
+        `ALTER TABLE ${quote(table)} ALTER COLUMN ${quote(column_name)} TYPE ${want} USING ${quote(column_name)}::${want}`,
+      );
+      converted += 1;
+      console.log(`[prepare-schema] ${table}.${column_name}: ${have} -> ${want}, rows kept`);
+    }
+  }
+  return converted;
+}
+
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) {
@@ -70,7 +125,9 @@ async function main() {
   const sql = postgres(url, { max: 1 });
   const blocked: string[] = [];
   let added = 0;
+  let converted = 0;
   try {
+    converted = await convertTypes(sql);
     for (const [table, uniques] of declaredUniques()) {
       const exists = await sql<{ table_name: string }[]>`
         SELECT table_name FROM information_schema.tables
@@ -118,7 +175,9 @@ async function main() {
     );
     process.exit(1);
   }
-  console.log(added ? `[prepare-schema] ${added} constraint(s) added` : "[prepare-schema] nothing to add");
+  console.log(added || converted
+    ? `[prepare-schema] ${added} constraint(s) added, ${converted} column(s) converted`
+    : "[prepare-schema] nothing to add");
 }
 
 main().catch((err) => {

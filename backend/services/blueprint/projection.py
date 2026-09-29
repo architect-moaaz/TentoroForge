@@ -56,7 +56,10 @@ _TYPES: dict[str, str] = {
     "money": "numeric", "currency": "numeric",
     "bool": "boolean", "boolean": "boolean",
     "date": "date",
-    "datetime": "timestamp", "timestamp": "timestamp", "time": "timestamp",
+    # A TIME OF DAY IS A TIME. Med Tracker's "Preferred time" projected as a
+    # timestamp: the form sent "09:00", no date could be made of it, and the
+    # required column got null (2026-09-29).
+    "datetime": "timestamp", "timestamp": "timestamp", "time": "time",
     "json": "jsonb", "jsonb": "jsonb", "object": "jsonb", "array": "jsonb",
     # A place: `{lat, lng}` (see geo_types).
     **{t: "jsonb" for t in LOCATION_TYPES},
@@ -193,7 +196,7 @@ PLATFORM_TABLE_SOURCES: dict[str, str] = {
 _BUILDER_TYPES: dict[str, str] = {
     "uuid": "uuid", "text": "text", "varchar": "text", "boolean": "boolean",
     "integer": "int", "numeric": "numeric", "timestamp": "timestamp",
-    "date": "date", "jsonb": "json",
+    "date": "date", "time": "time", "jsonb": "json",
 }
 
 _COLUMN_RE = re.compile(

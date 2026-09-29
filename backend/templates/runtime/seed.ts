@@ -172,6 +172,7 @@ function minimalRow(
     // A string-mode `date()` / `timestamp()` column (dataType "string") cannot
     // take "Default label" ("invalid input syntax for date") NOR a Date (see
     // _driverSafeDates) — give it a valid calendar date / ISO datetime string.
+    else if (ct === "pgtime") out[key] = "09:00:00"; // a time of day takes a time, never a date
     else if (dt === "string" && /date|time/.test(ct)) {
       out[key] = /time/.test(ct) ? new Date().toISOString() : new Date().toISOString().slice(0, 10);
     }
@@ -512,7 +513,13 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
     if (tcol) {
       const dt = String(tcol.dataType ?? "").toLowerCase();
       const ct = String(tcol.columnType ?? "").toLowerCase();
-      if (dt === "date" || /timestamp|date|time/.test(ct)) {
+      if (ct === "pgtime") {
+        // A TIME OF DAY: "09:00" as written, a time read out of a datetime,
+        // else a morning. Postgres refuses an ISO datetime for a time column.
+        const s = String(val ?? "");
+        const m = s.match(/(?:^|T|\s)(\d{1,2}:\d{2}(?::\d{2})?)/);
+        val = m ? m[1] : "09:00:00";
+      } else if (dt === "date" || /timestamp|date|time/.test(ct)) {
         if (dt === "string") {
           const s = typeof val === "string" && /^\d{4}-\d{2}-\d{2}/.test(val) ? val : "";
           val = /time/.test(ct) && !/date/.test(ct)
