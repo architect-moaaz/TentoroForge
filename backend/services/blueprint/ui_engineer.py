@@ -874,17 +874,19 @@ def page_widget_brief(doc: dict, page: dict) -> list[dict]:
     return out
 
 
-def plan_prompt(doc: dict, page: dict) -> str:
+def plan_prompt(doc: dict, page: dict, brief: str = "") -> str:
     """Ask for the decisions, not the code."""
+    wanted = (f"\n\nWhat is wanted of it — this decides the layout:\n{brief}" if brief else "")
     return ("Decide how to build this page — do not write it yet.\n\n```json\n"
-            + json.dumps(_page_brief(doc, page), indent=2) + "\n```\n\n"
+            + json.dumps(_page_brief(doc, page), indent=2) + "\n```" + wanted + "\n\n"
             "Answer with its state, its sections in order, and one line per behaviour the code must "
             "satisfy. Short lines. You will be asked for the code next, with this plan in front of you, "
             "so decide here and write there.")
 
 
 def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "",
-                current: dict | None = None, plan: dict | None = None) -> str:
+                current: dict | None = None, plan: dict | None = None,
+                relayout_of: dict | None = None) -> str:
     out = ["Write this page.\n\n```json\n" + json.dumps(_page_brief(doc, page), indent=2) + "\n```"]
     if plan:
         # THE DECIDING IS DONE. Handed the plan it made a moment ago, the
@@ -904,6 +906,17 @@ def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "",
             "in order. Touch only what this change needs; everything else stays as it is. Leave "
             "`load` and `view` empty — fill one with a file's full contents only when most of that "
             "file must change.")
+    if relayout_of and not current:
+        # LAID OUT AGAIN, NOT EDITED. "Rebuild every screen like Myntra" came
+        # back as one page with its dock moved and its grid widened: a change
+        # is made with edits, and edits keep the layout they are made in.
+        out.append(
+            "\nTHIS PAGE IS LAID OUT AGAIN FROM THE START, to what is wanted above and the "
+            "application's direction — its structure, its sections, their order and their look are "
+            "yours to decide afresh; do not keep the old arrangement because it was there. What it "
+            "DOES stays: the data it shows and every action it offers (each button, form, link and "
+            "workflow below is kept, working). The page as it is now, for what it does only:\n"
+            f"```ts\n// load.ts\n{relayout_of.get('load')}\n```\n```tsx\n// view.tsx\n{relayout_of.get('view')}\n```")
     if feedback:
         out.append(f"\nYour previous version was refused. Fix every one of these and keep what worked:\n{feedback}")
     return "\n".join(out)
@@ -1236,7 +1249,8 @@ def _with(client: Any, **changes: Any) -> Any:
     return dataclasses.replace(client, **changes)
 
 
-def _page_plan(doc: dict, page: dict, client: Any, system: str, spent: list[Any]) -> dict | None:
+def _page_plan(doc: dict, page: dict, client: Any, system: str, spent: list[Any],
+               brief: str = "") -> dict | None:
     """The page's decisions, in a budget that cannot swallow the page.
 
     A plan that fails is not a page that fails: the writer is asked as it
@@ -1249,7 +1263,7 @@ def _page_plan(doc: dict, page: dict, client: Any, system: str, spent: list[Any]
         # with five sections and a dozen behaviours. Effort buys deliberation,
         # and deliberation is the thing that was already running away.
         reply = _with(client, max_tokens=PLAN_MAX_TOKENS, effort="low")(
-            system=system, user=plan_prompt(doc, page), schema=PAGE_PLAN_SCHEMA)
+            system=system, user=plan_prompt(doc, page, brief), schema=PAGE_PLAN_SCHEMA)
         if getattr(reply, "usage", None) is not None:
             spent.append((reply.usage, time.monotonic() - t0))
         plan = json.loads(getattr(reply, "text", reply))
@@ -1266,7 +1280,7 @@ def _page_plan(doc: dict, page: dict, client: Any, system: str, spent: list[Any]
 def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                  feedback: str = "", brief: str = "", current: dict | None = None,
                  usage: Any = None, node: str = "page_code", critic: Any = None,
-                 on_look: Any = None) -> tuple[dict, list[Any]]:
+                 on_look: Any = None, relayout_of: dict | None = None) -> tuple[dict, list[Any]]:
     """Author one page and compile it, returning the accepted `pageCode` body
     and the usage of every call. Raises CompileError when the last round still
     does not compile — the message carries the errors for the next attempt.
@@ -1289,8 +1303,9 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     #: time, a changed page was rewritten whole, scored 7/10 again and cost
     #: two minutes for nothing (live, 2026-09-28).
     changing = current is not None
-    #: The page as it was before this change, to hold the rewrite to it.
-    original_view = str((current or {}).get("view") or "")
+    #: The page as it was before this change, to hold the rewrite to it — an
+    #: edit's current code, or the page a whole re-layout replaces.
+    original_view = str((current or relayout_of or {}).get("view") or "")
     #: What the reviewer is told was asked of the page, when it is changed.
     change = (brief or feedback or "").strip() if changing else ""
     #: The best version seen by the reviewer: (rank, body). Returned when a
@@ -1299,7 +1314,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     # DECIDE, THEN WRITE — in two calls, because one budget holds both and
     # the deciding will take all of it. Skipped on a repair (the decisions
     # were made and the code exists; what is wanted now is a fix).
-    plan = None if (current or feedback) else _page_plan(doc, page, client, system, spent)
+    plan = None if (current or feedback) else _page_plan(doc, page, client, system, spent,
+                                                         brief if relayout_of else "")
     # WITH THE DECIDING DONE, WRITING NEEDS LITTLE DELIBERATION AND NO ROOM
     # FOR IT. Measured on the page that failed four times: plan at `low` (15s),
     # then write at `low` in 24,000 — 64s, 12,655 characters. The same page
@@ -1315,7 +1331,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         t0 = time.monotonic()
         editing = current is not None
         reply = writer(system=system, user=user_prompt(doc, page, feedback=note, brief=brief,
-                                                       current=current, plan=plan),
+                                                       current=current, plan=plan,
+                                                       relayout_of=relayout_of),
                        schema=PAGE_EDIT_SCHEMA if editing else PAGE_CODE_SCHEMA)
         text = getattr(reply, "text", reply)
         if getattr(reply, "usage", None) is not None:
@@ -1351,8 +1368,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         design = _design_findings(doc, page, view)
         errors = (_static_findings(load, view) + _simulated_writes(view) + _unwired_actions(doc, page, view)
                   + typecheck(doc, app_root, str(page.get("id")), load, view))
-        if changing and original_view:
-            dropped = _dropped_controls(original_view, view, change)
+        if original_view:
+            dropped = _dropped_controls(original_view, view, change or brief)
             if dropped:
                 errors.append("view.tsx: the rewrite took away what the page had and the ask did not "
                               "say to remove: " + "; ".join(f"`{d}`" for d in dropped[:6]) + " — keep "

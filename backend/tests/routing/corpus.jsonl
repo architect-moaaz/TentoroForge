@@ -202,7 +202,7 @@
 {"say": "Drop the rule that a nurse needs at least one speciality", "verb": "remove_rule"}
 {"say": "let anyone open registration without signing in", "verb": "edit_access", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "change the theme colour to green", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
-{"say": "make it darker and more compact", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
+{"say": "make it darker", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "change the theme colour from blue to green", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "Make it look nicer", "verb": "restyle"}
 {"say": "call it Nurse Directory", "verb": "edit_navigation", "note": "quoted in the catalogue as an example of this verb"}

@@ -210,11 +210,13 @@ VERB_HELP: dict[str, str] = {
         "exact visible text. The screen stops declaring what the control did."
     ),
     "restyle": (
-        "Change how the application LOOKS — theme colour, palette, type, "
-        "density: \"change the theme colour to green\", \"make it darker and "
-        "more compact\". Re-decides the design system against the request; "
-        "every screen picks it up through the tokens. Needs the change in the "
-        "user's words."
+        "Change the application's COLOURS — its palette: \"change the theme "
+        "colour to green\", \"make it darker\", \"warmer colours\". Re-decides "
+        "the colour roles; every screen picks them up through the tokens. "
+        "Colours ONLY: the frame (side rail, top bar, bottom dock, its tone, "
+        "the sign-in layout), the fonts and the density are `write_section` "
+        "on `designSystem`, and the screens' layout is `rewrite_pages` / "
+        "`write_page_code` with `whole`. Needs the change in the user's words."
     ),
     "set_logo": (
         "Put the owner's LOGO in the application: \"put our logo in the "

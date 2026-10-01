@@ -124,6 +124,15 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
     _run("navigation", lambda: project_navigation(view, app_root))
     _run("public_nav", lambda: {"files": [project_public_nav(view, app_root)]})
     _run("brand_logo", lambda: project_brand_logo(svc.doc, app_root))
+    # THE FRAME'S IDENTITY (`design-dna.json`: its tone, its layout) — the
+    # build writes it, and nothing after the build did, so a new shell tone
+    # never reached the rail.
+    from services.blueprint.projection import project_shell_identity
+    _run("shell_identity", lambda: project_shell_identity(svc.doc, app_root))
+    # THE FRAME, including the files the application owns (`frameCode`): an
+    # undo of a frame change has to put the frame back too.
+    from services.smith.sync_app import refresh_frame
+    _run("frame", lambda: {"files": refresh_frame(app_root, svc.doc)})
     return sorted(set(f for f in files if f))
 
 

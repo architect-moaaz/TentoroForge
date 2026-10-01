@@ -804,7 +804,7 @@ def _where(svc: Any, route: str) -> str:
 
 def recode_page(svc: Any, route: str, *, app_root: str, request: str,
                 wanted: Sequence[str] = (), executor: Any = None, client: Any = None,
-                reasoning: Any = None) -> dict:
+                reasoning: Any = None, whole: bool = False) -> dict:
     """Change a coded page: its new widgets, then its code, as one change.
 
     Returns `{applied, committed, version, reason, missing}` — `missing` the
@@ -864,8 +864,11 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
         if not getattr(critic, "accepts_images", False):
             critic = None
         try:
-            body, spent = compose_page(doc, page, root, llm, brief=brief, current=row, node="page_code",
-                                       critic=critic)
+            # `whole`: laid out again from the start, its actions held — not
+            # edited inside the layout it has.
+            body, spent = compose_page(doc, page, root, llm, brief=brief,
+                                       current=None if whole else row, relayout_of=row if whole else None,
+                                       node="page_code", critic=critic)
         except NeedsWorkflow as exc:
             raise NeedsWorkflowError(route, exc.needs) from exc
         except CompileError as exc:
@@ -942,6 +945,106 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
     return {"applied": True, "committed": committed, "version": version,
             "reason": "", "missing": missing, "widgets": sorted(declared),
             "rationale": str(body.get("rationale") or "").strip()}
+
+
+#: How many pages are laid out at once — the build's own fan-out width.
+RELAYOUT_WORKERS = 4
+
+
+def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: str,
+                   reasoning: Any = None, client_for: Any = None) -> dict:
+    """Lay out several coded pages again from the start to `request`, at once,
+    and commit them as ONE version.
+
+    "Rebuild the layout of every screen to follow Myntra's pattern" was done
+    one page per tool call — one, as it turned out, before the turn moved on.
+    Each page is written by the engineer that wrote it, against its own
+    contract and the application's direction, every action it had held,
+    compiled and looked at; the writing runs in parallel, the commit once,
+    so the redesign is one change and one undo. Returns `{applied, done,
+    failed: {route: reason}, version, committed}`."""
+    import concurrent.futures as cf
+
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
+    from services.blueprint.app_sdk import project_code_pages
+    from services.blueprint.executors import RunUsage, tiered_router
+    from services.blueprint.ui_engineer import CompileError, NeedsWorkflow, compose_page, ensure_sdk
+
+    root = Path(app_root)
+    doc = svc.doc
+    targets: list[tuple[str, dict, dict]] = []
+    failed: dict[str, str] = {}
+    for route in dict.fromkeys(str(r).strip() for r in routes if str(r).strip()):
+        page = _page_for_route(doc, route)
+        row = code_row(doc, str((page or {}).get("id")))
+        if page is None:
+            failed[route] = "there is no page at this route"
+        elif row is None:
+            failed[route] = "this page is not written as code"
+        else:
+            targets.append((route, page, row))
+    usage = RunUsage.for_app(svc, phase="change")
+    router = tiered_router(reasoning=reasoning)
+    ensure_sdk(doc, root)
+
+    def write(route: str, page: dict, row: dict) -> tuple[str, dict | None, str]:
+        llm = client_for() if client_for else router.for_task("page_code", "ui_engineer")
+        critic = router.for_task("page_look", "page_reviewer")
+        if not getattr(critic, "accepts_images", False):
+            critic = None
+        try:
+            body, spent = compose_page(doc, page, root, llm, brief=request, relayout_of=row,
+                                       node="page_code", critic=critic)
+        except NeedsWorkflow as exc:
+            return route, None, f"it needs a process the app does not have: {exc.needs}"
+        except CompileError as exc:
+            return route, None, f"the new layout did not compile: {str(exc)[:300]}"
+        except Exception as exc:  # noqa: BLE001 — one page, not the redesign
+            logger.exception("[relayout] %s failed", route)
+            return route, None, f"{type(exc).__name__}: {str(exc)[:200]}"
+        for u, elapsed, *who in spent:
+            usage.record(node="page_code", agent=who[0] if who else "ui_engineer", usage=u, elapsed_s=elapsed)
+        return route, body, ""
+
+    written: list[tuple[str, dict, dict]] = []
+    tell(reasoning, f"Laying out {len(targets)} screen(s) again: {request}", "step")
+    with cf.ThreadPoolExecutor(max_workers=RELAYOUT_WORKERS) as pool:
+        futures = [pool.submit(write, route, page, row) for route, page, row in targets]
+        for fut in cf.as_completed(futures):
+            route, body, why = fut.result()
+            if body is None:
+                failed[route] = why
+            else:
+                page = next(p for r, p, _ in targets if r == route)
+                written.append((route, page, body))
+                tell(reasoning, f"{route} laid out again.", "step")
+    if not written:
+        return {"applied": False, "done": [], "failed": failed, "version": int(svc.doc.get("version") or 0),
+                "committed": []}
+    before = svc.snapshot()
+    committed: list[str] = []
+    for route, page, body in written:
+        application = apply_agent_result(svc, AgentResult(
+            task_id=f"TASK-smith-relayout-{page['id']}", agent="ui_engineer",
+            proposals=[ArtifactProposal(section="pageCode", natural_key=str(page["id"]), body=body)],
+            confidence=1.0), commit=False)
+        if not application.applied:
+            failed[route] = application.reason or "the new code was refused"
+            continue
+        committed += list(application.artifacts or [])
+    done = [r for r, _p, _b in written if r not in failed]
+    if not done:
+        svc.doc = before
+        svc.save()
+        return {"applied": False, "done": [], "failed": failed, "version": int(svc.doc.get("version") or 0),
+                "committed": []}
+    record = svc.commit(user_request=request, smith_interpretation=f"lay out again: {', '.join(done)}",
+                        before=before, affected=sorted(set(committed) | {
+                            str(p["id"]) for r, p, _b in written if r in done}))
+    ensure_sdk(svc.doc, root)
+    project_code_pages(svc.doc, app_root)
+    return {"applied": True, "done": sorted(done), "failed": failed, "version": int(record["version"]),
+            "committed": committed}
 
 
 def run(output_dir: str, verb: str, *, route: str = "",

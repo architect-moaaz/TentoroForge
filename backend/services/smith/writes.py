@@ -43,8 +43,13 @@ WRITES: tuple[tuple[str, str, dict[str, str]], ...] = (
      "and committed as one version. The compiler's verdict comes back to you. "
      "It cannot make records change by itself: a change to data (add, delete, "
      "approve, update) runs a workflow, so when none does what is asked, "
-     "`add_workflow` first. For a page that does not exist yet, `compose_route`.",
-     {"route": "string", "brief": "string"}),
+     "`add_workflow` first. For a page that does not exist yet, `compose_route`. "
+     "`whole: true` lays the page out AGAIN FROM THE START to the brief — its "
+     "structure, sections and look decided afresh, everything it does kept — "
+     "for \"redesign this screen\", \"make it look like…\", \"a grid instead of "
+     "the list\"; without it the page is changed by small edits inside the "
+     "layout it has.",
+     {"route": "string", "brief": "string", "whole": "boolean"}),
 )
 
 #: Which node re-decides a section when the loop asks for it changed. The
@@ -119,6 +124,36 @@ WRITES = WRITES + (
      "per page. The verdict per page comes back to you; a page still below the "
      "bar is a finding you can act on with `write_page_code`.",
      {"routes": "array"}),
+)
+
+WRITES = WRITES + (
+    ("rewrite_pages",
+     "Lay out SEVERAL screens again from the start, at once, to one brief — "
+     "\"rebuild every screen like Myntra\", \"make all the pages cards\", a new "
+     "direction for the whole app. `routes`: the screens, or [\"all\"] for every "
+     "screen written as code. Each keeps everything it does; all of them land "
+     "as one change. Do the frame first (`write_section designSystem` for the "
+     "shell and the look, `navigation` for the menu), then this, so the screens "
+     "are laid out inside the new frame. Several minutes for a whole app.",
+     {"routes": "array", "brief": "string"}),
+)
+
+def _frame_files_said() -> str:
+    from services.smith.frame_change import FRAME_PARTS
+    return "; ".join(f"`{f}` — {what}" for f, what in FRAME_PARTS.items())
+
+
+WRITES = WRITES + (
+    ("write_frame",
+     "Change any part of the application's FRAME — what is around every screen — "
+     "however small: \"centre the menu\", \"a search box in the top bar\", \"move "
+     "the bell to the left\", \"a footer with our address\", \"bigger logo in the "
+     "header\". `file` is the frame file the ask is about (read it first with "
+     "`read_file` under `app/`): " + _frame_files_said() + ". `brief` names the change "
+     "in the code's terms. Edited, compiled, committed as one version; from then on "
+     "that file is the application's own. To switch the KIND of frame (side rail, "
+     "top bar, bottom dock, its tone) use `write_section` on `designSystem`.",
+     {"file": "string", "brief": "string"}),
 )
 
 WRITE_NAMES: frozenset[str] = frozenset(name for name, _d, _a in WRITES)
@@ -242,8 +277,17 @@ def _reproject(svc: Any, app_root: str, section: str) -> list[str]:
             from services.smith.entity_change import _project_data
             return _project_data(svc, app_root)
         if section == "designSystem":
-            from services.blueprint.projection import project_design_tokens
-            return list(project_design_tokens(svc.doc, app_root).get("files") or [])
+            # HOW IT LOOKS IS MORE THAN ITS COLOURS: the shell (chrome, tone,
+            # sign-in layout) is the design system's too, and only the tokens
+            # were written — a new chrome stayed in the document.
+            from services.blueprint.projection import (project_design_tokens, project_navigation,
+                                                       project_shell_identity)
+            from services.smith.sync_app import refresh_frame
+            files = list(project_design_tokens(svc.doc, app_root).get("files") or [])
+            files += list(project_navigation(svc.doc, app_root).get("files") or [])
+            files += list(project_shell_identity(svc.doc, app_root).get("files") or [])
+            files += refresh_frame(app_root, svc.doc)
+            return files
         if section in ("pages", "navigation", "modules"):
             from services.blueprint.projection import apply_frontend_projection
             return list((apply_frontend_projection(svc, app_root) or {}).get("files") or [])
@@ -253,8 +297,45 @@ def _reproject(svc: Any, app_root: str, section: str) -> list[str]:
     return []
 
 
+def rewrite_pages(output_dir: str, routes: list[str], brief: str, *, reasoning: Any = None) -> dict:
+    """Several coded pages laid out again at once (`compose.relayout_pages`)."""
+    from services.blueprint.service import BlueprintService
+    from services.smith.compose import code_row, relayout_pages
+
+    brief = (brief or "").strip()
+    if not brief:
+        return _finding("`rewrite_pages` needs `brief`: what the screens should become.")
+    try:
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except FileNotFoundError:
+        return _finding("This project has no Blueprint, so there are no screens to lay out.")
+    wanted = [str(r).strip() for r in routes or [] if str(r).strip()]
+    if not wanted or any(r.lower() in ("all", "*", "every") for r in wanted):
+        wanted = [str(p.get("route")) for p in svc.doc.get("pages") or []
+                  if isinstance(p, dict) and p.get("status") != "DEPRECATED"
+                  and code_row(svc.doc, str(p.get("id"))) is not None]
+    if not wanted:
+        return _finding("No screen of this application is written as code, so none can be laid out "
+                        "again this way; `compose_route` changes a laid-out screen.")
+    try:
+        out = relayout_pages(svc, wanted, app_root=str(Path(output_dir) / "app"), request=brief,
+                             reasoning=reasoning)
+    except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
+        logger.exception("[smith] rewrite_pages failed")
+        return _finding(f"The screens were not laid out again — {type(exc).__name__}: {exc}")
+    done, failed = out.get("done") or [], out.get("failed") or {}
+    said = (f"Laid out {len(done)} screen(s) again (version {out.get('version')}): "
+            + ", ".join(f"`{r}`" for r in done) + "." if done else "")
+    finding = ("; ".join(f"{r} was not laid out again: {why}" for r, why in sorted(failed.items()))
+               if failed else "")
+    if not done:
+        return _finding(finding or "No screen was laid out again.")
+    return {"applied": True, "said": said, "finding": finding, "touched": list(out.get("committed") or []),
+            "version": out.get("version")}
+
+
 def write_page_code(output_dir: str, route: str, brief: str, *,
-                    reasoning: Any = None) -> dict:
+                    reasoning: Any = None, whole: bool = False) -> dict:
     """Rewrite one page's code to `brief`. Returns
     `{applied, said, finding, touched, version}` — `finding` set when an
     oracle refused, in its words; `said` for the person either way."""
@@ -281,7 +362,7 @@ def write_page_code(output_dir: str, route: str, brief: str, *,
                         "tree, which `compose_route` and `add_widgets` change.")
     app_root = str(Path(output_dir) / "app")
     try:
-        out = recode_page(svc, route, app_root=app_root, request=brief, reasoning=reasoning)
+        out = recode_page(svc, route, app_root=app_root, request=brief, reasoning=reasoning, whole=whole)
     except NeedsWorkflowError as exc:
         # WORKFLOW FIRST: the page said what it needs; the next step adds it.
         return _finding(str(exc))
@@ -319,8 +400,18 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     oracle refused; `said` is what the person is told."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
     if name == "write_page_code":
+        whole = str(args.get("whole") or "").strip().lower() in ("true", "1", "yes")
         return write_page_code(output_dir, str(args.get("route") or ""),
-                               str(args.get("brief") or ""), reasoning=reasoning)
+                               str(args.get("brief") or ""), reasoning=reasoning, whole=whole)
+    if name == "write_frame":
+        from services.smith.frame_change import run as frame_run
+        return frame_run(output_dir, str(args.get("file") or ""), str(args.get("brief") or ""),
+                         reasoning=reasoning)
+    if name == "rewrite_pages":
+        routes = args.get("routes")
+        return rewrite_pages(output_dir, list(routes) if isinstance(routes, list) else
+                             ([str(routes)] if routes else []), str(args.get("brief") or ""),
+                             reasoning=reasoning)
     if name == "verify_pages":
         routes = args.get("routes")
         return verify_pages(output_dir, list(routes) if isinstance(routes, list) else [], reasoning=reasoning)
@@ -330,4 +421,5 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     raise KeyError(name)
 
 
-__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "SECTION_WORDS", "run", "verify_pages", "write_page_code", "write_section"]
+__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "SECTION_WORDS", "run", "rewrite_pages", "verify_pages",
+           "write_page_code", "write_section"]

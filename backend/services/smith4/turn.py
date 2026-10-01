@@ -310,7 +310,10 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         observations.append(Observation(
             tool=tool, args=args, status="finding" if step.finding else step.status,
             said=step.finding or step.said, touched=list(step.touched)))
-        if step.said and not step.finding:
+        if step.said and (not step.finding or (step.touched and step.said != step.finding)):
+            # PART OF IT LANDED: twelve screens laid out again and one refused
+            # is twelve screens changed — said, beside the one the loop is
+            # told about.
             landed.append(step.said)
             if step.touched and step.status == "resolved":
                 ctx.applied.append(step.said)

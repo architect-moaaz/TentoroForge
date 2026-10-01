@@ -3124,6 +3124,30 @@
       },
       "default": []
     },
+    "frameCode": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string",
+            "default": ""
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
     "requirements": {
       "type": "array",
       "items": {

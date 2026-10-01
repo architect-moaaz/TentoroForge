@@ -115,6 +115,63 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
     return changed
 
 
+#: The app's frame — the platform's, not the app's: no agent writes these and
+#: no projection does; the Blueprint reaches them through `shell.json`,
+#: `design-dna.json` and the tokens they read. An app built before a frame
+#: change (a new chrome, the language switch) kept the old frame for good, so
+#: a shell the definition now asked for had no frame able to draw it.
+FRAME_FILES: tuple[str, ...] = (
+    "src/app/(dashboard)/layout.tsx", "src/app/(dashboard)/NotificationBell.tsx",
+    "src/app/(dashboard)/AccountMenu.tsx", "src/app/(dashboard)/MobileNav.tsx",
+    "src/app/(dashboard)/MobileTabBar.tsx", "src/app/(dashboard)/PersonaChrome.tsx",
+    "src/app/(dashboard)/RouteBreadcrumb.tsx",
+    "src/components/PublicPageFrame.tsx", "src/components/PublicNavLinks.tsx",
+    "src/components/AppNavigator.tsx",
+)
+
+
+def frame_template(app_root: str | Path, doc: dict, rel: str) -> str | None:
+    """The platform's version of a frame file, filled as a build fills it."""
+    from services.runtime_injector import _resolve_app_name
+
+    src = Path(__file__).resolve().parents[2] / "templates" / "app-foundation" / rel
+    if not src.is_file():
+        return None
+    app = doc.get("application") or {}
+    return src.read_text("utf-8").replace(
+        "__APP_NAME__", _resolve_app_name(Path(app_root), app.get("name"), app.get("domain")))
+
+
+def owned_frame(doc: dict) -> dict[str, str]:
+    """`{file: code}` — the frame files this application owns (`frameCode`)."""
+    return {str(r.get("file")): str(r.get("code") or "") for r in doc.get("frameCode") or []
+            if isinstance(r, dict) and r.get("file") and r.get("code")}
+
+
+def refresh_frame(app_root: str | Path, doc: dict) -> list[str]:
+    """The app's frame written out: each file the application owns from its
+    `frameCode` row, every other one as the platform's current version, filled
+    as a build fills it (`__APP_NAME__`). Written only where the file differs,
+    so a current app is untouched. Returns what changed."""
+    root = Path(app_root)
+    owned = owned_frame(doc)
+    changed: list[str] = []
+    for rel in FRAME_FILES:
+        text = owned.get(rel) or frame_template(root, doc, rel)
+        if text is None:
+            continue
+        dst = root / rel
+        try:
+            if dst.read_text("utf-8") == text:
+                continue
+        except OSError:
+            pass
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_text(text, "utf-8")
+        changed.append(rel)
+    return changed
+
+
 #: What an app is written out by: the projections and the files they copy.
 #: A change to any of these is a platform change an existing app has not had.
 _PLATFORM_SOURCES = ("services/blueprint", "services/smith/reproject.py",
@@ -184,6 +241,7 @@ def sync(svc: Any, app_root: str) -> dict:
     root = Path(app_root)
     before = _fingerprint(root)
     refresh_engine(root, svc.doc)
+    refresh_frame(root, svc.doc)
     everything(svc, app_root)
     after = _fingerprint(root)
     changed = sorted(k for k in after if k in before and before[k] != after[k])
@@ -235,4 +293,4 @@ def run(output_dir: str, *, reasoning: Any = None) -> dict:
     return {"applied": True, "edited_paths": moved, "diff_summary": summary_of(out), **out}
 
 
-__all__ = ["ENGINE_DIRS", "catch_up", "platform_stamp", "refresh_engine", "run", "summary_of", "sync"]
+__all__ = ["ENGINE_DIRS", "FRAME_FILES", "catch_up", "frame_template", "owned_frame", "refresh_frame", "platform_stamp", "refresh_engine", "run", "summary_of", "sync"]

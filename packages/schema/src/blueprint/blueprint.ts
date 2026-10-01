@@ -1080,6 +1080,22 @@ export const PageLayout = z.object({
  * A page with no row here renders its `pageLayouts` tree, which every page
  * has; the code is the designed page, the layout is its floor.
  */
+/**
+ * A file of the application's FRAME the application owns — its own version of
+ * the signed-in layout, the public header, the phone's tab bar. The frame is
+ * the platform's until someone asks for something only that app should have
+ * ("centre the menu", "a search box in the top bar"); from then on that file
+ * is this row's, re-projected from here and never replaced by the platform's.
+ */
+export const FrameCode = z.object({
+  /** Natural key — the frame file's path in the app, e.g. `src/app/(dashboard)/layout.tsx`. */
+  file: z.string(),
+  /** What was asked of it, in the person's words. */
+  rationale: z.string().default(""),
+  /** The whole file. */
+  code: z.string(),
+});
+
 export const PageCode = z.object({
   /** Natural key — the page this code renders. */
   page: PageId,
@@ -2494,6 +2510,8 @@ export const Blueprint = z.object({
   /** §34 — pages written as React against the library and the typed SDK.
    *  Takes precedence over the page's `pageLayouts` tree when both exist. */
   pageCode: z.array(PageCode).default([]),
+  /** The frame files this application owns (see `FrameCode`). */
+  frameCode: z.array(FrameCode).default([]),
 
   requirements: z.array(Requirement).default([]),
   completeness: Completeness.default({}),
