@@ -19,8 +19,10 @@ DATABASE_URL = os.getenv(
     "postgresql+asyncpg://tentoroforge:tentoroforge@localhost:5432/tentoroforge",
 )
 
-# For Alembic (sync driver)
-DATABASE_URL_SYNC = DATABASE_URL.replace("+asyncpg", "")
+# For Alembic (sync driver). Named, not left to SQLAlchemy's default: 2.1
+# changed the default for `postgresql://` to psycopg 3, which is not
+# installed, and forge-v3's backend failed every start (2026-10-02).
+DATABASE_URL_SYNC = DATABASE_URL.replace("+asyncpg", "+psycopg2")
 
 # ---------------------------------------------------------------------------
 # Auth / JWT
