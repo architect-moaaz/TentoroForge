@@ -2066,6 +2066,23 @@ export const BrandLogo = z.object({
 
 export const DesignSystem = z.object({
   visualPersonality: z.string().default(""),
+  /**
+   * The products this application should look and feel as good as — chosen
+   * for ITS domain and audience, each with what to take from it. Every page
+   * was written to "the best modern SaaS products — Linear, Stripe, Notion,
+   * Vercel" and judged against them, so a street-food menu and a fashion app
+   * came out as developer dashboards (2026-10-02). The page writer and the
+   * page reviewer hold each page to these instead.
+   */
+  references: z
+    .array(z.object({ product: z.string(), takeaway: z.string() }))
+    .describe(
+      "Two to four real, well-known products in THIS application's own field and for its "
+      + "audience whose experience it should match, each with the one thing to take from it "
+      + "(a layout idea, a way of presenting the main record, a tone). Not developer tools "
+      + "unless this is one.",
+    )
+    .default([]),
   colors: z.record(z.string(), z.string()).default({}),
   typography: z.record(z.string(), z.string()).default({}),
   spacing: z.record(z.string(), z.string()).default({}),

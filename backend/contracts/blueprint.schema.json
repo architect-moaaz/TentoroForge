@@ -2379,6 +2379,27 @@
           "type": "string",
           "default": ""
         },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "product": {
+                "type": "string"
+              },
+              "takeaway": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "product",
+              "takeaway"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Two to four real, well-known products in THIS application's own field and for its audience whose experience it should match, each with the one thing to take from it (a layout idea, a way of presenting the main record, a tone). Not developer tools unless this is one.",
+          "default": []
+        },
         "colors": {
           "type": "object",
           "additionalProperties": {

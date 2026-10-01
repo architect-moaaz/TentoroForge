@@ -676,6 +676,22 @@ def plottable_fields(entity: dict) -> list[str]:
     return out
 
 
+def customer_facing(doc: dict, page: dict) -> bool:
+    """Whether a page is for the product's customers rather than its staff:
+    public, or — in an application with more than one role — open only to the
+    role people sign up as. Such a page shows the product, not numbers about
+    it: F&B's customer menu carried a "Price range" chart because every list
+    page had to (2026-10-02)."""
+    from services.blueprint.account_model import signup_role
+    if str(page.get("access") or "") == "public":
+        return True
+    roles = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or []
+             if isinstance(r, dict) and r.get("status") != "DEPRECATED"}
+    customer = signup_role(doc)
+    users = [roles.get(str(u), str(u)) for u in page.get("users") or []]
+    return len(roles) > 1 and bool(customer) and bool(users) and all(u == customer for u in users)
+
+
 def check_analytics(result: "AgentResult", doc: dict | None) -> None:
     """CHARTS SHOW UP ON EVERY RELEVANT PAGE. The analytics agent was asked
     to decide page by page and decided "none" for a product's home
@@ -723,7 +739,7 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
         if not isinstance(page, dict) or page.get("status") == "DEPRECATED":
             continue
         need = CHARTS_REQUIRED.get(str(page.get("pattern") or ""), 0)
-        if not need:
+        if not need or customer_facing(doc, page):
             continue
         pid = str(page.get("id"))
         ent = ents.get(str((page.get("data") or {}).get("primaryEntity") or ""))

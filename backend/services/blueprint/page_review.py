@@ -438,18 +438,20 @@ def hard_findings(shot: dict) -> list[str]:
 def reviewer_system(doc: dict) -> str:
     """Who the reviewer is and what it holds a page to — shared with
     `page_look`, which asks the same reviewer as a page is written."""
-    from services.blueprint.ui_engineer import DESIGN_PRINCIPLES, _look, _rhythm
+    from services.blueprint.ui_engineer import DESIGN_PRINCIPLES, _look, _rhythm, bar
 
     comp = doc.get("composition") or {}
-    return ("You review screens of a business application before they ship. You are a senior "
-              "product designer with the bar of Linear, Stripe, Notion and Vercel: exacting about "
+    return ("You review screens of an application before they ship. You are a senior "
+              f"product designer with the bar of {bar(doc)}: exacting about "
               "hierarchy, spacing, alignment, density, typography, colour used for meaning, and "
               "whether the page does its job for the people who use it. The data is seeded demo "
               "data — judge the design and the behaviour it implies, not how many rows exist. "
               "The widgets in the page's contract (its KPI tiles and charts) are required by "
               "the application's analytics: judge how each is placed, sized and titled, never "
               "whether it belongs on the page — even where a convention seems to reserve "
-              "charts to the dashboard. "
+              "charts to the dashboard. A page that could belong to any application — generic "
+              "cards, a stock header, nothing of this product's character — is a design "
+              "problem, scored as one. "
               "The app's frame (the sidebar or the public top bar, with the menu and the app's "
               "name) is the platform's and is the same on every page — judge the content. A page "
               "that draws its own sidebar, top navigation or app header is a high-severity issue: "

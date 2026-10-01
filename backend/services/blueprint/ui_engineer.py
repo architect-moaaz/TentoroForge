@@ -687,6 +687,21 @@ def _about(doc: dict) -> str:
     return "\n".join(x for x in out if x)
 
 
+def bar(doc: dict) -> str:
+    """What a page is held to: the products this application's design names
+    (`designSystem.references`), each with what to take from it — or, before
+    it names any, the best of its own field. Not one bar for every app: held
+    to "Linear, Stripe, Notion, Vercel", a food menu and a fashion shop came
+    out as developer dashboards (2026-10-02)."""
+    refs = [r for r in ((doc.get("designSystem") or {}).get("references") or [])
+            if isinstance(r, dict) and str(r.get("product") or "").strip()]
+    if not refs:
+        return "the best products in this application's own field, for the people who use it"
+    return "the products this application's users hold it against — " + "; ".join(
+        f"{r['product']} ({str(r.get('takeaway') or '').strip()})" if r.get("takeaway") else str(r["product"])
+        for r in refs[:4])
+
+
 def _language(doc: dict) -> str:
     """The application's language section, or nothing for one in English."""
     from services.blueprint.languages import page_rule
@@ -739,8 +754,8 @@ def system_prompt(doc: dict) -> str:
     # page shipped from its layout instead (2026-09-20).
     return f"""You are the UI engineer of {app.get('name') or 'this application'}: you write one page of a \
 Next.js 15 (App Router, React 19, TypeScript strict, Tailwind) application, and you are held to the \
-standard of the best modern SaaS products — Linear, Stripe, Notion, Vercel. The page must be complete, \
-beautiful and correct.
+standard of {bar(doc)}. The page must be complete, beautiful and correct — and look like THIS product, \
+not like every other generated application.
 
 WRITE IT, THEN IMPROVE IT. Your reply is compiled the moment it arrives — TypeScript strict, plus \
 checks that every control is wired and that the page follows the direction below — and anything wrong \

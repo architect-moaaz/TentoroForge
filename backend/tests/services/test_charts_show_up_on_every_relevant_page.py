@@ -114,7 +114,7 @@ def test_what_can_be_charted():
 
 def test_the_author_is_told_the_rule():
     task = NODE_TASKS["analytics"]
-    assert "CHARTS SHOW UP ON EVERY RELEVANT PAGE" in task and "at least three" in task and "`approval_inbox`" in task
+    assert "CHARTS SHOW UP ON EVERY RELEVANT STAFF PAGE" in task and "at least three" in task and "`approval_inbox`" in task
     assert "A DASHBOARD IS RICH" in task and "`timeField`" in task and "Never a generic" in task
 
 
@@ -140,3 +140,31 @@ def test_a_refusal_reaches_the_retry_whole():
     kept = _reason(InvalidAnalytics(problems))
     assert "PAGE-008" in kept and len(kept) > 400, "the third page it was failed for was in the message it never saw"
     assert REASON_KEPT >= 4000 and ATTEMPTS_BY_NODE["analytics"] == 3
+
+
+def test_a_page_for_the_products_customers_is_not_made_to_carry_charts():
+    """F&B's customer menu carried a "Price range" chart because every list
+    page had to (2026-10-02)."""
+    from services.blueprint.agent_contract import customer_facing
+    doc = {"roles": [{"id": "ROLE-001", "name": "Admin"}, {"id": "ROLE-002", "name": "Customer"}],
+           "security": {"signupRole": "ROLE-002"}}
+    assert customer_facing(doc, {"access": "public", "users": ["ROLE-001"]})
+    assert customer_facing(doc, {"users": ["ROLE-002"]})
+    assert not customer_facing(doc, {"users": ["ROLE-001"]})
+    assert not customer_facing(doc, {"users": ["ROLE-001", "ROLE-002"]})
+    single = {"roles": [{"id": "ROLE-001", "name": "Recruiter"}]}
+    assert not customer_facing(single, {"users": ["ROLE-001"]})     # one role: the staff's own tool
+    menu = {**DOC, "roles": doc["roles"], "security": doc["security"],
+            "pages": [{**p, "access": "public"} for p in DOC["pages"]]}
+    check_analytics(_result(KPIS[:1]), menu)                        # nothing forced on a public page
+
+
+def test_every_page_is_held_to_this_applications_own_bar():
+    from services.blueprint.page_review import reviewer_system
+    from services.blueprint.ui_engineer import bar, system_prompt
+    doc = {"application": {"name": "F&B"}, "designSystem": {"references": [
+        {"product": "Deliveroo", "takeaway": "photo-led menu cards"}]}}
+    assert "Deliveroo (photo-led menu cards)" in bar(doc)
+    for prompt in (system_prompt(doc), reviewer_system(doc)):
+        assert "Deliveroo" in prompt and "Linear, Stripe" not in prompt
+    assert "own field" in bar({"designSystem": {}})
