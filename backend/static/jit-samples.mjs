@@ -259,9 +259,23 @@ export function described(entity) {
   return n ? Math.min(n, 8) : 8;
 }
 
+//: How often a record type's category examples repeat: the shortest
+//: category list with more than one example (0 when none). Every category
+//: cycles on it together, so the k-th country stays beside the k-th state —
+//: each on its own length put Nepal beside Uttar Pradesh (Test2,
+//: 2026-09-28). The projection's `category_period` is the same rule.
+export function categoryPeriod(entity) {
+  const lengths = (entity.fields || [])
+    .filter((f) => /string|text|varchar/.test(String(f.type || "text").toLowerCase()) && !UNIQUE_TEXT.test(f.name || ""))
+    .map((f) => (Array.isArray(f.examples) ? f.examples.filter((x) => typeof x === "string" && x.trim()).length : 0))
+    .filter((n) => n > 1);
+  return lengths.length ? Math.min(...lengths) : 0;
+}
+
 export function sampleRow(entity, i, entities) {
   const row = {};
   const fields = entity.fields || [];
+  const period = categoryPeriod(entity);
   const name = entity.name;
   //: "state" beside a city or a country is where someone lives, not a status.
   const address = fields.some((f) => /^(city|country|town|postcode|zip|address)/i.test(f.name));
@@ -283,6 +297,7 @@ export function sampleRow(entity, i, entities) {
     if (lower === "id") row[fname] = `sample-${name.toLowerCase()}-${i + 1}`;
     // EACH EXAMPLE ONCE. Cycling them over eight rows listed "Circe" and
     // "Educated" twice; rows beyond the examples take the generic value.
+    else if (period && examples.length > 1 && text && !opts.length && !UNIQUE_TEXT.test(fname)) row[fname] = examples[i % period];
     else if (i < examples.length && text && !opts.length) row[fname] = examples[i];
     else if (examples.length && text && !opts.length && !UNIQUE_TEXT.test(fname)) row[fname] = examples[i % examples.length];
     else if (/^(author|writer|artist|composer|director|creator|instructor|coach|host|speaker)(name)?$/.test(lower) && /string|text/.test(type))

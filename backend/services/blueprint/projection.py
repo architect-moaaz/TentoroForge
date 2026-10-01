@@ -2753,8 +2753,25 @@ def project_entity_access(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # seed — enough rows that a preview shows something
 # ---------------------------------------------------------------------------
 
+def category_period(fields: list) -> int:
+    """How often an entity's category examples repeat: the shortest category
+    list with more than one example, or 0 when there is none.
+
+    Example k of every field is record k, and a category's examples repeat
+    past their end. Each cycling on its own length took them out of step —
+    four countries and three states put Nepal beside Uttar Pradesh on the
+    fourth record (Test2, 2026-09-28). Cycling every category of the record
+    type together keeps the k-th of each beside the k-th of the others."""
+    lengths = [len([x for x in (f.get("examples") or []) if str(x).strip()])
+               for f in fields or [] if isinstance(f, dict)
+               and str(f.get("type") or "text").lower() in ("string", "text", "varchar")
+               and not _UNIQUE_TEXT.search(str(f.get("name") or "field"))]
+    lengths = [n for n in lengths if n > 1]
+    return min(lengths) if lengths else 0
+
+
 def _seed_value(field: dict, entity_name: str, row: int,
-                tables_by_id: dict | None = None) -> Any:
+                tables_by_id: dict | None = None, *, period: int = 0) -> Any:
     # A FOREIGN KEY IS A REFERENCE, NOT A LABEL. Written as "Committee Id 1"
     # it failed every child insert as an invalid uuid and the demo database
     # held nothing but the admin. The seeder resolves `ref:<table>[i]` to the
@@ -2777,6 +2794,9 @@ def _seed_value(field: dict, entity_name: str, row: int,
     # server does: a demo reading list is real titles rated 1–5, not
     # "Title 3" rated 300.
     examples = [str(x) for x in (field.get("examples") or []) if str(x).strip()]
+    category = kind in ("string", "text", "varchar") and not _UNIQUE_TEXT.search(str(name))
+    if category and period and len(examples) > 1:
+        return examples[(row - 1) % period]     # in step with the record's other categories
     if row <= len(examples) and kind in ("string", "text", "varchar"):
         return examples[row - 1]        # each once — a demo list never lists a title twice
     # …but a category's examples repeat: "Country 4" is not a country (the
@@ -2993,6 +3013,7 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                          for f in entity.get("fields") or []
                          if str(f.get("type") or "text").lower() in ("string", "text", "varchar")),
                         default=0)
+        period = category_period(entity.get("fields") or [])
         for row in range(1, (min(described, rows) if as_described and described else rows) + 1):
             record = {}
             for field in entity.get("fields") or []:
@@ -3009,7 +3030,7 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                 if is_image_field(field) or is_embedding_field(field):
                     continue
                 record[field.get("name")] = (_ref_by_label(field, row, tables_by_id, labels_by_id)
-                                             or _seed_value(field, name, row, tables_by_id))
+                                             or _seed_value(field, name, row, tables_by_id, period=period))
             out_rows.append(years_within_age(record, entity.get("fields") or []))
         seed[table] = out_rows
     return seed

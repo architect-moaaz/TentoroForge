@@ -343,3 +343,37 @@ def test_a_change_on_the_last_step_is_said_to_be_untried(tmp_path, monkeypatch, 
     _repo(tmp_path)
     result = _turn(tmp_path, _Chooser(_try(), _write()))
     assert "Rewrote **Categories**." in result.said and "not yet tried it again" in result.said
+
+
+# --------------------------------------------------------------------------- #
+# Sample records keep related examples together
+# --------------------------------------------------------------------------- #
+
+def test_related_categories_stay_in_step_past_the_shortest_list():
+    """Four countries and three states put Nepal beside Uttar Pradesh on the
+    fourth record (Test2, 2026-09-28)."""
+    from services.blueprint.projection import category_period, seed_rows
+    doc = {"data": {"entities": [{"id": "E1", "name": "Area", "table": "areas", "fields": [
+        {"name": "areaName", "type": "string", "examples": ["Lucknow", "Kanpur", "Pune", "Kathmandu", "Agra"]},
+        {"name": "state", "type": "string", "examples": ["Uttar Pradesh", "Uttar Pradesh", "Maharashtra"]},
+        {"name": "country", "type": "string", "examples": ["India", "India", "India", "Nepal"]},
+    ]}]}}
+    assert category_period(doc["data"]["entities"][0]["fields"]) == 3
+    rows = seed_rows(doc)["areas"]
+    assert [r["areaName"] for r in rows] == ["Lucknow", "Kanpur", "Pune", "Kathmandu", "Agra"]
+    pairs = {(r["state"], r["country"]) for r in rows}
+    assert ("Uttar Pradesh", "Nepal") not in pairs
+    assert pairs <= {("Uttar Pradesh", "India"), ("Maharashtra", "India")}
+
+
+def test_the_editor_sampler_keeps_the_same_rule():
+    import subprocess, json as _json, pathlib
+    root = pathlib.Path(__file__).resolve().parents[2]
+    script = ("import { sampleRow } from './static/jit-samples.mjs';"
+              "const e = {name: 'Area', fields: ["
+              "{name: 'state', type: 'string', examples: ['Uttar Pradesh', 'Uttar Pradesh', 'Maharashtra']},"
+              "{name: 'country', type: 'string', examples: ['India', 'India', 'India', 'Nepal']}]};"
+              "console.log(JSON.stringify([0,1,2,3,4,5].map((i) => sampleRow(e, i, [e]))));")
+    out = subprocess.run(["node", "--input-type=module", "-e", script], cwd=root, capture_output=True, text=True)
+    rows = _json.loads(out.stdout)
+    assert all(r["country"] == "India" for r in rows), rows
