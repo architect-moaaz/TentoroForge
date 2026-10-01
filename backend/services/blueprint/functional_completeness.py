@@ -917,6 +917,7 @@ def authoring_findings(doc: dict) -> list[dict]:
     out.extend(expression_findings(doc))
     out.extend(template_findings(doc))
     out.extend(insert_findings(doc))
+    out.extend(table_findings(doc))
     out.extend(column_findings(doc))
     out.extend(platform_write_findings(doc))
     # A step reads what no input declares and no earlier step produces — the
@@ -1979,6 +1980,34 @@ def item_value_findings(doc: dict) -> list[dict]:
                                     "detail": f"{name}, step {key!r}: writes {field!r} as {json.dumps(value)} for "
                                               f"every item, but each item carries its own {field!r} — read it "
                                               f"from the item: {read}"})
+    return out
+
+
+def table_findings(doc: dict) -> list[dict]:
+    """A DATABASE STEP NAMES A RECORD OF THIS APPLICATION. F&B's "Mark
+    Notifications Read" wrote `notifications.readAt` — a table the app does not
+    have — and every press answered 422 (2026-10-01); the column check skipped
+    it because no entity matched, so nothing said so. The platform's own login
+    table is the one other table a workflow may name."""
+    from services.blueprint.projection import PLATFORM_TABLE_SOURCES
+    platform = set(PLATFORM_TABLE_SOURCES) | {"users"}
+    records = sorted({str(e.get("table") or "") for e in (doc.get("data") or {}).get("entities") or []
+                      if isinstance(e, dict) and e.get("table")})
+    out: list[dict] = []
+    for wf in _live(doc.get("workflows")):
+        for st in wf.get("steps") or []:
+            cfg = (st or {}).get("config") or {} if isinstance(st, dict) else {}
+            table = str(cfg.get("table") or "").strip()
+            if not table or not str(cfg.get("actionType") or "").startswith("db_") or table in platform:
+                continue
+            if _entity_for_table(doc, table) is not None:
+                continue
+            out.append({"rule": "unknown-table", "page": str(wf.get("id")),
+                        "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
+                                  f"{cfg.get('actionType')} names the table {table!r}, which is no record of this "
+                                  f"application (its records: {', '.join(records) or 'none'}). Notifications are "
+                                  "sent with send_notification and marked read by the application's own bell; a "
+                                  "step reads and writes the records above"})
     return out
 
 

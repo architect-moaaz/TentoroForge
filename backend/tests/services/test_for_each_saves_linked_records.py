@@ -21,6 +21,8 @@ DATA = {"entities": [
     {"name": "SearchResult", "table": "search_results", "fields": [
         {"name": "id", "primaryKey": True}, {"name": "searchId", "required": True},
         {"name": "merchantProductId", "required": True}, {"name": "matchScore", "required": True}]},
+    {"name": "Search", "table": "searches", "fields": [
+        {"name": "id", "primaryKey": True}, {"name": "status"}, {"name": "resultCount"}]},
 ]}
 
 
