@@ -55,6 +55,18 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* && \
     playwright install chromium && chmod -R a+rX /ms-playwright
 
+# THE REVIEW'S BROWSER SCRIPT IS NODE. Verify & fix clicks through a running
+# app with `scripts/page_shots.mjs`, which imports the npm `playwright`; the
+# image had only the Python one, so it said "Playwright is not installed" on
+# forge-v3 (2026-10-01). Installed at the Python package's own version, which
+# drives the same Chromium build already in /ms-playwright — nothing more is
+# downloaded.
+RUN mkdir -p /opt/review-node && cd /opt/review-node && echo '{"private": true}' > package.json && \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --no-audit --no-fund --no-package-lock \
+      "playwright@$(python -c 'import importlib.metadata as m; print(m.version("playwright"))')" && \
+    chmod -R a+rX /opt/review-node
+ENV FORGE_PLAYWRIGHT_MODULES=/opt/review-node/node_modules
+
 # Copy application code
 COPY . .
 

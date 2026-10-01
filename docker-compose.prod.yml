@@ -22,6 +22,27 @@ services:
       timeout: 3s
       retries: 5
 
+  # THE GENERATED APPS' OWN DATABASES, kept apart from the platform's. The
+  # backend runs with no Docker, so an app's preview and its Verify & fix
+  # review cannot boot a Postgres of their own; each app gets a database here,
+  # created over the network (services/app_databases.py). pgvector, because
+  # an app may search by likeness. Started by name (a profile), so a stack
+  # that does not set APPS_DB_PASSWORD never runs it.
+  apps-db:
+    image: pgvector/pgvector:pg16
+    profiles: ["apps-db"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${APPS_DB_PASSWORD:-}
+    volumes:
+      - ./data/apps-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -71,6 +92,9 @@ services:
       # keys are stored: every stored value becomes unreadable. Without it the
       # Integrations page refuses to save.
       FORGE_INTEGRATIONS_SECRET: ${FORGE_INTEGRATIONS_SECRET:-}
+      # postgresql://postgres:<APPS_DB_PASSWORD>@apps-db:5432 — no database
+      # name; unset, apps use Docker as on a developer's machine.
+      FORGE_APPS_DATABASE_URL: ${FORGE_APPS_DATABASE_URL:-}
       # --- feature flags (mirror local dev defaults) ---
       FORGE_SMITH_ARCHITECT: ${FORGE_SMITH_ARCHITECT:-0}
       FORGE_SELF_HEAL: ${FORGE_SELF_HEAL:-1}

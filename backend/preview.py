@@ -76,8 +76,16 @@ async def _ensure_database(output_dir: str) -> None:
     rewrites .env.local to match; it runs here when the database does not
     answer. A preview without Docker still starts, and says why it has no data.
     """
+    from services import app_databases
     from services.blueprint.schema_push import database_exists, database_url
 
+    if app_databases.server():
+        # No Docker in the platform's container: the apps server holds it.
+        try:
+            await asyncio.to_thread(app_databases.ensure, output_dir)
+        except Exception as exc:  # noqa: BLE001 — a preview still starts, and the log says why
+            logger.warning("[preview] %s: apps database not ready: %s", output_dir, exc)
+        return
     script = Path(output_dir) / "start.sh"
     if not script.is_file() or database_exists(database_url(output_dir)):
         return

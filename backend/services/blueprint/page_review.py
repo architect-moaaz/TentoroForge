@@ -83,6 +83,12 @@ class ReviewUnavailable(RuntimeError):
 def _playwright_modules() -> Path:
     """Where `playwright` resolves from — the verify image's own node_modules
     in this repository, the one Playwright install the platform keeps."""
+    # In the platform's own image the package sits beside the Python one it
+    # matches (see the Dockerfile), sharing its browser — forge-v3 had no
+    # repository checkout to find `docker/forge-verify` in (2026-10-01).
+    own = os.environ.get("FORGE_PLAYWRIGHT_MODULES", "").strip()
+    if own and (Path(own) / "playwright").is_dir():
+        return Path(own)
     modules = _BACKEND.parent / "docker/forge-verify/node_modules"
     if (modules / "playwright").is_dir():
         return modules
@@ -181,6 +187,18 @@ class RunningApp:
         self.clone: tuple[str, str, str] | None = None
 
     def __enter__(self) -> "RunningApp":
+        from services import app_databases
+        if app_databases.server():
+            # NO DOCKER IN THE PLATFORM'S CONTAINER (forge-v3): the app's
+            # database lives on the apps server, and the review clicks through
+            # a copy of it made there (see `services.app_databases`).
+            try:
+                app_databases.ensure(self.root)
+                copy, url = app_databases.clone(self.root)
+            except Exception as exc:  # noqa: BLE001 — said, not crashed
+                raise ReviewUnavailable(f"the app's database could not be prepared: {exc}") from exc
+            self.clone = ("", copy, url)
+            return self._serve()
         # A DATABASE THAT IS UP IS SOMEONE'S. `start.sh` finds its port taken,
         # moves the app to another one and rewrites `.env` under the running
         # server; stopping compose afterwards took the person's database down.
@@ -196,6 +214,10 @@ class RunningApp:
         self.clone = _clone_database(self.root)
         if self.clone is None:
             raise ReviewUnavailable("could not make a copy of the app's database to click through")
+        return self._serve()
+
+    def _serve(self) -> "RunningApp":
+        assert self.clone is not None
         self.proc = subprocess.Popen(
             ["npx", "next", "dev", "--port", str(self.port)], cwd=self.root,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
@@ -227,8 +249,15 @@ class RunningApp:
                     continue
         if self.clone is not None:
             container, copy, _ = self.clone
-            subprocess.run(["docker", "exec", container, "dropdb", "-U", "postgres", "--if-exists", copy],
-                           capture_output=True, timeout=120)
+            if not container:
+                from services import app_databases
+                try:
+                    app_databases.drop(copy)
+                except Exception as exc:  # noqa: BLE001 — a leftover copy is not a failed review
+                    logger.warning("[page_review] could not drop %s: %s", copy, exc)
+            else:
+                subprocess.run(["docker", "exec", container, "dropdb", "-U", "postgres", "--if-exists", copy],
+                               capture_output=True, timeout=120)
         if self.started_db:
             subprocess.run(["docker", "compose", "stop"], cwd=self.root, capture_output=True, timeout=120)
         shutil.rmtree(self.root / REVIEW_DIST_DIR, ignore_errors=True)
@@ -239,6 +268,12 @@ def _query(app: RunningApp, sql: str) -> list[list[str]]:
     if app.clone is None:
         return []
     container, copy, _ = app.clone
+    if not container:
+        from services import app_databases
+        try:
+            return app_databases.query(copy, sql)
+        except Exception:  # noqa: BLE001 — as a failed psql: no rows
+            return []
     done = subprocess.run(["docker", "exec", container, "psql", "-U", "postgres", "-d", copy,
                            "-tA", "-F", "\t", "-c", sql], capture_output=True, text=True, timeout=60)
     if done.returncode != 0:
