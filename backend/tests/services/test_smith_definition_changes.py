@@ -77,7 +77,7 @@ def test_a_field_is_renamed_everywhere_the_blueprint_names_it(svc):
     assert kids[1]["props"]["columns"][1]["key"] == "experienceYears" and kids[2]["props"]["fields"][1]["name"] == "experienceYears"
     assert kids[3]["props"]["content"] == "Most experienced: {{nurses.0.experienceYears}} years"
     assert len(out["hits"]) >= 8 and fresh.doc["changeHistory"][-1]["userRequest"].startswith("rename Nurse.yearsOfExperience")
-    assert "drop and re-add" in fc.summary_of("rename_field", out)
+    assert "renamed in the database with its data" in fc.summary_of("rename_field", out)
 
 
 def test_a_field_is_removed_with_its_uses_and_what_still_reads_it_is_named(svc):

@@ -60,6 +60,11 @@ ENGINE_DIRS: dict[str, str] = {
 }
 
 
+#: Database scripts every app runs, the platform's: prepare, verify, reset.
+DB_SCRIPTS: tuple[str, ...] = ("src/db/prepare-schema.ts", "src/db/verify-schema.ts",
+                               "src/db/reset-schema.ts", "src/db/extensions.ts")
+
+
 def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
     """The app's copy of the platform's engine brought up to the platform's.
 
@@ -103,6 +108,21 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(f, dst)
             changed.append(rel)
+    # THE DATABASE SCRIPTS ARE THE PLATFORM'S TOO: how a schema change keeps
+    # the rows, and the check that it landed.
+    foundation = Path(__file__).resolve().parents[2] / "templates" / "app-foundation"
+    for rel in DB_SCRIPTS:
+        src, dst = foundation / rel, root / rel
+        if not src.is_file() or not (root / "drizzle.config.ts").is_file():
+            continue                      # an app with no database runs none of them
+        try:
+            if dst.read_bytes() == src.read_bytes():
+                continue
+        except OSError:
+            pass
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        changed.append(rel)
     if doc is not None:
         from services.blueprint.ui_engineer import ensure_sdk
         before = _fingerprint(root)

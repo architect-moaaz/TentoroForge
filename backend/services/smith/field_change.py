@@ -189,8 +189,16 @@ def rename_field(svc: Any, entity_ref: str, field_ref: str, new_name: str, *, ap
                smith_interpretation=f"rename the field across {len(hits)} reference(s)",
                before=before, affected=sorted({eid, *[h.split(':')[0] for h in hits if ':' in h]}))
     tell(reasoning, f"Renamed {ename}.{old} to {new_name} in {len(hits)} place(s).", "step")
+    edited = _project(svc, app_root)
+    if app_root:
+        # THE DATA MOVES WITH THE NAME: written down for prepare-schema, which
+        # renames the column in every database instead of dropping it.
+        from services.blueprint.migrations_ledger import column_renamed
+        from services.blueprint.projection import to_snake
+        table = str(ent.get("table") or to_snake(ename))
+        edited.append(column_renamed(_app_dir(app_root), table, to_snake(old), to_snake(new_name)))
     return {"applied": True, "entity": eid, "name": ename, "old": old, "new": new_name, "hits": hits,
-            "edited_paths": _project(svc, app_root)}
+            "edited_paths": edited}
 
 
 _FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -198,6 +206,12 @@ _FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 #: Where a field lands on a screen, in the words the reply uses.
 FORM_FIELD = "form field"
 TABLE_COLUMN = "table column"
+
+
+def _app_dir(app_root: str) -> Path:
+    """The app directory: `app_root` itself, or its `app/` when given the project."""
+    root = Path(app_root)
+    return root / "app" if (root / "app" / "package.json").is_file() else root
 
 
 def label_of(name: str, label: str = "") -> str:
@@ -661,13 +675,14 @@ def summary_of(verb: str, out: dict) -> str:
         return lead + "\n\n" + where
     if verb == "rename_field":
         s = (f"Renamed {out['name']}.{out['old']} to {out['new']} in {len(out['hits'])} place(s): "
-             f"{'; '.join(out['hits'][:8])}{'…' if len(out['hits']) > 8 else ''}. The column is renamed on the next "
-             "install; the migration may drop and re-add it, so back up the column's data first if it matters.")
+             f"{'; '.join(out['hits'][:8])}{'…' if len(out['hits']) > 8 else ''}. The column is renamed in the "
+             "database with its data, here and when the app is next published.")
         return s
     s = f"Removed {out['name']}.{out['field']} and took it out of {len(out['removed']) - 1} place(s): {'; '.join(out['removed'][1:8])}."
     if out.get("left"):
         s += " Still reading it, for Verify & Fix to repair: " + "; ".join(out["left"][:6]) + "."
-    s += " The column is dropped on the next install."
+    s += (" The column leaves the database with its data kept aside (retired records), so it can be "
+          "brought back.")
     return s
 
 

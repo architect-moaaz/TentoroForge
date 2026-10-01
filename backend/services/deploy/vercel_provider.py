@@ -144,6 +144,13 @@ _PLATFORM_REFRESH_FOUNDATION_FILES = (
     "src/db/reset-schema.ts",
     # reset-schema.ts imports it, so the two travel together.
     "src/db/extensions.ts",
+    # The build runs these between reset and seed. prepare-schema keeps rows
+    # through renames, required columns and removals; verify-schema stops a
+    # build whose push said "applied" and was not (database tests,
+    # 2026-10-01). An app built before either change publishes with the
+    # current ones, or its build calls a file it does not have.
+    "src/db/prepare-schema.ts",
+    "src/db/verify-schema.ts",
     # schema-page.tsx is fully platform-authored (per-app logic lives in the
     # files it imports). Refreshing it on every publish lets fixes to SSR
     # error handling / data-source resolution reach existing apps without a

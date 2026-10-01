@@ -8,10 +8,10 @@ the preview. When the application's own database answers, the schema is
 pushed and the seed run here, the same two commands a preview start runs.
 
 The seed is idempotent (the admin upserts; a table that already has rows is
-skipped), so running it after a push only fills what is new. `drizzle-kit
-push` runs without `--force`, as the preview does: an additive change applies,
-and one that would drop data stops at its prompt instead of being confirmed
-on the owner's behalf.
+skipped), so running it after a push only fills what is new. It runs the
+publish's own chain — prepare-schema, `drizzle-kit push --force`,
+verify-schema — so what Smith changed locally lands the way it will land
+when published, and a removal keeps its data in `forge_retired.rows`.
 """
 from __future__ import annotations
 
@@ -72,8 +72,17 @@ def push_now(app_root: str | Path) -> dict:
     if not url or not _answers(url):
         return {"applied": False, "reason": "its database is not running"}
     env = {**os.environ, "DATABASE_URL": url}
-    for cmd in (["npx", "drizzle-kit", "push"], ["npx", "tsx", "src/db/seed.ts"]):
-        if cmd[-1].endswith("seed.ts") and not (root / "src/db/seed.ts").is_file():
+    # THE SAME CHAIN AS A PUBLISH. A plain `drizzle-kit push` here answered
+    # nothing it asked, exited 0 having changed nothing, and this said
+    # "pushed" — for a renamed field, a required one, a changed type, every
+    # removal (database tests, 2026-10-01). Now: prepare (renames, required
+    # columns filled, types converted, removed data kept), push, then the
+    # database itself is asked whether it matches; any step that refuses is
+    # the reason, in its own words.
+    chain = [["npx", "tsx", "src/db/prepare-schema.ts"], ["npx", "drizzle-kit", "push", "--force"],
+             ["npx", "tsx", "src/db/verify-schema.ts"], ["npx", "tsx", "src/db/seed.ts"]]
+    for cmd in chain:
+        if cmd[1] == "tsx" and not (root / cmd[2]).is_file():
             continue
         try:
             proc = subprocess.run(cmd, cwd=str(root), env=env, stdin=subprocess.DEVNULL,
@@ -82,7 +91,9 @@ def push_now(app_root: str | Path) -> dict:
             logger.warning("[schema_push] %s: %s", " ".join(cmd), exc)
             return {"applied": False, "reason": f"`{' '.join(cmd[1:])}` did not finish ({type(exc).__name__})"}
         if proc.returncode != 0:
-            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
+            said = (proc.stderr or proc.stdout or "").strip().splitlines()
+            marked = [l for l in said if l.startswith(("[prepare-schema]", "[verify-schema]", "  - "))]
+            tail = marked[-6:] if marked else said[-3:]
             logger.warning("[schema_push] %s exited %s: %s", " ".join(cmd), proc.returncode, " | ".join(tail))
             return {"applied": False, "reason": f"`{' '.join(cmd[1:])}` failed: {' '.join(tail)[:300]}"}
     logger.info("[schema_push] %s: schema pushed and seeded", root.parent.name)

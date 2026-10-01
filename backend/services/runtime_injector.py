@@ -2306,7 +2306,8 @@ if [ -f drizzle.config.ts ]; then
   npx drizzle-kit push --force < /dev/null 2>&1 | tee "$PUSH_LOG"
   PUSH_STATUS=${PIPESTATUS[0]}
   # A question push could not ask ("created or renamed?") is a push that did nothing.
-  if [ "$PUSH_STATUS" -eq 0 ] && ! grep -qE "PostgresError|DrizzleError|^Error:|error: |created or renamed" "$PUSH_LOG"; then
+  if [ "$PUSH_STATUS" -eq 0 ] && ! grep -qE "PostgresError|DrizzleError|^Error:|error: |created or renamed" "$PUSH_LOG" \
+     && { [ ! -f src/db/verify-schema.ts ] || npx tsx src/db/verify-schema.ts < /dev/null; }; then
     say "${GREEN}✅ Migrations applied${NC}"
   else
     say "${RED}❌ Migration failed — the app needs its tables (see the error above).${NC}"

@@ -104,7 +104,9 @@ SECTION_WORDS: dict[str, str] = {
 WRITES = WRITES + (
     ("write_section",
      "Change one section of the Blueprint by briefing the agent that owns it — "
-     "the data model (`data.entities`: rename a record, change a field's type), "
+     "the data model (`data.entities`: rename a record, change a field's type — a "
+     "FIELD's rename is `rename_field`, which moves its data; here it would drop "
+     "the old field and start the new one empty), "
      "`apis`, `businessRules`, `permissions`, `workflows`, `designSystem`, "
      "`navigation`, `pages`, `requirements`, `product`. `brief` says what "
      "should be different and what must stay, in terms of what you read "
@@ -246,6 +248,7 @@ def write_section(output_dir: str, section: str, brief: str, *, subject: str = "
         return _finding("This project has no Blueprint, so there is no section to change.")
     app_root = str(Path(output_dir) / "app")
     before = int(svc.doc.get("version") or 0)
+    tables_before = _tables_by_entity(svc.doc)
     try:
         req = record_requirement(svc, brief, owner=section.split(".")[0])
         framed = ("THIS IS A CHANGE to an application that is already built, not a first authoring. "
@@ -260,13 +263,28 @@ def write_section(output_dir: str, section: str, brief: str, *, subject: str = "
     except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
         logger.exception("[smith] write_section %s failed", section)
         return _finding(f"{section} was not changed — {type(exc).__name__}: {exc}")
-    touched = _reproject(svc, app_root, section)
+    # A RECORD RENAMED KEEPS ITS ROWS: the entity is the same id under a new
+    # table name, and that is written down for prepare-schema to rename.
+    from services.blueprint.migrations_ledger import table_renamed
+    ledger: list[str] = []
+    for eid, table in _tables_by_entity(svc.doc).items():
+        old_table = tables_before.get(eid)
+        if old_table and old_table != table and (Path(app_root) / "package.json").is_file():
+            ledger = [table_renamed(app_root, old_table, table)]
+    touched = _reproject(svc, app_root, section) + ledger
     after = int(svc.doc.get("version") or before)
     changed = ", ".join(sorted({str(getattr(p, "natural_key", "") or "") for p in props if getattr(p, "natural_key", "")})[:8])
     return {"applied": True, "finding": "", "touched": touched, "version": after,
             "said": (f"Changed {SECTION_WORDS.get(section, section)} (version {after})"
                      + (f": {changed}" if changed else "") + "."
                      + (f" Updated: {', '.join(touched[:6])}." if touched else ""))}
+
+
+def _tables_by_entity(doc: dict) -> dict[str, str]:
+    from services.blueprint.projection import to_snake
+    return {str(e.get("id")): str(e.get("table") or to_snake(str(e.get("name") or "")))
+            for e in (doc.get("data") or {}).get("entities") or []
+            if isinstance(e, dict) and e.get("id") and e.get("status") != "DEPRECATED"}
 
 
 def _reproject(svc: Any, app_root: str, section: str) -> list[str]:

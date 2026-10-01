@@ -216,7 +216,8 @@ def summary_of(verb: str, out: dict) -> str:
         s += f" {out['relationships']} relationship(s) dropped."
     if out.get("pointing"):
         s += f" Still pointing at it, for you to decide: {', '.join(out['pointing'])}."
-    s += " The table is dropped on the next install."
+    s += (" The table leaves the database with its records kept aside (retired records), so they can "
+          "be brought back.")
     return s
 
 
