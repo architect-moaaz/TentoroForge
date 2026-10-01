@@ -348,7 +348,7 @@ def show_field(svc: Any, entity_ref: str, field_ref: str, *, page_id: str | None
 
 
 def add_field(svc: Any, entity_ref: str, field: dict, *, app_root: str | None = None,
-              reasoning: Any = None) -> dict:
+              reasoning: Any = None, surface: bool = True) -> dict:
     """Add a field to an entity AND put it where that entity is edited or listed.
 
     "Add father's name in the Nurse Registration" is one ask: a column, and the
@@ -360,6 +360,9 @@ def add_field(svc: Any, entity_ref: str, field: dict, *, app_root: str | None = 
     field goes onto each of them here, deterministically, and the reply names
     every place it went. A new field is never required: existing rows have
     no value for it, and the column must be nullable for the migration to apply.
+
+    `surface=False` adds the column only: a state a workflow sets (an order's
+    status) is not typed into the forms that create the record.
     """
     ent = find_named(_entities(svc.doc), entity_ref)
     if ent is None:
@@ -380,13 +383,13 @@ def add_field(svc: Any, entity_ref: str, field: dict, *, app_root: str | None = 
     ent.setdefault("fields", []).append(declared)
     label = label_of(name, str((field or {}).get("label") or ""))
 
-    surfaced = _surface(svc, ent, declared, label, known)
+    surfaced = _surface(svc, ent, declared, label, known) if surface else []
     # A FORM CAN ONLY SAVE WHAT ITS WORKFLOW TAKES. The layouts got the
     # control and the workflow that saves the record never heard of the field
     # — and an application whose pages are code does not ship its layouts at
     # all: 0l133sp2's "postcode when they create their profile" landed on an
     # unused table column and nowhere a person could type it.
-    flows = _extend_form_workflows(svc, ent, declared, known, label)
+    flows = _extend_form_workflows(svc, ent, declared, known, label) if surface else []
     svc.validate()
     svc.commit(user_request=f"add {ename}.{name}",
                smith_interpretation=f"add the field and show it in {len(surfaced)} place(s)",

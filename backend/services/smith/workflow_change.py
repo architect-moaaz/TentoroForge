@@ -340,25 +340,40 @@ def add_workflow(svc: Any, request: str, *, route: str = "", app_root: str | Non
     wf = next(w for w in svc.doc["workflows"] if w["id"] == new_id)
     steps_brief = _steps_brief(wf, f"This workflow was just declared for the user's ask: \"{request}\".")
     feedback = ""
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        spec = TaskSpec(task_id=f"smith-workflow-steps-{new_id}-{attempt}", node="workflow_steps",
+    attempt, fields_added = 1, []
+    while True:
+        spec = TaskSpec(task_id=f"smith-workflow-steps-{new_id}-{attempt}-{len(fields_added)}", node="workflow_steps",
                         agent=DAG["workflow_steps"].agent, attempt=attempt, subject=new_id,
                         feedback=feedback, brief=steps_brief)
         tell(reasoning, f"Authoring the steps of {new_name}.", "step")
         result = run(spec)
         props = _proposals(result)
         if not props:
-            raise WorkflowChangeError(f"the workflow agent wrote no steps for {new_name}; the workflow is declared "
-                                      "but does nothing yet.")
+            _withdraw(svc, new_id, new_name, app_root)
+            raise WorkflowChangeError(f"the workflow agent wrote no steps for {new_name}, so nothing has been "
+                                      "changed.")
         out, refusal = _apply(svc, request, _pinned(svc, props[:1], new_id),
                               interpretation=f"author the steps of {new_name}",
                               agent=DAG["workflow_steps"].agent, app_root=app_root)
         if not refusal:
             break
+        # A STATE THE ACTION MOVES NEEDS A FIELD TO HOLD IT. F&B's "mark an
+        # order as fulfilled" wrote `status`, which Order did not have, and was
+        # refused twice (2026-10-01). A field the steps write and the record
+        # lacks is added — the column only, never onto the forms that create
+        # the record — and the steps are asked for again, without counting it
+        # as a failed attempt.
+        if add_fields_the_steps_set(svc, refusal, props[0].body, fields_added, name=new_name,
+                                    app_root=app_root, reasoning=reasoning):
+            feedback = (f"{refusal} — the field(s) {', '.join(f'{e}.{f}' for f, e in fields_added)} now exist; "
+                        "write the steps again.")
+            continue
         feedback = refusal
         if attempt == MAX_ATTEMPTS:
-            raise WorkflowChangeError(f"the steps of {new_name} were refused {MAX_ATTEMPTS} times; the workflow "
-                                      f"is declared ({new_id}) but has no steps. The last reason was: {refusal}")
+            _withdraw(svc, new_id, new_name, app_root)
+            raise WorkflowChangeError(f"the steps of {new_name} were refused {MAX_ATTEMPTS} times, so nothing has "
+                                      f"been changed. The last reason was: {refusal}")
+        attempt += 1
         tell(reasoning, f"Those steps were refused — {refusal[:160]} Asking again.", "step")
 
     wf = next(w for w in svc.doc["workflows"] if w["id"] == new_id)
@@ -400,6 +415,87 @@ def add_workflow(svc: Any, request: str, *, route: str = "", app_root: str | Non
             "steps": len(wf.get("steps") or []), "trigger": str((wf.get("trigger") or {}).get("kind") or ""),
             "composed": composed, "offered": offered, "edited_paths": files,
             "page_refused": page_refused, "start_route": str((start or {}).get("route") or "")}
+
+
+#: Fields one new workflow may add to the records it acts on.
+MAX_FIELDS_ADDED = 3
+
+_MISSING_FIELD = re.compile(r"writes or filters '([A-Za-z_]\w*)', which ([A-Za-z_][\w ]*?) does not have")
+
+
+def missing_fields(refusal: str) -> list[tuple[str, str]]:
+    """(field, entity) for each column a step wrote that its record lacks, as
+    the contract's refusal names them."""
+    out: list[tuple[str, str]] = []
+    for m in _MISSING_FIELD.finditer(refusal or ""):
+        if (m.group(1), m.group(2)) not in out:
+            out.append((m.group(1), m.group(2)))
+    return out
+
+
+def written_type(workflow: dict, field: str) -> str:
+    """The type of the value the steps write into `field`: a yes/no, a number,
+    a moment, else text."""
+    def values(steps: Any):
+        for st in steps or []:
+            if not isinstance(st, dict):
+                continue
+            cfg = st.get("config") or {}
+            v = (cfg.get("values") or {}) if isinstance(cfg.get("values"), dict) else {}
+            if field in v:
+                yield v[field]
+            yield from values(cfg.get("steps"))
+    for value in values((workflow or {}).get("steps")):
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, (int, float)):
+            return "number"
+        if isinstance(value, str) and value.strip() in ("$now", "$today"):
+            return "datetime" if value.strip() == "$now" else "date"
+        return "string"
+    return "string"
+
+
+def add_fields_the_steps_set(svc: Any, refusal: str, workflow: dict, fields_added: list, *, name: str,
+                             app_root: str | None, reasoning: Any) -> bool:
+    """A STATE AN ACTION MOVES NEEDS A FIELD TO HOLD IT. F&B's "mark an order
+    as fulfilled" wrote `status`, which Order did not have, was refused twice,
+    and the next try made the action announce an event and change nothing
+    (2026-10-01). Each field the refused steps write that its record lacks is
+    added — the column only, never onto the forms that create the record — so
+    the steps can be asked for again. True when one was added; `fields_added`
+    grows with what was."""
+    from services.smith.field_change import add_field
+    from services.smith.section_change import SectionChangeError
+    missing = [m for m in missing_fields(refusal) if m not in fields_added]
+    room = MAX_FIELDS_ADDED - len(fields_added)
+    added = False
+    for fname, ename in missing[:max(room, 0)]:
+        ftype = written_type(workflow, fname)
+        try:
+            add_field(svc, ename, {"name": fname, "type": ftype}, app_root=app_root,
+                      reasoning=reasoning, surface=False)
+        except SectionChangeError as exc:
+            tell(reasoning, f"Could not add {ename}.{fname}: {exc}", "step")
+            continue
+        fields_added.append((fname, ename))
+        added = True
+        tell(reasoning, f"{name} sets {ename}.{fname}, which did not exist — added it ({ftype}).", "step")
+    return added
+
+
+def _withdraw(svc: Any, wf_id: str, name: str, app_root: str | None) -> None:
+    """A declared workflow whose steps could not be written is taken back out:
+    left in, it is a workflow that does nothing, offered by nothing."""
+    before = svc.snapshot()
+    svc.doc["workflows"] = [w for w in svc.doc.get("workflows") or [] if str(w.get("id")) != str(wf_id)]
+    try:
+        svc.validate()
+        svc.commit(user_request=f"withdraw {name}", smith_interpretation="its steps could not be written",
+                   before=before, affected=[str(wf_id)])
+        _project_runtime(svc, app_root)
+    except Exception as exc:  # noqa: BLE001 — the refusal is the news; the tidy-up is best effort
+        logger.warning("[workflow] could not withdraw %s: %s", wf_id, exc)
 
 
 def _offers(doc: dict, page_id: str, wf_id: str) -> bool:
@@ -456,8 +552,9 @@ def edit_workflow(svc: Any, ref: str, change: str, *, app_root: str | None = Non
     brief = _steps_brief(wf, f"The user asked to change what it does: \"{change}\". Keep every step the "
                              "change does not touch; change, add or drop steps only where the ask needs it.")
     feedback = ""
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        spec = TaskSpec(task_id=f"smith-edit-workflow-{wf['id']}-{attempt}", node="workflow_steps",
+    attempt, fields_added = 1, []
+    while True:
+        spec = TaskSpec(task_id=f"smith-edit-workflow-{wf['id']}-{attempt}-{len(fields_added)}", node="workflow_steps",
                         agent=DAG["workflow_steps"].agent, attempt=attempt, subject=str(wf["id"]),
                         feedback=feedback, brief=brief)
         tell(reasoning, f"Re-authoring the steps of {wf.get('name')}: {change}.", "step")
@@ -470,10 +567,16 @@ def edit_workflow(svc: Any, ref: str, change: str, *, app_root: str | None = Non
                               agent=DAG["workflow_steps"].agent, app_root=app_root)
         if not refusal:
             break
+        if add_fields_the_steps_set(svc, refusal, props[0].body, fields_added, name=str(wf.get("name") or ""),
+                                    app_root=app_root, reasoning=reasoning):
+            feedback = (f"{refusal} — the field(s) {', '.join(f'{e}.{f}' for f, e in fields_added)} now exist; "
+                        "write the steps again.")
+            continue
         feedback = refusal
         if attempt == MAX_ATTEMPTS:
             raise WorkflowChangeError(f"the changed steps were refused {MAX_ATTEMPTS} times and nothing has been "
                                       f"changed. The last reason was: {refusal}")
+        attempt += 1
         tell(reasoning, f"Those steps were refused — {refusal[:160]} Asking again.", "step")
     now = next(w for w in svc.doc["workflows"] if w["id"] == wf["id"])
     after = [str(s.get("name") or s.get("key")) for s in now.get("steps") or []]
