@@ -61,6 +61,12 @@ OUT_OF_STEPS = ("You have run out of steps for this turn and nothing has been ch
                 "with `answer`: in the person's words, what you found so far — what the tries "
                 "showed, what works and what does not — and what is left to do. Do not say "
                 "anything was changed. No other tool will run.")
+#: How a seam says a control it made leads nowhere yet (`frame_change`).
+UNWIRED = "Not working yet:"
+#: What `done` hears when that control has not been tried since.
+TRY_WIRED = ("Not tried yet. A control was found leading nowhere and has been changed since: "
+             "try it now (`open_page` the screen it leads to, with what it sends) and see it "
+             "work before ending.")
 #: The start of the message when the try after the change still fails.
 STILL_FAILING = "Still not working:"
 
@@ -149,6 +155,13 @@ def _before_done(observations: list[Observation], landed: list[str]) -> str:
     nudge = _unproven(observations)
     if nudge and nudge.split(":", 1)[0] not in said:
         return nudge
+    # A CHANGE AN ORACLE CALLED UNWIRED IS TRIED ONCE WIRED. The search box's
+    # screen was rewritten to read the query and the turn ended there, the
+    # search never run (F&B replay, 2026-10-01).
+    unwired = [i for i, o in enumerate(observations) if (o.said or "").startswith(UNWIRED)]
+    if unwired and not any(tools.is_trial(o.tool) for o in observations[unwired[-1] + 1:]) \
+            and TRY_WIRED.split(".", 1)[0] not in said:
+        return TRY_WIRED
     return ""
 
 
@@ -310,6 +323,8 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         observations.append(Observation(
             tool=tool, args=args, status="finding" if step.finding else step.status,
             said=step.finding or step.said, touched=list(step.touched)))
+        logger.info("[smith-obs] %s %s -> %s: %s", tool, {k: str(v)[:80] for k, v in args.items()},
+                    observations[-1].status, " ".join((observations[-1].said or "").split())[:400])
         if step.said and (not step.finding or (step.touched and step.said != step.finding)):
             # PART OF IT LANDED: twelve screens laid out again and one refused
             # is twelve screens changed — said, beside the one the loop is
@@ -340,6 +355,10 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 said = str((final.get("args") or {}).get("text") or "").strip()
         except Exception:  # noqa: BLE001 — the fallback below is still true
             logger.warning("smith4: the out-of-steps answer could not be had", exc_info=True)
+        if not said:
+            last = next((o for o in reversed(observations) if o.status == "finding" and o.said), None)
+            if last is not None:
+                said = f"The last thing I tried did not work: {' '.join(last.said.split())[:600]}"
         tail = (f"\n\nThis turn ran out of steps ({max_steps}) before I changed anything. "
                 "Say “carry on” and I will pick up from there.")
         return Outcome(status="no_op", touched=list(touched), said=(said + tail) if said else (

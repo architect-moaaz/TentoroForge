@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from services.blueprint.embeddings import (
-    EMBEDDING_DIMENSIONS, embedding_columns, is_embedding_field, is_image_field,
+    EMBEDDING_DIMENSIONS, embedding_columns, is_embedding_field, is_file_field, is_image_field,
 )
 from services.catalog import WorkflowNodeCatalog, workflow_nodes
 from services.workflow_nodes import workflow_node
@@ -48,7 +48,8 @@ from services.blueprint.geo_types import LOCATION_TYPES, is_location_field  # no
 _TYPES: dict[str, str] = {
     "uuid": "uuid", "guid": "uuid",
     "text": "text", "string": "text", "str": "text", "email": "text",
-    "url": "text", "enum": "text", "file": "text",
+    "url": "text", "enum": "text", "file": "text", "document": "text", "attachment": "text",
+    "pdf": "text", "upload": "text", "photo": "text", "picture": "text",
     # An image is a stored file: the column holds its forge_files id.
     "image": "text", "photo": "text", "picture": "text",
     "int": "integer", "integer": "integer", "number": "integer",
@@ -3038,7 +3039,7 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                         field = {**field, "references": target}
                 # No picture to seed, and a made-up file id is a broken image
                 # plus an embedding that fails; the vector is the platform's.
-                if is_image_field(field) or is_embedding_field(field):
+                if is_image_field(field) or is_file_field(field) or is_embedding_field(field):
                     continue
                 record[field.get("name")] = (_ref_by_label(field, row, tables_by_id, labels_by_id)
                                              or _seed_value(field, name, row, tables_by_id, period=period))

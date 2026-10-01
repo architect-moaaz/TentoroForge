@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
-from services.blueprint.embeddings import entity_embeddings, is_embedding_field, is_image_field
+from services.blueprint.embeddings import entity_embeddings, is_embedding_field, is_file_field, is_image_field
 from services.blueprint.projection import (
     _TYPES, _DEFAULT_TYPE, _is_credential_field, _live, is_list_type,
     reconcile_platform_table,
@@ -195,6 +195,9 @@ def emit_schema(doc: dict) -> str:
             note = str(f.get("description") or "").strip().replace("*/", "")
             if is_image_field(f):
                 note = (note + " " if note else "") + "A stored image's id — show it with <img src={fileUrl(row." + str(f["name"]) + ")} />."
+            elif is_file_field(f):
+                note = (note + " " if note else "") + ("A stored file's id — link to it with <a href={fileUrl(row."
+                                                       + str(f["name"]) + ")}>; in a form, kind: \"file\".")
             if note:
                 out.append(f"  /** {note[:160]} */")
             out.append(f"  {_prop(f['name'])}: {ts_type(f)}{'' if required else ' | null'};")

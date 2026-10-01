@@ -257,7 +257,9 @@ WHAT NON-TECHNICAL OWNERS ACTUALLY SAY, and how to read it:
   the frame file that holds it (read it first). A small change to ONE screen
   is `write_page_code` (edits); the whole of a screen is `write_page_code` with
   `whole`. Size the change to the ask: never rebuild the app for an alignment,
-  never edit one line for "redesign it".
+  never edit one line for "redesign it". A control added to the frame works
+  where it leads: a search box needs the screen it submits to filtering by
+  its query, a link needs its screen — make that screen do it too, then try it.
 - THEY SAID IT ALREADY. "Fix it", "it's not done", "do all three" asked for
   the change. Do not answer with "Shall I go ahead?" for something they asked
   for; do it, and ask only for a fact nobody has said.

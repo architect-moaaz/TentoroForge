@@ -229,7 +229,12 @@ def add_field(ctx: Ctx, u: dict) -> Outcome:
                 "integer": "integer", "number": "integer", "decimal": "decimal",
                 "numeric": "decimal", "float": "decimal", "money": "decimal", "bool": "boolean",
                 "boolean": "boolean", "date": "date", "datetime": "timestamp",
-                "timestamp": "timestamp"}.get(t, t)) or "string"
+                "timestamp": "timestamp",
+                # A picture is an image; any other stored file is a file —
+                # both are uploaded from the form and kept as the stored id.
+                "photo": "image", "picture": "image", "img": "image",
+                "document": "file", "attachment": "file", "pdf": "file", "upload": "file",
+                "doc": "file"}.get(t, t)) or "string"
     if not (Path(ctx.out) / ".forge" / "blueprint" / "current.json").exists():
         from services.fix_applier import _apply_add_field
         out = _apply_add_field(ctx.out, {"proposedFix": {"seam": "add_field",

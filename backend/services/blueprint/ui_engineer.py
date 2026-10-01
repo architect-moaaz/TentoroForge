@@ -390,6 +390,10 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
 <WorkflowButton workflow={workflows.x} input={{ … }} variant?="primary" | "secondary" | "outline" | "ghost" | "danger"
                 size?="sm" | "md" confirm?="Delete this case?" redirectTo? successMessage?>Label</WorkflowButton>
 
+A form input for an image field is kind: "image" (a picker that uploads); for any other stored file
+(a document, a PDF) kind: "file", with accept?=".pdf,.docx" — never a text box for either. Show a stored
+file with <a href={fileUrl(row.x)}>, an image with <img src={fileUrl(row.x)} />.
+
 <ImageSearch label?="Find products that look like this" />
    The search box for similar(): an upload that sets ?image= to the picked picture (and clears it).
 

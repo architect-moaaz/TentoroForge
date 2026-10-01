@@ -98,6 +98,16 @@ def _jail(output_dir: str, rel: str) -> Path:
     path = (root / rel).resolve()
     if path != root and root not in path.parents:
         raise ReadRefused(f"`{rel}` resolves outside the project and is refused.")
+    # THE APP'S OWN PATHS ARE PATHS TOO. Every other tool names a file the way
+    # the app does (`src/components/PublicPageFrame.tsx`); asked that way,
+    # this answered "no file" and a turn spent seven steps listing
+    # directories to find `app/` in front of it (F&B replay, 2026-10-01). The
+    # project holds one app, so a path that is not at the project root and is
+    # in the app is that file — the same file, not a nearer one.
+    if not path.exists() and not rel.startswith("app/"):
+        in_app = (root / "app" / rel).resolve()
+        if in_app.exists() and root in in_app.parents:
+            return in_app
     return path
 
 

@@ -111,7 +111,8 @@ export type FieldSpec<V> =
           : V extends GeoPoint
             ? { label: string; span?: "full"; kind: "location"; help?: string }
           : { label: string; span?: "full";
-              kind?: "text" | "textarea" | "email" | "date" | "time" | "datetime" | "select" | "password" | "url" | "tel" | "image";
+              kind?: "text" | "textarea" | "email" | "date" | "time" | "datetime" | "select" | "password" | "url" | "tel" | "image" | "file";
+              accept?: string;
               options?: Option[]; placeholder?: string; help?: string });
 
 type RequiredKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? never : K }[keyof T];
@@ -170,6 +171,9 @@ function Field({ name, spec, value, required, onChange }: {
     );
   } else if (kind === "image") {
     control = <ImageUpload id={id} required={required} value={(value as string) ?? ""} onChange={onChange} />;
+  } else if (kind === "file") {
+    control = <FileUpload id={id} required={required} value={(value as string) ?? ""} onChange={onChange}
+      accept={(spec as { accept?: string }).accept} />;
   } else if (kind === "location") {
     control = <LocationInput id={id} value={value} onChange={onChange} />;
   } else if (kind === "tags") {
@@ -209,6 +213,41 @@ async function storeImage(file: File): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** A `file` input — a document, a PDF, a spreadsheet: picked, stored at once,
+ *  and the value is the stored file's id, the way an image's is. Asked to
+ *  "let them attach the signed form", an app had a column for it and a text
+ *  box on the form: nothing could be attached (2026-10-01). */
+function FileUpload({ id, required, value, onChange, accept }: {
+  id: string; required: boolean; value: string; onChange: (v: unknown) => void; accept?: string;
+}) {
+  const [busy, setBusy] = React.useState(false);
+  const [failed, setFailed] = React.useState(false);
+  const [name, setName] = React.useState<string>("");
+  const href = fileUrl(value);
+  return (
+    <div className="grid gap-1">
+      {href && (
+        <a href={href} target="_blank" rel="noreferrer" className="text-sm font-medium text-primary underline-offset-4 hover:underline">
+          {name || "The attached file"}
+        </a>
+      )}
+      <input id={id} type="file" accept={accept} required={required && !value} disabled={busy}
+        className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          setBusy(true);
+          setFailed(false);
+          const stored = await storeImage(file);
+          setBusy(false);
+          if (stored) { setName(file.name); onChange(stored); } else setFailed(true);
+        }} />
+      {busy && <p className="text-xs text-muted-foreground">Uploading…</p>}
+      {failed && <p className="text-xs text-destructive">That file could not be uploaded.</p>}
+    </div>
+  );
 }
 
 /** An `image` input: pick a picture, it is stored at once, and the input's

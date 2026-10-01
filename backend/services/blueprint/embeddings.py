@@ -28,6 +28,8 @@ EMBEDDING_DIMENSIONS = 512
 
 #: Field types whose value is a stored image (a forge_files id).
 IMAGE_TYPES = frozenset({"image", "photo", "picture"})
+#: A stored file that is not a picture — a document, a PDF, an attachment.
+FILE_TYPES = frozenset({"file", "document", "attachment", "pdf", "upload"})
 
 #: Field types whose value is text an embedding can be computed from.
 _TEXT_TYPES = frozenset({
@@ -54,6 +56,11 @@ def is_embedding_field(field: Any) -> bool:
 
 def is_image_field(field: Any) -> bool:
     return isinstance(field, dict) and _type(field) in IMAGE_TYPES
+
+
+def is_file_field(field: Any) -> bool:
+    """A field holding a stored file that is not a picture."""
+    return isinstance(field, dict) and _type(field) in FILE_TYPES
 
 
 def source_kind(field: dict) -> str | None:

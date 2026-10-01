@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -153,6 +154,41 @@ def typecheck(app_root: Path, rel: str, code: str, timeout: float = 240.0) -> li
             target.write_text(original, "utf-8")
 
 
+_FORM = re.compile(r"<form\b([^>]*)>(.*?)</form>", re.S)
+_ACTION = re.compile(r"""\baction=\{?\s*["'`]([^"'`]+)["'`]""")
+_FIELD = re.compile(r"""\bname=["']([A-Za-z_][\w-]*)["']""")
+
+
+def unwired_queries(code: str, doc: dict) -> list[str]:
+    """What a form in the frame sends to a screen that does not read it.
+
+    The search box a person asked for in the nav bar submitted `q` to the menu,
+    and the menu never read `q`: the change was reported done, and the search
+    found nothing (F&B replay, 2026-10-01). A control that leads somewhere is
+    only working when the place it leads does it — read off the target
+    screen's own code, the way the action-integrity checks read a button."""
+    from services.smith.compose import _page_for_route, code_row
+
+    out: list[str] = []
+    for attrs, inner in _FORM.findall(code):
+        if re.search(r"""method=["']post["']""", attrs, re.I):
+            continue
+        action = _ACTION.search(attrs)
+        route = (action.group(1) if action else "").split("?")[0].strip() or "/"
+        if not route.startswith("/"):
+            continue
+        page = _page_for_route(doc, route)
+        row = code_row(doc, str((page or {}).get("id"))) if page else None
+        if row is None:
+            continue                      # a screen not written as code: nothing to read it off
+        text = str(row.get("load") or "") + "\n" + str(row.get("view") or "")
+        for name in dict.fromkeys(_FIELD.findall(inner)):
+            reads = re.search(rf"""searchParams(\?\.|\.)\s*{re.escape(name)}\b|searchParams\[["']{re.escape(name)}["']\]|\.get\(["']{re.escape(name)}["']\)""", text)
+            if not reads:
+                out.append(f"the frame sends `{name}` to `{route}`, and `{route}` does not read it")
+    return out
+
+
 def _client(reasoning: Any = None) -> Any:
     from services.blueprint.executors import tiered_router
     return tiered_router(reasoning=reasoning).for_task("page_code", "ui_engineer")
@@ -181,10 +217,16 @@ def change_frame(svc: Any, file: str, brief: str, *, app_root: str, client: Any 
         raise FrameChangeError(f"the application has no `{rel}` to change")
     call = client or _client(reasoning)
     compile_ = check or (lambda code: typecheck(root, rel, code))
+    # WHERE THINGS ARE. A search box was pointed at `/menu` in an app whose
+    # menu is `/`: the frame links to screens, and only the app knows them.
+    screens = "The application's screens (name → route; link only to these):\n" + "\n".join(
+        f"- {p.get('name')} → {p.get('route')}" + (" (public)" if str(p.get("access") or "") == "public" else "")
+        for p in svc.doc.get("pages") or [] if isinstance(p, dict) and p.get("route")
+        and p.get("status") != "DEPRECATED")
     note = ""
     tell(reasoning, f"Changing the frame ({rel}): {brief}", "step")
     for round_ in range(1, ROUNDS + 1):
-        user = (f"The change asked for: \"{brief}\".\n\nThe file `{rel}` — {FRAME_PARTS.get(rel, '')}:\n"
+        user = (f"The change asked for: \"{brief}\".\n\n{screens}\n\nThe file `{rel}` — {FRAME_PARTS.get(rel, '')}:\n"
                 f"```tsx\n{current}\n```" + (f"\n\nYour last reply was refused:\n{note}\nFix that." if note else ""))
         reply = call(system=SYSTEM, user=user, schema=EDIT_SCHEMA)
         try:
@@ -216,7 +258,7 @@ def change_frame(svc: Any, file: str, brief: str, *, app_root: str, client: Any 
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(candidate, "utf-8")
         return {"applied": True, "file": rel, "rationale": str(data.get("rationale") or "").strip(),
-                "version": int(record["version"])}
+                "version": int(record["version"]), "unwired": unwired_queries(candidate, svc.doc)}
     raise FrameChangeError(f"the frame was not changed after {ROUNDS} tries — {note}")
 
 
@@ -236,7 +278,11 @@ def run(output_dir: str, file: str, brief: str, *, reasoning: Any = None) -> dic
     said = (f"Changed the application's frame (`{out['file']}`, version {out['version']})"
             + (f": {out['rationale']}" if out["rationale"] else ".")
             + " This part of the frame is now the application's own.")
-    return {"applied": True, "said": said, "finding": "", "touched": [f"app/{out['file']}"],
+    unwired = out.get("unwired") or []
+    finding = ("Not working yet: " + "; ".join(unwired) + ". Make that screen use it — `write_page_code` "
+               "so its list narrows by it (`ctx.searchParams` in load.ts) — then `open_page` the screen "
+               "with a value from its data in the query and see the list narrow." if unwired else "")
+    return {"applied": True, "said": said, "finding": finding, "touched": [f"app/{out['file']}"],
             "version": out["version"]}
 
 

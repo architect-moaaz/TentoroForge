@@ -178,3 +178,63 @@ def test_the_prompt_sizes_the_change_to_the_ask():
     assert "A SMALL CHANGE TO THE FRAME IS STILL A CHANGE YOU CAN MAKE" in loop._PROMPT
     assert "Colours ONLY" in VERB_HELP["restyle"]
     loop._PROMPT.format(ask="a", history="", ctx="", observations="", catalogue="")
+
+
+def test_a_search_box_that_leads_to_a_screen_not_reading_it_is_not_done():
+    """The nav bar's search box submitted `q` to the menu, which never read it."""
+    doc = {"pages": [{"id": "PAGE-001", "route": "/", "name": "Menu"}],
+           "pageCode": [{"page": "PAGE-001", "load": "export async function load(ctx) { return {}; }",
+                         "view": "<div/>"}]}
+    frame = '<form action="/" method="get"><input name="q" /></form>'
+    assert frame_change.unwired_queries(frame, doc) == ["the frame sends `q` to `/`, and `/` does not read it"]
+    doc["pageCode"][0]["load"] = "const q = ctx.searchParams.q ?? '';"
+    assert frame_change.unwired_queries(frame, doc) == []
+    assert frame_change.unwired_queries('<form action="/x" method="post"><input name="q"/></form>', doc) == []
+
+
+def test_a_control_found_unwired_is_tried_once_wired(tmp_path, monkeypatch):
+    from services.smith import trials
+    from services.smith4 import handle
+    from services.smith4.turn import TRY_WIRED
+    from tests.services._loop_fixtures import _Chooser, _repo, _Writes
+    calls = []
+    monkeypatch.setattr("services.smith.writes.run", lambda name, args, **k: calls.append(name) or (
+        {"applied": True, "said": "Changed the frame.", "touched": ["app/x"],
+         "finding": "Not working yet: the frame sends `q` to `/`, and `/` does not read it."}
+        if name == "write_frame" else {"applied": True, "said": "Rewrote /.", "touched": ["app/y"], "finding": ""}))
+    monkeypatch.setattr(trials, "run", lambda name, args, **k: calls.append(name) or "/?q=tea as Admin: HTTP 200")
+    _repo(tmp_path)
+    chooser = _Chooser({"tool": "write_frame", "args": {"file": "f", "brief": "search"}},
+                       {"tool": "write_page_code", "args": {"route": "/", "brief": "read q"}},
+                       {"tool": "done", "args": {}},
+                       {"tool": "open_page", "args": {"route": "/?q=tea"}},
+                       {"tool": "done", "args": {}})
+    result = handle(project_id="p1", output_dir=str(tmp_path), message="add a search bar", choose=chooser,
+                    move=_Writes(tmp_path))
+    assert chooser.seen[3][-1].said == TRY_WIRED
+    assert calls == ["write_frame", "write_page_code", "open_page"]
+    assert "Changed the frame." in result.said and "Rewrote /." in result.said
+
+
+# --------------------------------------------------------------------------- #
+# A file is uploaded like an image
+# --------------------------------------------------------------------------- #
+
+def test_a_file_field_is_uploaded_from_the_form_and_linked_not_typed():
+    from services.blueprint.app_sdk import project_app_sdk  # noqa: F401 — module loads
+    from services.blueprint.embeddings import is_file_field
+    from services.blueprint.projection import seed_rows
+    client = (Path(__file__).resolve().parents[2] / "templates/app-foundation/src/sdk/client.tsx").read_text()
+    assert '"image" | "file"' in client and "function FileUpload" in client and 'kind === "file"' in client
+    assert is_file_field({"name": "signedForm", "type": "document"}) and not is_file_field({"type": "image"})
+    doc = {"data": {"entities": [{"id": "E1", "name": "Claim", "table": "claims", "fields": [
+        {"name": "title", "type": "string", "examples": ["A", "B"]},
+        {"name": "receipt", "type": "pdf"}]}]}}
+    assert all("receipt" not in r for r in seed_rows(doc)["claims"])     # no made-up file ids
+
+
+def test_smith_adds_a_document_field_as_a_file():
+    import inspect
+    from services.smith4 import verbs
+    src = inspect.getsource(verbs.add_field) if hasattr(verbs, "add_field") else inspect.getsource(verbs)
+    assert '"document": "file"' in src and '"photo": "image"' in src
