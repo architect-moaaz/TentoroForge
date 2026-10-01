@@ -252,7 +252,10 @@ def _project_runtime(svc: Any, app_root: str | None) -> list[str]:
 # --- add ---------------------------------------------------------------------
 
 def add_workflow(svc: Any, request: str, *, route: str = "", app_root: str | None = None,
-                 executor: Any = None, reasoning: Any = None) -> dict:
+                 executor: Any = None, reasoning: Any = None, compose: bool = True) -> dict:
+    """Declare a workflow for `request`, author its steps and project it.
+    `compose=False` leaves the screen it starts from to the caller — the build
+    writes that page itself, right after (see executors `_compose_ui`)."""
     from services.blueprint.agent_contract import ArtifactProposal
     from services.blueprint.orchestrator import DAG, TaskSpec
 
@@ -363,7 +366,7 @@ def add_workflow(svc: Any, request: str, *, route: str = "", app_root: str | Non
 
     # 3. the screen it starts from
     composed, offered, page_refused, start = None, False, "", None
-    if str((wf.get("trigger") or {}).get("kind") or "") == "manual":
+    if compose and str((wf.get("trigger") or {}).get("kind") or "") == "manual":
         start = page or pick_page(svc.doc, wf)
         if start is not None:
             if start.get("id") not in (wf.get("launchedFrom") or []):

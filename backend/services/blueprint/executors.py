@@ -1691,6 +1691,12 @@ NODE_TASKS: dict[str, str] = {
         "a `field` input, and a workflow acting on a record must declare the "
         "record; the step author cannot add inputs the pages were not told "
         "about.\n\n"
+        "EVERY SCREEN THAT CHANGES A RECORD HAS ITS WORKFLOW. Read the pages: "
+        "one that edits a record, one that marks it (fulfilled, approved, "
+        "cancelled), one that deletes it and one that saves something for later "
+        "each needs a workflow doing exactly that, launched from that page. A "
+        "create workflow does not edit, and a record whose state a screen moves "
+        "needs a field holding that state.\n\n"
         "AGREEING TERMS IS A CONVERSATION OF OFFERS. When two people agree "
         "something through the application — the dates and terms of a loan, a "
         "price, a schedule — model each move as its own workflow, not one "
@@ -4014,12 +4020,30 @@ def make_executor(
         critic = (model.for_task("page_look", "page_reviewer") if isinstance(model, ModelRouter) else model)
         if not getattr(critic, "accepts_images", False):
             critic = None
-        body, spent = ui_engineer.compose_page(
-            doc, page, Path(svc.output_dir) / "app", client,
-            feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
-            current=current if (spec.feedback or getattr(spec, "brief", "")) else None,
-            critic=critic,
-            on_look=lambda v: _looked(svc, spec, page, v, reasoning))
+        def compose(doc: dict, page: dict) -> tuple[Any, list]:
+            return ui_engineer.compose_page(
+                doc, page, Path(svc.output_dir) / "app", client,
+                feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
+                current=current if (spec.feedback or getattr(spec, "brief", "")) else None,
+                critic=critic,
+                on_look=lambda v: _looked(svc, spec, page, v, reasoning))
+
+        try:
+            body, spent = compose(doc, page)
+        except ui_engineer.NeedsWorkflow as need:
+            # A SCREEN THAT NEEDS AN ACTION GETS IT, THEN IS WRITTEN. F&B's Edit
+            # Category, Edit Menu Item and Incoming Orders, and SnapIt's
+            # Profile and Product Detail, each failed the build with "needs a
+            # workflow that does not exist yet" — the plan had edit screens and
+            # no update workflows (2026-09-30, 2026-10-01). The writer was right
+            # not to draw a Save that saves nothing; the build now adds what it
+            # named, the way a person asking Smith would, and writes the page.
+            if not _add_needed_workflows(page, need.needs, reasoning):
+                raise
+            with svc.lock:
+                doc = _copy.deepcopy(svc.doc)
+            page = next((p for p in doc.get("pages") or [] if str(p.get("id")) == spec.subject), page)
+            body, spent = compose(doc, page)
         for u, elapsed, *who in spent:
             if usage is not None and u is not None:
                 usage.record(node=spec.node, agent=who[0] if who else spec.agent, usage=u,
@@ -4027,6 +4051,28 @@ def make_executor(
         return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                            proposals=[ArtifactProposal(section="pageCode",
                                                        natural_key=spec.subject, body=body)])
+
+    def _add_needed_workflows(page: dict, needs: list[str], reasoning: Any) -> list[str]:
+        """Each workflow a page named as missing, declared, authored and
+        projected — one at a time under the document's lock, so pages written
+        in parallel never add the same one twice (an ask that an existing
+        workflow already covers becomes an edit of it). Returns what landed."""
+        from services.llm_client import tell
+        from services.smith.workflow_change import WorkflowChangeError, add_workflow
+
+        added: list[str] = []
+        app_root = str(Path(svc.output_dir) / "app")
+        with svc.lock:
+            for need in needs:
+                tell(reasoning, f"{page.get('route')} needs a workflow to {need} — adding it.", "step", "page_code")
+                try:
+                    out = add_workflow(svc, need, route=str(page.get("route") or ""), app_root=app_root,
+                                       executor=executor, reasoning=reasoning, compose=False)
+                except WorkflowChangeError as exc:
+                    tell(reasoning, f"Could not add a workflow to {need}: {exc}", "step", "page_code")
+                    continue
+                added.append(str(out.get("name") or out.get("workflow") or need))
+        return added
 
     def _looked(svc: Any, spec: TaskSpec, page: dict, v: dict, reasoning: Any) -> None:
         """A look's verdict, told to whoever watches: the thoughts and the
