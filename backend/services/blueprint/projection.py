@@ -1950,6 +1950,13 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     families = [_first_family(str(v)) for k, v in (typography or {}).items()
                 if k in ("fontFamilyBase", "fontFamilyHeading", "fontFamilyNumeric") and v]
     families = [f for f in families if f and f.lower() not in _SYSTEM_FAMILIES]
+    # A FACE FOR EACH SCRIPT THE LANGUAGES NEED. Test2's हिं rendered broken:
+    # nothing loaded a font that draws Devanagari. Text in a language is set
+    # in its script's face wherever it appears — the whole page once <html
+    # lang> is switched, and the switch's own label before that.
+    from services.blueprint.languages import script_fonts
+    scripts = script_fonts(doc)
+    families += [f for f in scripts.values() if f not in families]
     fonts_import = ""
     if families:
         query = "&".join("family=" + f.replace(" ", "+") + ":wght@400;500;600;700"
@@ -1980,9 +1987,13 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
         ".text-brand-gradient {\n  background-image: linear-gradient(135deg, "
         "hsl(var(--gradient-start, var(--primary))), hsl(var(--gradient-end, var(--accent))));\n"
         "  -webkit-background-clip: text;\n  background-clip: text;\n  color: transparent;\n}\n")
-    body = (fonts_import + "html:root {\n" + "\n".join(lines) + "\n}\n" + body_rule) if lines else (
+    script_rule = "".join(
+        f':lang({tag}), :lang({tag}) h1, :lang({tag}) h2, :lang({tag}) h3, :lang({tag}) .font-heading {{\n'
+        f'  font-family: "{family}", var(--font-body, ui-sans-serif), system-ui, sans-serif;\n}}\n'
+        for tag, family in scripts.items())
+    body = (fonts_import + "html:root {\n" + "\n".join(lines) + "\n}\n" + body_rule + script_rule) if lines else (
         "/* designSystem states no colour roles yet — the scaffold's own\n"
-        "   defaults stand rather than inventing a palette here. */\n")
+        "   defaults stand rather than inventing a palette here. */\n" + fonts_import + script_rule)
     (out / "tokens.css").write_text(header + body, "utf-8")
 
     return {"files": ["src/app/tokens.css"], "tokens": len(lines),

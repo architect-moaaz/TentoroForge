@@ -2,6 +2,7 @@ import type * as React from "react";
 import Link from "next/link";
 import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
 import { PublicNavLinks } from "@/components/PublicNavLinks";
+import { LanguageSwitch } from "@/sdk/i18n";
 import { PUBLIC_NAV } from "@/contracts/public-nav";
 
 /**
@@ -34,14 +35,17 @@ export function PublicPageFrame({ children }: { children: React.ReactNode }) {
             )}
           </Link>
           {hasNav && <PublicNavLinks items={items} />}
-          {signIn && (
-            <Link
-              href="/login"
-              className="ml-auto shrink-0 rounded-md border border-input px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
-            >
-              Sign in
-            </Link>
-          )}
+          <div className="ml-auto flex shrink-0 items-center gap-3">
+            <LanguageSwitch />
+            {signIn && (
+              <Link
+                href="/login"
+                className="shrink-0 rounded-md border border-input px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+              >
+                Sign in
+              </Link>
+            )}
+          </div>
         </div>
       </header>
       {/* The page's width and outer padding, set once for every public page —

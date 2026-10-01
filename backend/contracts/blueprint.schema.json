@@ -183,6 +183,14 @@
           "type": "string",
           "description": "BCP-47 tag for the language the INTERFACE is written in — 'ar', 'ar-PS', 'fr'. Set it when the request says what language the UI should be in; every string a reader sees is then authored in it and the document is laid out right-to-left where the script requires. A country, currency or market is not a language. Defaults to 'en'.",
           "default": "en"
+        },
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "BCP-47 tags of the OTHER languages people can switch the interface to, beside `locale` — ['hi'] for an English app that must also be shown in Hindi. Only when the request asks for the interface in more than one language. Empty for a single-language app.",
+          "default": []
         }
       },
       "additionalProperties": false,

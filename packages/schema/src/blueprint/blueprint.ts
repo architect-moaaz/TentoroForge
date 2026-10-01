@@ -143,6 +143,22 @@ export const Product = z.object({
       "country, currency or market is not a language. Defaults to 'en'.",
     )
     .default("en"),
+  /**
+   * The other languages a person can switch the interface to, beside
+   * `locale` — BCP-47 tags. Test2 (2026-09-28) was asked for English and
+   * Hindi; with nowhere to say so, every page rolled its own EN/हिं toggle,
+   * none agreed with the next, and nothing loaded a Devanagari font. Declared
+   * here, the app has one switch in its frame and every page reads it.
+   */
+  languages: z
+    .array(z.string())
+    .describe(
+      "BCP-47 tags of the OTHER languages people can switch the interface to, " +
+      "beside `locale` — ['hi'] for an English app that must also be shown in " +
+      "Hindi. Only when the request asks for the interface in more than one " +
+      "language. Empty for a single-language app.",
+    )
+    .default([]),
 });
 
 // ===========================================================================

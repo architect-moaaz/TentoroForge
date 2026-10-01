@@ -393,6 +393,13 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
 <ImageSearch label?="Find products that look like this" />
    The search box for similar(): an upload that sets ?image= to the picked picture (and clears it).
 
+// ---- @/sdk/i18n — view.tsx, only in an application shown in more than one language ----
+const t = useT();  t({ en: "Orders", hi: "ऑर्डर" })
+   The text in the language the person chose in the frame's switch; each key a language of the
+   application. The frame holds the only switch — a page never draws one of its own.
+<LanguageSwitch className? />
+   That switch, for the sign-in and sign-up pages only: they have no frame.
+
 // ---- @/sdk/camera — view.tsx, only on a page that uses the camera ----
 <CameraCapture onCapture={(dataUrl) => …} label?="Take photo" facing?="environment" | "user" className? />
    The live camera: a viewfinder and a shutter. onCapture gets the frame as an image data URL — what a
@@ -628,7 +635,7 @@ view.tsx — "use client" on the first line.
     the @radix-ui primitives the kit is built on, the UI kit and the library below (optional),
     "@/sdk" (entity types, workflows, pages, widgets, href, fileUrl), "@/sdk/client" (useWorkflow,
     WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm),
-    "@/sdk/camera" (CameraCapture, BarcodeScanner), and
+    "@/sdk/camera" (CameraCapture, BarcodeScanner), "@/sdk/i18n" (useT, useLanguage, LanguageSwitch), and
     `import type { Page, SeriesPoint, QueryRow, WidgetData } from "@/sdk/server"`.
   Nothing else is installed; an import of any other package fails to compile.
   WHAT IS NOT YOURS TO REWRITE — these carry the wiring, and only they do:
@@ -674,6 +681,13 @@ def _about(doc: dict) -> str:
     if personas:
         out.append("Who uses it: " + "; ".join(personas[:6]))
     return "\n".join(x for x in out if x)
+
+
+def _language(doc: dict) -> str:
+    """The application's language section, or nothing for one in English."""
+    from services.blueprint.languages import page_rule
+    rule = page_rule(doc)
+    return f"# Its language\n{rule}\n\n" if rule else ""
 
 
 def _look(doc: dict) -> str:
@@ -734,7 +748,7 @@ the first line is how a page runs out of room and arrives empty.
 {app.get('name')}
 {_about(doc)}
 
-# Its direction — follow it on every page
+{_language(doc)}# Its direction — follow it on every page
 {comp.get('vision') or '(no vision stated — choose a calm, professional, information-dense style)'}
 {conventions}
 
@@ -920,6 +934,9 @@ def ensure_sdk(doc: dict, app_root: Path) -> None:
         # (`./auth` → `@/lib/account`); an older tree gets the defaults it lacks.
         from services.blueprint.assembly import fill_scaffold_defaults
         fill_scaffold_defaults(app_root)
+        # What `@/sdk/i18n` reads: the interface's languages.
+        from services.blueprint.languages import project_languages
+        project_languages(doc, app_root)
         project_app_sdk(doc, app_root)
 
 
@@ -1168,7 +1185,7 @@ def _static_findings(load: str, view: str) -> list[str]:
     if re.search(r"\bfetch\(", load + view):
         out.append("load.ts/view.tsx: calls fetch — read through @/sdk/server, write through workflows.")
     if re.search(r"@/lib/|@/db", load + view):
-        out.append("load.ts/view.tsx: imports app internals — only @/sdk, @/sdk/server, @/sdk/client, @/sdk/camera.")
+        out.append("load.ts/view.tsx: imports app internals — only @/sdk, @/sdk/server, @/sdk/client, @/sdk/camera, @/sdk/i18n.")
     if re.search(r"lorem ipsum|coming soon", view, re.I) or re.search(r"\bTODO\b", view):
         out.append("view.tsx: placeholder copy.")
     return out
