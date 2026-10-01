@@ -128,6 +128,10 @@ _PLATFORM_REFRESH_RUNTIME_MAP = (
     # no per-app content in it, and every already-generated project is
     # serving the open version until its next publish carries this.
     ("api-export/route.ts", "src/app/api/export/[entity]/route.ts"),
+    # Uploads keep the file in the app's database when there is no object
+    # store; an app built before that kept failing every upload on Vercel.
+    ("storage.ts", "src/lib/storage.ts"),
+    ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts"),
 )
 _TEMPLATE_RUNTIME_DIR = (
     Path(__file__).resolve().parents[2] / "templates" / "runtime"

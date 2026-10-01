@@ -60,6 +60,13 @@ ENGINE_DIRS: dict[str, str] = {
 }
 
 
+#: Single runtime files the platform owns: template (under templates/runtime)
+#: -> where the app keeps it. Written only where the app has it already.
+RUNTIME_FILES: tuple[tuple[str, str], ...] = (
+    ("storage.ts", "src/lib/storage.ts"),
+    ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts"),
+)
+
 #: Database scripts every app runs, the platform's: prepare, verify, reset.
 DB_SCRIPTS: tuple[str, ...] = ("src/db/prepare-schema.ts", "src/db/verify-schema.ts",
                                "src/db/reset-schema.ts", "src/db/extensions.ts")
@@ -121,6 +128,12 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
         except OSError:
             pass
         dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        changed.append(rel)
+    for tmpl, rel in RUNTIME_FILES:
+        src, dst = _TEMPLATE_DIR / tmpl, root / rel
+        if not src.is_file() or not dst.is_file() or dst.read_bytes() == src.read_bytes():
+            continue
         shutil.copyfile(src, dst)
         changed.append(rel)
     if doc is not None:

@@ -11,6 +11,7 @@ nothing.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -416,3 +417,34 @@ def test_an_app_is_caught_up_once_per_platform_version(tmp_path, monkeypatch):
     monkeypatch.setitem(sync_app._STAMP, "v", "a-newer-platform")
     assert sync_app.catch_up(str(tmp_path)) == ["src/lib/account.ts"]
     assert len(syncs) == 2
+
+
+# --------------------------------------------------------------------------- #
+# Uploads: the app keeps the file, Smith can try it, a failed upload stops the save
+# --------------------------------------------------------------------------- #
+
+def test_an_app_keeps_uploaded_files_in_its_own_database_by_default():
+    root = Path(__file__).resolve().parents[2] / "templates"
+    storage = (root / "runtime/storage.ts").read_text()
+    assert 'if (process.env.FORGE_STORAGE !== "disk") return "db";' in storage
+    assert 'backend === "db" ? { data: input.buffer }' in storage
+    assert 'bytea("data")' in (root / "runtime/db/forge-files.schema.ts").read_text()
+    client = (root / "app-foundation/src/sdk/client.tsx").read_text()
+    assert client.count('setCustomValidity("That') == 2
+
+
+def test_existing_apps_get_the_storage_fix_on_publish_and_on_their_next_turn():
+    from services.deploy.vercel_provider import _PLATFORM_REFRESH_RUNTIME_MAP
+    from services.smith.sync_app import RUNTIME_FILES
+    for pair in (("storage.ts", "src/lib/storage.ts"), ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts")):
+        assert pair in _PLATFORM_REFRESH_RUNTIME_MAP and pair in RUNTIME_FILES
+
+
+def test_try_upload_is_a_trial():
+    assert tools.is_trial("try_upload") and "`try_upload` (kind: string, as: string)" in tools.render()
+    assert trials._PNG[:4] == bytes([0x89]) + b"PNG" and trials._PDF.startswith(b"%PDF")
+
+
+def test_a_control_that_did_nothing_is_pressed_again_before_it_counts():
+    shots = (Path(__file__).resolve().parents[2] / "scripts/page_shots.mjs").read_text()
+    assert 'if (outcome.outcome === "nothing") outcome = await press(who.ctx, url, c);' in shots

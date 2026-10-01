@@ -69,7 +69,23 @@ TRIALS: tuple[tuple[str, str, dict[str, str]], ...] = (
      {"route": "string", "as": "string", "sign_in": "boolean"}),
 )
 
+TRIALS = TRIALS + (
+    ("try_upload",
+     "Upload a small picture (`kind`: image) or a small PDF (`kind`: file) as "
+     "`as`, the way a form's picker does, then read it back the way a screen "
+     "shows it. Where \"I attached an image and it does not show\" starts: "
+     "whether the app can keep a file at all. The id it returns is what a "
+     "workflow's image or file input takes, for a `try_workflow` after it.",
+     {"kind": "string", "as": "string"}),
+)
+
 TRIAL_NAMES: frozenset[str] = frozenset(name for name, _d, _a in TRIALS)
+
+#: A 1×1 PNG and a one-page PDF: the smallest files each picker accepts.
+_PNG = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+                     "1f15c4890000000d49444154789c6360f8cf00000301010018dd8db00000000049454e44ae426082")
+_PDF = (b"%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>"
+        b"endobj 3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 10 10]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n")
 
 #: Words that mean nobody is signed in.
 SIGNED_OUT = frozenset({"signed out", "signed-out", "anonymous", "visitor", "guest", "public",
@@ -436,6 +452,40 @@ def _sign_in(bench: Bench, doc: dict, route: str, as_: str) -> str:
     return scrub("\n".join(out))
 
 
+def try_upload(bench: Bench, doc: dict, kind: str, as_: str) -> str:
+    import uuid as _uuid
+    pdf = (kind or "").strip().lower() in ("file", "pdf", "document")
+    data, name, ctype = (_PDF, "trial.pdf", "application/pdf") if pdf else (_PNG, "trial.png", "image/png")
+    app = bench.app()
+    who, jar = _session(app, doc, as_)
+    boundary = _uuid.uuid4().hex
+    body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\n"
+            f"Content-Type: {ctype}\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
+    req = urllib.request.Request(app.base + "/api/files/upload", data=body, method="POST", headers={
+        "content-type": f"multipart/form-data; boundary={boundary}",
+        "cookie": "; ".join(f"{c['name']}={c['value']}" for c in jar)})
+    bench.server_said()
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            status, text = r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        status, text = e.code, e.read().decode("utf-8", "replace")
+    out = [f"upload of {name} as {who}: HTTP {status}", f"answer: {_body(text)}"]
+    try:
+        stored = json.loads(text).get("id")
+    except ValueError:
+        stored = None
+    if stored:
+        code, _w, back = _http(app, "GET", f"/api/files/preview?src={stored}", None, jar)
+        out.append(f"read back from /api/files/preview?src={stored}: HTTP {code}, {len(back)} byte(s)"
+                   + ("" if code == 200 and back else " — the app stored it and cannot show it"))
+    said = bench.server_said()
+    if said:
+        out.append("the server printed:")
+        out += [f"  {l}" for l in said]
+    return scrub("\n".join(out))
+
+
 def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
     """Carry out one trial. The observation is returned, never raised."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
@@ -446,6 +496,8 @@ def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
         if name == "try_request":
             return try_request(bench, doc, str(args.get("method") or "GET"), str(args.get("path") or ""),
                                args.get("body"), as_)
+        if name == "try_upload":
+            return try_upload(bench, doc, str(args.get("kind") or "image"), as_)
         if name == "open_page":
             sign_in = str(args.get("sign_in") or "").strip().lower() in ("true", "1", "yes")
             return open_page(bench, doc, str(args.get("route") or ""), as_, sign_in=sign_in)

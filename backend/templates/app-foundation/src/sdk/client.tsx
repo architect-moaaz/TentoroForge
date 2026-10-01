@@ -236,13 +236,18 @@ function FileUpload({ id, required, value, onChange, accept }: {
       <input id={id} type="file" accept={accept} required={required && !value} disabled={busy}
         className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium"
         onChange={async (e) => {
-          const file = e.target.files?.[0];
+          const input = e.target;
+          const file = input.files?.[0];
+          input.setCustomValidity("");
           if (!file) return;
           setBusy(true);
           setFailed(false);
           const stored = await storeImage(file);
           setBusy(false);
-          if (stored) { setName(file.name); onChange(stored); } else setFailed(true);
+          if (stored) { setName(file.name); onChange(stored); return; }
+          setFailed(true);
+          input.setCustomValidity("That file could not be uploaded — pick it again, or remove it.");
+          input.reportValidity();
         }} />
       {busy && <p className="text-xs text-muted-foreground">Uploading…</p>}
       {failed && <p className="text-xs text-destructive">That file could not be uploaded.</p>}
@@ -267,13 +272,21 @@ function ImageUpload({ id, required, value, onChange }: {
         <input id={id} type="file" accept="image/*" required={required && !value} disabled={busy}
           className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium"
           onChange={async (e) => {
-            const file = e.target.files?.[0];
+            const input = e.target;
+            const file = input.files?.[0];
+            input.setCustomValidity("");
             if (!file) return;
             setBusy(true);
             setFailed(false);
             const stored = await storeImage(file);
             setBusy(false);
-            if (stored) onChange(stored); else setFailed(true);
+            if (stored) { onChange(stored); return; }
+            // A PICTURE THAT DID NOT UPLOAD STOPS THE SAVE. It used to show a
+            // line under the field and save the record without it — "image is
+            // attached but not showing" (F&B, 2026-10-01).
+            setFailed(true);
+            input.setCustomValidity("That image could not be uploaded — pick it again, or remove it.");
+            input.reportValidity();
           }} />
         {busy && <p className="text-xs text-muted-foreground">Uploading…</p>}
         {failed && <p className="text-xs text-destructive">That image could not be uploaded.</p>}

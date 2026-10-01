@@ -6,7 +6,9 @@
  *     Vercel-deployed apps). Uses @vercel/blob (optional dep).
  *   • S3 / object storage — when FORGE_S3_BUCKET (or AWS_S3_BUCKET) is set AND
  *     the optional `@aws-sdk/client-s3` dependency is installed.
- *   • Local disk (default) — bytes under FORGE_UPLOAD_DIR (default ./data/uploads).
+ *   • The app's own database (default) — bytes in forge_files.data; works on
+ *     every host, Vercel included, with nothing to set up.
+ *   • Local disk — only with FORGE_STORAGE=disk; bytes under FORGE_UPLOAD_DIR.
  *
  * File METADATA always lives in the `forge_files` DB table; the bytes live in the
  * selected backend. A file is addressed by its row id and served from /api/files/[id].
@@ -109,7 +111,7 @@ async function _blobGet(key: string): Promise<Buffer> {
   return Buffer.from(ab);
 }
 
-async function putBytes(key: string, buffer: Buffer, contentType: string): Promise<"blob" | "s3" | "local"> {
+async function putBytes(key: string, buffer: Buffer, contentType: string): Promise<"blob" | "s3" | "local" | "db"> {
   // Vercel Blob wins when the token is present — that's the marker for
   // "we're on Vercel and files should live in Vercel Blob".
   if (process.env.BLOB_READ_WRITE_TOKEN) {
@@ -129,19 +131,15 @@ async function putBytes(key: string, buffer: Buffer, contentType: string): Promi
     await s3.client.send(new s3.mod.PutObjectCommand({ Bucket: s3.bucket, Key: s3.prefix + key, Body: buffer, ContentType: contentType }));
     return "s3";
   }
-  // Serverless read-only filesystem — Vercel Lambda and AWS Lambda both set
-  // markers we can detect. Falling back to disk here produces
-  // `ENOENT: mkdir '/var/task/data'` on the very first upload because Lambda's
-  // cwd is read-only. Fail with an ACTIONABLE error naming the two working
-  // configurations (Vercel Blob token, or S3 bucket) instead.
-  if (process.env.VERCEL === "1" || process.env.LAMBDA_TASK_ROOT || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-    throw new Error(
-      "File storage not configured for serverless. Set BLOB_READ_WRITE_TOKEN " +
-      "(Vercel Blob — auto-injected when you add a Blob store in the Vercel " +
-      "dashboard) OR set FORGE_S3_BUCKET + AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY. " +
-      "Local disk storage does not work on Lambda's read-only filesystem."
-    );
-  }
+  // WITH NO OBJECT STORE, THE APP KEEPS THE FILE ITSELF — in its own
+  // database, beside the row that names it. A published app has no Blob
+  // token or bucket unless someone set one up, and its disk is read-only:
+  // every picture F&B's admin attached failed to upload, the form saved the
+  // item without it, and forge_files held nothing (2026-10-01). The database
+  // is the one store every app has — locally, on the platform, on Vercel —
+  // so the same backend runs everywhere and a test on a copy is a test of
+  // the live app. Local disk only where it is asked for.
+  if (process.env.FORGE_STORAGE !== "disk") return "db";
   const abs = path.join(UPLOAD_DIR, key);
   await fs.mkdir(path.dirname(abs), { recursive: true });
   await fs.writeFile(abs, buffer);
@@ -153,8 +151,14 @@ async function putBytes(key: string, buffer: Buffer, contentType: string): Promi
 // Vercel invocation runs in isolation so this is fine in practice.
 let _lastBlobUrl: string | null = null;
 
-async function getBytes(backend: string, key: string): Promise<Buffer> {
+async function getBytes(backend: string, key: string, id?: string): Promise<Buffer> {
   if (backend === "blob") return _blobGet(key);
+  if (backend === "db") {
+    const rows = await (db as any).select({ data: forgeFiles.data }).from(forgeFiles).where(eq(forgeFiles.id, id ?? "")).limit(1);
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    if (!row?.data) throw new Error("[storage] the file's bytes are not in the database");
+    return Buffer.from(row.data);
+  }
   if (backend === "s3") {
     const s3 = await s3Client();
     if (!s3) throw new Error("[storage] file stored in s3 but S3 backend unavailable");
@@ -193,6 +197,7 @@ export async function saveFile(input: {
       backend,
       storageKey,
       uploadedById: input.uploadedById ?? null,
+      ...(backend === "db" ? { data: input.buffer } : {}),
     });
   return { id, filename: input.filename, contentType: input.contentType, size, backend, url: `/api/files/${id}` };
 }
@@ -206,7 +211,7 @@ async function metaFor(id: string): Promise<{ filename: string; contentType: str
 export async function loadFile(id: string): Promise<{ buffer: Buffer; contentType: string; filename: string } | null> {
   const meta = await metaFor(id);
   if (!meta) return null;
-  const buffer = await getBytes(meta.backend, meta.storageKey);
+  const buffer = await getBytes(meta.backend, meta.storageKey, id);
   return { buffer, contentType: meta.contentType, filename: meta.filename };
 }
 

@@ -333,7 +333,15 @@ for (const p of cfg.pages) {
 
   if (cfg.probe) {
     result.controls = [];
-    for (const c of found.slice(0, MAX_CONTROLS)) result.controls.push(await press(who.ctx, url, c));
+    for (const c of found.slice(0, MAX_CONTROLS)) {
+      // A DEAD CONTROL IS DEAD TWICE. The first press of a link on a cold dev
+      // server compiles the page it opens, and F&B's working Edit link read
+      // as "does nothing when pressed" (2026-10-01) — a false finding that
+      // sends Smith to fix what works. Pressed again, the page is compiled.
+      let outcome = await press(who.ctx, url, c);
+      if (outcome.outcome === "nothing") outcome = await press(who.ctx, url, c);
+      result.controls.push(outcome);
+    }
   }
   result.ms = Date.now() - t0;
   out.push(result);
