@@ -24,3 +24,9 @@ def test_a_table_the_app_does_not_have_is_named():
 
 def test_the_apps_records_and_the_login_table_pass():
     assert table_findings(_doc("orders")) == [] and table_findings(_doc("users")) == []
+
+
+def test_with_no_record_declared_nothing_is_judged():
+    doc = _doc("payments")
+    doc["data"] = {"entities": []}
+    assert table_findings(doc) == []

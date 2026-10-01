@@ -1993,6 +1993,9 @@ def table_findings(doc: dict) -> list[dict]:
     platform = set(PLATFORM_TABLE_SOURCES) | {"users"}
     records = sorted({str(e.get("table") or "") for e in (doc.get("data") or {}).get("entities") or []
                       if isinstance(e, dict) and e.get("table")})
+    if not records:
+        # No record declared yet: nothing to judge a table against.
+        return []
     out: list[dict] = []
     for wf in _live(doc.get("workflows")):
         for st in wf.get("steps") or []:
