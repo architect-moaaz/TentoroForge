@@ -59,8 +59,11 @@ def handle(*, project_id: str, output_dir: str, message: str,
             plan_mod.agree(output_dir)
         elif not plan_mod.is_agreed(output_dir) and typed != plan_mod.REWORD_LABEL:
             # A NEW MESSAGE REPLACES A PLAN NOBODY AGREED TO. Left waiting, it
-            # was read as agreed and folded into the next ask (SnapIT replay).
+            # was read as agreed and folded into the next ask (SnapIT replay)
+            # — and the ask that produced it goes with it, or it is joined to
+            # the new message and planned again.
             plan_mod.clear(output_dir)
+            pending_ask.clear(output_dir)
     if plan_mod.peek(output_dir) and typed == plan_mod.ALL_LABEL:
         return _in_step(output_dir, version_before, _all_steps(output_dir, lambda step: turn(
             ctx_for(step), choose=choose, history=history, max_steps=max_steps)))

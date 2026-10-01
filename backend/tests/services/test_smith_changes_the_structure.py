@@ -280,3 +280,28 @@ def test_a_yes_agrees_to_the_plan_shown(tmp_path):
     from services.smith4.handle import _PLAN_YES
     plan_mod.remember(tmp_path, ["a", "b"], agreed=False)
     assert not plan_mod.is_agreed(tmp_path) and "go ahead" in _PLAN_YES and "delete it" not in _PLAN_YES
+
+
+def test_an_old_held_ask_is_not_joined_to_a_new_message(tmp_path):
+    import json as _json, time
+    from services.smith import pending_ask
+    pending_ask.remember(tmp_path, "make it Dubai centric")
+    assert pending_ask.take(tmp_path) == "make it Dubai centric"          # an answer within the hour
+    path = tmp_path / ".forge" / "pending-ask.json"
+    path.write_text(_json.dumps({"ask": "make it Dubai centric", "at": time.time() - 3 * 86400}))
+    assert pending_ask.take(tmp_path) == ""                                 # days later: not an answer
+    path.write_text(_json.dumps({"ask": "make it Dubai centric"}))
+    assert pending_ask.take(tmp_path) == ""                                 # from before the rule
+
+
+def test_replacing_an_unanswered_plan_drops_the_ask_behind_it(tmp_path):
+    from services.smith import pending_ask, plan as plan_mod
+    from services.smith4 import handle
+    from tests.services._loop_fixtures import _Chooser, _repo, _Writes
+    _repo(tmp_path)
+    plan_mod.remember(tmp_path, ["make it Dubai centric", "prices in AED"], agreed=False)
+    pending_ask.remember(tmp_path, "make it dubai centric")
+    chooser = _Chooser({"tool": "answer", "args": {"text": "ok"}})
+    handle(project_id="p1", output_dir=str(tmp_path), message="make it look like Myntra",
+           choose=chooser, move=_Writes(tmp_path))
+    assert "dubai" not in chooser.seen and pending_ask.take(tmp_path) == ""
