@@ -56,6 +56,11 @@ NOTHING_TRIED = ("Nothing has changed this turn and nothing was tried. If they s
 #: The start of the message when a trial that failed has not been tried
 #: again since the change meant to fix it.
 UNPROVEN = "Not shown to work yet:"
+#: What a turn that ran out of steps, having changed nothing, is told.
+OUT_OF_STEPS = ("You have run out of steps for this turn and nothing has been changed. End NOW "
+                "with `answer`: in the person's words, what you found so far — what the tries "
+                "showed, what works and what does not — and what is left to do. Do not say "
+                "anything was changed. No other tool will run.")
 #: The start of the message when the try after the change still fails.
 STILL_FAILING = "Still not working:"
 
@@ -319,8 +324,22 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
 
     if not landed:
         # NOT "Nothing needed doing" AND "I stopped" IN ONE BREATH (F&B, twice):
-        # a turn that ran out of steps while looking has not decided anything.
-        return Outcome(status="no_op", touched=list(touched), said=(
+        # a turn that ran out of steps while looking has not decided anything
+        # — but it has FOUND things, and "I have not changed anything yet"
+        # threw away that the admin's landing now worked (F&B replay). A turn
+        # that changed nothing may speak, so it is asked once to say what it
+        # found; it cannot take another step.
+        said = ""
+        try:
+            observations.append(Observation(tool="done", status="error", said=OUT_OF_STEPS))
+            final = choose(ctx.ask, opening(ctx.project_id, ctx.out, ctx.ask), observations, history) or {}
+            if str(final.get("tool") or "") == "answer":
+                said = str((final.get("args") or {}).get("text") or "").strip()
+        except Exception:  # noqa: BLE001 — the fallback below is still true
+            logger.warning("smith4: the out-of-steps answer could not be had", exc_info=True)
+        tail = (f"\n\nThis turn ran out of steps ({max_steps}) before I changed anything. "
+                "Say “carry on” and I will pick up from there.")
+        return Outcome(status="no_op", touched=list(touched), said=(said + tail) if said else (
             f"I have not changed anything yet — this turn ran out of steps ({max_steps}) "
             "while I was still looking into it. Say “carry on” and I will pick up from there."))
     failing = _failing_note(observations)

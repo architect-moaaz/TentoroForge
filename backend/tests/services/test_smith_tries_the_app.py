@@ -137,6 +137,21 @@ def test_a_turn_that_runs_out_of_steps_having_changed_nothing_says_so(tmp_path, 
     assert "have not changed anything yet" in result.said and "(2)" in result.said
 
 
+def test_a_turn_out_of_steps_says_what_it_found(tmp_path, monkeypatch, scripted):
+    """'I have not changed anything yet' threw away that the admin's landing
+    now worked (F&B replay)."""
+    import services.smith.loop as loop_mod
+    from services.smith4.turn import OUT_OF_STEPS
+    monkeypatch.setattr(loop_mod, "MAX_STEPS", 2)
+    _repo(tmp_path)
+    chooser = _Chooser(_try(), {"tool": "grep", "args": {"pattern": "b"}},
+                       {"tool": "answer", "args": {"text": "Signing in now lands the admin on Categories."}})
+    result = _turn(tmp_path, chooser)
+    assert chooser.seen[2][-1].said == OUT_OF_STEPS
+    assert result.said.startswith("Signing in now lands the admin on Categories.")
+    assert "ran out of steps (2) before I changed anything" in result.said
+
+
 # --------------------------------------------------------------------------- #
 # The bench: one copy a turn, fresh after the data model changes
 # --------------------------------------------------------------------------- #
