@@ -126,6 +126,11 @@ function resolveIdentifier(name: string, ctx: Context): unknown {
     // condition evaluates identically in the editor playground and here in the
     // shipped app. Pinned by the FEEL cross-engine conformance suite.
     if (current == null || typeof current !== "object") return null;
+    // A path on a list is the list of each item's value (FEEL): `items.subtotal`.
+    if (Array.isArray(current) && !(part in current)) {
+      current = current.map((el) => (el != null && typeof el === "object" ? (el as Record<string, unknown>)[part] : null));
+      continue;
+    }
     current = (current as Record<string, unknown>)[part];
   }
   return current === undefined ? null : current;
@@ -165,6 +170,13 @@ export function evaluate(node: ASTNode, ctx: Context): unknown {
     case "MemberExpression": {
       const obj = evaluate(node.object, ctx);
       if (obj == null || typeof obj !== "object") return undefined;
+      // A PATH ON A LIST IS THE LIST OF EACH ITEM'S VALUE (FEEL's own rule).
+      // `sum(items.subtotal)` read `subtotal` off the array, got nothing, and
+      // F&B's every order totalled 0 (2026-10-01). A list's own properties
+      // (`length`) still answer as before.
+      if (Array.isArray(obj) && !(node.property in obj)) {
+        return obj.map((el) => (el != null && typeof el === "object" ? (el as Record<string, unknown>)[node.property] : undefined));
+      }
       return (obj as Record<string, unknown>)[node.property];
     }
 

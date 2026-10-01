@@ -1,295 +1,325 @@
 [
- {
-  "expr": "age > 18",
-  "data": {
-   "age": 21
+  {
+    "expr": "age > 18",
+    "data": {
+      "age": 21
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "age > 18",
-  "data": {
-   "age": 12
+  {
+    "expr": "age > 18",
+    "data": {
+      "age": 12
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "age >= 18",
-  "data": {
-   "age": 18
+  {
+    "expr": "age >= 18",
+    "data": {
+      "age": 18
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "price <= 100",
-  "data": {
-   "price": 100.5
+  {
+    "expr": "price <= 100",
+    "data": {
+      "price": 100.5
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "qty != 0",
-  "data": {
-   "qty": 0
+  {
+    "expr": "qty != 0",
+    "data": {
+      "qty": 0
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "name = \"gold\"",
-  "data": {
-   "name": "gold"
+  {
+    "expr": "name = \"gold\"",
+    "data": {
+      "name": "gold"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "name = \"gold\"",
-  "data": {
-   "name": "silver"
+  {
+    "expr": "name = \"gold\"",
+    "data": {
+      "name": "silver"
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "name != \"gold\"",
-  "data": {
-   "name": "silver"
+  {
+    "expr": "name != \"gold\"",
+    "data": {
+      "name": "silver"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "status = \"active\"",
-  "data": {
-   "status": "Active"
+  {
+    "expr": "status = \"active\"",
+    "data": {
+      "status": "Active"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "status = \"active\"",
-  "data": {
-   "status": "ACTIVE"
+  {
+    "expr": "status = \"active\"",
+    "data": {
+      "status": "ACTIVE"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "status != \"active\"",
-  "data": {
-   "status": "Pending"
+  {
+    "expr": "status != \"active\"",
+    "data": {
+      "status": "Pending"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "code = \"01234\"",
-  "data": {
-   "code": "01234"
+  {
+    "expr": "code = \"01234\"",
+    "data": {
+      "code": "01234"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "code = \"01234\"",
-  "data": {
-   "code": 1234
+  {
+    "expr": "code = \"01234\"",
+    "data": {
+      "code": 1234
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "n = \"5\"",
-  "data": {
-   "n": 5
+  {
+    "expr": "n = \"5\"",
+    "data": {
+      "n": 5
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "n = \"5\"",
-  "data": {
-   "n": 6
+  {
+    "expr": "n = \"5\"",
+    "data": {
+      "n": 6
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "active = true",
-  "data": {
-   "active": true
+  {
+    "expr": "active = true",
+    "data": {
+      "active": true
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "active = false",
-  "data": {
-   "active": true
+  {
+    "expr": "active = false",
+    "data": {
+      "active": true
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "flag = \"true\"",
-  "data": {
-   "flag": true
+  {
+    "expr": "flag = \"true\"",
+    "data": {
+      "flag": true
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "tier in [\"gold\", \"silver\"]",
-  "data": {
-   "tier": "gold"
+  {
+    "expr": "tier in [\"gold\", \"silver\"]",
+    "data": {
+      "tier": "gold"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "tier in [\"gold\", \"silver\"]",
-  "data": {
-   "tier": "bronze"
+  {
+    "expr": "tier in [\"gold\", \"silver\"]",
+    "data": {
+      "tier": "bronze"
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "not(tier in [\"gold\", \"silver\"])",
-  "data": {
-   "tier": "bronze"
+  {
+    "expr": "not(tier in [\"gold\", \"silver\"])",
+    "data": {
+      "tier": "bronze"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "n in [1, 2, 3]",
-  "data": {
-   "n": 2
+  {
+    "expr": "n in [1, 2, 3]",
+    "data": {
+      "n": 2
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "n in [1, 2, 3]",
-  "data": {
-   "n": 5
+  {
+    "expr": "n in [1, 2, 3]",
+    "data": {
+      "n": 5
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "mid = null",
-  "data": {
-   "mid": null
+  {
+    "expr": "mid = null",
+    "data": {
+      "mid": null
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "mid = null",
-  "data": {},
-  "expected": true
- },
- {
-  "expr": "mid != null",
-  "data": {
-   "mid": "x"
+  {
+    "expr": "mid = null",
+    "data": {},
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "mid != null",
-  "data": {},
-  "expected": false
- },
- {
-  "expr": "contains(email, \"@\")",
-  "data": {
-   "email": "a@b.com"
+  {
+    "expr": "mid != null",
+    "data": {
+      "mid": "x"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "contains(email, \"@\")",
-  "data": {
-   "email": "nope"
+  {
+    "expr": "mid != null",
+    "data": {},
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "starts_with(sku, \"AB\")",
-  "data": {
-   "sku": "AB-9"
+  {
+    "expr": "contains(email, \"@\")",
+    "data": {
+      "email": "a@b.com"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "starts_with(sku, \"AB\")",
-  "data": {
-   "sku": "XY-9"
+  {
+    "expr": "contains(email, \"@\")",
+    "data": {
+      "email": "nope"
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "ends_with(file, \".pdf\")",
-  "data": {
-   "file": "a.pdf"
+  {
+    "expr": "starts_with(sku, \"AB\")",
+    "data": {
+      "sku": "AB-9"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "ends_with(file, \".pdf\")",
-  "data": {
-   "file": "a.txt"
+  {
+    "expr": "starts_with(sku, \"AB\")",
+    "data": {
+      "sku": "XY-9"
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "matches(zip, \"^[0-9]{5}$\")",
-  "data": {
-   "zip": "94103"
+  {
+    "expr": "ends_with(file, \".pdf\")",
+    "data": {
+      "file": "a.pdf"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "matches(zip, \"^[0-9]{5}$\")",
-  "data": {
-   "zip": "9x"
+  {
+    "expr": "ends_with(file, \".pdf\")",
+    "data": {
+      "file": "a.txt"
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "(age > 18 and tier = \"gold\")",
-  "data": {
-   "age": 20,
-   "tier": "gold"
+  {
+    "expr": "matches(zip, \"^[0-9]{5}$\")",
+    "data": {
+      "zip": "94103"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "(age > 18 and tier = \"gold\")",
-  "data": {
-   "age": 20,
-   "tier": "silver"
+  {
+    "expr": "matches(zip, \"^[0-9]{5}$\")",
+    "data": {
+      "zip": "9x"
+    },
+    "expected": false
   },
-  "expected": false
- },
- {
-  "expr": "(age > 18 or tier = \"gold\")",
-  "data": {
-   "age": 10,
-   "tier": "gold"
+  {
+    "expr": "(age > 18 and tier = \"gold\")",
+    "data": {
+      "age": 20,
+      "tier": "gold"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "(a = 1 and (b = 2 or c = 3))",
-  "data": {
-   "a": 1,
-   "b": 9,
-   "c": 3
+  {
+    "expr": "(age > 18 and tier = \"gold\")",
+    "data": {
+      "age": 20,
+      "tier": "silver"
+    },
+    "expected": false
   },
-  "expected": true
- },
- {
-  "expr": "not(age > 18)",
-  "data": {
-   "age": 10
+  {
+    "expr": "(age > 18 or tier = \"gold\")",
+    "data": {
+      "age": 10,
+      "tier": "gold"
+    },
+    "expected": true
   },
-  "expected": true
- },
- {
-  "expr": "not(age > 18)",
-  "data": {
-   "age": 30
+  {
+    "expr": "(a = 1 and (b = 2 or c = 3))",
+    "data": {
+      "a": 1,
+      "b": 9,
+      "c": 3
+    },
+    "expected": true
   },
-  "expected": false
- },
- {
-  "expr": "true",
-  "data": {},
-  "expected": true
- }
+  {
+    "expr": "not(age > 18)",
+    "data": {
+      "age": 10
+    },
+    "expected": true
+  },
+  {
+    "expr": "not(age > 18)",
+    "data": {
+      "age": 30
+    },
+    "expected": false
+  },
+  {
+    "expr": "true",
+    "data": {},
+    "expected": true
+  },
+  {
+    "expr": "sum(items.subtotal)",
+    "data": {
+      "items": [
+        {
+          "subtotal": 4.5
+        },
+        {
+          "subtotal": 3
+        }
+      ]
+    },
+    "expected": 7.5
+  },
+  {
+    "expr": "count(missing)",
+    "data": {},
+    "expected": 0
+  },
+  {
+    "expr": "count(check.output) > 0",
+    "data": {
+      "check": {
+        "rows": [],
+        "count": 0,
+        "output": []
+      }
+    },
+    "expected": false
+  }
 ]

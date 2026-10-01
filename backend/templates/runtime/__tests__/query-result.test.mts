@@ -37,5 +37,11 @@ check("a query with a row is one",
 check("count of nothing is none",
   evaluateExpression("count(missing)", {}), 0);
 
+// A PATH ON A LIST: F&B's order total `sum(items.subtotal)` was 0.
+check("a field read across a list is each item's value",
+  evaluateExpression("sum(items.subtotal)", { items: [{ subtotal: 4.5 }, { subtotal: 3 }] }), 7.5);
+check("and a single record's field reads as before",
+  evaluateExpression("order.total", { order: { total: 12 } }), 12);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
