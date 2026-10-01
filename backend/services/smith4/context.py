@@ -45,10 +45,11 @@ def opening(project_id: str, output_dir: str, ask: str, *, brief: str = "") -> s
                 "Do not ask what the brief already answers.")
     bp = Blueprint.load(project_id=project_id, output_dir=output_dir)
     page = blueprint_to_context(pick_relevant_slice(bp, ask=ask))
-    waiting = plan_mod.peek(output_dir)
+    waiting = plan_mod.peek(output_dir) if plan_mod.is_agreed(output_dir) else []
     if waiting:
-        page = ("STEPS OF AN AGREED PLAN STILL WAITING (each is a later turn; do "
-                "not do them now):\n" + "\n".join(f"- {s}" for s in waiting)
+        page = ("STEPS OF AN AGREED PLAN STILL WAITING (each is a later turn, done when they say "
+                "`next`; do not do them now, and do not put them in a plan you propose for this "
+                "message — they are already planned):\n" + "\n".join(f"- {s}" for s in waiting)
                 + "\n\n" + page)
     return page
 

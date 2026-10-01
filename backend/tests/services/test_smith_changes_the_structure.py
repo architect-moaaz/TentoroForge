@@ -238,3 +238,45 @@ def test_smith_adds_a_document_field_as_a_file():
     from services.smith4 import verbs
     src = inspect.getsource(verbs.add_field) if hasattr(verbs, "add_field") else inspect.getsource(verbs)
     assert '"document": "file"' in src and '"photo": "image"' in src
+
+
+# --------------------------------------------------------------------------- #
+# A plan nobody agreed to does not ride along
+# --------------------------------------------------------------------------- #
+
+def test_a_new_message_replaces_a_plan_nobody_agreed_to(tmp_path):
+    from services.smith import plan as plan_mod
+    from services.smith4 import handle
+    from tests.services._loop_fixtures import _Chooser, _repo, _Writes
+    _repo(tmp_path)
+    plan_mod.remember(tmp_path, ["make it Dubai centric", "prices in AED"], agreed=False)
+    chooser = _Chooser({"tool": "answer", "args": {"text": "ok"}})
+    handle(project_id="p1", output_dir=str(tmp_path), message="make it look like Myntra",
+           choose=chooser, move=_Writes(tmp_path))
+    assert plan_mod.peek(tmp_path) == []
+
+
+def test_an_agreed_plan_stays_and_is_never_folded_into_a_new_one(tmp_path):
+    from services.smith import plan as plan_mod
+    from services.smith4 import handle
+    from services.smith4.context import opening
+    from tests.services._loop_fixtures import _Chooser, _repo, _Writes
+    _repo(tmp_path)
+    plan_mod.remember(tmp_path, ["make it Dubai centric", "prices in AED"], agreed=False)
+    plan_mod.agree(tmp_path)
+    assert plan_mod.is_agreed(tmp_path)
+    plan_mod.remember(tmp_path, ["prices in AED"])                    # a step done: still agreed
+    assert plan_mod.is_agreed(tmp_path)
+    chooser = _Chooser({"tool": "propose_plan", "args": {"steps": [
+        "prices in AED", "restyle like Myntra", "rebuild every screen like Myntra"]}})
+    out = handle(project_id="p1", output_dir=str(tmp_path), message="make it look like Myntra",
+                 choose=chooser, move=_Writes(tmp_path))
+    assert "1. restyle like Myntra" in out.said and "2. rebuild every screen like Myntra" in out.said
+    assert "1. prices in AED" not in out.said
+
+
+def test_a_yes_agrees_to_the_plan_shown(tmp_path):
+    from services.smith import plan as plan_mod
+    from services.smith4.handle import _PLAN_YES
+    plan_mod.remember(tmp_path, ["a", "b"], agreed=False)
+    assert not plan_mod.is_agreed(tmp_path) and "go ahead" in _PLAN_YES and "delete it" not in _PLAN_YES

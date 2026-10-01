@@ -52,12 +52,20 @@ def handle(*, project_id: str, output_dir: str, message: str,
     # and the form left waiting on three more messages). Each step is a normal
     # turn; the run stops at the first that asks something or cannot be done,
     # and at a time budget, and says what is still to do either way.
+    answers_plan = (typed in (plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL) or plan_mod.wants_next(typed)
+                    or " ".join(typed.lower().rstrip(".!").split()) in _PLAN_YES)
+    if plan_mod.peek(output_dir):
+        if answers_plan:
+            plan_mod.agree(output_dir)
+        elif not plan_mod.is_agreed(output_dir) and typed != plan_mod.REWORD_LABEL:
+            # A NEW MESSAGE REPLACES A PLAN NOBODY AGREED TO. Left waiting, it
+            # was read as agreed and folded into the next ask (SnapIT replay).
+            plan_mod.clear(output_dir)
     if plan_mod.peek(output_dir) and typed == plan_mod.ALL_LABEL:
         return _in_step(output_dir, version_before, _all_steps(output_dir, lambda step: turn(
             ctx_for(step), choose=choose, history=history, max_steps=max_steps)))
     # AGREED, SO DO THE FIRST ONE NOW.
-    if plan_mod.peek(output_dir) and (plan_mod.wants_next(typed)
-                                      or typed in (plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL)):
+    if plan_mod.peek(output_dir) and answers_plan:
         step = plan_mod.take_next(output_dir)
         if typed == plan_mod.FIRST_LABEL:
             plan_mod.clear(output_dir)
@@ -87,6 +95,11 @@ def handle(*, project_id: str, output_dir: str, message: str,
         if note and note.strip() not in result.said:
             result.said += note
     return _in_step(output_dir, version_before, result)
+
+
+#: A plain yes to a plan that was just shown — not a confirmation's "delete it".
+_PLAN_YES = frozenset({"ok", "okay", "sure", "go ahead", "yes please", "proceed", "do it",
+                       "yes do it", "yes, go ahead", "yes go ahead", "sounds good"})
 
 
 def _once(items: list) -> list:

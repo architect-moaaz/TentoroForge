@@ -403,7 +403,14 @@ def _plan(ctx: Ctx, args: dict, landed: list[str], touched: list[str]) -> Outcom
     the yes — starting on step one while showing the list is the old silence
     with a receipt. The yes is fingerprinted so it is not re-planned."""
     from services.smith import confirm
-    steps = [str(s).strip() for s in (args.get("steps") or []) if str(s).strip()]
+    # A STEP ALREADY WAITING IS NOT A NEW STEP. Copied into the new plan it
+    # took a place the person's own ask needed (SnapIT replay: five old steps
+    # and the screens rebuild pushed past the cap).
+    def _norm(x: str) -> str:
+        return " ".join(str(x).split()).lower()
+    waiting = {_norm(w) for w in plan_mod.peek(ctx.out)}
+    steps = [str(s).strip() for s in (args.get("steps") or [])
+             if str(s).strip() and _norm(s) not in waiting]
     if len(steps) < 2:
         return _finished(landed, touched, Outcome(status="asked", said=(
             "I could not tell the parts of that apart. Say the first thing you want and I "
@@ -427,7 +434,7 @@ def _plan(ctx: Ctx, args: dict, landed: list[str], touched: list[str]) -> Outcom
         return Outcome(status="asked", said=question,
                        options=[plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL, plan_mod.REWORD_LABEL],
                        touched=list(touched))
-    plan_mod.remember(ctx.out, planned)
+    plan_mod.remember(ctx.out, planned, agreed=False)
     return Outcome(status="asked", said=plan_mod.as_question(planned, over),
                    options=[plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL, plan_mod.REWORD_LABEL],
                    touched=list(touched))
