@@ -1489,8 +1489,8 @@ def direction_prompts(doc: dict) -> tuple[str, str]:
     ds = doc.get("designSystem") or {}
     system = ("You are the design director of a software product. You decide, once, what the whole "
               "application should feel like and the conventions every page will follow, so that "
-              "thirty pages written separately read as one product of the quality of Linear, "
-              "Stripe or Notion. Be concrete: a page author must be able to follow each rule "
+              "thirty pages written separately read as one product, as good as "
+              f"{bar(doc)}. Be concrete: a page author must be able to follow each rule "
               "without guessing. Rules are about layout, hierarchy, density, tone of copy, how "
               "status and money read, empty/loading/error states, where actions live, and how "
               "lists, records and forms are built — never about colours by hex (the design "
@@ -1500,14 +1500,19 @@ def direction_prompts(doc: dict) -> tuple[str, str]:
     roles = [r.get("name") for r in doc.get("roles") or []]
     user = (f"The application: {app.get('name')}\n{str(app.get('description') or '')[:2000]}\n\n"
             f"Who uses it: {', '.join(r for r in roles if r) or 'staff'}\n\n"
-            f"Its design system (palette, type, radius, density):\n"
-            f"{json.dumps({k: ds.get(k) for k in ('register', 'density', 'typography', 'radius', 'tone', 'personality') if ds.get(k)}, indent=1)[:3000]}\n\n"
+            # THE DESIGN AS IT IS NAMED. This read `density` and `personality`,
+            # which the design system has never had (`informationDensity`,
+            # `visualPersonality`): the director saw the fonts and the radius
+            # and nothing of what the product is like (2026-10-02).
+            f"Its design system (personality, density, frame, type, radius):\n"
+            f"{json.dumps({k: ds.get(k) for k in ('visualPersonality', 'informationDensity', 'shell', 'navigationApproach', 'typography', 'radius') if ds.get(k)}, indent=1)[:3000]}\n\n"
+            + _references_brief(ds) +
             f"Its pages:\n{json.dumps(pages, indent=1)[:12000]}\n\n"
             "Return `vision` — one paragraph a page author reads before every page — and "
             "8 to 14 `conventions`, each a topic and a precise rule.\n\n"
             "CHARTS GO WHERE THE ANALYTICS PUTS THEM. The application's analytics "
-            "attaches KPIs and charts to pages — every dashboard, and every list of "
-            "records with a status, a date or an amount — and those pages must show "
+            "attaches KPIs and charts to the pages its staff work in — their "
+            "dashboards and lists of records — and those pages must show "
             "them. A convention may say HOW a chart or tile sits on a page (its size, "
             "its place, whether it gets a heading); it never reserves charts or tiles "
             "to the dashboard. A reading list's direction said \"tiles and charts are "
@@ -1522,6 +1527,22 @@ def direction_prompts(doc: dict) -> tuple[str, str]:
             "and dense sections; a consumer product wants a band, cards and open sections; a "
             "quiet tool wants a title alone and rows. Make the vision agree with what you chose.")
     return system, user
+
+
+def _references_brief(ds: dict) -> str:
+    """What to take from the products this one is held to, for the director:
+    the layouts they are known for, adapted — not a style word."""
+    refs = [r for r in ds.get("references") or [] if isinstance(r, dict) and r.get("product")]
+    if not refs:
+        return ""
+    return ("THE PRODUCTS IT IS HELD TO, and what to take from each:\n"
+            + "\n".join(f"- {r['product']}: {r.get('takeaway') or ''}" for r in refs[:4])
+            + "\nTake the LAYOUT patterns these are known for and adapt them to this product: what a "
+            "person sees first on each kind of page, how the main record is presented (photo-led "
+            "cards, rows, a timeline, a map), where the main action lives, how the person moves "
+            "between pages. Write those into the vision, the conventions and the rhythm — this is "
+            "what makes the product look like its own field rather than like every other "
+            "generated application.\n\n")
 
 
 def compose_direction(doc: dict, client: Any, *, references: Sequence[Path] = ()) -> tuple[dict, Any]:

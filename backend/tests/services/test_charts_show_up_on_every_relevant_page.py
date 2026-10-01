@@ -168,3 +168,17 @@ def test_every_page_is_held_to_this_applications_own_bar():
     for prompt in (system_prompt(doc), reviewer_system(doc)):
         assert "Deliveroo" in prompt and "Linear, Stripe" not in prompt
     assert "own field" in bar({"designSystem": {}})
+
+
+def test_the_design_director_sees_the_design_and_the_references():
+    """The director read `density` and `personality`, keys the design system
+    never had, and was told to match "Linear, Stripe or Notion"."""
+    from services.blueprint.ui_engineer import direction_prompts
+    doc = {"application": {"name": "F&B"}, "pages": [], "roles": [],
+           "designSystem": {"visualPersonality": "warm street-food stall", "informationDensity": "comfortable",
+                            "shell": {"chrome": "topbar"},
+                            "references": [{"product": "Zomato", "takeaway": "photo-led rows"}]}}
+    system, user = direction_prompts(doc)
+    assert "Linear" not in system + user and "Zomato" in system
+    assert "warm street-food stall" in user and "topbar" in user and "LAYOUT patterns" in user
+    assert "Zomato: photo-led rows" in user

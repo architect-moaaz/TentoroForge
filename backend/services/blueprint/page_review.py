@@ -59,7 +59,7 @@ REVIEW_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
     "required": ["score", "verdict", "strengths", "issues"],
     "properties": {
-        "score": {"type": "integer", "description": "1-10; 8 means ready to ship next to Linear or Stripe."},
+        "score": {"type": "integer", "description": "1-10; 8 means ready to ship next to the products this application is held to."},
         "verdict": {"type": "string", "enum": ["pass", "revise"]},
         "strengths": {"type": "array", "items": {"type": "string"}},
         "issues": {
