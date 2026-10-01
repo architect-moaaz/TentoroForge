@@ -61,10 +61,12 @@ TRIALS: tuple[tuple[str, str, dict[str, str]], ...] = (
      {"method": "string", "path": "string", "body": "object", "as": "string"}),
     ("open_page",
      "Open a screen in a browser signed in as `as` and press its controls. "
-     "Shows where it ended up (a sign-in that lands somewhere else shows "
-     "here), the text on it, errors in the browser, and what each button "
-     "did. A route with `[id]` opens the first record. On a copy of the data.",
-     {"route": "string", "as": "string"}),
+     "Shows where it ended up, the text on it, errors in the browser, and "
+     "what each button did. A route with `[id]` opens the first record. "
+     "`sign_in: true` instead signs in through the sign-in page's own form, "
+     "as the administrator, and shows where that lands — the only way to see "
+     "where a sign-in takes someone. On a copy of the data.",
+     {"route": "string", "as": "string", "sign_in": "boolean"}),
 )
 
 TRIAL_NAMES: frozenset[str] = frozenset(name for name, _d, _a in TRIALS)
@@ -352,10 +354,12 @@ def try_request(bench: Bench, doc: dict, method: str, path: str, body: Any, as_:
     return scrub("\n".join(out))
 
 
-def open_page(bench: Bench, doc: dict, route: str, as_: str) -> str:
+def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = False) -> str:
     from services.blueprint.page_review import BROKEN_OUTCOMES, ReviewUnavailable, run_shots
 
     route = (route or "").strip()
+    if sign_in:
+        return _sign_in(bench, doc, route, as_)
     if not route.startswith("/"):
         return "`route` is a screen's path, starting with `/`."
     pages = [p for p in doc.get("pages") or [] if isinstance(p, dict)]
@@ -400,6 +404,38 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str) -> str:
     return scrub("\n".join(out))
 
 
+def _sign_in(bench: Bench, doc: dict, route: str, as_: str) -> str:
+    """Sign in through the form as the administrator; where it lands."""
+    from services.blueprint.page_review import ReviewUnavailable, run_shots
+
+    role, is_admin = _role(doc, as_)
+    if not is_admin:
+        return ("Only the administrator's sign-in can be tried: the seeded administrator's "
+                "password is the one known. To see another role's pages, `open_page` "
+                "with `as` opens them already signed in as that role.")
+    if not route:
+        auth = [str(p.get("route")) for p in doc.get("pages") or []
+                if isinstance(p, dict) and str(p.get("pattern") or "") == "auth"]
+        route = next((r for r in auth if "login" in r or "sign-in" in r or "signin" in r), "/login")
+    app = bench.app()
+    bench.server_said()
+    try:
+        shot = run_shots(app, [{"id": "sign-in", "route": route, "signIn": True, "as": role}],
+                         Path(bench.output_dir) / ".forge" / "trials" / "shots", probe=False, states=False)[0]
+    except ReviewUnavailable as exc:
+        return f"The sign-in could not be tried in a browser: {exc}"
+    out = [f"signed in as the administrator ({role}) through the form at {route}: "
+           f"landed on {shot.get('landed') or '?'}"]
+    out += [f"browser error: {e}" for e in shot.get("errors") or []]
+    text = " ".join(str(shot.get("text") or "").split())
+    out.append(f"text on the page: {text[:BODY_SHOWN]}" if text else "the page shows no text")
+    said = bench.server_said()
+    if said:
+        out.append("the server printed:")
+        out += [f"  {l}" for l in said]
+    return scrub("\n".join(out))
+
+
 def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
     """Carry out one trial. The observation is returned, never raised."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
@@ -411,7 +447,8 @@ def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
             return try_request(bench, doc, str(args.get("method") or "GET"), str(args.get("path") or ""),
                                args.get("body"), as_)
         if name == "open_page":
-            return open_page(bench, doc, str(args.get("route") or ""), as_)
+            sign_in = str(args.get("sign_in") or "").strip().lower() in ("true", "1", "yes")
+            return open_page(bench, doc, str(args.get("route") or ""), as_, sign_in=sign_in)
     except TrialUnavailable as exc:
         return str(exc)
     except ValueError as exc:

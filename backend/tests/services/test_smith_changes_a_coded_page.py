@@ -112,6 +112,18 @@ def test_a_change_with_nothing_to_count_is_still_a_version(tmp_path, quiet):
     assert "p-8" in svc.doc["pageCode"][0]["view"]
 
 
+def test_the_same_code_back_is_not_a_rewrite(tmp_path, quiet):
+    """"Rewrote /login (version 59): … no edit is applicable here" — a page
+    nobody changed, committed and reported as changed (F&B replay)."""
+    svc = _svc(tmp_path)
+    before = svc.doc["version"]
+    quiet(VIEW)
+    out = recode_page(svc, "/dashboard", app_root=str(tmp_path / "app"),
+                      request="land the admin elsewhere", executor=_Run([]), client=object())
+    assert not out["applied"] and out["reason"] == "the page writer left the code as it was: rewrite"
+    assert svc.doc["version"] == before
+
+
 def test_a_widget_the_new_code_does_not_draw_is_reported_missing(tmp_path, quiet):
     svc = _svc(tmp_path)
     quiet(VIEW)

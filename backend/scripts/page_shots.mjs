@@ -261,6 +261,44 @@ async function press(context, url, control) {
 
 const out = [];
 for (const p of cfg.pages) {
+  if (p.signIn) {
+    // SIGNING IN, THROUGH THE FORM, as a person does: where it lands is the
+    // app's answer to "the admin lands on the customers' menu", and only the
+    // form's own redirect shows it.
+    const fresh = await browser.newContext({ viewport });
+    const page = await fresh.newPage();
+    const errors = watch(page);
+    let status = null;
+    try {
+      // A dev server compiling for the first time reloads the page under a
+      // redirect ("Fast Refresh will perform a full reload"): the sign-in
+      // succeeds and the person is left on the form. Warm it first, and
+      // submit once more if a reload took the redirect away.
+      await page.goto(cfg.baseUrl + p.route, { waitUntil: "networkidle", timeout: 120000 }).catch(() => {});
+      await page.waitForTimeout(3000);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const res = await page.goto(cfg.baseUrl + p.route, { waitUntil: "load", timeout: 120000 });
+        status = res?.status() ?? null;
+        const before = new URL(page.url()).pathname;
+        await page.locator('input[type="email"], input[name="email"]').first().fill(cfg.email, { timeout: 15000 });
+        await page.locator('input[type="password"]').first().fill(cfg.password, { timeout: 15000 });
+        await page.locator('button[type="submit"], form button').first().click({ timeout: 15000 });
+        await page.waitForURL((u) => new URL(u.toString()).pathname !== before, { timeout: 60000 }).catch(() => {});
+        await page.waitForLoadState("load").catch(() => {});
+        await page.waitForTimeout(1500);
+        if (new URL(page.url()).pathname !== before) break;
+        await page.context().clearCookies();
+      }
+    } catch (e) {
+      errors.push(`sign-in: ${e.message.split("\n")[0]}`.slice(0, 400));
+    }
+    const landed = new URL(page.url()).pathname;
+    const text = (await page.locator("body").innerText({ timeout: 5000 }).catch(() => "")).slice(0, 6000);
+    out.push({ id: p.id, route: p.route, url: p.route, as: p.as ?? null, status, landed, text,
+               signedIn: true, errors: [...new Set(errors)].slice(0, 12), states: {} });
+    await fresh.close();
+    continue;
+  }
   let url = p.route;
   const who = await contextsFor(p);
   const isRecord = /\[[^\]]+\]/.test(url);

@@ -389,6 +389,15 @@ def _render_accounts(bp: Blueprint) -> str:
     lines = ["## Accounts"]
     if a.get("sign_in_page"):
         lines.append(f"- Sign in at `{a['sign_in_page']}`; after signing in a person lands on `{a.get('after_sign_in') or '/'}`")
+    for role, route in (a.get("landing_by_role") or {}).items():
+        lines.append(f"- After signing in, a {role} lands on `{route}`")
+    if a.get("sign_in_page"):
+        # WHERE IT IS DECIDED, so a change goes there. F&B's "the admin lands
+        # on the customers' menu" rewrote /login twice; landing is not the
+        # sign-in page's, it is the menu definition's (2026-10-01).
+        lines.append("- Where each role lands after signing in is the menu definition's "
+                     "`initialRoute`, a map from role name to route; change it with "
+                     "`write_section` on `navigation`, naming the role and the route")
     if a.get("sign_up_page"):
         lines.append(f"- Sign up at `{a['sign_up_page']}`; a new account lands on `{a.get('after_sign_up') or '/'}`"
                      + (f" with the role {a['sign_up_role']}" if a.get("sign_up_role") else ""))

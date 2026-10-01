@@ -56,7 +56,7 @@ def _accounts(doc: dict[str, Any], role_names: dict[str, str]) -> dict[str, Any]
     try:
         from services.blueprint.account_model import (
             account_entity, admin_role, after_signup_route, auth_page_bodies, home_route,
-            prerequisites, signup_role,
+            landing_by_role, prerequisites, signup_role,
         )
     except Exception:  # noqa: BLE001 — an older tree without the account model
         return {}
@@ -74,6 +74,7 @@ def _accounts(doc: dict[str, Any], role_names: dict[str, str]) -> dict[str, Any]
         "sign_in_page": auth.get("login") or ("/login" if not auth_page_bodies(doc) else ""),
         "sign_up_page": auth.get("signup") or "",
         "after_sign_in": home_route(doc),
+        "landing_by_role": landing_by_role(doc),
         "after_sign_up": after_signup_route(doc),
         "person_record": ent.get("name") or "",
         "sign_up_role": signup_role(doc) or "",

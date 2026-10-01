@@ -883,6 +883,18 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
         # versions only what reports artifacts, and a `pageCode` row reports
         # none: a code-only change through it was saved with no version at
         # all, and an undo could not reach it.
+        # THE SAME CODE IS NOT A REWRITE. "Rewrote /login (version 59): the
+        # fix lives in account.ts … no edit to load or view is applicable"
+        # committed a version of a page nobody changed and reported it as
+        # changed (F&B replay, 2026-10-01). Said as a refusal, in the
+        # writer's words, so the loop goes where the writer pointed.
+        if not widgets and row is not None and \
+                str(body.get("view") or "") == str(row.get("view") or "") and \
+                str(body.get("load") or "") == str(row.get("load") or ""):
+            why = str(body.get("rationale") or "").strip()
+            return {"applied": False, "committed": [], "version": int(svc.doc.get("version") or 0),
+                    "reason": "the page writer left the code as it was" + (f": {why}" if why else ""),
+                    "missing": []}
         before = svc.snapshot()
         committed: list[str] = []
         steps = [("analytics", list(widgets))] if widgets else []
