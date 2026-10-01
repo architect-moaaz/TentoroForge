@@ -492,6 +492,17 @@ def review_brief(review: dict, shot: dict) -> str:
     return "\n".join(lines)
 
 
+def unbuilt_pages(doc: dict) -> list[dict]:
+    """Live pages with no code: their page step failed, so there is nothing
+    to open — a review must say so, never skip them in silence (F&B's
+    "Incoming Orders page is not done" was answered "no coded pages")."""
+    coded = {str(r.get("page")) for r in doc.get("pageCode") or [] if r.get("status") != "DEPRECATED"}
+    if not coded:
+        return []
+    return [p for p in doc.get("pages") or [] if isinstance(p, dict)
+            and str(p.get("status") or "").upper() != "DEPRECATED" and str(p.get("id")) not in coded]
+
+
 def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None,
                rounds: int = ROUNDS, workers: int = 6, only: set[str] | None = None,
                emit: Any = None) -> dict[str, Any]:

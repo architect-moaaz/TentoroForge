@@ -1396,6 +1396,12 @@ async def smith_chat(
     await _adopt_brand_language(output_dir, project, db)
     app_root = str(output_dir / "app")
     await _adopt_mcp_servers(output_dir, project, db)
+    # Its failures reach Smith's inbox (services/app_reporting).
+    try:
+        from services.app_reporting import wire as _wire_reporting
+        _wire_reporting(app_root, getattr(project, "id", None))
+    except OSError as exc:
+        logger.warning("[smith-chat] could not point the app's reporter at the platform: %s", exc)
 
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -2601,6 +2607,13 @@ def _review_coded(output_dir: str, app_root: str, *, emit, routes: list[str] | N
             (f"{i.get('where')}: {i.get('problem')}" for i in v.get("issues") or []), "")
         score = (r.get("scores") or [None])[-1]
         parts.append(f"{route} is still below the bar ({score}/10){': ' + why[:160] if why else ''}.")
+    # A screen whose page step failed has no code to open; it is named, not
+    # passed over — the person asks for it to be built.
+    from services.blueprint.page_review import unbuilt_pages
+    never = [p for p in unbuilt_pages(svc.doc) if only is None or str(p.get("id")) in only]
+    if never:
+        parts.append("Never built, so not checked: " + ", ".join(f"{p.get('name')} ({p.get('route')})" for p in never)
+                     + ". Ask me to build " + ("it" if len(never) == 1 else "them") + ".")
     emit("message", {"text": " ".join(parts)})
 
 

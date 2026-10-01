@@ -321,8 +321,12 @@ class VercelDeployProvider:
             vercel_has_nextauth_secret = "NEXTAUTH_SECRET" in existing_by_key
             nextauth_secret = "" if vercel_has_nextauth_secret else secrets.token_hex(32)
 
+            # WHERE THE APP REPORTS ITS FAILURES (services/app_reporting): the
+            # platform's public address and this project's id, so Smith's
+            # inbox hears of a crash in the published app.
+            from services.app_reporting import publish_env
             env = build_deploy_env(
-                integrations=dict(snapshot.integrations),
+                integrations={**publish_env(snapshot.project_id), **dict(snapshot.integrations)},
                 neon_url=neon_url,
                 vercel_url="",  # unused — NEXTAUTH_URL is left to VERCEL_URL
                 nextauth_secret=nextauth_secret,

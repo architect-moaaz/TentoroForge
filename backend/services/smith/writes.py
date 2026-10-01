@@ -141,6 +141,17 @@ def verify_pages(output_dir: str, routes: list[str] | None = None, *, reasoning:
     if wanted and not only:
         return _finding(f"None of {', '.join(wanted)} is a page here. Routes: "
                         + ", ".join(sorted(route_of.values()))[:500] + ".")
+    # A PAGE THAT WAS NEVER WRITTEN IS WRITTEN, NOT REVIEWED. F&B's tester
+    # said "Incoming Orders page is not done"; its build had failed, the
+    # review had nothing to open, and "no coded pages" was the whole reply.
+    from services.blueprint.page_review import unbuilt_pages
+    unbuilt = [p for p in unbuilt_pages(svc.doc) if only is None or str(p.get("id")) in only]
+    if unbuilt and (only is not None and all(str(p.get("id")) in {str(u.get("id")) for u in unbuilt} for p in
+                                             (pages[pid] for pid in only))):
+        names = ", ".join(f"{p.get('name') or p.get('id')} ({p.get('route')})" for p in unbuilt)
+        return _finding(f"{names} has no code yet — its page was never written (its build step failed), so "
+                        "there is nothing to open. Write it with `compose_route` on that route, adding first "
+                        "any workflow it needs to change its records, then verify it.")
     app_root = str(Path(output_dir) / "app")
     try:
         outcome = review_coded_pages(svc, app_root, only=only)
@@ -151,12 +162,15 @@ def verify_pages(output_dir: str, routes: list[str] | None = None, *, reasoning:
         return _finding(f"The review did not finish — {type(exc).__name__}: {exc}")
     report = outcome.get("pages") or {}
     if not report:
-        return {"applied": True, "said": str(outcome.get("skipped") or "No coded pages to verify."),
-                "finding": "", "touched": [], "version": 0}
+        return _finding("No page of this application is written as code yet, so there is nothing to open in "
+                        "a browser. Write the pages first (`compose_route`), then verify them.")
     rewritten = sorted(route_of.get(p, p) for p, r in report.items() if r.get("rewritten"))
     passing = sorted(route_of.get(p, p) for p, r in report.items() if r.get("passed"))
     short = {route_of.get(p, p): r for p, r in report.items() if not r.get("passed")}
+    never = [p for p in unbuilt if str(p.get("id")) not in report]
     said = (f"Opened {len(report)} page(s) in a browser and pressed every control."
+            + (" Never written, so not opened: " + ", ".join(f"{p.get('name')} ({p.get('route')})" for p in never)
+               + " — each needs `compose_route`." if never else "")
             + (f" Rewrote: {', '.join(rewritten)}." if rewritten else "")
             + (f" Passing: {', '.join(passing)}." if passing else ""))
     finding = ""

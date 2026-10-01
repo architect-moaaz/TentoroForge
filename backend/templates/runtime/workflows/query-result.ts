@@ -14,5 +14,8 @@
 export function queryResult(rows: unknown): Record<string, unknown> {
   const list = Array.isArray(rows) ? rows : [];
   const first = (list.length === 1 ? list[0] : null) as Record<string, unknown> | null;
-  return { ...(first ?? {}), rows: list, count: list.length };
+  // …AND `output`, the name every other step answers to. F&B's "already
+  // exists" check counted `check_existing.output`, which was not there, and
+  // every new category was refused (2026-10-01).
+  return { ...(first ?? {}), rows: list, count: list.length, output: list };
 }

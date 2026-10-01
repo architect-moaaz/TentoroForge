@@ -95,6 +95,9 @@ services:
       # postgresql://postgres:<APPS_DB_PASSWORD>@apps-db:5432 — no database
       # name; unset, apps use Docker as on a developer's machine.
       FORGE_APPS_DATABASE_URL: ${FORGE_APPS_DATABASE_URL:-}
+      # Where a PUBLISHED app reports its failures to Smith (services/app_reporting):
+      # this platform's public address, whose /api/* reaches the backend.
+      FORGE_PUBLIC_URL: ${FORGE_PUBLIC_URL:-}
       # --- feature flags (mirror local dev defaults) ---
       FORGE_SMITH_ARCHITECT: ${FORGE_SMITH_ARCHITECT:-0}
       FORGE_SELF_HEAL: ${FORGE_SELF_HEAL:-1}

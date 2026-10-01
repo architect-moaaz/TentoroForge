@@ -442,6 +442,12 @@ async def preview_start(
             detail="No application to preview yet — nothing has been built "
                    "into this project.",
         )
+    # Its failures reach Smith's inbox (services/app_reporting).
+    from services.app_reporting import wire as _wire_reporting
+    try:
+        _wire_reporting(app_dir, project.id)
+    except OSError:
+        pass
     try:
         port = await start_preview(project.short_id, str(app_dir))
         project.preview_port = port

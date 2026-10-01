@@ -231,6 +231,25 @@ def _route_of(doc: dict, page_id: str | None) -> str | None:
     return route if route and "[" not in route else None
 
 
+def landing_by_role(doc: dict) -> dict[str, str]:
+    """Where each kind of user lands, by the role's NAME (what the session
+    carries): the Blueprint's `navigation.initialRoute`, whose keys may name a
+    role or give its id. F&B's said `{"ROLE-001": "/admin/categories"}`; only
+    names were matched, the map came out empty, and an administrator who
+    signed in landed on the customers' menu (2026-10-01). `default`,
+    `authenticated` and any key that is no role are not a person's landing."""
+    roles = [r for r in doc.get("roles") or [] if isinstance(r, dict) and r.get("name")]
+    by_key = {str(r.get("name")).strip().lower(): str(r.get("name")) for r in roles}
+    by_key.update({str(r.get("id")).strip().lower(): str(r.get("name")) for r in roles if r.get("id")})
+    declared = (doc.get("navigation") or {}).get("initialRoute")
+    out: dict[str, str] = {}
+    for key, route in (declared.items() if isinstance(declared, dict) else ()):
+        name = by_key.get(str(key).strip().lower())
+        if name and isinstance(route, str) and route.startswith("/") and "[" not in route:
+            out[name] = route
+    return out
+
+
 def home_route(doc: dict) -> str:
     init = (doc.get("navigation") or {}).get("initialRoute") or {}
     if isinstance(init, dict):
@@ -302,7 +321,9 @@ def project_account(doc: dict, app_root: str | Path) -> dict[str, Any]:
         + "/** The role the built-in admin account holds: the one that reaches the most of the app. */\n"
         + f"export const ADMIN_ROLE: string | null = {json.dumps(admin_role(doc))};\n\n"
         + f"export const AFTER_SIGNUP: string = {json.dumps(after_signup_route(doc))};\n\n"
-        + f"export const HOME: string = {json.dumps(home_route(doc))};\n", "utf-8")
+        + f"export const HOME: string = {json.dumps(home_route(doc))};\n\n"
+        + "/** Where each role lands once signed in, by the role's name; anyone else goes HOME. */\n"
+        + f"export const LANDING_FOR: Record<string, string> = {json.dumps(landing_by_role(doc), indent=2)};\n", "utf-8")
     if ent is None:
         table = "// eslint-disable-next-line @typescript-eslint/no-explicit-any\nexport const accountTable: any = null;\n"
     else:

@@ -11,6 +11,10 @@ const BUILT_IN_FUNCTIONS: Record<string, (...args: unknown[]) => unknown> = {
     return nums.reduce((a, b) => a + b, 0);
   },
   count: (...args: unknown[]) => {
+    // NOTHING COUNTS AS NONE. `count(x)` of a missing value was 1 — the one
+    // argument it was handed — so a duplicate check over a list that was not
+    // there always found a duplicate (F&B, 2026-10-01).
+    if (args.length === 1 && args[0] == null) return 0;
     const list = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
     return list.length;
   },
