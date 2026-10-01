@@ -463,6 +463,11 @@ def _finished(landed: list[str], touched: list[str], last: Outcome | None, *,
     said = list(landed)
     if last.finding and last.said:
         said.append(last.said)
+    if last.finding and last.finding != last.said:
+        # WHAT WAS NOT DONE IS SAID BESIDE WHAT WAS. Ten screens laid out
+        # again and /profile refused was reported as the ten alone (SnapIT
+        # replay, 2026-10-01).
+        said.append("Not done: " + last.finding)
     answer = "\n\n".join(dict.fromkeys(s for s in said if s)) or last.said
     return Outcome(status=last.status, said=answer + note, options=list(last.options),
                    diff_summary=last.diff_summary, touched=list(touched), finding=last.finding)

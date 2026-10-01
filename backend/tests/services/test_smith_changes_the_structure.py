@@ -305,3 +305,24 @@ def test_replacing_an_unanswered_plan_drops_the_ask_behind_it(tmp_path):
     handle(project_id="p1", output_dir=str(tmp_path), message="make it look like Myntra",
            choose=chooser, move=_Writes(tmp_path))
     assert "dubai" not in chooser.seen and pending_ask.take(tmp_path) == ""
+
+
+def test_what_was_not_done_is_said_beside_what_was(tmp_path, monkeypatch):
+    from services.smith4 import handle
+    from tests.services._loop_fixtures import _Chooser, _repo, _Writes
+    monkeypatch.setattr("services.smith.writes.run", lambda name, args, **k: {
+        "applied": True, "said": "Laid out 10 screen(s) again.", "touched": ["app/x"],
+        "finding": "/profile was not laid out again: it needs a process the app does not have"})
+    _repo(tmp_path)
+    out = handle(project_id="p1", output_dir=str(tmp_path), message="rebuild every screen",
+                 choose=_Chooser({"tool": "rewrite_pages", "args": {"routes": ["all"], "brief": "x"}},
+                                 {"tool": "done", "args": {}}), move=_Writes(tmp_path))
+    assert "Laid out 10 screen(s) again." in out.said and "Not done: /profile was not laid out again" in out.said
+
+
+def test_an_escape_printed_as_text_is_refused():
+    from services.blueprint.ui_engineer import _static_findings
+    shown = '"use client";\nexport default function V() { return <p>Dubai \\u2014 verified</p>; }'
+    fine = '"use client";\nexport default function V() { return <p>{"Dubai \\u2014 verified"} — ok</p>; }'
+    assert any("escape" in f for f in _static_findings("", shown))
+    assert not any("escape" in f for f in _static_findings("", fine))

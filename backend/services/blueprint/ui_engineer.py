@@ -1205,6 +1205,13 @@ def _static_findings(load: str, view: str) -> list[str]:
         out.append("load.ts/view.tsx: imports app internals — only @/sdk, @/sdk/server, @/sdk/client, @/sdk/camera, @/sdk/i18n.")
     if re.search(r"lorem ipsum|coming soon", view, re.I) or re.search(r"\bTODO\b", view):
         out.append("view.tsx: placeholder copy.")
+    # AN ESCAPE IN JSX TEXT IS PRINTED, NOT DECODED. SnapIT's redesigned home
+    # read "app \\u2014 verified listings" (2026-10-01): JSX text and attribute
+    # strings are not JavaScript strings, so `\u2014` reaches the screen as six
+    # characters. Write the character itself (— · ₹), or {"\u2014"} in braces.
+    if re.search(r">[^<{}]*\\u[0-9a-fA-F]{4}[^<{}]*<", view) or re.search(r'\s[a-zA-Z]+="[^"]*\\u[0-9a-fA-F]{4}', view):
+        out.append("view.tsx: a `\\uXXXX` escape in JSX text or an attribute string is shown literally — "
+                   "write the character itself.")
     return out
 
 
