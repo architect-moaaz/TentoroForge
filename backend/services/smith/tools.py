@@ -37,6 +37,7 @@ declared rather than silently arriving as a string.
 from __future__ import annotations
 
 from services.smith.reads import READ_NAMES, READS
+from services.smith.trials import TRIAL_NAMES, TRIALS
 from services.smith.verbs import REQUIRED_BY_VERB, VERB_EXAMPLES, VERB_HELP
 from services.smith.writes import WRITE_NAMES, WRITES
 
@@ -140,7 +141,7 @@ def is_tool(name: str) -> bool:
     """Whether `name` is something the loop may call at all."""
     name = (name or "").strip()
     return (name in REQUIRED_BY_VERB or name in READ_NAMES or name in WRITE_NAMES
-            or name in DEFINITION_NAMES or name in TERMINAL_NAMES)
+            or name in TRIAL_NAMES or name in DEFINITION_NAMES or name in TERMINAL_NAMES)
 
 
 def is_definition(name: str) -> bool:
@@ -151,6 +152,11 @@ def is_definition(name: str) -> bool:
 def is_read(name: str) -> bool:
     """A read looks and writes nothing: no baseline, no proof, no boundary."""
     return (name or "").strip() in READ_NAMES
+
+
+def is_trial(name: str) -> bool:
+    """A trial runs the app on a copy of its data: it changes nothing real."""
+    return (name or "").strip() in TRIAL_NAMES
 
 
 def is_write(name: str) -> bool:
@@ -189,6 +195,12 @@ def render() -> str:
         lines.append(f"- `{name}` ({shown})")
         lines.append(f"    {' '.join(said.split())}")
     lines.append("")
+    lines.append("Trying it (the running app, on a copy of its data — nothing real changes):")
+    for name, said, args in TRIALS:
+        shown = ", ".join(f"{a}: {t}" for a, t in args.items())
+        lines.append(f"- `{name}` ({shown})")
+        lines.append(f"    {' '.join(said.split())}")
+    lines.append("")
     lines.append("Changing code (after reading it; the compiler's verdict comes back):")
     for name, said, args in WRITES:
         shown = ", ".join(f"{a}: {t}" for a, t in args.items())
@@ -217,4 +229,4 @@ def untyped() -> frozenset[str]:
 
 
 __all__ = ["DEFINITION", "DEFINITION_NAMES", "FIELD_TYPES", "TERMINAL", "TERMINAL_NAMES",
-           "catalogue", "is_definition", "is_read", "is_tool", "is_write", "render", "unknown", "untyped"]
+           "catalogue", "is_definition", "is_read", "is_tool", "is_trial", "is_write", "render", "unknown", "untyped"]

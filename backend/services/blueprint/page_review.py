@@ -178,13 +178,17 @@ class RunningApp:
     """The generated app, its database up and its dev server serving — beside
     whatever the person is already running, never over it."""
 
-    def __init__(self, app_root: Path):
+    def __init__(self, app_root: Path, *, log: Path | None = None):
         self.root = app_root
+        # Where the dev server's output goes. The review ignores it; Smith's
+        # trials read it, since a workflow that throws says why only there.
+        self.log = log
         self.port = _free_port()
         self.base = f"http://127.0.0.1:{self.port}"
         self.proc: subprocess.Popen | None = None
         self.started_db = False
         self.clone: tuple[str, str, str] | None = None
+        self._sink: Any = None
 
     def __enter__(self) -> "RunningApp":
         from services import app_databases
@@ -218,9 +222,14 @@ class RunningApp:
 
     def _serve(self) -> "RunningApp":
         assert self.clone is not None
+        sink: Any = subprocess.DEVNULL
+        if self.log is not None:
+            self.log.parent.mkdir(parents=True, exist_ok=True)
+            sink = self._sink = open(self.log, "ab")  # noqa: SIM115 — closed in __exit__
         self.proc = subprocess.Popen(
             ["npx", "next", "dev", "--port", str(self.port)], cwd=self.root,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+            stdout=sink, stderr=subprocess.STDOUT if self.log is not None else subprocess.DEVNULL,
+            start_new_session=True,
             env={**os.environ, "BROWSER": "none",
                  # The preview secret, so a session minted for a role the
                  # administrator does not hold is a session this server accepts.
@@ -247,6 +256,9 @@ class RunningApp:
                     break
                 except Exception:  # noqa: BLE001
                     continue
+        if self._sink is not None:
+            self._sink.close()
+            self._sink = None
         if self.clone is not None:
             container, copy, _ = self.clone
             if not container:
@@ -335,7 +347,6 @@ def who_opens(app: RunningApp, doc: dict, page: dict) -> dict[str, Any]:
 
 def shoot(app: RunningApp, doc: dict, page_ids: list[str], out_dir: Path) -> list[dict]:
     """Screenshot the pages, each signed in as someone it is for."""
-    modules = _playwright_modules()
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     pages = []
     for p in doc.get("pages") or []:
@@ -343,11 +354,19 @@ def shoot(app: RunningApp, doc: dict, page_ids: list[str], out_dir: Path) -> lis
             ent = ents.get(str((p.get("data") or {}).get("primaryEntity") or ""))
             pages.append({"id": p.get("id"), "route": p.get("route"),
                           "entity": (ent or {}).get("name"), **who_opens(app, doc, p)})
+    return run_shots(app, pages, out_dir)
+
+
+def run_shots(app: RunningApp, pages: list[dict], out_dir: Path, *, probe: bool = True,
+              states: bool = True) -> list[dict]:
+    """`page_shots.mjs` over `pages` (`{id, route, entity?, as?, cookies?,
+    anonymous?}`): one result per page, or ReviewUnavailable."""
+    modules = _playwright_modules()
     cfg = out_dir / "shots.json"
     out_dir.mkdir(parents=True, exist_ok=True)
     cfg.write_text(json.dumps({"baseUrl": app.base, "email": ADMIN_EMAIL,
                                "password": ADMIN_PASSWORD, "outDir": str(out_dir), "pages": pages,
-                               "probe": True}))
+                               "probe": probe, "states": states}))
     work = out_dir / "run"
     work.mkdir(exist_ok=True)
     link = work / "node_modules"

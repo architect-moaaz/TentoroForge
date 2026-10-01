@@ -28,7 +28,7 @@ from typing import Any, Callable
 
 from services.smith import loop as loop_mod
 from services.smith import plan as plan_mod
-from services.smith import reads, tools, writes
+from services.smith import reads, tools, trials, writes
 from services.smith.loop import Observation
 from services.smith.verbs import missing_fields
 from services.smith4.context import opening
@@ -45,6 +45,20 @@ LOOK_FIRST = ("Nothing has been read this turn. Read the page (`read_page_code`,
               "usually answers this. "
               "Ask again only if it still stands.")
 
+#: `done` with nothing changed and nothing tried. "Nothing needed doing" was
+#: the reply to a category that could not be added, twice, after twelve steps
+#: of reading code that read correctly (F&B, 2026-10-01): the fault was in
+#: what the code DID, and only running it shows that.
+NOTHING_TRIED = ("Nothing has changed this turn and nothing was tried. If they said "
+                 "something does not work, try it (`try_workflow`, `try_request`, "
+                 "`open_page`) and see what it does before deciding nothing needs "
+                 "doing. If nothing does need doing, end with `answer` and say why.")
+#: The start of the message when a trial that failed has not been tried
+#: again since the change meant to fix it.
+UNPROVEN = "Not shown to work yet:"
+#: The start of the message when the try after the change still fails.
+STILL_FAILING = "Still not working:"
+
 
 def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
          max_steps: int | None = None) -> Outcome:
@@ -52,14 +66,100 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     own budget — a fault dispatched by the journey verifier gets a few steps,
     a person's ask gets the full cap."""
     observations: list[Observation] = []
-    out = _run(ctx, choose, list(history or []), observations,
-               max_steps or loop_mod.MAX_STEPS)
+    bench = trials.Bench(ctx.out)
+    try:
+        out = _run(ctx, choose, list(history or []), observations,
+                   max_steps or loop_mod.MAX_STEPS, bench)
+    finally:
+        bench.close()
     out.steps = [o.tool for o in observations]
     return out
 
 
+def _trial_key(o: Observation) -> str:
+    a = o.args or {}
+    return "|".join([o.tool, str(a.get("workflow") or a.get("path") or a.get("route") or ""),
+                     str(a.get("method") or ""), str(a.get("as") or "").lower()])
+
+
+def _changed_after(observations: list[Observation], i: int) -> bool:
+    return any(o.touched for o in observations[i + 1:])
+
+
+def _still_failing(observations: list[Observation]) -> list[str]:
+    """Trials whose latest run came after a change and still failed — the
+    change did not fix what it was for."""
+    changes = [j for j, x in enumerate(observations) if x.touched]
+    if not changes:
+        return []
+    latest: dict[str, int] = {}
+    for i, o in enumerate(observations):
+        if tools.is_trial(o.tool):
+            latest[_trial_key(o)] = i
+    out = []
+    for i in sorted(latest.values()):
+        o = observations[i]
+        if i > changes[0] and trials.failed(o.said or ""):
+            out.append(o.line().split(" ->", 1)[0].lstrip("- "))
+    return out
+
+
+def _unproven(observations: list[Observation]) -> str:
+    """The trials that failed, were followed by a change, and have not been
+    run since. A change made after a failing try is a guess until the try
+    passes — the loop's oracle is the app itself."""
+    still = _still_failing(observations)
+    if still:
+        return (f"{STILL_FAILING} {', '.join(still)} was tried again after the change and "
+                "still fails. The change did not fix it. Read what the try reported — each "
+                "step's output shows what the next step received — and change what it points "
+                "at, then try again. If it cannot be fixed, end with `answer` and say what "
+                "still fails and why.")
+    open_: list[str] = []
+    for i, o in enumerate(observations):
+        if not tools.is_trial(o.tool) or not trials.failed(o.said or ""):
+            continue
+        if not _changed_after(observations, i):
+            continue
+        last_change = max(j for j, x in enumerate(observations) if x.touched)
+        key = _trial_key(o)
+        if any(_trial_key(x) == key for x in observations[last_change + 1:] if tools.is_trial(x.tool)):
+            continue
+        shown = o.line().split(" ->", 1)[0].lstrip("- ")
+        if shown not in open_:
+            open_.append(shown)
+    if not open_:
+        return ""
+    return (f"{UNPROVEN} {', '.join(open_)} failed before the change and has not been tried "
+            "since. Try it again now to show the change works — or, if it cannot be shown, "
+            "end with `answer` and say so.")
+
+
+def _before_done(observations: list[Observation], landed: list[str]) -> str:
+    """What `done` must hear first, once each: nothing tried, or not shown to work."""
+    said = {o.said.split(":", 1)[0] for o in observations if o.status == "error" and o.tool == "done"}
+    if not landed and not any(tools.is_trial(o.tool) for o in observations) \
+            and NOTHING_TRIED.split(":", 1)[0] not in said:
+        return NOTHING_TRIED
+    nudge = _unproven(observations)
+    if nudge and nudge.split(":", 1)[0] not in said:
+        return nudge
+    return ""
+
+
+def _failing_note(observations: list[Observation]) -> str:
+    """Said after what landed when a turn ends with a try still failing: a
+    change is reported, and so is that it did not fix what it was for."""
+    still = _still_failing(observations)
+    if not still:
+        return ""
+    return ("\n\nIt still does not work: I tried it again after the change and it failed "
+            "the same way. Say “carry on” and I will keep at it.")
+
+
 def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation],
-         max_steps: int) -> Outcome:
+         max_steps: int, bench: "trials.Bench | None" = None) -> Outcome:
+    bench = bench or trials.Bench(ctx.out)
     landed: list[str] = []
     touched: list[str] = []
     last: Outcome | None = None
@@ -100,10 +200,33 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             observations.append(Observation(tool=tool, args=args, status="error",
                                             said="`answer` needs `text`. Say it, or end with `done`."))
             continue
+        if tool == "done":
+            first = _before_done(observations, landed)
+            if first:
+                observations.append(Observation(tool=tool, args=args, status="error", said=first))
+                continue
         if tool in tools.TERMINAL_NAMES or not tool:
-            return _ended(tool, args, landed, touched, last)
+            ended = _ended(tool, args, landed, touched, last)
+            if tool != "answer" and ended.status not in ("asked",):
+                ended.said += _failing_note(observations)
+            return ended
         if not tools.is_tool(tool):
             observations.append(Observation(tool=tool, args=args, status="error", said=tools.unknown(tool)))
+            continue
+        if tools.is_trial(tool):
+            # THE SAME TRY AFTER A CHANGE IS A NEW TRY. Trying the workflow
+            # again once the fix landed is the whole point; trying it twice
+            # with nothing changed between is not reading the first answer.
+            same = [i for i, o in enumerate(observations) if tools.is_trial(o.tool)
+                    and loop_mod._identity(o.tool, o.args) == loop_mod._identity(tool, args)]
+            if same and not _changed_after(observations, same[-1]):
+                observations.append(Observation(
+                    tool=tool, args=args, status="error",
+                    said="That exact try has already been made and nothing has changed since — "
+                         "read what it reported rather than repeating it."))
+                continue
+            seen = trials.run(tool, args, bench=bench, doc=ctx.doc())
+            observations.append(Observation(tool=tool, args=args, status="read", said=seen))
             continue
         if loop_mod.already_done(tool, args, observations):
             observations.append(Observation(
@@ -176,10 +299,20 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 ctx.applied.append(step.said)
         touched += [p for p in step.touched if p not in touched]
         last = step
+        if bench.running and any("/db/" in p or p.startswith("db/") for p in step.touched):
+            # The copy was taken before the data model changed.
+            bench.reset()
         if not step.done and not step.finding:
             return _finished(landed, touched, step)
 
-    note = loop_mod.remaining_note(observations, capped=True).replace(
+    if not landed:
+        # NOT "Nothing needed doing" AND "I stopped" IN ONE BREATH (F&B, twice):
+        # a turn that ran out of steps while looking has not decided anything.
+        return Outcome(status="no_op", touched=list(touched), said=(
+            f"I have not changed anything yet — this turn ran out of steps ({max_steps}) "
+            "while I was still looking into it. Say “carry on” and I will pick up from there."))
+    failing = _failing_note(observations)
+    note = failing or loop_mod.remaining_note(observations, capped=True).replace(
         f"{loop_mod.MAX_STEPS} steps", f"{max_steps} steps")
     return _finished(landed, touched, last, note=note)
 
@@ -271,4 +404,4 @@ def _finished(landed: list[str], touched: list[str], last: Outcome | None, *,
                    diff_summary=last.diff_summary, touched=list(touched), finding=last.finding)
 
 
-__all__ = ["turn", "Choose", "LOOK_FIRST"]
+__all__ = ["turn", "Choose", "LOOK_FIRST", "NOTHING_TRIED", "UNPROVEN", "STILL_FAILING"]

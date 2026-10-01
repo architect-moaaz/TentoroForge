@@ -253,7 +253,7 @@ def add_field(ctx: Ctx, u: dict) -> Outcome:
                                           "label": str(f.get("label") or "")},
                                app_root=str(app_root), reasoning=ctx.reasoning)
         except SectionChangeError as exc:
-            return Outcome(status="needs_user", said=str(exc))
+            return Outcome(status="needs_user", said=str(exc), finding=str(exc))
     except Exception as exc:  # noqa: BLE001 — a turn degrades, it does not crash
         logger.exception("add_field failed for %s.%s", ent, name)
         return Outcome(status="needs_user", said=f"I could not add {name!r} to {ent}: {exc}")

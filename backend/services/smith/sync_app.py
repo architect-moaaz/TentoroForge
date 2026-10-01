@@ -50,6 +50,71 @@ def _fingerprint(app_root: Path) -> dict[str, str]:
     return out
 
 
+#: The engine an app runs on, as the platform ships it: template directory
+#: under `templates/runtime` -> where the app keeps its copy.
+ENGINE_DIRS: dict[str, str] = {
+    "feel-lite": "src/lib/feel-lite",
+    "workflows": "src/lib/workflows",
+    "rules": "src/lib/rules",
+    "events": "src/lib/events",
+}
+
+
+def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
+    """The app's copy of the platform's engine brought up to the platform's.
+
+    An app carries the workflow engine, the formula engine and the SDK as
+    files it was built with, and nothing replaced them afterwards. F&B was
+    built before the fix that made a lookup on a missing key match nothing;
+    the fix shipped, F&B kept the old engine, and its duplicate check went on
+    refusing every new category — on a definition that was right, so no
+    change Smith could make to the app would ever pass (2026-10-01). These
+    files are the platform's, not the app's: never written by an agent, never
+    the person's. So every turn starts on the current ones.
+
+    A file is written only when its content differs, so an app already
+    current is untouched (a running preview does not recompile), nothing is
+    deleted, and what a projection owns (`PROJECTED_PATHS`) is never written.
+    Returns the paths that changed, relative to the app."""
+    import shutil
+
+    from services.blueprint.assembly import PROJECTED_PATHS
+    from services.runtime_injector import _TEMPLATE_DIR
+
+    root = Path(app_root)
+    changed: list[str] = []
+    for src_name, dst_rel in ENGINE_DIRS.items():
+        src = _TEMPLATE_DIR / src_name
+        if not src.is_dir():
+            continue
+        for f in sorted(src.rglob("*")):
+            if not f.is_file() or "__tests__" in f.parts or f.name.endswith((".test.ts", ".spec.ts")):
+                continue
+            rel = f"{dst_rel}/{f.relative_to(src).as_posix()}"
+            if any(rel == p or rel.startswith(p.rstrip("/") + "/") for p in PROJECTED_PATHS):
+                continue
+            dst = root / rel
+            data = f.read_bytes()
+            try:
+                if dst.read_bytes() == data:
+                    continue
+            except OSError:
+                pass
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(f, dst)
+            changed.append(rel)
+    if doc is not None:
+        from services.blueprint.ui_engineer import ensure_sdk
+        before = _fingerprint(root)
+        ensure_sdk(doc, root)
+        after = _fingerprint(root)
+        changed += sorted(k for k in after if k.startswith("src/sdk/") and before.get(k) != after[k])
+    if changed:
+        logger.info("[engine] %s: %d engine file(s) brought up to the platform's: %s",
+                    root, len(changed), ", ".join(changed[:8]))
+    return changed
+
+
 def sync(svc: Any, app_root: str) -> dict:
     """Write every projection from `svc.doc`; what changed, added and went."""
     from services.smith.reproject import everything
@@ -58,6 +123,7 @@ def sync(svc: Any, app_root: str) -> dict:
 
     root = Path(app_root)
     before = _fingerprint(root)
+    refresh_engine(root, svc.doc)
     everything(svc, app_root)
     after = _fingerprint(root)
     changed = sorted(k for k in after if k in before and before[k] != after[k])
@@ -105,4 +171,4 @@ def run(output_dir: str, *, reasoning: Any = None) -> dict:
     return {"applied": True, "edited_paths": moved, "diff_summary": summary_of(out), **out}
 
 
-__all__ = ["run", "summary_of", "sync"]
+__all__ = ["ENGINE_DIRS", "refresh_engine", "run", "summary_of", "sync"]

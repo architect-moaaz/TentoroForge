@@ -3,7 +3,11 @@
 //
 //   node page_shots.mjs <config.json>
 //   config = { baseUrl, email, password, outDir, width?, height?, probe?,
-//              pages: [{ id, route, entity? }] }
+//              states?, pages: [{ id, route, entity?, cookies?, anonymous? }] }
+//
+// `states: false` skips the empty and missing-record openings (Smith's
+// `open_page` asks how ONE page behaves, not how it degrades). A page with
+// `anonymous` is opened signed out.
 //
 // For each page:
 //   * the page as it is — screenshot, HTTP status, every browser error;
@@ -14,7 +18,7 @@
 //
 // A route with a `[param]` is opened on a real record: the first row of the
 // page's entity, read through the app's own data API as the signed-in user.
-// Prints one JSON line: [{ id, route, url, status, file, errors[], ms,
+// Prints one JSON line: [{ id, route, url, landed, text, status, file, errors[], ms,
 //                          states: { empty?, missing? }, controls? }].
 import { chromium } from "playwright";
 import fs from "node:fs";
@@ -47,6 +51,13 @@ await emptyCtx.addCookies([...(await ctx.cookies()),
 // found — as that person. One pair of contexts per distinct session.
 const byCookie = new Map();
 async function contextsFor(p) {
+  if (p.anonymous) {
+    if (!byCookie.has("")) {
+      const none = await browser.newContext({ viewport });
+      byCookie.set("", { ctx: none, emptyCtx: none });
+    }
+    return byCookie.get("");
+  }
   if (!p.cookies?.length) return { ctx, emptyCtx };
   const key = p.cookies[0].value;
   if (!byCookie.has(key)) {
@@ -125,7 +136,11 @@ async function open(context, url, { shot } = {}) {
   // What the page SAYS it is — streaming sends a not-found page as HTTP 200.
   const state = await page.locator("[data-forge-page-state]").first()
     .getAttribute("data-forge-page-state", { timeout: 1000 }).catch(() => null);
-  return { page, status, errors, state };
+  // Where the page ended up and what it says: a sign-in that lands on the
+  // wrong screen, or a list that is empty, is only visible here.
+  const landed = new URL(page.url()).pathname;
+  const text = (await page.locator("body").innerText({ timeout: 5000 }).catch(() => "")).slice(0, 6000);
+  return { page, status, errors, state, landed, text };
 }
 
 // ---------------------------------------------------------------------------
@@ -258,12 +273,15 @@ for (const p of cfg.pages) {
   const file = path.join(cfg.outDir, `${p.id}.png`);
   const main = await open(who.ctx, url, { shot: file });
   const result = { id: p.id, route: p.route, url, as: p.as ?? null, status: main.status, state: main.state,
+                   landed: main.landed, text: main.text,
                    file, errors: [...new Set(main.errors)].slice(0, 12), states: {} };
   let found = [];
   if (cfg.probe) found = await controls(main.page).catch(() => []);
   await main.page.close();
 
-  if (!isRecord) {
+  if (cfg.states === false) {
+    // asked about the page as it is, not about its degraded states
+  } else if (!isRecord) {
     const emptyShot = path.join(cfg.outDir, `${p.id}.empty.png`);
     const e = await open(who.emptyCtx, url, { shot: emptyShot });
     result.states.empty = { status: e.status, errors: [...new Set(e.errors)].slice(0, 8), file: emptyShot };

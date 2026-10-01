@@ -43,8 +43,16 @@ def from_seam(out: dict[str, Any], *, ok: str = "Done.", fail: str,
         return Outcome(status="asked", said=str(out.get("reason") or ""),
                        options=list(out.get("options") or []))
     if not out.get("applied"):
-        return Outcome(status="needs_user", said=str(out.get("reason") or fail),
-                       options=list(out.get("options") or []))
+        reason = str(out.get("reason") or fail)
+        options = list(out.get("options") or [])
+        # A SEAM THAT DID NOTHING TELLS THE LOOP FIRST. "Refused 2 times and
+        # nothing has been changed. The last reason was: the agent returned
+        # nothing usable" was F&B's whole reply to "do them in order" — twice.
+        # The loop can read why and go another way (a page's code, another
+        # section); only what it cannot settle reaches the person, after what
+        # landed. A result with choices is a question for the person.
+        return Outcome(status="needs_user", said=reason, options=options,
+                       finding="" if options else reason)
     touched = list(out.get("edited_paths") or [])
     return Outcome(status=status_ok, said=str(out.get("diff_summary") or ok),
                    touched=touched, diff_summary=", ".join(touched[:8]) if touched else "")

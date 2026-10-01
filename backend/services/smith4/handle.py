@@ -32,6 +32,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
     `services.smith.loop.next_step` on the real model. `move` is the tree
     editor for layout pages; absent, `move_dispatcher`."""
     choose = choose or _default_choose(reasoning, images=_image_paths(attachments))
+    _engine_current(output_dir)
     if move is None:
         from services.smith.move_dispatcher import move_dispatcher
         move = move_dispatcher
@@ -86,6 +87,26 @@ def handle(*, project_id: str, output_dir: str, message: str,
         if note and note.strip() not in result.said:
             result.said += note
     return _in_step(output_dir, version_before, result)
+
+
+def _engine_current(output_dir: str) -> None:
+    """Every turn on a built app starts on the platform's current engine
+    (`sync_app.refresh_engine`): what Smith reads and tries is what the
+    platform now ships, and a fix to the engine reaches the app the next time
+    anyone speaks to it. Never costs the turn."""
+    from pathlib import Path
+    app_root = Path(output_dir) / "app"
+    if not (app_root / "package.json").is_file():
+        return
+    try:
+        import json
+        from services.smith.sync_app import refresh_engine
+        doc_path = Path(output_dir) / ".forge" / "blueprint" / "current.json"
+        doc = json.loads(doc_path.read_text("utf-8")) if doc_path.is_file() else None
+        refresh_engine(app_root, doc)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception("[smith] refreshing the engine of %s failed", output_dir)
 
 
 def _version(output_dir: str) -> int:
