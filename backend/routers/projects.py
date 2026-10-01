@@ -445,7 +445,7 @@ async def preview_start(
     # Its failures reach Smith's inbox (services/app_reporting).
     from services.app_reporting import wire as _wire_reporting
     try:
-        _wire_reporting(app_dir, project.id)
+        _wire_reporting(app_dir, getattr(project, "id", None))
     except OSError:
         pass
     try:

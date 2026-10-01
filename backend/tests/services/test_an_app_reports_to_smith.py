@@ -42,5 +42,5 @@ def test_every_way_an_app_runs_is_wired():
     from routers import blueprint_generate, projects
     from services.deploy import vercel_provider
     assert "publish_env(snapshot.project_id)" in inspect.getsource(vercel_provider)
-    assert "_wire_reporting(app_dir, project.id)" in inspect.getsource(projects.preview_start)
+    assert "_wire_reporting(app_dir, getattr(project, \"id\", None))" in inspect.getsource(projects.preview_start)
     assert '_wire_reporting(app_root, getattr(project, "id", None))' in inspect.getsource(blueprint_generate)
