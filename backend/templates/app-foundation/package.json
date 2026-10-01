@@ -59,7 +59,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/bcryptjs": "^2.4.6",
-    "drizzle-kit": "^0.30.0",
+    "drizzle-kit": "^0.31.8",
     "tsx": "^4.19.0",
     "postcss": "^8.4.0",
     "null-loader": "^4.0.1"

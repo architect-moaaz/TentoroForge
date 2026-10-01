@@ -230,6 +230,39 @@ def _normalise_scripts(pkg: dict) -> bool:
     return False
 
 
+# The lowest version of a tool the platform's own infrastructure needs, raised
+# in an app whose package.json was written before. Neon creates every app
+# database on Postgres 18, where NOT NULL is a named constraint that
+# information_schema reports as a CHECK; drizzle-kit before 0.31.8 read those
+# as checks the schema no longer declares and began every push with
+# `DROP CONSTRAINT "<table>_id_not_null"`, which Postgres refuses on a primary
+# key. The push stopped there, before any new column — F&B republished without
+# `orders.fulfilled` and the build went on to succeed (2026-10-01).
+_FLOORS = {"drizzle-kit": (0, 31, 8)}
+
+
+def _version(spec: str) -> tuple[int, ...] | None:
+    digits = spec.lstrip("^~>=v ").split("-", 1)[0].split(".")
+    try:
+        return tuple(int(d) for d in digits)
+    except ValueError:
+        return None
+
+
+def _raise_floors(pkg: dict) -> bool:
+    """A tool pinned below its floor is moved up to `^floor`. Returns True if
+    a change was made; a spec that is not a plain version is left alone."""
+    changed = False
+    for section in ("dependencies", "devDependencies"):
+        deps = pkg.get(section) or {}
+        for name, floor in _FLOORS.items():
+            have = _version(str(deps.get(name, "")))
+            if have is not None and have < floor:
+                deps[name] = "^" + ".".join(map(str, floor))
+                changed = True
+    return changed
+
+
 def _interpolate_placeholders(pkg: dict, project_slug: str | None) -> bool:
     """Replace legacy template placeholders (``__APP_SLUG__``) in ``name``.
 
@@ -312,8 +345,9 @@ def refresh_vendor_and_deps(
     rewritten, changes = _rewrite_deps_for_vendor(original_deps)
     name_changed = _interpolate_placeholders(pkg, project_slug)
     scripts_changed = _normalise_scripts(pkg)
+    floors_raised = _raise_floors(pkg)
 
-    if rewritten != original_deps or name_changed or scripts_changed:
+    if rewritten != original_deps or name_changed or scripts_changed or floors_raised:
         pkg["dependencies"] = rewritten
         pkg_path.write_text(json.dumps(pkg, indent=2) + "\n", encoding="utf-8")
         for old_name, old_spec, new_spec in changes["rewritten"]:
@@ -325,6 +359,8 @@ def refresh_vendor_and_deps(
             logger.info("[vendor-refresh] dropped %s (non-vendored)", name)
         if name_changed:
             logger.info("[vendor-refresh] interpolated __APP_SLUG__ → %s", project_slug)
+        if floors_raised:
+            logger.info("[vendor-refresh] raised tool floors: %s", _FLOORS)
         if scripts_changed:
             logger.info(
                 "[vendor-refresh] normalised build script → %s",
