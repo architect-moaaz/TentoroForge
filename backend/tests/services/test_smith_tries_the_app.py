@@ -300,8 +300,15 @@ def test_a_stale_engine_is_brought_up_to_the_platforms_and_nothing_else_moves(tm
     assert refresh_engine(app) == []          # current: nothing written, nothing recompiles
 
 
-def test_every_turn_on_a_built_app_starts_on_the_current_engine(tmp_path, scripted):
+def _built(tmp_path):
+    """A built app: an engine definition and an app directory."""
+    from services.blueprint.service import BlueprintService
     _repo(tmp_path)
+    BlueprintService.create(output_dir=tmp_path, app_id="t", name="F&B", domain="food").save()
+
+
+def test_every_turn_on_a_built_app_starts_on_the_current_engine(tmp_path, scripted):
+    _built(tmp_path)
     app = tmp_path / "app"
     (app / "src/lib/workflows").mkdir(parents=True)
     (app / "package.json").write_text("{}")
@@ -323,7 +330,7 @@ def test_no_crash_report_sends_the_loop_to_try_rather_than_ending_the_turn(tmp_p
 
 
 def test_a_refreshed_engine_is_the_first_thing_the_turn_hears(tmp_path, scripted):
-    _repo(tmp_path)
+    _built(tmp_path)
     app = tmp_path / "app"
     (app / "src/lib/workflows").mkdir(parents=True)
     (app / "package.json").write_text("{}")
@@ -377,3 +384,20 @@ def test_the_editor_sampler_keeps_the_same_rule():
     out = subprocess.run(["node", "--input-type=module", "-e", script], cwd=root, capture_output=True, text=True)
     rows = _json.loads(out.stdout)
     assert all(r["country"] == "India" for r in rows), rows
+
+
+def test_an_app_is_caught_up_once_per_platform_version(tmp_path, monkeypatch):
+    """F&B's account.ts was projected before the projection wrote each role's
+    landing; nothing re-projected it until someone changed something."""
+    from services.smith import sync_app
+    _built(tmp_path)
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "package.json").write_text("{}")
+    syncs = []
+    monkeypatch.setattr(sync_app, "sync", lambda svc, root: syncs.append(root) or
+                        {"changed": ["src/lib/account.ts"], "added": [], "removed": []})
+    assert sync_app.catch_up(str(tmp_path)) == ["src/lib/account.ts"]
+    assert sync_app.catch_up(str(tmp_path)) == []            # same platform: nothing to do
+    monkeypatch.setitem(sync_app._STAMP, "v", "a-newer-platform")
+    assert sync_app.catch_up(str(tmp_path)) == ["src/lib/account.ts"]
+    assert len(syncs) == 2

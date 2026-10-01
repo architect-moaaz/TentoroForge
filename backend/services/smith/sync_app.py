@@ -115,6 +115,66 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
     return changed
 
 
+#: What an app is written out by: the projections and the files they copy.
+#: A change to any of these is a platform change an existing app has not had.
+_PLATFORM_SOURCES = ("services/blueprint", "services/smith/reproject.py",
+                     "templates/runtime", "templates/app-foundation/src")
+_STAMP: dict[str, str] = {}
+STAMP_FILE = "platform-stamp"
+
+
+def platform_stamp() -> str:
+    """A fingerprint of the code that writes an application out — computed
+    once per process, since it changes only when the platform is deployed."""
+    if "v" not in _STAMP:
+        backend = Path(__file__).resolve().parents[2]
+        h = hashlib.sha1()
+        for rel in _PLATFORM_SOURCES:
+            base = backend / rel
+            files = [base] if base.is_file() else sorted(
+                f for f in base.rglob("*") if f.is_file() and "__pycache__" not in f.parts)
+            for f in files:
+                h.update(str(f.relative_to(backend)).encode())
+                try:
+                    h.update(f.read_bytes())
+                except OSError:
+                    continue
+        _STAMP["v"] = h.hexdigest()[:16]
+    return _STAMP["v"]
+
+
+def catch_up(output_dir: str | Path) -> list[str]:
+    """The application written out again when the platform that writes it has
+    changed since it was last written: the files that moved, or [].
+
+    A fix to a projection reached only the apps built after it. F&B's
+    definition sent its administrator to the back office; its `account.ts`
+    had been projected before the projection wrote each role's landing, so
+    the administrator landed on the customers' menu, and the turn spent
+    twelve steps trying to edit a generated file by hand (2026-10-01). The
+    platform's own fixes are the platform's to deliver: once per platform
+    version, at the start of the next turn, before anyone reads anything."""
+    out = Path(output_dir)
+    app_root = out / "app"
+    stamp_path = out / ".forge" / STAMP_FILE
+    if not (app_root / "package.json").is_file() or not (out / ".forge" / "blueprint" / "current.json").is_file():
+        return []
+    stamp = platform_stamp()
+    try:
+        if stamp_path.read_text("utf-8").strip() == stamp:
+            return []
+    except OSError:
+        pass
+    from services.blueprint.service import BlueprintService
+    done = sync(BlueprintService.load(output_dir=str(out)), str(app_root))
+    stamp_path.write_text(stamp, "utf-8")
+    moved = done["changed"] + done["added"] + done["removed"]
+    if moved:
+        logger.info("[catch-up] %s: written out for platform %s, %d file(s) moved: %s",
+                    out, stamp, len(moved), ", ".join(moved[:8]))
+    return moved
+
+
 def sync(svc: Any, app_root: str) -> dict:
     """Write every projection from `svc.doc`; what changed, added and went."""
     from services.smith.reproject import everything
@@ -133,6 +193,10 @@ def sync(svc: Any, app_root: str) -> dict:
     # table could be created (Test2's Area) is in the schema files and not in
     # the database; bringing the app in step brings that in step as well.
     pushed = push_now(root)
+    try:
+        (root.parent / ".forge" / STAMP_FILE).write_text(platform_stamp(), "utf-8")
+    except OSError:
+        pass
     return {"changed": changed, "added": added, "removed": removed,
             "database": "in step" if pushed["applied"] else pushed["reason"]}
 
@@ -171,4 +235,4 @@ def run(output_dir: str, *, reasoning: Any = None) -> dict:
     return {"applied": True, "edited_paths": moved, "diff_summary": summary_of(out), **out}
 
 
-__all__ = ["ENGINE_DIRS", "refresh_engine", "run", "summary_of", "sync"]
+__all__ = ["ENGINE_DIRS", "catch_up", "platform_stamp", "refresh_engine", "run", "summary_of", "sync"]

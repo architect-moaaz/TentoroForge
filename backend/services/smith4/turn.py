@@ -167,10 +167,10 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         # reported and changed a workflow that was already right.
         shown = ", ".join(ctx.engine_refreshed[:8]) + (" …" if len(ctx.engine_refreshed) > 8 else "")
         observations.append(Observation(tool="refresh_engine", status="read", said=(
-            f"Before this turn the app's copy of the platform's engine was out of date and was "
-            f"brought up to the current one ({len(ctx.engine_refreshed)} file(s): {shown}). A fault "
-            "they reported earlier may already be fixed by that: try it before changing anything, "
-            "and if the try passes, say it works now and why.")))
+            f"Before this turn the application was out of date with the platform and was written "
+            f"out again from its definition on the current one ({len(ctx.engine_refreshed)} "
+            f"file(s): {shown}). A fault they reported may already be fixed by that: try it before "
+            "changing anything, and if the try passes, say it works now and why.")))
     landed: list[str] = []
     touched: list[str] = []
     last: Outcome | None = None

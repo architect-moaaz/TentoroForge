@@ -97,20 +97,18 @@ def _once(items: list) -> list:
 
 
 def _engine_current(output_dir: str) -> list[str]:
-    """Every turn on a built app starts on the platform's current engine
-    (`sync_app.refresh_engine`): what Smith reads and tries is what the
-    platform now ships, and a fix to the engine reaches the app the next time
+    """Every turn on a built app starts on the current platform
+    (`sync_app.catch_up`: the engine, the SDK and every projection, written
+    out again once per platform version): what Smith reads and tries is what
+    the platform now ships, and a platform fix reaches the app the next time
     anyone speaks to it. Never costs the turn."""
     from pathlib import Path
     app_root = Path(output_dir) / "app"
     if not (app_root / "package.json").is_file():
         return []
     try:
-        import json
-        from services.smith.sync_app import refresh_engine
-        doc_path = Path(output_dir) / ".forge" / "blueprint" / "current.json"
-        doc = json.loads(doc_path.read_text("utf-8")) if doc_path.is_file() else None
-        return refresh_engine(app_root, doc)
+        from services.smith.sync_app import catch_up
+        return catch_up(output_dir)
     except Exception:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).exception("[smith] refreshing the engine of %s failed", output_dir)
