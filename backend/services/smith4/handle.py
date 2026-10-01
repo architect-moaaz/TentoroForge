@@ -32,7 +32,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
     `services.smith.loop.next_step` on the real model. `move` is the tree
     editor for layout pages; absent, `move_dispatcher`."""
     choose = choose or _default_choose(reasoning, images=_image_paths(attachments))
-    _engine_current(output_dir)
+    refreshed = _engine_current(output_dir)
     if move is None:
         from services.smith.move_dispatcher import move_dispatcher
         move = move_dispatcher
@@ -44,7 +44,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
                    ask=ask, reasoning=reasoning, guards=guards or (lambda _o: []), move=move,
                    attachments=list(attachments or []), history=list(history or []),
                    evidence=[str(e) for e in (evidence or []) if str(e).strip()],
-                   app_name=str(app_name or ""))
+                   app_name=str(app_name or ""), engine_refreshed=_once(refreshed))
 
     # AGREED TO ALL OF IT, SO DO ALL OF IT. "Do them in order" did the first
     # step and said "say next" — the person had just said the whole plan
@@ -89,7 +89,14 @@ def handle(*, project_id: str, output_dir: str, message: str,
     return _in_step(output_dir, version_before, result)
 
 
-def _engine_current(output_dir: str) -> None:
+def _once(items: list) -> list:
+    """The items the first time, nothing after: a refresh is news to the
+    turn's first step, not to every step of an agreed plan."""
+    taken, items[:] = list(items), []
+    return taken
+
+
+def _engine_current(output_dir: str) -> list[str]:
     """Every turn on a built app starts on the platform's current engine
     (`sync_app.refresh_engine`): what Smith reads and tries is what the
     platform now ships, and a fix to the engine reaches the app the next time
@@ -97,16 +104,17 @@ def _engine_current(output_dir: str) -> None:
     from pathlib import Path
     app_root = Path(output_dir) / "app"
     if not (app_root / "package.json").is_file():
-        return
+        return []
     try:
         import json
         from services.smith.sync_app import refresh_engine
         doc_path = Path(output_dir) / ".forge" / "blueprint" / "current.json"
         doc = json.loads(doc_path.read_text("utf-8")) if doc_path.is_file() else None
-        refresh_engine(app_root, doc)
+        return refresh_engine(app_root, doc)
     except Exception:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).exception("[smith] refreshing the engine of %s failed", output_dir)
+        return []
 
 
 def _version(output_dir: str) -> int:

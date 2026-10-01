@@ -109,7 +109,9 @@ class Bench:
             self.log.parent.mkdir(parents=True, exist_ok=True)
             self.log.write_bytes(b"")
             self._log_at = 0
-            app = factory(Path(self.output_dir) / "app", log=self.log)
+            import uuid
+            app = factory(Path(self.output_dir) / "app", log=self.log,
+                          dist_dir=f".next-trial-{uuid.uuid4().hex[:6]}")
             try:
                 self._app = app.__enter__()
             except ReviewUnavailable as exc:

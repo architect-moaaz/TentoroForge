@@ -160,6 +160,17 @@ def _failing_note(observations: list[Observation]) -> str:
 def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation],
          max_steps: int, bench: "trials.Bench | None" = None) -> Outcome:
     bench = bench or trials.Bench(ctx.out)
+    if ctx.engine_refreshed and not observations:
+        # SAID, SO A PASSING TRY IS BELIEVED. F&B's duplicate check passed on
+        # the first try once the engine was current; not knowing why, the
+        # loop spent eleven more steps looking for the bug the person had
+        # reported and changed a workflow that was already right.
+        shown = ", ".join(ctx.engine_refreshed[:8]) + (" …" if len(ctx.engine_refreshed) > 8 else "")
+        observations.append(Observation(tool="refresh_engine", status="read", said=(
+            f"Before this turn the app's copy of the platform's engine was out of date and was "
+            f"brought up to the current one ({len(ctx.engine_refreshed)} file(s): {shown}). A fault "
+            "they reported earlier may already be fixed by that: try it before changing anything, "
+            "and if the try passes, say it works now and why.")))
     landed: list[str] = []
     touched: list[str] = []
     last: Outcome | None = None
@@ -226,6 +237,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                          "read what it reported rather than repeating it."))
                 continue
             seen = trials.run(tool, args, bench=bench, doc=ctx.doc())
+            logger.info("[smith-try] %s %s -> %s", tool, args, " | ".join(seen.splitlines()[:6])[:600])
             observations.append(Observation(tool=tool, args=args, status="read", said=seen))
             continue
         if loop_mod.already_done(tool, args, observations):
@@ -312,6 +324,10 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             f"I have not changed anything yet — this turn ran out of steps ({max_steps}) "
             "while I was still looking into it. Say “carry on” and I will pick up from there."))
     failing = _failing_note(observations)
+    if not failing and _unproven(observations).startswith(UNPROVEN):
+        # The change landed on the last step the cap allowed, untried.
+        failing = ("\n\nI have not yet tried it again since the change, so I cannot say it works "
+                   "yet — this turn ran out of steps. Say “carry on” and I will try it.")
     note = failing or loop_mod.remaining_note(observations, capped=True).replace(
         f"{loop_mod.MAX_STEPS} steps", f"{max_steps} steps")
     return _finished(landed, touched, last, note=note)

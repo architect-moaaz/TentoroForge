@@ -309,8 +309,10 @@ def run(output_dir: str, *, kind: str = incident_ledger.KIND_CRASH) -> dict:
     answer, options = (slow_answer(str(output_dir), doc)
                        if kind == incident_ledger.KIND_SLOW
                        else crash_answer(str(output_dir), doc))
+    reported = (len(incident_ledger.crashes(str(output_dir))) if kind == incident_ledger.KIND_CRASH
+                else None)
     return {"applied": False, "edited_paths": [], "answer": answer,
-            "options": options, "kind": kind}
+            "options": options, "kind": kind, "reported": reported}
 
 
 __all__ = ["SHOWN", "MEASURED", "change_before", "describe_crash",

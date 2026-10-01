@@ -71,6 +71,9 @@ class Ctx:
     #: What earlier steps of THIS turn changed in the application, in their
     #: own words — so a later step answers knowing it ("rebuild" after a fix).
     applied: list[str] = field(default_factory=list)
+    #: Engine files brought up to the platform's at the start of this turn
+    #: (`sync_app.refresh_engine`). A fault reported before may be gone.
+    engine_refreshed: list[str] = field(default_factory=list)
 
     @property
     def out(self) -> str:
@@ -621,6 +624,15 @@ def incident(ctx: Ctx, u: dict) -> Outcome:
     from services.incident_ledger import KIND_CRASH, KIND_SLOW
     from services.smith.incidents import run
     out = run(ctx.out, kind=KIND_SLOW if u["verb"] == "explain_slowness" else KIND_CRASH)
+    if out.get("reported") == 0:
+        # NO REPORT IS NOT "IT WORKS". "Not able to add food and beverages as
+        # admin" was answered with three paragraphs on how crash reports
+        # reach Smith and a "Verify & fix" chip (F&B, 2026-10-01). The loop
+        # hears it and tries what they said does not work.
+        return Outcome(status="no_op", finding=(
+            "No failures have been reported by the running app — which does not mean it "
+            "works. Try what they said does not work (`try_workflow` with what they "
+            "entered, `open_page` as their role) and see what happens."))
     return Outcome(status="needs_user", said=str(out.get("answer") or ""),
                    options=list(out.get("options") or []))
 

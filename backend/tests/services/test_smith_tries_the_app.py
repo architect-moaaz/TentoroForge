@@ -145,8 +145,9 @@ class _FakeApp:
     started = 0
     stopped = 0
 
-    def __init__(self, root, log=None):
+    def __init__(self, root, log=None, dist_dir=""):
         self.base = "http://127.0.0.1:1"
+        self.dist_dir = dist_dir
 
     def __enter__(self):
         _FakeApp.started += 1
@@ -307,3 +308,38 @@ def test_every_turn_on_a_built_app_starts_on_the_current_engine(tmp_path, script
     (app / "src/lib/workflows/query-result.ts").write_text("old")
     _turn(tmp_path, _Chooser({"tool": "answer", "args": {"text": "ok"}}), "what is this?")
     assert (app / "src/lib/workflows/query-result.ts").read_text() != "old"
+
+
+def test_no_crash_report_sends_the_loop_to_try_rather_than_ending_the_turn(tmp_path, scripted):
+    """'Not able to add food and beverages as admin' got three paragraphs on
+    how crash reports work and a Verify & fix chip."""
+    _answers, calls = scripted
+    _repo(tmp_path)
+    chooser = _Chooser({"tool": "explain_crash", "args": {}}, _try(), {"tool": "done", "args": {}})
+    result = _turn(tmp_path, chooser, "not able to add food and beverages as admin")
+    assert "does not mean it works" in chooser.seen[1][-1].said
+    assert [c[0] for c in calls] == ["try_workflow"]
+    assert "Nothing has been reported as crashing" not in result.said
+
+
+def test_a_refreshed_engine_is_the_first_thing_the_turn_hears(tmp_path, scripted):
+    _repo(tmp_path)
+    app = tmp_path / "app"
+    (app / "src/lib/workflows").mkdir(parents=True)
+    (app / "package.json").write_text("{}")
+    (app / "src/lib/workflows/query-result.ts").write_text("old")
+    chooser = _Chooser(_try(), {"tool": "done", "args": {}})
+    _turn(tmp_path, chooser)
+    first = chooser.seen[0][0]
+    assert first.tool == "refresh_engine" and "may already be fixed" in first.said
+    assert "src/lib/" in first.said and "file(s)" in first.said
+
+
+def test_a_change_on_the_last_step_is_said_to_be_untried(tmp_path, monkeypatch, scripted):
+    import services.smith.loop as loop_mod
+    monkeypatch.setattr(loop_mod, "MAX_STEPS", 2)
+    answers, _calls = scripted
+    answers.append("Create Category (FLOW-001) run as Admin (Admin): HTTP 422\nanswer: {}")
+    _repo(tmp_path)
+    result = _turn(tmp_path, _Chooser(_try(), _write()))
+    assert "Rewrote **Categories**." in result.said and "not yet tried it again" in result.said

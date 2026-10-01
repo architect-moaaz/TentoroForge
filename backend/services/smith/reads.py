@@ -53,6 +53,12 @@ SKIP_DIRS: frozenset[str] = frozenset({
     ".turbo", ".cache", "coverage",
 })
 
+def _skipped(name: str) -> bool:
+    """A directory left out of listings: dependencies, and every Next build
+    directory — `.next`, a review's `.next-review`, a trial's `.next-trial-…`."""
+    return name in SKIP_DIRS or name.startswith(".next")
+
+
 #: How much of a file one read returns, in lines. Enough for any page module
 #: the build writes; a longer file is read in pieces by `start`.
 MAX_LINES = 400
@@ -151,7 +157,7 @@ def list_files(output_dir: str, path: str = "") -> str:
     lines: list[str] = []
     skipped: list[str] = []
     for entry in entries:
-        if entry.is_dir() and entry.name in SKIP_DIRS:
+        if entry.is_dir() and _skipped(entry.name):
             skipped.append(entry.name + "/")
             continue
         if entry.is_dir():
@@ -191,7 +197,7 @@ def grep(output_dir: str, pattern: str, path: str = "", glob: str = "") -> str:
     hits: list[str] = []
     files_searched = 0
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        dirnames[:] = sorted(d for d in dirnames if not _skipped(d))
         for name in sorted(filenames):
             if glob and not fnmatch.fnmatch(name, glob):
                 continue

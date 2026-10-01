@@ -178,8 +178,12 @@ class RunningApp:
     """The generated app, its database up and its dev server serving — beside
     whatever the person is already running, never over it."""
 
-    def __init__(self, app_root: Path, *, log: Path | None = None):
+    def __init__(self, app_root: Path, *, log: Path | None = None, dist_dir: str = REVIEW_DIST_DIR):
         self.root = app_root
+        # Each server builds into its own directory and deletes it after: two
+        # sharing one (a review and a Smith trial on the same app) took each
+        # other's build away mid-run and every page answered ENOENT.
+        self.dist_dir = dist_dir
         # Where the dev server's output goes. The review ignores it; Smith's
         # trials read it, since a workflow that throws says why only there.
         self.log = log
@@ -236,7 +240,7 @@ class RunningApp:
                  **boot_env(self.base),
                  # Also what the SDK's empty state answers to: only this server
                  # builds into `.next-review`.
-                 "NEXT_DIST_DIR": REVIEW_DIST_DIR, "DATABASE_URL": self.clone[2]})
+                 "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2]})
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             try:
@@ -272,7 +276,7 @@ class RunningApp:
                                capture_output=True, timeout=120)
         if self.started_db:
             subprocess.run(["docker", "compose", "stop"], cwd=self.root, capture_output=True, timeout=120)
-        shutil.rmtree(self.root / REVIEW_DIST_DIR, ignore_errors=True)
+        shutil.rmtree(self.root / self.dist_dir, ignore_errors=True)
 
 
 def _query(app: RunningApp, sql: str) -> list[list[str]]:
