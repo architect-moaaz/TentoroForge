@@ -629,18 +629,30 @@ def _report_payload(report: Any, doc: dict | None = None) -> dict:
 
 
 def _sign_in_line(doc: dict) -> str:
-    """Who to sign in as, one login per role. F&B's owner could only ever be
-    the administrator: "it didn't provide the option to login with different
-    type of users" (2026-10-02). The seed makes these; this says so."""
+    """The test logins the seed made, as a table: one per role, with its
+    password and where it lands. F&B's owner could only ever be the
+    administrator: "it didn't provide the option to login with different type
+    of users" (2026-10-02); a sentence naming the logins was missed, so they
+    are handed over as a table the person can test from. The seed makes these
+    (`seedRoleLogins`, `seedAdmin`) with the addresses `demo_logins` derives;
+    an app without sign-in has none to give."""
     try:
-        from services.blueprint.account_model import demo_logins
+        from services.blueprint.account_model import (
+            demo_logins, has_sign_in, home_route, landing_by_role,
+        )
         from services.post_gen_actions import admin_credentials
-        logins = demo_logins(doc)
-        if len(logins) < 2:
+        if not has_sign_in(doc):
             return ""
-        each = ", ".join(f"**{email}** ({role})" for email, role in logins)
-        return (f"\n\nSign in as {each} — the password for each is "
-                f"**{admin_credentials()['password']}**.")
+        logins = demo_logins(doc)
+        if not logins:
+            return ""
+        password = admin_credentials()["password"]
+        lands = landing_by_role(doc)
+        home = home_route(doc)
+        rows = "\n".join(f"| {role} | `{email}` | `{password}` | `{lands.get(role) or home}` |"
+                          for email, role in logins)
+        return ("\n\n**Test logins** — seeded so you can try the app as each kind of user:\n\n"
+                "| Role | Email | Password | Lands on |\n|---|---|---|---|\n" + rows)
     except Exception:  # noqa: BLE001 — the announcement never fails a build
         return ""
 

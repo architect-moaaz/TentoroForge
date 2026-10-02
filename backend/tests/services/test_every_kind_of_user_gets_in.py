@@ -92,12 +92,31 @@ def test_the_seed_makes_those_logins_with_the_same_addresses():
     assert "onConflictDoNothing" in seed.split("async function seedRoleLogins")[1].split("async function seedAdmin")[0]
 
 
-def test_the_build_announces_each_login():
+def test_the_build_hands_over_each_login_as_a_table():
     from routers.blueprint_generate import _sign_in_line
-    line = _sign_in_line(_doc())
-    assert "**admin@example.com** (Admin)" in line and "**customer@example.com** (Customer)" in line
-    assert "password" in line
-    assert _sign_in_line(_doc(roles=[{"id": "ROLE-001", "name": "Admin"}])) == ""
+    doc = _doc()
+    doc["navigation"] = {"initialRoute": {"ROLE-001": "/admin/categories", "authenticated": "/menu"}}
+    table = _sign_in_line(doc)
+    assert "| Role | Email | Password | Lands on |" in table
+    assert "| Admin | `admin@example.com` | `admin1234` | `/admin/categories` |" in table
+    assert "| Customer | `customer@example.com` | `admin1234` | `/menu` |" in table
+
+
+def test_one_role_still_gets_its_login_and_no_sign_in_gets_none():
+    from routers.blueprint_generate import _sign_in_line
+    alone = _sign_in_line(_doc(roles=[{"id": "ROLE-001", "name": "Admin"}]))
+    assert "| Admin | `admin@example.com` | `admin1234` |" in alone and "Customer" not in alone
+    assert _sign_in_line(_doc(security={"authentication": "none"})) == ""
+
+
+def test_the_table_reaches_the_build_complete_message():
+    from routers.blueprint_generate import _build_complete_message
+    doc = _doc()
+    doc["pages"] = [{"id": "PAGE-001", "route": "/menu"}]
+    doc["runtime"] = {"pages": {"planned": 1, "served": 1}}
+    msg = _build_complete_message(doc)
+    assert msg.startswith("Your application is built")
+    assert "| Customer | `customer@example.com` |" in msg
 
 
 # --- who may open a page ------------------------------------------------------
