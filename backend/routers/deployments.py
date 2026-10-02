@@ -91,9 +91,11 @@ async def _collect_integrations(
     res = await db.execute(
         select(PlatformIntegration).where(PlatformIntegration.org_id == org_id)
     )
+    from services.node_config_specs import platform_only_keys
+    platform_only = platform_only_keys()
     out: dict[str, str] = {}
     for row in res.scalars().all():
-        if not row.value_ct or not row.value_iv:
+        if not row.value_ct or not row.value_iv or row.key in platform_only:
             continue
         try:
             out[row.key] = decrypt(row.provider, row.value_ct, row.value_iv)

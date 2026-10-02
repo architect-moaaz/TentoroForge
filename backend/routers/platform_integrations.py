@@ -55,6 +55,7 @@ class IntegrationEntry(BaseModel):
     options: list[str] | None = None
     is_set: bool
     updated_at: str | None = None
+    platform_only: bool = False
 
 
 class IntegrationPutRequest(BaseModel):
@@ -137,6 +138,7 @@ async def list_integrations(
                 options=list(entry.options) if entry.options else None,
                 is_set=bool(row and row.value_ct),
                 updated_at=row.updated_at.isoformat() if row and row.updated_at else None,
+                platform_only=entry.platform_only,
             ))
     return out
 
@@ -303,5 +305,6 @@ async def integrations_catalog() -> list[dict[str, Any]]:
                 "default": e.default,
                 "help_url": e.help_url,
                 "options": list(e.options) if e.options else None,
+                "platform_only": e.platform_only,
             })
     return out

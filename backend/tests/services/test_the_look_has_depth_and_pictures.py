@@ -128,7 +128,7 @@ def test_without_a_key_nothing_is_fetched_and_the_run_carries_on(monkeypatch):
     monkeypatch.delenv(UNSPLASH_KEY_ENV, raising=False)
     doc = _doc(imagery=[{"role": "auth", "query": "tools"}])
     out = fill_imagery(doc)
-    assert out["found"] == 0 and out["empty"] == 1 and UNSPLASH_KEY_ENV in out["why"]
+    assert out["found"] == 0 and out["empty"] == 1 and "Unsplash key" in out["why"]
     assert doc["designSystem"]["imagery"][0].get("url", "") == ""
     assert "use the brand gradient" in imagery_brief(doc)
 

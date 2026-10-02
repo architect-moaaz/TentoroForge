@@ -3404,7 +3404,7 @@ def _find_imagery(svc: BlueprintService) -> None:
     """Fill the design's `imagery` entries from Unsplash (see `imagery`)."""
     from services.blueprint.imagery import fill_imagery
 
-    out = fill_imagery(svc.doc)
+    out = fill_imagery(svc.doc, output_dir=svc.output_dir)
     if out.get("found"):
         svc.save()
     logger.info("[imagery] found=%s kept=%s empty=%s %s", out.get("found"), out.get("kept"),
