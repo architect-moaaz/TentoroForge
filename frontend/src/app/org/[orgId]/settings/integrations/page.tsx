@@ -44,6 +44,8 @@ interface CatalogEntry {
   default: string | null;
   help_url: string | null;
   options: string[] | null;
+  /** Used by Forge while it builds (design tools, photos) — never copied into an app. */
+  platform_only?: boolean;
 }
 
 /** Friendly labels for known model ids. Anything not here shows the id as-is. */
@@ -69,6 +71,15 @@ const PROVIDER_LABELS: Record<string, string> = {
   cron: "Scheduled jobs",
   twilio: "SMS (Twilio)",
   stripe: "Payments (Stripe)",
+  unsplash: "Photos (Unsplash)",
+  figma: "Design (Figma)",
+  uxpilot: "Design (UX Pilot)",
+};
+
+/** What a card says about a provider, when the field labels alone don't. */
+const PROVIDER_NOTES: Record<string, string> = {
+  unsplash:
+    "Finds the photographs for sign-in panels, hero bands and empty states while an app is built, credited to their photographers. Without a key, pages use the brand gradient.",
 };
 
 function groupByProvider<T extends { provider: string }>(rows: T[]): Record<string, T[]> {
@@ -106,8 +117,9 @@ function IntegrationsSettings({ orgId }: { orgId: string }) {
         <p className="text-muted-foreground">
           Credentials configured here get baked into every app your org
           generates. Rotate a key and click <b>Sync</b> on the project page to
-          push the update into an existing app. Values are encrypted at rest
-          and never leave the platform.
+          push the update into an existing app. Design and photo keys are used
+          by Forge while it builds and never go into an app. Values are
+          encrypted at rest.
         </p>
       </div>
 
@@ -139,6 +151,7 @@ function ProviderCard({
 }) {
   const queryClient = useQueryClient();
   const [values, setValues] = useState<Record<string, string>>({});
+  const platformOnly = entries.every((e) => e.platform_only);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -189,8 +202,13 @@ function ProviderCard({
           {PROVIDER_LABELS[provider] ?? provider}
         </CardTitle>
         <CardDescription>
-          {entries.length} field{entries.length === 1 ? "" : "s"} · Not stored
-          on your generated apps until you sync
+          {PROVIDER_NOTES[provider] && (
+            <span className="block mb-1">{PROVIDER_NOTES[provider]}</span>
+          )}
+          {entries.length} field{entries.length === 1 ? "" : "s"} ·{" "}
+          {platformOnly
+            ? "Used by Forge while it builds — never copied into your apps"
+            : "Not stored on your generated apps until you sync"}
         </CardDescription>
       </CardHeader>
       <CardContent>

@@ -6,9 +6,10 @@ finds the picture: one Unsplash search per query, the first result, its URL
 sized for the web, and the photographer's credit, which the licence asks to be
 shown beside the picture and which the page author is handed with it.
 
-NO KEY, NO PHOTO — AND NO FAILURE. Unsplash's API needs an access key
-(``UNSPLASH_ACCESS_KEY``); the old keyless `source.unsplash.com` was retired in
-2024. Without a key every entry keeps an empty `url`, the page author is told
+NO KEY, NO PHOTO — AND NO FAILURE. Unsplash's API needs an access key, set
+per organisation in Settings → Integrations → Unsplash (the environment's
+``UNSPLASH_ACCESS_KEY`` is the fallback); the old keyless `source.unsplash.com`
+was retired in 2024. Without a key every entry keeps an empty `url`, the page author is told
 so, and pages fall back to the brand gradient. A search that fails does the
 same for its entry alone. A picture already found is kept: a rebuild does not
 re-roll the sign-in page.
@@ -20,11 +21,14 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
-#: The environment variable holding the Unsplash access key.
+#: The integrations provider and key (`node_config_specs.__unsplash__`), which
+#: is also the environment variable used as the fallback.
+PROVIDER = "unsplash"
 UNSPLASH_KEY_ENV = "UNSPLASH_ACCESS_KEY"
 #: Attribution the licence asks for, pointing back at the photographer.
 _UTM = "?utm_source=tentoro_forge&utm_medium=referral"
@@ -74,19 +78,32 @@ def find_photo(query: str, get: Fetcher) -> dict[str, Any] | None:
     }
 
 
-def fill_imagery(doc: dict, get: Fetcher | None = None) -> dict[str, Any]:
+def access_key(output_dir: str | Path | None) -> str:
+    """The Unsplash key of the organisation that owns this project, from the
+    integrations store; the environment when the store has none."""
+    if output_dir:
+        from services.figma.integrations import config_for
+        stored = (config_for(output_dir, PROVIDER).get(UNSPLASH_KEY_ENV) or "").strip()
+        if stored:
+            return stored
+    return os.environ.get(UNSPLASH_KEY_ENV, "").strip()
+
+
+def fill_imagery(doc: dict, get: Fetcher | None = None, *,
+                 output_dir: str | Path | None = None) -> dict[str, Any]:
     """Fill `designSystem.imagery[*].url/thumbUrl/credit` in place. Returns what
-    happened, for the ledger: how many were found, kept, or left empty and why."""
+    happened, for the ledger: how many were found, kept, or left empty and why.
+    `output_dir` names the project, so the key is its organisation's."""
     design = doc.get("designSystem") or {}
     entries = [e for e in design.get("imagery") or [] if isinstance(e, dict) and e.get("query")]
     if not entries:
         return {"found": 0, "kept": 0, "empty": 0, "why": "the design names no pictures"}
     if get is None:
-        key = os.environ.get(UNSPLASH_KEY_ENV, "").strip()
+        key = access_key(output_dir)
         if not key:
             empty = sum(1 for e in entries if not e.get("url"))
             return {"found": 0, "kept": len(entries) - empty, "empty": empty,
-                    "why": f"no {UNSPLASH_KEY_ENV} — pages use the brand gradient instead"}
+                    "why": "no Unsplash key (Settings → Integrations) — pages use the brand gradient instead"}
         get = _unsplash(key)
     found = kept = empty = 0
     for entry in entries:
@@ -122,4 +139,4 @@ def imagery_brief(doc: dict) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["UNSPLASH_KEY_ENV", "fill_imagery", "find_photo", "imagery_brief"]
+__all__ = ["UNSPLASH_KEY_ENV", "access_key", "fill_imagery", "find_photo", "imagery_brief"]

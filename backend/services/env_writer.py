@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.platform_integration import PlatformIntegration
 from models.platform_mcp_server import PlatformMcpServer
-from services.node_config_specs import all_providers, keys_for_provider
+from services.node_config_specs import all_providers, keys_for_provider, platform_only_keys
 from services.platform_integrations_crypto import CryptoError, decrypt
 
 
@@ -95,7 +95,9 @@ def mcp_env(rows: list, skipped: list[dict[str, str]] | None = None) -> dict[str
 
 def _known_keys() -> set[str]:
     """Every env-var name the spec registry declares. Only these are touched
-    by the writer; user-supplied keys (DATABASE_URL etc.) are left alone."""
+    by the writer; user-supplied keys (DATABASE_URL etc.) are left alone.
+    A platform-only key is known — so an old managed block's copy is stripped —
+    but never written (see `ConfigKey.platform_only`)."""
     return {
         entry.key
         for provider in all_providers()
@@ -123,6 +125,7 @@ async def write_env_local_from_platform(
     root = app_env_dir(output_dir)
     env_path = root / ".env.local"
     known = _known_keys()
+    platform_only = platform_only_keys()
 
     res = await db.execute(
         select(PlatformIntegration).where(PlatformIntegration.org_id == org_id)
@@ -136,6 +139,8 @@ async def write_env_local_from_platform(
     for row in rows:
         if row.key not in known:
             skipped.append({"key": row.key, "reason": "not_in_registry"})
+            continue
+        if row.key in platform_only:
             continue
         if not row.value_ct or not row.value_iv:
             # Explicitly cleared.
