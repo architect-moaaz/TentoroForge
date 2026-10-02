@@ -220,3 +220,10 @@ def test_a_page_may_not_sign_people_in_by_itself():
     assert any("next-auth" in f for f in _static_findings("", own))
     sdk = '"use client";\nimport { SignInForm } from "@/sdk/client";\nexport default function V(){ return <SignInForm />; }'
     assert not any("next-auth" in f for f in _static_findings("", sdk))
+
+
+def test_smith_hears_of_a_sign_in_page_written_before_the_rule():
+    from services.smith4.turn import standing_faults
+    doc = _doc(pages=[{"id": "PAGE-010", "route": "/login"}],
+               pageCode=[{"page": "PAGE-010", "load": "", "view": 'import { signIn } from "next-auth/react";'}])
+    assert any(f.startswith("/login signs people in through next-auth") for f in standing_faults(doc))

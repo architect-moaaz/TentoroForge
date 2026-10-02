@@ -24,6 +24,7 @@ happen. `answer` may speak only in a turn that changed nothing.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable
 
 from services.smith import loop as loop_mod
@@ -193,6 +194,16 @@ def standing_faults(doc: dict | None) -> list[str]:
                                 and str(p.get("status") or "").upper() != "REMOVED"])
     except Exception:  # noqa: BLE001
         logger.debug("[smith] access check failed", exc_info=True)
+    # A page written before the page writer refused it: F&B's sign-in page
+    # sent everyone to fixed addresses through next-auth (2026-10-02).
+    routes = {str(p.get("id")): str(p.get("route") or p.get("id")) for p in doc.get("pages") or []
+              if isinstance(p, dict)}
+    for row in doc.get("pageCode") or []:
+        if isinstance(row, dict) and re.search(r"""from\s+["']next-auth""",
+                                                str(row.get("load") or "") + str(row.get("view") or "")):
+            out.append(f"{routes.get(str(row.get('page')), row.get('page'))} signs people in through "
+                       "next-auth itself, so it decides where each person lands instead of their role "
+                       "— rewrite it with SignInForm/useSignIn (or SignUpForm/useSignUp) from @/sdk/client.")
     return out
 
 
