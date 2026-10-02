@@ -249,6 +249,9 @@ def write_section(output_dir: str, section: str, brief: str, *, subject: str = "
     app_root = str(Path(output_dir) / "app")
     before = int(svc.doc.get("version") or 0)
     tables_before = _tables_by_entity(svc.doc)
+    from services.blueprint.field_changes import field_settings, what_changed
+    fields_before = {"data": {"entities": [{"name": n, "fields": [{"name": f, **v}]}
+                                           for (n, f), v in field_settings(svc.doc).items()]}}
     try:
         req = record_requirement(svc, brief, owner=section.split(".")[0])
         framed = ("THIS IS A CHANGE to an application that is already built, not a first authoring. "
@@ -274,9 +277,29 @@ def write_section(output_dir: str, section: str, brief: str, *, subject: str = "
     touched = _reproject(svc, app_root, section) + ledger
     after = int(svc.doc.get("version") or before)
     changed = ", ".join(sorted({str(getattr(p, "natural_key", "") or "") for p in props if getattr(p, "natural_key", "")})[:8])
+    # THE DATABASE TAKES IT NOW, OR SMITH HEARS WHY. Making a dish name
+    # unique also brought in a `photo` field the database did not have; the
+    # schema files changed, nothing pushed, and the turn said "Changed" over a
+    # preview whose every read of that record failed (2026-10-02). The record
+    # types are not changed until the app's own database is too.
+    # FIELD BY FIELD WHAT IT DID — the ask's change and anything else the
+    # agent altered with it, so an unasked rename is seen and put back.
+    fields = what_changed(fields_before, svc.doc) if section.startswith("data") else []
+    field_note = (" Fields: " + "; ".join(fields[:12]) + "." if fields else "")
+    if section.startswith("data") and (Path(app_root) / "package.json").is_file():
+        from services.blueprint.schema_push import push_now
+        pushed = push_now(app_root)
+        if not pushed.get("applied") and pushed.get("lines"):
+            return {"applied": True, "touched": touched, "version": after,
+                    "finding": (f"The record types changed (version {after}), but the app's own database "
+                                f"would not take it: {pushed.get('reason')}.{field_note} Anything in that list "
+                                "the ask did not want — a field renamed or retyped along the way — put back "
+                                "as it was, so the definition and the database agree; then try the screens "
+                                "that use it."),
+                    "said": ""}
     return {"applied": True, "finding": "", "touched": touched, "version": after,
             "said": (f"Changed {SECTION_WORDS.get(section, section)} (version {after})"
-                     + (f": {changed}" if changed else "") + "."
+                     + (f": {changed}" if changed else "") + "." + field_note
                      + (f" Updated: {', '.join(touched[:6])}." if touched else ""))}
 
 
@@ -413,6 +436,96 @@ def _finding(text: str) -> dict:
     return {"applied": False, "said": text, "finding": text, "touched": [], "version": 0}
 
 
+WRITES = WRITES + (
+    ("set_field",
+     "Change one field's own rules and NOTHING else: `unique` (true: the "
+     "database refuses a second record with the same value) and `required` "
+     "(true: a record is never saved without it). `entity` and `field` by name. "
+     "The way to keep \"names must be unique\", \"a phone is always given\" — "
+     "a business rule only states it. Pushed to the app's database at once; if "
+     "the records already there break it, nothing is changed and you are told "
+     "which records, to settle with the person.",
+     {"entity": "string", "field": "string", "unique": "boolean", "required": "boolean"}),
+)
+
+
+WRITE_NAMES = frozenset(name for name, _d, _a in WRITES)
+
+
+def _flag(value: Any) -> bool | None:
+    if value in (None, ""):
+        return None
+    return str(value).strip().lower() in ("true", "1", "yes")
+
+
+def set_field(output_dir: str, entity: str, field: str, *, unique: Any = None,
+              required: Any = None) -> dict:
+    """One field's `unique` / `required`, set in the definition, projected
+    and pushed — or, when the app's own records break it, put back and said.
+
+    Asked to make dish names unique, `write_section` briefed the data agent,
+    which returned the whole record type: `image` renamed to `photo`, ids
+    turned to strings, `isAvailable` dropped — every run differently
+    (2026-10-02). A rule on one field is a setting, not a re-authoring."""
+    import copy
+
+    from services.blueprint.service import BlueprintService
+    from services.smith.entity_change import _project_data
+    from services.smith.section_change import find_named, names
+
+    want = {k: v for k, v in (("unique", _flag(unique)), ("required", _flag(required))) if v is not None}
+    if not want:
+        return _finding("`set_field` needs `unique` or `required` (true or false).")
+    try:
+        svc = BlueprintService.load(output_dir=output_dir)
+    except FileNotFoundError:
+        return _finding("This project has no Blueprint, so there is no field to change.")
+    entities = [e for e in (svc.doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)]
+    import re as _re
+    canon = lambda t: _re.sub(r"[^a-z0-9]", "", str(t or "").lower())   # noqa: E731
+    ent = find_named(entities, entity, id_prefix="ENTITY-") or next(
+        (e for e in entities if canon(entity) in {canon(e.get("name")), canon(e.get("table")), canon(e.get("id"))}),
+        None)
+    if ent is None:
+        return _finding(f"No record type called {entity!r}. The app has: {names(entities)}.")
+    fields = [f for f in ent.get("fields") or [] if isinstance(f, dict)]
+    fld = next((f for f in fields if str(f.get("name") or "").lower() == str(field or "").strip().lower()), None)
+    if fld is None:
+        return _finding(f"{ent.get('name')} has no field {field!r}. It has: "
+                        + ", ".join(str(f.get("name")) for f in fields) + ".")
+    if all(bool(fld.get(k)) == v for k, v in want.items()):
+        return {"applied": True, "finding": "", "touched": [], "said":
+                f"{ent.get('name')}.{fld.get('name')} is already " + " and ".join(
+                    ("unique" if k == "unique" else "required") if v else f"not {k}" for k, v in want.items()) + "."}
+    before = copy.deepcopy(svc.doc)
+    for k, v in want.items():
+        if v:
+            fld[k] = True
+        else:
+            fld.pop(k, None)
+    words = "; ".join(f"{ent.get('name')}.{fld.get('name')} is {'now' if v else 'no longer'} {k}"
+                      for k, v in want.items())
+    svc.commit(user_request=f"set {ent.get('name')}.{fld.get('name')}: {want}", smith_interpretation=words,
+               before=before, affected=[str(ent.get("id"))])
+    app_root = str(Path(output_dir) / "app")
+    touched = _project_data(svc, app_root) if (Path(app_root) / "package.json").is_file() else []
+    if (Path(app_root) / "package.json").is_file():
+        from services.blueprint.schema_push import push_now
+        pushed = push_now(app_root)
+        if not pushed.get("applied") and pushed.get("lines"):
+            # PUT BACK: a definition the app's own database will not take
+            # leaves every read of that record failing.
+            svc.doc = before
+            svc.save()
+            _project_data(svc, app_root)
+            push_now(app_root)
+            named = "; ".join(l.strip(" -") for l in pushed["lines"] if l.strip().startswith("-")) or pushed["reason"]
+            return _finding(f"Not changed: the records already in the app break it — {named}. They are the "
+                            "person's: say which, and ask whether to change those records or keep the rule as it was.")
+    return {"applied": True, "finding": "", "touched": touched, "version": int(svc.doc.get("version") or 0),
+            "said": f"{words} — the database keeps it from now on."}
+
+
 def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dict:
     """Carry out one write. The result's `finding` is the observation when an
     oracle refused; `said` is what the person is told."""
@@ -433,11 +546,14 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     if name == "verify_pages":
         routes = args.get("routes")
         return verify_pages(output_dir, list(routes) if isinstance(routes, list) else [], reasoning=reasoning)
+    if name == "set_field":
+        return set_field(output_dir, str(args.get("entity") or ""), str(args.get("field") or ""),
+                         unique=args.get("unique"), required=args.get("required"))
     if name == "write_section":
         return write_section(output_dir, str(args.get("section") or ""), str(args.get("brief") or ""),
                              subject=str(args.get("subject") or ""), reasoning=reasoning)
     raise KeyError(name)
 
 
-__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "SECTION_WORDS", "run", "rewrite_pages", "verify_pages",
-           "write_page_code", "write_section"]
+__all__ = ["WRITES", "WRITE_NAMES", "SECTION_NODE", "SECTION_WORDS", "run", "rewrite_pages", "set_field",
+           "verify_pages", "write_page_code", "write_section"]

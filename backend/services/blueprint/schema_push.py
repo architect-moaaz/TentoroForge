@@ -71,7 +71,22 @@ def push_now(app_root: str | Path) -> dict:
         return {"applied": False, "reason": "the application is not installed yet"}
     if not url or not _answers(url):
         return {"applied": False, "reason": "its database is not running"}
-    env = {**os.environ, "DATABASE_URL": url}
+    out = run_chain(root, url)
+    if out["applied"]:
+        logger.info("[schema_push] %s: schema pushed and seeded", root.parent.name)
+    return out
+
+
+#: What a publish's build runs against its database, after the reset.
+PUBLISH_CHAIN = (("npx", "tsx", "src/db/prepare-schema.ts"), ("npx", "drizzle-kit", "push", "--force"),
+                 ("npx", "tsx", "src/db/verify-schema.ts"), ("npx", "tsx", "src/db/seed.ts"))
+
+
+def run_chain(app_root: str | Path, url: str, *, extra_env: dict[str, str] | None = None) -> dict:
+    """The publish chain against the database at `url`: ``{"applied", "reason",
+    "lines"}`` — `lines` are what the step that refused said, in its words."""
+    root = Path(app_root)
+    env = {**os.environ, **(extra_env or {}), "DATABASE_URL": url}
     # THE SAME CHAIN AS A PUBLISH. A plain `drizzle-kit push` here answered
     # nothing it asked, exited 0 having changed nothing, and this said
     # "pushed" — for a renamed field, a required one, a changed type, every
@@ -79,9 +94,7 @@ def push_now(app_root: str | Path) -> dict:
     # columns filled, types converted, removed data kept), push, then the
     # database itself is asked whether it matches; any step that refuses is
     # the reason, in its own words.
-    chain = [["npx", "tsx", "src/db/prepare-schema.ts"], ["npx", "drizzle-kit", "push", "--force"],
-             ["npx", "tsx", "src/db/verify-schema.ts"], ["npx", "tsx", "src/db/seed.ts"]]
-    for cmd in chain:
+    for cmd in map(list, PUBLISH_CHAIN):
         if cmd[1] == "tsx" and not (root / cmd[2]).is_file():
             continue
         try:
@@ -89,15 +102,16 @@ def push_now(app_root: str | Path) -> dict:
                                   capture_output=True, text=True, timeout=TIMEOUT_S)
         except (OSError, subprocess.TimeoutExpired) as exc:
             logger.warning("[schema_push] %s: %s", " ".join(cmd), exc)
-            return {"applied": False, "reason": f"`{' '.join(cmd[1:])}` did not finish ({type(exc).__name__})"}
+            return {"applied": False, "reason": f"`{' '.join(cmd[1:])}` did not finish ({type(exc).__name__})",
+                    "lines": []}
         if proc.returncode != 0:
             said = (proc.stderr or proc.stdout or "").strip().splitlines()
             marked = [l for l in said if l.startswith(("[prepare-schema]", "[verify-schema]", "  - "))]
             tail = marked[-6:] if marked else said[-3:]
             logger.warning("[schema_push] %s exited %s: %s", " ".join(cmd), proc.returncode, " | ".join(tail))
-            return {"applied": False, "reason": f"`{' '.join(cmd[1:])}` failed: {' '.join(tail)[:300]}"}
-    logger.info("[schema_push] %s: schema pushed and seeded", root.parent.name)
-    return {"applied": True, "reason": ""}
+            return {"applied": False, "reason": f"`{' '.join(cmd[1:])}` failed: {' '.join(tail)[:300]}",
+                    "lines": marked or said[-12:]}
+    return {"applied": True, "reason": "", "lines": []}
 
 
-__all__ = ["database_exists", "database_url", "push_now"]
+__all__ = ["PUBLISH_CHAIN", "database_exists", "database_url", "push_now", "run_chain"]

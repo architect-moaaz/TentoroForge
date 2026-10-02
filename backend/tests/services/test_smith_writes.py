@@ -195,3 +195,101 @@ def test_the_three_refusals_now_go_through_write_section(tmp_path, monkeypatch):
 
 def test_every_section_the_loop_can_change_has_words_for_the_person():
     assert set(writes.SECTION_WORDS) == set(writes.SECTION_NODE)
+
+
+def test_a_data_change_the_apps_database_refuses_is_a_finding(tmp_path, monkeypatch):
+    """Making a dish name unique also brought in a `photo` field the database
+    did not have; the turn said "Changed" over a preview whose reads of that
+    record all failed (2026-10-02). The push is part of the change."""
+    import services.smith.section_change as sc
+    from services.blueprint.agent_contract import ArtifactProposal
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "package.json").write_text("{}")
+    entity = lambda image, unique: {"name": "FoodItem", "fields": [
+        {"name": "name", "type": "string", "unique": unique}, {"name": image, "type": "image"}]}
+    svc = type("S", (), {"doc": {"version": 7, "data": {"entities": [entity("image", False)]}}})()
+    monkeypatch.setattr("services.blueprint.service.BlueprintService.load", classmethod(lambda cls, output_dir: svc))
+    monkeypatch.setattr(sc, "record_requirement", lambda s, text, owner: {"id": "REQ-9"})
+
+    def rerun(s, node, **k):
+        s.doc["version"] = 8
+        s.doc["data"]["entities"] = [entity("photo", True)]
+        return [ArtifactProposal("data.entities", "food item", {"name": "FoodItem"})], None
+    monkeypatch.setattr(sc, "rerun", rerun)
+    monkeypatch.setattr("services.smith.entity_change._project_data", lambda s, root: ["app/src/db/schema/food_item.ts"])
+    monkeypatch.setattr("services.blueprint.schema_push.push_now", lambda root: {
+        "applied": False, "reason": "`tsx src/db/verify-schema.ts` failed: food_items.photo is not in the database",
+        "lines": ["  - food_items.photo is not in the database"]})
+    out = writes.write_section(str(tmp_path), "data.entities", "make dish names unique")
+    assert out["finding"] and "food_items.photo is not in the database" in out["finding"]
+    assert "FoodItem.image was removed; FoodItem.name is now unique; FoodItem.photo was added" in out["finding"]
+    assert out["touched"] == ["app/src/db/schema/food_item.ts"]
+
+    monkeypatch.setattr("services.blueprint.schema_push.push_now", lambda root: {"applied": True, "reason": "", "lines": []})
+    assert not writes.write_section(str(tmp_path), "data.entities", "make dish names unique")["finding"]
+
+
+class _FieldSvc:
+    """A Blueprint with one record type, committing in memory."""
+
+    def __init__(self):
+        self.doc = {"version": 5, "data": {"entities": [{"id": "ENTITY-002", "name": "FoodItem", "fields": [
+            {"name": "name", "type": "string", "required": True}, {"name": "image", "type": "image"}]}]}}
+        self.commits = []
+
+    def commit(self, **k):
+        self.commits.append(k)
+        self.doc["version"] += 1
+
+    def save(self):
+        pass
+
+
+def _set_up_field(tmp_path, monkeypatch, push):
+    svc = _FieldSvc()
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "package.json").write_text("{}")
+    monkeypatch.setattr("services.blueprint.service.BlueprintService.load", classmethod(lambda cls, output_dir: svc))
+    monkeypatch.setattr("services.smith.entity_change._project_data", lambda s, root: ["app/src/db/schema/food_item.ts"])
+    monkeypatch.setattr("services.blueprint.schema_push.push_now", push)
+    return svc
+
+
+def test_set_field_changes_that_one_setting_and_nothing_else(tmp_path, monkeypatch):
+    """A rule on one field is a setting, not a re-authoring: `write_section`
+    renamed `image`, retyped ids and dropped `isAvailable` while making one
+    name unique (2026-10-02)."""
+    svc = _set_up_field(tmp_path, monkeypatch, lambda root: {"applied": True, "reason": "", "lines": []})
+    out = writes.run("set_field", {"entity": "food item", "field": "Name", "unique": "true"}, output_dir=str(tmp_path))
+    assert out["applied"] and not out["finding"]
+    assert "FoodItem.name is now unique" in out["said"] and out["touched"] == ["app/src/db/schema/food_item.ts"]
+    fields = svc.doc["data"]["entities"][0]["fields"]
+    assert fields == [{"name": "name", "type": "string", "required": True, "unique": True},
+                      {"name": "image", "type": "image"}]
+    assert len(svc.commits) == 1
+
+
+def test_set_field_the_apps_records_break_is_put_back_and_the_records_named(tmp_path, monkeypatch):
+    calls = []
+
+    def push(root):
+        calls.append(root)
+        if len(calls) == 1:
+            return {"applied": False, "reason": "prepare refused", "lines": [
+                "  - food_items.name must be unique, and the rows already there are not: name=\"Paneer Tikka\" (2 rows)"]}
+        return {"applied": True, "reason": "", "lines": []}
+    svc = _set_up_field(tmp_path, monkeypatch, push)
+    out = writes.run("set_field", {"entity": "FoodItem", "field": "name", "unique": True}, output_dir=str(tmp_path))
+    assert not out["applied"] and "Paneer Tikka" in out["finding"] and "ask whether" in out["finding"]
+    assert "unique" not in svc.doc["data"]["entities"][0]["fields"][0], "the definition is put back"
+    assert len(calls) == 2, "and the database brought back in step with it"
+
+
+def test_set_field_names_what_there_is_when_asked_for_what_is_not(tmp_path, monkeypatch):
+    _set_up_field(tmp_path, monkeypatch, lambda root: {"applied": True})
+    assert "It has: name, image" in writes.run("set_field", {"entity": "FoodItem", "field": "title", "unique": True},
+                                                output_dir=str(tmp_path))["finding"]
+    assert "needs `unique` or `required`" in writes.run("set_field", {"entity": "FoodItem", "field": "name"},
+                                                        output_dir=str(tmp_path))["finding"]
+    assert "already" in writes.run("set_field", {"entity": "FoodItem", "field": "name", "required": True},
+                                   output_dir=str(tmp_path))["said"]

@@ -235,6 +235,39 @@ class VercelDeployProvider:
             # 1. Snapshot
             yield DeployEvent("snapshot", "Packaging app source…")
             _refresh_platform_files(Path(snapshot.output_dir))
+
+            # 1a. THE LIVE DATA IS ASKED FIRST (`migration_trial`). A redeploy
+            # migrates real records; the chain the build will run is tried on a
+            # copy of them, and what would not fit is fixed by Smith before
+            # anything is packaged — or the publish stops here, live app as it
+            # was, saying which records and why.
+            prior_live = await self._latest_prior_with_neon(snapshot)
+            if prior_live and prior_live.neon_project_id:
+                from services.deploy.migration_trial import ensure_publishable
+                yield DeployEvent("migrate", "Trying the change on a copy of the live data…")
+                notes: list[str] = []
+                verdict = await ensure_publishable(
+                    self.neon, prior_live.neon_project_id, snapshot.output_dir,
+                    app_project_id=str(snapshot.project_id or ""), say=notes.append)
+                for note in notes:
+                    yield DeployEvent("migrate", note)
+                if not verdict["ok"]:
+                    detail = "; ".join(l.strip() for l in verdict["lines"] if l.strip().startswith("- "))[:600] \
+                        or verdict["reason"][:600]
+                    settle = f"\n\n{verdict['settle']}" if verdict.get("settle") else ""
+                    yield DeployEvent(
+                        "error",
+                        "Not published: the live data cannot take this change without losing records — "
+                        f"{detail}. Nothing was changed, and the live app keeps running as it was.{settle}",
+                        {"stage": "migration_trial", "reason": verdict["reason"][:600]},
+                    )
+                    row.status = "failed"
+                    row.error = f"migration_trial: {verdict['reason'][:300]}"
+                    await self._flush()
+                    return
+                if verdict["fixed"]:
+                    yield DeployEvent("migrate", "Fixed — the live data takes the change now. Changed so every "
+                                      f"live record fits: {verdict.get('changed') or 'nothing in the record types'}.")
             # Deploy-time vendor + deps normalisation. Re-vendors the
             # @tentoroforge/* packages into ./vendor/ and rewrites
             # package.json deps to point at the vendored copies. Fixes
