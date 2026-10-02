@@ -39,14 +39,15 @@ def handle(*, project_id: str, output_dir: str, message: str,
         move = move_dispatcher
     typed = (message or "").strip()
     version_before = _version(output_dir)
+    planned_from = plan_mod.asked_of(output_dir)
 
-    def ctx_for(ask: str) -> Ctx:
+    def ctx_for(ask: str, step: bool = False) -> Ctx:
         return Ctx(output_dir=str(output_dir), project_id=str(project_id), message=typed,
                    ask=ask, reasoning=reasoning, guards=guards or (lambda _o: []), move=move,
                    attachments=list(attachments or []), history=list(history or []),
                    evidence=[str(e) for e in (evidence or []) if str(e).strip()],
                    app_name=str(app_name or ""), engine_refreshed=_once(refreshed),
-                   unattended=unattended)
+                   unattended=unattended, asked_from=planned_from if step else "")
 
     # A TURN THE PLATFORM STARTED is the fault and nothing else: the person's
     # waiting plan or held question is theirs, not something to clear or join.
@@ -74,7 +75,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
             pending_ask.clear(output_dir)
     if plan_mod.peek(output_dir) and typed == plan_mod.ALL_LABEL:
         return _in_step(output_dir, version_before, _all_steps(output_dir, lambda step: turn(
-            ctx_for(step), choose=choose, history=history, max_steps=max_steps)))
+            ctx_for(step, True), choose=choose, history=history, max_steps=max_steps)))
     # AGREED, SO DO THE FIRST ONE NOW.
     if plan_mod.peek(output_dir) and answers_plan:
         step = plan_mod.take_next(output_dir)
@@ -82,7 +83,7 @@ def handle(*, project_id: str, output_dir: str, message: str,
             plan_mod.clear(output_dir)
         if step:
             pending_ask.clear(output_dir)
-            result = turn(ctx_for(step), choose=choose, history=history, max_steps=max_steps)
+            result = turn(ctx_for(step, True), choose=choose, history=history, max_steps=max_steps)
             note = plan_mod.remaining_note(plan_mod.peek(output_dir))
             if note and result.status == "resolved":
                 result.said += note

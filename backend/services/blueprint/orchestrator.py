@@ -3199,7 +3199,7 @@ def _project_assemble(svc: BlueprintService, app_root: str) -> None:
 
 
 def review_coded_pages(svc: BlueprintService, app_root: str, *,
-                       only: set[str] | None = None, emit: Any = None) -> dict:
+                       only: set[str] | None = None, emit: Any = None, asked: str = "") -> dict:
     """Verify & fix for coded pages: judge each as it renders; have the weak
     ones rewritten. `only` narrows it to those page ids.
 
@@ -3219,7 +3219,7 @@ def review_coded_pages(svc: BlueprintService, app_root: str, *,
     with svc.lock:
         before = _copy.deepcopy(svc.doc.get("pageCode") or [])
     outcome = review_app(svc, app_root, client, usage=RunUsage.for_app(svc, phase="review"),
-                         only=only, emit=emit)
+                         only=only, emit=emit, asked=asked)
     rewritten = [pid for pid, r in (outcome.get("pages") or {}).items() if r.get("rewritten")]
     if rewritten:
         try:

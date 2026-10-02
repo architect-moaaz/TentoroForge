@@ -827,6 +827,7 @@ Reply with the rationale and the full contents of both files."""
 
 
 def _page_brief(doc: dict, page: dict) -> dict:
+    from services.blueprint.page_usage import page_requirements
     pages = {str(p.get("id")): p for p in doc.get("pages") or []}
     from services.blueprint.app_sdk import page_keys, workflow_keys
     pkeys, wkeys = page_keys(doc), workflow_keys(doc)
@@ -849,6 +850,9 @@ def _page_brief(doc: dict, page: dict) -> dict:
                                    "trigger": (w.get("trigger") or {}).get("detail")} for w in launched],
         "roles": [r.get("name") for r in doc.get("roles") or [] if r.get("id") in (page.get("users") or [])],
         "widgets": page_widget_brief(doc, page),
+        # WHAT IT ANSWERS TO: the requirements of its module, of the processes
+        # it launches and of the rules on its records (`page_usage`).
+        **({"requirements": reqs} if (reqs := page_requirements(doc, page)) else {}),
         **_content_part(doc, page),
     }
 

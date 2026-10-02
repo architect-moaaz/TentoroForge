@@ -191,7 +191,8 @@ def verify_pages(output_dir: str, routes: list[str] | None = None, *, reasoning:
                         "any workflow it needs to change its records, then verify it.")
     app_root = str(Path(output_dir) / "app")
     try:
-        outcome = review_coded_pages(svc, app_root, only=only)
+        from services.smith.asked import with_their_words
+        outcome = review_coded_pages(svc, app_root, only=only, asked=with_their_words("").strip())
     except ReviewUnavailable as exc:
         return _finding(f"The pages could not be opened in a browser here: {exc}")
     except Exception as exc:  # noqa: BLE001
@@ -530,6 +531,9 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     """Carry out one write. The result's `finding` is the observation when an
     oracle refused; `said` is what the person is told."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
+    if name in ("write_page_code", "rewrite_pages", "write_frame") and args.get("brief"):
+        from services.smith.asked import with_their_words
+        args["brief"] = with_their_words(str(args["brief"]))
     if name == "write_page_code":
         whole = str(args.get("whole") or "").strip().lower() in ("true", "1", "yes")
         return write_page_code(output_dir, str(args.get("route") or ""),

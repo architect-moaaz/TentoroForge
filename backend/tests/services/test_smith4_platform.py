@@ -76,7 +76,7 @@ def test_verify_pages_is_a_tool_that_reports_per_page(tmp_path, monkeypatch):
     monkeypatch.setattr("services.blueprint.service.BlueprintService.load", classmethod(
         lambda cls, output_dir: type("S", (), {"doc": {"pages": [
             {"id": "PAGE-001", "route": "/tools"}, {"id": "PAGE-002", "route": "/rentals"}]}})()))
-    monkeypatch.setattr("services.blueprint.orchestrator.review_coded_pages", lambda svc, root, only=None: {
+    monkeypatch.setattr("services.blueprint.orchestrator.review_coded_pages", lambda svc, root, only=None, asked="": {
         "pages": {"PAGE-001": {"passed": True, "rewritten": False, "scores": [8]},
                   "PAGE-002": {"passed": False, "rewritten": True, "scores": [5, 6],
                                "review": {"broken": ["the Accept button does nothing"]}}}})

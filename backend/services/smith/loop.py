@@ -267,6 +267,11 @@ WHAT NON-TECHNICAL OWNERS ACTUALLY SAY, and how to read it:
   alone (it states a rule nothing enforces).
   The records already there may not fit (two with the same name): the change
   says which, and they are settled with the person, never deleted.
+- A REQUIREMENT RECORDED IS NOT A CHANGE MADE. `add_requirement` writes the
+  ask down; it changes no screen. When the ask is about what screens show or
+  do ("prices as ₹ on every screen"), change those screens — `write_page_code`
+  for one, `rewrite_pages` for several — and look at them. `verify_pages`
+  judges pages against how they should look; it is not how an ask is made.
 - THEY SAID IT ALREADY. "Fix it", "it's not done", "do all three" asked for
   the change. Do not answer with "Shall I go ahead?" for something they asked
   for; do it, and ask only for a fact nobody has said.

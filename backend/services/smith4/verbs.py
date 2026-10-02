@@ -77,6 +77,8 @@ class Ctx:
     #: Started by the platform (the build finishing a page), not a person:
     #: nobody can answer a question or agree to a plan.
     unattended: bool = False
+    #: The ask an agreed plan was made from, while one of its steps runs.
+    asked_from: str = ""
 
     @property
     def out(self) -> str:

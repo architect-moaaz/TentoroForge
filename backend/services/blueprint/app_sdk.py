@@ -144,7 +144,8 @@ from services.blueprint.geo_types import LOCATION_TS, LOCATION_TYPES  # noqa: E4
 def ts_type(field: dict) -> str:
     """The value a row carries for this column, as the SDK hands it over:
     numbers as numbers (numeric columns are coerced), dates as ISO strings."""
-    type_name = str(field.get("type") or "").lower()
+    from services.blueprint.projection import base_type
+    type_name = base_type(field.get("type"))
     if type_name in LOCATION_TYPES:
         return LOCATION_TS
     if is_list_type(type_name):
@@ -158,7 +159,8 @@ def ts_type(field: dict) -> str:
 
 
 def _numeric(field: dict) -> bool:
-    type_name = str(field.get("type") or "").lower()
+    from services.blueprint.projection import base_type
+    type_name = base_type(field.get("type"))
     return not is_list_type(type_name) and _TYPES.get(type_name, _DEFAULT_TYPE) in ("integer", "numeric")
 
 

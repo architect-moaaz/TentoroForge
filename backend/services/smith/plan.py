@@ -53,35 +53,49 @@ def split(steps: list[str]) -> tuple[list[str], list[str]]:
     return tidy[:MAX_STEPS], tidy[MAX_STEPS:]
 
 
-def _write(output_dir: str | Path, steps: list[str], agreed: bool | None) -> None:
+def _write(output_dir: str | Path, steps: list[str], agreed: bool | None, asked: str | None = None) -> None:
     """`agreed` None keeps what the plan already was: working through an
     agreed plan rewrites its list and must not un-agree it."""
     try:
         path = _path(output_dir)
         keep = is_agreed(output_dir) if agreed is None else bool(agreed)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"steps": steps, "agreed": keep}, indent=2), "utf-8")
+        asked = asked_of(output_dir) if asked is None else asked
+        path.write_text(json.dumps({"steps": steps, "agreed": keep, **({"asked": asked} if asked else {})},
+                                   indent=2), "utf-8")
     except Exception as exc:  # noqa: BLE001 — a plan that cannot be kept is asked again
         logger.warning("[smith] could not record the plan: %s", exc)
 
 
-def remember(output_dir: str | Path, steps: list[str], *, agreed: bool | None = None) -> None:
-    """Keep the steps still to do, in order."""
+def remember(output_dir: str | Path, steps: list[str], *, agreed: bool | None = None,
+             asked: str | None = None) -> None:
+    """Keep the steps still to do, in order — and the ask they came from."""
     kept, _over = split(steps)
     if not kept:
         clear(output_dir)
         return
-    _write(output_dir, kept, agreed)
+    _write(output_dir, kept, agreed, asked)
 
 
-def remember_all(output_dir: str | Path, steps: list[str], *, agreed: bool | None = None) -> None:
+def remember_all(output_dir: str | Path, steps: list[str], *, agreed: bool | None = None,
+                 asked: str | None = None) -> None:
     """Keep every step still to do, in order — a plan whose step split into
     sub-steps holds those AND the rest, however many that is."""
     tidy = [" ".join(str(s).split()) for s in (steps or []) if str(s or "").strip()]
     if not tidy:
         clear(output_dir)
         return
-    _write(output_dir, tidy, agreed)
+    _write(output_dir, tidy, agreed, asked)
+
+
+def asked_of(output_dir: str | Path) -> str:
+    """The ask the waiting plan was made from: each step is run carrying it,
+    since a step alone ("show prices as ₹") is Smith's words, not theirs."""
+    try:
+        raw = json.loads(_path(output_dir).read_text("utf-8"))
+        return str((raw or {}).get("asked") or "") if isinstance(raw, dict) else ""
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def is_agreed(output_dir: str | Path) -> bool:

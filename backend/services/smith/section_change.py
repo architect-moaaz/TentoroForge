@@ -59,6 +59,7 @@ def apply(svc: Any, request: str, proposals: list, *, interpretation: str, agent
     from services.blueprint.service import BlueprintInvalid
     from services.smith.change import apply_change
     bind_ids(svc)
+    _as_patches(svc, proposals)
     try:
         out = apply_change(svc, request, proposals=list(proposals), interpretation=interpretation,
                            agent=agent, app_root=app_root, regenerate=False)
@@ -67,6 +68,47 @@ def apply(svc: Any, request: str, proposals: list, *, interpretation: str, agent
     if not getattr(out, "applied", False):
         return None, str(getattr(out, "reason", "") or "refused")
     return out, ""
+
+
+def _onto(have: dict, given: dict) -> dict:
+    """`given` laid onto `have`, setting by setting: a nested setting merged
+    the same way, and an empty value never wiping one that is there — the
+    agent restated `photoEmbedding` with `embedding: {of: ""}` and the
+    contract refused the whole change (2026-10-02)."""
+    out = dict(have)
+    for k, v in given.items():
+        if v in (None, "", [], {}) and out.get(k) not in (None, "", [], {}):
+            continue
+        out[k] = _onto(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+def _as_patches(svc: Any, proposals: list) -> None:
+    """A change to a record type that exists is a patch onto it: a field the
+    proposal leaves out is kept, and so is any setting of a field it does not
+    restate. The data agent returns the whole record type, and what it left
+    out was applied as a removal — asked for two-decimal prices it dropped
+    `photoEmbedding` and the id's uniqueness; asked for unique names it
+    dropped `isAvailable` (2026-10-02). Removing a field is `remove_field`;
+    renaming one is `rename_field`, which moves its data."""
+    entities = [e for e in (svc.doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)]
+    by_key = {str(e.get("id")): e for e in entities}
+    by_key.update({str(e.get("name") or "").strip().lower(): e for e in entities})
+    for prop in proposals:
+        body = getattr(prop, "body", None)
+        if getattr(prop, "section", "") != "data.entities" or not isinstance(body, dict) \
+                or not isinstance(body.get("fields"), list):
+            continue
+        cur = by_key.get(str(body.get("id") or "")) or by_key.get(str(body.get("name") or "").strip().lower()) \
+            or by_key.get(str(getattr(prop, "natural_key", "") or "").strip().lower())
+        if cur is None:
+            continue                       # a new record type is proposed whole
+        given = {str(f.get("name")): f for f in body["fields"] if isinstance(f, dict) and f.get("name")}
+        merged = [_onto(f, given[str(f.get("name"))]) if str(f.get("name")) in given else f
+                  for f in cur.get("fields") or [] if isinstance(f, dict)]
+        have = {str(f.get("name")) for f in merged}
+        merged += [f for name, f in given.items() if name not in have]
+        body["fields"] = merged
 
 
 def pinned(svc: Any, proposals: list, section: str, artifact_id: str) -> list:
@@ -97,8 +139,17 @@ def rerun(svc: Any, node: str, *, brief: str, request: str, interpretation: str,
     proposals `keep` selects, commit them. Returns (proposals applied, result).
     """
     from services.blueprint.orchestrator import DAG, TaskSpec
+    from services.smith.asked import with_their_words
     run = executor_for(svc, executor, reasoning)
     agent = DAG[node].agent
+    # WHAT WAS ASKED, NOT ONLY SMITH'S READING OF IT — and, for the agents
+    # whose slice holds no pages, which screens read the records they change.
+    brief = with_their_words(brief)
+    if node in ("entity_fields", "data_model", "business_rules"):
+        from services.blueprint.page_usage import usage_brief
+        used = usage_brief(svc.doc)
+        if used:
+            brief = f"{brief}\n\n{used}"
     feedback = ""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         spec = TaskSpec(task_id=f"smith-{node}-{slug(subject or request)[:24]}-{attempt}", node=node,

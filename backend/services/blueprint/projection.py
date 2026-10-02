@@ -68,6 +68,15 @@ _TYPES: dict[str, str] = {
 _DEFAULT_TYPE = "text"
 
 
+def base_type(type_name: object) -> str:
+    """A field's type as the maps know it: lower-case, its parameters off.
+    The data agent wrote FoodItem.price as `decimal(10,2)`; no map knew it,
+    so the column became text, the SDK typed it a string and the dish form
+    took the price in a text box (2026-10-02). Precision is the column's
+    business; the kind of value is `decimal`."""
+    return re.sub(r"\s*\(.*$", "", str(type_name or "").strip().lower())
+
+
 def _live(items: Any) -> list[dict]:
     """Artifacts still in play. A DEPRECATED page is not projected."""
     return [i for i in (items or []) if i.get("status") != "DEPRECATED"]
@@ -104,7 +113,7 @@ def is_list_type(type_name: Any) -> bool:
 
 def drizzle_column(field: dict) -> tuple[str, str]:
     """One column line and the builder it needs imported."""
-    type_name = str(field.get("type") or "").lower()
+    type_name = base_type(field.get("type"))
     # AN EMBEDDING IS FILLED BY THE PLATFORM, SO IT IS ALWAYS NULLABLE. The
     # vector arrives after the row does (the Data Engine embeds the source once
     # it is written), and a row whose image the model could not read must

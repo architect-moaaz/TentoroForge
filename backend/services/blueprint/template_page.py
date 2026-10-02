@@ -106,7 +106,8 @@ def _slug(name: str) -> str:
 
 
 def _field_kind(f: Mapping[str, Any]) -> dict:
-    t = str(f.get("type") or "string").lower()
+    from services.blueprint.projection import base_type
+    t = base_type(f.get("type") or "string")
     opts = f.get("enumValues") or f.get("enum") or f.get("options")   # `enumValues` is the Blueprint's key
     spec: dict[str, Any] = {"name": str(f["name"]), "label": _humanise(str(f["name"])),
                             "required": bool(f.get("required", False))}

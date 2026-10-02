@@ -83,10 +83,17 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     a person's ask gets the full cap."""
     observations: list[Observation] = []
     bench = trials.Bench(ctx.out)
+    # THE PERSON'S WORDS GO WITH EVERY BRIEF THIS TURN HANDS ON (`asked`).
+    from services.smith.asked import ASKED
+    asked = ctx.ask or ctx.message or ""
+    if ctx.asked_from and ctx.asked_from not in asked:
+        asked = f"{ctx.asked_from}\n(This turn does one part of it: {asked})"
+    token = ASKED.set(asked)
     try:
         out = _run(ctx, choose, list(history or []), observations,
                    max_steps or loop_mod.MAX_STEPS, bench)
     finally:
+        ASKED.reset(token)
         bench.close()
     out.steps = [o.tool for o in observations]
     return out
@@ -491,7 +498,7 @@ def _plan(ctx: Ctx, args: dict, landed: list[str], touched: list[str]) -> Outcom
         return Outcome(status="asked", said=question,
                        options=[plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL, plan_mod.REWORD_LABEL],
                        touched=list(touched))
-    plan_mod.remember(ctx.out, planned, agreed=False)
+    plan_mod.remember(ctx.out, planned, agreed=False, asked=ctx.ask)
     return Outcome(status="asked", said=plan_mod.as_question(planned, over),
                    options=[plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL, plan_mod.REWORD_LABEL],
                    touched=list(touched))

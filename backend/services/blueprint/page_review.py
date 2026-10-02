@@ -530,7 +530,7 @@ def unbuilt_pages(doc: dict) -> list[dict]:
 
 def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None,
                rounds: int = ROUNDS, workers: int = 6, only: set[str] | None = None,
-               emit: Any = None) -> dict[str, Any]:
+               emit: Any = None, asked: str = "") -> dict[str, Any]:
     """Look at every coded page and have the failing ones rewritten.
 
     Returns what happened per page: its scores by round, whether it passed,
@@ -617,8 +617,10 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
             def rewrite(pid: str) -> tuple[str, dict | None]:
                 current = next((r for r in doc.get("pageCode") or [] if str(r.get("page")) == pid), None)
                 try:
-                    body, spent = compose_page(doc, pages[pid], root, client,
-                                               brief=review_brief(verdicts[pid], shots[pid]),
+                    # The ask the review runs for, when there is one: a rewrite
+                    # made only from the review's notes left it out.
+                    brief = review_brief(verdicts[pid], shots[pid]) + (f"\n\n{asked}" if asked else "")
+                    body, spent = compose_page(doc, pages[pid], root, client, brief=brief,
                                                current=current)
                 except CompileError as exc:
                     logger.warning("[page_review] %s rewrite did not compile: %s", pid, exc)
