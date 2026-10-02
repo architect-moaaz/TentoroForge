@@ -19,8 +19,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { OfficeBridge } from "@/components/smith/officeBridge";
+import { useOfficeStore } from "@/components/virtual-office/OfficeStateManager";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
+
+/** Idle answers to tolerate before a recovery concludes the run is really over
+ *  — four polls, so about sixteen seconds of asking. */
+const IDLE_POLLS_BEFORE_GIVING_UP = 4;
 
 /** What the orchestrator says about one node, as the run unfolds. */
 export type NodeState = "waiting" | "running" | "done" | "failed";
@@ -41,7 +47,6 @@ export interface RunForecast {
   workflows?: number;
   businessRules?: number;
   apis?: number;
-  expectedTests?: number;
   [k: string]: number | undefined;
 }
 
@@ -58,6 +63,38 @@ export interface RunEvent {
   seq: number;
   event: string;
   detail: string;
+}
+
+/**
+ * One thing that happened to one subject of one node — the grain the run
+ * panel's level map draws: a page landing, the reviewer's verdict on it, a
+ * repair round, a retry, a wait on the API. Kept structured beside the
+ * `events` summaries so the map is derived, never guessed from text.
+ */
+export interface RunMoment {
+  kind: "subject" | "verdict" | "repair" | "unrepaired" | "retry" | "stalled" | "paused" | "look";
+  node: string;
+  subject: string;
+  ok?: boolean;
+  findings?: number;
+  attempt?: number;
+  of?: number;
+  reason?: string;
+  /** What landed, in a line ("Doctor — 9 fields: name, specialization…"). */
+  summary?: string;
+  /** A page looked at as it was written: the reviewer's score and pictures. */
+  look?: RunLook;
+}
+
+export interface RunLook {
+  route: string;
+  attempt: number;
+  score: number;
+  verdict: "pass" | "revise";
+  issues: string[];
+  broken: number;
+  /** Which screenshots exist — fetched by name from the looks endpoint. */
+  shots: string[];
 }
 
 /**
@@ -123,6 +160,10 @@ export interface BlueprintRun {
   thoughts: RunThought[];
   /** Every event, in order. The engine's own account of the run. */
   events: RunEvent[];
+  /** The moments the level map draws (see `RunMoment`), in order. */
+  moments?: RunMoment[];
+  /** The plan's concurrency levels — the nodes that may run side by side. */
+  levels?: string[][];
   /** Ordered as the orchestrator planned them, not as they finish. */
   nodes: RunNode[];
   nodesDone: number;
@@ -185,16 +226,39 @@ export interface StartOptions {
   defineOnly?: boolean;
   /** Start over rather than resuming an existing Blueprint. */
   fresh?: boolean;
+  /**
+   * Which review `approved` answers: `requirements` locks them and works out
+   * the product model; `product_model` builds. Omitted, the open one.
+   */
+  gate?: "requirements" | "product_model";
+  /** At the product model's review: the modules to build. Omitted is all. */
+  modules?: string[] | null;
 }
 
 export function useBlueprintRun(projectId: string | null) {
   const [run, setRun] = useState<BlueprintRun>(EMPTY);
+  // THE OFFICE WATCHES THE SAME STREAM. Every event the panel reduces is
+  // also told to the office, translated into its own vocabulary (see
+  // `officeBridge`), so the animated floor shows the build this panel is
+  // counting — the fan-out, the reviewer, the retries, the strike.
+  const office = useRef(new OfficeBridge());
   const abortRef = useRef<AbortController | null>(null);
   // True while this hook is driving its own stream. A reattached run must not
   // be overwritten by polling, and polling must stop the moment we start one.
   const ownStreamRef = useRef(false);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollCancelRef = useRef(false);
+  // WHY WE STOPPED READING, HELD BACK RATHER THAN SHOWN. A stream that dies
+  // mid-run is not a run that died: the DAG is detached server-side and keeps
+  // going with nobody listening, which is the whole reason polling exists. So
+  // the reason is kept here and only surfaced if polling turns out to have
+  // nothing to track — otherwise the user is told a working build failed.
+  const dropReasonRef = useRef<string | null>(null);
+  // Consecutive polls that found nothing while recovering. "Idle" is not proof
+  // the run is over — the registry lives in ONE backend process, so a backend
+  // serving this endpoint from more than one worker answers idle from whichever
+  // worker did not start the run. Ask a few times before believing it.
+  const idlePollsRef = useRef(0);
 
   // REATTACH BY POLLING. The run's progress arrives over SSE, but that stream
   // is not the only way it reaches the panel: a reload, an expired-then-restored
@@ -215,6 +279,7 @@ export function useBlueprintRun(projectId: string | null) {
         nodesTotal?: number;
         callsDone?: number;
         nodes?: { key: string; state: NodeState; subject?: string; calls?: number }[];
+        moments?: ({ event: string } & Record<string, unknown>)[];
         elapsedMs?: number;
         awaitingApproval?: boolean;
         status?: string;
@@ -223,6 +288,8 @@ export function useBlueprintRun(projectId: string | null) {
       if (pollCancelRef.current || ownStreamRef.current) return;
 
       if (snap.active) {
+        idlePollsRef.current = 0;
+        dropReasonRef.current = null;
         setRun((prev) => ({
           ...prev,
           nodesDone: snap.nodesDone ?? 0,
@@ -240,14 +307,24 @@ export function useBlueprintRun(projectId: string | null) {
           awaitingApproval: Boolean(snap.awaitingApproval),
           reattachedStage: snap.stage ?? null,
           reattachedElapsedMs: snap.elapsedMs ?? null,
+          // THE MAP COMES BACK WITH THE COUNTS. The registry keeps the moments
+          // the level map is drawn from; a page that loads mid-build gets
+          // its cells, verdicts and looks, not just "14 of 31".
+          ...(Array.isArray(snap.moments) && snap.moments.length > (prev.moments?.length ?? 0)
+            ? { moments: snap.moments.map((m) => momentOf(m.event, m)).filter((m): m is RunMoment => m !== null) }
+            : {}),
           status: "running",
           // Polling took over — a stream that dropped is no longer an error.
           error: null,
         }));
         pollTimerRef.current = setTimeout(pollOnce, 4000);
       } else if (snap.status === "error") {
+        idlePollsRef.current = 0;
+        dropReasonRef.current = null;
         setRun((prev) => ({ ...prev, status: "error", error: snap.error ?? null }));
       } else if (snap.status === "complete") {
+        idlePollsRef.current = 0;
+        dropReasonRef.current = null;
         // Apply the FINAL node states the snapshot carries — every node done,
         // preview included. Flipping only `status` left the last active poll's
         // nodes frozen, and that poll caught the run on its last node
@@ -277,6 +354,25 @@ export function useBlueprintRun(projectId: string | null) {
                 review: finalizeReview(prev.review),
               }
             : prev,
+        );
+      } else if (dropReasonRef.current) {
+        // NOTHING TO TRACK — or nobody who knows about it answered. We are here
+        // because a stream dropped out from under a run that was in flight, so
+        // one idle answer is not enough to call it over: a restarted backend,
+        // a poll that raced the registry, or a second worker process all look
+        // exactly like this. Keep asking for a short while.
+        idlePollsRef.current += 1;
+        if (idlePollsRef.current < IDLE_POLLS_BEFORE_GIVING_UP) {
+          pollTimerRef.current = setTimeout(pollOnce, 4000);
+          return;
+        }
+        // It really is gone. NOW the drop is worth reporting — and it is the
+        // only account the user will get of why the run stopped.
+        const reason = dropReasonRef.current;
+        dropReasonRef.current = null;
+        idlePollsRef.current = 0;
+        setRun((prev) =>
+          prev.status === "running" ? { ...prev, status: "error", error: reason } : prev,
         );
       }
     } catch {
@@ -334,6 +430,8 @@ export function useBlueprintRun(projectId: string | null) {
     abortRef.current?.abort();
     abortRef.current = null;
     ownStreamRef.current = false;
+    dropReasonRef.current = null;
+    idlePollsRef.current = 0;
   }, []);
 
   const start = useCallback(
@@ -381,10 +479,17 @@ export function useBlueprintRun(projectId: string | null) {
               // §14 — the documents attached on /blueprint/new. Carried on
               // every turn: the definition re-reads the whole brief each time.
               evidence: opts.evidence ?? [],
+              ...(opts.gate ? { gate: opts.gate } : {}),
+              ...(opts.modules ? { modules: opts.modules } : {}),
             }),
           },
         );
       } catch (e) {
+        // RELEASE THE CLAIM ON THE WAY OUT. `pollOnce` refuses to run while this
+        // hook owns a stream; leaving the flag set on an early return silenced
+        // polling for the life of the page, so nothing recovered and nothing
+        // tried to — the panel sat on its error until the user reloaded.
+        ownStreamRef.current = false;
         if (ctrl.signal.aborted) return;
         setRun((r) => ({ ...r, status: "error", error: String(e) }));
         return;
@@ -395,6 +500,7 @@ export function useBlueprintRun(projectId: string | null) {
       // which parses as zero events and looks exactly like a run that did
       // nothing. The same blindness cost a generated app its form submits.
       if (res.redirected || !res.ok || !res.body) {
+        ownStreamRef.current = false;
         setRun((r) => ({
           ...r,
           status: "error",
@@ -424,6 +530,12 @@ export function useBlueprintRun(projectId: string | null) {
         }
         if (event === "done") gotTerminal = true;
         setRun((prev) => reduce(prev, event, data));
+        try {
+          const tell = useOfficeStore.getState().handleEvent;
+          for (const e of office.current.translate(event, data)) tell(e);
+        } catch {
+          // The office is a picture of the run, never a reason to lose it.
+        }
       };
 
       try {
@@ -448,9 +560,20 @@ export function useBlueprintRun(projectId: string | null) {
           }
         }
       } catch (e) {
-        if (!ctrl.signal.aborted) {
-          setRun((r) => ({ ...r, status: "error", error: String(e) }));
+        if (ctrl.signal.aborted) {
+          ownStreamRef.current = false;
+          return;
         }
+        // THE STREAM DIED, NOT THE RUN. `reader.read()` rejects when the
+        // connection is cut under it — a proxy that caps how long one request
+        // may live, a suspended tab, a network that blinked. That is the SAME
+        // situation as the clean-EOF case below, and it was the common one:
+        // calling it an error froze the panel on "TypeError: network error"
+        // over a build that ran happily to completion, and nothing polled
+        // afterwards because the stream claim above was never released.
+        dropReasonRef.current =
+          `The connection to the engine dropped (${String(e)}) and could not be picked back up.`;
+        resumePolling();
         return;
       }
 
@@ -460,7 +583,11 @@ export function useBlueprintRun(projectId: string | null) {
       // panel frozen at the last event — hand back to polling, which reads the
       // registry and tracks the run to its real end. This is the fix for a
       // status that used to stop updating whenever the stream blinked.
-      if (!gotTerminal) resumePolling();
+      if (!gotTerminal) {
+        dropReasonRef.current =
+          "The connection to the engine ended before the run said how it finished.";
+        resumePolling();
+      }
     },
     [projectId, stop, resumePolling],
   );
@@ -496,6 +623,8 @@ export function reduce(
       { seq: prev.events.length, event, detail: describe(event, data) },
     ],
   };
+  const moment = momentOf(event, data);
+  if (moment) prev = { ...prev, moments: [...(prev.moments ?? []), moment] };
 
   switch (event) {
     case "started":
@@ -590,6 +719,8 @@ export function reduce(
         ...prev,
         nodes: keys.map((key) => ({ key, state: "waiting", calls: 0 })),
         nodesTotal: (data.total as number) ?? keys.length,
+        levels: (data.levels as string[][]) ?? undefined,
+        moments: [],
         alreadyComplete: (data.alreadyComplete as string[]) ?? [],
         awaitingApproval: Boolean(data.awaitingApproval),
       };
@@ -617,9 +748,11 @@ export function reduce(
                 ...n,
                 state: "running",
                 calls: n.calls + 1,
+                // How many are finished — `index` is which one finished, and
+                // subjects land out of order ("11 of 15", then "3 of 15").
                 subject:
-                  data.index != null && data.total
-                    ? `${data.index} of ${data.total}`
+                  data.total && (data.done != null || data.index != null)
+                    ? `${Math.min(Number(data.done ?? data.index), Number(data.total))} of ${data.total}`
                     : (data.subject as string | undefined),
               }
             : n,
@@ -693,6 +826,39 @@ export function reduce(
 
 
 /** One line a person can read, per event. */
+/** The structured moment an event is, or null when the map has no use for it. */
+export function momentOf(event: string, data: Record<string, unknown>): RunMoment | null {
+  const node = String(data.node ?? "");
+  const subject = String(data.subject ?? "");
+  const reason = data.reason != null ? String(data.reason) : undefined;
+  switch (event) {
+    case "node:subject":
+      return { kind: "subject", node, subject, ok: Boolean(data.ok),
+               ...(data.summary ? { summary: String(data.summary) } : {}) };
+    case "page:look":
+      return { kind: "look", node, subject, ok: data.verdict === "pass",
+               look: { route: String(data.route ?? ""), attempt: Number(data.attempt ?? 1),
+                       score: Number(data.score ?? 0), verdict: data.verdict === "pass" ? "pass" : "revise",
+                       issues: Array.isArray(data.issues) ? (data.issues as unknown[]).map(String) : [],
+                       broken: Number(data.broken ?? 0),
+                       shots: Array.isArray(data.shots) ? (data.shots as unknown[]).map(String) : [] } };
+    case "observer:verdict":
+      return { kind: "verdict", node, subject, ok: Boolean(data.ok), findings: Number(data.findings ?? 0) };
+    case "observer:repair":
+      return { kind: "repair", node, subject, attempt: Number(data.round ?? 1), of: Number(data.of ?? 0), reason };
+    case "observer:unrepaired":
+      return { kind: "unrepaired", node, subject, reason };
+    case "node:retry":
+      return { kind: "retry", node, subject, attempt: Number(data.attempt ?? 0), of: Number(data.of ?? 0), reason };
+    case "node:stalled":
+      return { kind: "stalled", node, subject, reason };
+    case "run:paused":
+      return { kind: "paused", node: "", subject: "", reason };
+    default:
+      return null;
+  }
+}
+
 function describe(event: string, data: Record<string, unknown>): string {
   switch (event) {
     case "started":
@@ -710,6 +876,8 @@ function describe(event: string, data: Record<string, unknown>): string {
         ` (${data.nodesDone}/${data.nodesTotal})`;
     case "forecast":
       return "Forecast received";
+    case "page:look":
+      return `Looked at ${data.route}: ${data.score}/10 — ${data.verdict === "pass" ? "passed" : "sent back"}`;
     case "usage": {
       const cost = data.cost_usd as number | undefined;
       const secs = data.elapsed_s as number | undefined;

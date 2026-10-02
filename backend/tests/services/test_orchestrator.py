@@ -78,7 +78,7 @@ def test_integration_waits_for_both_branches():
     level_of = {k: i for i, level in enumerate(lv) for k in level}
     assert level_of["integration"] > level_of["backend"]
     assert level_of["integration"] > level_of["frontend"]
-    assert level_of["verification"] > level_of["testing"]
+    assert level_of["verification"] > level_of["memory"]
 
 
 def test_a_cycle_raises_instead_of_hanging():
@@ -109,7 +109,7 @@ def test_nodes_only_claim_to_produce_what_their_agent_may_write():
 def test_descendants_walks_transitively():
     assert "verification" in descendants("data_model")
     assert "backend" in descendants("apis")
-    assert descendants("preview") == set()
+    assert descendants("assemble") == set()
 
 
 # --- §94: the state machine -------------------------------------------------
@@ -365,7 +365,7 @@ def test_projection_nodes_are_deterministic_not_model_calls():
     invent paths that pass validation against files nobody wrote."""
     from services.blueprint.orchestrator import PROJECTIONS
 
-    for key in ("backend", "frontend", "integration", "preview"):
+    for key in ("backend", "frontend", "integration", "assemble"):
         assert DAG[key].kind == "projection", key
         assert key in PROJECTIONS, f"{key} must declare what it projects"
 
@@ -381,8 +381,8 @@ def test_a_run_over_projection_nodes_reports_blocked_not_failed(svc):
     def never_called(spec):
         raise AssertionError("a projection node must not call an agent")
 
-    report = run(svc, never_called, plan=["backend", "preview"])
-    assert set(report.blocked) == {"backend", "preview"}
+    report = run(svc, never_called, plan=["backend", "assemble"])
+    assert set(report.blocked) == {"backend", "assemble"}
     assert report.failed == []
 
 
@@ -475,8 +475,9 @@ def test_a_rejected_proposal_is_re_asked_with_the_reason(svc):
 def test_the_reason_reaches_the_prompt(svc):
     from services.blueprint.executors import build_prompt
 
-    _, plain = build_prompt(svc.doc, "page_layouts", subject="PAGE-001")
-    _, retry = build_prompt(svc.doc, "page_layouts", subject="PAGE-001",
+    # Smith recomposing a screen asks the page author for a `page_layouts` subject
+    _, plain = build_prompt(svc.doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
+    _, retry = build_prompt(svc.doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages",
                             feedback="root.props.variant: 'ghost' is not allowed")
     assert "ghost" in retry and "ghost" not in plain
 
@@ -490,8 +491,9 @@ def test_foundational_nodes_are_classified_by_what_they_produce():
     from services.blueprint.orchestrator import is_foundational
 
     frame = {k for k, n in DAG.items() if is_foundational(n)}
+    # `ui_direction` sets the whole app's look — frame, like the design system.
     assert frame == {"application_model", "design_system", "integrations",
-                     "ux_architecture"}
+                     "ux_architecture", "ui_direction"}
 
 
 def test_service_and_projection_nodes_are_never_foundational():
@@ -557,7 +559,7 @@ def test_the_plan_still_reaches_the_implementation(ats):
     """Narrowing must not cut the projections off — a change that never
     regenerates anything is not a change."""
     plan = incremental_plan(ats, ["RULE-004"], also_sections={"businessRules"})
-    for required in ("integration", "testing", "verification", "preview"):
+    for required in ("integration", "memory", "verification", "assemble"):
         assert required in plan
 
 
@@ -600,7 +602,10 @@ def test_a_presentational_change_does_not_re_author_the_rule_catalogue(ats):
     assert "businessRules" not in sections_of(ats, {"CMP-033", "PAGE-009"})
 
     plan = incremental_plan(ats, ["CMP-033", "PAGE-009"])
-    assert "business_rules" not in plan
+    # Rules are not seeded by the component. They run again only as a
+    # consequence of `workflows` running again (a prerequisite names the
+    # workflows it gates) — never on their own account.
+    assert ("business_rules" in plan) == ("workflows" in plan)
 
 
 def test_an_entity_change_does_re_author_the_rules(ats):
@@ -630,7 +635,7 @@ def test_narrowing_did_not_cut_off_what_reads_the_change(ats):
     change anything upstream can respond to.
     """
     plan = incremental_plan(ats, ["PAGE-009"])
-    for required in ("page_layouts", "frontend", "integration", "verification", "preview"):
+    for required in ("page_layouts", "frontend", "integration", "verification", "assemble"):
         assert required in plan, required
 
 
@@ -658,52 +663,83 @@ def test_a_node_that_ran_is_not_recorded_as_skipped(svc):
     assert report.skipped == [] and report.skipped_because == {}
 
 
+# The fan-out below is `entity_fields`: one call per named entity, each
+# detailing its own row. (These were written against `page_layouts`, which
+# lays pages out without a model now.)
 def _layout_result(spec: TaskSpec) -> AgentResult:
-    """One authored page tree, keyed to the subject the node fanned out to."""
+    """One detailed entity, keyed to the subject the node fanned out to."""
     return AgentResult(
         task_id=spec.task_id, agent=spec.agent, confidence=0.95,
         proposals=[ArtifactProposal(
-            section="pageLayouts", natural_key=spec.subject,
-            body={"page": spec.subject,
-                  "root": {"type": "Stack", "props": {}, "children": []}},
+            section="data.entities", natural_key=f"E{spec.subject[-1]}",
+            body={"name": f"E{spec.subject[-1]}", "table": f"e{spec.subject[-1]}s",
+                  "fields": [{"name": "id", "type": "uuid", "primaryKey": True}]},
         )],
     )
 
 
+@pytest.fixture
+def partial_fanout(monkeypatch):
+    """The partial-tolerance tests below are about a fan-out whose subjects can
+    each be missing (pages, one of which falls back to its floor). They run on
+    `entity_fields` as the harness, which is itself `whole` now — a missing
+    entity is a hole — so for them the node is made partial again."""
+    import dataclasses
+    from services.blueprint import orchestrator as _orch
+    monkeypatch.setitem(_orch.DAG, "entity_fields",
+                        dataclasses.replace(_orch.DAG["entity_fields"], whole=False))
+
+
 def _fanout_svc(svc, pages=3):
-    svc.doc["pages"] = [
-        {"id": f"PAGE-{i:03d}", "route": f"/p{i}", "name": f"P{i}",
-         "purpose": f"Page {i}."}
-        for i in range(1, pages + 1)
-    ]
+    for i in range(1, pages + 1):
+        svc.upsert("data.entities", {"name": f"E{i}", "table": f"e{i}s",
+                                     "description": "x", "fields": []},
+                   natural_key=f"E{i}")
+    svc.save()
+    assert [e["id"] for e in svc.doc["data"]["entities"]] == \
+        [f"ENTITY-{i:03d}" for i in range(1, pages + 1)]
     return svc
 
 
-def test_one_failed_subject_does_not_take_the_whole_node(svc):
+def test_one_failed_subject_does_not_take_the_whole_node(svc, partial_fanout):
     """One page of twenty-four failed on a live run and `page_layouts` failed
     with it, skipping frontend, integration, testing, memory, verification and
-    preview. One bad page cost the entire application.
+    preview. One bad subject cost the entire application.
 
-    The hole was the thing to close, not the node: the failure is named, and a
-    page with no authored tree still falls back to its pattern.
+    The hole was the thing to close, not the node: the failure is named.
     """
     _fanout_svc(svc)
     seen: list[str] = []
 
     def executor(spec):
         seen.append(spec.subject)
-        if spec.subject == "PAGE-002":
+        if spec.subject == "ENTITY-002":
             raise RuntimeError("this one is broken")
         return _layout_result(spec)
 
-    report = run(svc, executor, plan=["page_layouts"], max_attempts=1)
-    # every subject was attempted, not abandoned at the first failure — and a
-    # page gets its four attempts (ATTEMPTS_BY_NODE) whatever the run's default
-    assert seen[:3] == ["PAGE-001", "PAGE-002", "PAGE-003"]
-    assert seen.count("PAGE-002") == 4 and set(seen) == {"PAGE-001", "PAGE-002", "PAGE-003"}
-    assert "page_layouts" in report.completed
-    # these pages carry no entity or pattern, so no template can stand in
-    assert any("PAGE-002" in f for f in report.failed) and report.fallbacks == []
+    report = run(svc, executor, plan=["entity_fields"], max_attempts=1)
+    # every subject was attempted, not abandoned at the first failure
+    assert sorted(seen) == ["ENTITY-001", "ENTITY-002", "ENTITY-003"]
+    assert "entity_fields" in report.completed
+    assert report.failed == ["entity_fields:ENTITY-002"]
+
+
+def test_a_whole_node_fails_on_one_missing_subject_and_stops_what_depends_on_it(svc):
+    """036farqu: `entity_fields` lost Member and ConditionEvidence, reported
+    done, and 22 minutes of pages and workflows were built on entities with no
+    columns before `assemble` refused a form inserting into nothing. The data
+    model is `whole`: one entity missing fails the node, here, naming it."""
+    _fanout_svc(svc)
+
+    def executor(spec):
+        if spec.subject == "ENTITY-002":
+            raise RuntimeError("confidence 0.10 is below the threshold")
+        return _layout_result(spec)
+
+    report = run(svc, executor, plan=["entity_fields", "security"], max_attempts=1)
+    assert "entity_fields" not in report.completed
+    assert report.failed == ["entity_fields:ENTITY-002"]
+    assert "security" not in report.completed, "nothing is built on a hole"
 
 
 def test_a_node_that_authored_nothing_at_all_has_genuinely_failed(svc):
@@ -713,24 +749,23 @@ def test_a_node_that_authored_nothing_at_all_has_genuinely_failed(svc):
     def executor(spec):
         raise RuntimeError("all broken")
 
-    report = run(svc, executor, plan=["page_layouts"], max_attempts=1)
-    assert "page_layouts" not in report.completed
+    report = run(svc, executor, plan=["entity_fields"], max_attempts=1)
+    assert "entity_fields" not in report.completed
     assert len(report.failed) == 3
 
 
-def test_a_partial_node_still_unblocks_what_depends_on_it(svc):
+def test_a_partial_node_still_unblocks_what_depends_on_it(svc, partial_fanout):
     """The point of the change: downstream work proceeds on partial input."""
     _fanout_svc(svc)
 
     def executor(spec):
-        if spec.subject == "PAGE-002":
+        if spec.node == "security" or spec.subject == "ENTITY-002":
             raise RuntimeError("broken")
         return _layout_result(spec)
 
-    report = run(svc, executor, plan=["page_layouts", "frontend"],
-                 max_attempts=1, app_root="/tmp/forge-partial-test")
-    assert "frontend" not in report.skipped, (
-        "a partial page_layouts must not skip the projection behind it")
+    report = run(svc, executor, plan=["entity_fields", "security"], max_attempts=1)
+    assert "security" not in report.skipped, (
+        "a partial entity_fields must not skip the node behind it")
 
 
 def test_a_failed_node_records_why(svc):
@@ -800,7 +835,7 @@ def test_the_fanout_runs_subjects_concurrently(svc):
             inflight -= 1
         return _layout_result(spec)
 
-    run(svc, executor, plan=["page_layouts"], max_attempts=1)
+    run(svc, executor, plan=["entity_fields"], max_attempts=1)
     assert peak > 1, "subjects ran one at a time"
     assert peak <= FANOUT_CONCURRENCY
 
@@ -838,7 +873,7 @@ def test_applies_happen_one_at_a_time_as_results_land(svc):
             inflight += 1
             peak = max(peak, inflight)
         try:
-            applied.append(result.proposals[0].body["page"])
+            applied.append(result.proposals[0].body["name"])
             time.sleep(0.01)
             return real_apply(service, result, **kw)
         finally:
@@ -847,13 +882,13 @@ def test_applies_happen_one_at_a_time_as_results_land(svc):
 
     orchestrator.apply_agent_result = tracking
     try:
-        run(svc, executor, plan=["page_layouts"], max_attempts=1)
+        run(svc, executor, plan=["entity_fields"], max_attempts=1)
     finally:
         orchestrator.apply_agent_result = real_apply
 
     assert peak == 1, "two applies overlapped"
-    assert sorted(applied) == ["PAGE-001", "PAGE-002", "PAGE-003", "PAGE-004"]
-    assert applied[0] == "PAGE-004", "the first result to land waited for the slowest"
+    assert sorted(applied) == ["E1", "E2", "E3", "E4"]
+    assert applied[0] == "E4", "the first result to land waited for the slowest"
 
 
 def test_a_retry_still_carries_its_own_feedback(svc):
@@ -864,16 +899,16 @@ def test_a_retry_still_carries_its_own_feedback(svc):
 
     def executor(spec):
         seen.setdefault(spec.subject, []).append(spec.feedback)
-        if spec.subject == "PAGE-002" and spec.attempt == 1:
+        if spec.subject == "ENTITY-002" and spec.attempt == 1:
             raise RuntimeError("bad page tree")
         return _layout_result(spec)
 
-    report = run(svc, executor, plan=["page_layouts"], max_attempts=2)
-    assert seen["PAGE-002"][0] == ""
-    assert "bad page tree" in seen["PAGE-002"][1]
+    report = run(svc, executor, plan=["entity_fields"], max_attempts=2)
+    assert seen["ENTITY-002"][0] == ""
+    assert "bad page tree" in seen["ENTITY-002"][1]
     assert report.failed == []
     # subjects that succeeded first time are not called again
-    assert len(seen["PAGE-001"]) == 1
+    assert len(seen["ENTITY-001"]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -912,7 +947,7 @@ def test_completed_nodes_never_skips_projections():
     done = completed_nodes(doc)
     assert "backend" not in done
     assert "frontend" not in done
-    assert "preview" not in done
+    assert "assemble" not in done
 
 
 def test_completed_nodes_empty_for_a_fresh_document():
@@ -1126,7 +1161,7 @@ def test_one_node_cannot_spend_the_whole_wave_budget(svc):
     finds the provider's rate limit rather than the machine's.
 
     Two caps, and they answer different questions: how wide one node may go,
-    and how wide the run may go. `page_layouts` here has more subjects than
+    and how wide the run may go. `entity_fields` here has more subjects than
     either budget, so it would take every slot if only the wave cap existed.
     """
     import threading
@@ -1153,55 +1188,36 @@ def test_one_node_cannot_spend_the_whole_wave_budget(svc):
         with lock:
             total -= 1
             inflight[spec.node] -= 1
-        if spec.node == "page_layouts":
+        if spec.node == "entity_fields":
             return _layout_result(spec)
         return _wave_result(spec)
 
-    # `page_layouts` depends on `patterns`, which is not in this plan — so all
-    # three nodes are ready at once and share one wave.
-    plan = ["page_layouts", "data_model", "integrations"]
+    # None of the three depends on anything in this plan — so all three are
+    # ready at once and share one wave.
+    plan = ["entity_fields", "design_system", "integrations"]
     report = run(svc, executor, plan=plan, max_attempts=1)
 
     assert report.ok
     assert sorted(report.completed) == sorted(plan)
     assert peak_total <= WAVE_CONCURRENCY, "the wave budget was exceeded"
-    assert peak_node["page_layouts"] <= FANOUT_CONCURRENCY, (
+    assert peak_node["entity_fields"] <= FANOUT_CONCURRENCY, (
         "one node took more than its own width out of the shared budget")
 
 
 def test_an_optional_node_failure_does_not_sink_the_run(svc):
-    """`testing` is verification, not the running app — and the last node to
-    spend the API. A failure there (a low credit balance) must NOT hold a built
-    app in draft: it is shipped without, recorded in `degraded`, and the run
-    stays ok so the app can still reach ready."""
+    """`ui_direction` shapes the look, not the running app. A failure there (a
+    low credit balance) must NOT hold a built app in draft: it is shipped
+    without, recorded in `degraded`, and the run stays ok so the app can still
+    reach ready."""
     def executor(spec: TaskSpec) -> AgentResult:
-        if spec.node == "testing":
+        if spec.node == "ui_direction":
             raise RuntimeError("credit balance too low")
         return page_agent_result(spec)
 
-    report = run(svc, executor, plan=["testing"], max_attempts=1)
+    report = run(svc, executor, plan=["ui_direction"], max_attempts=1)
     assert report.ok, f"failed={report.failed} blocked={report.blocked}"
-    assert "testing" in report.degraded and "testing" not in report.failed
-    assert "credit balance too low" in report.degraded["testing"]
-
-
-def test_a_fanout_resume_reruns_only_the_uncomposed_subjects():
-    """Resume is continue, not redo, at the subject grain: a page that already
-    has a composed `pageLayouts` row is not re-run, so a resume of a run that
-    dropped pages recomposes exactly the ones that failed — not all of them,
-    which on `page_layouts` (the dominant cost) would triple the bill."""
-    from services.blueprint.orchestrator import DAG, subjects_for, pending_subjects
-    doc = {
-        "pages": [{"id": f"PAGE-{i}", "route": f"/p{i}"} for i in range(1, 5)],
-        # two of the four already composed
-        "pageLayouts": [{"page": "PAGE-1", "root": {}}, {"page": "PAGE-3", "root": {}}],
-    }
-    node = DAG["page_layouts"]
-    assert sorted(subjects_for(node, doc)) == ["PAGE-1", "PAGE-2", "PAGE-3", "PAGE-4"]
-    assert sorted(pending_subjects(node, doc)) == ["PAGE-2", "PAGE-4"]
-    # A fresh document (nothing composed) still runs every subject.
-    assert sorted(pending_subjects(node, {"pages": doc["pages"], "pageLayouts": []})) == \
-        ["PAGE-1", "PAGE-2", "PAGE-3", "PAGE-4"]
+    assert "ui_direction" in report.degraded and "ui_direction" not in report.failed
+    assert "credit balance too low" in report.degraded["ui_direction"]
 
 
 # ---------------------------------------------------------------------------
@@ -1254,27 +1270,27 @@ def test_a_rejected_subject_is_retried_while_its_siblings_are_still_running(svc)
     def executor(spec):
         with lock:
             events.append(("start", spec.subject, spec.attempt, time.monotonic()))
-        if spec.subject == "PAGE-003":
+        if spec.subject == "ENTITY-003":
             time.sleep(0.3)  # the slow sibling
-        elif spec.subject == "PAGE-001" and spec.attempt == 1:
+        elif spec.subject == "ENTITY-001" and spec.attempt == 1:
             raise RuntimeError("refused at once")
         with lock:
             events.append(("end", spec.subject, spec.attempt, time.monotonic()))
         return _layout_result(spec)
 
-    report = run(svc, executor, plan=["page_layouts"], max_attempts=2)
+    report = run(svc, executor, plan=["entity_fields"], max_attempts=2)
     assert report.ok, report.failed_because
     retry_started = next(t for k, s, a, t in events
-                         if k == "start" and s == "PAGE-001" and a == 2)
+                         if k == "start" and s == "ENTITY-001" and a == 2)
     slow_returned = next(t for k, s, a, t in events
-                         if k == "end" and s == "PAGE-003")
+                         if k == "end" and s == "ENTITY-003")
     assert retry_started < slow_returned, "the retry waited for the slowest sibling"
 
 
 def test_a_dependent_starts_before_an_unrelated_fanout_finishes(svc):
-    """The whole point, end to end: `page_layouts` is wide and slow, and
-    `page_contracts` needs only `ux_architecture` here. It must run while
-    pages are still composing rather than after the last one lands."""
+    """The whole point, end to end: a fan-out is wide and slow, and
+    `design_system` needs only `application_model` here. It must run while
+    entities are still being detailed rather than after the last one lands."""
     import threading
     import time
 
@@ -1286,25 +1302,27 @@ def test_a_dependent_starts_before_an_unrelated_fanout_finishes(svc):
     def executor(spec):
         with lock:
             started.setdefault(spec.node, time.monotonic())
-        if spec.node == "page_layouts":
+        if spec.node == "entity_fields":
             time.sleep(0.25)
             out = _layout_result(spec)
-        elif spec.node == "page_contracts":
-            out = page_agent_result(spec)
+        elif spec.node == "application_model":
+            out = AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.95,
+                              proposals=[ArtifactProposal(section="product", natural_key="product",
+                                                          body={"objectives": ["x"]})])
         else:
             out = _wave_result(spec)
         with lock:
             finished[spec.node] = time.monotonic()
         return out
 
-    # page_layouts' own dependencies are not in this plan, so it is ready at
-    # once; page_contracts is ready as soon as ux_architecture applies.
+    # entity_fields' own dependency is not in this plan, so it is ready at
+    # once; design_system is ready as soon as application_model applies.
     report = run(svc, executor,
-                 plan=["page_layouts", "ux_architecture", "page_contracts"],
+                 plan=["entity_fields", "application_model", "design_system"],
                  max_attempts=1)
     assert report.ok, report.failed_because
-    assert started["page_contracts"] < finished["page_layouts"], (
-        "page_contracts waited for a fan-out it does not depend on")
+    assert started["design_system"] < finished["entity_fields"], (
+        "design_system waited for a fan-out it does not depend on")
 
 
 def test_the_scheduler_holds_the_document_lock_while_applying(svc):
@@ -1323,7 +1341,7 @@ def test_the_scheduler_holds_the_document_lock_while_applying(svc):
 
     orchestrator.apply_agent_result = tracking
     try:
-        run(svc, _layout_result, plan=["page_layouts"], max_attempts=1)
+        run(svc, _layout_result, plan=["entity_fields"], max_attempts=1)
     finally:
         orchestrator.apply_agent_result = real_apply
     assert owned and all(owned)
@@ -1344,26 +1362,19 @@ def _declared_workflows(svc, n=3):
     return svc
 
 
-def test_pages_compose_against_declared_workflows_not_their_steps():
-    """A button names a workflow by id and supplies its inputs; it never reads
-    a step. So `page_layouts` waits for the declaration and runs beside the
-    step authoring, which was the longest node of a build and sat ahead of
-    every page."""
-    assert "workflows" in DAG["page_layouts"].depends_on
-    assert "workflow_steps" not in DAG["page_layouts"].depends_on
+def test_pages_are_laid_out_after_the_steps_that_declare_their_inputs():
+    """A Form collects a workflow's inputs, and the inputs are written with the
+    steps — so `page_layouts` waits for `workflow_steps`. It calls no model, so
+    waiting costs the length of a projection, not a page composer's minutes."""
+    assert "workflow_steps" in DAG["page_layouts"].depends_on
+    assert DAG["page_layouts"].kind == "service"
     # what derives from steps waits for them
     assert "workflow_steps" in DAG["apis"].depends_on
     assert "workflow_steps" in DAG["integration"].depends_on
     assert DAG["workflow_steps"].fanout == "workflows"
     assert DAG["workflow_steps"].depends_on == frozenset({"workflows"})
-    # The scheduler is readiness-driven, so what matters is that no path
-    # leads from the step authoring to the page composer. The wave index is
-    # one behind since the whole-app `composition` call sits between the
-    # contracts and the pages: one short call, not the longest node of a build.
-    assert "page_layouts" not in descendants("workflow_steps")
     at = {k: i for i, level in enumerate(levels()) for k in level}
-    assert at["composition"] == at["workflow_steps"]
-    assert at["page_layouts"] == at["workflow_steps"] + 1
+    assert at["page_layouts"] == at["workflow_steps"] + 1 == at["apis"]
 
 
 def test_workflow_steps_fan_out_over_the_declared_workflows(svc):
@@ -1425,19 +1436,19 @@ def test_install_depends_on_nothing_and_the_build_waits_for_it():
     first agent and be done before there is anything to compile."""
     assert DAG["install"].depends_on == frozenset()
     assert DAG["install"].kind == "projection"
-    assert "install" in DAG["preview"].depends_on
-    assert "integration" in DAG["preview"].depends_on
-    assert "verification" not in DAG["preview"].depends_on, (
+    assert "install" in DAG["assemble"].depends_on
+    assert "integration" in DAG["assemble"].depends_on
+    assert "verification" not in DAG["assemble"].depends_on, (
         "the compile waited for a report it does not read")
     assert "install" in levels()[0]
 
 
-def test_testing_waits_for_what_it_reads_not_for_the_projections():
-    from services.blueprint.agent_contract import capability_for
-
-    reads = capability_for(DAG["testing"].agent).reads
-    assert "codeMap" not in reads
-    assert DAG["testing"].depends_on == frozenset({"apis", "workflow_steps", "business_rules"})
+def test_nothing_is_authored_that_nothing_reads():
+    """`testing` declared tests nobody wrote or ran; `database` wrote the same
+    four constants every build. Neither is a node now."""
+    assert "testing" not in DAG and "database" not in DAG
+    assert DAG["memory"].depends_on == frozenset({"apis", "workflow_steps", "business_rules"})
+    assert "entity_fields" in DAG["apis"].depends_on
 
 
 def test_a_deterministic_node_may_hand_back_a_future_and_is_done_when_it_lands(svc, tmp_path, monkeypatch):
@@ -1496,12 +1507,12 @@ def test_a_failed_install_is_recorded_and_the_build_is_skipped(svc, tmp_path, mo
         return fut
 
     monkeypatch.setitem(orchestrator.PROJECTION_HANDLERS, "install", broken_install)
-    report = run(svc, page_agent_result, plan=["install", "preview"],
+    report = run(svc, page_agent_result, plan=["install", "assemble"],
                  max_attempts=1, app_root=str(tmp_path / "app"))
     assert report.failed == ["install"]
     assert "ENOTFOUND" in report.failed_because["install"]
-    assert "preview" in report.skipped
-    assert report.skipped_because["preview"] == "install"
+    assert "assemble" in report.skipped
+    assert report.skipped_because["assemble"] == "install"
 
 
 def test_the_build_does_not_install_again_when_the_install_node_did(svc, tmp_path, monkeypatch):
@@ -1511,17 +1522,24 @@ def test_the_build_does_not_install_again_when_the_install_node_did(svc, tmp_pat
     seen: list[dict] = []
     monkeypatch.setattr(assembly, "verify_build",
                         lambda root, **kw: seen.append(kw) or {"install": 0, "build": 0})
+    # The build node also STARTS the app now — `next build` does not catch a
+    # route collision, so compiling is not the whole gate. Stubbed for the
+    # same reason the build is: this test asserts what the install was told,
+    # and a real dev server would make it minutes long.
+    monkeypatch.setattr(assembly, "verify_boot",
+                        lambda root, **kw: {"port": 0, "entry": "/", "status": 200,
+                                            "seconds": 0.0})
     monkeypatch.setattr(assembly, "apply_assembly", lambda *a, **k: {})
     monkeypatch.setattr(assembly, "page_funnel",
                         lambda doc, root: {"planned": 0, "served": 0, "missing": []})
 
     (app_root / "node_modules").mkdir(parents=True)
-    orchestrator._project_preview(svc, str(app_root))
+    orchestrator._project_assemble(svc, str(app_root))
     assert seen[-1]["install"] is False
 
     import shutil
     shutil.rmtree(app_root / "node_modules")
-    orchestrator._project_preview(svc, str(app_root))
+    orchestrator._project_assemble(svc, str(app_root))
     assert seen[-1]["install"] is True, "no node_modules: the build installs for itself"
 
 
@@ -1551,22 +1569,21 @@ def _declared_pages(svc):
     return case, note
 
 
-def test_workflows_are_declared_against_the_page_set_and_contracts_run_beside_them():
-    """A workflow needs a page's id and route to say where it launches; a
-    contract's tasks and states it never reads. The two longest declarations
-    of a build used to run one after the other."""
+def test_workflows_are_declared_after_the_fields_the_pages_need():
+    """They ran side by side, because a workflow reads a page's id and route
+    and never its tasks. The contracts now also say what each page SHOWS, and
+    a fact a page needs may add a field to its entity (`content_fields`);
+    `workflows` fixes each form's inputs, so it waits for those fields — the
+    form that creates a tool must ask for what the tool page shows. Measured
+    on 036farqu, that costs up to the length of `page_details` (~6-7 min)."""
     assert DAG["page_details"].depends_on == frozenset({"page_contracts"})
     assert DAG["page_details"].fanout == "page_features"
     assert "page_contracts" in DAG["workflows"].depends_on
-    assert "page_details" not in DAG["workflows"].depends_on
+    assert "content_fields" in DAG["workflows"].depends_on
     assert "page_details" in DAG["page_layouts"].depends_on
     assert "page_details" in DAG["apis"].depends_on
     at = {k: i for i, level in enumerate(levels()) for k in level}
-    assert at["page_details"] == at["workflows"]
-    # `composition` reads the finished contracts and runs beside the step
-    # authoring; the pages follow it and never wait on the steps.
-    assert at["composition"] == at["workflow_steps"]
-    assert "page_layouts" not in descendants("workflow_steps")
+    assert at["page_details"] < at["content_fields"] < at["workflows"]
 
 
 def test_a_feature_is_an_entitys_pages_and_an_orphan_page_is_its_own(svc):
@@ -1645,7 +1662,7 @@ def test_everything_about_data_waits_for_the_fields_not_the_names():
     and enums every downstream node reads are authored per entity."""
     assert DAG["entity_fields"].depends_on == frozenset({"data_model"})
     assert DAG["entity_fields"].fanout == "entities"
-    for consumer in ("database", "page_contracts", "security", "business_rules",
+    for consumer in ("page_contracts", "security", "business_rules",
                      "workflows"):
         assert "entity_fields" in DAG[consumer].depends_on, consumer
         assert "data_model" not in DAG[consumer].depends_on, consumer
@@ -1696,27 +1713,6 @@ def test_each_entity_is_detailed_by_its_own_call_onto_the_named_row(svc):
     assert all(len(e["fields"]) == 2 for e in svc.doc["data"]["entities"])
 
 
-# --- §34: the app composed once, before any page -----------------------------
-
-def test_the_app_is_composed_once_before_any_page():
-    node = DAG["composition"]
-    assert {"page_details", "design_system", "figma_design_system"} <= node.depends_on
-    assert not node.fanout, "one call for the whole app, not one per page"
-    assert "composition" in DAG["page_layouts"].depends_on
-
-
-def test_a_page_change_recomposes_the_app(ats):
-    """Adding a page must give that page a sketch, so the composition follows
-    the pages rather than the frame — the same reasoning that keeps
-    pageLayouts incremental."""
-    from services.blueprint.orchestrator import is_foundational
-
-    assert not is_foundational(DAG["composition"])
-    plan = incremental_plan(ats, [ats["pages"][0]["id"]])
-    assert "composition" in plan
-    assert plan.index("composition") < plan.index("page_layouts")
-
-
 def test_every_refusal_so_far_reaches_the_next_attempt(svc):
     """Fed only its latest refusal, the composer cycled on /master-data: each
     attempt fixed the fault it was shown and undid one it was no longer shown.
@@ -1748,3 +1744,22 @@ def test_the_fan_out_path_accumulates_too(svc):
     fb = accumulate_refusals("", 1, "first")
     fb = accumulate_refusals(fb, 2, "second")
     assert fb.splitlines()[1:] == ["- attempt 1: first", "- attempt 2: second"]
+
+
+def test_a_service_node_writing_the_same_section_does_not_hide_a_node_from_the_observer():
+    """`auth_pages` writes `pages` after `page_details`; it is never judged, so
+    deferring to it meant the page contracts were judged by no one."""
+    from services.blueprint import orchestrator as o
+
+    order = [k for level in levels() for k in level]
+    applied = o._applied
+    o._applied = lambda state: True
+    try:
+        def judged(key):
+            return o._watchable(key, None, order, set(order), set(order[:order.index(key) + 1]))
+        assert judged("page_details")
+        assert judged("workflow_steps")
+        assert not judged("workflows"), "judged through workflow_steps, an agent"
+        assert not judged("data_model"), "judged through entity_fields, an agent"
+    finally:
+        o._applied = applied

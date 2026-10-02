@@ -10,6 +10,7 @@ const noop = "export default {}; export const __noop = true;";
 installHarness({
   stubs: {
     "@/db": "export const db = { insert: () => ({ values: (v) => ({ returning: async () => [{ id: 'row-1', ...v }] }) }) };",
+    "./embedding-columns": "export const EMBEDDING_DIMENSIONS = 512;\nexport const embeddingColumnsFor = () => [];\n",
     "@/db/schema": "export const cases = { __name: 'cases', id: { columnType: 'PgUUID', dataType: 'string' }, title: { columnType: 'PgText', dataType: 'string' }, caseNumber: { columnType: 'PgText', dataType: 'string' } };",
     "drizzle-orm": "export const getTableName = (t) => t.__name || 'cases'; export const is = (v) => !!(v && v.__name); export class Table {}; export const eq = () => ({}); export const and = () => ({}); export const sql = () => ({});",
     "@/lib/error_reporter": "export const reportFromError = () => {};",
@@ -62,6 +63,22 @@ const outText = _finalizeInsert(table, {
 ok(typeof outText.title === "string",
    "a Date into a TEXT column is stringified, never passed raw to the driver");
 eqJson(outText.title, "2026-09-05T10:00:00.000Z", "a text column takes the full ISO string");
+const num = mod._numberIn;
+eqJson([num("₹12,995"), num("20%"), num("$1,299.00"), num("1.299,50 €"), num("Rs. 4,999.50 only"), num("free")],
+       [12995, 20, 1299, 1299.5, 4999.5, null], "the number in a price or a discount read off a page");
+const priceTable = { __name: "p", price: { columnType: "PgNumeric", dataType: "string" },
+                     discount: { columnType: "PgInteger", dataType: "number" }, note: { columnType: "PgText", dataType: "string" } };
+eqJson(_finalizeInsert(priceTable, { price: "₹12,995", discount: "20%", note: "20% off" }, ctx),
+       { price: "12995", discount: 20, note: "20% off" }, "a number column takes the number, a text column the text");
+eqJson(_finalizeInsert(priceTable, { price: "call for price" }, ctx), {}, "text with no number is dropped, not the row");
+const r0 = mod._resolveRef;
+const photo: any = { variables: { analyze_image: { brand: null, productName: "French Press", category: "" }, count: 0 } };
+eqJson(r0('{{analyze_image.brand ?? "Unbranded"}}', photo), "Unbranded", "a missing value takes its fallback");
+eqJson(r0('{{analyze_image.productName ?? "Unnamed"}}', photo), "French Press", "a present value is kept");
+eqJson(r0('{{analyze_image.category ?? analyze_image.productName ?? "Other"}}', photo), "French Press", "empty text is nothing; the next side is tried");
+eqJson(r0('{{analyze_image.brand ?? 0}}', photo), 0, "a number literal stays a number");
+eqJson(r0('Searching for {{analyze_image.brand ?? "any brand"}} {{analyze_image.productName}}', photo),
+       "Searching for any brand French Press", "and inside text too");
 const resolve = mod._resolveRef;
 const a = resolve("$uuid", ctx), b = resolve("$uuid", ctx);
 ok(typeof a === "string" && /^[0-9a-f-]{36}$/.test(a), "$uuid is a fresh identifier");

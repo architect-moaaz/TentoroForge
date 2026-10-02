@@ -69,30 +69,9 @@ def test_a_long_list_is_cut_rather_than_becoming_a_directory():
     assert len(options_for("entity", many)) == MAX_OPTIONS
 
 
-def test_an_unrecognised_ask_offers_the_closest_few_as_sentences():
-    close = cap.nearest("make the colours nicer")
-    assert close and close[0][0] == "restyle"
-    assert close[0][1] == "change the theme colour to green"       # a sentence, not a verb name
-    assert len(cap.nearest("the app should email someone")) <= 3
-    # An ask with nothing in common offers nothing rather than guessing.
-    assert cap.nearest("refactor the codebase") == []
-    assert cap.nearest("") == []
-
-
-def test_an_inflection_is_the_same_word():
-    """Matching "change" to "changes" by prefix while counting them as two
-    words made "changes" look unique to one verb, and ranked `revert` above
-    `edit_access` for "change who can delete a nurse"."""
-    assert cap._stem("changes") == cap._stem("change")
-    assert cap._words("colours") == cap._words("colour")
-    assert cap._words("registration") != set()      # a long word keeps its shape
-    assert cap._stem("less") == "less"              # not trimmed below the floor
-    assert cap.nearest("change who can delete a nurse")[0][0] == "edit_access"
-
-
 def test_the_turn_asks_with_options_instead_of_naming_slots(tmp_path):
     from services.blueprint.service import BlueprintService
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Roster", domain="health")
     svc.doc["data"] = {"entities": [{"id": "ENTITY-001", "name": "Nurse", "table": "nurses",
@@ -107,22 +86,6 @@ def test_the_turn_asks_with_options_instead_of_naming_slots(tmp_path):
     assert result.status == "asked"
     assert result.answer == "Which record?" and result.options == ["Nurse"]
     assert "entity" not in result.answer
-
-
-def test_the_turn_offers_the_closest_asks_when_the_verb_is_unknown(tmp_path):
-    from services.smith_session import SmithSession
-
-    session = SmithSession(
-        project_id="p1", output_dir=str(tmp_path), guards_fn=lambda *a, **kw: [],
-        understand_ask_fn=lambda m, ctx, **kw: {"verb": "make_it_nicer"},
-        iteration_move_fn=lambda *a, **kw: None)
-    result = session.run_iteration(user_message="make the colours nicer")
-    assert result.status == "needs_user"
-    assert "Did you mean one of these?" in result.answer
-    assert "change the theme colour to green" in result.options
-    assert result.options[-1] == "Something else"
-    # The thirty-item wall is gone from this reply.
-    assert "**The screens**" not in result.answer
 
 
 def test_a_state_machines_name_is_not_an_answer():
@@ -144,7 +107,7 @@ def test_a_change_is_confirmed_in_the_words_on_the_screen(tmp_path):
     of a sentence with nothing in it."""
     import subprocess
 
-    from services.smith_session import IterationMove, SmithSession
+    from tests.services._front_door import IterationMove, SmithSession
 
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     (tmp_path / "src").mkdir()

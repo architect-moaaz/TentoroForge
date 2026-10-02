@@ -373,11 +373,17 @@ class TestFidelitySmokeHappyPath:
             )
 
     def test_schema_has_required_top_level_keys(self):
+        # `layout` is NOT one of them. `packages/schema/src/page.ts` declares it
+        # `z.string().optional()`, so a page without one is valid and this list
+        # was asking for a key the contract does not require — the fidelity path
+        # stopped emitting it and that read as a missing field.
         for page_type, schema in self.schemas.items():
-            for key in ("route", "layout", "meta", "dataSources", "root"):
+            for key in ("route", "meta", "dataSources", "root"):
                 assert key in schema, (
                     f"Schema '{page_type}' is missing required key '{key}'"
                 )
+            if "layout" in schema:
+                assert isinstance(schema["layout"], str), page_type
 
 
 # ---------------------------------------------------------------------------

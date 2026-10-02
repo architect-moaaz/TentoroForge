@@ -335,3 +335,36 @@ def test_refreshed_next_config_ignores_ts_and_eslint_errors(broken_project):
     text = (broken_project / "next.config.js").read_text()
     assert "ignoreBuildErrors: true" in text
     assert "ignoreDuringBuilds: true" in text
+
+
+# ---------- tool floors ----------
+
+
+def test_a_republish_brings_a_drizzle_kit_that_reads_postgres_18(broken_project):
+    """drizzle-kit 0.30 read Postgres 18's named NOT NULL constraints as stray
+    checks and opened every push by dropping `<table>_id_not_null`, which
+    Postgres refuses; the push died before adding F&B's `orders.fulfilled`."""
+    pkg = json.loads((broken_project / "package.json").read_text())
+    pkg["devDependencies"] = {"drizzle-kit": "^0.30.0", "tsx": "^4.0.0"}
+    (broken_project / "package.json").write_text(json.dumps(pkg))
+    refresh_vendor_and_deps(broken_project, project_slug="test-app")
+    dev = json.loads((broken_project / "package.json").read_text())["devDependencies"]
+    assert dev == {"drizzle-kit": "^0.31.8", "tsx": "^4.0.0"}
+
+
+def test_a_newer_or_unusual_drizzle_kit_is_left_alone(broken_project):
+    pkg = json.loads((broken_project / "package.json").read_text())
+    pkg["devDependencies"] = {"drizzle-kit": "^0.32.1"}
+    pkg["dependencies"]["drizzle-kit"] = "latest"
+    (broken_project / "package.json").write_text(json.dumps(pkg))
+    refresh_vendor_and_deps(broken_project, project_slug="test-app")
+    out = json.loads((broken_project / "package.json").read_text())
+    assert out["devDependencies"]["drizzle-kit"] == "^0.32.1"
+    assert out["dependencies"]["drizzle-kit"] == "latest"
+
+
+def test_new_apps_start_on_a_drizzle_kit_that_reads_postgres_18():
+    root = Path(__file__).resolve().parents[3] / "templates"
+    for name in ("app-foundation/package.json", "standalone-app/package.json.tmpl"):
+        text = (root / name).read_text()
+        assert '"drizzle-kit": "^0.31.8"' in text, name

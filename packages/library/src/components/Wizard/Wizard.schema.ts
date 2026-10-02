@@ -65,6 +65,6 @@ export const WizardProps = z
   })
   .strict();
 
-export type WizardPropsType = z.infer<typeof WizardProps>;
+export type WizardPropsType = z.input<typeof WizardProps>;
 export type WizardFieldType = z.infer<typeof WizardField>;
 export type WizardStepType = z.infer<typeof WizardStep>;

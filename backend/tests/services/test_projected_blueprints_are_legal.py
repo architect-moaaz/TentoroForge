@@ -53,8 +53,15 @@ def test_a_generated_blueprint_still_satisfies_the_contract(path):
 
     import jsonschema
 
+    from services.blueprint.migrations import migrate
+
     schema = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
     doc = json.loads(path.read_text(encoding="utf-8"))
+    # What `BlueprintService.load` hands every caller: the vocabulary
+    # migrations run on load and are persisted by the next save, so a word the
+    # catalog retired (`start` steps) is not what the next save validates. A
+    # rule the migrations do not rewrite still fails here.
+    migrate(doc)
 
     errors = sorted(
         jsonschema.Draft202012Validator(schema).iter_errors(doc),

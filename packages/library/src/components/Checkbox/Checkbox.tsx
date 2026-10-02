@@ -23,7 +23,7 @@ function useCheckboxId(name: string): string {
   return `checkbox-${name}-${React.useId()}`;
 }
 
-export function Checkbox({ name, label, validators: _v, bind: _bind,
+export function Checkbox({ name = "checkbox", label, validators: _v, bind: _bind,
                           style, checked, onChange }: CheckboxProps) {
   const id = useCheckboxId(name);
   const radiusScale = useRadiusScale();

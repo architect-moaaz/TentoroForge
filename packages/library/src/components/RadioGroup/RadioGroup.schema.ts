@@ -11,4 +11,4 @@ export const RadioGroupProps = z.object({
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),
 });
-export type RadioGroupPropsType = z.infer<typeof RadioGroupProps>;
+export type RadioGroupPropsType = z.input<typeof RadioGroupProps>;

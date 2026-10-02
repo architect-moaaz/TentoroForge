@@ -6,4 +6,4 @@ export const MenubarProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type MenubarPropsType = z.infer<typeof MenubarProps>;
+export type MenubarPropsType = z.input<typeof MenubarProps>;

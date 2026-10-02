@@ -80,7 +80,7 @@ def test_nothing_like_it_is_nothing_rather_than_the_nearest_thing():
 def test_the_turn_asks_which_one_instead_of_changing_the_wrong_control(tmp_path):
     import json
 
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     forge = tmp_path / ".forge" / "blueprint"
     forge.mkdir(parents=True)
@@ -101,7 +101,7 @@ def test_the_turn_asks_which_one_instead_of_changing_the_wrong_control(tmp_path)
 def test_the_turn_offers_what_is_on_the_screen_when_the_words_are_not_there(tmp_path):
     import json
 
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     forge = tmp_path / ".forge" / "blueprint"
     forge.mkdir(parents=True)

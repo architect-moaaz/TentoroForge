@@ -71,19 +71,23 @@ from routers.portal import router as portal_router
 from routers.health import router as health_router
 from routers.quality import router as quality_router
 from routers.runtime_exceptions import router as runtime_exceptions_router
+from routers.incidents import router as incidents_router
 from routers.notifications import router as notifications_router
 from routers.sso import router as sso_router
 from routers.audit import router as audit_router
 from routers.attachments import router as attachments_router
+from routers.exports import router as exports_router
 from routers.files import router as files_router
 from routers.environments import router as environments_router
 from routers.webhooks import router as webhooks_router
 from routers.visual_editor import router as visual_editor_router
+from routers.react_editor import router as react_editor_router
 from routers.modules import router as modules_router
 from routers.export import router as export_router
 from routers.ir import router as ir_router
 from routers.design import router as design_router
 from routers.brand import router as brand_router
+from routers.brand_discovery import router as brand_discovery_router
 from routers.usage import router as usage_router
 
 # Middleware
@@ -156,9 +160,11 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(quality_router)
 app.include_router(runtime_exceptions_router)
+app.include_router(incidents_router)
 app.include_router(project_events_router)
 app.include_router(auth_router)
 app.include_router(orgs_router)
+app.include_router(brand_discovery_router)
 # output_projects BEFORE projects so /api/projects/<short-id> routes win
 # first-match for non-UUID ids (the schema editor uses filesystem dirs).
 app.include_router(output_projects_router)
@@ -204,9 +210,12 @@ app.include_router(sso_router)
 app.include_router(audit_router)
 app.include_router(files_router)
 app.include_router(attachments_router)
+app.include_router(exports_router)
 app.include_router(environments_router)
 app.include_router(webhooks_router)
 app.include_router(visual_editor_router)
+# The visual React editor — the Editor tab over a Blueprint's coded pages.
+app.include_router(react_editor_router)
 app.include_router(modules_router)
 app.include_router(export_router)
 app.include_router(ir_router)

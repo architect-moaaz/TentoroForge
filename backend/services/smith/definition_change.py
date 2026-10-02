@@ -166,7 +166,9 @@ PRODUCT_SCHEMA: dict[str, Any] = {
             "name": {"type": "string"}, "description": {"type": "string"},
             "goals": {"type": "array", "items": {"type": "string"}}}, "required": ["name"], "additionalProperties": False}},
         "locale": {"type": "string"},
-        "changed": {"type": "array", "items": {"type": "string", "enum": ["name", "description", "objectives", "terminology", "personas", "locale"]},
+        "languages": {"type": "array", "items": {"type": "string"},
+                      "description": "BCP-47 tags of the OTHER languages people can switch the interface to"},
+        "changed": {"type": "array", "items": {"type": "string", "enum": ["name", "description", "objectives", "terminology", "personas", "locale", "languages"]},
                     "description": "the fields the request changed; only these are applied"},
         "note": {"type": "string"},
     },
@@ -191,13 +193,17 @@ def edit_product(svc: Any, change: str, *, app_root: str | None = None, client: 
     current = {"name": app.get("name"), "description": app.get("description"),
                "objectives": prod.get("objectives") or [],
                "terminology": [{"term": k, "meaning": v} for k, v in (prod.get("terminology") or {}).items()],
-               "personas": prod.get("personas") or [], "locale": prod.get("locale") or "en"}
+               "personas": prod.get("personas") or [], "locale": prod.get("locale") or "en",
+               "languages": prod.get("languages") or []}
     system = ("You revise the product definition of an application that is already built: its name, its "
               "description, its objectives, its domain terminology, its personas and its locale.\n"
               "Rules: change ONLY what the request asks; return every field as it should be after the "
               "change, unchanged fields exactly as given, and list in `changed` the fields the request "
               "changed — nothing else is applied, so a field you rewrote without listing it is dropped. "
-              "The name is never empty. `locale` is a BCP-47 tag. Say in `note` anything that could not be done.")
+              "The name is never empty. `locale` is a BCP-47 tag: the language the interface is written in. "
+              "`languages` are the OTHER languages people can switch the interface to (\"also in Hindi\" adds "
+              "`hi`; \"English and Hindi\" on an English app is `languages: [\"hi\"]`). "
+              "Say in `note` anything that could not be done.")
     user = f"The request: \"{change}\".\n\nThe product as it stands:\n{json.dumps(current, indent=1)}\n\nReturn it as it should be."
     call = client or _client()
     tell(reasoning, f"Revising the product definition: {change}.", "step")
@@ -226,6 +232,10 @@ def edit_product(svc: Any, change: str, *, app_root: str | None = None, client: 
             prod[key] = data[key]; changed.append(key)
     if "locale" in declared and data.get("locale") and data["locale"] != prod.get("locale"):
         prod["locale"] = str(data["locale"]); changed.append("locale")
+    if "languages" in declared and isinstance(data.get("languages"), list):
+        tags = [str(t).strip() for t in data["languages"] if str(t).strip()]
+        if tags != list(prod.get("languages") or []):
+            prod["languages"] = tags; changed.append("languages")
     svc.doc["application"] = app
     svc.doc["product"] = prod
     if not changed:
@@ -238,9 +248,15 @@ def edit_product(svc: Any, change: str, *, app_root: str | None = None, client: 
                before=before, affected=[])
     files: list[str] = []
     if app_root and ("name" in changed):
-        from services.blueprint.projection import project_nav_flow, project_shell
-        files += list(project_shell(svc.doc, app_root).get("files") or [])
-        files += list(project_nav_flow(svc.doc, app_root).get("files") or [])
+        # The rail and the edge pages both carry the application's name.
+        from services.blueprint.projection import project_navigation
+        files += project_navigation(svc.doc, app_root)["files"]
+    if app_root and ({"languages", "locale"} & set(changed)):
+        # The frame's switch reads the list; the tokens load each script's face.
+        from services.blueprint.languages import project_languages
+        from services.blueprint.projection import project_design_tokens
+        files += project_languages(svc.doc, app_root)["files"]
+        files += project_design_tokens(svc.doc, app_root)["files"]
     return {"applied": True, "changed": changed, "name": app.get("name"), "note": str(data.get("note") or "").strip(),
             "edited_paths": files}
 
@@ -359,8 +375,16 @@ def summary_of(verb: str, out: dict) -> str:
     if verb == "remove_requirement":
         return f"Retired {out['requirement']}" + (f" and took it off {len(out['uncited'])} artifact(s)" if out.get("uncited") else "") + "."
     if verb == "edit_product":
-        return (f"Revised the product ({', '.join(out['changed'])}); the application is now \"{out['name']}\"."
-                + (f" {out['note']}" if out.get("note") else ""))
+        s = (f"Revised the product ({', '.join(out['changed'])}); the application is now \"{out['name']}\"."
+             + (f" {out['note']}" if out.get("note") else ""))
+        if "languages" in out["changed"]:
+            # SAID, NOT LEFT TO BE DISCOVERED: the frame's switch is there at
+            # once, and a screen written before speaks one language until it
+            # is written again.
+            s += (" The language switch is in the application's frame now. Each screen's own text "
+                  "is in the languages it was written in until it is rewritten — say which screens "
+                  "to rewrite in every language, or \"all of them\", and I will.")
+        return s
     if verb == "add_api":
         s = f"Declared {out['method']} {out['path']} ({out['api']}), guarded by {out.get('permission') or 'no permission'}, recorded as {out['requirement']}."
         s += (" The data engine serves it." if out.get("served") else
@@ -374,7 +398,7 @@ def summary_of(verb: str, out: dict) -> str:
         # application does not talk to the service until somebody builds that.
         # The reply used to stop at "Declared", which reads as "connected" to
         # anyone who asked for email to be sent.
-        return (f"Recorded **{out['name']}** in the definition ({out['integration']}, "
+        said = (f"Recorded **{out['name']}** in the definition ({out['integration']}, "
                 f"{out['kind']} via {out['provider'] or 'unspecified provider'}), "
                 f"as {out['requirement']}."
                 + (f"\n\nIt names these secrets, which have to be set in the environment: "
@@ -382,6 +406,22 @@ def summary_of(verb: str, out: dict) -> str:
                    "goes in the Blueprint." if out.get("secrets") else "")
                 + "\n\nThis is a declaration, not a connection: nothing is sent or received "
                   "until a developer wires it up against those secrets.")
+        # AND IF IT IS EMAIL, THERE IS A REAL PATH. Recording SendGrid when
+        # what the owner wanted was the confirmation email to arrive leaves
+        # them one sentence away from a connection and no way to know it.
+        # Only for an integration the agent declared as EMAIL. "Google
+        # Analytics" names Google and is not a mail service; offering to send
+        # the application's email through it would be a wrong suggestion
+        # dressed as a helpful one.
+        from services.smith.email_connect import service_for
+        chosen = (service_for(f"{out['name']} {out.get('provider') or ''}")
+                  if str(out.get("kind") or "") == "email" else None)
+        if chosen is not None:
+            said += (f"\n\nIf what you want is for the application to actually send "
+                     f"through it, say “connect it to {chosen.name}” and I will: the app "
+                     "is projected to send through that service, and you set the key "
+                     "once under Settings → Integrations.")
+        return said
     return f"Retired the integration {out['name']} ({out['integration']})."
 
 

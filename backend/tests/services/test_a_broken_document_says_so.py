@@ -10,6 +10,13 @@ since. A composition that was demonstrably valid — it passed
 `check_pattern_templates` — came back refused, twice, and two rounds of
 investigation went into the composition before anyone validated the untouched
 document, which fails in one line.
+
+THE EXAMPLE HAD TO CHANGE, NOT THE RULE. `runtime.placeholders` is a DECLARED
+field now (`packages/schema/src/blueprint/blueprint.ts`), so the key this used
+to break the document with became legal and all three tests stopped raising —
+passing nothing and asserting nothing. The stand-in is a key the contract has
+never declared. What is checked is unchanged: an untouched document that is
+already invalid says so, keeps its own error, and is not repaired.
 """
 from __future__ import annotations
 
@@ -19,6 +26,13 @@ from services.blueprint.agent_contract import (
     AgentResult, ArtifactProposal, apply_agent_result,
 )
 from services.blueprint.service import BlueprintInvalid, BlueprintService
+
+
+#: A key from an older schema version, exactly as one was found on disk — the
+#: shape of the real defect: a list left behind by a since-removed producer.
+#: Deliberately not a field the contract declares, because the point is a
+#: document that is invalid before the change and stays that way.
+_STALE_KEY = "legacyPlaceholders"
 
 
 def _svc(tmp_path):
@@ -42,8 +56,7 @@ def _a_page(svc):
 
 def test_a_pre_existing_fault_is_named_as_pre_existing(tmp_path):
     svc = _svc(tmp_path)
-    # A key from an older schema version, exactly as it was found on disk.
-    svc.doc.setdefault("runtime", {})["placeholders"] = []
+    svc.doc.setdefault("runtime", {})[_STALE_KEY] = []
 
     with pytest.raises(BlueprintInvalid) as exc:
         apply_agent_result(svc, _a_page(svc), commit=False, user_request="x")
@@ -51,30 +64,30 @@ def test_a_pre_existing_fault_is_named_as_pre_existing(tmp_path):
     said = str(exc.value)
     assert "ALREADY invalid before the change" in said
     # And it still names the actual fault, so the message is actionable.
-    assert "placeholders" in said
+    assert _STALE_KEY in said
 
 
 def test_the_original_fault_survives_in_errors(tmp_path):
     """The list is what a caller reads programmatically; the added line must
     not displace what was actually wrong."""
     svc = _svc(tmp_path)
-    svc.doc.setdefault("runtime", {})["placeholders"] = []
+    svc.doc.setdefault("runtime", {})[_STALE_KEY] = []
 
     with pytest.raises(BlueprintInvalid) as exc:
         apply_agent_result(svc, _a_page(svc), commit=False, user_request="x")
-    assert any("placeholders" in e for e in exc.value.errors)
+    assert any(_STALE_KEY in e for e in exc.value.errors)
 
 
 def test_nothing_is_repaired_or_loosened(tmp_path):
     """The document is still invalid and the write is still refused. Only the
     attribution changes — a repair here would be the quiet fix §76 forbids."""
     svc = _svc(tmp_path)
-    svc.doc.setdefault("runtime", {})["placeholders"] = []
+    svc.doc.setdefault("runtime", {})[_STALE_KEY] = []
 
     with pytest.raises(BlueprintInvalid):
         apply_agent_result(svc, _a_page(svc), commit=False, user_request="x")
 
-    assert svc.doc["runtime"]["placeholders"] == [], "the fault was repaired"
+    assert svc.doc["runtime"][_STALE_KEY] == [], "the fault was repaired"
     assert not [p for p in svc.doc.get("pages") or [] if p.get("route") == "/"], (
         "the refused change was left behind")
 

@@ -457,16 +457,20 @@ def main(argv: list[str] | None = None) -> int:
     model = _model(args.dry_run, args.model or SMITH_MODEL)
     executor = None
     if args.run_agents and not args.dry_run:
-        from services.blueprint.executors import make_executor, tiered_router
+        from services.blueprint.executors import (
+            RunUsage, make_executor, tiered_router)
         from services.blueprint.observer import anthropic_observer
 
         smith = _open(args.blueprint, args.output_dir, model=model,
                       new=args.new, domain=args.domain, app_root=app_root)
         # Smith interprets on one model; the specialists and the observer
-        # fill constrained shapes on another, tiered by node.
+        # fill constrained shapes on another, tiered by node. Their spend is
+        # a change to an application that already exists, and is recorded as
+        # one — without the ledger this path cost money nothing ever counted.
         router = tiered_router(model=args.agent_model or AGENT_MODEL)
-        smith.executor = make_executor(smith.blueprint, router)
-        smith.observer_agent = anthropic_observer(router)
+        spend = RunUsage.for_app(smith.blueprint, phase="change")
+        smith.executor = make_executor(smith.blueprint, router, usage=spend)
+        smith.observer_agent = anthropic_observer(router, usage=spend)
     else:
         smith = _open(args.blueprint, args.output_dir, model=model,
                       executor=executor, new=args.new, domain=args.domain,

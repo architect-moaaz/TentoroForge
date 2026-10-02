@@ -201,3 +201,59 @@ def _all_labels(node, out=None):
         for c in node.get("children") or []:
             _all_labels(c, out)
     return out
+
+
+# ----------------------------------------------- a rail that carries no glyphs
+
+def _plain_rail():
+    """A rail captured as text: no actions, glyphs on only some entries.
+
+    The shape `navigation_from` used to lose most of. Dev Mode types a rail's
+    destinations as `<p>` when the designer drew them as text, and bakes the
+    icon into the string only where there is an icon to bake.
+    """
+    return _t("Stack",
+              _t("Text", content="Criterion"),
+              _t("Text", content="⬡Dashboard"),
+              _t("Text", content="Front Desk"),
+              _t("Text", content="+New Case"),
+              _t("Text", content="Ticket Queue"),
+              className="bg-[#0f172a] w-[240px] h-full")
+
+
+def test_a_destination_without_a_glyph_is_still_a_destination():
+    """The bug this rule was turned around for: requiring a glyph or an action
+    read two of these four and silently dropped the other two."""
+    nav = navigation_from([_plain_rail()])
+    labels = [i["label"] for g in nav["groups"] for i in g["items"]]
+    assert labels == ["Dashboard", "Front Desk", "New Case", "Ticket Queue"]
+
+
+def test_the_brand_is_not_one_of_them():
+    """It is the run at the top, ending at the first label drawn as
+    navigation — so a one-line brand does not swallow what follows it, and a
+    destination does not get read as a brand."""
+    assert navigation_from([_plain_rail()])["brand"] == ["Criterion"]
+    assert navigation_from([_rail()])["brand"] == ["Criterion", "Case Management"]
+
+
+def test_a_section_label_is_still_a_heading_not_a_place():
+    """The other half. Capitals are how a rail draws a section and not how it
+    draws a place, so OVERVIEW and CASES must not become destinations now that
+    a plain label can be one."""
+    nav = navigation_from([_rail()])
+    assert [g["label"] for g in nav["groups"]] == ["OVERVIEW", "CASES"]
+    everywhere = {i["label"] for g in nav["groups"] for i in g["items"]}
+    assert "OVERVIEW" not in everywhere and "CASES" not in everywhere
+
+
+def test_a_heading_with_nothing_under_it_is_not_a_heading():
+    """A trailing capitalised label introduces nothing, so it is read as a
+    destination rather than opening an empty group that gets dropped."""
+    rail = _t("Stack",
+              _t("Text", content="Criterion"),
+              _t("Button", label="⬡Dashboard", navigate="/"),
+              _t("Text", content="ARCHIVE"),
+              className="w-[240px]")
+    items = [i["label"] for g in navigation_from([rail])["groups"] for i in g["items"]]
+    assert items == ["Dashboard", "ARCHIVE"]

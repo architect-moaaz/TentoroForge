@@ -11,4 +11,4 @@ export const SliderProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type SliderPropsType = z.infer<typeof SliderProps>;
+export type SliderPropsType = z.input<typeof SliderProps>;

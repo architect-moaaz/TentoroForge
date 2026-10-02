@@ -110,7 +110,10 @@ def test_a_new_workflow_is_declared_authored_and_offered_on_its_screen(svc, monk
     assert [w["name"] for w in fresh.doc["workflows"] if w["name"] in ("Register Nurse", "Delete Nurse")] == ["Register Nurse", "Delete Nurse"]
     assert next(w for w in fresh.doc["workflows"] if w["name"] == "Delete Nurse")["steps"]      # untouched
     assert "THE TRIGGER COMES FROM THE WORDS" not in brief          # a screen was named: manual, there
-    assert composed == [("/master-data", f"add a control that runs the Reset Nurse Location workflow ({out['workflow']})")]
+    assert composed == [("/master-data", f"add a control that runs the Reset Nurse Location workflow — "
+                                         f"{wf.get('purpose') or wf['name']}. It is the only way this change "
+                                         "reaches the records; wire the control to it, never to screen state "
+                                         f"({out['workflow']})")]
     # the stub composer placed no control, and the reply says so instead of claiming one
     assert out["composed"] == "/master-data" and out["offered"] is False
     assert "placed no control for it" in wc.summary_of("add_workflow", out)
@@ -188,30 +191,6 @@ def test_an_unknown_workflow_is_named_with_the_choices(svc):
         wc.edit_workflow(svc, "Delete Nurse", "", executor=lambda s: None)
 
 
-def test_the_verbs_and_the_tools_share_the_seam(monkeypatch, tmp_path):
-    import services.smith_tools as smith_tools
-    from services.smith.understand_ask import _PROMPT
-    from services.smith.verbs import REQUIRED_BY_VERB
-    for v in ("add_workflow", "edit_workflow", "remove_workflow"):
-        assert v in REQUIRED_BY_VERB and f'"{v}"' in _PROMPT and f"{v} needs:" in _PROMPT
-    assert REQUIRED_BY_VERB["edit_workflow"] == {"workflow", "change"}
-    calls = []
-    monkeypatch.setattr("services.smith.workflow_change.run",
-                        lambda output_dir, verb, **kw: calls.append((verb, kw)) or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
-    (tmp_path / ".forge" / "blueprint").mkdir(parents=True)
-    (tmp_path / ".forge" / "blueprint" / "current.json").write_text("{}")
-    assert smith_tools.READONLY_HANDLERS["add_workflow"](str(tmp_path), {"request": "email the admin"})["applied"]
-    assert smith_tools.READONLY_HANDLERS["remove_workflow"](str(tmp_path), {"workflow": "Delete Nurse"})["applied"]
-    assert [c[0] for c in calls] == ["add_workflow", "remove_workflow"]
-    assert calls[0][1]["workflow"] == "email the admin" and calls[1][1]["workflow"] == "Delete Nurse"
-    from services.smith_session import SmithSession
-    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=lambda _d: [],
-                           understand_ask_fn=lambda m, c, history=None: {"verb": "edit_workflow", "workflow": "Delete Nurse", "change": "ask for a reason"},
-                           iteration_move_fn=lambda *a, **k: None)
-    assert session.run_iteration(user_message="the delete should ask for a reason").status == "resolved"
-    assert calls[-1][0] == "edit_workflow" and calls[-1][1]["change"] == "ask for a reason"
-
-
 def test_steps_the_engine_would_refuse_are_fed_back_not_crashed(svc):
     """The contract refuses a step reading a value nothing declares; that is
     a rejection the retry is told, not an exception the turn dies on."""
@@ -272,3 +251,61 @@ def test_retiring_a_workflow_takes_its_form_off_the_screen_too(svc):
     layout = next(l for l in fresh.doc["pageLayouts"] if l["page"] == svc._t.form["id"] and l.get("status") != "SUPERSEDED")
     assert [n["type"] for n in layout["root"]["children"]] == ["Button"]
     assert out["forms_left"] == 1 and "came off too" in wc.summary_of("remove_workflow", out)
+
+
+# ── A state the action moves needs a field to hold it (F&B, 2026-10-01) ─────
+
+def _steps_writing(svc, values):
+    def steps_for(subject):
+        row = dict(next(w for w in svc.doc["workflows"] if w["id"] == subject))
+        row.pop("id", None)
+        row["steps"] = _wf(row["name"], "db_update", inputs=row["inputs"], values=values)["steps"]
+        return row
+    return steps_for
+
+
+def test_a_field_the_steps_set_is_added_as_a_column_only(svc, monkeypatch):
+    monkeypatch.setattr("services.smith.compose.compose_route", lambda *a, **k: SimpleNamespace(applied=True))
+    seen = []
+    out = wc.add_workflow(svc, "mark a nurse as on leave", route="/master-data", compose=False,
+                          executor=_agent(seen, declare_names=("Mark Nurse On Leave",),
+                                          steps_for=_steps_writing(svc, {"onLeave": True})))
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    nurse = next(e for e in fresh.doc["data"]["entities"] if e["name"] == "Nurse")
+    assert {"name": "onLeave", "type": "boolean", "required": False} in nurse["fields"]
+    wf = next(w for w in fresh.doc["workflows"] if w["id"] == out["workflow"])
+    assert len(wf["steps"]) == 3
+    # The form that creates a nurse does not start asking for it.
+    reg = next(w for w in fresh.doc["workflows"] if w["name"] == "Register Nurse")
+    assert "onLeave" not in [i["name"] for i in reg["inputs"]]
+    # Asked again after the field was added — without being counted as a failure.
+    assert [s.node for s in seen] == ["workflows", "workflow_steps", "workflow_steps"]
+    assert "Nurse.onLeave now exist" in seen[2].feedback
+
+
+def test_steps_that_cannot_be_written_take_the_declaration_back_out(svc):
+    seen = []
+    with pytest.raises(wc.WorkflowChangeError, match="nothing has been changed"):
+        wc.add_workflow(svc, "reset a nurse's location", route="/master-data", compose=False,
+                        executor=_agent(seen, steps_for=_steps_writing(svc, {"location": "{{nonsense(location)}}"})))
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    assert "Reset Nurse Location" not in [w["name"] for w in fresh.doc["workflows"]]
+
+
+def test_the_refusal_is_read_for_the_fields_it_names():
+    refusal = ("InvalidWorkflowStep: Mark Order Fulfilled, step 'update_order_status': writes or filters "
+               "'status', which Order does not have (fields: id, customerName)")
+    assert wc.missing_fields(refusal) == [("status", "Order")]
+    steps = {"steps": [{"config": {"values": {"status": "fulfilled", "done": True, "n": 2, "at": "$now"}}}]}
+    assert [wc.written_type(steps, f) for f in ("status", "done", "n", "at")] == ["string", "boolean", "number", "datetime"]
+
+
+def test_changing_an_action_can_add_the_field_it_sets_too(svc):
+    """The hollow 'Mark Order Fulfilled' already on F&B is repaired by a change, not an add."""
+    seen = []
+    out = wc.edit_workflow(svc, "Delete Nurse", "mark the nurse inactive instead of deleting",
+                           executor=_agent(seen, steps_for=_steps_writing(svc, {"active": False})))
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    nurse = next(e for e in fresh.doc["data"]["entities"] if e["name"] == "Nurse")
+    assert {"name": "active", "type": "boolean", "required": False} in nurse["fields"]
+    assert out["applied"] and [s.node for s in seen] == ["workflow_steps", "workflow_steps"]

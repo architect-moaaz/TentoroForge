@@ -183,7 +183,10 @@ def test_the_blueprint_is_updated_before_any_agent_runs(svc):
         executor=executor,
     )
     assert result.applied and result.version == before + 1
-    assert seen and all(v == before + 1 for v in seen)
+    # Service nodes (auth_pages, page_layouts) may commit their own derived
+    # additions during the change; the invariant is that no agent sees the
+    # pre-change version.
+    assert seen and all(v >= before + 1 for v in seen)
 
 
 def test_a_change_creates_a_version_and_records_the_request(svc):

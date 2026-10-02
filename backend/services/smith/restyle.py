@@ -50,9 +50,14 @@ def palette_decision(doc: dict) -> dict | None:
     whose reason names the palette question — the one discovery asked."""
     ds = doc.get("designSystem") or {}
     evidence = " ".join(str(ds.get(k) or "") for k in ("visualPersonality", "paletteEvidence")).lower()
+    # A decision another one supersedes is no longer binding: the second
+    # restyle said it superseded the ORIGINAL palette, skipping the first
+    # restyle, and briefed the design agent with the wrong "earlier" palette.
+    replaced = {str(d.get("supersedes")) for d in doc.get("decisions") or []
+                if isinstance(d, dict) and d.get("supersedes")}
     best = None
     for d in doc.get("decisions") or []:
-        if not isinstance(d, dict) or d.get("status") not in (None, "APPROVED"):
+        if not isinstance(d, dict) or d.get("status") not in (None, "APPROVED") or str(d.get("id")) in replaced:
             continue
         text = str(d.get("decision") or "").strip()
         reason = str(d.get("reason") or "").lower()
@@ -71,7 +76,8 @@ def record_decision(svc: Any, change: str) -> dict:
     previous = palette_decision(svc.doc)
     body = {
         "decision": change,
-        "reason": "Asked in conversation after the build; the design system was re-decided against it.",
+        "reason": "Asked in conversation after the build; the design system's palette and theme were "
+                  "re-decided against it.",
         "source": "user",
         "approvedBy": "user",
         "binding": True,
@@ -132,7 +138,7 @@ def _proposed_colors(proposals: list) -> dict:
 def restyle(svc: Any, change: str, *, app_root: str | None = None,
             executor: Any = None, reasoning: Any = None) -> dict:
     """Re-decide the design system for `change`, commit it, re-project the tokens."""
-    from services.blueprint.agent_contract import InvalidPatternTemplate
+    from services.blueprint.agent_contract import InvalidPatternTemplate, AuthorRefusal
     from services.blueprint.executors import RunUsage, make_executor, tiered_router
     from services.blueprint.orchestrator import DAG, TaskSpec
     from services.blueprint.projection import project_design_tokens
@@ -151,7 +157,8 @@ def restyle(svc: Any, change: str, *, app_root: str | None = None,
     brief = brief_for(change, design, previous)
     agent = DAG[NODE].agent
     run = executor or make_executor(svc, tiered_router(reasoning=reasoning),
-                                    usage=RunUsage(), reasoning=reasoning)
+                                    usage=RunUsage.for_app(svc, phase="change"),
+                                    reasoning=reasoning)
     feedback = ""
     out = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -185,7 +192,7 @@ def restyle(svc: Any, change: str, *, app_root: str | None = None,
             out = apply_change(svc, change, proposals=proposals,
                                interpretation=f"restyle the design system: {change}",
                                agent=agent, app_root=app_root, regenerate=False)
-        except (BlueprintInvalid, InvalidPatternTemplate) as exc:
+        except (BlueprintInvalid, AuthorRefusal) as exc:
             out = None
             feedback = f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
         if out is not None and out.applied:
@@ -239,7 +246,11 @@ def run(output_dir: str, change: str, *, reasoning: Any = None) -> dict:
         return {"applied": False, "edited_paths": [], "reason": str(exc)}
     except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
         logger.exception("[smith] restyle failed")
-        return {"applied": False, "edited_paths": [], "reason": f"{type(exc).__name__}: {exc}"}
+        # The owner reads this; "MalformedEnvelope: design_system: proposal 0
+        # body was not JSON" told a non-technical owner nothing (UAT replay).
+        return {"applied": False, "edited_paths": [],
+                "reason": ("I could not change the colours this time — the design step's answer came back "
+                           "unreadable, so nothing in the app was changed. Ask again and I will retry.")}
     return {"applied": True, "edited_paths": out["edited_paths"],
             "diff_summary": summary_of(out, change), "version": out["version"],
             "changed": out["changed"], "decision": out["decision"], "reason": ""}

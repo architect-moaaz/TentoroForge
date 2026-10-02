@@ -46,6 +46,10 @@ def find_field(doc: dict, entity_ref: str, field_ref: str) -> tuple[dict, dict]:
         raise SectionChangeError(f"I cannot tell which entity {entity_ref!r} means. The entities are: {names(_entities(doc))}.")
     want = (field_ref or "").strip().lower()
     fields = [f for f in (ent.get("fields") or []) if isinstance(f, dict)]
+    if not want:
+        # Asked, not refused: "Tool has no field ''" read as a broken app.
+        raise SectionChangeError(f"Which field of {ent.get('name')} do you mean? Its fields are: "
+                                 f"{', '.join(str(f.get('name')) for f in fields) or '(none)'}.")
     fld = next((f for f in fields if str(f.get("name") or "").lower() == want), None)
     if fld is None:
         hits = [f for f in fields if want and want in str(f.get("name") or "").lower()]
@@ -185,8 +189,16 @@ def rename_field(svc: Any, entity_ref: str, field_ref: str, new_name: str, *, ap
                smith_interpretation=f"rename the field across {len(hits)} reference(s)",
                before=before, affected=sorted({eid, *[h.split(':')[0] for h in hits if ':' in h]}))
     tell(reasoning, f"Renamed {ename}.{old} to {new_name} in {len(hits)} place(s).", "step")
+    edited = _project(svc, app_root)
+    if app_root:
+        # THE DATA MOVES WITH THE NAME: written down for prepare-schema, which
+        # renames the column in every database instead of dropping it.
+        from services.blueprint.migrations_ledger import column_renamed
+        from services.blueprint.projection import to_snake
+        table = str(ent.get("table") or to_snake(ename))
+        edited.append(column_renamed(_app_dir(app_root), table, to_snake(old), to_snake(new_name)))
     return {"applied": True, "entity": eid, "name": ename, "old": old, "new": new_name, "hits": hits,
-            "edited_paths": _project(svc, app_root)}
+            "edited_paths": edited}
 
 
 _FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -194,6 +206,12 @@ _FIELD_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 #: Where a field lands on a screen, in the words the reply uses.
 FORM_FIELD = "form field"
 TABLE_COLUMN = "table column"
+
+
+def _app_dir(app_root: str) -> Path:
+    """The app directory: `app_root` itself, or its `app/` when given the project."""
+    root = Path(app_root)
+    return root / "app" if (root / "app" / "package.json").is_file() else root
 
 
 def label_of(name: str, label: str = "") -> str:
@@ -253,8 +271,13 @@ def _surface(svc: Any, ent: dict, field: dict, label: str, known: set[str],
     name = str(field.get("name") or "")
     surfaced: list[dict] = []
     pages = {str(p.get("id")): p for p in (svc.doc.get("pages") or []) if isinstance(p, dict)}
+    # A page written as code does not ship its layout: a control put there is
+    # seen by nobody, and saying "put it on the verification queue" was untrue.
+    coded = {str(r.get("page")) for r in svc.doc.get("pageCode") or [] if isinstance(r, dict) and r.get("view")}
     for layout in _live(svc.doc.get("pageLayouts")):
         if only_page is not None and str(layout.get("page")) != str(only_page):
+            continue
+        if str(layout.get("page")) in coded:
             continue
         if not _touches_entity(svc.doc, layout, eid, ename):
             continue
@@ -283,8 +306,13 @@ def _present(svc: Any, ent: dict, name: str, only_page: str | None = None) -> li
     eid, ename = str(ent["id"]), str(ent.get("name") or "")
     pages = {str(p.get("id")): p for p in (svc.doc.get("pages") or []) if isinstance(p, dict)}
     out: list[dict] = []
+    # A page written as code does not ship its layout: a control put there is
+    # seen by nobody, and saying "put it on the verification queue" was untrue.
+    coded = {str(r.get("page")) for r in svc.doc.get("pageCode") or [] if isinstance(r, dict) and r.get("view")}
     for layout in _live(svc.doc.get("pageLayouts")):
         if only_page is not None and str(layout.get("page")) != str(only_page):
+            continue
+        if str(layout.get("page")) in coded:
             continue
         if not _touches_entity(svc.doc, layout, eid, ename):
             continue
@@ -334,7 +362,7 @@ def show_field(svc: Any, entity_ref: str, field_ref: str, *, page_id: str | None
 
 
 def add_field(svc: Any, entity_ref: str, field: dict, *, app_root: str | None = None,
-              reasoning: Any = None) -> dict:
+              reasoning: Any = None, surface: bool = True) -> dict:
     """Add a field to an entity AND put it where that entity is edited or listed.
 
     "Add father's name in the Nurse Registration" is one ask: a column, and the
@@ -346,6 +374,9 @@ def add_field(svc: Any, entity_ref: str, field: dict, *, app_root: str | None = 
     field goes onto each of them here, deterministically, and the reply names
     every place it went. A new field is never required: existing rows have
     no value for it, and the column must be nullable for the migration to apply.
+
+    `surface=False` adds the column only: a state a workflow sets (an order's
+    status) is not typed into the forms that create the record.
     """
     ent = find_named(_entities(svc.doc), entity_ref)
     if ent is None:
@@ -366,7 +397,13 @@ def add_field(svc: Any, entity_ref: str, field: dict, *, app_root: str | None = 
     ent.setdefault("fields", []).append(declared)
     label = label_of(name, str((field or {}).get("label") or ""))
 
-    surfaced = _surface(svc, ent, declared, label, known)
+    surfaced = _surface(svc, ent, declared, label, known) if surface else []
+    # A FORM CAN ONLY SAVE WHAT ITS WORKFLOW TAKES. The layouts got the
+    # control and the workflow that saves the record never heard of the field
+    # — and an application whose pages are code does not ship its layouts at
+    # all: 0l133sp2's "postcode when they create their profile" landed on an
+    # unused table column and nowhere a person could type it.
+    flows = _extend_form_workflows(svc, ent, declared, known, label) if surface else []
     svc.validate()
     svc.commit(user_request=f"add {ename}.{name}",
                smith_interpretation=f"add the field and show it in {len(surfaced)} place(s)",
@@ -375,8 +412,68 @@ def add_field(svc: Any, entity_ref: str, field: dict, *, app_root: str | None = 
                                        {l.get("page") for l in _live(svc.doc.get("pageLayouts"))
                                         if _touches_entity(svc.doc, l, eid, ename)}]}))
     tell(reasoning, f"Added {ename}.{name} and put it on {len(surfaced)} screen element(s).", "step")
+    edited = _project(svc, app_root)
+    if app_root:
+        surfaced += _recode_form_pages(svc, flows, declared, label, app_root, reasoning)
+    # IN THE DATABASE NOW (see `schema_push`): the forms just given this field
+    # save into a column that has to exist.
+    pushed = {"applied": False, "reason": ""}
+    if app_root:
+        from services.blueprint.schema_push import push_now
+        pushed = push_now(app_root)
     return {"applied": True, "entity": eid, "name": ename, "field": name, "type": ftype, "label": label,
-            "surfaced": surfaced, "edited_paths": _project(svc, app_root)}
+            "surfaced": surfaced, "workflows": [w.get("name") for w in flows], "edited_paths": edited,
+            "pushed": bool(pushed.get("applied")), "push_reason": str(pushed.get("reason") or "")}
+
+
+def _extend_form_workflows(svc: Any, ent: dict, field: dict, known: set[str], label: str) -> list[dict]:
+    """The workflows that save `ent` from a form — they already take some of
+    its fields as inputs and write them — now take and write `field` too."""
+    name, table = str(field["name"]), str(ent.get("table") or "")
+    out = []
+    for w in _live(svc.doc.get("workflows")):
+        inputs = [i for i in w.get("inputs") or [] if isinstance(i, dict)]
+        form_inputs = {str(i.get("name")) for i in inputs if i.get("kind") == "field"} & known
+        if not form_inputs or any(str(i.get("name")) == name for i in inputs):
+            continue
+        writes = [st for st in w.get("steps") or [] if isinstance(st, dict)
+                  and str((st.get("config") or {}).get("actionType") or "") in ("db_insert", "db_update")
+                  and str((st.get("config") or {}).get("table") or "") == table
+                  and any(f"{{{{{n}}}}}" in json.dumps((st.get("config") or {}).get("values") or {})
+                          for n in form_inputs)]
+        if not writes:
+            continue
+        w.setdefault("inputs", []).append({"name": name, "kind": "field", "type": field.get("type") or "string",
+                                           "required": False, "description": label})
+        for st in writes:
+            st["config"].setdefault("values", {})[name] = f"{{{{{name}}}}}"
+        out.append(w)
+    return out
+
+
+def _recode_form_pages(svc: Any, flows: list[dict], field: dict, label: str, app_root: str,
+                       reasoning: Any) -> list[dict]:
+    """Each coded page that runs one of `flows`, rewritten with the new field
+    on its form — by the UI engineer, compiled before it is kept."""
+    from services.smith.compose import ComposeError, code_row, recode_page
+
+    pages = {str(p.get("id")): p for p in _live(svc.doc.get("pages"))}
+    done: list[dict] = []
+    for pid in dict.fromkeys(str(x) for w in flows for x in w.get("launchedFrom") or []):
+        page = pages.get(pid)
+        if page is None or code_row(svc.doc, pid) is None:
+            continue
+        names = ", ".join(str(w.get("name")) for w in flows if pid in [str(x) for x in w.get("launchedFrom") or []])
+        request = (f"Add the new field **{label}** (`{field['name']}`, {field.get('type') or 'string'}, optional) "
+                   f"to the form on this page that runs {names}, so people can fill it in. The workflow "
+                   f"already takes it as an input. Keep everything else on the page as it is.")
+        try:
+            recode_page(svc, str(page.get("route")), app_root=app_root, request=request, reasoning=reasoning)
+            done.append({"page": str(page.get("name") or page.get("route")), "route": str(page.get("route")),
+                         "where": FORM_FIELD})
+        except (ComposeError, Exception) as exc:  # noqa: BLE001 — the field exists; say where it did not land
+            logger.warning("[field] could not add %s to %s: %s", field["name"], page.get("route"), exc)
+    return done
 
 
 def consequences(doc: dict, entity_ref: str, field_ref: str) -> dict:
@@ -512,8 +609,21 @@ def remove_field(svc: Any, entity_ref: str, field_ref: str, *, app_root: str | N
     svc.commit(user_request=f"remove {ename}.{old}", smith_interpretation=f"remove the field and {len(removed) - 1} reference(s)",
                before=before, affected=sorted({eid, *[h.split(':')[0] for h in removed if ':' in h]}))
     tell(reasoning, f"Removed {ename}.{old} and {len(removed) - 1} reference(s).", "step")
+    edited = _project(svc, app_root)
+    # THE CODED SCREENS THAT USE IT, rewritten without it: the SDK's type
+    # lost the field, and a page still reading it — or still offering it as a
+    # form field (`spiceLevel: {…}`), which the search for `.spiceLevel`
+    # missed (F&B live test, 2026-10-02) — no longer compiles.
+    import re as _re
+    from services.smith.compose import pages_using, recode_pages_using
+    done, notes = recode_pages_using(svc, app_root, pages_using(svc, rf"\b{_re.escape(old)}\b", entity_id=eid),
+                                     reasoning=reasoning, request=(
+        f"The field {ename}.{old} was removed from the app: take away everything on the page that "
+        f"shows, edits or filters by it. Keep everything else."))
+    removed += [f"screen {r} rewritten without it" for r in done]
+    left += notes
     return {"applied": True, "entity": eid, "name": ename, "field": old, "removed": removed, "left": left,
-            "edited_paths": _project(svc, app_root)}
+            "edited_paths": edited}
 
 
 def _walk(node: Any):
@@ -533,6 +643,14 @@ def _project(svc: Any, app_root: str | None) -> list[str]:
     from services.blueprint.projection import apply_frontend_projection, project_business_rules, project_data_layer
     files = list(project_data_layer(svc.doc, app_root).get("files") or [])
     _project_integration(svc, app_root)
+    # What the coded pages and sign-up read: the SDK's types and the account's
+    # own fields (a new required-free field joins the sign-up form).
+    from pathlib import Path as _Path
+    from services.blueprint.account_model import project_account
+    from services.blueprint.ui_engineer import ensure_sdk
+    files += list(project_account(svc.doc, app_root).get("files") or [])
+    ensure_sdk(svc.doc, _Path(app_root))
+    files += ["src/sdk/schema.ts", "src/sdk/workflows.ts"]
     files += ["src/lib/workflows/definitions"]
     files += [str(f) for f in (apply_frontend_projection(svc, app_root) or {}).get("files", [])]
     try:
@@ -562,16 +680,22 @@ def summary_of(verb: str, out: dict) -> str:
         else:
             lead += (f". No screen edits or lists {out['name']} records through a form or a table "
                      "yet, so it is not on a page \u2014 say which screen should show it.")
-        return lead + "\n\nThe column is added as a migration; existing rows keep their data."
+        where = ("The column is in the database now; existing rows keep their data."
+                 if out.get("pushed") else
+                 "The column is added when the preview next starts"
+                 + (f" ({out['push_reason']})" if out.get("push_reason") else "")
+                 + "; existing rows keep their data.")
+        return lead + "\n\n" + where
     if verb == "rename_field":
         s = (f"Renamed {out['name']}.{out['old']} to {out['new']} in {len(out['hits'])} place(s): "
-             f"{'; '.join(out['hits'][:8])}{'…' if len(out['hits']) > 8 else ''}. The column is renamed on the next "
-             "install; the migration may drop and re-add it, so back up the column's data first if it matters.")
+             f"{'; '.join(out['hits'][:8])}{'…' if len(out['hits']) > 8 else ''}. The column is renamed in the "
+             "database with its data, here and when the app is next published.")
         return s
     s = f"Removed {out['name']}.{out['field']} and took it out of {len(out['removed']) - 1} place(s): {'; '.join(out['removed'][1:8])}."
     if out.get("left"):
         s += " Still reading it, for Verify & Fix to repair: " + "; ".join(out["left"][:6]) + "."
-    s += " The column is dropped on the next install."
+    s += (" The column leaves the database with its data kept aside (retired records), so it can be "
+          "brought back.")
     return s
 
 

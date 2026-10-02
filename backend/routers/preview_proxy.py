@@ -64,7 +64,10 @@ _client = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0), follow_red
 
 
 def _filter_headers(headers) -> list[tuple[str, str]]:
-    return [(k, v) for k, v in headers.items() if k.lower() not in _HOP_BY_HOP]
+    # `multi_items`, not `items`: httpx joins repeated headers with ", ", and
+    # a Set-Cookie list joined that way is one broken cookie.
+    items = headers.multi_items() if hasattr(headers, "multi_items") else headers.items()
+    return [(k, v) for k, v in items if k.lower() not in _HOP_BY_HOP]
 
 
 async def _proxy(request: Request, project_id: str, path: str) -> Response:
@@ -113,12 +116,19 @@ async def _proxy(request: Request, project_id: str, path: str) -> Response:
             await upstream_resp.aclose()
 
     resp_headers = _filter_headers(upstream_resp.headers)
-    return StreamingResponse(
+    response = StreamingResponse(
         stream_upstream(),
         status_code=upstream_resp.status_code,
-        headers=dict(resp_headers),
+        headers={k: v for k, v in resp_headers if k.lower() != "set-cookie"},
         media_type=upstream_resp.headers.get("content-type"),
     )
+    # EVERY COOKIE, EACH ON ITS OWN LINE. A dict kept one Set-Cookie of
+    # next-auth's three, so a preview sign-in succeeded and no session
+    # arrived (Test4, 2026-09-28).
+    for k, v in resp_headers:
+        if k.lower() == "set-cookie":
+            response.raw_headers.append((b"set-cookie", v.encode("latin-1")))
+    return response
 
 
 # One route per method — FastAPI has no single catch-all decorator, and

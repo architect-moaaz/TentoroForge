@@ -25,16 +25,34 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _code_pages(svc: Any, app_root: str) -> dict:
+    from pathlib import Path
+
+    from services.blueprint.app_sdk import project_code_pages
+    from services.blueprint.ui_engineer import ensure_sdk
+
+    ensure_sdk(svc.doc, Path(app_root))
+    return {"files": list(project_code_pages(svc.doc, app_root) or [])}
+
+
+def _account(svc: Any, app_root: str) -> dict:
+    from services.blueprint.account_model import project_account
+
+    return project_account(svc.doc, app_root)
+
+
 def everything(svc: Any, app_root: str | None) -> list[str]:
     """Re-project every part of the application from `svc.doc`."""
     if not app_root:
         return []
     from services.blueprint.orchestrator import _project_integration
     from services.blueprint.projection import (
-        apply_frontend_projection, project_business_rules, project_data_layer,
-        project_design_tokens, project_entity_access, project_launch_roles,
-        project_middleware, project_public_resources, project_seed,
+        apply_frontend_projection, project_brand_logo, project_business_rules,
+        project_data_layer, project_design_tokens, project_entity_access,
+        project_launch_roles, project_middleware, project_public_resources,
+        project_public_routes, project_seed, project_shell,
     )
+    from services.smith import accounts as _accounts
 
     files: list[str] = []
 
@@ -48,18 +66,79 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
             files.extend(str(f) for f in (out.get("files") or []))
 
     _run("data_layer", lambda: project_data_layer(svc.doc, app_root))
+    # Workflow definitions, the connected-services map and the seed: the
+    # projection node's own function, so a re-projection writes exactly what
+    # a build writes.
     _run("integrations", lambda: _project_integration(svc, app_root))
-    files.append("src/lib/workflows/definitions")
-    _run("frontend", lambda: apply_frontend_projection(svc, app_root))
+    files += ["src/lib/workflows/definitions", "src/lib/integrations/connected.ts"]
+    # WHAT IS BUILT, NOT EVERYTHING DECLARED: a module left for later has no
+    # screens in the running app (see `scope.built_view`).
+    from services.blueprint.scope import built_view
+    view = built_view(svc.doc)
+    _run("frontend", lambda: apply_frontend_projection(svc, app_root, doc=view))
+    # THE DESIGNED PAGES. `apply_frontend_projection` writes page schemas, not
+    # a page's React code or the SDK it compiles against: an undo that put a
+    # page's earlier code back into the document left the app serving the
+    # newer view.tsx, charts and all (036farqu's Open a Dispute). The same two
+    # calls the build's frontend projection makes, in the same order.
+    _run("code_pages", lambda: _code_pages(svc, app_root))
+    _run("account", lambda: _account(svc, app_root))
     _run("business_rules", lambda: project_business_rules(svc.doc, app_root))
     for name, fn in (("middleware", project_middleware),
                      ("public_resources", project_public_resources),
+                     # An undo that makes a page private again has to take its
+                     # route file back out, or the page stays reachable without
+                     # a session long after the document stopped saying so.
+                     ("public_routes", project_public_routes),
                      ("entity_access", project_entity_access),
                      ("launch_roles", project_launch_roles)):
         _run(name, lambda fn=fn: fn(svc.doc, app_root))
+    # AN UNDONE IMPORT MUST STOP BEING LOADED. The declaration is gone from
+    # the restored document; its payload file has to go from the app tree too,
+    # or the seeder applies it on the next boot and the undo undid nothing.
+    # Before the seed, because the seed's content depends on which entities
+    # still hold imported data.
+    _run("imports", lambda: {"files": _reconcile_imports(svc.doc, app_root)})
     _run("seed", lambda: project_seed(svc.doc, app_root))
+    # THE ROSTER IS NOT IN THE DOCUMENT, and is re-projected anyway. Who may
+    # log in is a project ledger, not a Blueprint section (`smith.accounts`),
+    # so restoring an older document must not disturb it — but the file the
+    # seed reads lives in the app tree, and putting every projection back in
+    # step means putting that one back too.
+    _run("accounts", lambda: {"files": _accounts.project(svc.output_dir, app_root)})
     _run("design_tokens", lambda: project_design_tokens(svc.doc, app_root))
+    # THE RAIL IS A PROJECTION TOO, and this list did not have it:
+    # `apply_frontend_projection` writes the page schemas, not `shell.json`.
+    # An undo that restores a document without a logo left the rail still
+    # carrying one, because the rail is only rewritten by `project_shell`.
+    # `project_brand_logo` then puts the file the rewritten rail names back
+    # under `public/`; the bytes of a mark that is no longer referenced are
+    # left where they are, unread and harmless, rather than deleted from a
+    # tree this function does not own.
+    # THE WAYS AROUND THE APP, ALL OF THEM. `project_shell` alone wrote the
+    # signed-in rail and left the route graph, the root and the edge pages as
+    # they were — and the PUBLIC menu, which is the only menu an application
+    # without sign-in shows (Test2, 2026-09-28: a page made public never
+    # reached it). `project_navigation` is the navigation's own set.
+    from services.blueprint.projection import project_navigation, project_public_nav
+    _run("navigation", lambda: project_navigation(view, app_root))
+    _run("public_nav", lambda: {"files": [project_public_nav(view, app_root)]})
+    _run("brand_logo", lambda: project_brand_logo(svc.doc, app_root))
+    # THE FRAME'S IDENTITY (`design-dna.json`: its tone, its layout) — the
+    # build writes it, and nothing after the build did, so a new shell tone
+    # never reached the rail.
+    from services.blueprint.projection import project_shell_identity
+    _run("shell_identity", lambda: project_shell_identity(svc.doc, app_root))
+    # THE FRAME, including the files the application owns (`frameCode`): an
+    # undo of a frame change has to put the frame back too.
+    from services.smith.sync_app import refresh_frame
+    _run("frame", lambda: {"files": refresh_frame(app_root, svc.doc)})
     return sorted(set(f for f in files if f))
+
+
+def _reconcile_imports(doc: dict, app_root: str) -> list[str]:
+    from services.smith.data_import import reconcile
+    return reconcile(doc, app_root)
 
 
 __all__ = ["everything"]

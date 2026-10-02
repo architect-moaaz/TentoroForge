@@ -86,7 +86,7 @@ export const DataSource = z
   .object({
     name: z.string().min(1),
     entity: z.string().min(1).optional(),
-    op: z.enum(["list", "get", "create", "update", "delete", "aggregate", "series", "search"]).optional(),
+    op: z.enum(["list", "get", "create", "update", "delete", "aggregate", "series", "search", "similar"]).optional(),
     metrics: z
       .record(
         z.object({
@@ -135,6 +135,10 @@ export const DataSource = z
     q: z.string().optional(),
     columns: z.array(z.string().min(1)).optional(),
     snippet: z.boolean().optional(),
+    // op:"similar" — records ranked by embedding distance to the page's query
+    // image (URL `image`) or query text (URL `q`). `field` names the entity's
+    // embedding field; the Blueprint's PageDataSource says the same.
+    field: z.string().optional(),
     filter: z.record(z.unknown()).optional(),
     select: z.array(z.string()).optional(),
     orderBy: z

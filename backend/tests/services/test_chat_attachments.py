@@ -46,9 +46,19 @@ class TestClassify:
     def test_text_formats(self, name):
         assert classify(name, "") == KIND_TEXT
 
-    @pytest.mark.parametrize("name", ["report.docx", "book.xlsx", "app.exe"])
+    @pytest.mark.parametrize("name", ["report.docx", "app.exe"])
     def test_unsupported_is_explicit(self, name):
         assert classify(name, "") == KIND_UNSUPPORTED
+
+    def test_a_workbook_is_its_own_kind_now_that_its_rows_can_be_loaded(self):
+        """`.xlsx` used to be refused as "a zip container we have no reader
+        for", which was true of reading it as a document and wrong about what
+        an owner attaches one FOR: "here's our customer spreadsheet, load it
+        in". It is accepted as its own kind — never read into a prompt, and
+        loaded by `services.smith.data_import` from the file on disk."""
+        from services.chat_attachments import KIND_SPREADSHEET
+
+        assert classify("book.xlsx", "") == KIND_SPREADSHEET
 
     def test_content_type_wins_over_a_lying_extension(self):
         assert classify("screenshot", "image/png") == KIND_IMAGE

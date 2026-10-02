@@ -12,7 +12,12 @@ from __future__ import annotations
 import re
 
 _HOME_SLUG = "home"
-_SAFE_SEGMENT = re.compile(r"^[a-z0-9_\-\[\]]+$")
+#: What a segment may hold. The point is path traversal and shell injection —
+#: no dots (so no `..`), no slashes, no spaces, no quoting or metacharacters.
+#: Capitals are none of those: `[scanId]` is ordinary Next.js, and refusing it
+#: failed a 27-page build at `frontend` after 43 minutes of generation, taking
+#: `integration` and `assemble` down with it (HippieKit, zo9k0ekd).
+_SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9_\-\[\]]+$")
 _COLON_PARAM_RE = re.compile(r":(\w+)")
 
 

@@ -18,8 +18,8 @@ Two entry points:
 
 Turn budget vs run budget:
 
-- ``turn_budget`` is a per-fault ceiling — the max iters Smith can spend
-  on ONE fault. Passed to :func:`agents.smith_agent.run_smith_agent`.
+- ``turn_budget`` is a per-fault ceiling — the max steps the loop may spend
+  on ONE fault (`max_steps` of :func:`services.smith4.platform.smith_result`).
 - ``FORGE_AUTOFIX_SMITH_BUDGET`` (env, default 15) is the CUMULATIVE
   turn cap for a whole ``dispatch_all`` invocation. When the next
   fault's ``turn_budget`` would push cumulative use over the cap, we
@@ -400,24 +400,21 @@ async def _default_smith_runner(
     turn_budget: int,
     **_extra: Any,
 ) -> dict[str, Any]:
-    """Run ``run_smith_agent`` in a worker thread and return the result.
+    """Run one Smith v4 turn in a worker thread and return the legacy shape.
 
     Kept a top-level function (not a lambda) so callers can monkeypatch
-    it in tests without importing agents.smith_agent themselves. The
+    it in tests. The
     recall/memory blocks are empty on purpose — a V&F autofix turn is a
     scoped one-shot repair, not a conversational continuation, and the
     fault context we hand Smith is already carrying everything relevant.
     """
-    from agents.smith_agent import run_smith_agent
+    from services.smith4.platform import smith_result
 
     def _sync() -> dict[str, Any]:
-        return run_smith_agent(
-            user_message=user_message,
-            output_dir=output_dir,
-            recall_block="",
-            memory_block="",
-            scoped_tools=scoped_tools,
-            max_iters=max(1, int(turn_budget)),
-        )
+        # `scoped_tools` is not honoured: the loop chooses from the whole
+        # catalogue (§0 of the loop spec), and the fault context in the
+        # prompt is what narrows it. The turn budget is.
+        return smith_result("", output_dir, user_message,
+                            max_steps=max(1, int(turn_budget)))
 
     return await asyncio.to_thread(_sync)

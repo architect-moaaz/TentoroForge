@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 NODE = "security"
 
+#: What step 1 hears back when the roles and permissions need no change.
+UNCHANGED = "the roles and permissions need no change"
+
 PAGE_ACCESS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -147,6 +150,27 @@ def _project(svc: Any, app_root: str | None) -> list[str]:
             files += list((fn(svc.doc, app_root) or {}).get("files") or [])
         except Exception as exc:  # noqa: BLE001 — a projector that cannot run here is said, not hidden
             logger.warning("[access] %s failed: %s", fn.__name__, exc)
+    # WHERE A PAGE LIVES FOLLOWS WHO MAY OPEN IT. A public page is served
+    # outside the signed-in area and listed on the public menu; a signed-in
+    # one inside it. This re-projected only the gate, so "make Location
+    # Explorer public" set the page public and the middleware open, and left
+    # its files inside `(dashboard)` behind a login the app does not have and
+    # off the public menu (Test2, 2026-09-28). In the build's order: the code
+    # pages (moved, the old copy swept by its marker), the public routes and
+    # menu, then the navigation that reads them.
+    from services.blueprint.app_sdk import project_code_pages
+    from services.blueprint.projection import project_navigation, project_public_nav, project_public_routes
+    steps = (
+        ("project_code_pages", lambda: {"files": project_code_pages(svc.doc, app_root)}),
+        ("project_public_routes", lambda: project_public_routes(svc.doc, app_root)),
+        ("project_public_nav", lambda: {"files": [project_public_nav(svc.doc, app_root)]}),
+        ("project_navigation", lambda: project_navigation(svc.doc, app_root)),
+    )
+    for name, step in steps:
+        try:
+            files += [str(f) for f in ((step() or {}).get("files") or []) if f]
+        except Exception as exc:  # noqa: BLE001 — a projector that cannot run here is said, not hidden
+            logger.warning("[access] %s failed: %s", name, exc)
     try:
         project_seed(svc.doc, app_root)
         files.append("src/db/seed.json")
@@ -177,9 +201,17 @@ def change_access(svc: Any, change: str, *, app_root: str | None = None, executo
     )
     def keep(props):
         return [p for p in props if p.section in ("roles", "permissions", "security")]
-    rerun(svc, NODE, brief=brief, request=change, interpretation=f"change access: {change}", keep=keep,
-          executor=executor, reasoning=reasoning, app_root=app_root,
-          say=f"Re-deciding roles and permissions: {change}.")
+    # NOTHING TO CHANGE IS AN ANSWER. Told to return the model unchanged when
+    # the ask is only about screens, the agent returned nothing; that was read
+    # as a refusal twice, and "only admins can open order details" never
+    # reached the screens step (F&B live test, 2026-10-02).
+    try:
+        rerun(svc, NODE, brief=brief, request=change, interpretation=f"change access: {change}", keep=keep,
+              executor=executor, reasoning=reasoning, app_root=app_root, empty=UNCHANGED,
+              say=f"Re-deciding roles and permissions: {change}.")
+    except SectionChangeError as exc:
+        if UNCHANGED not in str(exc):
+            raise
 
     # 2. which roles reach which screen — held to the roles that now exist
     call = client or _client()

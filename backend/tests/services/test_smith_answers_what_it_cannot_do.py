@@ -2,13 +2,14 @@
 
 Eight things people ask for cannot be done. Each used to land on the verb that
 looked nearest — "delete the Wards page" read as removing a control — or on "I
-did not recognise that as something I can do", which is true and useless. Two
-of the eight stopped being limits: undo exists, and "build it" builds.
+did not recognise that as something I can do", which is true and useless.
+Three of the eight have stopped being limits: undo exists, "build it" builds,
+and a screen can be removed (`test_smith_removes_a_page`).
 """
 
 from __future__ import annotations
 
-from services.smith.limits import answer, cannot
+from services.smith.limits import answer
 from services.smith.verbs import REQUIRED_BY_VERB, VERB_HELP
 
 DOC = {
@@ -18,36 +19,19 @@ DOC = {
 }
 
 
-def test_each_refusal_is_a_verb_the_classifier_can_reach():
-    for verb in ("remove_page", "rename_entity", "change_field_type", "edit_api", "reorder"):
-        assert verb in REQUIRED_BY_VERB and verb in VERB_HELP, verb
-        assert cannot(verb)
-    assert not cannot("remove") and not cannot("rename_field") and not cannot("revert")
+def test_the_three_refusals_are_made_now_and_reorder_is_the_one_left():
+    """`write_section` closed rename_entity, change_field_type and edit_api;
+    `reorder` on a tree-laid page is the last honest refusal."""
+    from services.smith4.verbs import PERFORM, honest_refusal, section_write, tree_edit
+    for verb in ("rename_entity", "change_field_type", "edit_api"):
+        assert verb in REQUIRED_BY_VERB and "Cannot be done" not in VERB_HELP[verb], verb
+        assert PERFORM[verb] is section_write
+    assert PERFORM["reorder"] is tree_edit and honest_refusal is not None
+    assert answer("reorder", {"route": "/wards"}, DOC)[0]
 
 
-def test_a_screen_cannot_go_but_the_menu_and_the_record_can():
-    said, options = answer("remove_page", {"route": "/wards"}, DOC)
-    assert "cannot remove **Wards**" in said and "put it back" in said
-    assert options == ["Take Wards off the menu",
-                       "Retire the Ward record and everything built on it"]
-
-
-def test_a_record_cannot_be_renamed_but_the_words_people_read_can():
-    said, options = answer("rename_entity", {"entity": "Nurse", "new_value": "Colleague"}, DOC)
-    assert "cannot rename the **Nurse** record" in said
-    assert options == ["We say “Colleague”, never “Nurse”"]
-
-
-def test_a_box_cannot_change_type_and_the_way_round_names_its_cost():
-    said, options = answer("change_field_type", {"entity": "Nurse", "field": {"name": "phone"}}, DOC)
-    assert "cannot change what kind of value **phone** holds" in said
-    assert "loses what is in that box" in said
-    assert options == ["Remove phone from Nurse", "Leave it as it is"]
-
-
-def test_an_endpoint_is_added_or_removed_not_edited():
-    said, options = answer("edit_api", {"api": "GET /api/data/wards"}, DOC)
-    assert "not changed in place" in said and options[0] == "Remove GET /api/data/wards"
+def test_a_screen_is_no_longer_answered_here_at_all():
+    assert answer("remove_page", {"route": "/wards"}, DOC) == ("", [])
 
 
 def test_a_screen_is_laid_out_again_rather_than_nudged():
@@ -62,9 +46,10 @@ def test_a_verb_that_is_not_a_refusal_answers_nothing_here():
 
 
 def test_the_turn_says_why_and_offers_the_nearest_thing(tmp_path):
+    """`reorder` stands in for what `remove_page` used to demonstrate here."""
     import json
 
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     forge = tmp_path / ".forge" / "blueprint"
     forge.mkdir(parents=True)
@@ -72,9 +57,9 @@ def test_the_turn_says_why_and_offers_the_nearest_thing(tmp_path):
 
     session = SmithSession(
         project_id="p1", output_dir=str(tmp_path), guards_fn=lambda *a, **kw: [],
-        understand_ask_fn=lambda m, ctx, **kw: {"verb": "remove_page", "route": "/wards"},
+        understand_ask_fn=lambda m, ctx, **kw: {"verb": "reorder", "route": "/wards"},
         iteration_move_fn=lambda *a, **kw: None)
-    result = session.run_iteration(user_message="delete the Wards page")
+    result = session.run_iteration(user_message="move the chart above the table on /wards")
     assert result.status == "needs_user"
-    assert "cannot remove **Wards**" in result.answer
-    assert "Take Wards off the menu" in result.options
+    assert "cannot move things around on **/wards**" in result.answer
+    assert "Lay /wards out again" in result.options

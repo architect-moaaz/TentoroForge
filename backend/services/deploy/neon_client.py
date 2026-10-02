@@ -127,6 +127,29 @@ class NeonClient:
             )
         return r.json()["uri"]
 
+    # ── Branches ────────────────────────────────────────────────────
+
+    async def create_branch(self, project_id: str, name: str) -> dict[str, Any]:
+        """A copy of the project's default branch — its data as it is now,
+        copy-on-write, in seconds — with its own read-write endpoint.
+        Returns ``{"branch_id", "database_url"}``. Used to try a publish's
+        migration on the live data without touching the live data."""
+        r = await self._client.post(
+            f"{BASE}/projects/{project_id}/branches",
+            json={"branch": {"name": name}, "endpoints": [{"type": "read_write"}]},
+        )
+        if not r.is_success:
+            raise RuntimeError(f"Neon create_branch failed: project={project_id!r} status={r.status_code}")
+        body = r.json()
+        uris = body.get("connection_uris") or []
+        if not uris:
+            raise RuntimeError(f"Neon create_branch returned no connection uri: project={project_id!r}")
+        return {"branch_id": body["branch"]["id"], "database_url": uris[0]["connection_uri"]}
+
+    async def delete_branch(self, project_id: str, branch_id: str) -> None:
+        r = await self._client.delete(f"{BASE}/projects/{project_id}/branches/{branch_id}")
+        r.raise_for_status()
+
     # ── House-keeping ───────────────────────────────────────────────
 
     async def close(self) -> None:

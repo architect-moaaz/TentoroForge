@@ -8,7 +8,7 @@
 
 import type { DataEngine } from "@tentoroforge/renderer";
 import * as engine from "./data-engine";
-import { resolveAggregate as _resolveAggregate, resolveSeries as _resolveSeries } from "./data-engine";
+import { resolveAggregate as _resolveAggregate, resolveSeries as _resolveSeries, resolveQuery as _resolveQuery, resolveSimilar as _resolveSimilar } from "./data-engine";
 // SSR data path: the entity registry is otherwise only populated on the first API
 // request, so server-side renders saw "Unknown entity". Initialise it here too.
 import { ensureDataEngineInitialized } from "./data-init";
@@ -78,6 +78,31 @@ export async function resolveSeries(source: unknown, ctx?: ActorCtx): Promise<Ar
   }
 }
 
+/** Resolve an op:"query" dataSource — measures by dimensions — to tidy rows.
+ *  Degrades to [] so an analytic shows its empty state, never a broken page. */
+export async function resolveQuery(source: unknown, ctx?: ActorCtx): Promise<Array<Record<string, string | number | boolean | null>>> {
+  try {
+    await ensureDataEngineInitialized();
+    return await _resolveQuery(source as any, ctx as any);
+  } catch (err) {
+    console.warn(`[data-engine-bridge] query run failed:`, err);
+    return [];
+  }
+}
+
+/** Resolve an op:"similar" dataSource: records ranked by how close their
+ *  embedding is to the page's query image or text. Unlike the others this one
+ *  does not degrade quietly — an unreachable embedding service throws, so the
+ *  page says the search is not connected instead of "no matches". */
+export async function resolveSimilar(
+  source: unknown,
+  query: { image?: string; text?: string },
+  ctx?: ActorCtx,
+): Promise<Array<Record<string, unknown>>> {
+  await ensureDataEngineInitialized();
+  return await _resolveSimilar(source as any, query, ctx as any);
+}
+
 // Scalar aggregate ops that resolve to a single number via resolveAggregate.
 // Written by the planner as `{op: "max", entity, field}` — the ergonomic
 // shorthand — but resolveAggregate expects the richer
@@ -103,6 +128,11 @@ export const dataEngine: DataEngine = {
 
     try {
       await ensureDataEngineInitialized();
+
+      // op:"query" — measures by dimensions → tidy rows for charts and KPIs.
+      if (src.op === "query") {
+        return await resolveQuery(src, userCtx);
+      }
 
       // op:"series" — grouped aggregate → [{label, value}] for charts.
       if (src.op === "series") {

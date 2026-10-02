@@ -61,13 +61,18 @@ ROOM_OF: dict[str, str] = {
     "accessibility": "design_studio",
     "figma_intelligence": "design_studio",
     "page_design": "design_studio",
+    "analytics": "design_studio",
     # Data — entities, the schema they become, the endpoints they imply (§28)
     "data_model": "data",
     "api": "data",
     "backend": "data",
     # Composition — the page trees A2UI authors, and the projection that turns
     # them into what the engine renders (§34)
-    "a2ui_composition": "composition",
+    "page_template": "composition",
+    "ui_engineer": "composition",
+    "ui_director": "design_studio",
+    "page_reviewer": "qa",
+    "testing": "qa",
     "a2ui_pages": "composition",
     "frontend": "composition",
     # Logic — what the business does (§107 step 16)
@@ -76,7 +81,6 @@ ROOM_OF: dict[str, str] = {
     # Security — permissions guard entities, so this sits next to Data (§100)
     "security": "security",
     # Verification — the §75 matrix, the tests, and what the run remembers
-    "testing": "qa",
     "verification": "qa",
     # The observer (§73) sits with verification: it judges each node as it
     # lands and sends the incomplete ones back to their author.
@@ -102,8 +106,10 @@ NODE_LABEL: dict[str, str] = {
     "design_system": "Setting the design language",
     "page_contracts": "Deciding the page set",
     "page_details": "Writing each feature's page contracts",
-    "composition": "Sketching the whole app",
-    "page_layouts": "Composing page trees",
+    "analytics": "Designing each page's analytics",
+    "page_layouts": "Laying out each page",
+    "ui_direction": "Setting the app's look and conventions",
+    "page_code": "Writing each page in React",
     "figma_intelligence": "Reading the design out of Figma",
     "figma_design_system": "Turning Figma into design tokens",
     "frontend": "Projecting the page schemas",
@@ -113,10 +119,9 @@ NODE_LABEL: dict[str, str] = {
     "security": "Setting roles and permissions",
     "integrations": "Connecting the outside services",
     "integration": "Assembling the application",
-    "testing": "Generating the tests",
     "memory": "Recording decisions and coverage",
     "verification": "Checking the blueprint against itself",
-    "preview": "Building the preview",
+    "assemble": "Assembling and starting the application",
     "install": "Installing the toolchain",
 }
 

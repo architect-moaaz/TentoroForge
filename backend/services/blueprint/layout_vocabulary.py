@@ -27,6 +27,22 @@ class _SourceBook:
         from services.a2ui_to_forge import _entity_index
         self.idx = _entity_index(registry)
         self.sources = sources
+        #: What the translation had to give up, in words a reader can act on.
+        self.recorded: list[str] = []
+
+    def _record(self, kind: str, where: Any, what: str, detail: str,
+                *, material: bool = False) -> None:
+        """The binder's loss ledger, for the one path that has no ledger.
+
+        `_translate_option_sources` is shared with the A2UI translator, whose
+        `_Binder` writes every removal to a ledger. It grew a `_record` call
+        (73b29f2) this stand-in never had, and on UAT (2026-09-18) the first
+        page to reach that branch raised AttributeError — which no refusal
+        handler catches — and took the whole build down. Kept rather than
+        dropped: the caller surfaces it as an issue on the result.
+        """
+        self.recorded.append(f"{kind} {what} on {where}: {detail}"
+                             + (" (material)" if material else ""))
 
     def _add_source(self, spec: dict) -> str:
         for existing in self.sources:
@@ -58,6 +74,9 @@ def translate_layout_vocabulary(result: Any, doc: dict | None) -> None:
         sources = [s for s in (body.get("dataSources") or []) if isinstance(s, dict)]
         book = _SourceBook(registry, sources)
         _translate_option_sources(body.get("root"), book, registry)
+        issues = getattr(result, "issues", None)
+        if book.recorded and isinstance(issues, list):
+            issues.extend(book.recorded)
         body["dataSources"] = book.sources
         _name_the_signed_in_user(body)
         # The renderer evaluates visibleIf/when with FEEL-lite; an author

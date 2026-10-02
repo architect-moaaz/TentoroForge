@@ -42,19 +42,20 @@ from typing import Any, Iterable
 
 # Three KPIs is the floor a scanning reader needs before a row reads as a
 # summary rather than a stray number. Four is the common shipped shape.
-KPI_FLOOR = 3
+#: Re-exported from the one table that states them, so a caller reading this
+#: module and a caller reading `page_demands` cannot disagree about what a KPI
+#: is. They were two frozensets with the same members, maintained by hand.
+from services.page_demands import (  # noqa: E402
+    ACTIVITY_TYPES as _ACTIVITY_TYPES,
+    CHART_TYPES as _CHART_TYPES,
+    KPI_FLOOR,
+    KPI_TYPES as _KPI_TYPES,
+)
 
 # Routes that serve the "how are we doing" job. Dashboards are named by route,
 # never by entity — that is the whole reason they slipped the existing floor.
 _DASHBOARD_ROUTES = {"/", "/home", "/dashboard", "/overview", "/index"}
 _DASHBOARD_LEAF = re.compile(r"/(home|dashboard|overview)$")
-
-_KPI_TYPES = frozenset({"MetricTile", "Stat", "KpiTile", "SplitArc"})
-_CHART_TYPES = frozenset({"Chart", "Gauge", "Heatmap", "Sparkline", "Schematic"})
-_ACTIVITY_TYPES = frozenset({
-    "Table", "List", "Timeline", "ActivityFeed", "Kanban", "DescriptionList",
-    "ResourceTimeline", "Calendar",
-})
 
 # Column names that read as free text even when the SQL type does not say so.
 # Grouping on any of these produces one bucket per row.
@@ -151,6 +152,22 @@ def dashboard_findings(route: str, doc: Any, registry: Any) -> list[dict]:
     if not is_dashboard_route(route):
         return []
 
+    # A PAGE THAT SAYS IT IS NOT A DASHBOARD IS NOT ONE. `is_dashboard_route`
+    # reads the URL, and a URL says nothing about what a screen is for: a
+    # calculator lives at "/" like any other single-page application, and this
+    # floor then demanded three KPI tiles, a chart and a recent-activity
+    # surface from a keypad that has no records to count.
+    #
+    # The page's own declared pattern is the stronger evidence and it travels
+    # with the projected schema (`meta.pattern`). Read, never inferred: only a
+    # contract that NAMES a non-dashboard pattern is excused, so a page that
+    # declares nothing is judged exactly as before.
+    from services.page_kind_anatomy import page_family
+
+    declared = str(((doc or {}).get("meta") or {}).get("pattern") or "").strip().lower()
+    if declared and page_family(declared) not in (None, "dashboard"):
+        return []
+
     root = page_root(doc)
     if root is None:
         # A dashboard we cannot read is a finding, never silence. Returning []
@@ -163,33 +180,13 @@ def dashboard_findings(route: str, doc: Any, registry: Any) -> list[dict]:
                     "checked, so it must not pass."),
         )]
 
-    out: list[dict] = []
-    present = _types_present(root)
+    # THE SLOT RULES LIVE IN ONE PLACE NOW. `page_demands` states each demand
+    # once, and the composer's brief is rendered from the same objects — so a
+    # page cannot be refused for a rule nobody told it about, which is exactly
+    # what `dashboard_no_chart` was for every dashboard composed here.
+    from services.page_demands import findings as demand_findings
 
-    kpis = _count_of(root, _KPI_TYPES)
-    if kpis < KPI_FLOOR:
-        out.append(_finding(
-            "dashboard_no_kpis", route, slot="kpis",
-            detail=(f"dashboard has {kpis} KPI tile(s); the floor is "
-                    f"{KPI_FLOOR}. A summary row is how a reader answers "
-                    f"'how are we doing' without reading the tables."),
-        ))
-
-    if not (present & _CHART_TYPES):
-        out.append(_finding(
-            "dashboard_no_chart", route, slot="chart",
-            detail=("dashboard has no chart. Counts alone cannot answer "
-                    "'is this getting better or worse'."),
-        ))
-
-    if not (present & _ACTIVITY_TYPES):
-        out.append(_finding(
-            "dashboard_no_activity", route, slot="activity",
-            detail=("dashboard has no recent-activity surface (table, list, "
-                    "timeline or feed) — nothing answers 'what just "
-                    "happened'."),
-        ))
-
+    out: list[dict] = list(demand_findings("dashboard", route, {"root": root}))
     out.extend(_groupby_findings(route, doc, registry))
     return out
 

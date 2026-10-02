@@ -5,6 +5,8 @@ import { useForm, Controller, useWatch, type SubmitHandler } from "react-hook-fo
 import { DatePicker } from "../DatePicker/DatePicker";
 import { RadioGroup } from "../RadioGroup/RadioGroup";
 import { Switch } from "../Switch/Switch";
+import { FileUpload } from "../FileUpload/FileUpload";
+import { fileSrc } from "../FileUpload/fileSrc";
 import { ensureHumanLabel } from "../../utils/humanizeLabel";
 import {
   WorkflowDispatcherContext,
@@ -44,6 +46,8 @@ type FieldSpec =
   | { kind: "object"; name: string; label: string; description?: string; fields: Field[] }
   // Free-form string→value map (unknown shape): add/remove key+value rows.
   | { kind: "keyvalue"; name: string; label: string; description?: string; valueType?: "text" | "number" | "boolean" }
+  // An uploaded file (an `image` column): stored when chosen, submitted as its id.
+  | { kind: "file"; name: string; label: string; required?: boolean; accept?: string }
   // Spec B6: a subsection that reveals/hides a group of fields based on a
   // `visibleIf` predicate on the same form's state (feel-lite expression,
   // evaluated by the interaction engine). A section has NO submit value of
@@ -958,6 +962,27 @@ function FormFieldImpl({
             ))}
           </div>
         </fieldset>
+      );
+    case "file":
+      return (
+        <Controller name={name} control={control}
+          rules={{ required: effRequired ? "required" : false }}
+          render={({ field: f }) => (
+            <div className={FIELD_WRAP}>
+              <FileUpload
+                name={name}
+                label={field.label}
+                accept={field.accept}
+                hint={(field as { hint?: string }).hint}
+                onUploaded={(refs) => f.onChange(refs[0]?.id ?? "")}
+              />
+              {/* An edit form opens on the record's current file. */}
+              {typeof f.value === "string" && f.value && String(field.accept ?? "").startsWith("image")
+                ? <img src={fileSrc(f.value)} alt="" className="h-20 w-20 rounded-md border border-border/60 object-cover" />
+                : null}
+              {error && <p role="alert" className={FIELD_ERROR}>{error}</p>}
+            </div>
+          )} />
       );
     case "keyvalue":
       return <KeyValueField name={name} field={field} control={control} />;

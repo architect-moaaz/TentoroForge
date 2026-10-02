@@ -21,4 +21,4 @@ export const HeadingProps = z.object({
   className: z.string().optional(),
 });
 
-export type HeadingPropsType = z.infer<typeof HeadingProps>;
+export type HeadingPropsType = z.input<typeof HeadingProps>;

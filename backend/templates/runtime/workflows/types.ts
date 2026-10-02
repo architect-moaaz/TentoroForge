@@ -277,6 +277,19 @@ export interface WorkflowDefinition {
   description?: string;
   /** Optional event/schedule trigger contract — see WorkflowTriggerContract. */
   trigger?: WorkflowTriggerContract;
+  /**
+   * The inputs a run cannot start without, by name (projected from the
+   * Blueprint's `workflow.inputs`). A run missing one is refused before its
+   * first step: 0l133sp2 wrote `kycStatus: pending` and NULL over the
+   * identity photo, so a member's submission was filed with nothing in it.
+   */
+  requiredInputs?: string[];
+  /**
+   * The inputs that are a RECORD of an entity, and the table each is read
+   * from. A control sends an id; the steps read fields of it, so the row is
+   * loaded before the first one runs (see `record-inputs.ts`).
+   */
+  recordInputs?: { name: string; table: string }[];
   /** Process variables — the data context flowing through the workflow */
   processVariables?: ProcessVariable[];
   /**
@@ -342,6 +355,25 @@ export interface WorkflowExecutionResult {
   log: ExecutionLogEntry[];
   /** Final process variable state */
   output: Record<string, unknown>;
+  /**
+   * What a step could not do, in words for the person who ran it.
+   *
+   * A run is not only "completed" or "failed": a step can do half of what it
+   * says — an email saved as a notification because no email service is
+   * connected — and that used to live in the step's own output where nothing
+   * read it. The engine collects every `notice` a handler returns onto the
+   * run, so the caller that shows "complete · 4 steps" can show the half as
+   * well instead of a success the owner has to disprove.
+   */
+  notices?: string[];
+  /**
+   * The run ended on a refused `end` — it stopped without doing what it was
+   * asked (a check failed). `status` is "failed" and `error` is the end's
+   * message, the sentence the person is shown; this says it was the rules
+   * saying no rather than something breaking, so nothing reports it as a
+   * crash or retries it.
+   */
+  refused?: boolean;
   error?: string;
   /** If paused: which node and what task is pending */
   pausedAt?: string;

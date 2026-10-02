@@ -3,3 +3,7 @@ node_modules/
 out/
 *.log
 .env.local
+# The editor's on-demand page builds and the compiler's per-page checks.
+.forge-jit/
+.forge-check/
+src/.forge-drafts/

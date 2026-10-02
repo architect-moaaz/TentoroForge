@@ -8,6 +8,7 @@ export class Anthropic {
   constructor(_opts: { apiKey: string }) {}
   messages = {
     create: async (_req: any) => {
+      (globalThis as any).__forgeLastRequest = _req;
       const text = (globalThis as any).__forgeStubResponse ?? "";
       return { content: [{ type: "text", text }] };
     },

@@ -38,6 +38,8 @@ PENDING_PATH = Path(".forge") / "pending-ask.json"
 #: Long enough for the sentence that asked and the clarification it drew,
 #: several times over; short enough that a runaway loop cannot grow a file.
 MAX_CHARS = 4000
+#: How long a held ask waits for its answer.
+MAX_AGE_S = 2 * 3600
 
 
 def _path(output_dir: str | Path) -> Path:
@@ -52,7 +54,8 @@ def remember(output_dir: str | Path, ask: str) -> None:
     try:
         path = _path(output_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"ask": text}, indent=2), "utf-8")
+        import time
+        path.write_text(json.dumps({"ask": text, "at": time.time()}, indent=2), "utf-8")
     except Exception as exc:  # noqa: BLE001 — carrying the ask is a courtesy
         logger.warning("[smith] could not record the pending ask: %s", exc)
 
@@ -68,6 +71,15 @@ def take(output_dir: str | Path) -> str:
     try:
         raw = json.loads(path.read_text("utf-8"))
         ask = str((raw or {}).get("ask") or "").strip() if isinstance(raw, dict) else ""
+        # AN ANSWER COMES WITHIN THE HOUR, NOT DAYS LATER. SnapIT's "make it
+        # Dubai centric" was held for two days under a question nobody
+        # answered, and the next request — "make it look like Myntra" — was
+        # joined to it and planned as Dubai first (replay, 2026-10-01). A
+        # note with no time is from before this rule and is as old as that.
+        import time
+        at = float((raw or {}).get("at") or 0) if isinstance(raw, dict) else 0.0
+        if time.time() - at > MAX_AGE_S:
+            ask = ""
     except FileNotFoundError:
         return ""
     except Exception as exc:  # noqa: BLE001 — an unreadable note is no note

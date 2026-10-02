@@ -149,6 +149,16 @@ function asDocuments(val: unknown): { docs: Doc[]; text: string } {
       if (mt.includes("pdf")) docs.push({ kind: "pdf", base64: data, mediaType: "application/pdf", filename: f.filename });
       else if (mt.startsWith("image/")) docs.push({ kind: "image", base64: data, mediaType: mt, filename: f.filename });
       else texts.push(typeof f.text === "string" ? f.text : "");
+    } else if (typeof it === "string" && /^data:(image\/[\w.+-]+|application\/pdf);base64,/i.test(it.trim())) {
+      // A PICTURE IS A PICTURE. A page hands a captured or pasted image to its
+      // workflow as a data URL; read as text, the model got 70k characters of
+      // base64 and every field of SnapIT's photo analysis came back null
+      // (2026-09-29).
+      const [, mediaType, base64] = it.trim().match(/^data:([^;]+);base64,(.*)$/is) ?? [];
+      if (mediaType && base64) {
+        if (/pdf/i.test(mediaType)) docs.push({ kind: "pdf", base64, mediaType: "application/pdf" });
+        else docs.push({ kind: "image", base64, mediaType: mediaType.toLowerCase() });
+      }
     } else if (typeof it === "string") {
       texts.push(it);
     } else if (it != null) {
@@ -326,6 +336,19 @@ export async function aiClassify(config: NodeConfig, ctx: WorkflowExecutionConte
   };
 }
 
+/** AN EMPTY ANSWER IS NO ANSWER. Told to "leave productName empty" when the
+ *  pages named nothing, the model returned "" — and `not(productName = null)`
+ *  read that as found, so SnapIT tried to save a product with no name
+ *  (2026-09-29). A field extracted as blank text is null. */
+export function blankIsNull<T>(record: T): T {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(record as Record<string, unknown>)) {
+    out[k] = typeof v === "string" && !v.trim() ? null : v;
+  }
+  return out as T;
+}
+
 export async function aiExtract(config: NodeConfig, ctx: WorkflowExecutionContext): Promise<Record<string, unknown>> {
   const c = config as Cfg;
   const vars = (ctx.variables ?? {}) as Record<string, unknown>;
@@ -338,10 +361,18 @@ export async function aiExtract(config: NodeConfig, ctx: WorkflowExecutionContex
   }
   const fields = extractFieldNames(c.aiExtractFields);
   const fieldList = fields.length ? fields : ["name", "email", "phone"];
-  const extra = resolveString(c.aiPrompt ?? "", vars);
+  // What the author said to look for, under whichever name it wrote it.
+  const extra = resolveString(c.aiPrompt ?? c.prompt ?? c.instruction ?? c.instructions ?? "", vars);
+  // ONE RECORD, OR EVERY ONE. Search results hold many listings; extracted as
+  // a single object, SnapIT kept one listing of twenty-five and its "persist"
+  // step had nothing to save row by row (2026-09-29). `aiExtractMany` asks
+  // for an array, which a db_insert then writes one row per item.
+  const many = c.aiExtractMany === true || c.aiExtractMany === "true";
   const system = c.aiSystemPrompt
     ? resolveString(c.aiSystemPrompt, vars)
-    : `You are a precise data-extraction assistant. Extract EXACTLY these fields from the input and respond with a SINGLE JSON object whose keys are exactly: [${fieldList.join(", ")}]. Use null when a field is absent. No commentary.`;
+    : many
+      ? `You are a precise data-extraction assistant. Find EVERY record in the input and respond with a JSON ARRAY of objects, one per record, each with keys exactly: [${fieldList.join(", ")}]. Use null when a field is absent. An input with no records is []. No commentary.`
+      : `You are a precise data-extraction assistant. Extract EXACTLY these fields from the input and respond with a SINGLE JSON object whose keys are exactly: [${fieldList.join(", ")}]. Use null when a field is absent. No commentary.`;
   const user =
     [extra, text && `Input:\n${text}`].filter(Boolean).join("\n\n") ||
     (docs.length ? "Extract the fields from the attached document." : "Extract the fields.");
@@ -349,10 +380,15 @@ export async function aiExtract(config: NodeConfig, ctx: WorkflowExecutionContex
     system,
     user,
     model: await aiModel(c),
-    maxTokens: num(c.aiMaxTokens, 2048),
+    maxTokens: num(c.aiMaxTokens, many ? 16000 : 2048),
     documents: docs,
   });
-  const parsed = raw ? parseJson(raw) ?? {} : mockExtract(fieldList);
+  if (many) {
+    const list = raw ? parseJsonArray(raw) : [mockExtract(fieldList)];
+    const items = list.filter((x) => x && typeof x === "object" && !Array.isArray(x)).map(blankIsNull) as Record<string, unknown>[];
+    return { data: items, items, count: items.length, extracted: items, output: items };
+  }
+  const parsed = blankIsNull(raw ? parseJson(raw) ?? {} : mockExtract(fieldList));
   // Expose each extracted field as a top-level process variable so a downstream
   // db_insert/db_update can bind it directly (values: { column: "{{field}}" }).
   // Reserved roots are never overwritten.
@@ -362,8 +398,12 @@ export async function aiExtract(config: NodeConfig, ctx: WorkflowExecutionContex
       if (k && !reserved.has(k)) (ctx.variables as Record<string, unknown>)[k] = v;
     }
   }
-  // Include contract-declared `data` alongside legacy names.
-  return { data: parsed, extracted_fields: parsed, extracted: parsed, output: parsed };
+  // Include contract-declared `data` alongside legacy names — and each field
+  // on the step itself, so `{{extract_profile.brand}}` reads the brand the
+  // way `{{insert_case.id}}` reads an inserted row's id. SnapIT's product
+  // was saved with no name because only `.data.brand` held it (2026-09-29).
+  const own = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  return { ...own, data: parsed, extracted_fields: parsed, extracted: parsed, output: parsed };
 }
 
 export async function aiDecide(config: NodeConfig, ctx: WorkflowExecutionContext): Promise<Record<string, unknown>> {
@@ -392,6 +432,53 @@ export async function aiDecide(config: NodeConfig, ctx: WorkflowExecutionContext
     rationale: reasoning,
     output: decision,
   };
+}
+
+/** A JSON array from a model's reply — bare, fenced, or the first `[…]` in it;
+ *  and when the reply was cut off mid-list, every record that was finished.
+ *  SnapIT's listing extraction ran out of room on the 13th listing and the
+ *  unparseable remainder cost all twelve before it (2026-09-29). */
+export function parseJsonArray(raw: string): unknown[] {
+  const text = String(raw).trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  for (const candidate of [text, text.slice(text.indexOf("["), text.lastIndexOf("]") + 1)]) {
+    try {
+      const v = JSON.parse(candidate);
+      if (Array.isArray(v)) return v;
+      if (v && typeof v === "object") {
+        for (const k of ["items", "records", "data", "results"]) {
+          if (Array.isArray((v as Record<string, unknown>)[k])) return (v as Record<string, unknown[]>)[k];
+        }
+      }
+    } catch { /* try the next shape */ }
+  }
+  return finishedRecords(text);
+}
+
+/** The complete top-level `{…}` objects of a list that never closed. */
+function finishedRecords(text: string): unknown[] {
+  const start = text.indexOf("[");
+  if (start === -1) return [];
+  const out: unknown[] = [];
+  let depth = 0, from = -1, inString = false, escaped = false;
+  for (let i = start + 1; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") { if (depth === 0) from = i; depth++; }
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0 && from !== -1) {
+        try { out.push(JSON.parse(text.slice(from, i + 1))); } catch { /* a broken record is skipped */ }
+        from = -1;
+      }
+    } else if (ch === "]" && depth === 0) break;
+  }
+  return out;
 }
 
 function mockExtract(fields: string[]): Record<string, unknown> {

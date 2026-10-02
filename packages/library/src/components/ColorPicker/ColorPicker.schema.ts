@@ -7,4 +7,4 @@ export const ColorPickerProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type ColorPickerPropsType = z.infer<typeof ColorPickerProps>;
+export type ColorPickerPropsType = z.input<typeof ColorPickerProps>;

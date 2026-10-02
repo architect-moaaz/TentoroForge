@@ -58,7 +58,42 @@ def test_primitives_without_a_contract_still_get_props():
     c = load_contracts()
     for name in ("Stack", "Row", "Grid", "Container", "Text"):
         assert props_for(name, c), f"{name} would author against nothing"
-    assert set(props_for("Text", c)) == {"content", "as"}
+    # `variant` is the third, and it is not an invention: ffcee08 added it
+    # because the composer emits a style band on Text, the transcribed entry
+    # accepted only content/as, and every page carrying one was rejected and
+    # dropped. This assertion pinned the two it had and was never moved, so it
+    # has failed since — the code was right and the test was describing the bug.
+    assert set(props_for("Text", c)) == {"content", "as", "variant"}
+
+
+def test_texts_style_band_says_what_the_engine_says():
+    """The drift that cost the MaritimeTalent pages, closed from both ends.
+
+    Text is declared in three places and they do not all count. `_PRIMITIVE_PROPS`
+    decides only that `variant` EXISTS — the library never registers Text, so
+    that entry is the fallback; its enum is then overwritten by `_zod_facts`
+    from `backend/contracts/component-catalog.json`, which is what the composer
+    is actually told. The engine validates against `packages/schema`. So the
+    pair that can hurt is the catalog and the schema: when they disagree a page
+    composes cleanly and is rejected afterwards, which is the most expensive way
+    to be wrong.
+
+    `contract-drift.mjs` already compares the two, but by prop NAME and only
+    when somebody runs it. An enum that loses a member keeps the name and is
+    exactly what happened here, so this reads the values, off the schema rather
+    than copied beside it — a copy is what drifted in the first place.
+    """
+    import pathlib
+    import re
+
+    src = (pathlib.Path(__file__).resolve().parents[3]
+           / "packages" / "schema" / "src" / "nodes" / "primitive.ts").read_text("utf-8")
+    block = re.search(r"variant:\s*z\s*\.enum\(\[(.*?)\]\)", src, re.S)
+    assert block, "TextNode no longer declares a `variant` enum — find where it went"
+    engine = re.findall(r'"([^"]+)"', block.group(1))
+
+    assert engine, "the enum was found but read as empty"
+    assert props_for("Text", load_contracts())["variant"]["enum"] == engine
 
 
 # ------------------------------------------------------------------- required
@@ -278,13 +313,16 @@ def test_a_button_must_declare_how_it_acts():
     from services.a2ui_catalog import build_a2ui_catalog
 
     body = build_a2ui_catalog()["components"]["Button"]["allOf"][2]
-    # All six the catalog offers. The first version of this list held four,
+    # All seven the catalog offers. The first version of this list held four,
     # and a Button written with `opensDialog` — which a modal page needs — was
-    # refused for declaring an action that was not on it.
+    # refused for declaring an action that was not on it. `clientAction` is
+    # the seventh and the first that does not involve the server: it changes
+    # one of the page's own `clientState` values, which is the only thing a
+    # calculator's keys can do.
     assert {tuple(a["required"]) for a in body["anyOf"]} == {
         ("workflow",), ("navigate",), ("submit",), ("onClick",),
-        ("opensDialog",), ("togglesSidebar",)}
-    # Still not required outright — which of the four is the composer's call.
+        ("opensDialog",), ("togglesSidebar",), ("clientAction",)}
+    # Still not required outright — which of the seven is the composer's call.
     assert "workflow" not in (body.get("required") or [])
 
 

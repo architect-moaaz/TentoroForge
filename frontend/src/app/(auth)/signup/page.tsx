@@ -20,7 +20,11 @@ export default function SignupPage() {
     e.preventDefault();
     try {
       await signup(email, name, password);
-      router.push("/");
+      // NOT "/" — that is the workspace picker, and a brand-new account has
+      // nothing to pick. Onboarding reads the company's site, makes the
+      // workspace from it, and sends them on; somebody who was invited to an
+      // existing organisation is bounced straight through.
+      router.push("/onboarding");
     } catch {
       // error is set in store
     }

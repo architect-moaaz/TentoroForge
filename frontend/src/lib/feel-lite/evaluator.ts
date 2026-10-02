@@ -11,6 +11,7 @@ const BUILT_IN_FUNCTIONS: Record<string, (...args: unknown[]) => unknown> = {
     return nums.reduce((a, b) => a + b, 0);
   },
   count: (...args: unknown[]) => {
+    if (args.length === 1 && args[0] == null) return 0; // nothing counts as none
     const list = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
     return list.length;
   },
@@ -105,6 +106,11 @@ function resolveIdentifier(name: string, ctx: Context): unknown {
     // (ctx.get(name) -> None). Without this, `field = null` reads false in the
     // browser playground but true in the shipped app (they must agree).
     if (current == null || typeof current !== "object") return null;
+    // A path on a list is the list of each item's value (FEEL): `items.subtotal`.
+    if (Array.isArray(current) && !(part in current)) {
+      current = current.map((el) => (el != null && typeof el === "object" ? (el as Record<string, unknown>)[part] : null));
+      continue;
+    }
     current = (current as Record<string, unknown>)[part];
   }
   return current === undefined ? null : current;
@@ -149,6 +155,11 @@ export function evaluate(node: ASTNode, ctx: Context): unknown {
     case "MemberExpression": {
       const obj = evaluate(node.object, ctx);
       if (obj == null || typeof obj !== "object") return undefined;
+      // A path on a list is the list of each item's value (FEEL); a list's own
+      // properties (`length`) still answer as before.
+      if (Array.isArray(obj) && !(node.property in obj)) {
+        return obj.map((el) => (el != null && typeof el === "object" ? (el as Record<string, unknown>)[node.property] : undefined));
+      }
       return (obj as Record<string, unknown>)[node.property];
     }
 

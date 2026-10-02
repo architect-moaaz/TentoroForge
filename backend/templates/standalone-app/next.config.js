@@ -47,7 +47,13 @@ module.exports = {
   // app_emitter's inline write of next.config.js.
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
-  images: { domains: ["localhost"] },
+  images: {
+    // Photographs come from Unsplash (see the Blueprint's designSystem.imagery).
+    remotePatterns: [
+      { protocol: "http", hostname: "localhost" },
+      { protocol: "https", hostname: "images.unsplash.com" },
+    ],
+  },
   webpack: (config) => {
     // The renderer dist imports `@tentoroforge/feel-lite` (the FEEL-lite
     // expression engine, which we ship as loose files under src/lib/feel-lite

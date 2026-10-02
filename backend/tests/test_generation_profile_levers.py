@@ -17,7 +17,10 @@ def test_fast_profile_is_the_light_one():
     assert fast.narrative_expansion is False
     # Fast uses the quick one-shot planner, NOT the slow per-unit decomposition.
     assert fast.decomposition is False
-    assert fast.eta_minutes == 12
+    # 10, and the profile's own description says "~10 min" — the two were
+    # changed together and this assertion was not.
+    assert fast.eta_minutes == 10
+    assert "10 min" in fast.description
 
 
 def test_complete_profile_is_the_thorough_one():

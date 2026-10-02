@@ -60,6 +60,8 @@ def _fn_sum(args: list) -> float:
 
 @_register("count")
 def _fn_count(args: list) -> int:
+    if len(args) == 1 and args[0] is None:
+        return 0  # nothing counts as none
     if len(args) == 1 and isinstance(args[0], list):
         return len(args[0])
     return len(args)
@@ -307,6 +309,9 @@ def evaluate(node: ASTNode, ctx: dict) -> Any:
             for part in parts:
                 if isinstance(val, dict):
                     val = val.get(part)
+                elif isinstance(val, list):
+                    # A path on a list is the list of each item's value (FEEL).
+                    val = [v.get(part) if isinstance(v, dict) else None for v in val]
                 else:
                     return None
             return val
@@ -391,6 +396,9 @@ def evaluate(node: ASTNode, ctx: dict) -> Any:
         obj = evaluate(node.object, ctx)
         if isinstance(obj, dict):
             return obj.get(node.property)
+        if isinstance(obj, list):
+            # A path on a list is the list of each item's value (FEEL).
+            return [v.get(node.property) if isinstance(v, dict) else None for v in obj]
         if hasattr(obj, node.property):
             return getattr(obj, node.property)
         return None

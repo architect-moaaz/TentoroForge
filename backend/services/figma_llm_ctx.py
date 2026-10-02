@@ -165,8 +165,7 @@ def context_from_plan(plan: dict | None) -> dict:
     except Exception:
         # Try the deprecated location + fall back to empty.
         try:
-            from services.smith_tools import _load_library_component_names  # type: ignore
-            components = list(_load_library_component_names() or [])
+            components = []   # the library catalogue is not consulted here any more
         except Exception:
             components = []
 

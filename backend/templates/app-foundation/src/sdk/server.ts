@@ -1,0 +1,441 @@
+// The app SDK — server half. What a page's `load.ts` may read, typed from the
+// Living Blueprint (`./schema`, projected). Every read runs as the signed-in
+// user, so the ownership rules the Blueprint declares scope it: a list is the
+// rows this person may see, a count is their count.
+//
+// Server-only: imports the database. A `view.tsx` never imports this module;
+// it receives what `load` returned as props.
+
+import { auth } from "@/auth";
+import * as engine from "@/lib/data-engine";
+import { actorCtx, resolveAggregate, resolveQuery, resolveSeries, resolveSimilar } from "@/lib/data-engine-bridge";
+import { ensureDataEngineInitialized } from "@/lib/data-init";
+import { NUMERIC_FIELDS, READABLE_FIELDS } from "./schema";
+import type { AccountEntity, Entities, EntityName, NumericField } from "./schema";
+import { ACCOUNT } from "@/lib/account";
+import { distanceKm, isPoint, parseNear, type GeoPoint } from "./geo";
+
+export { distanceKm, formatDistance, parseNear, type GeoPoint } from "./geo";
+import type { WidgetRef } from "./widgets";
+
+export type { Entities, EntityName } from "./schema";
+
+/** The person the page is rendered for. */
+export interface SessionUser {
+  id: string;
+  name: string | null;
+  email: string | null;
+  role: string | null;
+}
+
+/** What a page's `load` is handed: the route's params (`id` on a `[id]`
+ *  route), the query string, and the signed-in user. */
+export interface PageContext {
+  params: Record<string, string>;
+  searchParams: Record<string, string | undefined>;
+  user: SessionUser | null;
+}
+
+/** Equality filters on an entity's own fields. */
+export type Where<E extends EntityName> = Partial<{
+  [K in keyof Entities[E]]: string | number | boolean;
+}>;
+
+type Scalar = string | number | boolean;
+
+/** A foreign key's filter by the record it points at: `{ in: "Ingredient",
+ *  where: { kind: "harmful" } }`. */
+export type Related = { [T in EntityName]: { in: T; where: Where<T> } }[EntityName];
+
+/** A count's filter: equality on the entity's own columns — or, on a foreign
+ *  key, `Related`: the rows whose key points at a record matching `where`.
+ *  Counts and totals only. */
+export type CountWhere<E extends EntityName> = Partial<{
+  [K in keyof Entities[E]]: Scalar | Related;
+}>;
+
+export interface ListOptions<E extends EntityName> {
+  where?: Where<E>;
+  /** Free-text search over the entity's searchable columns. */
+  search?: string;
+  sort?: keyof Entities[E] & string;
+  order?: "asc" | "desc";
+  /** Rows per page (default 50, at most 200). */
+  limit?: number;
+  page?: number;
+}
+
+export interface Page<T> {
+  rows: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface SeriesPoint {
+  label: string;
+  value: number;
+}
+
+/** The page reviewer's empty state: on the reviewer's own server — the one
+ *  that builds into `.next-review`, which nothing else does — a request
+ *  carrying the `forge-review-empty` cookie reads an application with no rows,
+ *  so the reviewer can see every page's empty state without a second database. */
+async function reviewingEmpty(): Promise<boolean> {
+  if (process.env.NEXT_DIST_DIR !== ".next-review") return false;
+  try {
+    const { cookies } = await import("next/headers");
+    return (await cookies()).get("forge-review-empty")?.value === "1";
+  } catch {
+    return false;
+  }
+}
+
+async function actor() {
+  try {
+    const session = await auth();
+    return actorCtx(session?.user as Record<string, unknown> | undefined) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/** A row as its type says: only the typed columns (a credential never
+ *  leaves the server, however a view passes rows around), dates as ISO
+ *  strings, numeric columns as numbers (the driver returns `numeric` as text). */
+function plain<E extends EntityName>(entity: E, row: Record<string, unknown>): Entities[E] {
+  const numeric = new Set(NUMERIC_FIELDS[entity] ?? []);
+  const out: Record<string, unknown> = {};
+  for (const k of READABLE_FIELDS[entity] ?? Object.keys(row)) {
+    const v = row[k];
+    if (v === undefined) out[k] = null;
+    else if (v instanceof Date) out[k] = v.toISOString();
+    else if (numeric.has(k) && typeof v === "string" && v !== "" && !Number.isNaN(Number(v))) out[k] = Number(v);
+    else out[k] = v;
+  }
+  return out as Entities[E];
+}
+
+function filters(where?: Record<string, unknown>): Record<string, string> | undefined {
+  if (!where) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(where)) if (v !== undefined && v !== null) out[k] = String(v);
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** The signed-in user, or null. */
+export async function currentUser(): Promise<SessionUser | null> {
+  try {
+    const u = (await auth())?.user as Record<string, unknown> | undefined;
+    if (!u?.id) return null;
+    const s = (v: unknown) => (v === undefined || v === null ? null : String(v));
+    return { id: String(u.id), name: s(u.name), email: s(u.email), role: s(u.role) };
+  } catch {
+    return null;
+  }
+}
+
+/** One page of rows and the total that matches. */
+export async function listPage<E extends EntityName>(
+  entity: E, opts: ListOptions<E> = {},
+): Promise<Page<Entities[E]>> {
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  const page = Math.max(opts.page ?? 1, 1);
+  if (await reviewingEmpty()) return { rows: [], total: 0, page, limit };
+  await ensureDataEngineInitialized();
+  try {
+    const res = await engine.query(entity, {
+      search: opts.search || undefined,
+      filters: filters(opts.where as Record<string, unknown>),
+      sort: opts.sort,
+      order: opts.order,
+      page, limit,
+    }, await actor());
+    return { rows: res.data.map((r) => plain(entity, r)), total: res.total, page, limit };
+  } catch (err) {
+    console.warn(`[sdk] list ${entity} failed:`, err);
+    return { rows: [], total: 0, page, limit };
+  }
+}
+
+/** The rows, without the paging envelope. */
+export async function list<E extends EntityName>(
+  entity: E, opts: ListOptions<E> = {},
+): Promise<Entities[E][]> {
+  return (await listPage(entity, opts)).rows;
+}
+
+/** Rows of `entity` nearest to `from`, closest first, each with its
+ *  `distanceKm` — read as the signed-in user, so only what they may see.
+ *  `field` is the entity's `location` field; rows with none come last.
+ *  Ranked over the first `scan` rows that match `where` (default 200): a
+ *  neighbourhood's worth, not a city's. */
+export async function near<E extends EntityName>(
+  entity: E, field: keyof Entities[E] & string, from: GeoPoint | null,
+  opts: { where?: Where<E>; radiusKm?: number; limit?: number; scan?: number } = {},
+): Promise<(Entities[E] & { distanceKm: number | null })[]> {
+  const rows = await list(entity, { where: opts.where, limit: Math.min(opts.scan ?? 200, 200) });
+  // Rows with no location are kept, after the located ones — hidden, a list
+  // of records nobody has placed yet reads as empty. A radius asks for the
+  // located ones only.
+  const out = rows
+    .map((r) => ({ ...r, distanceKm: from ? distanceKm(from, (r as unknown as Record<string, unknown>)[field]) : null }))
+    .filter((r) => (from && opts.radiusKm !== undefined ? r.distanceKm !== null && r.distanceKm <= opts.radiusKm : true));
+  if (from) out.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+  return out.slice(0, opts.limit ?? 50);
+}
+
+/** Where the reader is: `?near=lat,lng` (set by <NearMe />), else the
+ *  location on their own account record, else null. */
+export async function whereAmI(ctx?: { searchParams?: Record<string, string | undefined> }): Promise<GeoPoint | null> {
+  const asked = parseNear(ctx?.searchParams?.near);
+  if (asked) return asked;
+  const field = ACCOUNT?.locationField;
+  if (!field) return null;
+  const mine = (await myAccount()) as Record<string, unknown> | null;
+  return mine && isPoint(mine[field]) ? mine[field] : null;
+}
+
+/** One record by id, or null when it does not exist or is not this user's to see. */
+export async function record<E extends EntityName>(
+  entity: E, id: string | undefined,
+): Promise<Entities[E] | null> {
+  if (!id || /[[\]]/.test(id) || (await reviewingEmpty())) return null;
+  await ensureDataEngineInitialized();
+  try {
+    return plain(entity, await engine.findById(entity, id, await actor()));
+  } catch {
+    return null;
+  }
+}
+
+/** The records a set of foreign keys point at, keyed by id — for showing a
+ *  rental's tool and its owner by name, never by id. Nulls and repeats are
+ *  skipped; an id this user cannot see is simply absent from the map. */
+export async function recordsById<E extends EntityName>(
+  entity: E, ids: ReadonlyArray<string | null | undefined>,
+): Promise<Record<string, Entities[E]>> {
+  const unique = [...new Set(ids.filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 200);
+  const rows = await Promise.all(unique.map((id) => record(entity, id)));
+  const out: Record<string, Entities[E]> = {};
+  unique.forEach((id, i) => { const row = rows[i]; if (row) out[id] = row; });
+  return out;
+}
+
+/** The signed-in person's own record: the account entity's row whose id IS
+ *  their login's id. Null when signed out, or when the application has no
+ *  account entity. */
+export async function myAccount(): Promise<Entities[Extract<AccountEntity, EntityName>] | null> {
+  const user = await currentUser();
+  if (!user || !ACCOUNT) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (await record(ACCOUNT.entity as EntityName, user.id)) as any;
+}
+
+/** How many rows match. */
+export async function count<E extends EntityName>(entity: E, where?: CountWhere<E>): Promise<number> {
+  if (await reviewingEmpty()) return 0;
+  const out = await resolveAggregate({
+    name: "count", entity, op: "aggregate",
+    metrics: { value: { fn: "count", filter: where ?? undefined } },
+  }, await actor());
+  return Number(out.value ?? 0);
+}
+
+/** A sum, average, minimum or maximum of a numeric field. */
+export async function total<E extends EntityName>(
+  entity: E, fn: "sum" | "avg" | "min" | "max", field: NumericField<E>, where?: CountWhere<E>,
+): Promise<number> {
+  if (await reviewingEmpty()) return 0;
+  const out = await resolveAggregate({
+    name: "total", entity, op: "aggregate",
+    metrics: { value: { fn, field, filter: where ?? undefined } },
+  }, await actor());
+  return Number(out.value ?? 0);
+}
+
+/** Rows grouped by a field — a chart's data. `bucket` groups a date field by
+ *  day, week or month. Counts by default; `fn` + `field` aggregate a number. */
+export async function series<E extends EntityName>(
+  entity: E,
+  opts: {
+    groupBy: keyof Entities[E] & string;
+    bucket?: "day" | "week" | "month";
+    fn?: "count" | "sum" | "avg" | "min" | "max";
+    field?: NumericField<E>;
+  },
+): Promise<SeriesPoint[]> {
+  if (await reviewingEmpty()) return [];
+  return resolveSeries({
+    name: "series", entity, op: "series",
+    groupBy: opts.groupBy, bucket: opts.bucket,
+    agg: { fn: opts.fn ?? "count", field: opts.field },
+  }, await actor());
+}
+
+export interface SimilarOptions {
+  /** A stored image's id — `ctx.searchParams.image`, written by <ImageSearch>. */
+  image?: string;
+  /** Words describing what to find — `ctx.searchParams.q`. Images and text
+   *  share one space, so a sentence finds pictures too. */
+  text?: string;
+  /** The embedding field to rank by; the entity's first when omitted. */
+  field?: string;
+  /** At most this many, closest first (default 12, at most 100). */
+  limit?: number;
+}
+
+export interface Similar<T> {
+  /** Closest first. `similarity` is 0–100 and only means something relative to
+   *  the other rows: a correct text match can sit near 30. Order, don't grade. */
+  rows: Array<T & { similarity: number }>;
+  /** Why there are no rows when it is not "nothing is alike" — the embedding
+   *  service is not connected. Show it; null otherwise. */
+  error: string | null;
+}
+
+/** Records ranked by how alike they are to an image or a description — an
+ *  entity with an embedding field (`findable by likeness` in its type). No
+ *  image and no text is no rows. */
+export async function similar<E extends EntityName>(
+  entity: E, opts: SimilarOptions,
+): Promise<Similar<Entities[E]>> {
+  const empty = { rows: [], error: null };
+  if (!opts.image && !opts.text?.trim()) return empty;
+  if (await reviewingEmpty()) return empty;
+  try {
+    const rows = await resolveSimilar(
+      { name: "similar", entity, op: "similar", field: opts.field, limit: opts.limit },
+      { image: opts.image, text: opts.text }, await actor());
+    return {
+      rows: rows.map((r) => ({ ...plain(entity, r), similarity: Number(r.similarity ?? 0) })),
+      error: null,
+    };
+  } catch (err) {
+    const e = err as Error;
+    if (e?.name === "EmbeddingUnavailable") return { rows: [], error: e.message };
+    console.warn(`[sdk] similar ${entity} failed:`, err);
+    return empty;
+  }
+}
+
+/** One row of a query: each dimension's value under its field name (a date
+ *  bucket as "2026-03", "2026-Q1"…), each measure under its key, and — for a
+ *  dimension that points at another record — its name under `<field>Label`. */
+export type QueryRow = Record<string, string | number | boolean | null>;
+
+export type Measure<E extends EntityName> =
+  | { fn: "count" }
+  | { fn: "count_distinct"; field: keyof Entities[E] & string }
+  | { fn: "sum" | "avg"; field: NumericField<E> }
+  | { fn: "min" | "max"; field: keyof Entities[E] & string };
+
+export type Dimension<E extends EntityName> =
+  | (keyof Entities[E] & string)
+  | { field: keyof Entities[E] & string; bucket?: "day" | "week" | "month" | "quarter" | "year" }
+  /** A number in bands, in order: from ≤ value < to, an open end left out. */
+  | { field: keyof Entities[E] & string; ranges: readonly { label?: string; from?: number; to?: number }[] };
+
+/** A date window, half-open: `from` inclusive, `to` exclusive. ISO strings. */
+export interface DateRange { from?: string; to?: string }
+
+export interface QueryOptions<E extends EntityName, M extends string> {
+  measures: Record<M, Measure<E>>;
+  /** At most two: the axis, then the split. None for a single number. */
+  dimensions?: Dimension<E>[];
+  /** Equality filters; an array means "any of". */
+  where?: Partial<{ [K in keyof Entities[E]]: string | number | boolean | (string | number)[] }>;
+  /** Narrows `timeField` (default: the bucketed dimension) to a date window. */
+  range?: DateRange;
+  timeField?: keyof Entities[E] & string;
+  // NoInfer: the measure keys are what `measures` declares; a sort naming
+  // one must not narrow them to itself.
+  sort?: { by: NoInfer<M> | (keyof Entities[E] & string); order?: "asc" | "desc" };
+  /** Top-N (at most 1000). */
+  limit?: number;
+}
+
+/** Measures by dimensions — the query behind every chart and KPI, run by the
+ *  Data Engine as one GROUP BY over the rows this user may read.
+ *
+ *    query("Order", { measures: { revenue: { fn: "sum", field: "total" } },
+ *                     dimensions: [{ field: "placedAt", bucket: "month" }, "region"] })
+ *    → [{ placedAt: "2026-01", region: "EU", revenue: 1840 }, …]
+ */
+export async function query<E extends EntityName, M extends string>(
+  entity: E, opts: QueryOptions<E, M>,
+): Promise<QueryRow[]> {
+  if (await reviewingEmpty()) return [];
+  const measures = Object.entries(opts.measures).map(([key, m]) => {
+    const spec = m as { fn: string; field?: string };
+    return { key, aggregation: spec.fn, field: spec.field };
+  });
+  const dimensions = (opts.dimensions ?? []).map((d) => (typeof d === "string" ? { field: d } : d));
+  return resolveQuery({
+    name: "query", entity, op: "query", measures, dimensions,
+    filter: opts.where ?? {}, range: opts.range, timeField: opts.timeField,
+    sort: opts.sort, limit: opts.limit,
+  }, await actor());
+}
+
+/** What a widget's read returns: its rows, and — for a single number (a
+ *  metric or gauge, a query with no dimension) — that number. */
+export interface WidgetData {
+  rows: QueryRow[];
+  value: number | null;
+  /** For a single number read over a date range: the same number over the
+   *  period immediately before it, and the change as a fraction of it
+   *  (0.12 = up 12%). Null when there is no range, no time field, or no
+   *  previous value to compare against. */
+  previous?: number | null;
+  delta?: number | null;
+}
+
+/** The window of the same length that ends where `range` begins. */
+function previousRange(range: DateRange): DateRange | null {
+  if (!range.from || !range.to) return null;
+  const from = new Date(range.from).getTime(), to = new Date(range.to).getTime();
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return null;
+  return { from: new Date(from - (to - from)).toISOString(), to: new Date(from).toISOString() };
+}
+
+/** Read one of the page's widgets (`widgets` from "@/sdk"), exactly as the
+ *  Blueprint declares it. `range` narrows it to a date window (the page's
+ *  date filter); `where` adds equality filters (a record page's own id). */
+export async function runWidget(
+  widget: WidgetRef,
+  opts: { range?: DateRange; where?: Record<string, string | number | boolean | (string | number)[]> } = {},
+): Promise<WidgetData> {
+  const src = widget.source;
+  if (await reviewingEmpty()) return { rows: [], value: src.op === "query" && !src.dimensions.length ? 0 : null };
+  if (src.op === "list") {
+    const rows = await list(src.entity, {
+      where: { ...src.filter, ...opts.where } as Where<typeof src.entity>,
+      sort: src.sort as never, order: "desc", limit: src.limit,
+    });
+    return { rows: rows as unknown as QueryRow[], value: null };
+  }
+  const rows = await resolveQuery({
+    name: widget.id, entity: src.entity, op: "query",
+    measures: src.measures, dimensions: src.dimensions,
+    filter: { ...src.filter, ...opts.where }, timeField: src.timeField,
+    range: opts.range, sort: src.sort, limit: src.limit,
+  }, await actor());
+  const single = src.dimensions.length === 0;
+  const first = src.measures[0]?.key;
+  const v = single && first ? rows[0]?.[first] : null;
+  const value = single ? Number(v ?? 0) : null;
+  // A NUMBER WITH ITS CONTEXT. A KPI read over a window says how things
+  // stand; against the window before it says which way they are going.
+  const before = single && first && src.timeField && opts.range ? previousRange(opts.range) : null;
+  if (!before) return { rows, value };
+  const prior = await resolveQuery({
+    name: `${widget.id}:previous`, entity: src.entity, op: "query",
+    measures: src.measures, dimensions: src.dimensions,
+    filter: { ...src.filter, ...opts.where }, timeField: src.timeField,
+    range: before, sort: src.sort, limit: src.limit,
+  }, await actor());
+  const previous = Number(prior[0]?.[first] ?? 0);
+  const delta = previous > 0 && value != null ? (value - previous) / previous : null;
+  return { rows, value, previous, delta };
+}

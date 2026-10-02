@@ -128,7 +128,7 @@ class RunLedger:
                      "at": _now()})
 
     def node_subject(self, key: str, subject: str, index: int, total: int,
-                     ok: bool = True) -> None:
+                     ok: bool = True, summary: str = "") -> None:
         """One artifact of a fanning-out node.
 
         "Which of the eighteen stopped it" was the question `node_failed`
@@ -138,7 +138,17 @@ class RunLedger:
         rather than a single silence.
         """
         self._write({"event": "node:subject", "node": key, "subject": subject,
-                     "index": index, "total": total, "ok": ok, "at": _now()})
+                     "index": index, "total": total, "ok": ok, "at": _now(),
+                     **({"summary": summary} if summary else {})})
+
+    def page_look(self, key: str, subject: str, *, route: str, attempt: int, score: int,
+                  verdict: str, issues: list[str], broken: int, shots: list[str]) -> None:
+        """A page looked at as it was written (`page_look`): what the reviewer
+        scored it, the first problems it named, and which screenshots exist —
+        by name, never by bytes; the panel fetches the picture it wants."""
+        self._write({"event": "page:look", "node": key, "subject": subject, "route": route,
+                     "attempt": attempt, "score": score, "verdict": verdict,
+                     "issues": list(issues)[:4], "broken": broken, "shots": list(shots), "at": _now()})
 
     def node_retry(self, key: str, subject: str, attempt: int, of: int,
                    reason: str) -> None:
@@ -174,6 +184,16 @@ class RunLedger:
                      "subject": subject, "reason": str(reason)[:600],
                      "at": _now()})
 
+    def deferred(self, key: str, section: str, reason: str) -> None:
+        """A finding the node that was judged cannot act on.
+
+        Recorded rather than repaired: sending it back to that node's author
+        spends a round asking for something outside its reach.
+        """
+        self._write({"event": "observer:deferred", "node": key,
+                     "section": section, "reason": str(reason)[:600],
+                     "at": _now()})
+
     def node_failed(self, key: str, reason: str) -> None:
         self._write({"event": "node:failed", "node": key,
                      "reason": str(reason)[:600], "at": _now()})
@@ -181,6 +201,16 @@ class RunLedger:
     def node_blocked(self, key: str, reason: str) -> None:
         self._write({"event": "node:blocked", "node": key,
                      "reason": str(reason)[:600], "at": _now()})
+
+    def node_stalled(self, key: str, subject: str, reason: str) -> None:
+        """The API, not the author, failed a call; it is re-sent after a pause
+        and the subject's attempts are untouched."""
+        self._write({"event": "node:stalled", "node": key, "subject": subject,
+                     "reason": reason[:400], "at": _now()})
+
+    def run_paused(self, _key: str, reason: str) -> None:
+        """The API cannot be paid. Nothing more is sent; what landed stays."""
+        self._write({"event": "run:paused", "reason": reason[:600], "at": _now()})
 
     def node_skipped(self, key: str, unmet: str) -> None:
         self._write({"event": "node:skipped", "node": key, "unmet": unmet,
@@ -203,6 +233,9 @@ class RunLedger:
             "skippedBecause": dict(getattr(report, "skipped_because", {}) or {}),
             "repaired": list(getattr(report, "repaired", []) or []),
             "unrepaired": dict(getattr(report, "unrepaired", {}) or {}),
+            # The API stopped answering, not the work: what is in `skipped`
+            # under this reason is still to do, and nothing was lost.
+            "pausedBecause": str(getattr(report, "paused_because", "") or ""),
         })
 
     def crashed(self, exc: BaseException) -> None:

@@ -1,0 +1,181 @@
+/**
+ * The store's transaction path: an edit is sent against the loaded revision,
+ * the answer replaces what is held, a stale answer reloads rather than
+ * overwrites, a refused answer leaves the page as it was, and undo is a
+ * restore of the recorded revision.
+ */
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("sonner", () => ({ toast: { warning: vi.fn(), error: vi.fn(), info: vi.fn(), success: vi.fn() } }));
+
+const calls: { name: string; args: unknown[] }[] = [];
+const api = {
+  pages: vi.fn(), open: vi.fn(), apply: vi.fn(), draftApply: vi.fn(), discardDraft: vi.fn(), restore: vi.fn(), check: vi.fn(), propose: vi.fn(),
+  applyProposal: vi.fn(), discardProposal: vi.fn(), history: vi.fn(), jit: vi.fn(), vendor: vi.fn(),
+};
+vi.mock("../api", async () => {
+  const real = await vi.importActual<typeof import("../api")>("../api");
+  return { ...real, editorApi: new Proxy({}, { get: (_, name: string) => (...args: unknown[]) => { calls.push({ name, args }); return (api as Record<string, ReturnType<typeof vi.fn>>)[name](...args); } }) };
+});
+
+import { EditorApiError } from "../api";
+import { useEditorStore } from "../store";
+import type { PageDoc, PageModel } from "../types";
+
+function model(text: string): PageModel {
+  return {
+    ok: true, roots: [{ id: "r0", owner: "View" }], imports: [], loadKeys: [], viewProps: [],
+    nodes: {
+      r0: { id: "r0", parent: null, index: 0, type: "div", kind: "element", props: [], text: null, textEditable: false, inner: "", innerSpan: [0, 0], selfClosing: false, span: [0, 0], wrapperSpan: null, line: 1, endLine: 3, context: null, children: ["r0.0"] },
+      "r0.0": { id: "r0.0", parent: "r0", index: 0, type: "h1", kind: "element", props: [], text, textEditable: true, inner: text, innerSpan: [0, 0], selfClosing: false, span: [0, 0], wrapperSpan: null, line: 2, endLine: 2, context: null, children: [] },
+    },
+  };
+}
+
+function doc(revision: string, text: string): PageDoc {
+  return {
+    page: { id: "PAGE-001", name: "Records", route: "/records", purpose: "" }, coded: true, revision, model: model(text),
+    source: { view: `<h1>${text}</h1>`, load: "" }, registry: { version: "1", components: [] }, pages: [], workflows: [], entities: [], theme: {}, history: [],
+  };
+}
+
+beforeEach(async () => {
+  calls.length = 0;
+  Object.values(api).forEach((f) => f.mockReset());
+  api.pages.mockResolvedValue({ entryPage: "PAGE-001", pages: [{ id: "PAGE-001", name: "Records", route: "/records", purpose: "", pattern: null, access: "authenticated", coded: true, module: null, navigatesTo: [] }] });
+  api.open.mockResolvedValue(doc("rev1", "Records"));
+  api.jit.mockImplementation(async (_p: string, pageId: string) => ({ js: `js-${pageId}-${calls.filter((c) => c.name === "jit").length}`, css: "", revision: "rev1", vendorKey: "v1", ms: 5, cached: false, data: "sample", warnings: [] }));
+  api.vendor.mockResolvedValue({ key: "v1", js: "window.__forgeVendor = {}", specifiers: ["react"], ms: 9, cached: false });
+  await useEditorStore.getState().init("project-1");
+});
+
+describe("the store's transactions", () => {
+  it("lands an edit on the page's draft, undoable as one step, and saves everything as one revision", async () => {
+    api.draftApply.mockResolvedValue({ revision: "rev1", draftRevision: "d2", dirty: true, unchanged: false, model: model("Cases"), source: { view: "<h1>Cases</h1>", load: "" } });
+    const s = useEditorStore.getState();
+    s.select(["r0.0"]);
+    expect(await s.setText("r0.0", "Cases")).toBe(true);
+    const draft = calls.find((c) => c.name === "draftApply")!;
+    expect(draft.args.slice(1)).toEqual(["PAGE-001", { baseRevision: "rev1", ops: [{ op: "setText", id: "r0.0", text: "Cases" }] }]);
+    const st = useEditorStore.getState();
+    expect(st.doc?.revision).toBe("rev1");                       // nothing saved yet
+    expect(st.doc?.draft).toEqual({ revision: "d2", base: "rev1" });
+    expect(st.doc?.model?.nodes["r0.0"].text).toBe("Cases");
+    expect(st.saveState).toBe("unsaved");
+    expect(st.undoStack.map((u) => [u.label, u.before.revision, u.after.revision])).toEqual([["Change text", "rev1", "d2"]]);
+    expect(st.selection).toEqual(["r0.0"]);
+    expect(calls.some((c) => c.name === "apply")).toBe(false);
+    expect(st.livePatches).toEqual([{ fid: "r0.0", text: "Cases" }]);   // shown on the page before the rebuild
+
+    // undo moves the draft back to what was saved: no draft left
+    api.draftApply.mockResolvedValue({ revision: "rev1", draftRevision: "rev1", dirty: false, unchanged: false, model: model("Records"), source: { view: "<h1>Records</h1>", load: "" } });
+    await useEditorStore.getState().undo();
+    const back = calls.filter((c) => c.name === "draftApply")[1]!;
+    expect(back.args[2]).toEqual({ baseRevision: "rev1", source: { view: "<h1>Records</h1>", load: "" } });
+    expect(useEditorStore.getState().doc?.draft).toBeNull();
+    expect(useEditorStore.getState().saveState).toBe("saved");
+    expect(useEditorStore.getState().redoStack).toHaveLength(1);
+
+    // redo, then Save: one apply with the draft's whole source
+    api.draftApply.mockResolvedValue({ revision: "rev1", draftRevision: "d2", dirty: true, unchanged: false, model: model("Cases"), source: { view: "<h1>Cases</h1>", load: "" } });
+    await useEditorStore.getState().redo();
+    api.apply.mockResolvedValue({ revision: "d2", model: model("Cases"), source: { view: "<h1>Cases</h1>", load: "" }, checked: true, unchanged: false, version: 3 });
+    expect(await useEditorStore.getState().save()).toBe(true);
+    const apply = calls.find((c) => c.name === "apply")!;
+    expect(apply.args.slice(1)).toEqual(["PAGE-001", "rev1", [], "Edits in the editor", { view: "<h1>Cases</h1>", load: "" }]);
+    expect(useEditorStore.getState().doc?.revision).toBe("d2");
+    expect(useEditorStore.getState().doc?.draft).toBeNull();
+    expect(useEditorStore.getState().saveState).toBe("saved");
+  });
+
+  it("reloads on a stale revision instead of overwriting", async () => {
+    api.draftApply.mockRejectedValue(new EditorApiError({ status: 409, code: "stale", message: "The page changed", current: "rev9" }));
+    api.open.mockResolvedValue(doc("rev9", "Someone else's title"));
+    expect(await useEditorStore.getState().setText("r0.0", "Mine")).toBe(false);
+    const st = useEditorStore.getState();
+    expect(st.doc?.revision).toBe("rev9");
+    expect(st.doc?.model?.nodes["r0.0"].text).toBe("Someone else's title");
+    expect(st.undoStack).toEqual([]);
+    expect(st.saveState).toBe("saved");
+  });
+
+  it("keeps the last valid page when a change is refused, and shows why", async () => {
+    api.draftApply.mockRejectedValue(new EditorApiError({ status: 422, code: "does-not-compile", message: "That change would break the page, so it was not saved.",
+      findings: [{ file: "view.tsx", line: 2, code: "TS2322", raw: "x", plain: "Line 2 of the page: not accepted", severity: "must-fix" }] }));
+    expect(await useEditorStore.getState().setProp("r0.0", "size", { kind: "string", value: "huge" })).toBe(false);
+    const st = useEditorStore.getState();
+    expect(st.doc?.revision).toBe("rev1");
+    expect(st.lastFindings[0].plain).toBe("Line 2 of the page: not accepted");
+    expect(st.saveState).toBe("saved");
+  });
+
+  it("marks the save as failed when the connection is lost, without claiming it saved", async () => {
+    api.draftApply.mockRejectedValue(new TypeError("Failed to fetch"));
+    expect(await useEditorStore.getState().setText("r0.0", "x")).toBe(false);
+    const st = useEditorStore.getState();
+    expect(st.saveState).toBe("failed");
+    expect(st.saveError).toBe("Failed to fetch");
+    expect(st.doc?.revision).toBe("rev1");
+  });
+
+  it("drops a Smith proposal when the selection changes, and refuses to apply a stale one", async () => {
+    const s = useEditorStore.getState();
+    s.select(["r0.0"]);
+    api.propose.mockResolvedValue({ id: "p1", pageId: "PAGE-001", baseRevision: "rev1", prompt: "bigger", annotation: "", selection: { type: "component", nodeIds: ["r0.0"] },
+      summary: "Bigger title", explanation: "", needs: [], questions: [], replacements: [{ nodeId: "r0.0", type: "h1", before: "<h1>Records</h1>", after: "<h1 className=\"text-3xl\">Records</h1>" }],
+      imports: [], expandsScope: [], refused: [], findings: [], valid: true, status: "ready", createdAt: "", timing: { generationMs: 1, validationMs: 1 } });
+    await s.askSmith("bigger");
+    expect(useEditorStore.getState().smith.proposal?.id).toBe("p1");
+    useEditorStore.getState().select(["r0"]);
+    expect(useEditorStore.getState().smith.proposal).toBeNull();
+
+    useEditorStore.getState().select(["r0.0"]);
+    await useEditorStore.getState().askSmith("bigger");
+    useEditorStore.setState((st) => ({ doc: { ...st.doc!, revision: "rev2" } }));
+    await useEditorStore.getState().applyProposal();
+    expect(calls.some((c) => c.name === "applyProposal")).toBe(false);
+    expect(useEditorStore.getState().smith.error).toContain("changed since");
+  });
+});
+
+
+describe("the instant canvas", () => {
+  it("builds the open page on open, rebuilds it from the draft after an edit, and follows the app-wide preview", async () => {
+    let st = useEditorStore.getState();
+    expect(st.source).toBe("jit");
+    expect(st.frameDoc?.pageId).toBe("PAGE-001");
+    expect(calls.filter((c) => c.name === "jit")).toHaveLength(1);
+
+    // an edit lands on the draft; the canvas is built from the draft, not from what is saved
+    api.draftApply.mockResolvedValue({ revision: "rev1", draftRevision: "d2", dirty: true, unchanged: false, model: model("Cases"), source: { view: "<h1>Cases</h1>", load: "" } });
+    await st.setText("r0.0", "Cases");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls.filter((c) => c.name === "jit")).toHaveLength(2);
+    expect(calls.filter((c) => c.name === "jit").pop()!.args[2]).toMatchObject({ draft: true });
+
+    useEditorStore.setState({ pages: [...useEditorStore.getState().pages, { id: "PAGE-002", name: "One", route: "/records/[id]", purpose: "", pattern: null, access: "authenticated", coded: true, module: null, navigatesTo: [] }] });
+    useEditorStore.getState().previewNavigate("PAGE-002", { id: "sample-record-2" }, {});
+    await new Promise((r) => setTimeout(r, 0));
+    st = useEditorStore.getState();
+    expect(st.frameTarget).toEqual({ pageId: "PAGE-002", params: { id: "sample-record-2" }, search: {} });
+    expect(st.previewStack.map((t) => t.pageId)).toEqual(["PAGE-001"]);
+    const last = calls.filter((c) => c.name === "jit").pop()!;
+    expect(last.args.slice(1, 3)).toEqual(["PAGE-002", { params: { id: "sample-record-2" }, search: {}, fresh: undefined, draft: false }]);
+    expect(st.pageId).toBe("PAGE-001");
+    useEditorStore.getState().previewBack();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(useEditorStore.getState().frameTarget?.pageId).toBe("PAGE-001");
+    // The shared script was fetched once for all of those pages.
+    expect(calls.filter((c) => c.name === "vendor")).toHaveLength(1);
+    expect(useEditorStore.getState().vendor?.key).toBe("v1");
+  });
+
+  it("fetches the shared script again only when a page was built against a newer one", async () => {
+    expect(calls.filter((c) => c.name === "vendor")).toHaveLength(1);
+    api.jit.mockResolvedValue({ js: "js", css: "", revision: "rev1", vendorKey: "v2", ms: 5, cached: false, data: "sample", warnings: [] });
+    api.vendor.mockResolvedValue({ key: "v2", js: "window.__forgeVendor = {}", specifiers: ["react"], ms: 9, cached: false });
+    await useEditorStore.getState().loadFrame({ pageId: "PAGE-001", params: {}, search: {} });
+    expect(calls.filter((c) => c.name === "vendor")).toHaveLength(2);
+    expect(useEditorStore.getState().vendor?.key).toBe("v2");
+  });
+});

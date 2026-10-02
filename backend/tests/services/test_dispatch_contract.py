@@ -111,9 +111,31 @@ def test_the_manifest_samples_each_key_from_the_declared_input():
 def test_the_projection_writes_the_manifest(tmp_path):
     from services.blueprint.projection import project_dispatches
     r = project_dispatches(_doc(), tmp_path)
-    assert r == {"files": ["src/contracts/dispatches.json"], "dispatches": 3}
+    assert r == {"files": ["src/contracts/dispatches.json", "src/lib/incident-map.ts"],
+                 "dispatches": 3}
     data = json.loads((tmp_path / "src/contracts/dispatches.json").read_text())
     assert {e["workflow"] for e in data["dispatches"]} == {"FLOW-C", "FLOW-D"}
+
+
+def test_the_run_time_reporter_gets_the_same_wires_the_dry_run_checks(tmp_path):
+    """The build-time dry run names the route, the control and the workflow.
+    When the same wire breaks in front of a customer the app has a workflow id
+    and a browser path, so the projection hands it these two tables — written
+    from the same manifest, never a second derivation that can disagree."""
+    from services.blueprint.projection import project_dispatches
+    project_dispatches(_doc(), tmp_path)
+    emitted = (tmp_path / "src/lib/incident-map.ts").read_text()
+    routes = json.loads(emitted.split("ROUTES: string[] = ")[1].split(";")[0])
+    controls = json.loads(emitted.split("label: string }>> =\n")[1].rsplit(";", 1)[0])
+    assert "/records/[id]" in routes
+    # Keyed by the Blueprint id the control carries AND the slug the projected
+    # definition is filed under, because the run sees whichever was dispatched.
+    assert controls["FLOW-D"] == controls["delete-record"]
+    # Both controls that run FLOW-D, so the reporter can tell them apart by the
+    # route it was on — and, when it cannot, name neither rather than guess.
+    assert {(c["route"], c["control"], c["label"]) for c in controls["FLOW-D"]} == {
+        ("/records", "Table.rowActions[1]", "Delete"),
+        ("/records/[id]", "Button", "Delete Record")}
 
 
 def test_a_list_column_collected_by_a_text_field_is_refused():

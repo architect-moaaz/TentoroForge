@@ -8,4 +8,4 @@ export const DropdownMenuProps = z.object({
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),
 });
-export type DropdownMenuPropsType = z.infer<typeof DropdownMenuProps>;
+export type DropdownMenuPropsType = z.input<typeof DropdownMenuProps>;

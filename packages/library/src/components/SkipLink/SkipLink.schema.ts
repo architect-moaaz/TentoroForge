@@ -26,4 +26,4 @@ export const SkipLinkProps = z.object({
   className: z.string().optional(),
 });
 
-export type SkipLinkPropsType = z.infer<typeof SkipLinkProps>;
+export type SkipLinkPropsType = z.input<typeof SkipLinkProps>;

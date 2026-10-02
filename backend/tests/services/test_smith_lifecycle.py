@@ -77,13 +77,21 @@ def authoring_executor(spec):
 
 @pytest.fixture()
 def smith(tmp_path, monkeypatch):
-    # `preview` compiles what it assembles, which is the point of that node and
+    # `assemble` compiles what it builds, which is the point of that node and
     # not what these tests are about: they exercise §107's state machine, and
     # an `npm install` per test would make the file minutes long for a fact it
     # never asserts. The build itself is covered in test_assembly.
     monkeypatch.setattr(
         "services.blueprint.assembly.verify_build",
         lambda app_root, **kw: {"install": 0, "build": 0},
+    )
+    # The build node starts the app as well: `next build` does not catch a
+    # route collision, and an app that compiles and will not boot reached a
+    # user. Stubbed here for the same reason the build is.
+    monkeypatch.setattr(
+        "services.blueprint.assembly.verify_boot",
+        lambda app_root, **kw: {"port": 0, "entry": "/", "status": 200,
+                                "seconds": 0.0},
     )
     monkeypatch.setattr(
         "services.blueprint.assembly.install_dependencies",
@@ -172,8 +180,11 @@ def test_the_three_phases_partition_the_dag():
 def test_the_domain_phase_authors_what_everything_else_reads():
     """The split is only worth making if the cheap half is the half the rest
     of the DAG depends on."""
-    assert set(domain_nodes()) == {"requirements", "application_model"}
+    assert set(domain_nodes()) == {"requirements"}
     downstream = set(definition_nodes())
+    # The product model is the first thing worked out once they are agreed.
+    from services.smith.smith import model_nodes
+    assert set(model_nodes()) <= downstream
     assert all(
         DAG[k].depends_on <= set(domain_nodes()) | downstream | set(build_nodes())
         for k in downstream
@@ -381,7 +392,7 @@ def test_a_build_runs_the_whole_dag_not_a_sub_plan(smith):
     assert set(ran) == set(domain_nodes()), "the domain gate runs the cheap half"
 
     say(smith, plan_json(intent="command", command="approve"))
-    assert set(ran) >= {"requirements", "data_model", "page_contracts", "testing"}
+    assert set(ran) >= {"requirements", "data_model", "page_contracts", "page_code"}
 
 
 def test_the_state_walk_follows_what_completed_not_what_was_asked(smith, tmp_path):
@@ -535,7 +546,7 @@ def _report(*completed: str):
 
 
 FULL_BUILD = ("requirements", "application_model", "backend", "integration",
-              "verification", "preview")
+              "verification", "assemble")
 
 
 def test_a_router_build_from_the_review_gate_reaches_preview(tmp_path):
@@ -562,9 +573,9 @@ def test_a_router_build_that_stalled_reads_where_it_stopped(tmp_path):
     svc.doc["requirements"] = [{"id": "REQ-001", "description": "x"}]
     svc.doc["state"] = "BLUEPRINT_REVIEW"
     svc.save()
-    # the join ran, verification did not, and preview did — the compile no
+    # the join ran, verification did not, and assemble did — the compile no
     # longer waits for the report, but the state still reads in §107's order
-    assert settle_state_after_build(svc, _report("backend", "integration", "preview")) == "BUILD"
+    assert settle_state_after_build(svc, _report("backend", "integration", "assemble")) == "BUILD"
 
 
 def test_a_router_build_that_defined_nothing_moves_nowhere(tmp_path):

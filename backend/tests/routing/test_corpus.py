@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import Counter
 
 from services.smith.verbs import REQUIRED_BY_VERB
-from tests.routing.run_corpus import rows
+from tests.routing.run_corpus import CONTEXTS, rows
 
 CORPUS = rows()
 
@@ -40,3 +40,19 @@ def test_every_verb_that_can_be_asked_for_has_at_least_one_sentence():
     labelled = {r.get("verb") for r in CORPUS}
     missing = set(REQUIRED_BY_VERB) - labelled
     assert missing == set(), sorted(missing)
+
+
+def test_every_state_a_row_asks_for_exists():
+    """A row may name the state of the application it assumes.
+
+    Measured against the wrong one, a sentence is asked a question with no
+    right answer: "show phone on the nurse form" is `add_widgets` only where
+    the nurse already HAS a phone, and `add_field` where she does not. A typo
+    in the name would silently hand it the default and count the answer as a
+    misroute, which is how six of these came to be counted as the classifier's
+    fault.
+    """
+    for row in CORPUS:
+        assert row.get("context", "") in CONTEXTS, (
+            f"{row['say']!r} asks for the state {row.get('context')!r}, which "
+            f"is not one of {sorted(k for k in CONTEXTS if k)}")

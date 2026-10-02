@@ -41,7 +41,11 @@ INDEPENDENT = (
 @pytest.mark.parametrize("projection", INDEPENDENT)
 def test_it_runs_before_the_drop(projection):
     src = _source()
-    assert src.index(f"{projection}(svc.doc") < src.index('if result.get("failed")'), (
+    # The document, or its built view when some modules are not built yet
+    # (`scope.built_view`) — either way the Blueprint, not the planning result.
+    at = min(i for i in (src.find(f"{projection}(svc.doc"), src.find(f"{projection}(view"))
+             if i >= 0)
+    assert at < src.index('if result.get("failed")'), (
         f"{projection} is skipped when any page fails to plan"
     )
 

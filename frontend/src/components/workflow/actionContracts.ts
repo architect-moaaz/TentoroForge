@@ -315,6 +315,20 @@ export const ACTION_CONTRACTS: Record<string, ActionContract> = {
       { name: "data", type: "object", label: "Extracted fields" },
     ],
   },
+  for_each: {
+    label: "For Each",
+    inputs: [
+      { name: "items", type: "array", required: true, label: "Items (a list, or {{step.output}})" },
+      { name: "as", type: "string", label: "Each item is called (default: item)" },
+      { name: "steps", type: "array", required: true, label: "Steps run for each item" },
+    ],
+    outputs: [
+      { name: "count", type: "number", label: "Items processed" },
+      { name: "failed", type: "number", label: "Items that failed" },
+      { name: "results", type: "array", label: "Each item's step outputs" },
+      { name: "errors", type: "array", label: "Where each failed item stopped" },
+    ],
+  },
   // --- Integrations --------------------------------------------------- //
   mcp_tool_call: {
     label: "MCP · Tool Call",

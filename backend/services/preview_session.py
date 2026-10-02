@@ -118,17 +118,32 @@ def session_token(
     session: Session, *, secret: str = PREVIEW_SECRET,
     now: int | None = None, ttl_s: int = DEFAULT_TTL_S,
 ) -> str:
-    """The encrypted JWT NextAuth expects in its session cookie."""
-    from jose import jwe
+    """The encrypted JWT NextAuth expects in its session cookie.
+
+    Compact JWE, `dir` + A256GCM, written by hand over `cryptography`:
+    python-jose's encrypt draws a 16-byte IV for GCM, and the `jose` next-auth
+    decodes with refuses anything but 12 ("Invalid Initialization Vector
+    length") — so every token minted here before was found by the app and
+    thrown away (nlwtcyz5 reviewed as a Parent landed on /login, 2026-09-25).
+    """
+    import base64
+    import os
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    def b64(b: bytes) -> str:
+        return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
 
     payload = json.dumps(
         session.claims(now=int(now if now is not None else time.time()),
                        ttl_s=ttl_s),
         separators=(",", ":"), sort_keys=True,
-    )
-    token = jwe.encrypt(payload, derive_key(secret),
-                        algorithm="dir", encryption="A256GCM")
-    return token.decode("ascii") if isinstance(token, bytes) else token
+    ).encode("utf-8")
+    header = b64(json.dumps({"alg": "dir", "enc": "A256GCM"}, separators=(",", ":")).encode())
+    iv = os.urandom(12)
+    sealed = AESGCM(derive_key(secret)).encrypt(iv, payload, header.encode("ascii"))
+    ciphertext, tag = sealed[:-16], sealed[-16:]
+    return ".".join([header, "", b64(iv), b64(ciphertext), b64(tag)])
 
 
 def cookie(
@@ -148,6 +163,36 @@ def cookie(
         "secure": False,
         "sameSite": "Lax",
     }
+
+
+def _fnv1a(secret: str) -> str:
+    """The app's `fingerprint` (templates/app-foundation/src/lib/session-cookie.ts):
+    FNV-1a over the secret's UTF-16 code units, as eight hex digits."""
+    h = 0x811C9DC5
+    for ch in secret:
+        h ^= ord(ch)
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return f"{h:08x}"
+
+
+def cookie_names(secret: str = PREVIEW_SECRET) -> list[str]:
+    """The names a generated app reads its session from, over http.
+
+    An app names its cookie `forge-<fingerprint of its secret>.session-token`
+    so two apps on localhost stop overwriting each other's session
+    (session-cookie.ts, 2026-09-21); apps built before that read next-auth's
+    default. A browser given both signs in to either — the review of
+    nlwtcyz5 as a Parent landed on /login until it did (2026-09-25)."""
+    return [f"forge-{_fnv1a(secret)}.session-token", COOKIE_NAME]
+
+
+def cookies(
+    session: Session, *, base_url: str, secret: str = PREVIEW_SECRET,
+    now: int | None = None,
+) -> list[dict[str, Any]]:
+    """One cookie per name the app might read, all carrying the session."""
+    first = cookie(session, base_url=base_url, secret=secret, now=now)
+    return [{**first, "name": name} for name in cookie_names(secret)]
 
 
 def boot_env(base_url: str, secret: str = PREVIEW_SECRET) -> dict[str, str]:

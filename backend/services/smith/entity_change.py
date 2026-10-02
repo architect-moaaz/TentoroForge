@@ -108,9 +108,18 @@ def add_entity(svc: Any, request: str, *, app_root: str | None = None, executor:
     if req.get("id") and req["id"] not in (ent.get("requirements") or []):
         ent["requirements"] = list(ent.get("requirements") or []) + [req["id"]]
         svc.save()
+    files = _project_data(svc, app_root)
+    # IN THE DATABASE NOW, NOT AT THE NEXT INSTALL: a screen built for this
+    # record next must have a table to save into (see `schema_push`).
+    pushed = {"applied": False, "reason": "the application is not built yet"}
+    if app_root:
+        from services.blueprint.schema_push import push_now
+        tell(reasoning, f"Creating the {name} table in the running database.", "step")
+        pushed = push_now(app_root)
     return {"applied": True, "entity": eid, "name": name, "table": ent.get("table"),
             "fields": [str(f.get("name")) for f in (ent.get("fields") or []) if isinstance(f, dict)],
-            "requirement": req.get("id"), "edited_paths": _project_data(svc, app_root)}
+            "requirement": req.get("id"), "edited_paths": files,
+            "pushed": bool(pushed.get("applied")), "push_reason": str(pushed.get("reason") or "")}
 
 
 def dependents(doc: dict, eid: str) -> dict:
@@ -148,35 +157,64 @@ def consequences(doc: dict, ref: str) -> dict:
     }
 
 
+def rename_entity(svc: Any, ref: str, new: str, *, app_root: str | None = None,
+                  reasoning: Any = None) -> dict:
+    """A record type renamed in place: the same id, every field, relationship
+    and rule as they are, and its table kept — the rows stay where they are,
+    nothing to migrate. The SDK's type is the new name, so the coded screens
+    that use the old one are rewritten with it.
+
+    Through `write_section` the data agent returned "Feedback" keyed by its
+    new name and it was added beside "Review", the reviews still in the old
+    one (F&B live test, 2026-10-02). A rename is a setting, not a re-authoring."""
+    import re as _re
+    from services.blueprint.app_sdk import pascal
+    from services.smith.compose import pages_using, recode_pages_using
+
+    ent = find_named(_live(svc.doc), ref, id_prefix="ENTITY-")
+    if ent is None:
+        canon = _re.sub(r"[^a-z0-9]", "", str(ref or "").lower())
+        ent = next((e for e in _live(svc.doc) if canon in {_re.sub(r"[^a-z0-9]", "", str(e.get(k) or "").lower())
+                                                          for k in ("name", "table")}), None)
+    if ent is None:
+        raise SectionChangeError(f"I cannot tell which record {ref!r} means. The records are: {names(_live(svc.doc))}.")
+    old, want = str(ent.get("name") or ""), pascal(new) or str(new).strip()
+    if not want:
+        raise SectionChangeError("no new name was given.")
+    if want == old:
+        return {"applied": True, "entity": str(ent.get("id")), "old": old, "name": want, "already": True,
+                "pages": [], "notes": [], "edited_paths": []}
+    before = svc.snapshot()
+    ent["name"] = want
+    if ent.get("label") and str(ent.get("label")).strip().lower() == old.lower():
+        ent["label"] = want
+    svc.validate()
+    svc.commit(user_request=f"rename {old} to {want}", smith_interpretation=f"rename the record {old} to {want}",
+               before=before, affected=[str(ent.get("id"))])
+    tell(reasoning, f"Renamed {old} to {want}; its table and rows stay as they are.", "step")
+    files = _project_data(svc, app_root)
+    if app_root:
+        from services.blueprint.ui_engineer import ensure_sdk
+        ensure_sdk(svc.doc, Path(app_root))
+    done, notes = recode_pages_using(svc, app_root, pages_using(svc, rf"\b{_re.escape(old)}\b"),
+                                     reasoning=reasoning, request=(
+        f"The record {old} is now called {want}: use the SDK's {want} wherever the page used {old} "
+        f"(its type and its reads), and say {want} where the page says {old}. Keep everything else."))
+    return {"applied": True, "entity": str(ent.get("id")), "old": old, "name": want, "already": False,
+            "pages": done, "notes": notes, "edited_paths": files}
+
+
 def _retire_pages(svc: Any, pages: list[dict]) -> list[str]:
-    ids = {str(p.get("id")) for p in pages}
-    routes = []
-    for p in pages:
-        p["status"] = "DEPRECATED"
-        routes.append(str(p.get("route")))
-    for layout in svc.doc.get("pageLayouts") or []:
-        if isinstance(layout, dict) and str(layout.get("page")) in ids and layout.get("status") != "SUPERSEDED":
-            layout["status"] = "DEPRECATED"
-    nav = svc.doc.get("navigation") or {}
-    def prune(tree):
-        out = []
-        for n in tree or []:
-            if not isinstance(n, dict):
-                continue
-            if str(n.get("page") or "") in ids:
-                continue
-            if n.get("children"):
-                n["children"] = prune(n["children"])
-                if not n["children"] and not n.get("page"):
-                    continue
-            out.append(n)
-        return out
-    if nav.get("tree"):
-        nav["tree"] = prune(nav["tree"])
-    initial = (nav.get("initialRoute") or {}).get("default") if isinstance(nav.get("initialRoute"), dict) else None
-    if initial in routes:
-        nav["initialRoute"] = {}
-    return routes
+    """The record's screens go the way a screen goes when it is asked for by
+    name — `page_change.retire`, which is the same job.
+
+    It used to be a smaller version of it here: the menu was pruned and the
+    layouts marked, and every link, arrow and widget still pointed at routes
+    that had stopped resolving. Retiring an entity left the same dead ends
+    `remove_page` exists to prevent, one level up.
+    """
+    from services.smith.page_change import retire
+    return retire(svc, pages)["routes"]
 
 
 def remove_entity(svc: Any, ref: str, *, app_root: str | None = None, reasoning: Any = None) -> dict:
@@ -200,19 +238,22 @@ def remove_entity(svc: Any, ref: str, *, app_root: str | None = None, reasoning:
     files = _project_data(svc, app_root)
     if app_root:
         from services.blueprint.orchestrator import _project_integration
-        from services.blueprint.projection import apply_frontend_projection, project_nav_flow, project_shell
+        from services.blueprint.projection import apply_frontend_projection, project_navigation
         _project_integration(svc, app_root)
         files += [str(f) for f in (apply_frontend_projection(svc, app_root) or {}).get("files", [])]
-        files += list(project_shell(svc.doc, app_root).get("files") or []) + list(project_nav_flow(svc.doc, app_root).get("files") or [])
+        files += project_navigation(svc.doc, app_root)["files"]
     return {"applied": True, "entity": eid, "name": str(ent.get("name")), "pages": routes, "workflows": retired_wfs,
             "relationships": len(deps["relationships"]), "pointing": deps["pointing"], "edited_paths": sorted(set(files))}
 
 
 def summary_of(verb: str, out: dict) -> str:
     if verb == "add_entity":
+        where = ("The table is in the application's database now, with sample rows."
+                 if out.get("pushed") else
+                 f"The table is created the next time the preview starts ({out.get('push_reason') or 'the database was not reachable'}).")
         return (f"Added the entity {out['name']} ({out['entity']}, table {out['table']}) with "
-                f"{', '.join(out['fields']) or 'no fields'}; recorded as {out['requirement']}. The table lands as a "
-                "migration on the next install. Say \"add a screen for " + str(out['name']) + "\" and I will compose it.")
+                f"{', '.join(out['fields']) or 'no fields'}; recorded as {out['requirement']}. {where} "
+                "Say \"add a screen for " + str(out['name']) + "\" and I will compose it.")
     s = f"Retired the entity {out['name']} ({out['entity']})."
     if out.get("pages"):
         s += f" Its screens are retired and off the menu: {', '.join(out['pages'])}."
@@ -222,7 +263,8 @@ def summary_of(verb: str, out: dict) -> str:
         s += f" {out['relationships']} relationship(s) dropped."
     if out.get("pointing"):
         s += f" Still pointing at it, for you to decide: {', '.join(out['pointing'])}."
-    s += " The table is dropped on the next install."
+    s += (" The table leaves the database with its records kept aside (retired records), so they can "
+          "be brought back.")
     return s
 
 

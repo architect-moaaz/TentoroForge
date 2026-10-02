@@ -144,40 +144,4 @@ def test_result_bundle_only_touches_two_files(tmp_path):
 # End-to-end through the tool wrapper + atomic apply_bundle (writes real files)
 # --------------------------------------------------------------------------- #
 
-def test_smith_add_field_writes_files_end_to_end(tmp_path):
-    """_smith_add_field -> _apply_add_field -> build_add_field_bundle ->
-    apply_bundle: the column lands on disk, committed atomically, and the app's
-    other entity module is untouched."""
-    from services.smith_tools import _smith_add_field
-    root = _app(tmp_path)
-    before_cust = (root / "src/db/schema/customer.ts") if (root / "src/db/schema/customer.ts").exists() else None
 
-    res = _smith_add_field(str(root), {"entity": "Offer",
-                                       "field": {"name": "discount", "type": "decimal"}})
-    assert res["applied"] is True, res
-    assert set(res["edited_paths"]) == {
-        "contracts/resource-registry.json", "src/db/schema/offer.ts"}
-
-    reg = json.loads((root / "contracts/resource-registry.json").read_text())
-    offer = next(e for e in reg["entities"] if e["name"] == "Offer")
-    assert "discount" in [f["name"] for f in offer["fields"]]
-    dz = (root / "src/db/schema/offer.ts").read_text()
-    assert 'discount: decimal(' in dz and 'import { pgTable, decimal,' in dz
-
-
-def test_smith_add_field_flat_shorthand(tmp_path):
-    """Accepts {entity, name, type} as well as {entity, field:{...}}."""
-    from services.smith_tools import _smith_add_field
-    root = _app(tmp_path)
-    res = _smith_add_field(str(root), {"entity": "Offer", "name": "notes", "type": "text"})
-    assert res["applied"] is True, res
-    dz = (root / "src/db/schema/offer.ts").read_text()
-    assert 'notes: text("notes")' in dz
-
-
-def test_smith_add_field_duplicate_returns_noop_not_crash(tmp_path):
-    from services.smith_tools import _smith_add_field
-    root = _app(tmp_path)
-    res = _smith_add_field(str(root), {"entity": "Offer", "name": "title", "type": "varchar"})
-    assert res["applied"] is False
-    assert "already exists" in (res.get("reason") or "")

@@ -36,11 +36,15 @@ and a per-app auth secret.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 import shutil
+import os
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 #: Repairs from ``app_emitter`` that the Blueprint path makes unnecessary, and
 #: the projection that makes each one so. Stated rather than merely omitted, so
@@ -73,7 +77,22 @@ PROJECTED_PATHS: tuple[str, ...] = (
     # `/` too and renders without the sidebar.
     "src/app/(dashboard)/page.tsx",
     "src/lib/sensitive-columns.ts", "src/lib/searchable-columns.ts",
+    "src/lib/embedding-columns.ts",
+    # Every name each entity goes by (`projection.entity_alias_map`).
+    "src/lib/entity-aliases.ts",
+    # What each foreign key is shown as (`projection.fk_label_map`).
+    "src/lib/fk-labels.json",
+    # Who signs in (`account_model.project_account`).
+    "src/lib/account.ts", "src/lib/account-table.ts",
+    # The interface's languages (`languages.project_languages`).
+    "src/lib/languages.ts",
     "src/lib/append-only-entities.ts",
+    # The owner's OWN records, loaded from a spreadsheet
+    # (`services.smith.data_import`). Nothing in any scaffold layer writes
+    # here, so this is not resolving a conflict — it is saying whose the
+    # directory is, so that the day a copier decides it owns `src/db` it does
+    # not take a business's customer list with it.
+    "src/db/imports",
 )
 
 #: Files inside a projected directory that the *scaffold* still owns.
@@ -108,6 +127,26 @@ SCAFFOLD_OWNED: tuple[str, ...] = ()
 #: The floor is a plain-looking application, not an unbuildable one.
 SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     "src/app/tokens.css",
+    # The account files, when the projection did not run; and the sign-in
+    # pages, which an `auth` page's code replaces — the template only fills
+    # the hole, never overwrites the designed page (`app_sdk._AUTH_FLOORS`).
+    "src/lib/account.ts", "src/lib/account-table.ts",
+    # The interface's languages (`languages.project_languages`).
+    "src/lib/languages.ts",
+    "src/app/login/page.tsx", "src/app/signup/page.tsx",
+    # The coded root page the catch-all imports (`app_sdk.ROOT_DIR`). The
+    # projection writes it when `/` has code and the stub otherwise; this is
+    # the stub for a tree the projection never reached.
+    "src/app/_root/page.tsx",
+    # The public frame's menu (`project_public_nav`); the frame imports it.
+    "src/contracts/public-nav.ts",
+    # The owner's mark, for the pages with no shell around them. `BrandMark.tsx`
+    # imports it and the sign-in screen and every error page render that, so a
+    # tree without this module does not compile — the same trap `tokens.css`
+    # above was added for. `project_brand_logo` writes it on every build, with a
+    # `null` body when no logo was given; this stands in when that projection
+    # did not run at all.
+    "src/contracts/brand.ts",
     # THE PLATFORM'S USERS TABLE IS A DEFAULT THE BLUEPRINT MAY EXTEND. The
     # projection emits `user.ts` for a Blueprint entity that maps to `users`
     # — the platform's columns as the platform declares them, then whatever
@@ -126,12 +165,62 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: { url: process.env.DATABASE_URL! },
+  // The seed's own bookkeeping table is created with raw SQL, outside the
+  // schema; seen by push it turned every new table into a "created or renamed
+  // from _forge_seed_meta?" prompt that no-one could answer (0l133sp2).
+  tablesFilter: ["!_forge_seed_meta"],
 });
 '''
 
 
-#: Directories that are build output or dependencies, never scaffold.
-_SKIP_DIRS = frozenset({"node_modules", ".next", "dist", ".git", "drizzle"})
+#: Directories inside a template that are never part of a generated
+#: application: build output, dependencies, and the scaffold's OWN tests.
+#:
+#: `__tests__` IS THE SCAFFOLD TESTING ITSELF, NOT THE APP TESTING ITSELF.
+#: `src/hooks/__tests__/useAgentChat.test.tsx` was copied into every generated
+#: app, and `tsconfig.json` excludes only `node_modules` — so `next build`
+#: type-checked a file importing `vitest` and `@testing-library/react`, which
+#: the standalone `package.json.tmpl` does not declare and never should. A
+#: generated app gets its test suite from `services.test_suite_emitter`, which
+#: writes `src/__tests__/generated/` AND injects the `vitest` devDependency
+#: alongside it. That is the path by which an application comes to have tests;
+#: the scaffold's own are for the scaffold.
+_SKIP_DIRS = frozenset({"node_modules", ".next", "dist", ".git", "drizzle",
+                        "__tests__"})
+
+
+def skipped_by_scaffold(path: str | Path) -> bool:
+    """True when nothing at `path` is copied into a generated application.
+
+    Public because two callers outside this module have to agree with it: a
+    test that reads the floor to work out which packages a generated app
+    imports must skip exactly what the copy skips, or it reports a dependency
+    the application never has. A second copy of the rule is a second copy that
+    drifts.
+    """
+    return any(part in _SKIP_DIRS for part in Path(path).parts)
+
+
+def fill_scaffold_defaults(app_root: str | Path) -> list[str]:
+    """Copy each ``SCAFFOLD_DEFAULTS`` file the tree lacks, from the scaffold
+    layers. What a refreshed SDK imports has to exist: ``client.tsx`` gained
+    ``./auth``, which reads ``@/lib/account``, and an application built before
+    the account model had no such file — its next editor check refreshed the
+    SDK and left it unable to build. A default only fills a hole; a file the
+    projection wrote, or the person's, is never touched."""
+    out = Path(app_root)
+    written: list[str] = []
+    for layer in _template_dirs():
+        if not layer.is_dir():
+            continue
+        for rel in SCAFFOLD_DEFAULTS:
+            src = layer / rel
+            dst = out / rel
+            if src.is_file() and not dst.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, dst)
+                written.append(rel)
+    return written
 
 
 def _template_dirs() -> list[Path]:
@@ -155,7 +244,27 @@ def _template_dirs() -> list[Path]:
 
 #: Scaffold files a template used to ship and no longer does; deleted from an
 #: application on every assembly so the old copy cannot shadow the new shape.
-RETIRED_SCAFFOLD_FILES: tuple[str, ...] = ("src/app/page.tsx",)
+RETIRED_SCAFFOLD_FILES: tuple[str, ...] = (
+    "src/app/page.tsx",
+    # The catch-all became OPTIONAL (`[[...slug]]`) so it serves "/" as well.
+    # Next refuses a segment that is both required and optional at one level,
+    # so an application assembled before that change must lose the old copy or
+    # it will not build at all.
+    "src/app/[...slug]/page.tsx",
+    # A ROUTE GROUP IS NOT A PATH SEGMENT. `(dashboard)` contributes nothing to
+    # the URL, so the scaffold's landing page inside it IS "/" — and with an
+    # optional catch-all also serving "/", Next refuses to start:
+    #
+    #   You cannot define a route with the same specificity as a optional
+    #   catch-all route ("/" and "/[[...slug]]")
+    #
+    # Measured on a generated master-data app: every node completed, the
+    # projection was correct, and the dev server would not boot. The list
+    # above retired `src/app/page.tsx` and stopped there, because that is
+    # where a landing page usually sits; this template keeps its own one
+    # directory deeper, inside the group.
+    "src/app/(dashboard)/page.tsx",
+)
 
 
 def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
@@ -175,7 +284,7 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
         if not layer.is_dir():
             continue
         for src in layer.rglob("*"):
-            if src.is_dir() or any(part in _SKIP_DIRS for part in src.parts):
+            if src.is_dir() or skipped_by_scaffold(src):
                 continue
             rel = src.relative_to(layer)
             dst_rel = rel.with_suffix("") if rel.suffix == _TMPL_SUFFIX else rel
@@ -235,22 +344,13 @@ PLACEHOLDER_PAGES: tuple[str, ...] = EDGE_PAGES + ("src/app/layout.tsx",)
 def _landing_route(doc: dict) -> str:
     """Where "back to the app" should point.
 
-    The declared landing page if navigation names one, else the first page that
-    is not an auth route — never a guess like "/dashboard" that may not exist.
+    The same answer the root redirect gives — one function, because the 403
+    page's "Return to the app" and `/` are two doors to the same place, and
+    when this had its own copy the two read different keys of the navigation.
     """
-    nav = doc.get("navigation") or {}
-    for key in ("landing", "home", "root"):
-        route = nav.get(key)
-        if isinstance(route, str) and route.startswith("/"):
-            return route
-    pages = [p for p in (doc.get("pages") or []) if p.get("status") != "DEPRECATED"]
-    for page in pages:
-        route = page.get("route") or ""
-        if route and route != "/" and not any(
-            k in route for k in ("sign-in", "signin", "login", "sign-up", "register")
-        ):
-            return route
-    return "/"
+    from services.blueprint.projection import landing_route
+
+    return landing_route(doc)
 
 
 def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
@@ -270,10 +370,47 @@ def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
     tag = str((doc.get("product") or {}).get("locale") or "").strip() or "en"
     base = tag.replace("_", "-").split("-")[0].lower()
 
+    # WHERE "RETURN TO" GOES IS WHO IS ASKING. nav-flow carries the per-role
+    # landing map (`initialFor`, written by `project_nav_flow` from the
+    # Blueprint's `navigation.initialRoute`) and the signed-in front door
+    # (`entries.authenticated`); the 403 page inlines the map and falls back
+    # to the door. One route for everyone sent an administrator "back" to the
+    # doctor's page and so straight back to the 403 (nlwtcyz5). The map is
+    # read through the emitter's reader — the same one the root redirect
+    # uses — so there is one per-role map, not two. Before nav-flow exists
+    # (the scaffold is laid down at second zero and filled again on
+    # assembly) the map is empty and the door is derived from the pages.
+    from services.app_emitter import landing_for, landing_map_literal
+
+    nav_flow: dict = {}
+    nav_path = Path(app_root) / "src" / "contracts" / "nav-flow.json"
+    if nav_path.is_file():
+        try:
+            loaded = json.loads(nav_path.read_text("utf-8"))
+            nav_flow = loaded if isinstance(loaded, dict) else {}
+        except Exception:  # noqa: BLE001
+            nav_flow = {}
+    # THE DECLARED LANDING COMES FIRST. `navigation.initialRoute.default` is
+    # what the navigation agent writes and what "open on Master Data" changes;
+    # the root redirect reads it, so the 403 page's fallback reads it too, or
+    # the two doors part ways the moment the landing is changed. The signed-in
+    # front door from nav-flow stands in when the Blueprint declares none.
+    from services.blueprint.projection import declared_landing
+
+    entries = nav_flow.get("entries") if isinstance(nav_flow.get("entries"), dict) else {}
+    door = entries.get("authenticated")
+    if declared_landing(doc):
+        home_route = declared_landing(doc)
+    elif isinstance(door, str) and door.startswith("/") and "[" not in door:
+        home_route = door
+    else:
+        home_route = _landing_route(doc)
+
     values = {
         "{{app_name}}": app_name,
         "{{app_initial}}": initial,
-        "{{home_route}}": _landing_route(doc),
+        "{{home_route}}": home_route,
+        "{{landing_for}}": landing_map_literal(landing_for(nav_flow)),
         "__APP_LOCALE__": tag,
         "__APP_DIR__": "rtl" if base in _RTL_LANGUAGES else "ltr",
     }
@@ -291,6 +428,39 @@ def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
             path.write_text(text, "utf-8")
             touched.append(rel)
     return touched
+
+
+def relay_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
+    """Lay the edge pages down from the scaffold again and fill them from the
+    Blueprint as it is now.
+
+    The fill consumes the placeholders: once `{{home_route}}` has become
+    "/nurse-registration" there is nothing left in the file for a later fill
+    to find, so `interpolate_edge_pages` on a built app is a no-op however the
+    navigation has changed since. A build never notices, because it copies the
+    scaffold fresh every time; a change after the build does not copy the
+    scaffold, and its 403 page kept returning people to whatever the landing
+    was the day the app was built. This copies only :data:`EDGE_PAGES` — the
+    files that carry a `{{home_route}}` — in scaffold order, later layer over
+    earlier, and fills them; the rest of the scaffold is left as it stands.
+
+    Returns the pages laid down, whether or not the fill changed them: a page
+    re-laid from the scaffold is a page that was written.
+    """
+    out = Path(app_root)
+    laid: list[str] = []
+    for layer in _template_dirs():
+        for rel in EDGE_PAGES:
+            src = layer / rel
+            if not src.is_file():
+                continue
+            dst = out / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            if rel not in laid:
+                laid.append(rel)
+    interpolate_edge_pages(out, doc)
+    return laid
 
 
 #: The auth scaffold files whose `ACCOUNT_TYPES` default the signup derivation
@@ -516,6 +686,22 @@ def assemble(doc: dict, app_root: str | Path, *,
         # the request, which is correct for any port a preview lands on.
         f"AUTH_TRUST_HOST=true\n"
     )
+    # THE VARIABLES A CONNECTED SERVICE READS, BY NAME AND WITH NO VALUE.
+    # `.env.example` is the file a developer who exports this application
+    # copies, and until now it said nothing about the email the app sends —
+    # so the one thing standing between a run and a delivered message was
+    # invisible outside the platform. The values come from the platform's
+    # credential store (`services.env_writer` writes `.env.local`, a publish
+    # writes the deployment's environment); an example file carries names.
+    from services.blueprint.projection import connected_services
+
+    for service in connected_services(doc):
+        env_body += (
+            f"\n# {service['name']} — carries this application's "
+            f"`{service['action']}` steps. Set these on the platform under "
+            "Settings \u2192 Integrations, or here for a local run.\n"
+            + "".join(f"# {key}=\n" for key in service["keys"])
+        )
     (out / ".env.example").write_text(env_body, "utf-8")
 
     # Next.js gives `.env.local` precedence over `.env`, and the scaffold ships
@@ -644,6 +830,17 @@ def apply_assembly(svc: Any, app_root: str | Path, *,
                    preview_url: str | None = None) -> dict[str, Any]:
     """Assemble, then record what was assembled in the Blueprint."""
     result = assemble(svc.doc, app_root, project_short_id=project_short_id)
+    # THE PEOPLE WHO LOG IN SURVIVE A REBUILD. Their roster is a project
+    # ledger rather than a Blueprint section (people are data, not definition
+    # — see `services.smith.accounts`), so nothing in `doc` would carry it
+    # into a freshly assembled tree, and the six staff an owner set up would
+    # quietly lose their accounts on the next build.
+    try:
+        from services.smith.accounts import project as project_accounts
+        result["accountRoster"] = project_accounts(svc.output_dir, app_root)
+    except Exception as exc:  # noqa: BLE001 — one file, not the assembly
+        result["accountRoster"] = []
+        logger.warning("[assembly] the account roster could not be projected: %s", exc)
     svc.doc["runtime"] = describe_runtime(app_root)
     svc.doc["deployment"] = describe_deployment(svc.doc, preview_url=preview_url)
     svc.doc["dependencies"] = describe_dependencies(app_root)
@@ -656,6 +853,16 @@ def apply_assembly(svc: Any, app_root: str | Path, *,
 
 class BuildFailed(RuntimeError):
     """The assembled application does not compile."""
+
+
+class DispatchesRefused(BuildFailed):
+    """Controls the dry run proved would refuse their first click; `problems`
+    carries each one (route, control, label, workflow, input, node, actionType,
+    problem) for the build's repair round."""
+
+    def __init__(self, message: str, problems: list[dict]):
+        super().__init__(message)
+        self.problems = problems
 
 
 def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
@@ -672,14 +879,17 @@ def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
     actually served from, not against the Blueprint that intended it.
 
     Returns the counts and the missing routes rather than raising: whether a
-    shortfall should end a run is the caller's decision, and `_project_preview`
+    shortfall should end a run is the caller's decision, and `_project_assemble`
     records it either way. Reporting it is the part that was missing.
     """
+    from services.blueprint.app_sdk import code_page_dir
+
     root = Path(app_root)
-    planned = {
-        str(p.get("route")) for p in (doc.get("pages") or [])
-        if isinstance(p, dict) and p.get("route")
-    }
+    # A RETIRED PAGE IS NOT A PLANNED PAGE. /doctor, retired during the
+    # build, was counted as planned and reported "not served" (i3i950po).
+    live = [p for p in (doc.get("pages") or [])
+            if isinstance(p, dict) and p.get("route") and p.get("status") != "DEPRECATED"]
+    planned = {str(p.get("route")) for p in live}
     registry = root / "src" / "schemas" / "registry.ts"
     served: set[str] = set()
     if registry.exists():
@@ -687,6 +897,19 @@ def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
         # per line. Read rather than re-derived, so this cannot agree with the
         # Blueprint by construction and disagree with the app.
         served = set(re.findall(r'"([^"]+)":\s*\(\)\s*=>', registry.read_text("utf-8")))
+    # A PAGE WRITTEN AS REACT IS SERVED BY ITS OWN FILE, NOT THE REGISTRY.
+    # The registry lists the engine-rendered schemas; a coded page lives at
+    # its directory under src/app with its view and load. Read off the tree,
+    # like the registry, so a page whose code was never projected still
+    # counts as missing. /login, /signup and /appointments were coded, on
+    # disk and serving, and reported "not served" (i3i950po, 2026-09-25).
+    coded = {str(r.get("page")): r for r in (doc.get("pageCode") or [])
+             if isinstance(r, dict) and r.get("status") != "DEPRECATED"}
+    by_code: set[str] = set()
+    for page in live:
+        if str(page.get("id")) in coded and (root / code_page_dir(page) / "view.tsx").is_file():
+            by_code.add(str(page.get("route")))
+    served |= by_code
 
     # A FALLBACK IS A ROUTE THAT ANSWERS, NOT A PAGE THAT WAS BUILT. The
     # placeholder `plan_pages` writes for a page nothing composed is
@@ -698,7 +921,11 @@ def page_funnel(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # shape stays what `runtime.pages` accepts (§12: a new key is declared in
     # the contract first); which of the missing routes carry a placeholder
     # is in the projection's own `fellBack`.
-    fallback = _fallback_routes(root / "src" / "schemas")
+    # A route whose page is written as React is served by that code, whatever
+    # placeholder schema the projection also wrote for it: the coded route
+    # file wins. /books, /login and /signup were coded, on disk and serving,
+    # and counted missing for their placeholders (looktest0927, 2026-09-27).
+    fallback = _fallback_routes(root / "src" / "schemas") - by_code
     missing = sorted((planned - served) | (planned & fallback))
     return {
         "planned": len(planned),
@@ -737,7 +964,7 @@ def scaffold_tokens() -> frozenset[str]:
         if not layer.is_dir():
             continue
         for f in layer.rglob("*"):
-            if f.is_dir() or any(part in _SKIP_DIRS for part in f.parts):
+            if f.is_dir() or skipped_by_scaffold(f):
                 continue
             if f.suffix not in _TEXT_SUFFIXES and f.suffix != ".tmpl":
                 continue
@@ -842,14 +1069,201 @@ def install_dependencies(app_root: str | Path, *, timeout: int = 900) -> int:
     return verify_build(app_root, timeout=timeout, build=False)["install"]
 
 
+class BootFailed(RuntimeError):
+    """The application compiles and will not start."""
+
+
+def verify_boot(app_root: str | Path, *, entry: str = "/",
+                timeout: int = 120) -> dict[str, Any]:
+    """Start the app and prove it serves its way in. Raise if it will not.
+
+    `next build` DOES NOT CATCH THIS CLASS OF FAULT, which is the whole reason
+    this exists. Measured: a generated app with two files resolving to "/" —
+    the scaffold's landing page inside a route group, and the optional
+    catch-all — built clean, exit 0, full route listing. `next dev` refused to
+    start:
+
+        You cannot define a route with the same specificity as a optional
+        catch-all route ("/" and "/[[...slug]]")
+
+    Every node had completed, the projection was correct, and the first person
+    to learn the application was broken was the person running it. A gate that
+    compiles is not a gate that boots.
+
+    SHAPE-AGNOSTIC, DELIBERATELY. `entry` is where the Blueprint says a visitor
+    comes in: "/" for a single-page tool whose only page is the root,
+    "/add-data" for an app whose root merely forwards. Asserting a shape here —
+    "the root must redirect", "something must serve /" — would refuse a
+    calculator for correctly being its own landing page. What every
+    application owes is the same: it starts, and its way in is served.
+
+    ANY RESPONSE COUNTS AS SERVED. A 500 from an unreachable database, a 307 to
+    a sign-in — both mean the server started and routed. This checks booting,
+    not behaviour, and a database is not required to run it.
+    """
+    import signal
+    import socket
+    import subprocess
+    import time
+    import urllib.error
+    import urllib.request
+
+    root = Path(app_root)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+
+    started = time.monotonic()
+    # ITS OWN PROCESS GROUP, BECAUSE `npm` IS NOT THE SERVER. `npm run dev`
+    # spawns `next dev`, which spawns `next-server`, and all of them inherit
+    # this pipe. Terminating npm alone leaves the grandchildren running and
+    # HOLDING THE PIPE OPEN — so every read below waits for an EOF that cannot
+    # come, and the build node blocks for ever with no CPU, no subprocess of
+    # its own to see, and nothing written to the ledger. That is exactly how a
+    # run went silent after a clean build. Killing the group ends the whole
+    # tree and closes the pipe with it.
+    proc = subprocess.Popen(
+        ["npm", "run", "dev", "--", "--port", str(port)],
+        cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, env={**os.environ, "BROWSER": "none"},
+        start_new_session=True,
+    )
+
+    def _kill_tree() -> None:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(os.getpgid(proc.pid), sig)
+            except (ProcessLookupError, PermissionError):
+                return
+            try:
+                proc.wait(timeout=10)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+
+    def _stop() -> str:
+        """End the whole tree, then read what it said. Never unbounded."""
+        _kill_tree()
+        try:
+            out, _ = proc.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            # The pipe is still held by something this could not kill. Its
+            # output is not worth hanging a build for.
+            return "(the application did not release its output)"
+        return out or ""
+
+    try:
+        listening = False
+        while time.monotonic() - started < timeout:
+            if proc.poll() is not None:
+                # IT DIED RATHER THAN SERVED. This is the route-collision case:
+                # Next prints the conflict and exits, so there is never a port
+                # to connect to. Its own words are the reason.
+                #
+                # Read through `_stop`, which bounds it. A bare
+                # `proc.stdout.read()` here waits for EOF on a pipe a
+                # surviving grandchild may still hold, and npm exiting says
+                # nothing about whether `next-server` did.
+                raise BootFailed(
+                    "the application exited instead of starting: "
+                    + _last_error(_stop()))
+            with socket.socket() as s2:
+                s2.settimeout(1)
+                if s2.connect_ex(("127.0.0.1", port)) == 0:
+                    listening = True
+                    break
+            time.sleep(0.5)
+
+        if not listening:
+            raise BootFailed(
+                f"the application did not listen within {timeout}s: "
+                + _last_error(_stop()))
+
+        url = f"http://127.0.0.1:{port}{entry if entry.startswith('/') else '/' + entry}"
+        try:
+            with urllib.request.urlopen(url, timeout=60) as reply:
+                status = reply.status
+        except urllib.error.HTTPError as exc:
+            status = exc.code          # 4xx/5xx still means it routed
+        except Exception as exc:  # noqa: BLE001
+            raise BootFailed(
+                f"{url} did not answer: {exc}; " + _last_error(_stop())) from exc
+
+        return {"port": port, "entry": entry, "status": status,
+                "seconds": round(time.monotonic() - started, 1)}
+    finally:
+        # UNCONDITIONALLY. `poll()` reports on npm, and npm exiting leaves the
+        # server it spawned running — on a port, holding the pipe, outliving
+        # the build that started it.
+        _kill_tree()
+        if proc.stdout:
+            proc.stdout.close()
+
+
+def _last_error(output: str) -> str:
+    """The line worth reporting out of a dev server's noise."""
+    lines = [l.strip() for l in (output or "").splitlines() if l.strip()]
+    for line in reversed(lines):
+        if "Error" in line or "error" in line or "cannot" in line.lower():
+            return line[:400]
+    return (lines[-1][:400] if lines else "no output")
+
+
+class RouteCollision(RuntimeError):
+    """Two page files in the assembled tree answer the same URL."""
+
+
+def route_collisions(app_root: str | Path) -> list[tuple[str, list[str]]]:
+    """Every URL two or more `page.tsx` files resolve to.
+
+    Next refuses such a tree — "You cannot have two parallel pages that
+    resolve to the same path" — but only after the full `next build` has run,
+    and only in its own words. Every writer of a route file (the scaffold, the
+    public routes, the coded pages, the task inbox) is right on its own; this
+    is the one place that sees all of them at once. Route groups `(x)` and
+    parallel slots `@x` do not appear in a URL; dynamic segments collide
+    whatever their parameter is named (`[id]` and `[slug]` at one level are
+    one route to Next); an optional catch-all also answers its parent.
+    """
+    app = Path(app_root) / "src" / "app"
+    if not app.is_dir():
+        return []
+    seen: dict[str, list[str]] = {}
+    for page in sorted(app.rglob("page.tsx")):
+        rel_parts = page.parent.relative_to(app).parts
+        if any(p.startswith("_") for p in rel_parts):
+            continue                                        # a private folder is never a route
+        parts = [p for p in rel_parts
+                 if not (p.startswith("(") and p.endswith(")")) and not p.startswith("@")]
+        # `[id]`/`[slug]` are one route; a catch-all `[...x]` is a different one.
+        norm = ["[...*]" if p.startswith("[...") else "[[...*]]" if p.startswith("[[...")
+                else "[*]" if p.startswith("[") else p for p in parts]
+        urls = ["/" + "/".join(norm)]
+        if norm and norm[-1].startswith("[[..."):
+            urls.append("/" + "/".join(norm[:-1]))          # `[[...slug]]` also answers its parent
+        rel = str(page.relative_to(Path(app_root)))
+        for url in urls:
+            seen.setdefault(url.replace("//", "/"), []).append(rel)
+    return [(url, files) for url, files in sorted(seen.items()) if len(files) > 1]
+
+
+def check_route_tree(app_root: str | Path) -> None:
+    """Refuse a tree with two pages at one URL, naming both — before a build
+    that would take minutes to say the same thing less plainly."""
+    clashes = route_collisions(app_root)
+    if clashes:
+        raise RouteCollision("; ".join(f"{url} is served by {' and '.join(files)}"
+                                       for url, files in clashes[:8]))
+
+
 def verify_build(app_root: str | Path, *, timeout: int = 900,
-                 install: bool = True, build: bool = True) -> dict[str, Any]:
+                 install: bool = True, build: bool = True, dispatches: bool = True) -> dict[str, Any]:
     """Install and build the assembled app; raise if it does not compile.
 
     ``install=False`` skips the install when the `install` node already ran
     it at the start of the build; ``build=False`` is that node's own call.
 
-    The `preview` node assembled a tree and reported success without ever
+    The `assemble` node built a tree and reported success without ever
     compiling it, so "an application was generated" meant "files were written".
     Two build-breaking faults survived every run that way: the scaffold's own
     user table was deleted by the projection guard, and the data engine's
@@ -887,7 +1301,7 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
                 f"npm {name} failed ({proc.returncode}):\n"
                 + build_message(proc.stdout, proc.stderr)
             )
-    if build:
+    if build and dispatches:
         out["dispatches"] = verify_dispatches(root, timeout=timeout)
     return out
 
@@ -912,6 +1326,23 @@ def _env_file(root: Path) -> dict[str, str]:
     except Exception:  # noqa: BLE001
         pass
     return env
+
+
+def app_database_url(app_root: str | Path) -> str:
+    """The database THIS application opens, as its own ``.env.local`` says.
+
+    Not :func:`default_database_url`. That is the value assembly WRITES; the
+    file is the value the application READS, and `run.sh` rewrites it when it
+    picks a free port, so the two differ on any machine running more than one
+    app. Anything that wants to look at an application's records has to open
+    the database the application itself opened, or it is reading someone
+    else's — which is the whole of the defect
+    `test_each_application_gets_its_own_database` exists for.
+
+    Empty string when the file is absent or names no url: the caller says so
+    rather than falling back to a guess at somebody's database.
+    """
+    return _env_file(Path(app_root)).get("DATABASE_URL", "").strip()
 
 
 def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
@@ -946,6 +1377,7 @@ def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
         raise BuildFailed(f"the dispatch dry run could not run ({proc.returncode}):\n"
                           + build_message(proc.stdout, proc.stderr))
     lines = []
+    problems: list[dict] = []
     for r in report.get("results") or []:
         if r.get("ok"):
             continue
@@ -953,8 +1385,12 @@ def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
             lines.append(f"{r.get('route')}: {r.get('control')} {r.get('label')!r} runs "
                          f"{r.get('workflow')} — step {pr.get('node')!r} ({pr.get('actionType')}): "
                          f"{pr.get('problem')}")
-    raise BuildFailed("a control the app ships would refuse at first click:\n"
-                      + "\n".join(lines[:12]))
+            problems.append({"route": r.get("route"), "page": r.get("page"), "control": r.get("control"),
+                             "label": r.get("label"), "workflow": r.get("workflow"), "input": r.get("input"),
+                             "node": pr.get("node"), "actionType": pr.get("actionType"),
+                             "problem": pr.get("problem")})
+    raise DispatchesRefused("a control the app ships would refuse at first click:\n"
+                            + "\n".join(lines[:12]), problems)
 
 
 #: Where a verification build writes, beside — never inside — the served app.

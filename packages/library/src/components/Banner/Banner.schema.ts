@@ -7,4 +7,4 @@ export const BannerProps = z.object({
   className:   z.string().optional(),
   style:       z.record(z.unknown()).optional(),
 });
-export type BannerPropsType = z.infer<typeof BannerProps>;
+export type BannerPropsType = z.input<typeof BannerProps>;

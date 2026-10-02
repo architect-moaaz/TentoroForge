@@ -47,14 +47,15 @@ def test_enum_options_become_select():
     ]
 
 
-def test_currency_semantic_on_numeric_is_moneyish_numberinput():
+def test_currency_semantic_on_numeric_is_a_moneyinput():
+    """A NumberInput with a `$` prefix throws the currency half away and
+    defaults to USD in the UI; a money column carries the currency beside the
+    amount. The banking-app work made that the control, and this test asked
+    for the prefix long after it stopped being emitted."""
     control, props = resolve_control(name="amount", sql_type="numeric",
                                      semantic_type="currency")
-    assert control == "NumberInput"
-    assert props["prefix"] == "$"
-    assert props["showSteppers"] is False
-    assert props["step"] == 0.01
-    assert props["min"] == 0
+    assert control == "MoneyInput"
+    assert props == {}
 
 
 def test_sql_type_boolean_is_switch():
@@ -86,13 +87,30 @@ def test_name_description_varchar_is_textarea():
     assert control == "Textarea"
 
 
-def test_incompatible_currency_hint_on_varchar_is_ignored():
-    # `currency` is a numeric-flavoured hint; on a varchar column it is a mistake and
-    # is dropped, falling through to the plain Input default.
-    control, props = resolve_control(name="referenceCode", sql_type="varchar",
+def test_a_currency_hint_on_a_varchar_is_an_opt_in_not_a_mistake():
+    """This asserted the hint was DROPPED on a varchar, and that was right
+    while `currency` meant "NumberInput with a $ prefix" — a numeric control on
+    a text column is incompatible. Slice 2 made money a control of its own, and
+    `MoneyInput` is exactly what a money value stored on a legacy varchar
+    should render as; `test_semantic_field_types_money` names the migration and
+    self-heal passes that rely on opting in this way. The hint now promotes."""
+    control, props = resolve_control(name="amount", sql_type="varchar",
                                      semantic_type="currency")
-    assert control == "Input"
+    assert control == "MoneyInput"
     assert props == {}
+
+
+def test_a_textual_hint_on_a_numeric_column_is_still_dropped():
+    """The incompatibility rule itself is not gone — `_semantic_control` still
+    refuses a hint the column cannot hold. Kept under test so the case above
+    reads as one hint changing meaning, not as the guard being removed."""
+    on_text = resolve_control(name="contact", sql_type="varchar", semantic_type="email")
+    assert on_text == ("Input", {"type": "email"})
+    # The same hint on an integer column is refused, and the column's own type
+    # decides instead — no `type: email` on a number input.
+    control, props = resolve_control(name="count", sql_type="integer",
+                                     semantic_type="email")
+    assert control == "NumberInput" and props.get("type") != "email"
 
 
 def test_document_url_columns_are_fileupload():
@@ -143,4 +161,4 @@ def test_deterministic_same_inputs_same_output():
     a = resolve_control(**kwargs)
     b = resolve_control(**kwargs)
     assert a == b
-    assert a == ("NumberInput", {"min": 0, "step": 0.01, "prefix": "$", "showSteppers": False})
+    assert a == ("MoneyInput", {})

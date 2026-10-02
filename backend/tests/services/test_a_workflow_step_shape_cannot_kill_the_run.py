@@ -56,6 +56,18 @@ def test_a_column_may_be_set_to_any_scalar():
     )
 
 
+def _definitions(result) -> list[str]:
+    """The workflow DEFINITION files a projection wrote.
+
+    These asserted `len(result["files"]) == 1`, and `project_workflows` emits
+    `src/lib/workflows/launch-roles.ts` alongside the definitions now — so the
+    count became 2 and five tests reported that the workflow had stopped being
+    projected. Naming what is looked for is also a stronger assertion than a
+    count: two files could be the right number and the wrong pair.
+    """
+    return [f for f in result["files"] if "/definitions/" in f]
+
+
 def _doc(sets):
     return {
         "application": {"id": "app", "name": "App"},
@@ -80,7 +92,9 @@ def _doc(sets):
 ])
 def test_a_sets_shape_the_projection_cannot_honour_is_skipped_not_fatal(sets, tmp_path):
     result = project_workflows(_doc(sets), tmp_path)
-    assert len(result["files"]) == 1, "the workflow must still be projected"
+    assert _definitions(result) == ["src/lib/workflows/definitions/raise-case.json"], (
+        "the workflow must still be projected"
+    )
 
 
 def test_a_well_formed_sets_still_reaches_the_projection(tmp_path):
@@ -88,9 +102,10 @@ def test_a_well_formed_sets_still_reaches_the_projection(tmp_path):
     states the values a person never types, and dropping those silently is the
     not-null insert failure this exists to prevent."""
     result = project_workflows(_doc({"status": "Open"}), tmp_path)
-    assert len(result["files"]) == 1
-    written = json.loads((tmp_path / result["files"][0]).read_text()) \
-        if (tmp_path / result["files"][0]).exists() else {}
+    definitions = _definitions(result)
+    assert definitions == ["src/lib/workflows/definitions/raise-case.json"]
+    written = json.loads((tmp_path / definitions[0]).read_text()) \
+        if (tmp_path / definitions[0]).exists() else {}
     assert "Open" in json.dumps(written), "the declared value never reached the artifact"
 
 
@@ -98,4 +113,5 @@ def test_no_sets_at_all_is_normal(tmp_path):
     """Most steps declare none, and that is not a defect."""
     doc = _doc(None)
     doc["workflows"][0]["steps"][0]["config"].pop("sets")
-    assert len(project_workflows(doc, tmp_path)["files"]) == 1
+    assert _definitions(project_workflows(doc, tmp_path)) == [
+        "src/lib/workflows/definitions/raise-case.json"]

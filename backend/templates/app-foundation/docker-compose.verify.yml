@@ -21,7 +21,9 @@
 #   NEXTAUTH_SECRET       — random per run
 services:
   postgres:
-    image: postgres:16
+    # postgres 16 with pgvector: an embedding field is a vector column.
+    # Same major version and data layout, so an existing volume still mounts.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

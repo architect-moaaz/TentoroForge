@@ -77,6 +77,7 @@ export type ActionType =
   | "transform"
   | "generate_document"
   | "mcp_tool_call"
+  | "for_each"
   | "emit_event"
   | "wait_for_event"
   | "custom" | "ocr_document";

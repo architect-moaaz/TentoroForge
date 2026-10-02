@@ -12,6 +12,8 @@ import json
 import re
 from pathlib import Path
 
+from services.blueprint.assembly import skipped_by_scaffold
+
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 TMPL = TEMPLATES / "standalone-app" / "package.json.tmpl"
 FLOOR_SRC = TEMPLATES / "app-foundation" / "src"
@@ -62,6 +64,14 @@ def _floor_imported_packages() -> set[str]:
     pkgs: set[str] = set()
     for path in FLOOR_SRC.rglob("*"):
         if path.suffix not in {".ts", ".tsx", ".js", ".jsx", ".mjs"}:
+            continue
+        # WHAT SHIPS IS WHAT NEEDS A DEPENDENCY. This walked the floor's own
+        # `__tests__` too and reported `vitest` and `@testing-library/react`
+        # as missing template deps — correctly, while those files were being
+        # copied into every generated app. They are not any more, and the rule
+        # is imported rather than restated so the two cannot disagree about
+        # which files a generated application actually contains.
+        if skipped_by_scaffold(path):
             continue
         for spec in import_re.findall(path.read_text()):
             # Skip relative and alias imports.

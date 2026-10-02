@@ -16,7 +16,6 @@ from types import SimpleNamespace
 import services.llm_client as lc
 import pytest
 
-from services.smith.understand_ask import understand_ask
 
 
 @pytest.fixture()
@@ -72,26 +71,10 @@ def test_the_answer_gets_its_own_room(transport):
     assert transport["max_tokens"] == without + lc.THINKING_HEADROOM_TOKENS
 
 
-def test_understand_ask_forwards_the_reasoning_and_still_answers(transport):
-    thoughts: list[str] = []
-    u = understand_ask("the page at / is empty", "PAGE-002 route /",
-                       reasoning=thoughts.append)
-    assert thoughts == ["/ has a page but no layout."]
-    assert u["verb"] == "compose_route" and u["route"] == "/"
-
-
-def test_an_injected_provider_keeps_its_one_argument_seam(transport):
-    """Every test in the suite supplies `lambda prompt: "..."`. None of them
-    should have to grow a parameter to say it does no thinking."""
-    u = understand_ask("x", "ctx", reasoning=lambda _t: None,
-                       provider=lambda _prompt: '{"verb":"rename"}')
-    assert u["verb"] == "rename"
-
-
 def test_a_session_without_a_sink_calls_the_seam_exactly_as_before():
     """Every caller predating this passes no reasoning_fn, and their seams
     take no such argument — passing one anyway would TypeError the turn."""
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     seen: dict = {}
 
@@ -106,7 +89,7 @@ def test_a_session_without_a_sink_calls_the_seam_exactly_as_before():
 
 
 def test_a_session_with_a_sink_hands_it_to_the_seam():
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     seen: dict = {}
 
@@ -139,10 +122,9 @@ def test_the_router_gives_chat_v2_a_sink_that_emits():
            'emit("thought"' in src, "the sink emits no thought event"
 
 
-def test_chat_v2_passes_the_sink_into_the_session():
+def test_chat_v2_passes_the_sink_into_the_turn():
     import inspect
 
     from services import smith_chat_v2
 
-    assert "reasoning_fn=req.reasoning_fn" in inspect.getsource(
-        smith_chat_v2._build_session)
+    assert "reasoning=req.reasoning_fn" in inspect.getsource(smith_chat_v2.handle_chat_v2)

@@ -4,6 +4,8 @@ import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { ACCOUNT, ACCOUNT_INITIAL, SIGNUP_ROLE } from "@/lib/account";
+import { accountTable } from "@/lib/account-table";
 
 // The account types signup offers. Empty by default (single-account app);
 // the Blueprint assembly step overwrites this line with the derived options
@@ -26,7 +28,33 @@ const signupSchema = z.object({
       (v) => ACCOUNT_TYPE_VALUES.length === 0 || (!!v && ACCOUNT_TYPE_VALUES.includes(v)),
       "Please choose an account type"
     ),
+  // The account entity's own fields (see `@/lib/account`), checked below.
+  account: z.record(z.string(), z.unknown()).optional(),
 });
+
+/**
+ * THE PERSON'S OWN RECORD, WITH THE LOGIN. When the application has an
+ * account entity, signup creates its row too — the same id as the login, so
+ * `$user.id` IS the person's row everywhere. Only the fields the entity
+ * declares are written; a required one left out is refused in words.
+ */
+function accountValues(input: Record<string, unknown>, email: string): { values?: Record<string, unknown>; error?: string } {
+  if (!ACCOUNT) return {};
+  // WHERE A NEW ACCOUNT STARTS. The form asks only what a person types, so
+  // the state a process owns — a verification that has not happened yet — is
+  // written here rather than asked for. Anything the person did fill wins.
+  const values: Record<string, unknown> = { ...ACCOUNT_INITIAL };
+  for (const f of ACCOUNT.fields) {
+    let v = input[f.name];
+    if ((v === undefined || v === "") && f.kind === "email") v = email;
+    if (v === undefined || v === "" || v === null) {
+      if (f.required) return { error: `${f.label} is required` };
+      continue;
+    }
+    values[f.name] = f.kind === "number" ? Number(v) : f.kind === "checkbox" ? Boolean(v) : v;
+  }
+  return { values };
+}
 
 export async function POST(request: Request) {
   try {
@@ -47,20 +75,51 @@ export async function POST(request: Request) {
       );
     }
 
-    const hashedPassword = await bcrypt.hash(data.password, 12);
+    const account = accountValues(data.account ?? {}, data.email);
+    if (account.error) {
+      return NextResponse.json(
+        { error: { code: "VALIDATION_ERROR", message: account.error } },
+        { status: 400 }
+      );
+    }
 
-    const [user] = await db
-      .insert(users)
-      .values({
-        email: data.email,
-        password: hashedPassword,
-        ...("name" in (users as any) ? { name: data.name } : {}),
-        ...("firstName" in (users as any) ? { firstName: data.name.split(" ")[0], lastName: data.name.split(" ").slice(1).join(" ") || "" } : {}),
-        // Persist the chosen account type when the table carries the column
-        // and a choice was actually offered; auth folds it into the session.
-        ...("accountType" in (users as any) && data.accountType ? { accountType: data.accountType } : {}),
-      } as any)
-      .returning();
+    const hashedPassword = await bcrypt.hash(data.password, 12);
+    // The role: the one chosen, else the one self-registered people get —
+    // auth folds `accountType` into the session role, and without one a new
+    // person held a role no page or workflow names.
+    const role = data.accountType || SIGNUP_ROLE || undefined;
+
+    // One transaction: never a login without its person, or the reverse.
+    const user = await (db as any).transaction(async (tx: any) => {
+      const [created] = await tx
+        .insert(users)
+        .values({
+          email: data.email,
+          password: hashedPassword,
+          ...("name" in (users as any) ? { name: data.name } : {}),
+          ...("firstName" in (users as any) ? { firstName: data.name.split(" ")[0], lastName: data.name.split(" ").slice(1).join(" ") || "" } : {}),
+          ...("accountType" in (users as any) && role ? { accountType: role } : {}),
+        } as any)
+        .returning();
+      if (ACCOUNT && accountTable && account.values) {
+        if ((accountTable as unknown) === (users as unknown)) {
+          // THE PERSON'S RECORD IS THE LOGIN'S OWN ROW. An account entity on
+          // the platform's `users` table (SnapIT's "User") folds into it; a
+          // second insert into that table wrote a row with no password and
+          // every signup failed (2026-09-29). The row just made is completed
+          // with the columns the table has — a field folded into a platform
+          // column (displayName → name) is already there.
+          const own: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(account.values)) {
+            if (k in (users as any) && !["id", "email", "password"].includes(k)) own[k] = v;
+          }
+          if (Object.keys(own).length) await tx.update(users).set(own as any).where(eq(users.id, created.id));
+        } else {
+          await tx.insert(accountTable).values({ ...account.values, id: created.id });
+        }
+      }
+      return created;
+    });
 
     return NextResponse.json(
       { id: user.id, email: user.email },

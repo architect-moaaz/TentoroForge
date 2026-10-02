@@ -26,9 +26,14 @@ export const FileUploadProps = z.object({
   filenameField: z.string().optional(),
   mimeTypeField: z.string().optional(),
 
+  // THE PAGE'S IMAGE SEARCH. Like an Input of type "search" writing `q`, a
+  // FileUpload with `search` writes the uploaded image's id to the URL's
+  // `image`, which the page's op:"similar" source ranks records against.
+  search: z.boolean().optional(),
+
   // ── Spec E Wave 3 additions ──
   resumable:  z.boolean().optional(),
   retryOn5xx: z.boolean().optional(),
   chunkSizeMb: z.number().int().min(1).max(50).optional(),
 });
-export type FileUploadPropsType = z.infer<typeof FileUploadProps>;
+export type FileUploadPropsType = z.input<typeof FileUploadProps>;

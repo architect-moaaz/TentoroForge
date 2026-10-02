@@ -142,6 +142,20 @@ export const ACTION_FIELD_SPECS: Record<string, ActionSpec> = {
     ],
   },
 
+  // --- Loops ---------------------------------------------------------- //
+  for_each: {
+    label: "For Each",
+    fields: [
+      { key: "items", label: "Items", kind: "text", placeholder: "{{extract_listings.output}}",
+        help: "The list to go through — a step output holding one." },
+      { key: "as", label: "Each item is called", kind: "text", placeholder: "listing",
+        help: "Read inside the loop as {{listing.field}}." },
+      { key: "steps", label: "Steps for each item", kind: "json",
+        placeholder: '[\n  { "key": "merchant", "config": { "actionType": "db_insert", "table": "merchants", "findBy": ["domain"], "values": { "domain": "{{listing.domain}}" } } }\n]',
+        help: "Actions run in order for every item; each reads earlier ones as {{key.id}}." },
+    ],
+  },
+
   // --- MCP ------------------------------------------------------------ //
   mcp_tool_call: {
     label: "MCP Tool Call",

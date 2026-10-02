@@ -129,8 +129,19 @@ def record_usage(
     duration_ms: int | None = None,
     num_turns: int | None = None,
     kind: str = "generation",
+    phase: str = "",
 ) -> None:
-    """Append one agent-phase usage entry. Fail-open: never raises."""
+    """Append one agent-phase usage entry. Fail-open: never raises.
+
+    ``phase`` is what this call was FOR, to the person who owns the
+    application: ``build`` while it is being made, ``change`` for anything
+    asked for after it exists. Written per row so the two can be told apart
+    by reading the ledger rather than by matching timestamps against run
+    boundaries — runs overlap, and a guess about money is worse than no
+    answer. Rows written before this existed carry no phase at all, and
+    :mod:`services.smith.spend` reports them as unsplit rather than folding
+    them into whichever side would look tidier.
+    """
     try:
         usage = usage if isinstance(usage, dict) else {}
         entry = {
@@ -138,6 +149,7 @@ def record_usage(
             "project": str(project or "unknown"),
             "agent": str(agent or "agent"),
             "kind": kind,
+            "phase": str(phase or ""),
             "model": model,
             "input_tokens": int(usage.get("input_tokens") or 0),
             "output_tokens": int(usage.get("output_tokens") or 0),

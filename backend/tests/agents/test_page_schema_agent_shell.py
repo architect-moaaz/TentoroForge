@@ -15,6 +15,14 @@ but zero page schemas:
 Approach: mock `_collect_llm_text` so the real LLM is not invoked, but
 every other code path — prompt construction, shell.json detection,
 filename resolution, file write — runs for real.
+
+THE PAGE TYPE HAD TO CHANGE. These asked for `list` and `detail` pages, and
+the Collection and Record Authority phases made those two kinds — along with
+dashboards — the deterministic composers' to write: `run_page_schema_agent`
+now returns before authoring one, so nothing was written and the two bugs
+above looked like they had come back. `settings` is a kind no composer claims,
+so the slug and the write still run for real, which is what these guard.
+`test_a_composer_owned_page_is_not_authored_here` pins the skip itself.
 """
 from __future__ import annotations
 import json
@@ -92,7 +100,7 @@ async def test_run_page_schema_agent_writes_schema_file_for_simple_page(tmp_path
         await run_page_schema_agent(
             output_dir=str(tmp_path),
             plan={"entities": {}},
-            page={"route": "/tasks", "type": "list", "name": "Tasks"},
+            page={"route": "/tasks", "type": "settings", "name": "Tasks"},
         )
     written = tmp_path / "src" / "schemas" / "tasks.json"
     assert written.exists(), f"page schema not written at {written}"
@@ -114,7 +122,7 @@ async def test_run_page_schema_agent_handles_colon_param_route(tmp_path):
         await run_page_schema_agent(
             output_dir=str(tmp_path),
             plan={"entities": {}},
-            page={"route": "/users/:id", "type": "detail", "name": "User Detail"},
+            page={"route": "/users/:id", "type": "settings", "name": "User Detail"},
         )
     # slugify_route normalises :id → [id], so the file lands at users/[id].json
     written = tmp_path / "src" / "schemas" / "users" / "[id].json"
@@ -129,7 +137,7 @@ async def test_run_page_schema_agent_handles_bracket_param_route(tmp_path):
         await run_page_schema_agent(
             output_dir=str(tmp_path),
             plan={"entities": {}},
-            page={"route": "/users/[id]", "type": "detail", "name": "User Detail"},
+            page={"route": "/users/[id]", "type": "settings", "name": "User Detail"},
         )
     written = tmp_path / "src" / "schemas" / "users" / "[id].json"
     assert written.exists()
@@ -246,3 +254,31 @@ def test_nav_flow_schema_path_matches_agent_write_path():
             f"  agent writes:  {agent_path}\n"
             "Editor will get 'No schema at ...' when opening this page."
         )
+
+
+# ── The composers own three page kinds, and this agent knows it ────────
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page_type,artifact", [
+    ("list", "collection"),
+    ("detail", "record"),
+    ("dashboard", "dashboard"),
+])
+async def test_a_composer_owned_page_is_not_authored_here(tmp_path, page_type, artifact):
+    """The Authority phases made these kinds the composers' to write.
+
+    `run_page_schema_agent` returns before the LLM for them — letting it run
+    would silently overwrite a page the composer had already laid out. That
+    skip is the current contract and had no test of its own, which is why the
+    three tests above could sit red for months reading as the slug bug
+    returning rather than as a page kind that had changed hands.
+    """
+    with _patch_llm():
+        await run_page_schema_agent(
+            output_dir=str(tmp_path),
+            plan={"entities": {}},
+            page={"route": "/things", "type": page_type, "name": "Things"},
+        )
+    assert not list((tmp_path / "src" / "schemas").glob("*.json")), (
+        f"a {artifact}-owned page was authored by the LLM path"
+    )

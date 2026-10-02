@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { resolveIcon } from "../../icons";
 import { useTokens } from "../../theme/tokens-context";
 import type { StyleSlotT } from "@tentoroforge/schema";
@@ -21,12 +21,18 @@ import type { StyleSlotT } from "@tentoroforge/schema";
  * navigate via `data-nav-trigger`, which the Engine uses to swap the PageOutlet.
  */
 
-type SubItem = { label: string; route: string; icon?: string };
-type Group = { label?: string; icon?: string; route?: string; items?: SubItem[] };
+// `glyph`: an icon already drawn by the app (its layout can draw any icon by
+// name; this library keeps a short list so its bundle stays small). Wins over
+// `icon` when given.
+type SubItem = { label: string; route: string; icon?: string; glyph?: ReactNode };
+type Group = { label?: string; icon?: string; glyph?: ReactNode; route?: string; items?: SubItem[] };
 
 type Props = {
   groups?: Group[];
   appName?: string;
+  logoSrc?: string;
+  logoAlt?: string;
+  logoAspect?: number;
   mode?: "dark" | "light";
   bg?: string;
   text?: string;
@@ -63,6 +69,7 @@ const CSS = `
 .tf-row:hover,.tf-sub:hover{background:var(--tf-hover)}
 .tf-active{background:var(--tf-abg)!important;color:var(--tf-atext)!important;border-left-color:var(--tf-accent)!important}
 .tf-label{opacity:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:opacity .14s ease .03s}
+.tf-logo{display:block;flex-shrink:0;height:28px;object-fit:contain;object-position:left center}
 .tf-brand{opacity:1;font-weight:600;overflow:hidden;transition:opacity .14s ease .03s;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-clamp:2;overflow-wrap:anywhere;line-height:1.2;font-size:0.875rem}
 @media (min-width:768px){.tf-sidenav .tf-brand{opacity:0}.tf-sidenav:hover .tf-brand{opacity:1}}
 .tf-subs{max-height:999px;overflow:hidden;transition:max-height .22s ease}
@@ -80,6 +87,9 @@ const CSS = `
 export function SideNav({
   groups = [],
   appName = "App",
+  logoSrc,
+  logoAlt,
+  logoAspect,
   mode = "dark",
   bg,
   text,
@@ -128,13 +138,20 @@ export function SideNav({
 
   const [active, setActive] = useState("");
   useEffect(() => {
-    const sync = () => setActive(window.location.pathname);
+    const sync = () => setActive(window.location.pathname + window.location.search);
     sync();
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
+  // A destination may be a VIEW of a page (`/tools?view=mine`) beside the page
+  // itself (`/tools`). When the current address is exactly one destination,
+  // only that one is lit — both used to light, because one starts the other.
+  const routes = groups.flatMap((g) => [g.route, ...(g.items || []).map((s) => s.route)]).filter(Boolean) as string[];
+  const exact = routes.includes(active);
+  const path = active.split("?")[0];
   const isActive = (route?: string) =>
-    !!route && (active === route || (route !== "/" && active.startsWith(route)));
+    !!route && (exact ? active === route
+      : !route.includes("?") && (path === route || (route !== "/" && path.startsWith(route + "/"))));
 
   function leaf(item: SubItem | Group, sub = false) {
     const route = (item as SubItem).route || "";
@@ -150,7 +167,7 @@ export function SideNav({
         className={`${sub ? "tf-sub" : "tf-row"}${act ? " tf-active" : ""}`}
       >
         <span data-nav-icon="" className="inline-flex">
-          <Glyph name={item.icon} size={sub ? 17 : 20} />
+          {item.glyph ?? <Glyph name={item.icon} size={sub ? 17 : 20} />}
         </span>
         <span className="tf-label" data-nav-label="">{item.label}</span>
       </a>
@@ -180,30 +197,66 @@ export function SideNav({
             borderBottom: `.5px solid ${divider}`,
           }}
         >
-          <span
-            style={{
-              minWidth: 28,
-              height: 28,
-              borderRadius: 7,
-              background: cAccent,
-              color: "#fff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: 600,
-              fontSize: 14,
-            }}
-          >
-            {(appName || "A").trim().charAt(0).toUpperCase()}
-          </span>
-          <span
-            className="tf-brand"
-            title={appName}
-            aria-label={appName}
-            style={{ color: light ? "#0F172A" : "#fff" }}
-          >
-            {appName}
-          </span>
+          {logoSrc ? (
+            // THE OWNER'S OWN MARK. The initial-in-a-square below is what an
+            // application that has never been given one shows, and it is a
+            // stand-in for exactly this.
+            //
+            // IT REPLACES THE WHOLE LOCKUP, square and name both — the name
+            // span below renders only when there is no mark. A logo is how a
+            // company writes its name, so setting one beside the name in text
+            // reads as a stutter ("Bright Care | Bright Care"), worst exactly
+            // where the mark is a wordmark. Every chrome in the generated app
+            // follows the same rule; the scaffold's `ShellBrand` is the other
+            // half of it.
+            //
+            // SIZED BY HEIGHT, NEVER SQUEEZED TO FIT. The mark takes the row's
+            // 28px of height and whatever width its ratio then asks for, and
+            // the collapsed rail — 64px wide — CLIPS it. Capping the width
+            // to the rail instead does not work: `contain` inside a 28px box
+            // letterboxes a 4:1 wordmark down to 28×7, a coloured smudge
+            // nobody can read. Clipped, the collapsed rail shows the
+            // mark's leading 28px at full height, which for the wordmarks
+            // people actually have is the icon they begin with; hovering opens
+            // the rail and the whole mark is there. The ratio comes from the
+            // stored image, because an SVG with no intrinsic width lays out at
+            // zero without it.
+            <img
+              className="tf-logo"
+              src={logoSrc}
+              alt={logoAlt || appName}
+              style={logoAspect && logoAspect > 0
+                ? { width: Math.round(28 * logoAspect) }
+                : { width: "auto" }}
+            />
+          ) : (
+            <span
+              style={{
+                minWidth: 28,
+                height: 28,
+                borderRadius: 7,
+                background: cAccent,
+                color: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: 600,
+                fontSize: 14,
+              }}
+            >
+              {(appName || "A").trim().charAt(0).toUpperCase()}
+            </span>
+          )}
+          {!logoSrc && (
+            <span
+              className="tf-brand"
+              title={appName}
+              aria-label={appName}
+              style={{ color: light ? "#0F172A" : "#fff" }}
+            >
+              {appName}
+            </span>
+          )}
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "8px 0" }}>
@@ -215,7 +268,7 @@ export function SideNav({
               <div key={`g:${gi}`}>
                 <div data-nav-group-label="" className={`tf-row${sectionActive ? " tf-active" : ""}`}>
                   <span data-nav-icon="" className="inline-flex">
-                    <Glyph name={g.icon} size={20} />
+                    {g.glyph ?? <Glyph name={g.icon} size={20} />}
                   </span>
                   <span className="tf-label" data-nav-label="">{g.label}</span>
                 </div>

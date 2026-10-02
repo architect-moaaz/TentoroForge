@@ -46,7 +46,6 @@ EDGES: tuple[str, ...] = (
     "Workflow↔API",
     "Design↔DesignSystem",
     "Requirement↔Code",
-    "Requirement↔Test",
     "Blueprint↔Implementation",
     # Added by the migration ledger: each collapses a cluster of passes from
     # the old repair chain that the PRD's ten edges do not cover.
@@ -80,11 +79,9 @@ SECTION_OWNER: dict[str, str] = {
     # wrong is its to author again. The section was already reachable as a
     # finding's `section` through the Page↔Layout edge and had no owner, so
     # every one of those repair tasks was addressed to "unassigned".
-    "pageLayouts": "a2ui_pages",
-    # §34 — the whole-app sketch has the same authority behind it.
-    "composition": "a2ui_composition",
+    "pageLayouts": "page_template",
     "components": "frontend",
-    "widgets": "page_design",
+    "widgets": "analytics",
     "designSystem": "accessibility",
     "data.entities": "data_model",
     "data.relationships": "data_model",
@@ -97,7 +94,6 @@ SECTION_OWNER: dict[str, str] = {
     "security": "security",
     "roles": "security",
     "permissions": "security",
-    "tests": "testing",
     "runtime": "build",
     "deployment": "deployment",
     "codeMap": "backend",
@@ -127,7 +123,6 @@ EDGE_SECTIONS: dict[str, tuple[str, ...]] = {
     "Requirement↔Code": ("requirements", "pages", "apis", "workflows",
                          "businessRules", "components", "data.entities",
                          "codeMap"),
-    "Requirement↔Test": ("requirements", "tests"),
     "Blueprint↔Implementation": ("pages", "apis", "workflows", "businessRules",
                                  "components", "data.entities", "codeMap"),
     "Navigation↔Page": ("navigation", "pages"),
@@ -286,6 +281,16 @@ def check_api_database(doc: dict) -> list[Finding]:
                 "API↔Database", section="data.constraints",
                 artifact_id=con.get("entity"),
                 detail=f"constraint names unknown entity {con['entity']}",
+            ))
+
+    # An embedding is filled from the field it names; one that names nothing
+    # embeddable is a column no row will ever have a value in.
+    from services.blueprint.embeddings import unfillable_embeddings
+    for ent in entities.values():
+        for problem in unfillable_embeddings(ent):
+            out.append(Finding(
+                "API↔Database", section="data.entities",
+                artifact_id=ent.get("id"), detail=problem,
             ))
     return out
 
@@ -459,8 +464,51 @@ def check_design_system(doc: dict) -> list[Finding]:
         for group in ("colors", "spacing", "typography", "radius")
         if not (design.get(group) or {})
     ]
+    out.extend(check_palette_roles(doc))
     out.extend(check_palette_contrast(doc))
     return out
+
+
+#: THE JOBS A PALETTE DOES, each a role the pages are written against. Tool
+#: Share (036farqu) named a forest green and a terracotta and shipped a
+#: white-and-green app: no role said what the terracotta was FOR, so pages used
+#: it three times, and with no tint and no dark surface declared, a selected
+#: chip or a "happening now" card had no colour to be drawn in.
+PALETTE_ROLES: dict[str, str] = {
+    "background": "the page ground — a considered neutral, warm or cool, not a default white",
+    "surface": "cards and panels, one step off the ground",
+    "textPrimary": "body text, the palette's ink",
+    "textSecondary": "supporting text",
+    "primary": "the brand anchor: navigation, the default button, links",
+    "accent": "the ONE thing to act on now: the main call to action, the active status, the selected option",
+    "accentSubtle": "a tint of the accent for selected chips and highlighted items, with accent-toned text",
+    "inverse": "a dark surface for the one card that leads a screen (what is happening now), with light text",
+    "gradientStart": "the brand gradient's first stop — the primary's hue, deep enough to carry light text",
+    "gradientEnd": "its second stop — the same hue turned 20-40° round the wheel (never the accent), "
+                   "so the sign-in panel, a hero band and the leading card have depth without a photo",
+}
+
+#: Roles a palette may leave out: the projection derives the gradient from the
+#: primary and the accent when the design does not state one.
+OPTIONAL_PALETTE_ROLES = frozenset({"gradientStart", "gradientEnd"})
+
+
+def check_palette_roles(doc: dict) -> list[Finding]:
+    """An authored palette states every role pages are written against. A
+    palette read off a Figma file carries what the file declares and is not
+    held to this — the file is the authority there."""
+    design = doc.get("designSystem") or {}
+    if design.get("derivedFromFigma"):
+        return []
+    colors = design.get("colors") or {}
+    if not colors:
+        return []
+    from services.blueprint.projection import _kebab
+    have = {_kebab(k) for k, v in colors.items() if isinstance(v, str) and v}
+    return [Finding("Design↔DesignSystem", section="designSystem", artifact_id=f"colors.{role}",
+                    detail=f"colors.{role} is missing — {job}")
+            for role, job in PALETTE_ROLES.items()
+            if role not in OPTIONAL_PALETTE_ROLES and _kebab(role) not in have]
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +568,13 @@ def check_palette_contrast(doc: dict) -> list[Finding]:
     for role in ("primary", "secondary", "accent", *_STATUS_ROLES):
         pairs.append((f"{role}-foreground", role,
                       f"label on a {role} fill", _AA_LARGE))
+    pairs.append(("accent-subtle-foreground", "accent-subtle",
+                  "a selected chip's text on the accent tint", _AA_TEXT))
+    pairs.append(("inverse-foreground", "inverse", "text on the dark hero card", _AA_TEXT))
+    # A gradient is read at BOTH ends: light text that reads on the first stop
+    # and vanishes on the second is the common failure.
+    pairs.append(("gradient-foreground", "gradient-start", "text on the brand gradient's first stop", _AA_TEXT))
+    pairs.append(("gradient-foreground", "gradient-end", "text on the brand gradient's second stop", _AA_TEXT))
 
     out: list[Finding] = []
     for fg, bg, what, threshold in pairs:
@@ -571,19 +626,6 @@ def check_requirement_code(doc: dict) -> list[Finding]:
                 detail=f"claimed by {', '.join(owners)} but none appear in codeMap",
             ))
     return out
-
-
-def check_requirement_test(doc: dict) -> list[Finding]:
-    """§75 Requirement↔Test — an unverified requirement is an assertion."""
-    verified: set[str] = set()
-    for t in _live(doc.get("tests")):
-        verified.update(t.get("verifies") or [])
-    return [
-        Finding("Requirement↔Test", section="requirements", artifact_id=r.get("id"),
-                detail="no test verifies this requirement")
-        for r in _live(doc.get("requirements"))
-        if r.get("status") not in ("PROPOSED",) and r.get("id") not in verified
-    ]
 
 
 def check_blueprint_implementation(doc: dict) -> list[Finding]:
@@ -832,7 +874,7 @@ def check_widget_datasource(doc: dict) -> list[Finding]:
             continue
 
         columns = {f.get("name") for f in entity.get("fields") or []}
-        for key in ("field", "groupBy", "sort"):
+        for key in ("field", "groupBy", "sort") if src.get("op") != "query" else ():
             col = src.get(key)
             if col and columns and col not in columns:
                 out.append(Finding(
@@ -846,6 +888,17 @@ def check_widget_datasource(doc: dict) -> list[Finding]:
                     detail=f"displays {col!r}, not a column on {entity.get('name')}",
                 ))
 
+        if src.get("op") == "query":
+            for detail in _query_findings(w, src, entity):
+                out.append(Finding("Widget↔DataSource", section="widgets",
+                                   artifact_id=wid, detail=detail))
+        elif w.get("kind") == "chart" and src.get("op") not in ("series",):
+            out.append(Finding(
+                "Widget↔DataSource", section="widgets", artifact_id=wid,
+                detail=f"a chart over a {src.get('op')!r} source has nothing to "
+                       "draw — give it a query with a dimension",
+            ))
+
         agg = src.get("aggregation")
         if w.get("unit") == "percent" and agg in MAGNITUDE_AGGREGATIONS:
             out.append(Finding(
@@ -858,6 +911,129 @@ def check_widget_datasource(doc: dict) -> list[Finding]:
                 "Widget↔DataSource", section="widgets", artifact_id=wid,
                 detail=f"{agg!r} needs a field to aggregate over",
             ))
+    return out
+
+
+#: How many dimensions and measures each chart mark can draw. A type
+#: statement about the mark, not a taste: a pie has one set of slices, a
+#: heatmap needs a row and a column, a scatter needs an x and a y value.
+_MARK_SHAPE: dict[str, tuple[tuple[int, int], tuple[int, int]]] = {
+    #          dimensions  measures
+    "bar":     ((1, 2), (1, 8)),
+    "line":    ((1, 2), (1, 8)),
+    "area":    ((1, 2), (1, 8)),
+    "radar":   ((1, 2), (1, 8)),
+    "pie":     ((1, 1), (1, 1)),
+    "donut":   ((1, 1), (1, 1)),
+    "funnel":  ((1, 1), (1, 1)),
+    "treemap": ((1, 2), (1, 1)),
+    "heatmap": ((2, 2), (1, 1)),
+    "scatter": ((1, 2), (2, 3)),
+    "sunburst": ((1, 2), (1, 1)),
+    # a link from the first dimension's value to the second's, as wide as the measure
+    "graph":   ((2, 2), (1, 1)),
+    # the dimension holds a country's name or ISO code
+    "map":     ((1, 1), (1, 1)),
+}
+
+_DATE_TYPES = ("date", "time", "timestamp")
+
+
+def range_findings(dim: dict, field: dict | None) -> list[str]:
+    """What is wrong with a numeric dimension's `ranges`: bands over a number,
+    each with an end, lower below upper, not overlapping, labels distinct."""
+    from services.blueprint.app_sdk import _numeric
+
+    out: list[str] = []
+    ranges = dim.get("ranges") or []
+    if dim.get("bucket"):
+        out.append("has both a date bucket and number ranges — a column is one or the other")
+    if field is not None and not _numeric(field):
+        out.append("is grouped into number ranges but is not a number")
+    bands: list[tuple[float, float]] = []
+    labels: list[str] = []
+    for i, r in enumerate(ranges):
+        lo, hi = r.get("from"), r.get("to")
+        if lo is None and hi is None:
+            out.append(f"range {i + 1} has neither `from` nor `to`")
+            continue
+        if not all(v is None or isinstance(v, (int, float)) and not isinstance(v, bool) for v in (lo, hi)):
+            out.append(f"range {i + 1}: `from` and `to` are numbers")
+            continue
+        if lo is not None and hi is not None and lo >= hi:
+            out.append(f"range {i + 1}: `from` ({lo}) must be below `to` ({hi}) — `to` is exclusive")
+            continue
+        bands.append((float("-inf") if lo is None else lo, float("inf") if hi is None else hi))
+        labels.append(str(r.get("label") or ""))
+    ordered = sorted(bands)
+    if any(a[1] > b[0] for a, b in zip(ordered, ordered[1:])):
+        out.append("ranges overlap — a value would be counted twice")
+    named = [l for l in labels if l]
+    if len(set(named)) != len(named):
+        out.append("two ranges share a label")
+    return out
+
+
+def _query_findings(widget: dict, src: dict, entity: dict) -> list[str]:
+    """What a `query` source cannot compute, or its chart cannot draw."""
+    from services.blueprint.app_sdk import _numeric
+
+    fields = {f.get("name"): f for f in entity.get("fields") or []}
+    name = entity.get("name")
+    out: list[str] = []
+    measures = src.get("measures") or []
+    dims = src.get("dimensions") or []
+    for m in measures:
+        agg, col = m.get("aggregation"), m.get("field")
+        if agg != "count" and not col:
+            out.append(f"measure {m.get('key')!r}: {agg!r} needs a field")
+            continue
+        if col and fields and col not in fields:
+            out.append(f"measure {m.get('key')!r}: {col!r} is not a column on {name}")
+        elif col and agg in ("sum", "avg") and fields and not _numeric(fields[col]):
+            out.append(f"measure {m.get('key')!r}: {agg} over {col!r}, which is "
+                       f"not a number on {name}")
+        if widget.get("unit") == "percent" and agg in MAGNITUDE_AGGREGATIONS + ("count_distinct",):
+            out.append(f"unit 'percent' over a {agg!r} measure — a magnitude shown "
+                       "as a ratio is a fabricated number")
+    keys = [m.get("key") for m in measures]
+    if len(set(keys)) != len(keys):
+        out.append("two measures share a key")
+    for d in dims:
+        col = d.get("field")
+        if fields and col not in fields:
+            out.append(f"dimension {col!r} is not a column on {name}")
+        elif d.get("bucket") and fields and not any(
+                t in str(fields[col].get("type") or "").lower() for t in _DATE_TYPES):
+            out.append(f"dimension {col!r} is bucketed by {d['bucket']} but is not a date")
+        if d.get("ranges"):
+            out.extend(f"dimension {col!r}: {e}" for e in range_findings(d, fields.get(col) if fields else None))
+    for key in ("timeField",):
+        col = src.get(key)
+        if col and fields and col not in fields:
+            out.append(f"{key} {col!r} is not a column on {name}")
+    sort_by = (src.get("sort") or {}).get("by")
+    if sort_by and sort_by not in keys and sort_by not in [d.get("field") for d in dims]:
+        out.append(f"sorts by {sort_by!r}, which is neither a measure nor a dimension")
+
+    kind, chart = widget.get("kind"), widget.get("chart") or {}
+    if kind == "chart":
+        mark = chart.get("mark")
+        if not mark:
+            out.append("a chart widget without `chart.mark` — say how it is drawn")
+        elif mark in _MARK_SHAPE:
+            (dlo, dhi), (mlo, mhi) = _MARK_SHAPE[mark]
+            if not dlo <= len(dims) <= dhi:
+                want = str(dlo) if dlo == dhi else f"{dlo}–{dhi}"
+                out.append(f"a {mark} draws {want} dimension(s); this query has {len(dims)}")
+            if not mlo <= len(measures) <= mhi:
+                want = str(mlo) if mlo == mhi else f"{mlo}–{mhi}"
+                out.append(f"a {mark} draws {want} measure(s); this query has {len(measures)}")
+            if mark in ("bar", "line", "area", "radar") and len(dims) == 2 and len(measures) > 1:
+                out.append(f"a {mark} split by a second dimension draws one measure; "
+                           f"this query has {len(measures)}")
+    elif kind in ("metric", "gauge") and dims:
+        out.append(f"a {kind} is one number; this query groups by {len(dims)} dimension(s)")
     return out
 
 
@@ -936,7 +1112,6 @@ CHECKS: dict[str, Callable[[dict], list[Finding]]] = {
     "Page↔Function": check_page_function,
     "Design↔DesignSystem": check_design_system,
     "Requirement↔Code": check_requirement_code,
-    "Requirement↔Test": check_requirement_test,
     "Blueprint↔Implementation": check_blueprint_implementation,
     "Navigation↔Page": check_navigation_page,
     "Page↔Precondition": check_page_precondition,
@@ -1002,7 +1177,6 @@ def requirement_verdict(doc: dict, requirement_id: str) -> dict[str, Any]:
     """
     facets = {
         "Requirement↔Code": check_requirement_code,
-        "Requirement↔Test": check_requirement_test,
     }
     detail: dict[str, Any] = {}
     failed = False

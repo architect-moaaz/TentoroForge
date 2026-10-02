@@ -16,6 +16,9 @@
  */
 
 import { promises as fs } from "fs";
+import { missingRequiredInputs } from "./required-inputs";
+import { hydrateRecordInputs } from "./record-inputs";
+import { queryResult } from "./query-result";
 import crypto from "node:crypto";
 import path from "path";
 // The app's data layer — used by the default db_* action handlers so workflows
@@ -37,6 +40,8 @@ import {
 } from "./engine";
 import { registerAIActions } from "./ai";
 import { registerOcrActions } from "./ocr";
+// A workflow write fills embedding columns exactly as a form write does.
+import { embedWrittenRow } from "../embeddings";
 // emit_event node factory — pure module; the durable bus (events/bus.ts)
 // is injected lazily below so loading the workflow runtime never drags in
 // the event tables on apps that predate them.
@@ -169,7 +174,32 @@ export async function triggerWorkflow(
     };
   }
 
-  const result = await executeWorkflow(workflow, input, user);
+  // NOTHING RUNS WITHOUT WHAT IT NEEDS. A required input that arrives empty
+  // used to flow into the first `db_update` as `null` and overwrite the
+  // column it was meant to fill — the run said "completed" and the person
+  // was told their document was submitted (0l133sp2). Refused here, the
+  // caller gets 422 and the form says which box is empty.
+  const missing = missingRequiredInputs(workflow, input as Record<string, unknown>);
+  if (missing.length) {
+    const now = new Date().toISOString();
+    return {
+      workflowId: workflow.id,
+      workflowName: workflow.name,
+      startedAt: now,
+      completedAt: now,
+      status: "failed",
+      refused: true,
+      log: [],
+      output: {},
+      error: `${workflow.name} needs ${missing.join(", ")} — nothing was changed.`,
+    };
+  }
+
+  // THE RECORD BEHIND THE ID. A control sends `{ member: "<uuid>" }`; the
+  // steps read `member.kycStatus`. Loaded here, once, before anything runs.
+  const hydrated = await hydrateRecordInputs(workflow, input as Record<string, unknown>, loadRecordRow);
+
+  const result = await executeWorkflow(workflow, hydrated, user);
   await persistPendingTask(result, workflowIdOrName, input, user);
   return result;
 }
@@ -458,6 +488,17 @@ function _canonTable(s: string): string {
   return s.toLowerCase().replace(/[_-]/g, "");
 }
 
+/** One row of `table` by id, for `hydrateRecordInputs`. */
+export async function loadRecordRow(table: string, id: string): Promise<Record<string, unknown> | null> {
+  const resolved = _resolveTable(table);
+  if (!resolved) return null;
+  const idColumn = (resolved as any).id;
+  if (!idColumn) return null;
+  const rows = await (db as any).select().from(resolved).where(eq(idColumn, id)).limit(1);
+  return (rows?.[0] as Record<string, unknown>) ?? null;
+}
+
+
 export function _resolveTable(name?: unknown): any {
   if (typeof name !== "string") return undefined;
   const tables = Object.values(schema as Record<string, unknown>).filter(
@@ -502,6 +543,41 @@ function _recordIdFallback(path: string, vars: Record<string, unknown>): unknown
   if (typeof own === "string" || typeof own === "number") return own;
   if (own == null && (typeof vars.id === "string" || typeof vars.id === "number")) return vars.id;
   return undefined;
+}
+
+// `{{find_tool.ownerId}}` over a lookup step: a db_query's output is
+// `{rows, count}`, so the field is on its first row. Step authors write the
+// short form (Tool Share: `{{fetch_tool_owner.ownerId}}`) and it resolved to
+// nothing, so the notification went to nobody.
+function _firstRowFallback(path: string, vars: Record<string, unknown>): unknown {
+  const m = path.match(/^([A-Za-z_]\w*)\.(.+)$/);
+  if (!m) return undefined;
+  const base = vars[m[1]] as { rows?: unknown } | undefined;
+  if (!base || !Array.isArray(base.rows) || base.rows.length === 0) return undefined;
+  return _walkPath(base.rows[0], m[2]);
+}
+
+/** The first side of `a ?? "b" ?? c` that holds something — a path walked in
+ *  the workflow's variables, or a literal ("text", 'text', a number, true,
+ *  false). Empty text and null count as nothing, as a missing value does. */
+export function _firstPresent(inner: string, ctx: WorkflowExecutionContext): unknown {
+  for (const raw of inner.split("??")) {
+    const part = raw.trim();
+    let v: unknown;
+    const quoted = part.match(/^"(.*)"$|^'(.*)'$/s);
+    if (quoted) v = quoted[1] ?? quoted[2];
+    else if (/^-?\d+(\.\d+)?$/.test(part)) v = Number(part);
+    else if (part === "true" || part === "false") v = part === "true";
+    else if (/^[\w.[\]]+$/.test(part)) {
+      v = ctx.variables[part];
+      if (v === undefined && (part.includes(".") || part.includes("["))) {
+        v = _walkPath(ctx.variables, part);
+        if (v === undefined) v = _firstRowFallback(part, ctx.variables) ?? _recordIdFallback(part, ctx.variables);
+      }
+    }
+    if (v !== undefined && v !== null && v !== "") return v;
+  }
+  return null;
 }
 
 function _walkPath(root: unknown, path: string): unknown {
@@ -572,13 +648,24 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
       if (v !== undefined) return v;
       if (!key.includes(".") && !key.includes("[")) return "";
       const walked = _walkPath(ctx.variables, key);
-      return walked === undefined ? _recordIdFallback(key, ctx.variables) : walked;
+      return walked !== undefined ? walked
+        : _firstRowFallback(key, ctx.variables) ?? _recordIdFallback(key, ctx.variables);
     }
+    // A VALUE, OR ELSE ANOTHER: `{{analyze_image.brand ?? "Unbranded"}}`.
+    // A photo with no visible brand gave SnapIT's product a null brand and the
+    // required column refused the row (2026-09-29). Each side is a path or a
+    // literal ("text", a number, true/false); the first that is not empty wins.
+    const soleOr = ref.match(/^\s*\{\{([^{}]*\?\?[^{}]*)\}\}\s*$/);
+    if (soleOr) return _firstPresent(soleOr[1], ctx);
     // Accept dotted paths PLUS bracket-index segments: `search.result.data.web[0].url`.
     // Feel-lite (used elsewhere for expressions) refuses `[` in identifier
     // paths — but a workflow binding is a walk, not an expression, so route
     // it through the walker directly. Mirrors packages/renderer/src/runtime
     // BIND-FIX #211 which fixed the same class of failure in the UI layer.
+    ref = ref.replace(/\{\{([^{}]*\?\?[^{}]*)\}\}/g, (_m, inner) => {
+      const v = _firstPresent(inner as string, ctx);
+      return v == null ? "" : String(v);
+    });
     return ref.replace(/\{\{\s*([\w.[\]]+)\s*\}\}/g, (_m, k) => {
       const key = k as string;
       // Fast path: flat lookup, then bracket-free dot-walk (legacy behaviour
@@ -587,7 +674,7 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
       if (v !== undefined) return v == null ? "" : String(v);
       if (!key.includes(".") && !key.includes("[")) return "";
       let walked = _walkPath(ctx.variables, key);
-      if (walked === undefined) walked = _recordIdFallback(key, ctx.variables);
+      if (walked === undefined) walked = _firstRowFallback(key, ctx.variables) ?? _recordIdFallback(key, ctx.variables);
       return walked == null ? "" : String(walked);
     });
   }
@@ -779,6 +866,24 @@ const _LEGACY_OWNER_FK_RE =
 // Drop keys the table doesn't have or that are empty "" / undefined (so they don't
 // clobber DB defaults or crash type coercion, e.g. "" into a timestamp), and default
 // an ACTOR FK to the acting user when missing.
+/** The number written in `text`: "₹12,995" → 12995, "20%" → 20,
+ *  "$1,299.00" → 1299, "1.299,50 €" → 1299.5; null when there is none. */
+export function _numberIn(text: string): number | null {
+  const m = String(text).match(/-?\d[\d.,\s]*/);
+  if (!m) return null;
+  let s = m[0].replace(/\s/g, "").replace(/[.,]$/, "");
+  const lastDot = s.lastIndexOf("."), lastComma = s.lastIndexOf(",");
+  if (lastComma > lastDot) {
+    // "1.299,50" or "12,995": a comma followed by exactly three digits is a
+    // thousands separator; otherwise it is the decimal mark.
+    s = /,\d{3}$/.test(s) && lastDot === -1 ? s.replace(/,/g, "") : s.replace(/\./g, "").replace(",", ".");
+  } else {
+    s = s.replace(/,/g, "");
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function _finalizeInsert(
   table: any, values: Record<string, unknown>, ctx: WorkflowExecutionContext,
 ): Record<string, unknown> {
@@ -833,6 +938,22 @@ export function _finalizeInsert(
         : v.toISOString();
       continue;
     }
+    // A NUMBER COLUMN TAKES THE NUMBER IN THE TEXT. A price read off a page
+    // arrives as "₹12,995", a discount as "20%"; postgres refused them and
+    // four of SnapIT's thirteen listings were lost (2026-09-29). The number
+    // is taken out of the text; text with none is dropped (the column's
+    // default fires) rather than failing the whole row.
+    const isNumberCol = typeof (col && col.columnType) === "string" &&
+      /numeric|decimal|integer|int\b|smallint|bigint|real|double|serial/i.test(col.columnType);
+    if (isNumberCol && typeof v === "string" && !/^\s*-?\d+(\.\d+)?\s*$/.test(v)) {
+      const n = _numberIn(v);
+      if (n === null) {
+        console.warn(`[workflow] db_insert: dropping ${k} — no number in ${JSON.stringify(v).slice(0, 60)}.`);
+        continue;
+      }
+      out[k] = dataType === "string" ? String(n) : n;
+      continue;
+    }
     out[k] = v;
   }
   const uid = (ctx as { user?: { id?: unknown } }).user?.id;
@@ -857,6 +978,9 @@ export function _finalizeInsert(
   }
   return out;
 }
+
+/** A lookup whose key is missing: it matches no row (see `_buildWhere`). */
+export const MATCHES_NOTHING = Symbol("matches-nothing");
 
 export function _buildWhere(
   table: any, where: unknown, ctx: WorkflowExecutionContext,
@@ -905,6 +1029,16 @@ export function _buildWhere(
       return eq(table[field], _coerceValue(v, table[field]));
     })
     .filter(Boolean) as any[];
+  // A LOOKUP WITH A MISSING KEY FINDS NOTHING. Dropping the empty condition
+  // widened the SELECT to the whole table: SnapIT looked up the product of a
+  // barcode it did not know (`id = {{lookup_identifier.productId}}`, empty)
+  // and got every product back — with one product in the table, an unknown
+  // barcode would have been "found" as it (2026-09-29). `where: {}` written
+  // on purpose still reads every row; a key that resolved to nothing does not.
+  if (!opts.strict && emptyRefs.length) {
+    console.warn(`[workflow] db_query: ${emptyRefs.join(", ")} resolved to nothing — no row matches`);
+    return MATCHES_NOTHING;
+  }
   if (conds.length === 0) {
     // Config was provided but every entry filtered out (or {} was passed).
     // For destructive ops (db_update/db_delete) THIS IS DANGEROUS —
@@ -1041,7 +1175,7 @@ export function registerDefaultActions(): void {
           try {
             const rows = await (db as any).insert(table).values(values).returning();
             const row = Array.isArray(rows) ? rows[0] : rows;
-            if (row) inserted.push(row);
+            if (row) inserted.push(await embedWrittenRow(table, row));
           } catch (err) {
             console.warn(`[workflow] db_insert (row-fanout): row failed —`, err);
           }
@@ -1061,9 +1195,41 @@ export function registerDefaultActions(): void {
         if (rs.errors.length) return { error: rs.errors.join("; ") };
         Object.assign(raw, rs.patches);
       } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
+      // FIND, OR CREATE. `findBy` names the columns that identify the record
+      // (a merchant by its domain); a row that already has those values is
+      // the step's output and nothing is inserted — so the same merchant met
+      // on two listings is one merchant, not a unique-key failure.
+      const findBy = Array.isArray((config as any).findBy) ? ((config as any).findBy as string[]) : [];
+      if (findBy.length && findBy.every((k) => raw[k] !== undefined && raw[k] !== null && raw[k] !== "")
+          && findBy.every((k) => (table as any)[k] !== undefined)) {
+        const cond = and(...findBy.map((k) => eq((table as any)[k], raw[k] as any)));
+        let [existing] = await (db as any).select().from(table).where(cond).limit(1);
+        if (existing) {
+          // …AND WHAT IT LACKED IS FILLED IN. SnapIT's Air Jordan was first
+          // saved with no picture; every later search found that row and the
+          // results page showed an empty frame (2026-09-29). A column the
+          // found row leaves empty takes this step's value; a filled one is
+          // never overwritten, and only the author's own values count.
+          const given = _finalizeInsert(table, raw, ctx);
+          const fill: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(given)) {
+            if (!(k in raw) || findBy.includes(k) || v == null) continue;
+            const had = (existing as Record<string, unknown>)[k];
+            if (had == null || had === "") fill[k] = v;
+          }
+          if (Object.keys(fill).length) {
+            const [updated] = await (db as any).update(table).set(fill).where(cond).returning();
+            if (updated) existing = updated;
+          }
+          const nid = (config as any).__nodeId;
+          if (nid) ctx.variables[nid] = existing;
+          return { ...(existing as Record<string, unknown>), inserted: existing, found: true };
+        }
+      }
       const values = _finalizeInsert(table, raw, ctx);
       const rows = await (db as any).insert(table).values(values).returning();
       const row = Array.isArray(rows) ? rows[0] : rows;
+      if (row && typeof row === "object") await embedWrittenRow(table, row);
       if (row && typeof row === "object") {
         // Legacy flat aliases (`scan_sessions_id`) — kept for
         // backward-compat with older plans.
@@ -1087,10 +1253,75 @@ export function registerDefaultActions(): void {
         source_file: "src/lib/workflows/index.ts",
         workflow_id: (config as any)?.__workflowId || (ctx as any)?.workflow?.id,
         node_id: (config as any)?.__nodeId,
-        page_route: typeof window !== "undefined" ? window.location?.pathname : undefined,
       });
       return { error: String(err) };
     }
+  });
+
+  // FOR EACH ITEM, THESE STEPS. The engine had no way to do something once
+  // per record: SnapIT's listings each need a merchant, a merchant product
+  // pointing at it, and a search result pointing at both, and a list insert
+  // writes one table without carrying each new id to the next (2026-09-29).
+  // Config: `items` (a list, or a step output holding one), `as` (the name
+  // each item goes by, default `item`), `steps` (actions run in order per
+  // item; each output is `{{<step key>.<field>}}` for the steps after it).
+  // An item whose step fails stops there and is reported; the rest go on.
+  registerActionHandler("for_each", async (config, ctx) => {
+    const cfg = config as any;
+    let list: unknown = typeof cfg.items === "string" ? _resolveRef(cfg.items, ctx) : cfg.items;
+    if (list && !Array.isArray(list) && typeof list === "object") {
+      for (const k of ["items", "rows", "data", "output", "result", "results"]) {
+        const inner = (list as Record<string, unknown>)[k];
+        if (Array.isArray(inner)) { list = inner; break; }
+      }
+    }
+    const items = Array.isArray(list) ? list : [];
+    const as = String(cfg.as || "item");
+    const steps = (Array.isArray(cfg.steps) ? cfg.steps : []).filter((s: any) => s && typeof s === "object");
+    const limit = Math.max(0, Math.min(Number(cfg.maxItems ?? 200) || 200, 500));
+    const names = [as, `${as}Index`, ...steps.map((s: any) => String(s.key || ""))].filter(Boolean);
+    const before: Record<string, unknown> = {};
+    for (const n of names) if (n in ctx.variables) before[n] = ctx.variables[n];
+    const results: Record<string, unknown>[] = [];
+    const errors: { index: number; step: string; error: string }[] = [];
+    // `where`: a FEEL condition over the item — the items it rejects are
+    // skipped, not failed (a search result with no price is not a product
+    // offered for sale, and saving it would only fail on the price).
+    const where = typeof cfg.where === "string" && cfg.where.trim() ? cfg.where : "";
+    let skipped = 0;
+    for (const [index, item] of items.slice(0, limit).entries()) {
+      ctx.variables[as] = item;
+      ctx.variables[`${as}Index`] = index;
+      if (where) {
+        let keep = false;
+        try { keep = !!evaluateExpression(where, ctx.variables as Record<string, unknown>); } catch { keep = false; }
+        if (!keep) { skipped++; continue; }
+      }
+      const outputs: Record<string, unknown> = { index };
+      for (const step of steps) {
+        const key = String(step.key || "");
+        const stepCfg = { ...(step.config || {}), __nodeId: key };
+        const handler = getActionHandler(String(stepCfg.actionType || ""));
+        if (!handler) {
+          errors.push({ index, step: key, error: `no action ${stepCfg.actionType}` });
+          break;
+        }
+        const out = await handler(stepCfg as any, ctx);
+        if (key) ctx.variables[key] = out;
+        outputs[key] = out;
+        const err = out && typeof out === "object" ? (out as any).error : undefined;
+        if (err) { errors.push({ index, step: key, error: String(err) }); break; }
+      }
+      results.push(outputs);
+    }
+    // The loop's names are its own; what the workflow held before comes back.
+    for (const n of names) {
+      if (n in before) ctx.variables[n] = before[n];
+      else delete ctx.variables[n];
+    }
+    return { count: results.length, done: results.length - errors.length, failed: errors.length, skipped,
+             errors, results, output: results,
+             ...(items.length > limit ? { notice: `Only the first ${limit} of ${items.length} were processed.` } : {}) };
   });
 
   registerActionHandler("db_update", async (config, ctx) => {
@@ -1123,6 +1354,9 @@ export function registerDefaultActions(): void {
       const where = _buildWhere(table, (config as any).where, ctx);
       _requireWhereOrThrow("db_update", config, where);
       const rows = await q.where(where).returning();
+      if (Array.isArray(rows)) {
+        for (const r of rows) await embedWrittenRow(table, r, null, Object.keys(raw));
+      }
       const count = Array.isArray(rows) ? rows.length : 1;
       // `updated` (the legacy scalar) + contract-declared `updated: {count, rows}`.
       // Split naming — top-level `updated` used to be a plain number, so
@@ -1146,7 +1380,6 @@ export function registerDefaultActions(): void {
         source_file: "src/lib/workflows/index.ts",
         workflow_id: (config as any)?.__workflowId || (ctx as any)?.workflow?.id,
         node_id: (config as any)?.__nodeId,
-        page_route: typeof window !== "undefined" ? window.location?.pathname : undefined,
       });
       return { error: String(err) };
     }
@@ -1180,7 +1413,6 @@ export function registerDefaultActions(): void {
         source_file: "src/lib/workflows/index.ts",
         workflow_id: (config as any)?.__workflowId || (ctx as any)?.workflow?.id,
         node_id: (config as any)?.__nodeId,
-        page_route: typeof window !== "undefined" ? window.location?.pathname : undefined,
       });
       return { error: String(err) };
     }
@@ -1197,9 +1429,17 @@ export function registerDefaultActions(): void {
       // ops (db_update/db_delete) below still use strict:true, gated by
       // _requireWhereOrThrow, so unfiltered writes remain impossible.
       const where = _buildWhere(table, (config as any).where, ctx, { strict: false });
+      if (where === MATCHES_NOTHING) return queryResult([]);
       const rows = await (where ? q.where(where) : q);
-      // Contract declared `count` alongside `rows` — provide both.
-      return { rows, count: Array.isArray(rows) ? rows.length : 0 };
+      // THE ONE ROW A LOOKUP LOOKED UP, READABLE AS ITSELF. A step written to
+      // fetch one record is read as that record — `check_member_verified.
+      // kycStatus`, `fetch_tool_owner.ownerId`. Templates had a fallback for
+      // it; a CONDITION did not, so "list a tool" asked whether the member
+      // was verified, read `undefined` off `{rows, count}`, and answered "you
+      // must complete identity verification" to a verified member — every
+      // member, every time (0l133sp2). The first row's fields ride alongside
+      // `rows`, which keep their own names when a column shares one.
+      return queryResult(rows);
     } catch (err) { console.error("[workflow] db_query failed:", err); return { error: String(err), rows: [], count: 0 }; }
   });
 
@@ -1214,18 +1454,29 @@ export function registerDefaultActions(): void {
   registerActionHandler("mcp_tool_call", async (config, ctx) => {
     const cfg = config as any;
     let serverId: string | undefined = cfg.mcp_server_id;
+    // The servers this app was given: MCP_SERVER_<slug>_URL, with _NAME.
+    const servers = Object.keys(process.env)
+      .filter((k) => k.startsWith("MCP_SERVER_") && k.endsWith("_URL"))
+      .map((k) => {
+        const slug = k.slice("MCP_SERVER_".length, -"_URL".length);
+        return { slug, name: String(process.env[`MCP_SERVER_${slug}_NAME`] ?? "") };
+      });
+    const flat = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
     if (!serverId && cfg.mcp_server_name) {
-      // Iterate env for a NAME match. env_writer emits MCP_SERVER_<slug>_NAME
-      // when the platform config carries a human name; if not present we
-      // fall through to error so the author sees the config gap.
-      const target = String(cfg.mcp_server_name).toLowerCase();
-      for (const [k, v] of Object.entries(process.env)) {
-        if (k.startsWith("MCP_SERVER_") && k.endsWith("_NAME") &&
-            String(v ?? "").toLowerCase() === target) {
-          serverId = k.slice("MCP_SERVER_".length, -"_NAME".length);
-          break;
-        }
-      }
+      // By name — exactly, then loosely: a step written against the
+      // integration ("FireCrawl MCP") finds the server ("Firecrawl").
+      const target = flat(cfg.mcp_server_name);
+      const hit = servers.find((s) => flat(s.name) === target)
+        ?? servers.find((s) => flat(s.name) && (target.includes(flat(s.name)) || flat(s.name).includes(target)));
+      serverId = hit?.slug;
+    }
+    if (!serverId && !cfg.mcp_server_name) {
+      // NO SERVER NAMED: the app's only one, or the one the tool is named
+      // for (`firecrawl_search` → Firecrawl). SnapIT's steps named none and
+      // failed "no server matched" with Firecrawl configured (2026-09-28).
+      const prefix = flat(String(cfg.mcp_tool_name ?? "").split("_")[0]);
+      serverId = servers.length === 1 ? servers[0].slug
+        : servers.find((s) => prefix && flat(s.name).startsWith(prefix))?.slug;
     }
     if (!serverId) {
       const msg = `mcp_tool_call: no server matched (id=${cfg.mcp_server_id ?? ""} name=${cfg.mcp_server_name ?? ""})`;
@@ -1251,8 +1502,14 @@ export function registerDefaultActions(): void {
       if (textBlocks) {
         try { parsed = JSON.parse(textBlocks); } catch { parsed = textBlocks; }
       }
+      // `output` and `data` beside `result`: a step reads the one before it as
+      // `{{search.output}}`, as it does every other step's, and SnapIT's
+      // listing extraction read nothing from a Firecrawl search that had
+      // answered (2026-09-29).
       return {
         result: parsed,
+        output: parsed,
+        data: parsed,
         text: textBlocks,
         isError: !!result?.isError,
         raw: result,
@@ -1335,8 +1592,12 @@ export function registerDefaultActions(): void {
   registerActionHandler("send_notification", async (config, ctx) => {
     const title = String(_resolveRef((config as any).title ?? (config as any).subject ?? "Notification", ctx) ?? "Notification");
     const message = String(_resolveRef((config as any).message ?? (config as any).body ?? "", ctx) ?? "");
-    const userId = _resolveRef((config as any).to ?? (config as any).userId ?? null, ctx);
-    const role = (config as any).toRole ?? (config as any).assigneeRole ?? null;
+    // `recipient` is what the step author writes ("{{tool.ownerId}}"); it was
+    // not read, so every such notification was stored for nobody.
+    const who = (config as any).to ?? (config as any).userId ?? (config as any).recipient
+      ?? (config as any).recipientId ?? (config as any).recipientUserId ?? null;
+    const userId = _resolveRef(who, ctx);
+    const role = (config as any).toRole ?? (config as any).assigneeRole ?? (config as any).recipientRole ?? null;
     const type = String((config as any).notificationType ?? (config as any).type ?? "info");
     const entityId = _resolveRef((config as any).entityId ?? null, ctx);
     const table = (schema as any).forgeNotifications;
@@ -1355,11 +1616,22 @@ export function registerDefaultActions(): void {
     return { sent: true, channel: "in_app", notificationId };
   });
 
-  // Real email — provider priority (mutually exclusive):
-  //   1. SMTP (via nodemailer) when SMTP_HOST is set — corporate mail servers,
-  //      Gmail/Outlook app passwords, self-hosted (Postfix, Mailu, …).
-  //   2. Resend (HTTP, no npm dep) when RESEND_API_KEY is set — hosted email API.
-  //   3. In-app notification fallback so the message is never lost.
+  // Real email. THE APPLICATION KNOWS WHICH SERVICE IT IS MEANT TO SEND
+  // THROUGH: `src/lib/integrations/connected.ts` is projected from the
+  // Blueprint's `integrations` (the owner chose it in conversation) and names
+  // the provider plus the NAME of the variable that carries its credential.
+  //
+  //   1. The declared service, when one is declared — SMTP via nodemailer, or
+  //      Resend over HTTP.
+  //   2. No declaration: whichever credential the environment happens to hold
+  //      (SMTP first), which is how every app built before the declaration
+  //      existed keeps working.
+  //   3. NOTHING CONNECTED, OR THE SEND FAILED: the message is persisted as an
+  //      in-app notification so it is not lost, and the step returns
+  //      `sent: false` with a `notice` saying so in words an owner can act on.
+  //      It used to return `{sent: true, channel: "in_app"}` here, so a
+  //      workflow that never emailed anybody reported a completed run — the
+  //      "the confirmation email never came" that no screen explained.
   // Credentials resolved via getSecret() so admins can override env from the
   // /settings/integrations UI without restarting the app.
   registerActionHandler("send_email", async (config, ctx) => {
@@ -1394,10 +1666,26 @@ export function registerDefaultActions(): void {
       }
     }
     const { getSecret } = await import("@/lib/integrations/resolver");
-    const from = (await getSecret("resend", "FORGE_EMAIL_FROM")) || "notifications@example.com";
+    const { connectedService } = await import("@/lib/integrations/connected");
+    const service = connectedService("send_email");
+    const ownFrom = await getSecret("resend", "FORGE_EMAIL_FROM");
+    const from = ownFrom || "notifications@example.com";
+    // The from-address an owner never set: the mail goes out from a stand-in,
+    // which is the "it's sending from a weird address" complaint. Said once,
+    // on a send that actually happened, rather than guessed at afterwards.
+    const fromNotice = ownFrom
+      ? undefined
+      : `sent from ${from} — set FORGE_EMAIL_FROM to the address you want people to see`;
 
-    // 1. SMTP wins when SMTP_HOST is set.
-    const smtpHost = await getSecret("smtp", "SMTP_HOST");
+    // 1. SMTP: the declared provider, or an SMTP_HOST in the environment when
+    //    nothing is declared. A DECLARED provider is never overridden by the
+    //    other one's stray credential — the owner said which service sends.
+    const smtpDeclared = service ? service.provider === "smtp" : true;
+    const smtpHost = smtpDeclared ? await getSecret("smtp", "SMTP_HOST") : undefined;
+    // A PROVIDER THAT WAS TRIED AND REFUSED is not a provider that was never
+    // configured, and the notice must not say it was: an owner who has set
+    // the credential would go looking for a setting that is already there.
+    let refused = "";
     if (smtpHost && to) {
       const port = Number((await getSecret("smtp", "SMTP_PORT")) || "587");
       const user = await getSecret("smtp", "SMTP_USER");
@@ -1414,15 +1702,19 @@ export function registerDefaultActions(): void {
         });
         const info: any = await transporter.sendMail({ from, to, subject, html: `<p>${body}</p>` });
         // Contract-declared `messageId`. nodemailer surfaces it as info.messageId.
-        return { sent: true, channel: "smtp", messageId: info?.messageId ?? null };
+        return { sent: true, channel: "smtp", messageId: info?.messageId ?? null, notice: fromNotice };
       } catch (e) {
         console.warn("[workflow] send_email: smtp failed:", e);
+        refused = `${service?.name ?? "the mail server"} refused the message (${e instanceof Error ? e.message : String(e)})`;
         // Fall through to the fallback — do NOT try Resend after SMTP was
         // configured; the two are mutually exclusive.
       }
     } else {
-      // 2. Resend — only when SMTP isn't configured.
-      const key = await getSecret("resend", "RESEND_API_KEY");
+      // 2. Resend — the declared provider, or the key the environment holds
+      //    when nothing is declared and SMTP is not configured.
+      const key = (!service || service.provider === "resend")
+        ? await getSecret("resend", "RESEND_API_KEY")
+        : undefined;
       if (key && to) {
         try {
           const res = await fetch("https://api.resend.com/emails", {
@@ -1432,38 +1724,48 @@ export function registerDefaultActions(): void {
           });
           if (res.ok) {
             const j: any = await res.json().catch(() => null);
-            return { sent: true, channel: "email", messageId: j?.id ?? null };
+            return { sent: true, channel: "email", messageId: j?.id ?? null, notice: fromNotice };
           }
           console.warn("[workflow] send_email: resend error", res.status);
-        } catch (e) { console.warn("[workflow] send_email failed:", e); }
+          refused = `${service?.name ?? "Resend"} rejected the message (HTTP ${res.status})`;
+        } catch (e) {
+          console.warn("[workflow] send_email failed:", e);
+          refused = `${service?.name ?? "Resend"} could not be reached (${e instanceof Error ? e.message : String(e)})`;
+        }
       }
     }
 
-    // 3. Fallback — persist so the message is never lost. But be honest
-    // about it: return channel="in_app" AND a warning flag so a downstream
-    // audit/UI can distinguish "actually delivered by email" from "landed
-    // as an in-app notification because no address was resolvable / the
-    // provider errored". The `sent:true` claim used to hide both failure
-    // modes silently.
+    // 3. NOT SENT. The message is persisted so it is not lost, and the step
+    // says which of the four reasons it was: no service is connected, the
+    // connected service's credential is not set here, there was nobody to
+    // send to, or the provider itself refused. `sent` is false for all four
+    // — it used to be true, with `channel: "in_app"`, which is why an owner
+    // could watch a workflow report success while no email existed.
     const table = (schema as any).forgeNotifications;
     if (table) {
       try {
         await (db as any).insert(table).values({ title: subject || "Email", message: body, userId: null, role: null, type: "email", entityId: null, read: false });
       } catch { /* ignore */ }
     }
+    // `notice` is what the owner reads. The engine collects every step's
+    // notice onto the run, the dispatch shows them on the toast the person
+    // who pressed the button is already looking at, and the wording says
+    // what to do rather than naming an internal state.
+    const notice = refused
+      ? `${refused} — nothing was sent, and the message was saved as a notification instead.`
+      : !to
+      ? "No email address could be worked out for this step, so nothing was sent — it was saved as a notification instead."
+      : service
+        ? `Email is set up to go through ${service.name}, but its credential (${service.liveKey}) is not set in this environment — nothing was sent, and the message was saved as a notification instead.`
+        : "No email service is connected to this application, so the email was not sent — it was saved as a notification instead. Ask Forge to connect one.";
     return {
-      sent: true,
+      sent: false,
       channel: "in_app",
-      // A0-7: `messageId` is contract-declared, but only the two PROVIDER paths
-      // returned it — so on this fallback the declared path resolved to
-      // undefined with no explanation. Returning an explicit null keeps the
-      // path resolvable and says what it means: delivered, but not by a
-      // provider that issues message ids. `channel` and `warning` carry the
-      // detail.
+      // A0-7: `messageId` is contract-declared, so the path stays resolvable
+      // on this branch too; null says no provider issued one.
       messageId: null,
-      warning: to
-        ? "email provider failed — persisted as in-app notification"
-        : "no email address resolvable (no `to`, and role→email lookup empty) — persisted as in-app notification",
+      notice,
+      warning: notice,
     };
   });
 
@@ -1484,7 +1786,11 @@ export function registerDefaultActions(): void {
       // A0-3: the contract advertises an output named `value`; this returned
       // only `{ran, result}`. Both names are returned so neither the contract
       // nor any existing {{n.output.result}} reference breaks.
-      return { ran: true, result, value: result };
+      // …AND `output`, the name every other step answers to. Med Tracker's
+      // "Save Medicine" wrote `timeOfDay: {{compute_time_of_day.output}}`; the
+      // formula was right, the name was not there, and the required column
+      // got null (2026-09-29).
+      return { ran: true, result, value: result, output: result };
     } catch (err) {
       console.warn("[workflow] custom expression failed:", err);
       return { ran: false, error: String(err) };

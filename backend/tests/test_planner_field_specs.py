@@ -3,7 +3,14 @@
 registry can't derive (semanticType/enum/required/label/order) — MERGED over the
 registry-derived default. The CONTROL TYPE is never authored by the planner; it is
 always DERIVED by the shared `resolve_control` authority, so a planner `control` key is
-ignored. Omitted columns are backfilled from the registry."""
+ignored.
+
+THE BACKSTOP IS GONE, AND THAT IS THE POINT. This used to say "omitted columns are
+backfilled from the registry", and `build_form_page` used to do it. The backstop let
+another entity's columns into a form whenever the caller passed a wider editable set —
+auth columns (email/password/isActive) turned up on a rent-payment form. So the plan is
+authoritative for the FIELD SET now: a page's `fields` emits exactly those fields, and a
+spec naming a column the entity does not have is dropped. Nothing is appended."""
 
 from services.deterministic_pages import build_form_page
 from agents.planner import _sanitize_page_fields
@@ -48,11 +55,10 @@ def test_field_specs_merge_over_registry_with_backstop():
                            entities={}, field_specs=specs)
     byname = _by_name(page)
 
-    # amount → currency NumberInput: plain number, no stepper, $ prefix.
+    # amount → MoneyInput: the amount and its currency together, not a bare
+    # number with a `$` stuck on the front.
     amt = byname["amount"]
-    assert amt["type"] == "NumberInput"
-    assert amt["props"].get("prefix") == "$"
-    assert amt["props"].get("showSteppers") is False
+    assert amt["type"] == "MoneyInput"
 
     # status → Select with the planner's literal options.
     status = byname["status"]
@@ -63,9 +69,9 @@ def test_field_specs_merge_over_registry_with_backstop():
     assert byname["name"]["props"]["label"] == "Full Name"
     assert _fields_of(page)[0]["props"]["name"] == "name"
 
-    # notes was omitted by the planner but is STILL present (registry backstop).
-    assert "notes" in byname
-    assert byname["notes"]["type"] == "Textarea"
+    # `notes` is a real column and is NOT here: the plan did not name it, and
+    # the plan is the field set. Backfilling it is the bleed this replaced.
+    assert "notes" not in byname
 
 
 def test_field_spec_for_nonexistent_column_is_dropped():
@@ -74,7 +80,21 @@ def test_field_spec_for_nonexistent_column_is_dropped():
                            entities={}, field_specs=specs)
     names = set(_by_name(page))
     assert "foo" not in names                     # never invented
-    assert {"name", "amount", "status", "notes"} <= names  # real columns still built
+    # AND NOTHING IS PUT IN ITS PLACE. A plan that names one column this
+    # entity does not have gets a form with no inputs — the honest reading of
+    # "the plan is the field set", and worth knowing: a single typo in
+    # `page.fields` costs the whole form, not just that field.
+    assert names == set()
+
+
+def test_a_real_column_beside_a_bogus_one_still_builds():
+    """The drop is per-spec, not per-page: the bad name goes, the good one
+    stays. Without this the test above could pass on a form builder that gave
+    up entirely on the first unknown column."""
+    specs = [{"name": "foo"}, {"name": "amount"}]
+    page = build_form_page("Deal", _COLS, "/deals/new", None, op="create",
+                           entities={}, field_specs=specs)
+    assert set(_by_name(page)) == {"amount"}
 
 
 def test_planner_control_is_ignored_control_is_derived():
@@ -91,14 +111,12 @@ def test_planner_control_is_ignored_control_is_derived():
 
 def test_planner_control_cannot_override_semantic_derivation():
     # Even a "correct-looking" control is ignored: amount is currency (semanticType),
-    # so it derives a currency NumberInput regardless of the bogus control the planner sent.
+    # so it derives a MoneyInput regardless of the bogus control the planner sent.
     specs = [{"name": "amount", "semanticType": "currency", "control": "Input"}]
     page = build_form_page("Deal", _COLS, "/deals/new", None, op="create",
                            entities={}, field_specs=specs)
     node = _by_name(page)["amount"]
-    assert node["type"] == "NumberInput"
-    assert node["props"].get("prefix") == "$"
-    assert node["props"].get("showSteppers") is False
+    assert node["type"] == "MoneyInput"
 
 
 def test_no_field_specs_is_identical_to_today():

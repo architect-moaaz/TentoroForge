@@ -18,5 +18,9 @@ def test_a_reference_field_seeds_as_a_ref_token(tmp_path):
                     {"name": "role", "type": "string"}]}]}}
     project_seed(doc, tmp_path)
     seed = json.loads((Path(tmp_path) / "src" / "db" / "seed.json").read_text())
-    assert [r["committeeId"] for r in seed["committee_memberships"]] == ["ref:committees[0]", "ref:committees[1]", "ref:committees[2]"]
+    from services.blueprint.projection import SEED_ROWS
+    refs = [r["committeeId"] for r in seed["committee_memberships"]]
+    assert refs == [f"ref:committees[{i}]" for i in range(SEED_ROWS)], "a dozen rows point at a dozen parents"
+    dates = sorted({str(r.get("joinedAt") or r.get("createdAt") or "")[:7] for r in seed["committee_memberships"]} - {""})
+    assert len(dates) >= 3 or not dates, "dated across months, so a trend has a line to draw"
     assert seed["committees"][0]["name"] == "Committee 1"

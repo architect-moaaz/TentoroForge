@@ -122,6 +122,18 @@ _PLATFORM_REFRESH_FILES = ("vercel.json",)
 # projects on their next publish, without a regen.
 _PLATFORM_REFRESH_RUNTIME_MAP = (
     ("seed.ts", "src/db/seed.ts"),
+    # The CSV export answered anybody — no session, no role, every column
+    # including the password hash. It now reads the app's own ENTITY_ACCESS
+    # and SENSITIVE_COLUMNS projections. That is a fix to platform logic with
+    # no per-app content in it, and every already-generated project is
+    # serving the open version until its next publish carries this.
+    ("api-export/route.ts", "src/app/api/export/[entity]/route.ts"),
+    # Uploads keep the file in the app's database when there is no object
+    # store; an app built before that kept failing every upload on Vercel.
+    ("storage.ts", "src/lib/storage.ts"),
+    ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts"),
+    # The engine: foreign keys and yes/no groups shown by name on charts.
+    ("data-engine.ts", "src/lib/data-engine.ts"),
 )
 _TEMPLATE_RUNTIME_DIR = (
     Path(__file__).resolve().parents[2] / "templates" / "runtime"
@@ -135,7 +147,18 @@ _TEMPLATE_FOUNDATION_DIR = (
 # ends up in a non-runtime location in the generated tree (build-time
 # scripts, deploy-time DB reset, etc.).
 _PLATFORM_REFRESH_FOUNDATION_FILES = (
+    # Carries the row type the engine returns; travels with data-engine.ts.
+    "src/lib/data-engine-bridge.ts",
     "src/db/reset-schema.ts",
+    # reset-schema.ts imports it, so the two travel together.
+    "src/db/extensions.ts",
+    # The build runs these between reset and seed. prepare-schema keeps rows
+    # through renames, required columns and removals; verify-schema stops a
+    # build whose push said "applied" and was not (database tests,
+    # 2026-10-01). An app built before either change publishes with the
+    # current ones, or its build calls a file it does not have.
+    "src/db/prepare-schema.ts",
+    "src/db/verify-schema.ts",
     # schema-page.tsx is fully platform-authored (per-app logic lives in the
     # files it imports). Refreshing it on every publish lets fixes to SSR
     # error handling / data-source resolution reach existing apps without a
@@ -172,6 +195,20 @@ def _refresh_platform_files(output_dir: Path) -> None:
         dst = output_dir / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(src.read_bytes())
+    # THE FRAME TOO — the platform's version of each frame file, or the one
+    # the application owns (`frameCode`). A frame fix (the current page lit
+    # in the rail) otherwise reached a published app only after a Smith turn.
+    try:
+        import json as _json
+        from services.smith.sync_app import refresh_frame
+        for blueprint in (output_dir.parent / ".forge" / "blueprint" / "current.json",
+                          output_dir / ".forge" / "blueprint" / "current.json"):
+            if blueprint.is_file():
+                refresh_frame(output_dir, _json.loads(blueprint.read_text("utf-8")))
+                break
+    except Exception:  # noqa: BLE001 — a stale frame is not a failed publish
+        import logging as _logging
+        _logging.getLogger(__name__).warning("[vercel] could not refresh the frame of %s", output_dir, exc_info=True)
 
 
 class VercelDeployProvider:
@@ -198,6 +235,39 @@ class VercelDeployProvider:
             # 1. Snapshot
             yield DeployEvent("snapshot", "Packaging app source…")
             _refresh_platform_files(Path(snapshot.output_dir))
+
+            # 1a. THE LIVE DATA IS ASKED FIRST (`migration_trial`). A redeploy
+            # migrates real records; the chain the build will run is tried on a
+            # copy of them, and what would not fit is fixed by Smith before
+            # anything is packaged — or the publish stops here, live app as it
+            # was, saying which records and why.
+            prior_live = await self._latest_prior_with_neon(snapshot)
+            if prior_live and prior_live.neon_project_id:
+                from services.deploy.migration_trial import ensure_publishable
+                yield DeployEvent("migrate", "Trying the change on a copy of the live data…")
+                notes: list[str] = []
+                verdict = await ensure_publishable(
+                    self.neon, prior_live.neon_project_id, snapshot.output_dir,
+                    app_project_id=str(snapshot.project_id or ""), say=notes.append)
+                for note in notes:
+                    yield DeployEvent("migrate", note)
+                if not verdict["ok"]:
+                    detail = "; ".join(l.strip() for l in verdict["lines"] if l.strip().startswith("- "))[:600] \
+                        or verdict["reason"][:600]
+                    settle = f"\n\n{verdict['settle']}" if verdict.get("settle") else ""
+                    yield DeployEvent(
+                        "error",
+                        "Not published: the live data cannot take this change without losing records — "
+                        f"{detail}. Nothing was changed, and the live app keeps running as it was.{settle}",
+                        {"stage": "migration_trial", "reason": verdict["reason"][:600]},
+                    )
+                    row.status = "failed"
+                    row.error = f"migration_trial: {verdict['reason'][:300]}"
+                    await self._flush()
+                    return
+                if verdict["fixed"]:
+                    yield DeployEvent("migrate", "Fixed — the live data takes the change now. Changed so every "
+                                      f"live record fits: {verdict.get('changed') or 'nothing in the record types'}.")
             # Deploy-time vendor + deps normalisation. Re-vendors the
             # @tentoroforge/* packages into ./vendor/ and rewrites
             # package.json deps to point at the vendored copies. Fixes
@@ -313,8 +383,12 @@ class VercelDeployProvider:
             vercel_has_nextauth_secret = "NEXTAUTH_SECRET" in existing_by_key
             nextauth_secret = "" if vercel_has_nextauth_secret else secrets.token_hex(32)
 
+            # WHERE THE APP REPORTS ITS FAILURES (services/app_reporting): the
+            # platform's public address and this project's id, so Smith's
+            # inbox hears of a crash in the published app.
+            from services.app_reporting import publish_env
             env = build_deploy_env(
-                integrations=dict(snapshot.integrations),
+                integrations={**publish_env(snapshot.project_id), **dict(snapshot.integrations)},
                 neon_url=neon_url,
                 vercel_url="",  # unused — NEXTAUTH_URL is left to VERCEL_URL
                 nextauth_secret=nextauth_secret,

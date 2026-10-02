@@ -5,4 +5,4 @@ export const SpinnerProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type SpinnerPropsType = z.infer<typeof SpinnerProps>;
+export type SpinnerPropsType = z.input<typeof SpinnerProps>;

@@ -7,4 +7,4 @@ export const CameraCaptureProps = z.object({
   className:    z.string().optional(),
   style:        z.record(z.unknown()).optional(),
 });
-export type CameraCapturePropsType = z.infer<typeof CameraCaptureProps>;
+export type CameraCapturePropsType = z.input<typeof CameraCaptureProps>;

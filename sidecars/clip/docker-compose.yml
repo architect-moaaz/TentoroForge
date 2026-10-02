@@ -1,0 +1,18 @@
+services:
+  clip:
+    build: .
+    image: forge-clip:latest
+    container_name: forge-clip
+    ports:
+      - "8001:8001"
+    environment:
+      # Set to require `Authorization: Bearer <key>`; the app sends
+      # EMBEDDINGS_API_KEY when it has one.
+      EMBEDDINGS_API_KEY: ${EMBEDDINGS_API_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3

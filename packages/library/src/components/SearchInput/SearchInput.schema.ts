@@ -26,4 +26,4 @@ export const SearchInputProps = z
   })
   .strict();
 
-export type SearchInputPropsType = z.infer<typeof SearchInputProps>;
+export type SearchInputPropsType = z.input<typeof SearchInputProps>;

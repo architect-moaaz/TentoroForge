@@ -28,11 +28,18 @@ def repo(tmp_path: Path) -> Path:
     _run(tmp_path, "git", "commit", "-q", "-m", "initial")
 
     # Simulate a Smith edit — modify a file, commit it.
+    #
+    # THE TRAILER IS WHAT MAKES IT SMITH'S. S24-9 made `revert_last_patch`
+    # refuse a commit that carries no `Forge-Actor:`, because "undo that" must
+    # not reverse a save the USER made through the visual editor — and an
+    # unattributed HEAD could be either. This fixture kept committing without
+    # one, so the refusal was correct and the test read as a broken revert.
+    # `git_service.git_commit` writes the trailer; the fixture writes it too.
     (tmp_path / "app.py").write_text("print('goodbye')\n")
     (tmp_path / "src.json").write_text('{"changed": true}\n')
     _run(tmp_path, "git", "add", ".")
     _run(tmp_path, "git", "commit", "-q", "-m",
-         "fix(page): remove Department field")
+         "fix(page): remove Department field\n\nForge-Actor: smith")
     return tmp_path
 
 

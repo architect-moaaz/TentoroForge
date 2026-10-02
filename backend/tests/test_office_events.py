@@ -94,7 +94,7 @@ def test_the_plan_line_publishes_the_roster(narrated):
     (plan,) = narrated(PLAN)
     assert plan["type"] == "run_plan"
     # Agents, not node keys — the office moves people.
-    assert plan["agents"] == ["a2ui_pages", "data_model", "page_design"]
+    assert plan["agents"] == ["data_model", "page_design", "page_template"]
 
 
 def test_a_node_start_walks_the_agent_in_and_says_what_it_is_doing(narrated):

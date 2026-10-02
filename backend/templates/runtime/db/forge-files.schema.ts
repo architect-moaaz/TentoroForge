@@ -1,4 +1,7 @@
-import { pgTable, uuid, text, bigint, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, bigint, timestamp, customType } from "drizzle-orm/pg-core";
+
+/** The file's bytes, when the app keeps them itself (`backend = "db"`). */
+const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea" });
 
 /**
  * Uploaded-file metadata. Bytes live in the configured storage backend (local
@@ -14,4 +17,5 @@ export const forgeFiles = pgTable("forge_files", {
   storageKey: text("storage_key").notNull(),
   uploadedById: uuid("uploaded_by_id"),
   createdAt: timestamp("created_at").defaultNow(),
+  data: bytea("data"),
 });

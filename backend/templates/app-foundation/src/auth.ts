@@ -2,6 +2,7 @@ import type { NextAuthOptions } from "next-auth";
 import { getServerSession } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
+import { sessionCookies } from "@/lib/session-cookie";
 import { db } from "@/db";
 import { users } from "@/db/schema/user";
 import { eq } from "drizzle-orm";
@@ -93,8 +94,22 @@ export const authOptions: NextAuthOptions = {
     },
   },
   secret: process.env.NEXTAUTH_SECRET || "dev-secret",
+  // THIS APPLICATION'S OWN COOKIE. Every generated app used next-auth's
+  // default name, and a browser sends a cookie for the HOST, not the port —
+  // so two apps on localhost overwrite each other's session. The second one
+  // then reads a token it cannot decrypt and logs
+  // "[next-auth][error][JWT_SESSION_ERROR] decryption operation failed" on
+  // every request, while the person is quietly signed out.
+  //
+  // The name is derived from the secret, which is already this app's alone,
+  // so nothing new has to be configured or kept in step.
+  // NAMED IN ONE PLACE, because `middleware.ts` has to look for the same
+  // name — `withAuth` asks for next-auth's default unless it is told.
+  cookies: sessionCookies(),
 };
 
+/** The signed-in person, on the server. Every page and route reads through
+ *  this — `getServerSession` with this app's own options. */
 export async function auth() {
   return getServerSession(authOptions);
 }

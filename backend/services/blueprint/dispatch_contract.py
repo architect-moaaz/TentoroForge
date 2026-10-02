@@ -146,7 +146,23 @@ def step_refs(wf: Mapping[str, Any]) -> Iterator[tuple[str, str, str]]:
 def _supplied_by_workflow(wf: Mapping[str, Any]) -> set[str]:
     inputs = {str(i.get("name")) for i in (wf.get("inputs") or []) if isinstance(i, dict) and i.get("name")}
     keys = {str(s.get("key")) for s in (wf.get("steps") or []) if isinstance(s, dict) and s.get("key")}
-    return inputs | keys | set(RUNTIME_HEADS)
+    return inputs | keys | set_variables(wf) | set(RUNTIME_HEADS)
+
+
+def set_variables(wf: Mapping[str, Any]) -> set[str]:
+    """Names a `set_variable` step writes — the engine stores its value under
+    `variableName` (engine.ts), and the step author is told it may read it.
+
+    Left out, the reference check refused the very answer its own refusal
+    recommends: told "set it from a step", a dental app's Book Appointment
+    author set `resolvedClinicId` with two set_variable steps and was refused
+    again for reading it (UAT, 2026-09-18), and shipped with no steps."""
+    names: set[str] = set()
+    for s in wf.get("steps") or []:
+        cfg = (s or {}).get("config") or {} if isinstance(s, dict) else {}
+        if cfg.get("actionType") == "set_variable" and cfg.get("variableName"):
+            names.add(str(cfg["variableName"]))
+    return names
 
 
 def workflow_ref_findings(doc: Mapping[str, Any]) -> list[dict]:
@@ -317,7 +333,15 @@ def dispatches(doc: Mapping[str, Any]) -> list[dict]:
     control→workflow wire with the payload it sends, sampled per key from the
     workflow's declared input types."""
     out: list[dict] = []
+    # A PAGE THAT SHIPS CODE DOES NOT SHIP ITS LAYOUT. Its controls are in its
+    # `view.tsx`, type-checked against each workflow's required inputs when it
+    # is written; the layout's Form is not in the app. 0l133sp2 failed its
+    # build on /disputes/new's layout Form (no rental in scope) while the page
+    # that shipped sent `run({ rental, reason, description })`.
+    coded = {str(r.get("page")) for r in (doc.get("pageCode") or []) if isinstance(r, dict) and r.get("view")}
     for d in control_dispatches(doc):
+        if d.page_id in coded:
+            continue
         wf = _workflow_by_id(dict(doc), d.workflow_id) or {}
         by_name = {str(i.get("name")): i for i in (wf.get("inputs") or []) if isinstance(i, dict)}
         payload = {}

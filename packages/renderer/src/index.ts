@@ -53,6 +53,21 @@ export {
   type WorkflowDispatchOptions,
 } from "./client/WorkflowDispatcher";
 export { ClientIsland } from "./client/ClientIsland";
+export {
+  ClientStateContext,
+  ClientStateProvider,
+  initialValues,
+  isClientAction,
+  nextValues,
+  nextValue,
+  useClientState,
+} from "./client/ClientState";
+export type {
+  ClientAction,
+  ClientActions,
+  ClientStateController,
+  ClientStateValue,
+} from "./client/ClientState";
 // Shell composition — PageOutletContext lets the scaffold wrap a shell schema
 // around per-page content without duplicating the nav in every page schema.
 export { PageOutletContext } from "./runtime/page-outlet-context";
@@ -73,6 +88,10 @@ export {
   NavigatorProvider,
   useNavigator,
 } from "./client/Navigator";
+// The box that opens a route when pressed. `Container` renders through it,
+// and so does the library's `Card`, so a clickable card is one affordance
+// with one keyboard behaviour wherever it is drawn.
+export { NavigateSurface } from "./client/NavigateSurface";
 export type { Navigator } from "./client/Navigator";
 
 // Shell state — mobile sidebar drawer open/close + delegated click handling.

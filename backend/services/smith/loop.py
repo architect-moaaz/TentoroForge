@@ -1,0 +1,417 @@
+"""The change turn as a loop: act, observe, act again (S1, `2026-09-24-smith-as-a-loop`).
+
+A turn used to be one interpretation and one move. The model said what the
+message meant, deterministic code did it, and the turn ended — so the model
+never saw the result of its own change. Two failures follow from that and only
+from that:
+
+* "yes please" to Smith's own offer to build a dashboard came back as "I looked
+  at what you asked and I don't see anything to change" (`docs/SMITH-VERBS.md`).
+  The move reported nothing; nothing read the report.
+* "Add a phone number, show it on the form and make it required" did the
+  biggest one and dropped the rest, which is why `services.smith.plan` exists.
+
+What this adds is a second look, and only that. **Every step is an existing
+verb, executed by the existing seam, through the existing capability check** —
+:mod:`services.smith.tools` generates the catalogue from `REQUIRED_BY_VERB`, so
+there is no verb here that the dispatcher did not already have. The loop
+chooses the next step; it does not widen what may be chosen, and it writes
+nothing itself.
+
+WHY THIS IS NOT THE REPAIR CHAIN COMING BACK
+--------------------------------------------
+The rebuild exists because a 151-pass chain mapped bad output onto plausible
+output with no oracle. Iterating on a VERIFIED result is a different thing, and
+the project already does it in three places: `ui_engineer` sends compiler errors
+back to the page's author (`COMPILE_ROUNDS`), `observer` judges a node and
+re-briefs the agent that owns it, `build_repair` returns a failing proof to the
+step that owns it (`REPAIR_ROUNDS`). Each has something that can say "no" for a
+reason that is not a guess.
+
+The change turn has one too and throws it away: `smith_session` snapshots git
+before the move and asks git what actually changed — then uses the finding as a
+pass/fail gate and ends the turn on it. Here it becomes an observation. "The
+diff did not touch the file you named" is exactly the sentence that makes a
+model try the other reading.
+
+Bounded like the others, by :data:`MAX_STEPS`, and what the cap cuts off is
+SAID rather than dropped. A cap of 1 is the behaviour that shipped before this
+file existed, which is the comparison S1 is for.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass, field
+from typing import Sequence, Any, Callable
+
+from services.smith import tools
+
+logger = logging.getLogger(__name__)
+
+#: How many steps one turn may take. Twelve since the loop can read (S2): a
+#: turn that looks before it acts spends two or three steps looking, the
+#: longest real multi-ask in a UAT replay is four, and a step re-tried under a
+#: different reading costs two. The other loops in the tree cap at 2 and 3; a
+#: turn is the one place a person is waiting, so it is not unbounded here
+#: either.
+MAX_STEPS = 12
+
+#: How many observations the model is shown. The whole turn, in practice —
+#: this is a ceiling against a cap that someone later raises.
+WINDOW = 12
+
+
+@dataclass
+class Observation:
+    """What one step did, in the words the seam used.
+
+    `said` is the seam's own answer. Nothing paraphrases it on the way in: a
+    step that reported "I looked for the delete button and could not find it"
+    is worth exactly its own sentence to whatever picks next.
+    """
+    tool: str
+    args: dict[str, Any] = field(default_factory=dict)
+    status: str = ""                       # resolved | no_op | asked | needs_user | error
+    said: str = ""
+    touched: list[str] = field(default_factory=list)
+
+    def line(self) -> str:
+        args = ", ".join(f"{k}={v!r}" for k, v in sorted(self.args.items()) if v)
+        head = f"{self.tool}({args})" if args else f"{self.tool}()"
+        files = f" [touched: {', '.join(self.touched[:3])}]" if self.touched else ""
+        # WHAT WAS READ IS SHOWN AS READ. A file's lines collapsed to one would
+        # be a file the model cannot reason from; the read's own layout stays.
+        if self.status == "read":
+            return f"- {head} ->\n{self.said}"
+        return f"- {head} -> {self.status or '?'}: {' '.join((self.said or '').split())}{files}"
+
+
+#: A step is identified by the fields its verb DECLARES it needs — the same set
+#: `missing_fields` holds it to. Projecting onto them is what lets the turn's
+#: first step, which carries a whole understanding, be compared with a later
+#: one, which carries a tool call; and it keeps the check from depending on
+#: fields neither the verb nor the user ever named.
+def _identity(tool: str, args: dict) -> str:
+    from services.smith.verbs import REQUIRED_BY_VERB
+
+    required = REQUIRED_BY_VERB.get(tool)
+    keys = sorted(required) if required else sorted(args or {})
+    shown = {k: (args or {}).get(k) for k in keys if (args or {}).get(k)}
+    return json.dumps([tool, shown], sort_keys=True, default=str)
+
+
+def already_done(tool: str, args: dict, observations: list[Observation]) -> bool:
+    """Whether this exact call has already been made this turn.
+
+    An identity check, not a policy about which verbs may repeat: `add_field`
+    twice with different fields is two steps, `add_field` twice with the same
+    one is the model not reading its own observation.
+    """
+    want = _identity(tool, args)
+    return any(_identity(o.tool, o.args) == want for o in observations)
+
+
+_PROMPT = """You are changing an application someone owns. Decide the NEXT \
+step, or end the turn. The steps already taken this turn, if any, are below.
+
+THE CONVERSATION SO FAR:
+{history}
+
+WHAT THEY ASKED, in their words:
+{ask}
+
+The ask is often a word — "yes please", "go ahead" — and means nothing without
+the exchange above it. Read what it is answering before deciding anything. If
+the two together still do not say what is wanted, `ask_user`; do not pick a
+subject out of the application below and act as though they raised it.
+
+WHAT THE APPLICATION IS, as much of it as is relevant:
+{ctx}
+
+WHAT HAS HAPPENED SO FAR THIS TURN:
+{observations}
+
+Return ONLY a JSON object with exactly these keys:
+
+  "tool": the name of ONE tool from the list below, or `done`, `answer` or
+      `ask_user` to end the turn. A name that is not in the list is an error
+      and costs a step.
+  "args": an object with that tool's arguments. Only the ones it lists.
+  "why": one short sentence, for the person, saying what this step is for.
+
+HOW TO DECIDE
+
+SPEAK THE PERSON'S LANGUAGE. To them it is "your application", "the app",
+"what I know about it" — never "the Blueprint", "a section", "a node", "an
+agent", "the slice", "the catalogue", or an id like PAGE-014 unless they used
+it first. Those names are for tool calls, not replies. "The Blueprint does not
+cover that" is a sentence they cannot act on; "that is not something your
+application handles" is.
+
+LOOK BEFORE YOU ACT when the application above does not show you what you
+need. The context is a slice, not the whole; `read_page_code` shows what a
+screen actually runs, `grep` finds where a word appears in the code,
+`read_section` opens any part of the Blueprint, `find` turns a name into an
+id, `read_rows` shows what a record type's data actually holds. A change made
+to something you have not looked at is a guess. Reading costs a step;
+guessing costs the change.
+
+WHAT THE APP IS FOR IS WRITTEN DOWN. A change that states a scope or a
+constraint — the places it serves, who it is for, a rule every record keeps —
+is recorded as a requirement too (`add_requirement` or `edit_requirement`, in
+the person's words), beside whatever changes the screens. Everything built or
+written later reads the requirements, not this conversation.
+
+AN EXPLANATION IS AN ACT TOO. "Why does the screen show X?" is answered from
+what you read THIS turn — the rows behind the screen, the code that draws it —
+not from what the definition implies and not from what an earlier reply said.
+Values nobody could have typed (outside what the app is for, repeating in a
+pattern) came from somewhere: the sample data, an import, the code. Say where,
+and offer the change that fixes it.
+
+CHANGE CODE FROM WHAT YOU READ. When the ask is a change no verb below
+describes — a rule the screen applies, what a control does, the order things
+appear in — read the page, then `write_page_code` with a brief that names the
+change in the code's own terms: the constant, the component, the line. The
+compiler's verdict comes back as an observation; a page that did not compile
+is a brief to sharpen, not a reason to stop.
+
+A CHANGE TO RECORDS IS A WORKFLOW, AND IT COMES FIRST. Adding, deleting,
+approving or updating records happens only through a workflow; a page's code
+cannot do it on its own. When the ask needs one the application does not have
+("a delete button"), `add_workflow` first — it also puts its control on the
+page — and only then change the page's code for what is left. A plan orders
+its steps the same way. A page that reports it needs a workflow is telling you
+which one to add.
+
+A step that reported it changed nothing is INFORMATION, not a reason to repeat
+it. "I looked for X and could not find it" means X is not what it is called, or
+the change belongs to a different tool — read what the observation actually
+said and pick accordingly. The same tool with the same arguments twice is
+refused.
+
+A step that reported the wrong file was edited, or that the diff did not touch
+what you named, is the same kind of information: the ask was right and the
+target was wrong.
+
+END WITH `done` when every part of what they asked for is covered by a step
+above that reported it landed. Do not end while a part of their message has
+had no step at all — and do not invent one either: if a part needs a fact
+nobody has said, `ask_user` for exactly that fact.
+
+A QUESTION ALREADY ASKED ABOVE WAS ASKED FROM THE SLICE ALONE. "Does the
+page already have X?", "which file is it in?", "what is it called?" — the
+code answers these. Read, then act. Ask the person only for what nothing in
+the application can tell you, and then ask exactly that.
+
+WHAT NON-TECHNICAL OWNERS ACTUALLY SAY, and how to read it:
+- EVERY ask, the layout ones too: "grid view with images", "make it
+  scrollable", "a home page listing the tools" are asks, each about a screen.
+  Several asks about one screen are one step: "grid view, with the photo, the
+  name as 'Product', the description and the area" on Discover is one ask
+  about Discover, not four. "Good visuals", "look nicer", "with images" on a
+  screen are about what that screen SHOWS (photos, cards), not a restyle; a
+  restyle is only for named colours, fonts or an overall look. A long message
+  that is hard to follow is still a list of asks: act on what you can read and
+  ask about the rest, rather than answering that you did not follow.
+- WHAT A SCREEN CALLS A THING IS NOT WHAT THE DATA MODEL CALLS IT. "The title
+  should be named as product", "call them products on the page" are the
+  WORDING on screens — never a rename of the record type, which rewrites the
+  data, the processes and every page. Only an explicit "the records should be
+  called X in the data" is that.
+- WHAT THE APPLICATION CANNOT DO IS SAID, NOT DROPPED. It cannot fetch
+  pictures or facts from the internet: photos come from the people who list
+  things (an image field they upload to). Say so and offer the nearest thing;
+  do not silently leave the ask out. It CAN take a person's current location:
+  a `location` field ({{lat, lng}}, shared from the browser), with distances
+  ("0.4 mi away") in place of coordinates.
+- WRONG BEHAVIOUR IS NOT A CRASH, AND IT IS NOT ANSWERED FROM THE DEFINITION.
+  "I can't add a category", "after login it takes me to the wrong page", "the
+  notifications are not seen", "it says it already exists but it doesn't" —
+  the app did something other than they expected, usually without an error
+  anyone reported. Reading the code shows what it SAYS; it said the right
+  thing in every one of these and still did the wrong thing. TRY IT FIRST:
+  `try_workflow` the process their button runs, as their role, with what
+  they typed; `open_page` the screen as them and see where it lands and what
+  it shows; `try_request` what the screen asks the app for. What the try
+  shows is the bug report, in the app's own words. Then change what it
+  points at — and try it again: a change is done when the try that failed
+  now works, not when the change was made.
+- A STRUCTURAL ASK IS THE WHOLE STRUCTURE. "Make it like Myntra", "a top bar
+  instead of the sidebar", "tabs at the bottom on the phone", "redesign the
+  app", "change the layout" are three changes, and all three are made in the
+  turn: THE FRAME — the shell in `designSystem.shell` (`chrome`: standard-rail,
+  wide-rail, icon-rail, floating-rail, right-rail, topbar or dock; `tone`:
+  dark, brand, light or tinted; `auth`: the sign-in layout), the fonts and the
+  density — with `write_section` on `designSystem`, and the phone's navigation
+  (`navigation.mobile`: tabs or drawer) with `write_section` on `navigation`;
+  THE LOOK — colours, with `restyle` or in the same `designSystem` brief; and
+  THE SCREENS — `rewrite_pages` with every screen they meant (["all"] when they
+  said the app or every screen), laid out afresh inside the new frame. Frame
+  first, screens last. "Every screen" is every screen, never the first one.
+  Then `open_page` the home screen and see the new frame before ending.
+- A SMALL CHANGE TO THE FRAME IS STILL A CHANGE YOU CAN MAKE. Anything about
+  what is around every screen — the menu's alignment, a search box in the top
+  bar, the bell's place, a footer, the header's height — is `write_frame` on
+  the frame file that holds it (read it first). A small change to ONE screen
+  is `write_page_code` (edits); the whole of a screen is `write_page_code` with
+  `whole`. Size the change to the ask: never rebuild the app for an alignment,
+  never edit one line for "redesign it". A control added to the frame works
+  where it leads: a search box needs the screen it submits to filtering by
+  its query, a link needs its screen — make that screen do it too, then try it.
+- A RULE ABOUT THE DATA IS KEPT BY THE DATA. "Names must be unique", "no two
+  X share a Y", "a Y is always given" are the field's own settings — `unique`,
+  `required` — set with `set_field`, so the database refuses what breaks them.
+  Not `write_section` (it re-authors the whole record type) and not `add_rule`
+  alone (it states a rule nothing enforces).
+  The records already there may not fit (two with the same name): the change
+  says which, and they are settled with the person, never deleted.
+- A REQUIREMENT RECORDED IS NOT A CHANGE MADE. `add_requirement` writes the
+  ask down; it changes no screen. When the ask is about what screens show or
+  do ("prices as ₹ on every screen"), change those screens — `write_page_code`
+  for one, `rewrite_pages` for several — and look at them. `verify_pages`
+  judges pages against how they should look; it is not how an ask is made.
+- THEY SAID IT ALREADY. "Fix it", "it's not done", "do all three" asked for
+  the change. Do not answer with "Shall I go ahead?" for something they asked
+  for; do it, and ask only for a fact nobody has said.
+
+BEFORE THERE IS AN APPLICATION the page above says so. Then the verbs do not
+apply: `open_decisions` says what the brief leaves unsaid; ask ONE open
+decision per turn with `ask_user` and its options as chips; when it says the
+brief stands on its own, `define_application`. Defining runs a dozen agents
+and costs minutes, so do not define twice in a turn, and do not define what
+a question would change.
+
+A CREDENTIAL IS NEVER A VALUE IN A CALL. `token_env` and `key_env` take the
+NAME of an environment variable — `FIGMA_TOKEN`, `UXPILOT_API_KEY` — never
+the secret. A pasted Figma token (`figd_…`) or UX Pilot key (`ep_…`) is the
+person answering the wrong question: do not pass it on; `ask_user` for the
+variable's name, and say that what they typed is written to the conversation
+and must not be a secret.
+
+SEVERAL ASKS IN ONE MESSAGE ARE A PLAN, NOT A GUESS ABOUT WHICH ONE. "Add a
+phone number, show it on the form and make it required" is three; end the
+turn with `propose_plan` and every ask in their words, and they agree once.
+One thing asked for in several words is not a plan: "rename the delete
+button to archive" is one step. A yes to a plan already shown is not a plan.
+
+END WITH `answer` when they asked a question rather than for a change, or when
+the honest outcome is that nothing needed doing. AN ANSWER ALREADY GIVEN ABOVE
+WAS WRITTEN FROM THE SLICE ALONE. If the question is about what the code does
+— which rows a screen shows, what a button runs, what a value is mapped to —
+the slice cannot say and the code can: `read_page_code` or `grep`, then
+`answer` from what you read. An answer that amounts to "I cannot see that
+part of the application" is the signal to look, not the end.
+
+Do not describe work in "why" that no step above performed.
+
+THE TOOLS
+
+{catalogue}
+"""
+
+
+def _render(observations: list[Observation]) -> str:
+    if not observations:
+        return "(nothing yet — this is the first step)"
+    return "\n".join(o.line() for o in observations[-WINDOW:])
+
+
+def next_step(ask: str, ctx: str, observations: list[Observation],
+              history: list | None = None, *,
+              provider: Callable[[str], str] | None = None,
+              reasoning: Callable[[str], None] | None = None,
+              images: Sequence[str] = ()) -> dict[str, Any]:
+    """The next step, or a terminal move. Never raises.
+
+    `history` is the exchange, rendered the way `understand_ask` renders it.
+    Step one gets it and the steps after it did not, so a turn whose ask was
+    "yes please" reached this function with the word alone and no idea what it
+    answered. It filled the gap from the Blueprint slice and answered a
+    question about identity documents that nobody had asked.
+
+    An unreachable or unparseable model ends the turn on what has already
+    landed rather than failing it: the steps above this one are real changes
+    that were verified when they were made, and throwing the turn away would
+    not unmake them.
+    """
+    from services.smith.understand_ask import (_default_provider, _did_not_follow,
+                                                _looks_cut_off, _parse, _render_history)
+
+    call = provider or (lambda prompt: _default_provider(prompt, reasoning, images=images))
+    shown = (f"\n\n[{len(images)} screenshot{'s' if len(images) != 1 else ''} attached by the person, shown above "
+             "the text: what they see on screen. Read it as their evidence.]" if images else "")
+    prompt = _PROMPT.format(ask=(ask or "").strip() + shown, history=_render_history(history),
+                            ctx=ctx or "(nothing yet)", observations=_render(observations),
+                            catalogue=tools.render())
+    try:
+        raw = call(prompt)
+    except Exception as exc:  # noqa: BLE001 — a turn degrades, it does not crash
+        # The provider's own words go to the log, for whoever runs the
+        # platform: "credit balance is too low" is theirs to act on.
+        logger.warning("smith loop: provider unreachable (%s: %s); ending the turn",
+                       type(exc).__name__, str(exc)[:300])
+        return {"tool": "done", "args": {}, "unreachable": True,
+                "why": "I could not reach my reasoning service for the next step."}
+
+    data = _parse(raw)
+    if data is None and raw and not _looks_cut_off(raw):
+        # AN UNREADABLE REPLY IS ASKED FOR AGAIN, NOT TAKEN AS CONFUSION. A
+        # 601-character reply that did not parse ended a turn on "I could not
+        # turn that into a change I am sure of" — the person's third report
+        # of the same missing list, answered as if they had been unclear
+        # (Test2, 2026-09-28). One more call costs seconds; the dead end cost
+        # the turn. What the model said is logged, so the next one can be read.
+        logger.warning("smith loop: reply did not parse (%d chars): %r — asking once more",
+                       len(raw), raw[:300])
+        try:
+            raw = call(prompt + "\n\nYour last reply could not be read. Reply with the JSON "
+                                "object only — {\"tool\": …, \"args\": …, \"why\": …} — with no "
+                                "prose before or after it.")
+        except Exception:  # noqa: BLE001
+            raw = ""
+        data = _parse(raw)
+    if data is None and _looks_cut_off(raw):
+        # THE REPLY RAN OUT OF ROOM MID-OBJECT (smithv2, 1be5ce23). Asking again
+        # costs one call; telling the person they were unclear costs their
+        # next three messages. Prose is not retried — asking the same way
+        # again rarely changes it.
+        logger.info("smith loop: reply did not parse (%d chars, looks cut off) — asking once more",
+                    len(raw or ""))
+        try:
+            raw = call(prompt + "\n\nReply with the JSON object only — no prose before or "
+                                "after it, and keep it short.")
+        except Exception:  # noqa: BLE001
+            raw = ""
+        data = _parse(raw)
+    if data is None:
+        # NOT A SILENT END. A reply nobody could read is not "done"; it is a
+        # turn that must ask, in the person's own words, for one thing.
+        logger.warning("smith loop: gave up on a reply of %d chars: %r", len(raw or ""), (raw or "")[:300])
+        return {"tool": "ask_user", "args": {"question": _did_not_follow(ask)}, "why": ""}
+
+    tool = str(data.get("tool") or "").strip()
+    args = data.get("args")
+    return {
+        "tool": tool,
+        "args": args if isinstance(args, dict) else {},
+        "why": str(data.get("why") or "").strip(),
+    }
+
+
+def remaining_note(observations: list[Observation], *, capped: bool) -> str:
+    """What the cap cut off, said rather than dropped.
+
+    `build_repair` ends the same way — what is still wrong after the rounds is
+    recorded as an issue of the application rather than quietly left.
+    """
+    if not capped:
+        return ""
+    return ("\n\nI stopped after "
+            f"{MAX_STEPS} steps in one turn. Tell me what is still missing and "
+            "I will carry on from there.")
+
+
+__all__ = ["MAX_STEPS", "WINDOW", "Observation", "already_done", "next_step",
+           "remaining_note"]

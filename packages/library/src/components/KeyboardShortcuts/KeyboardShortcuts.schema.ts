@@ -22,4 +22,4 @@ export const KeyboardShortcutsProps = z
   })
   .strict();
 
-export type KeyboardShortcutsPropsType = z.infer<typeof KeyboardShortcutsProps>;
+export type KeyboardShortcutsPropsType = z.input<typeof KeyboardShortcutsProps>;

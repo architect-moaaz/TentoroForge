@@ -50,6 +50,21 @@ import {
  */
 export const UiDesigner = z.enum(["forge", "uxpilot"]);
 
+/**
+ * Where this application's design language comes from: the company's own,
+ * discovered once from their website during onboarding and held by the
+ * organisation, or one designed for this application alone.
+ *
+ * A closed pair for the same reason `UiDesigner` is one — the
+ * `brand_design_system` node dispatches on it without interpretation, and an
+ * organisation that never finished discovery has nothing to project, so the
+ * value a build reads must be a fact rather than a guess. Absent means the
+ * question has not been put to the user yet; `custom` is what an application
+ * built before the company profile existed was, and what an organisation
+ * with no profile can only be.
+ */
+export const DesignLanguageSource = z.enum(["company", "custom"]);
+
 export const ApplicationMeta = z.object({
   id: z.string(),
   name: z.string(),
@@ -68,6 +83,20 @@ export const ApplicationMeta = z.object({
    * merges its own proposal over the singleton. Absent means `forge`.
    */
   uiDesigner: UiDesigner.optional(),
+  /**
+   * The application-wide answer to "whose design language is this", recorded
+   * when the user answers Smith at the approval gate.
+   *
+   * On `application` for the reason `uiDesigner` is: no agent in the registry
+   * may write this section, so a model merging its own proposal over the
+   * singleton cannot overwrite what a person chose. `company` makes the
+   * organisation's discovered tokens outrank the design agent's own palette
+   * (the `brand_design_system` node projects them after it); `custom` leaves
+   * the agent's design standing. Absent means unasked — which is also what an
+   * organisation with no finished discovery stays, since there would be
+   * nothing to offer.
+   */
+  designLanguage: DesignLanguageSource.optional(),
 });
 
 // ===========================================================================
@@ -114,6 +143,22 @@ export const Product = z.object({
       "country, currency or market is not a language. Defaults to 'en'.",
     )
     .default("en"),
+  /**
+   * The other languages a person can switch the interface to, beside
+   * `locale` — BCP-47 tags. Test2 (2026-09-28) was asked for English and
+   * Hindi; with nowhere to say so, every page rolled its own EN/हिं toggle,
+   * none agreed with the next, and nothing loaded a Devanagari font. Declared
+   * here, the app has one switch in its frame and every page reads it.
+   */
+  languages: z
+    .array(z.string())
+    .describe(
+      "BCP-47 tags of the OTHER languages people can switch the interface to, " +
+      "beside `locale` — ['hi'] for an English app that must also be shown in " +
+      "Hindi. Only when the request asks for the interface in more than one " +
+      "language. Empty for a single-language app.",
+    )
+    .default([]),
 });
 
 // ===========================================================================
@@ -148,6 +193,13 @@ export const Module = z.object({
   name: z.string(),
   description: z.string().default(""),
   pages: z.array(PageId).default([]),
+  /**
+   * The person chose, at the product-model gate, not to build this module
+   * yet. Its screens are declared but not written or served; its records and
+   * processes are built with the rest, so building it later adds screens to a
+   * working application rather than a second application beside it.
+   */
+  deferred: z.boolean().optional(),
   ...artifactBase,
 });
 
@@ -185,15 +237,112 @@ export const PagePattern = z.enum([
   "command_center",
   "split_view",
   "document_workspace",
+  // A SCREEN THAT IS NOT ABOUT THE APPLICATION'S RECORDS. Every other value
+  // here names a way of showing, entering or arranging records, so a
+  // calculator, a converter or a scratch tool had no value it could honestly
+  // take. Asked for "a simple arithmetic calculator", `page_contracts` chose
+  // `dashboard` — the least-bad option for a single screen at "/" — and
+  // everything downstream then behaved correctly on a false premise: the
+  // dashboard floor demanded three KPI tiles, a chart and a recent-activity
+  // surface, none of which a calculator has records for, so every composition
+  // was refused and the page author bolted a chart bound to {{resultHistory}}
+  // and a feed bound to {{keystrokeLog}} onto a keypad to get past it.
+  //
+  // Pairs with `clientState`: a tool's values live on the screen. The two
+  // arrived together because neither is much use alone — a pattern that says
+  // "not about records" and no way to say what it IS about leaves the same
+  // hole.
+  "tool",
+  // SIGNING IN AND CREATING AN ACCOUNT. These screens were template files the
+  // build never saw — no contract, no design, not in the editor — so every
+  // app opened on the same sign-in page with the same "Welcome back". As
+  // pages they are written like every other; `auth` says which.
+  "auth",
 ]);
 
 /** §33 — every page has a structured contract *before* implementation. */
+/**
+ * WHAT A READER DECIDES ON, AND WHERE EACH FACT COMES FROM.
+ *
+ * A page contract listed the tasks a page is for and nothing about what it
+ * says. Tool Share's tool page was "Review a tool's photos and description,
+ * view the owner's profile, request to borrow" — and the Tool entity had two
+ * columns, so the page showed an id. A borrower deciding whether to ask for a
+ * drill weighs what it is and what comes with it, who owns it and whether
+ * they are verified, how often it has been lent, and what happens at
+ * handover; every one of those is a field, a related record, a count over a
+ * relationship, or a rule — and the contract now says which.
+ *
+ * `kind`:
+ * - `field` — `field` of the page's record (or of `entity`). A field the
+ *   entity does not have yet is proposed in `newField` and added to the data
+ *   model before workflows are written, so the form that creates the record
+ *   asks for it.
+ * - `related` — the record the page's record points at through its foreign
+ *   key `via`, shown by `field` of that record (`entity`).
+ * - `reverse` — the record that points AT the page's record: the row of
+ *   `entity` whose foreign key `via` is the page's record, narrowed by
+ *   `where`, the latest by `sort` (default `createdAt`), shown by `field` —
+ *   or, through `then`, by a field of the record THAT row points at. A
+ *   shopper's current plan: Subscription `via` shopperId, `where` status
+ *   active, `then` {via planId, entity Plan, field name}. The link the
+ *   reader cares about is often stored on the other side, and `related`
+ *   alone could only follow a key the page's own record holds.
+ * - `count` / `total` — rows of `entity` whose foreign key `via` points at the
+ *   page's record (or, with `of`, at the record the page's record points at
+ *   through `of`), narrowed by `where`; `total` applies `fn` to `field`.
+ *   Without `via`, every row of `entity` that matches `where` — a staff
+ *   overview's "Active subscriptions" belongs to no one record. A `where` key
+ *   may be `fk.field`: a field of the record the counted row's foreign key
+ *   `fk` points at (ProductIngredient `where` {"ingredientId.kind": "harmful"}).
+ * - `process` — what a rule or a workflow means for the reader (`about`):
+ *   reassurance beside an action, or what happens next.
+ * - `distance` — how far the reader is from the record: its `location` field
+ *   (`field`), or, through the foreign key `via`, the location of the record it
+ *   points at (`entity`, `field`) — the owner's area for a tool.
+ */
+export const PageContentSource = z.object({
+  kind: z.enum(["field", "related", "reverse", "count", "total", "process", "distance"]),
+  entity: EntityId.optional(),
+  field: z.string().optional(),
+  via: z.string().optional(),
+  of: z.string().optional(),
+  where: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  fn: z.enum(["sum", "avg", "min", "max"]).optional(),
+  /** `reverse`: which of several rows is shown — the latest by this field. */
+  sort: z.string().optional(),
+  /** `reverse`: follow the found row's foreign key `via` to `entity`, show `field`. */
+  then: z
+    .object({ via: z.string(), entity: EntityId, field: z.string().optional() })
+    .optional(),
+  about: z.string().optional(),
+  newField: z
+    .object({
+      type: z.string(),
+      description: z.string().default(""),
+      enumValues: z.array(z.string()).optional(),
+      required: z.boolean().default(false),
+    })
+    .optional(),
+});
+
+export const PageContentItem = z.object({
+  label: z.string().min(1),
+  /** The reader's question this fact answers ("Is the owner trustworthy?"). */
+  answers: z.string().default(""),
+  /** `lead` lead the screen; `reassurance` sits beside the main action. */
+  prominence: z.enum(["lead", "key", "supporting", "reassurance"]).default("key"),
+  source: PageContentSource,
+});
+
 export const PageContract = z.object({
   id: PageId,
   name: z.string(),
   route: z.string().describe("URL path, e.g. /candidates or /candidates/[id]"),
   purpose: z.string().describe("Why this page exists, in business terms"),
   pattern: PagePattern.optional(),
+  /** On an `auth` page: which of the two it is. */
+  auth: z.enum(["login", "signup"]).optional(),
   module: ModuleId.optional(),
 
   /** Roles for whom this page is meaningful. */
@@ -382,6 +531,9 @@ export const PageContract = z.object({
   /** The jobs a user comes here to do — drives composition, not decoration. */
   primaryTasks: z.array(z.string()).default([]),
 
+  /** What the page says, fact by fact, and where each comes from (see PageContentSource). */
+  content: z.array(PageContentItem).default([]),
+
   data: z
     .object({
       primaryEntity: EntityId.optional(),
@@ -402,11 +554,33 @@ export const PageContract = z.object({
     )
     .default(["loading", "empty", "populated", "error"]),
 
+  /**
+   * Which form factors this page is for.
+   *
+   * EACH KEY CARRIES ITS OWN DEFAULT, and that is load-bearing rather than
+   * tidy. The object-level default below only applies when `responsive` is
+   * absent entirely; an agent that wrote `{desktop: "primary"}` — a perfectly
+   * sensible thing to say about a page — had the WHOLE NODE rejected for
+   * `'tablet' is a required property`, and `page_details` re-ran from
+   * scratch. Measured on a one-page calculator: 74s for the node, about half
+   * of it re-doing work that was never wrong, for two keys whose values the
+   * contract was already willing to assume.
+   *
+   * The defaults were always stated. They just did not apply where the
+   * mistake actually happens, which is a partial object rather than a missing
+   * one.
+   */
   responsive: z
     .object({
-      desktop: z.enum(["primary", "supported", "adaptive", "unsupported"]),
-      tablet: z.enum(["primary", "supported", "adaptive", "unsupported"]),
-      mobile: z.enum(["primary", "supported", "adaptive", "unsupported"]),
+      desktop: z
+        .enum(["primary", "supported", "adaptive", "unsupported"])
+        .default("primary"),
+      tablet: z
+        .enum(["primary", "supported", "adaptive", "unsupported"])
+        .default("supported"),
+      mobile: z
+        .enum(["primary", "supported", "adaptive", "unsupported"])
+        .default("adaptive"),
     })
     .default({ desktop: "primary", tablet: "supported", mobile: "adaptive" }),
 
@@ -438,6 +612,8 @@ export type NavNodeT = {
   label: string;
   page?: string;
   icon?: string;
+  view?: string;
+  tab?: boolean;
   roles?: string[];
   children?: NavNodeT[];
 };
@@ -447,6 +623,14 @@ export const NavNode: z.ZodType<NavNodeT> = z.lazy(() =>
     label: z.string(),
     page: PageId.optional(),
     icon: z.string().optional(),
+    /**
+     * A saved view of the page (a key of its `views`), when the destination is
+     * the page filtered — "My listings" is `/tools?view=mine`, not `/tools`
+     * again. Two entries naming one route lit together and collided.
+     */
+    view: z.string().optional(),
+    /** One of the bottom tab bar's destinations, when `navigation.mobile` is `tabs`. */
+    tab: z.boolean().optional(),
     /** Visible only to these roles; empty means all authenticated roles. */
     roles: z.array(RoleId).default([]).optional(),
     children: z.array(NavNode).default([]).optional(),
@@ -458,6 +642,13 @@ export const Navigation = z.object({
   tree: z.array(NavNode).default([]),
   /** Landing route per role — resolved deterministically, never guessed. */
   initialRoute: z.record(z.string(), z.string()).default({}),
+  /**
+   * How a phone navigates: `tabs` is a bottom tab bar of the destinations
+   * the architect marks `tab: true` (a mobile-first product), `drawer` the menu
+   * behind a hamburger. Unset, it follows the pages' own declarations: tabs
+   * when most say a phone is their primary device.
+   */
+  mobile: z.enum(["tabs", "drawer"]).optional(),
 });
 
 // ===========================================================================
@@ -669,7 +860,14 @@ export const PageDataSource = z.object({
    * Blueprint requires name+entity+op and does not carry the mutation ops —
    * so the two are not merged, but the read ops must agree.
    */
-  op: z.enum(["list", "get", "aggregate", "series"]),
+  op: z.enum(["list", "get", "aggregate", "series", "similar"]),
+  /**
+   * op:"similar" — the embedding field to rank by. The query comes from the
+   * page's URL: `image` (a stored file id, written by a FileUpload with
+   * `search`) or `q` (text, written by an Input of type "search"). With no
+   * query the source is empty.
+   */
+  field: z.string().optional(),
   filter: z.record(z.unknown()).optional(),
   metrics: z.record(z.unknown()).optional(),
   limit: z.number().int().optional(),
@@ -689,6 +887,101 @@ export const PageDataSource = z.object({
   sort: z.enum(["label", "value"]).optional(),
 });
 
+/**
+ * A value that lives on the SCREEN and nowhere else.
+ *
+ * Every action this platform could express was server-side and record-shaped:
+ * a control runs a workflow, or it navigates. So an application whose
+ * behaviour is arithmetic over what is on screen — a calculator, a converter,
+ * a tip splitter — had no way to be described at all, and the pipeline did
+ * the only thing the vocabulary allowed: it invented a `CalculatorSession`
+ * TABLE to hold the display value and the pending operator, turned every
+ * keypress into a server workflow against a row that was never created, and
+ * produced twenty-eight minutes of application that could not work.
+ *
+ * `clientState` is the missing word. A declared value with a starting point,
+ * changed by `ClientAction`s on the controls, read by bindings as
+ * `{{state.<name>}}`. It is never persisted and never sent anywhere: when the
+ * page closes, it is gone, which is exactly what "does not store anything"
+ * means.
+ *
+ * ORTHOGONAL TO `dataSources`, deliberately. A page declaring only
+ * `dataSources` is the server-backed screen this platform has always built. A
+ * page declaring only `clientState` is a tool. A page declaring BOTH is the
+ * hybrid — a form that computes a total as you type and then submits it to a
+ * workflow — and needs no third mode to say so, because the two lists already
+ * say it between them.
+ */
+export const ClientStateValue = z.object({
+  /** Bound as `{{state.<name>}}`. Unique within the page. */
+  name: z.string().min(1),
+  /**
+   * What kind of value it holds. The renderer starts it at a typed empty
+   * (`""`, `0`, `false`) when `initial` is absent, so a declared value is
+   * never `undefined` on the first paint — a display bound to `undefined`
+   * renders as nothing and reads as a broken screen.
+   */
+  type: z.enum(["string", "number", "boolean"]),
+  /** Where it starts. A calculator's display starts at `"0"`, not empty. */
+  initial: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  /** What this value is for, in the words the requirement used. */
+  description: z.string().default(""),
+});
+
+/**
+ * What a control does to the screen's own state when it is pressed.
+ *
+ * `set` writes a literal — the Clear key putting the display back to "0".
+ * `compute` evaluates a formula over the current state and writes the result
+ * — the digit keys appending, the equals key doing the arithmetic. The
+ * formula language is the one `evaluateComputed` already runs in the browser
+ * for a form's computed fields; nothing new is interpreted, and there is no
+ * arbitrary code here by construction.
+ *
+ * A control may carry a client action AND a workflow. They are not
+ * alternatives: "work out the total, then submit it" is one press.
+ */
+export const ClientAction = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("set"),
+    /** The `clientState` name being written. */
+    target: z.string().min(1),
+    value: z.union([z.string(), z.number(), z.boolean()]),
+  }),
+  z.object({
+    kind: z.literal("compute"),
+    target: z.string().min(1),
+    /**
+     * Read over the page's client state by name — `display + digit`,
+     * `number(display) * 2`. The same expressions a computed form field uses.
+     */
+    formula: z.string().min(1),
+  }),
+]);
+
+/**
+ * What a control does when it is pressed: one change, or several at once.
+ *
+ * A LIST IS A SIMULTANEOUS ASSIGNMENT, NOT A SCRIPT. Every action in it reads
+ * the state as it was WHEN THE CONTROL WAS PRESSED, so the order carries no
+ * meaning and no action can depend on another's result. That is the property
+ * that keeps this declarative: a reader never has to simulate a sequence to
+ * know what a button does. Allowing each step to see the previous one's writes
+ * would turn a page into a small imperative program, which is the thing this
+ * contract exists to avoid.
+ *
+ * A single action was the first shape, and a live composition refused on it:
+ * a calculator's Clear key sets `display` to "0", `error` to false and
+ * `errorMessage` to "" — one press, three of the screen's own values, and no
+ * honest way to say it. The composer wrote the list anyway, which is the right
+ * instinct and was not expressible.
+ *
+ * Two actions writing the SAME value in one press are ambiguous under these
+ * semantics and are reported as a finding rather than silently resolved by
+ * position.
+ */
+export const ClientActions = z.union([ClientAction, z.array(ClientAction).min(1)]);
+
 export const PageLayout = z.object({
   /** Natural key — the page this tree renders. */
   page: PageId,
@@ -697,6 +990,12 @@ export const PageLayout = z.object({
   root: TemplateNode,
   /** The fetches `root` binds to, as the composer's binder resolved them. */
   dataSources: z.array(PageDataSource).default([]),
+  /**
+   * Values that live on this screen and nowhere else — see
+   * :data:`ClientStateValue`. Empty for every server-backed page, which is
+   * every page this platform could describe before it existed.
+   */
+  clientState: z.array(ClientStateValue).default([]),
   /**
    * Which composer produced this tree.
    *
@@ -761,6 +1060,54 @@ export const PageLayout = z.object({
   ...artifactBase,
 });
 
+/**
+ * §34 — a page written as React by the UI engineer, against the component
+ * library and the app's typed SDK (`src/sdk`, projected from this document).
+ *
+ * Two modules, because a Next.js page that loads data on the server cannot
+ * also hold the hooks its interactions need. `load` is `load.ts`: a server
+ * function that reads through `@/sdk/server` and returns the view's props
+ * (or null for a 404). `view` is `view.tsx`, a client module: the screen
+ * itself, composed from the app's UI kit and `@tentoroforge/library`, running
+ * workflows through `@/sdk/client`. The route's `page.tsx` joining them is
+ * projected, not authored, so every coded page gets the same frame.
+ *
+ * The SDK is typed from the Blueprint — entities, workflow inputs, page
+ * routes — so what this code may say about the application is checked by
+ * the TypeScript compiler before it is accepted: a field the entity lacks,
+ * a workflow input a form does not collect, a route that does not exist.
+ *
+ * A page with no row here renders its `pageLayouts` tree, which every page
+ * has; the code is the designed page, the layout is its floor.
+ */
+/**
+ * A file of the application's FRAME the application owns — its own version of
+ * the signed-in layout, the public header, the phone's tab bar. The frame is
+ * the platform's until someone asks for something only that app should have
+ * ("centre the menu", "a search box in the top bar"); from then on that file
+ * is this row's, re-projected from here and never replaced by the platform's.
+ */
+export const FrameCode = z.object({
+  /** Natural key — the frame file's path in the app, e.g. `src/app/(dashboard)/layout.tsx`. */
+  file: z.string(),
+  /** What was asked of it, in the person's words. */
+  rationale: z.string().default(""),
+  /** The whole file. */
+  code: z.string(),
+});
+
+export const PageCode = z.object({
+  /** Natural key — the page this code renders. */
+  page: PageId,
+  /** Why the page is built this way, in terms of what the user asked for. */
+  rationale: z.string().default(""),
+  /** `load.ts` — the server half: `export async function load(ctx)`. */
+  load: z.string().min(1),
+  /** `view.tsx` — a client component, the screen itself. */
+  view: z.string().min(1),
+  ...artifactBase,
+});
+
 // ===========================================================================
 // §34 · app-level composition — the one call that sees every page at once
 // ===========================================================================
@@ -820,6 +1167,22 @@ export const Composition = z.object({
   conventions: z
     .array(z.object({ topic: z.string(), rule: z.string() }))
     .default([]),
+  /**
+   * The page rhythm: five anatomy decisions made once per application, so
+   * its pages agree with each other and differ from another product's. The
+   * page author used to be handed one anatomy for every application (eyebrow
+   * and title, a dark leading card, KPI tiles, tables in cards), which is why
+   * two apps with different palettes still read as one product recoloured.
+   */
+  rhythm: z
+    .object({
+      header: z.enum(["eyebrow-title", "title-only", "band", "compact"]),
+      lead: z.enum(["dark-card", "gradient-band", "outlined-panel", "type-only"]),
+      lists: z.enum(["table", "cards", "rows"]),
+      figures: z.enum(["tiles", "strip", "inline"]),
+      sections: z.enum(["cards", "open", "dense"]),
+    })
+    .optional(),
   pages: z.array(PageSketch).default([]),
 });
 
@@ -875,12 +1238,99 @@ export const SeriesSource = z.object({
   filter: z.record(z.string(), z.unknown()).default({}),
 });
 
+/** What a query measure computes. `count_distinct` counts the distinct values
+ *  of `field` (customers who ordered, not orders). `ratio` is not here: a ratio
+ *  is two measures, and the page divides them where it can say what over what. */
+export const QueryAggregation = z.enum(["count", "count_distinct", "sum", "avg", "min", "max"]);
+
+export const QueryMeasure = z.object({
+  /** The column this number arrives under in each row — `count`, `revenue`. */
+  key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  /** How a reader names it: the axis title, the legend, the tooltip. */
+  label: z.string().optional(),
+  aggregation: QueryAggregation,
+  /** The column aggregated. Required for everything but `count`. */
+  field: z.string().optional(),
+});
+
+/** Date truncation for a date dimension. */
+export const DateBucket = z.enum(["day", "week", "month", "quarter", "year"]);
+
+/** One band of a numeric dimension: `from` ≤ value < `to`; an open end is
+ *  left out. The label is what the axis says ("18–30"). */
+export const QueryRange = z.object({
+  label: z.string().optional(),
+  from: z.number().optional(),
+  to: z.number().optional(),
+});
+
+export const QueryDimension = z.object({
+  field: z.string(),
+  /** Set when `field` is a date: rows are grouped by this period. */
+  bucket: DateBucket.optional(),
+  /**
+   * Set when `field` is a number: rows are grouped into these bands, in this
+   * order ("age group" over `age`), and a value in none of them is left out.
+   * Without it a number groups by its every distinct value — an age × gender
+   * heatmap had no way to say 18–30 (h7gmi93x).
+   */
+  ranges: z.array(QueryRange).min(1).max(24).optional(),
+});
+
+/**
+ * Measures by dimensions — the query every analytic reads.
+ *
+ * One row per combination of dimension values, one column per measure: a
+ * status breakdown is one dimension and one measure, revenue by month split by
+ * region is two dimensions, a scatter is one dimension and two measures, a KPI
+ * is no dimension at all. The Data Engine resolves it as one GROUP BY, scoped
+ * to the reader's rows like every other read.
+ */
+export const QuerySource = z.object({
+  op: z.literal("query"),
+  entity: EntityId,
+  measures: z.array(QueryMeasure).min(1),
+  /** At most two: the axis, and the split (series, stack or heatmap row). */
+  dimensions: z.array(QueryDimension).max(2).default([]),
+  filter: z.record(z.string(), z.unknown()).default({}),
+  /** The date column a dashboard's date range narrows. Defaults to the
+   *  bucketed dimension when there is one. */
+  timeField: z.string().optional(),
+  /** A measure key or a dimension field; the default is chronological for a
+   *  bucketed axis and the first measure, largest first, otherwise. */
+  sort: z.object({
+    by: z.string(),
+    order: z.enum(["asc", "desc"]).default("desc"),
+  }).optional(),
+  /** Top-N. */
+  limit: z.number().int().positive().max(1000).optional(),
+});
+
 export const DataSource = z.discriminatedUnion("op", [
   ListSource,
   SingleSource,
   AggregateSource,
   SeriesSource,
+  QuerySource,
 ]);
+
+/** How a chart widget draws its query. The encoding is the query's own shape:
+ *  the first dimension is the axis (or the slice, the node, the heatmap
+ *  column, the map's country, where a graph's link starts), the second the
+ *  split (or the heatmap row, where a graph's link ends), the measures the
+ *  values. */
+export const ChartMark = z.enum([
+  "bar", "line", "area", "pie", "donut", "funnel", "radar",
+  "scatter", "heatmap", "treemap", "sunburst", "graph", "map",
+]);
+
+export const ChartSpec = z.object({
+  mark: ChartMark,
+  /** Bar/area with a split dimension or several measures: stack them. */
+  stacked: z.boolean().optional(),
+  /** Bars run left to right — a ranking with long category names. */
+  horizontal: z.boolean().optional(),
+});
 
 export const WidgetKind = z.enum([
   "metric", "chart", "list", "table", "feed", "gauge", "text",
@@ -899,18 +1349,59 @@ export const Widget = z.object({
   kind: WidgetKind,
   label: z.string(),
   /**
+   * The handle a page reads it by: `widgets.<key>` in the generated SDK,
+   * `runWidget(widgets.<key>)` in `load.ts`. Derived from the label once,
+   * when the widget is created, and kept from then on. It used to be
+   * recomputed at every projection, numbering label collisions in document
+   * order — so adding, retiring or reordering one widget renumbered its
+   * neighbours (`vaccinationHistory3` became `vaccinationHistory2`) and
+   * every page written against the old handle stopped type-checking
+   * (nlwtcyz5, 22 errors across six pages). A valid identifier, unique
+   * among the application's live widgets. Optional only because rows
+   * written before it existed have none; those read as the old derivation
+   * until a write stamps them.
+   */
+  key: z.string().regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/).optional(),
+  /**
    * Required, deliberately. `widget_data_source_guard` existed to rebind
    * hardcoded stat and list widgets to real sources; a widget that cannot be
    * written without a source has nothing to rebind.
    */
   dataSource: DataSource,
   unit: DisplayUnit.default("number"),
+  /** What the reader learns from it, in a sentence — the card's subtitle. */
+  description: z.string().optional(),
+  /** Required on a `chart` widget: how its data is drawn. */
+  chart: ChartSpec.optional(),
+  /** How much of the page's width it takes. */
+  size: z.enum(["sm", "md", "lg", "full"]).optional(),
+  /** Its position among the page's widgets, lowest first. */
+  order: z.number().int().optional(),
   ...artifactBase,
 });
 
 // ===========================================================================
 // §11 · data — entities, relationships, constraints
 // ===========================================================================
+
+/**
+ * A field that holds the embedding of another field on the same record, so
+ * records can be found by what they look like or mean rather than by the
+ * words they contain.
+ *
+ * `of` names the source: an `image` field (a stored file id) or a text field.
+ * The platform fills the vector whenever the source is written, through
+ * whichever path wrote it (a form, a workflow, an import), and an
+ * `op: "similar"` page source ranks records by distance to a query image or
+ * query text.
+ *
+ * There are no dimensions here on purpose. How long the vector is depends on
+ * the embedding model the platform runs, not on the application, so a
+ * Blueprint cannot be asked for a number it has no way to know.
+ */
+export const FieldEmbedding = z.object({
+  of: z.string().min(1),
+});
 
 export const Field = z.object({
   name: z.string(),
@@ -937,6 +1428,21 @@ export const Field = z.object({
    * all currently guess at too.
    */
   references: EntityId.optional(),
+  /**
+   * The range a number is bounded to, when the request or the domain fixes
+   * one — a rating 1–5, a percentage 0–100. A rating written as a bare
+   * integer was seeded 3…24 and a page showed "average rating 13.5 / 5".
+   */
+  min: z.number().optional(),
+  max: z.number().optional(),
+  /**
+   * Six to eight realistic values of a field people read — a book's title, a
+   * clinic's name — so sample and demo data speak the application's language.
+   * A reading list was reviewed full of books called "Quarterly review 1".
+   */
+  examples: z.array(z.string()).max(8).optional(),
+  /** Declared on a `type: "vector"` field; see FieldEmbedding. */
+  embedding: FieldEmbedding.optional(),
   description: z.string().default(""),
 });
 
@@ -948,6 +1454,15 @@ export const Entity = z.object({
   fields: z.array(Field).default([]),
   /** Field used as the human label in pickers, FK columns and breadcrumbs. */
   labelField: z.string().optional(),
+  /**
+   * THE PERSON BEHIND A LOGIN. Each row of this entity IS a signed-in
+   * person: its `id` is their account's id, so `$user.id` names their row in
+   * every workflow and every foreign key, and signup creates the row with
+   * the account. Without it a Tool Share member signed up with a login and
+   * no Member, filled a separate public "Create Profile" form that belonged
+   * to nobody, and their KYC could not be found. At most one entity.
+   */
+  account: z.boolean().optional(),
   ...artifactBase,
 });
 
@@ -967,10 +1482,56 @@ export const Constraint = z.object({
   description: z.string().default(""),
 });
 
+/** One column of a spreadsheet, bound to one declared field of the entity. */
+export const ImportedColumn = z.object({
+  /** The column heading as the owner's file spells it. */
+  column: z.string(),
+  /** The declared field it was loaded into. Never a field that does not exist. */
+  field: z.string(),
+});
+
+/**
+ * A spreadsheet the owner loaded into their own application.
+ *
+ * THE ROWS ARE NOT HERE. They are the business's records; they live in the
+ * generated app's database, written by its own seeder from
+ * `src/db/imports/<id>.json`. What the Blueprint keeps is that the import
+ * HAPPENED, and under which mapping — because three producers need that fact
+ * and none of them need the data: the seed stops fabricating demo rows for an
+ * entity that now holds real ones, Smith can say what has been loaded and
+ * refuse the same file twice, and a change that leaves no trace in the
+ * Blueprint is invisible to everything else that reads it.
+ *
+ * `id` is the content hash of the file, so the same spreadsheet attached
+ * twice is the same import rather than a second copy of every row.
+ */
+export const DataImport = z.object({
+  id: z.string(),
+  entity: EntityId,
+  /** The table the rows were inserted into — what the payload file names. */
+  table: z.string(),
+  /** The file's own name, as the owner sees it in the conversation. */
+  source: z.string(),
+  /** Rows that satisfied every declared field they touch. */
+  rowCount: z.number().int().nonnegative().default(0),
+  /** Rows the import left out, and why is in the conversation, not here. */
+  rejectedCount: z.number().int().nonnegative().default(0),
+  columns: z.array(ImportedColumn).default([]),
+  /**
+   * Columns deliberately left out, by name. A column with no field is a
+   * REFUSAL, not a silent drop — this records only the ones the owner then
+   * said to import without.
+   */
+  ignoredColumns: z.array(z.string()).default([]),
+  importedAt: z.string().default(""),
+});
+
 export const DataModel = z.object({
   entities: z.array(Entity).default([]),
   relationships: z.array(Relationship).default([]),
   constraints: z.array(Constraint).default([]),
+  /** Spreadsheets loaded into the application's own database (§11). */
+  imports: z.array(DataImport).default([]),
 });
 
 // ===========================================================================
@@ -1041,6 +1602,18 @@ export const WorkflowStep = z.object({
           z.union([z.string(), z.number(), z.boolean(), z.null()]),
         )
         .optional(),
+      /**
+       * On an `end`: the run stopped WITHOUT doing what it was asked — a
+       * validation branch. Reported to the caller as a failure carrying
+       * `message`. Both ends of a validate-then-save workflow used to complete
+       * alike, so an empty form was told "Record added successfully."
+       * (h7gmi93x). Not `outcome`: agents already write that as a free label
+       * (`not_found`, `created`, an approval's `rejected`), which is theirs.
+       */
+      refused: z.boolean().optional(),
+      /** On a refused `end`: the sentence the person is shown. Also a
+       *  notification's text on `send_notification`. */
+      message: z.string().optional(),
     })
     .catchall(z.unknown())
     .default({}),
@@ -1102,6 +1675,18 @@ export const RuleAction = z.object({
   workflow: WorkflowId.optional(),
 });
 
+/**
+ * What satisfies a prerequisite: a row of `entity` belonging to the acting
+ * account (`account` names its field that holds the account's id), matching
+ * every `where` value — "a KycVerification of this member with status
+ * approved".
+ */
+export const PrerequisiteRequirement = z.object({
+  entity: EntityId,
+  account: z.string(),
+  where: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
+});
+
 export const BusinessRule = z.object({
   id: RuleId,
   name: z.string(),
@@ -1118,8 +1703,23 @@ export const BusinessRule = z.object({
    * rule the agent authored fires on the form exactly as one a person
    * authored. A rule with only a statement is prose; it constrains people,
    * not forms.
+   *
+   * `kind: "prerequisite"`: a person must have done something before they may
+   * run `gates` — verified their identity, been approved, paid. Tool Share's
+   * "KYC approval required for listing and borrowing" was a statement, prose
+   * nothing enforced, and anyone could list and borrow. A prerequisite is
+   * enforced: every gated workflow starts by checking `requires` and refuses
+   * with `message` when it is not met.
    */
-  kind: z.enum(["statement", "condition_action"]).default("statement"),
+  kind: z.enum(["statement", "condition_action", "prerequisite"]).default("statement"),
+  /** On a prerequisite: the workflows it gates. */
+  gates: z.array(WorkflowId).default([]),
+  /** On a prerequisite: the record that satisfies it. */
+  requires: PrerequisiteRequirement.optional(),
+  /** On a prerequisite: what the person is told when it is not met. */
+  message: z.string().optional(),
+  /** On a prerequisite: the page where it is done — where a new account is sent first. */
+  page: PageId.optional(),
   entity: EntityId.optional(),
   when: z.string().optional(),
   then: z.array(RuleAction).default([]),
@@ -1151,6 +1751,20 @@ export const Integration = z.object({
   provider: z.string().default(""),
   /** Names only. §42/§99 — raw credentials never live in the Blueprint. */
   secretRefs: z.array(z.string()).default([]),
+  /**
+   * The workflow action type this integration SERVES — `send_email` for
+   * outbound mail — or "" when it serves none.
+   *
+   * WHY A DECLARATION AND NOT AN INFERENCE. A row with `kind: "email"` used to
+   * be the whole record, and nothing downstream could tell a service the
+   * runtime can actually talk to from a note left for a developer: both read
+   * as "email", and an owner who asked for a confirmation email got a
+   * declaration and an app that silently sent nothing. `serves` names the
+   * runtime capability, so the projection can write the binding into the app
+   * (`src/lib/integrations/connected.ts`) and the step that sends can say
+   * which service it is sending through — or that none is connected.
+   */
+  serves: z.string().default(""),
   ...artifactBase,
 });
 
@@ -1240,6 +1854,14 @@ export const Security = z.object({
     .enum(["none", "email_password", "sso", "oauth", "magic_link"])
     .default("email_password"),
   rbac: z.boolean().default(true),
+  /**
+   * The role a person who creates their own account gets. Signup used to
+   * give none, so a self-registered person held the platform's fallback
+   * "user", which no page or workflow of the application names — and every
+   * workflow gated by role refused them. When absent and the application
+   * has exactly one role, that role.
+   */
+  signupRole: RoleId.optional(),
   /**
    * A string states policy and enforces nothing; a {@link RecordScopeRule}
    * is enforced. An entity with no rule is readable by every authenticated
@@ -1412,8 +2034,55 @@ export const DesignSource = z.object({
     .optional(),
 });
 
+/**
+ * §47 — the owner's own mark, as a file the generated application carries.
+ *
+ * A logo already reached the platform and was already read: `/api/brand/extract/logo`
+ * derives the palette from one and then drops the image. So "put our brand colours,
+ * the green from our logo" worked and "put our logo in the corner" had nowhere to
+ * land — there was no field to write, and the owner's phrasebook closed on
+ * "colours and type can change; no image can be supplied".
+ *
+ * `file` is a path RELATIVE TO THE PROJECT'S OUTPUT DIRECTORY — beside the
+ * Blueprint itself, not an attachment id and not an absolute path. An attachment is
+ * a chat artifact and may be swept; the mark is part of what the application IS, and
+ * has to survive a rebuild that reads nothing but this document. The projection
+ * copies it into the generated tree's `public/`, and the shell renders it where the
+ * application's name is.
+ */
+export const BrandLogo = z.object({
+  file: z.string().min(1),
+  /** What is read aloud in place of the image. Defaults to the application's name. */
+  alt: z.string().default(""),
+  mediaType: z.string().default("image/png"),
+  /**
+   * Intrinsic pixel size, when the image could be measured. The shell scales the
+   * mark to the height it has, and uses the ratio to keep a wide wordmark from
+   * being squared off; absent, it falls back to a square box.
+   */
+  width: z.number().int().positive().optional(),
+  height: z.number().int().positive().optional(),
+});
+
 export const DesignSystem = z.object({
   visualPersonality: z.string().default(""),
+  /**
+   * The products this application should look and feel as good as — chosen
+   * for ITS domain and audience, each with what to take from it. Every page
+   * was written to "the best modern SaaS products — Linear, Stripe, Notion,
+   * Vercel" and judged against them, so a street-food menu and a fashion app
+   * came out as developer dashboards (2026-10-02). The page writer and the
+   * page reviewer hold each page to these instead.
+   */
+  references: z
+    .array(z.object({ product: z.string(), takeaway: z.string() }))
+    .describe(
+      "Two to four real, well-known products in THIS application's own field and for its "
+      + "audience whose experience it should match, each with the one thing to take from it "
+      + "(a layout idea, a way of presenting the main record, a tone). Not developer tools "
+      + "unless this is one.",
+    )
+    .default([]),
   colors: z.record(z.string(), z.string()).default({}),
   typography: z.record(z.string(), z.string()).default({}),
   spacing: z.record(z.string(), z.string()).default({}),
@@ -1421,6 +2090,49 @@ export const DesignSystem = z.object({
   borders: z.record(z.string(), z.string()).default({}),
   elevation: z.record(z.string(), z.string()).default({}),
   navigationApproach: z.string().default(""),
+  /**
+   * The photographs the application uses, by the job each does: the sign-in
+   * page's brand panel (`auth`), the band that leads a dashboard (`hero`), an
+   * illustrated empty state (`empty`). The design agent writes the `query` and
+   * `alt`; the `imagery` service node fills `url`, `thumbUrl` and `credit` from
+   * Unsplash when the platform has a key, and pages fall back to the brand
+   * gradient when it has not. `credit` is shown beside the picture — the
+   * licence asks for it.
+   */
+  imagery: z
+    .array(
+      z.object({
+        role: z.enum(["auth", "hero", "empty"]),
+        query: z.string().min(1),
+        alt: z.string().default(""),
+        url: z.string().default(""),
+        thumbUrl: z.string().default(""),
+        credit: z.object({ name: z.string(), link: z.string() }).optional(),
+      }),
+    )
+    .default([]),
+  /**
+   * The application's frame, decided with the rest of the look: how the
+   * navigation is built (`chrome`) and how the sign-in screen is composed
+   * (`auth`). Every generated app shipped the same hover-expand rail and the
+   * same split sign-in because nothing carried this decision to the shell,
+   * which has six of each. Derived from `navigationApproach` and the
+   * personality when the design does not state it.
+   */
+  shell: z
+    .object({
+      chrome: z.enum(["standard-rail", "wide-rail", "icon-rail", "floating-rail", "right-rail", "topbar", "dock"]),
+      auth: z.enum(["split-editorial", "split-reversed", "side-panel", "centered-minimal", "brand-wash", "top-anchored"]),
+      /**
+       * What the navigation is painted with: `dark` (the design's inverse
+       * surface), `brand` (the primary colour), `light` (a card beside the
+       * page), `tinted` (the ground washed with the primary). Every rail was
+       * the inverse surface — the one navy rail on a warm pediatric app and a
+       * stark tool alike. Derived from the personality when not stated.
+       */
+      tone: z.enum(["dark", "brand", "light", "tinted"]).optional(),
+    })
+    .optional(),
   informationDensity: z.enum(["compact", "comfortable", "spacious"]).default("comfortable"),
   responsiveRules: z.array(z.string()).default([]),
   accessibilityRules: z.array(z.string()).default([]),
@@ -1435,6 +2147,12 @@ export const DesignSystem = z.object({
    * ground was the ground and not a guess.
    */
   paletteEvidence: z.record(z.string(), z.number()).optional(),
+  /**
+   * The owner's logo, when they supplied one. Absent is the normal case: an
+   * application built from a description has no mark, and the shell shows the
+   * application's initial rather than an empty box.
+   */
+  logo: BrandLogo.optional(),
 });
 
 // ===========================================================================
@@ -1452,6 +2170,12 @@ export const Requirement = z.object({
   acceptanceCriteria: z.array(z.string()).default([]),
   /** Recorded when confidence sat in the 0.70–0.90 band (§17). */
   assumption: z.string().optional(),
+  /**
+   * The capability area this requirement belongs to, in the product's own
+   * words ("Booking", "Clinic admin"). The requirements review groups by it,
+   * so a person reads fourteen requirements as six things the app does.
+   */
+  area: z.string().optional(),
   /**
    * The Blueprint section that SATISFIES this requirement — a `SECTION_OWNER`
    * key (`designSystem`, `security`, `pageLayouts`, `workflows`, …). A global
@@ -1607,6 +2331,15 @@ export const Runtime = z.object({
    */
   placeholders: z.array(z.string()).optional(),
   /**
+   * What the build proved wrong and could not repair (`build_repair`): a
+   * control that would refuse its first click, a table or demo row the
+   * database refused. The app ships with these said, rather than the run
+   * ending with nothing.
+   */
+  issues: z.array(z.record(z.string(), z.unknown())).optional(),
+  /** The throwaway-database check at the build (`data_gate`): ok, skipped, rebuilt, push, seed. */
+  database: z.record(z.string(), z.unknown()).optional(),
+  /**
    * Planned pages against pages the application actually serves (§72).
    *
    * A run that plans N pages and ships fewer reports success: composition
@@ -1623,6 +2356,43 @@ export const Runtime = z.object({
       missing: z.array(z.string()).default([]),
       status: z.enum(["complete", "short"]),
     })
+    .optional(),
+  /**
+   * Whether the assembled application actually started, and what it served.
+   *
+   * THE THIRD TIME THIS OMISSION HAS SHIPPED. `build` and `placeholders` above
+   * both record the same failure: the assemble node wrote a field this
+   * contract did not declare, `additionalProperties: false` refused it, and
+   * every generated application became unmodifiable on its next `save()`.
+   * The boot check wrote `boot` on 2026-09-17 without declaring it first, and
+   * it reached UAT that way — caught by the regression suite scanning a fresh
+   * build's Blueprint, after the cutover, not before it.
+   *
+   * `status` is the entry route's HTTP status. A boot that fails raises and is
+   * never recorded here, so a present `boot` always means the app served.
+   */
+  boot: z
+    .object({
+      entry: z.string(),
+      port: z.number().optional(),
+      status: z.number(),
+      seconds: z.number().optional(),
+    })
+    .optional(),
+  /**
+   * What the page reviewer found, per page id: its score each time it was
+   * looked at, whether it passed, and whether it was rewritten. Written by the
+   * `page_review` node (declared before its producer, so the first review
+   * never meets `additionalProperties: false`).
+   */
+  pageReview: z
+    .record(
+      z.object({
+        scores: z.array(z.number().nullable()).default([]),
+        passed: z.boolean().nullable().optional(),
+        rewritten: z.boolean().nullable().optional(),
+      }),
+    )
     .optional(),
 });
 
@@ -1754,6 +2524,11 @@ export const Blueprint = z.object({
   /** §34 — the whole app sketched once: per-page skeletons and the
    *  conventions every page inherits. Authored by A2UI before any page is. */
   composition: Composition.default({}),
+  /** §34 — pages written as React against the library and the typed SDK.
+   *  Takes precedence over the page's `pageLayouts` tree when both exist. */
+  pageCode: z.array(PageCode).default([]),
+  /** The frame files this application owns (see `FrameCode`). */
+  frameCode: z.array(FrameCode).default([]),
 
   requirements: z.array(Requirement).default([]),
   completeness: Completeness.default({}),
@@ -1780,8 +2555,13 @@ export type Entity = z.infer<typeof Entity>;
 export type Workflow = z.infer<typeof Workflow>;
 export type Widget = z.infer<typeof Widget>;
 export type DataSource = z.infer<typeof DataSource>;
+export type QuerySource = z.infer<typeof QuerySource>;
+export type ChartSpec = z.infer<typeof ChartSpec>;
 export type PatternTemplate = z.infer<typeof PatternTemplate>;
 export type PageLayout = z.infer<typeof PageLayout>;
+export type ClientStateValue = z.infer<typeof ClientStateValue>;
+export type ClientAction = z.infer<typeof ClientAction>;
+export type ClientActions = z.infer<typeof ClientActions>;
 export type SectionSketch = z.infer<typeof SectionSketch>;
 export type PageSketch = z.infer<typeof PageSketch>;
 export type Composition = z.infer<typeof Composition>;

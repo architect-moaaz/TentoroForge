@@ -124,7 +124,7 @@ def test_an_agent_sees_only_what_it_may_read(svc):
 
 
 def test_context_always_carries_application_identity(svc):
-    for agent in ("page_design", "data_model", "testing"):
+    for agent in ("page_design", "data_model", "security"):
         assert "application" in context_for(svc.doc, agent)
 
 
@@ -338,8 +338,8 @@ def kimi() -> "OpenAICompatibleModel":
 def test_router_sends_each_node_to_its_assigned_model():
     from services.blueprint.executors import AnthropicModel, ModelRouter
 
-    router = ModelRouter(default=AnthropicModel(), by_node={"testing": kimi()})
-    assert router.for_task("testing", "testing").model == "kimi-k2-0711-preview"
+    router = ModelRouter(default=AnthropicModel(), by_node={"integrations": kimi()})
+    assert router.for_task("integrations", "integration").model == "kimi-k2-0711-preview"
     assert router.for_task("data_model", "data_model").model == DEFAULT_MODEL
 
 
@@ -354,17 +354,17 @@ def test_node_assignment_beats_agent_assignment():
     from services.blueprint.executors import AnthropicModel, ModelRouter
 
     k = kimi()
-    router = ModelRouter(default=AnthropicModel(), by_node={"testing": k},
-                         by_agent={"testing": AnthropicModel()})
-    assert router.for_task("testing", "testing") is k
+    router = ModelRouter(default=AnthropicModel(), by_node={"integrations": k},
+                         by_agent={"integration": AnthropicModel()})
+    assert router.for_task("integrations", "integration") is k
 
 
 def test_assignments_report_what_runs_where():
     from services.blueprint.executors import AnthropicModel, ModelRouter
 
-    router = ModelRouter(default=AnthropicModel(), by_node={"testing": kimi()})
+    router = ModelRouter(default=AnthropicModel(), by_node={"integrations": kimi()})
     a = router.assignments()
-    assert a["testing"] == "kimi-k2-0711-preview"
+    assert a["integrations"] == "kimi-k2-0711-preview"
     assert a["data_model"] == DEFAULT_MODEL
     assert set(a) == set(DAG), "every node must have a declared model"
 
@@ -372,8 +372,8 @@ def test_assignments_report_what_runs_where():
 def test_a_transport_that_cannot_enforce_the_schema_gets_it_in_the_prompt(svc):
     """Kimi's JSON mode guarantees valid JSON, not our envelope. The constraint
     has to be stated somewhere, so it moves into the system prompt."""
-    enforced, _ = build_prompt(svc.doc, "testing", inline_schema=False)
-    stated, _ = build_prompt(svc.doc, "testing", inline_schema=True)
+    enforced, _ = build_prompt(svc.doc, "integrations", inline_schema=False)
+    stated, _ = build_prompt(svc.doc, "integrations", inline_schema=True)
     marker = "Your reply must be a single JSON object"
     assert marker in stated and "natural_key" in stated
     assert marker not in enforced, "Claude's transport enforces it; don't pay the tokens"
@@ -395,11 +395,11 @@ def test_the_executor_picks_the_prompt_form_from_the_clients_capability(svc):
         return Spy()
 
     router = ModelRouter(
-        default=spy("claude", True), by_node={"testing": spy("kimi", False)}
+        default=spy("claude", True), by_node={"integrations": spy("kimi", False)}
     )
     ex = make_executor(svc, router)
     ex(TaskSpec("T-1", "page_contracts", "page_design"))
-    ex(TaskSpec("T-2", "testing", "testing"))
+    ex(TaskSpec("T-2", "integrations", "integration"))
 
     marker = "Your reply must be a single JSON object"
     assert marker not in seen["claude"], "schema-enforcing transport: no inline envelope"
@@ -513,13 +513,13 @@ def test_a_run_can_mix_anthropic_gemini_and_an_openai_compatible_provider(svc):
     router = ModelRouter(
         default=AnthropicModel(),
         by_node={
-            "testing": provider("moonshot", "kimi-k2-0711-preview"),
+            "integrations": provider("moonshot", "kimi-k2-0711-preview"),
             "business_rules": GeminiModel(),
         },
     )
     a = router.assignments()
     assert a["data_model"] == DEFAULT_MODEL
-    assert a["testing"] == "kimi-k2-0711-preview"
+    assert a["integrations"] == "kimi-k2-0711-preview"
     assert a["business_rules"] == "gemini-2.5-pro"
     assert len(set(a.values())) >= 3
 
@@ -537,7 +537,7 @@ def test_prompt_form_follows_each_providers_capability(svc):
         (provider("moonshot", "kimi-k2-0711-preview"), True),
     ):
         system, _ = build_prompt(
-            svc.doc, "testing",
+            svc.doc, "integrations",
             inline_schema=not client.enforces_schema,
         )
         marker = "Your reply must be a single JSON object"
@@ -820,7 +820,12 @@ def test_large_max_tokens_uses_streaming():
     from services.blueprint.executors import AnthropicModel
 
     src = inspect.getsource(AnthropicModel.__call__)
-    assert "messages.stream" in src and "get_final_message" in src
+    assert "messages.stream" in src
+    # The SDK's own assembled message still comes back — `_drain` reads the
+    # events on the way past (forwarding thinking, and giving up on a reply
+    # that is all thinking) rather than rebuilding a reply out of deltas.
+    assert "self._drain(stream)" in src
+    assert "get_final_message" in inspect.getsource(AnthropicModel._drain)
 
 
 def test_unfillable_fields_are_withheld_from_agents():
@@ -852,7 +857,7 @@ def test_unfillable_fields_are_withheld_from_agents():
         f"{offenders} are prompted through build_prompt and can now author "
         "decisions — stop withholding the field for them")
 
-    for agent in ("api", "data_model", "page_design", "workflow", "testing"):
+    for agent in ("api", "data_model", "page_design", "workflow", "security"):
         for section, shape in writable_shapes(agent).items():
             if "properties" not in shape:
                 continue
@@ -1011,8 +1016,8 @@ def test_the_page_authoring_prefix_is_identical_across_subjects():
         ],
         "data": {"entities": []},
     }
-    first, _ = build_prompt(doc, "page_layouts", subject="PAGE-001")
-    second, _ = build_prompt(doc, "page_layouts", subject="PAGE-002")
+    first, _ = build_prompt(doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
+    second, _ = build_prompt(doc, "page_layouts", subject="PAGE-002", agent="a2ui_pages")
     assert first == second
 
 
@@ -1035,7 +1040,7 @@ def test_an_agent_sees_provenance_only_for_what_it_owns():
     owner = context_for(doc, "requirement")
     assert "evidence" in owner["requirements"][0]
 
-    consumer = context_for(doc, "testing")
+    consumer = context_for(doc, "security")
     assert "evidence" not in consumer["requirements"][0]
     assert consumer["requirements"][0]["description"] == "d"
     assert "syncNote" not in consumer["pages"][0]
@@ -1058,7 +1063,7 @@ def test_effort_is_tiered_per_node_and_the_load_bearing_nodes_stay_high():
                  "page_contracts", "business_rules", "security", "workflows",
                  "page_layouts"):
         assert r.for_task(node, "x").effort == "high", node
-    assert r.for_task("testing", "x").effort == "medium"
+    assert r.for_task("ux_architecture", "x").effort == "medium"
     assert r.for_task("integrations", "x").effort == "low"
 
 
@@ -1122,11 +1127,10 @@ def test_the_montage_leads_and_the_page_brief_follows(tmp_path):
     class _Client:
         class messages:
             @staticmethod
-            def create(**kw):
+            def stream(**kw):          # every call streams (2026-09-22)
                 sent.update(kw)
                 raise RuntimeError("stop after capture")
 
-    # Small max_tokens keeps this on the non-streaming path.
     model = AnthropicModel(_client=_Client(), max_tokens=1000)
     try:
         model(system="s", user="author PAGE-003", schema={}, image=p)
@@ -1145,7 +1149,7 @@ def test_without_a_montage_the_message_is_unchanged(tmp_path):
     class _Client:
         class messages:
             @staticmethod
-            def create(**kw):
+            def stream(**kw):
                 sent.update(kw)
                 raise RuntimeError("stop")
 
@@ -1165,7 +1169,7 @@ def test_the_authoring_prompt_asks_for_the_empty_state_to_carry_its_action():
     doc = {"pages": [{"id": "PAGE-001", "route": "/customers",
                       "purpose": "p", "pattern": "entity_list"}],
            "data": {"entities": []}}
-    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
     assert "EmptyState.action" in user
     assert "not as a Button beside it" in user
 
@@ -1178,7 +1182,7 @@ def test_the_authoring_prompt_forbids_a_loading_state():
     doc = {"pages": [{"id": "PAGE-001", "route": "/customers",
                       "purpose": "p", "pattern": "entity_list"}],
            "data": {"entities": []}}
-    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
     assert "loading or skeleton" in user
     assert "gated for you" in user
 
@@ -1466,7 +1470,7 @@ def test_database_is_tuned_but_the_deciding_nodes_are_not():
     from services.blueprint.executors import tiered_router
 
     r = tiered_router()
-    assert r.for_task("database", "x").effort == "medium"
+    assert r.for_task("design_system", "x").effort == "medium"
     for node in ("security", "workflows", "business_rules", "data_model"):
         assert r.for_task(node, "x").effort == "high", node
 
@@ -1500,8 +1504,8 @@ def test_the_design_language_rides_in_the_cached_prefix():
         "data": {"entities": []},
         "requirements": [],
     }
-    s1, u1 = build_prompt(doc, "page_layouts", subject="PAGE-001")
-    s2, u2 = build_prompt(doc, "page_layouts", subject="PAGE-002")
+    s1, u1 = build_prompt(doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
+    s2, u2 = build_prompt(doc, "page_layouts", subject="PAGE-002", agent="a2ui_pages")
 
     # Identical prefix, or every page writes a new cache entry instead of
     # reading the last one — which is what an 18% hit rate looked like.
@@ -1527,7 +1531,7 @@ def test_the_page_brief_still_carries_what_is_per_page():
         "data": {"entities": []},
         "requirements": [],
     }
-    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001")
+    _, user = build_prompt(doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
     assert "PAGE-001" in user
     assert "/sessions" in user
 
@@ -1584,19 +1588,23 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
                                               MAX_TOKENS_BY_NODE, tiered_router)
 
     r = tiered_router()
-    for node in ("database", "security"):
+    for node in ("page_contracts", "security"):
         assert r.for_task(node, "x").max_tokens == 64000, node
     # The declarations are what remain of the calls that hit 32k writing
     # every field, every step and every contract; those are authored one
     # entity, one workflow and one feature per call inside the default.
-    for node in ("data_model", "workflows", "page_contracts"):
+    for node in ("data_model", "workflows"):
         assert r.for_task(node, "x").max_tokens == 32000, node
+    # The page set grows with the application: on UAT a 23-entity app spent
+    # the whole 32,000 reasoning over 24 slots and wrote no page at all.
+    assert r.for_task("page_contracts", "x").max_tokens == 64000
     for node in ("requirements", "ux_architecture", "integrations",
-                 "page_layouts", "design_system", "testing", "workflow_steps",
+                 "page_layouts", "design_system", "workflow_steps",
                  "page_details", "entity_fields"):
         assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
     assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
-                                       "database", "security", "workflows"}
+                                       "security", "workflows",
+                                       "page_code"}   # a page's two whole files
 
 
 def test_raising_the_ceiling_did_not_disturb_effort():
@@ -1608,8 +1616,6 @@ def test_raising_the_ceiling_did_not_disturb_effort():
     # tuned for tokens only — effort must stay at the default
     assert r.for_task("workflows", "x").effort == "high"
     assert r.for_task("security", "x").effort == "high"
-    # tuned for both
-    assert r.for_task("database", "x").effort == "medium"
     # tuned for effort only — ceiling must stay default
     assert r.for_task("integrations", "x").effort == "low"
     assert r.for_task("ux_architecture", "x").effort == "medium"
@@ -1702,8 +1708,13 @@ def test_the_authors_reply_updates_the_declared_row_whatever_it_called_it(tmp_pa
     assert result.proposals[0].natural_key == "Open a Case"
     assert body["id"] == wid and body["name"] == "Open a Case"
     assert body["trigger"] == {"kind": "manual"}, "the trigger is declared, not authored"
-    assert [i["name"] for i in body["inputs"]] == ["title"], (
-        "inputs are declared: the pages were composed against them")
+    # The declared inputs are kept as declared and first; an input the author
+    # ADDS survives. `page_layouts` composes the forms after this node, and
+    # the page check requires a form to collect every input a step writes —
+    # while discarding it made "declare it as an input" a refusal no author
+    # could answer (a dental app's Book Appointment shipped with no steps).
+    assert [i["name"] for i in body["inputs"]] == ["title", "priority"], (
+        "declared inputs first and unchanged, the author's addition kept")
     assert body["steps"]
 
     applied = apply_agent_result(svc, result, commit=False, user_request="")
@@ -1931,21 +1942,13 @@ def _page(pid="PAGE-001", route="/candidates"):
             "pattern": "entity_list", "data": {"primaryEntity": "ENTITY-001"}}
 
 
-def test_the_composition_prompt_is_the_whole_app_with_names_only(svc):
-    svc.doc["pages"] = [_page(), _page("PAGE-002", "/roles")]
-    system, user = build_prompt(svc.doc, "composition")
-    assert "Name components from this list only" in system
-    assert "props:" not in system, "the index carries names, not signatures"
-    assert '"PAGE-001"' in user and '"PAGE-002"' in user
-    assert 'natural_key "composition"' in user
-
-
 def test_the_page_composer_inherits_the_apps_conventions(svc):
     """A page authored bespoke used to re-decide the header, the filters, the
-    empty state. Now the app decided them once, and the composer is told —
-    in the cached prefix, since the decisions are the app's, not the page's."""
+    empty state. An app composed before the build stopped sketching carries
+    its decisions, and Smith's composer is still told them — in the cached
+    prefix, since the decisions are the app's, not the page's."""
     svc.doc["pages"] = [_page(), _page("PAGE-002", "/roles")]
-    before, plain_user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001")
+    before, plain_user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
     svc.doc["composition"] = {
         "vision": "Calm and dense",
         "conventions": [{"topic": "header", "rule": "Title left, action right"}],
@@ -1954,9 +1957,9 @@ def test_the_page_composer_inherits_the_apps_conventions(svc):
                   {"page": "PAGE-002", "layout": "single_column",
                    "sections": [{"name": "List", "purpose": "scan"}]}],
     }
-    system, user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001")
+    system, user = build_prompt(svc.doc, "page_layouts", subject="PAGE-001", agent="a2ui_pages")
     assert "Calm and dense" not in before
     assert "Calm and dense" in system and "Title left, action right" in system
     assert "composition.sketch" in user and "composition.sketch" not in plain_user
-    other, _ = build_prompt(svc.doc, "page_layouts", subject="PAGE-002")
+    other, _ = build_prompt(svc.doc, "page_layouts", subject="PAGE-002", agent="a2ui_pages")
     assert other == system, "the prefix must stay identical across the fan-out"

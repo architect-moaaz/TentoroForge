@@ -24,12 +24,18 @@ from __future__ import annotations
 
 #: verb -> the fields a turn must carry to be actionable.
 #:
-#: `rename` keeps exactly what it always required. The others ask for what
-#: their own machinery needs and nothing more: a composition needs a route, not
-#: a `current_behavior` for a page that does not exist yet.
+#: Each verb asks for what its own machinery needs and nothing more: a
+#: composition needs a route, not a description of a page that does not exist
+#: yet; a rename needs the screen, the text and the new text.
 REQUIRED_BY_VERB: dict[str, set[str]] = {
-    "rename": {"screen", "element_label", "current_behavior",
-               "desired_behavior", "target_file"},
+    # The screen and the control's exact visible text. `new_value` is what to
+    # write and the move derives it when a behaviour was described instead;
+    # a rename with none is a removal, which is `remove`'s job. The old
+    # classifier also demanded `screen`, `current_behavior` and
+    # `desired_behavior` — descriptions, not inputs — and the dispatcher
+    # excused `rename` from the slot gate because of it. Smith v4 holds every
+    # verb to its declared fields, so the declaration is what the edit needs.
+    "rename": {"element_label", "target_file"},
     # A control taken off a screen: the screen and the control's exact visible
     # text. No `new_value` — that is what makes it a removal to the move.
     # Without this verb the model had to express "remove the delete button"
@@ -42,6 +48,15 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # wording. Needs only the change, in the user's words: the design agent
     # re-decides the section against it.
     "restyle": {"change"},
+    # The owner's mark. Nothing is required of the understanding, and that is
+    # the point: the one thing this verb needs is a FILE, and a file is not
+    # something the model can put in a field. It comes from what the person
+    # attached to the turn, which the loop hands to the tool directly.
+    "set_logo": set(),
+    # Its own verb, not a flag on the one above: which of the two this is has
+    # to be read off the sentence by the model. A flag set here from the word
+    # "remove" would be wrong on "remove the old logo and use this one".
+    "remove_logo": set(),
     # Workflows — the business processes. `workflow` is what the new one
     # should do (add) or which existing one is meant (edit/remove); `change`
     # is what should be different about it. `route` may name the screen a
@@ -55,6 +70,20 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Access — roles, permissions, who reaches which screen. One verb: the
     # security agent re-decides the model and a second call the screens.
     "edit_access": {"change"},
+    # THE PEOPLE, not the roles. `edit_access` says what a Ward Manager may
+    # do; these say who Dave is and whether he can get in at all — the moment
+    # an owner hands the application to their team, and previously a dead end
+    # in both directions ("set up logins for my six staff", "reset Dave's
+    # password"). Not a Blueprint change: people are data, not definition.
+    #
+    # `add_login` takes the EMAIL, because that is what identifies an account
+    # and what the person types to sign in; a name alone ("a login for Dave")
+    # is the request without the one fact it needs, so it is asked for. The
+    # other two take `person` — an email, or the name they were added under,
+    # resolved against the roster and refused when it is ambiguous.
+    "add_login": {"email"},
+    "remove_login": {"person"},
+    "reset_login": {"person"},
     # Business rules — what constrains a form or a record.
     "add_rule": {"rule"},
     "edit_rule": {"rule", "change"},
@@ -75,8 +104,24 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "remove_api": {"api"},
     "add_integration": {"integration"},
     "remove_integration": {"integration"},
+    # CONNECTED, NOT JUST WRITTEN DOWN. `add_integration` records a service
+    # and the NAMES of its secrets and changes nothing else — which from the
+    # owner's chair is indistinguishable from an application that is broken:
+    # the "email the customer" step still runs and the customer still hears
+    # nothing. This verb is the ask "make it actually talk to X", and it is
+    # answered one of two ways: outbound email has an adapter and is connected
+    # for real, and everything else is refused with the reason and the nearest
+    # thing that works. `integration` is the service in the user's words —
+    # "our Outlook", "Xero", "our own account" — and never a credential: the
+    # value is set by the owner on the platform, and only its variable NAME is
+    # ever spoken about here (§42).
+    "connect_service": {"integration"},
     "compose_route": {"route"},
     "add_widgets": {"route", "widgets"},
+    # A whole screen retired: the route stops resolving, the entry leaves the
+    # menu, and every link to it comes off the screens that held it. Needs the
+    # route and nothing else — a page is named by where it is.
+    "remove_page": {"route"},
     # A new field on an existing entity's data model. `field` carries at least
     # {name, type}; the column is created nullable via drizzle-kit push, so it
     # is a migration, never a rebuild. Displaying it is a separate edit_page.
@@ -101,18 +146,55 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Undo. Needs nothing: it is always the last change, and asking which one
     # would be asking the person to know what Smith recorded.
     "revert": set(),
+    # The guide the owner hands their staff. Needs nothing: the audiences and
+    # the screens are read off the composed application, not off the ask —
+    # asking who it is for would be asking the owner to list their own roles.
+    "write_guide": set(),
+    # What the application has cost to run. Needs nothing — it is always this
+    # application, and the ledger is read whole. Answers a question that had
+    # no verb at all: "how much has this cost me?" was the last entry on the
+    # owner phrasebook's dead-end list, and every figure it wants has been on
+    # disk the whole time.
+    "spend": set(),
+    # The owner's own data, from the spreadsheet they attached. Needs only
+    # WHICH RECORDS it holds — the file is not a slot, for the same reason
+    # `revert` has none: it is always the one just attached, and an attachment
+    # id is a thing only Smith has seen. First turn describes and waits;
+    # `services.smith.data_import` holds the plan between the two.
+    "import_data": {"entity"},
+    # Their data, back out. NEEDS NOTHING: an entity narrows it to one sheet,
+    # and no entity is the honest reading of "back it up somewhere" — all of
+    # them, in one file. A required slot here would turn a question anybody
+    # can ask into one they have to phrase correctly.
+    "export_data": set(),
+    # THE TWO ASKS THAT NEEDED A SIGNAL, NOT A VERB. "it crashed" and "it's
+    # really slow" were the only entries on the owner's phrasebook whose gap
+    # was not a missing capability: nothing left the running application for
+    # Smith to answer from, so the owner's sentence WAS the whole report.
+    # The application now reports its own failures and its own slow responses
+    # into its incident ledger, and these two read it back. Neither needs a
+    # field — a person saying "it crashed" is telling you they do not know
+    # what crashed, and asking them would be the whole problem again.
+    "explain_crash": set(),
+    "explain_slowness": set(),
+    # A copy of the whole thing — records AND the definition — that the owner
+    # keeps. Needs nothing; there is only ever one application to copy.
+    "back_up": set(),
     # THE ASKS THAT REACH NOTHING, GIVEN SOMEWHERE TO LAND. Each of these is a
     # thing people ask for that Smith genuinely cannot do. Without a verb they
     # were classified as whatever was nearest — "delete the Wards page" as a
     # control removal — or fell to "I did not recognise that", which is true
     # and useless. As verbs they are recognised, answered with the REASON, and
     # offered the nearest thing that does work. They change nothing.
-    "remove_page": {"route"},
     "rename_entity": {"entity", "new_value"},
     "change_field_type": {"entity", "field"},
     "edit_api": {"api"},
     "reorder": {"route"},
     "rebuild": set(),
+    # THE APP AND ITS DEFINITION, BACK IN STEP. Needs nothing: it is always
+    # this application, written out again from what it already says.
+    "sync_app": set(),
+    "refresh_sample_data": {"entity"},
 }
 
 #: What each verb is for, in the words a model should recognise. Shown in the
@@ -128,11 +210,26 @@ VERB_HELP: dict[str, str] = {
         "exact visible text. The screen stops declaring what the control did."
     ),
     "restyle": (
-        "Change how the application LOOKS — theme colour, palette, type, "
-        "density: \"change the theme colour to green\", \"make it darker and "
-        "more compact\". Re-decides the design system against the request; "
-        "every screen picks it up through the tokens. Needs the change in the "
-        "user's words."
+        "Change the application's COLOURS — its palette: \"change the theme "
+        "colour to green\", \"make it darker\", \"warmer colours\". Re-decides "
+        "the colour roles; every screen picks them up through the tokens. "
+        "Colours ONLY: the frame (side rail, top bar, bottom dock, its tone, "
+        "the sign-in layout), the fonts and the density are `write_section` "
+        "on `designSystem`, and the screens' layout is `rewrite_pages` / "
+        "`write_page_code` with `whole`. Needs the change in the user's words."
+    ),
+    "set_logo": (
+        "Put the owner's LOGO in the application: \"put our logo in the "
+        "corner\", \"use this as our logo\", \"here is our brand mark\". "
+        "The image comes from the file attached to the message; there is no "
+        "field for it and none can be invented. It renders in the rail's brand "
+        "block on every screen, where the application's initial otherwise is. "
+        "NOT restyle — that is colour, type and density, and it carries no image."
+    ),
+    "remove_logo": (
+        "Take the owner\'s logo back OUT of the application: \"remove the logo\", "
+        "\"drop our logo\", \"go back to no logo\". The rail shows the "
+        "application\'s initial again. Needs nothing."
     ),
     "edit_navigation": (
         "Change the app's menu: \"put Master Data first\", \"call it Nurse "
@@ -162,6 +259,27 @@ VERB_HELP: dict[str, str] = {
         "delete a nurse\", \"make Master Data admin-only\", \"let anyone open "
         "registration without signing in\". Re-decides roles, permissions and "
         "screen access. Needs the change in the user's words."
+    ),
+    "add_login": (
+        "Give a PERSON a login: \"set up a login for dave@clinic.com\", \"add "
+        "my new receptionist\", \"my six staff need accounts\". The account is "
+        "created with no password and a one-time setup link the person uses to "
+        "choose their own — nobody is ever told someone else's password. Needs "
+        "the email address they will sign in with; their name and the role "
+        "they sign in as are optional. NOT edit_access, which changes what a "
+        "role may do rather than who exists."
+    ),
+    "remove_login": (
+        "Stop a PERSON signing in: \"remove Dave's login\", \"Sarah has left\", "
+        "\"take away dave@clinic.com's access\". The account is deactivated, "
+        "not deleted — the records they created still point at it. Needs who, "
+        "by email or the name they were added under."
+    ),
+    "reset_login": (
+        "Give a PERSON a way back in: \"reset Dave's password\", \"Sarah is "
+        "locked out\", \"send dave@clinic.com a new password link\". Their old "
+        "password stops working and they get a one-time link to choose a new "
+        "one. Needs who, by email or the name they were added under."
     ),
     "add_rule": (
         "Add a business rule: \"years of experience cannot exceed 60\", \"a nurse "
@@ -206,19 +324,43 @@ VERB_HELP: dict[str, str] = {
     "add_api": ("Declare an API endpoint: \"an endpoint that lists wards\". Needs it in the user's words."),
     "remove_api": ("Retire an endpoint. Needs which one (method and path, or id)."),
     "add_integration": (
-        "Declare an integration: \"send email through SendGrid\". Records the "
-        "NAMES of the secrets it needs, never their values. Needs it in the "
-        "user's words."
+        "WRITE DOWN an outside service without wiring it up: \"make a note "
+        "that we use Stripe for payments\". Records the NAMES of the secrets "
+        "it needs, never their values, and says plainly that nothing is "
+        "connected. Needs it in the user's words. NOT connect_service, which "
+        "makes the application actually talk to it."
     ),
     "remove_integration": ("Retire an integration. Needs which one."),
+    "connect_service": (
+        "Make the application actually talk to an outside service: \"connect "
+        "it to our Outlook\", \"send the emails through our own account\", "
+        "\"send email through SendGrid\", \"connect it to Xero\". "
+        "Outbound email has an adapter and is "
+        "connected for real — the service is recorded, the app sends through "
+        "it, and the owner sets the key on the platform, never here. Anything "
+        "else is answered with why it cannot be connected and the nearest "
+        "thing that works. Needs the service in the user's words. NOT "
+        "add_integration, which only writes the service down."
+    ),
     "compose_route": (
         "Build or rebuild the screen at a route — when a route renders "
-        "nothing, or the user wants it laid out again from scratch."
+        "nothing, or the user wants it laid out again from scratch. For a NEW "
+        "screen about one kind of record (a list of areas, a screen to manage "
+        "suppliers), also pass `entity`: that record's name — its add, edit and "
+        "delete are then declared as workflows the screen can call."
     ),
     "add_widgets": (
         "Add named sections or widgets to a screen that exists: "
         '"put upcoming sessions and quorum status on the dashboard". NOT for a '
         "new data-model field — that is add_field."
+    ),
+    "remove_page": (
+        "Take a whole SCREEN out of the application: \"delete the Wards page\", "
+        "\"remove the reports screen\". Its route stops resolving, it leaves the "
+        "menu, and every link to it comes off the screens that had one. The "
+        "screen is retired rather than deleted, so undo brings it back. NOT "
+        "`remove`, which takes one control off a screen that stays. Needs the "
+        "route."
     ),
     "add_field": (
         "Add ONE NEW field/attribute to an existing entity's DATA MODEL: "
@@ -247,30 +389,61 @@ VERB_HELP: dict[str, str] = {
         "page names a frame any more, and every screen is composed from the "
         "component library. The requirements, entities and rules are untouched."
     ),
-    "remove_page": (
-        "They want a whole SCREEN gone: \"delete the Wards page\", \"remove "
-        "the reports screen\". Cannot be done directly. Needs the route."
-    ),
     "rename_entity": (
         "They want a whole KIND OF RECORD called something else everywhere: "
         "\"call nurses colleagues\", \"rename the Ward record to Unit\". "
-        "Cannot be done. Needs the record and the new name. NOT rename_field, "
+        "The data model is re-decided with the new name; pages and processes that still say the old one are reported to follow up. Needs the record and the new name. NOT rename_field, "
         "which is one box on a record."
     ),
     "change_field_type": (
         "They want an existing box to hold a different KIND of value: \"make "
         "the phone number a number instead of text\", \"the date should be a "
-        "date, not free text\". Cannot be done. Needs the record and the box."
+        "date, not free text\". The field is re-authored with the new type and the migration says what carries across. Needs the record and the box."
     ),
     "edit_api": (
         "They want an existing endpoint CHANGED rather than added or removed: "
-        "\"make that endpoint take a date range\". Cannot be done. Needs "
+        "\"make that endpoint take a date range\". The endpoint is re-decided by the API author. Needs "
         "which endpoint."
     ),
     "reorder": (
         "They want things MOVED AROUND on a screen that already exists: "
         "\"move the chart above the table\", \"put the search at the top\". "
         "Nothing rearranges a composed screen. Needs the screen."
+    ),
+    "write_guide": (
+        "Write the short guide the owner gives their staff: \"write me a "
+        "one-page guide for the team\", \"something I can hand to the staff\", "
+        "\"how do I explain this to my team?\". One page, per role, in the "
+        "words of the people who will use it — derived from the screens that "
+        "actually built, and saved as a file at the top of the application so "
+        "it can be printed and handed on. Changes nothing about the "
+        "application. Needs nothing."
+    ),
+    "explain_crash": (
+        "Something in the RUNNING application broke and they are telling "
+        "you: \"it crashed\", \"the app crashed\", \"I got an error\", "
+        "\"it broke when I clicked save\", \"something went wrong\". NOT "
+        "a page that shows 404, \"not found\", or nothing: that is a page "
+        "answering as written — its loader returned null, or the preview "
+        "has no such record — and is a change to that page, not an incident "
+        "(a tester's \"it's showing 404\" was answered with the crash "
+        "ledger, 2026-09-26). I read "
+        "what the application itself reported — what failed, where, how often "
+        "and what it said — and offer the repair when the crash names one. "
+        "Needs nothing: not knowing what broke is the reason they are asking."
+    ),
+    "explain_slowness": (
+        "The running application is SLOW and they are telling you: \"it's "
+        "really slow\", \"this takes forever\", \"why is it so slow\", "
+        "\"loading takes ages\". I read what the application timed and say "
+        "what has been taking too long, and I say plainly that I cannot make "
+        "it faster on its own. Needs nothing."
+    ),
+    "back_up": (
+        "A copy of the whole application the owner keeps: \"back it up "
+        "somewhere\", \"what if I lose all this?\", \"can I take a backup?\". "
+        "The records and the definition in one archive, downloaded now. Says "
+        "plainly that nothing is scheduled and there is no restore button."
     ),
     "revert": (
         "Undo the last change: \"undo that\", \"undo\", \"put it back\", "
@@ -279,9 +452,140 @@ VERB_HELP: dict[str, str] = {
         "written out again. Said twice it goes back two changes. Needs "
         "nothing — it is always the most recent change."
     ),
+    "import_data": (
+        "Load the data they already have into the application: \"here's our "
+        "customer spreadsheet, load it in\", \"import these suppliers\", "
+        "\"can you put our existing bookings in\". The file is the one they "
+        "attached. Needs only WHICH KIND OF RECORD it holds (\"customers\"). "
+        "The first turn writes nothing — it says how many rows would land, "
+        "how many would not and why, and which column becomes which field; "
+        "the rows are loaded on a yes. A column the record has no field for "
+        "is refused, not guessed at."
+    ),
+    "export_data": (
+        "Give them their data back as a spreadsheet: \"can I get all this out "
+        "as a spreadsheet?\", \"export the customers\", \"download the "
+        "bookings\". Reads the records out of the "
+        "application's own database and produces the file on this turn. "
+        "`entity` narrows it to one kind of record; with none, every kind goes "
+        "into one zip. A backup of records AND definition is `back_up`. Changes nothing — the "
+        "application is untouched and there is nothing to undo."
+    ),
     "rebuild": (
         "Regenerate the application from its definition. The honest answer "
         "when a change is larger than a single screen."
+    ),
+    "refresh_sample_data": (
+        "Rewrite the sample records a record type starts with, when they are "
+        "wrong: \"the sample areas pair Nepal with Uttar Pradesh\", \"make the "
+        "demo products real ones\", \"the sample data should only be India and "
+        "Sri Lanka\". Needs WHICH record type; `change` carries what they said. "
+        "The examples are re-authored row by row and exactly the old sample "
+        "rows in the running app are replaced; rows people entered stay."
+    ),
+    "sync_app": (
+        "Bring the running application back in step with its definition: the "
+        "definition already says what the person is asking for, but they report "
+        "the application does not show it — \"I still can't see it in the "
+        "menu\", \"I made it public and it still asks me to sign in\", \"it "
+        "says it's there but it isn't\". Every file of the application is "
+        "written out again from the definition, in seconds and with no model "
+        "call, and what was out of step is named. Use it BEFORE concluding "
+        "there is nothing to change, whenever what you read and what the person "
+        "sees disagree. Needs nothing."
+    ),
+    "spend": (
+        "What this application has cost to run: \"how much has this cost "
+        "me?\", \"what has this spent so far\", \"show me the usage\", "
+        "\"how many tokens has this burned\". Reads the usage ledger for "
+        "this application and reports the model spend — building it, the "
+        "changes since, and where it went. Says plainly that the figure is "
+        "the platform's cost of running the models and not an invoice. Needs "
+        "nothing, and changes nothing."
+    ),
+}
+
+
+#: Sentences people actually typed, per verb — the examples the model is
+#: shown beside each tool in the catalogue (`tools.render`). They lived in
+#: the old classifier's prompt; there is no prompt now, so they live with the
+#: verb. The phrasebook checks each is still quoted somewhere the model reads.
+VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
+    'compose_route': (
+        'The page is empty',
+        'add a dashboard at /',
+    ),
+    'add_widgets': (
+        'I cannot see fathersName on the registration page',
+        'show phone on the nurse form',
+    ),
+    'remove': (
+        'get rid of the export link',
+    ),
+    'add_field': (
+        'customers need a phone number',
+    ),
+    'rename_field': (
+        'rename yearsOfExperience to experienceYears',
+    ),
+    'remove_field': (
+        'drop the location field from nurses',
+    ),
+    'remove_entity': (
+        "we don't need the Department entity",
+    ),
+    'add_workflow': (
+        'send a reminder every Monday',
+    ),
+    'edit_workflow': (
+        'the delete should ask for a reason first',
+    ),
+    'remove_workflow': (
+        'stop sending the welcome email',
+    ),
+    'edit_rule': (
+        'raise the experience cap to 70',
+    ),
+    'restyle': (
+        'change the theme colour from blue to green',
+    ),
+    'edit_product': (
+        'call the app Nurse Roster',
+        'it is for ward managers',
+        'the interface should be in Arabic',
+    ),
+    'add_requirement': (
+        'the app should also let a nurse mark herself unavailable',
+    ),
+    'remove_api': (
+        'remove the export endpoint',
+    ),
+    'remove_integration': (
+        'drop the Stripe integration',
+    ),
+    'write_guide': (
+        'how do I explain this to the people using it?',
+        'a cheat sheet for the drivers',
+    ),
+    'spend': (
+        'what have I spent on this',
+        'what did the build cost',
+        'how many tokens has this used',
+    ),
+    'rebuild': (
+        'rebuild everything',
+        'generate the app',
+    ),
+    'refresh_sample_data': (
+        'the sample areas are wrong, make them real India and Sri Lanka ones',
+        'fix the demo data so each country has its own states',
+    ),
+    'sync_app': (
+        'I still cannot see it in the menu',
+        'it says it is public but it still asks me to sign in',
+    ),
+    'back_up': (
+        'what happens if I lose all this?',
     ),
 }
 
@@ -315,7 +619,11 @@ def missing_fields(understanding: dict) -> list[str]:
         if isinstance(value, str):
             if not value.strip():
                 out.append(key)
-        elif isinstance(value, (list, tuple)):
+        elif isinstance(value, (list, tuple, dict)):
+            # `field` arrives as `{}` when the model named none, and an empty
+            # dict is not a field spec. Untreated it passed this gate and
+            # reached the seam as "Nurse has no field ''" — the same silence
+            # `widgets: []` is checked for one line up.
             if not value:
                 out.append(key)
         elif value is None:

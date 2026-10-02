@@ -70,9 +70,11 @@ invented for it.
 from __future__ import annotations
 
 import json
+import re
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -93,6 +95,11 @@ logger = logging.getLogger(__name__)
 #: has ignored the same brief twice is the same failure at higher cost — the
 #: same argument as ``ATTEMPTS_BY_NODE``.
 OBSERVER_ROUNDS = 2
+
+#: Critic calls one observation makes at once, across a fan-out's subjects.
+#: The agents' own calls already run 14 wide (`WAVE_CONCURRENCY`); these read
+#: a snapshot and write nothing, and 8 covers every fan-out measured so far.
+CRITIC_CONCURRENCY = 8
 
 #: Which agent the observer is. Registered with no writable section — its
 #: capability is to flag, never to author.
@@ -286,6 +293,14 @@ def _rows(doc: Mapping[str, Any], section: str, subject: str) -> Any:
         return value
     # A fan-out subject is an artifact id (a page); its own row, and any row
     # in another owned section that points at it (a page's layout, widgets).
+    # A PART of a feature (`ENTITY-003~2`) is the pages it was given, by id —
+    # matched on the entity, it would be judged on its sibling parts' pages.
+    from services.blueprint.orchestrator import PART, feature_pages
+
+    if PART in subject:
+        ids = {str(p.get("id")) for p in feature_pages(doc, subject)}
+        return [row for row in value if isinstance(row, dict)
+                and (str(row.get("id")) in ids or str(row.get("page")) in ids)]
     return [
         row for row in value if isinstance(row, dict)
         and subject in (row.get("id"), row.get("page"),
@@ -296,7 +311,7 @@ def _rows(doc: Mapping[str, Any], section: str, subject: str) -> Any:
 
 def observation_context(
     doc: Mapping[str, Any], *, agent: str, subject: str = "",
-    user_request: str = "",
+    user_request: str = "", scope: str = "",
 ) -> dict[str, Any]:
     """What the critic is shown: the node's output, the requirements in force,
     and the request. Not the whole Blueprint — a page's judgement does not
@@ -325,19 +340,33 @@ def observation_context(
 
     by_id = {r.get("id"): r for r in _live(doc.get("requirements"))}
 
-    cited: set[str] = set()
-    for value in produced.values():
-        for row in (value if isinstance(value, list) else [value]):
-            if isinstance(row, dict):
-                cited.update(row.get("requirements") or [])
+    # WHEREVER THE SECTION CITES THEM. A row's `requirements` used to be read
+    # at the top level only; `product` is one object whose capabilities each
+    # cite their own, so the critic was handed `requirementsCited: []` and
+    # reported that REQ-029 "does not exist anywhere in the artifact" — a
+    # finding about its own slice, sent back as two repair rounds and a flag
+    # (forge-v3 9naxfb3d, 2026-09-22: 9 minutes on one node).
+    cited: set[str] = _cited_requirements(list(produced.values()))
     # A row may cite a requirement another section owns; grading it here is the
     # bug, so drop it — the owning node still judges it.
     cited = {c for c in cited if _in_scope(by_id.get(c) or {})}
 
+    in_scope = [r for r in _live(doc.get("requirements")) if _in_scope(r)]
+    # A SUBJECT IS JUDGED ON WHAT ITS AUTHOR WAS GIVEN. A fan-out author —
+    # one entity's fields, one workflow's steps — is shown only the
+    # requirements its subject cites (the whole section when it cites none).
+    # Graded against the whole domain and the whole request instead, it was
+    # marked down for gaps in OTHER subjects it was never shown: over three
+    # weeks, "leaves out something a requirement asks for" was 53% of every
+    # repair the observer sent (387 of 729), 222 of them on entity_fields,
+    # page_details and workflow_steps. Coverage across subjects is still
+    # judged — once, after they all land (`scope: "domain"`).
+    if subject and cited:
+        in_scope = [r for r in in_scope if r.get("id") in cited]
     requirements = [
         {k: r.get(k) for k in ("id", "title", "statement", "description",
                                "priority", "status") if r.get(k) is not None}
-        for r in _live(doc.get("requirements")) if _in_scope(r)
+        for r in in_scope
     ]
     if subject:
         # A page's contract is the promise its layout is judged against.
@@ -346,6 +375,7 @@ def observation_context(
             produced["pages"] = [page]
 
     return {
+        "scope": scope or ("subject" if subject else "node"),
         "userRequest": user_request,
         "application": {
             k: v for k, v in (doc.get("application") or {}).items()
@@ -360,20 +390,66 @@ def observation_context(
     }
 
 
+_REQ_ID = re.compile(r"^REQ-\d+$")
+
+
+def _cited_requirements(value: Any) -> set[str]:
+    """Every requirement id cited anywhere inside `value` — a row's own
+    `requirements`, or those of the things it holds (a product's
+    capabilities, a page's views)."""
+    out: set[str] = set()
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            if key == "requirements" and isinstance(inner, list):
+                out.update(str(x) for x in inner if isinstance(x, str) and _REQ_ID.match(x))
+            else:
+                out |= _cited_requirements(inner)
+    elif isinstance(value, list):
+        for item in value:
+            out |= _cited_requirements(item)
+    return out
+
+
+def _platform_rules() -> tuple[str, ...]:
+    """The same words the contract refuses with (`agent_contract.PLATFORM_RULES`)."""
+    from services.blueprint.agent_contract import PLATFORM_RULES
+
+    return PLATFORM_RULES
+
+
 def critic_prompt(context: dict[str, Any]) -> tuple[str, str]:
     """(system, user). The system half is the contract; the user half is the
     slice."""
     system = (
         "You are the observer for a Prompt-to-App build. A specialist agent "
         "has just finished its task and you are judging its outcome.\n\n"
-        "Decide whether the output is COMPLETE against the requirements it "
-        "claims, the requirements that fall in its domain, and the user's "
-        "request. Report a finding for each thing that is genuinely missing, "
+        + {
+            "subject": (
+                "This output is ONE subject of several — one entity, one workflow, "
+                "one page — and its author was given exactly the requirements "
+                "listed. Decide whether it is COMPLETE against those. A requirement "
+                "about a different subject is not a gap in this one: coverage across "
+                "subjects is judged separately, once they have all landed. "),
+            "domain": (
+                "This is EVERY subject this node wrote, judged together; each one is "
+                "also judged on its own, separately. Look only for a requirement in its "
+                "domain that NO subject satisfies. Name, as the artifact, the existing "
+                "entity/workflow/page that should carry it — or leave it empty when "
+                "nothing that could carry it exists yet. Do not repeat a problem "
+                "inside a single subject; that was already judged. "),
+        }.get(str(context.get("scope") or ""),
+              "Decide whether the output is COMPLETE against the requirements it "
+              "claims, the requirements that fall in its domain, and the user's "
+              "request. ")
+        + "Report a finding for each thing that is genuinely missing, "
         "contradicts a requirement, or claims a requirement it does not "
         "actually satisfy. Each finding names: the section (one of "
         "sectionsYouMayName), the artifact id it concerns (empty if none "
         "exists yet), the requirement id it fails (empty if none), and in one "
         "or two sentences what is missing.\n\n"
+        + "The platform already provides the following. Never report their absence as a "
+          "finding, and never ask for the opposite — the contract refuses it, so the author "
+          "could not comply:\n" + "".join(f"- {r}\n" for r in _platform_rules()) + "\n"
         "You cannot edit anything and you must not propose alternatives, "
         "restyle, rename, or comment on quality. Do not report preferences. "
         "If the output is complete, the verdict is pass and findings is "
@@ -426,6 +502,7 @@ class Observer:
         planned: Iterable[str] = (),
         user_request: str = "",
         subject_of: Callable[[str], str | None] | None = None,
+        mode: str = "all",
     ) -> Observation:
         """Judge one node's outcome. Pure with respect to the Blueprint: reads
         ``doc``, writes nothing. Safe to run on any thread — the scheduler
@@ -433,17 +510,29 @@ class Observer:
 
         ``subject_of`` maps an artifact id to the subject that authored it,
         for a fan-out whose subjects are not artifact ids (a feature's pages).
+
+        ``mode`` splits the judgement for a fan-out that is judged as its
+        subjects land (see the orchestrator's `observe`):
+
+        * ``"subjects"`` — each subject by the critic, on its own requirements,
+          and nothing else. Its siblings may not be written yet, so neither the
+          graph checks nor the coverage pass can be fair to it;
+        * ``"sweep"`` — once every subject has landed: the graph checks over
+          all of them, and the coverage pass across them. Not each subject
+          again — each has been judged already;
+        * ``"all"`` — both at once, as a node that is judged when it finishes.
         """
         subjects = list(subjects) or [""]
         edges = ready_edges(doc, pending=pending, planned=planned)
         obs = Observation(node=key, agent=agent, subjects=subjects, edges=edges)
 
-        for f in verify(dict(doc), edges=edges).findings:
-            self._file(obs, f, subject_of)
+        if mode != "subjects":
+            for f in verify(dict(doc), edges=edges).findings:
+                self._file(obs, f, subject_of)
 
         if self.critic is not None:
             self._consult(obs, doc, user_request=user_request,
-                          subject_of=subject_of)
+                          subject_of=subject_of, mode=mode)
 
         with self._lock:
             self.history.append(obs)
@@ -469,43 +558,94 @@ class Observer:
         # still flags it.
         obs.deferred.append(f)
 
+    def _ask(self, obs: Observation, doc: Mapping[str, Any], subject: str, *,
+             user_request: str, scope: str = "") -> tuple[str, Any] | None:
+        """One critic call for one subject: ``("ok", (verdict, items))``,
+        ``("unavailable", why)``, or ``None`` when there is nothing to judge.
+        Touches nothing on ``obs`` — it runs beside its siblings."""
+        context = observation_context(
+            doc, agent=obs.agent, subject=subject, user_request=user_request, scope=scope,
+        )
+        if not context["output"]:
+            # The node wrote nothing this subject can be judged on. A
+            # critique of an empty output is a critique of the prompt.
+            return None
+        system, user = critic_prompt(context)
+        t0 = time.monotonic()
+        try:
+            raw = self.critic(system=system, user=user, schema=VERDICT_SCHEMA)
+        except Exception as exc:  # noqa: BLE001 — recorded, never invented
+            return "unavailable", f"{type(exc).__name__}: {str(exc)[:200]}"
+        text = getattr(raw, "text", raw)
+        usage = getattr(raw, "usage", None)
+        if self.usage is not None and usage is not None:
+            try:
+                # NO PROJECT OF ITS OWN, AND IT MUST NOT INVENT ONE. The
+                # observer judges a document it was handed; it holds no
+                # service and cannot name the application. It used to pass
+                # `project=""`, which the ledger wrote as the literal string
+                # `blueprint` — so every critic call on every build landed in
+                # one anonymous bucket and a per-project total silently left
+                # the watching out, 19-28% of three measured builds. The run's
+                # own `RunUsage` knows whose run it is; leaving this off is
+                # what lets it say so.
+                self.usage.record(node=f"observer:{obs.node}",
+                                  agent=OBSERVER_AGENT, usage=usage,
+                                  elapsed_s=time.monotonic() - t0)
+            except Exception:  # noqa: BLE001 — the ledger never ends a run
+                pass
+        try:
+            reply = json.loads(text if isinstance(text, str) else "")
+            return "ok", (str(reply["verdict"]), list(reply.get("findings") or []))
+        except (ValueError, KeyError, TypeError) as exc:
+            return "unavailable", f"malformed reply: {str(exc)[:200]}"
+
     def _consult(self, obs: Observation, doc: Mapping[str, Any], *,
                  user_request: str,
-                 subject_of: Callable[[str], str | None] | None = None) -> None:
+                 subject_of: Callable[[str], str | None] | None = None,
+                 mode: str = "all") -> None:
         """Ask the critic, once per subject. Its findings are filed like any
-        other; its verdict is recorded as it was given."""
+        other; its verdict is recorded as it was given.
+
+        THE SUBJECTS ARE ASKED TOGETHER. One after another, a feature-per-call
+        node waited N critic calls for its verdict: `workflow_steps` took a
+        median 60s to be judged on two workflows, `page_details` up to 380s,
+        and everything downstream of it waited too. The calls read one
+        snapshot and write nothing, so they run side by side and are filed in
+        subject order afterwards — the verdict is the same one, sooner.
+        """
+        subjects = list(obs.subjects)
+        jobs: list[tuple[str, str]] = [] if mode == "sweep" else [(s, "") for s in subjects]
+        # COVERAGE ACROSS SUBJECTS, ONCE. Each subject is judged on the
+        # requirements its author was given; what no subject covers is asked
+        # in one more call with every subject in view, and filed against the
+        # artifact that should carry it — the entity that lacks the field, not
+        # whichever entity happened to be under review. It reads the same
+        # snapshot, so it runs BESIDE the others: a node waits no longer than
+        # it did, for one call rather than the rounds it replaces.
+        if len(subjects) > 1 and mode != "subjects":
+            jobs.append(("", "domain"))
+        if len(jobs) > 1:
+            with ThreadPoolExecutor(
+                    max_workers=min(len(jobs), CRITIC_CONCURRENCY)) as pool:
+                answers = list(pool.map(
+                    lambda job: self._ask(obs, doc, job[0], user_request=user_request, scope=job[1]),
+                    jobs))
+        else:
+            answers = [self._ask(obs, doc, s, user_request=user_request, scope=sc) for s, sc in jobs]
+
         verdicts: list[str] = []
-        for subject in obs.subjects:
-            context = observation_context(
-                doc, agent=obs.agent, subject=subject, user_request=user_request,
-            )
-            if not context["output"]:
-                # The node wrote nothing this subject can be judged on. A
-                # critique of an empty output is a critique of the prompt.
+        for answer in answers:
+            if answer is None:
                 continue
-            system, user = critic_prompt(context)
-            t0 = time.monotonic()
-            try:
-                raw = self.critic(system=system, user=user, schema=VERDICT_SCHEMA)
-            except Exception as exc:  # noqa: BLE001 — recorded, never invented
-                obs.critic = f"unavailable: {type(exc).__name__}: {str(exc)[:200]}"
-                return
-            text = getattr(raw, "text", raw)
-            usage = getattr(raw, "usage", None)
-            if self.usage is not None and usage is not None:
-                try:
-                    self.usage.record(node=f"observer:{obs.node}",
-                                      agent=OBSERVER_AGENT, usage=usage,
-                                      elapsed_s=time.monotonic() - t0, project="")
-                except Exception:  # noqa: BLE001 — the ledger never ends a run
-                    pass
-            try:
-                reply = json.loads(text if isinstance(text, str) else "")
-                verdict = str(reply["verdict"])
-                items = list(reply.get("findings") or [])
-            except (ValueError, KeyError, TypeError) as exc:
-                obs.critic = f"unavailable: malformed reply: {str(exc)[:200]}"
-                return
+            status, payload = answer
+            if status != "ok":
+                # One subject the critic could not judge makes the critic's
+                # half unavailable, as it always did; the findings the other
+                # subjects returned are still filed — they were given.
+                obs.critic = f"unavailable: {payload}"
+                continue
+            verdict, items = payload
 
             filed = 0
             for item in items:
@@ -519,14 +659,28 @@ class Observer:
                     continue
                 if req:
                     detail = f"{req}: {detail}"
+                # AN EMPTY ARTIFACT MEANS "THIS DOES NOT EXIST YET". The
+                # critic is told exactly that above, and this line used to
+                # fill the blank with the subject being judged — so on a
+                # fan-out node, "no Patient entity is defined" was filed
+                # against the User entity and sent to the field author, who
+                # writes the columns of the entity it is handed and cannot
+                # create another. LabConnect spent 34 minutes and 18 repair
+                # rounds on findings of that shape.
+                #
+                # Left empty, `_file` defers it: a per-subject author has
+                # nothing to re-author for it. A single-subject node still
+                # receives it, because that node owns the whole section and
+                # CAN create what is missing.
                 finding = Finding(CRITIC_EDGE, detail=detail,
-                                  artifact_id=artifact or (subject or None),
+                                  artifact_id=artifact or None,
                                   section=section or None)
                 self._file(obs, finding, subject_of)
                 filed += 1
             # A fail that names nothing is an opinion; recorded as what it is.
             verdicts.append("fail" if verdict == "fail" and filed else "pass")
-        obs.critic = "fail" if "fail" in verdicts else "pass"
+        if not obs.critic.startswith("unavailable"):
+            obs.critic = "fail" if "fail" in verdicts else "pass"
 
     # -- repair --------------------------------------------------------------
 
@@ -612,7 +766,7 @@ def anthropic_observer(model: Any = None, *, effort: str = "medium",
 
 
 __all__ = [
-    "CRITIC_EDGE", "OBSERVER_AGENT", "OBSERVER_MODEL_ENV", "OBSERVER_ROUNDS",
+    "CRITIC_CONCURRENCY", "CRITIC_EDGE", "OBSERVER_AGENT", "OBSERVER_MODEL_ENV", "OBSERVER_ROUNDS",
     "VERDICT_SCHEMA",
     "Observation", "Observer", "RepairTask", "anthropic_observer",
     "critic_prompt", "flag_unrepaired", "observation_context",

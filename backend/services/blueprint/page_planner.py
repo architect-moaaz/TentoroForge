@@ -34,7 +34,9 @@ from collections import Counter
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
+
+from services.blueprint.embeddings import is_embedding_field
 
 #: Emitted by ``npm run emit:catalog --workspace=packages/library``.
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "contracts" / "component-catalog.json"
@@ -54,6 +56,8 @@ FORM_KINDS: dict[str, str] = {
     "date": "date", "datetime": "date", "timestamp": "date",
     "enum": "select",
     "json": "object", "jsonb": "object", "object": "object",
+    # Uploaded, stored, and submitted as the stored file's id.
+    "image": "file", "photo": "file", "picture": "file",
 }
 
 #: Fields no user edits and no list shows by default.
@@ -102,8 +106,10 @@ def _entities(doc: dict) -> dict[str, dict]:
 
 
 def _visible_fields(entity: dict) -> list[dict]:
+    # An embedding is the platform's: nobody reads a vector or types one.
     return [f for f in (entity.get("fields") or [])
-            if f.get("name") not in INTERNAL_FIELDS]
+            if f.get("name") not in INTERNAL_FIELDS
+            and not is_embedding_field(f)]
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +282,8 @@ def form_fields_for(entity: dict, *, creating: bool = False) -> list[dict]:
             if not field["options"]:
                 field["kind"] = "text"
                 field.pop("options")
+        if kind == "file":
+            field["accept"] = "image/*"
         out.append(field)
     return out
 
@@ -632,6 +640,32 @@ def narrow_to_prop(value: Any, spec: dict) -> Any:
     ]
 
 
+def _allowed_at(schema: Any, path: Iterable[Any]) -> list[str]:
+    """The property names a component's schema allows at `path` — what the
+    model should have written. Empty when the schema says nothing useful
+    there (a `type` error, an enum, a path through `anyOf` branches that
+    disagree)."""
+    node = schema
+    for step in path:
+        if not isinstance(node, dict):
+            return []
+        if isinstance(step, int):
+            node = node.get("items") or {}
+            if isinstance(node, list):
+                node = node[step] if step < len(node) else {}
+        else:
+            node = (node.get("properties") or {}).get(step) or {}
+    while isinstance(node, dict) and not node.get("properties"):
+        branches = node.get("anyOf") or node.get("oneOf") or []
+        objects = [b for b in branches if isinstance(b, dict) and b.get("properties")]
+        if len(objects) != 1:
+            return []
+        node = objects[0]
+    props = (node.get("properties") or {}) if isinstance(node, dict) else {}
+    required = set(node.get("required") or []) if isinstance(node, dict) else set()
+    return [f"{k} (required)" if k in required else k for k in props]
+
+
 def validate_props(schema: dict, catalog: dict[str, dict]) -> list[str]:
     """Prop errors in an instantiated page, against each component's own schema."""
     from jsonschema import Draft7Validator
@@ -668,8 +702,16 @@ def validate_props(schema: dict, catalog: dict[str, dict]) -> list[str]:
             # `registry.ts` lifts both out of the props and forwards them to
             # the element, so neither is a component prop this can judge.
             _PASSTHROUGH = {"className", "style"}
+            # `_figmaNodeId` AND ITS KIN ARE PROVENANCE, NOT PROPS. The Figma
+            # and JSX transforms stamp the source node's id onto props so
+            # `realize` can find the region again; the UX Pilot path strips
+            # its copy before proposing, the Figma path does not, and the
+            # catalog's `additionalProperties: false` then refused the page
+            # for carrying the very marker the platform wrote. No model
+            # authors these — they all start with `_figma`.
             checkable = {k: v for k, v in props.items()
-                         if k not in bound and k not in _PASSTHROUGH}
+                         if k not in bound and k not in _PASSTHROUGH
+                         and not k.startswith("_figma")}
             schema = entry["props"]
             if bound and isinstance(schema.get("required"), list):
                 schema = dict(schema)
@@ -694,7 +736,17 @@ def validate_props(schema: dict, catalog: dict[str, dict]) -> list[str]:
                 ):
                     continue
                 loc = ".".join(str(p) for p in err.absolute_path) or "(root)"
-                errors.append(f"{path}.props.{loc}: {err.message}")
+                # NAME THE COMPONENT AND WHAT IT TAKES. A path and
+                # "'value' was unexpected" does not say which component was
+                # wrong or what it accepts instead, so the retry guesses:
+                # LabConnect's PAGE-012 wrote {label, value} into an `items`
+                # prop, was refused twice with that sentence, and the
+                # orchestrator stopped asking. The allowed keys come from the
+                # component's own schema at the failing path.
+                allowed = _allowed_at(schema, err.absolute_path)
+                errors.append(f"{path}.props.{loc}: {node.get('type')} {err.message}"
+                              + (f" — {node.get('type')}.{loc} accepts: "
+                                 f"{', '.join(allowed)}" if allowed else ""))
         for i, child in enumerate(node.get("children") or []):
             walk(child, f"{path}.children[{i}]")
 
@@ -1520,6 +1572,10 @@ def plan_page(doc: dict, page: dict, template: dict,
             "module": page.get("module"),
         },
         "dataSources": sources,
+        # THE SCREEN'S OWN VALUES REACH THE RENDERER. Without this the page
+        # ships with its bindings intact and nothing behind them: `clientState`
+        # is where `{{state.display}}` resolves, and it lives on the layout.
+        **({"clientState": template["clientState"]} if template.get("clientState") else {}),
         "root": root,
         # THE FRAME'S SIZE REACHES THE RENDERER. `FigmaCanvas` scales a page
         # by (available width / frame width) and reads it from here; without
@@ -2141,13 +2197,34 @@ def page_slots(doc: dict) -> list[dict]:
     if designed:
         return frame_slots(designed)
 
+    entities = (doc.get("data") or {}).get("entities") or []
+
+    # A HOME SLOT THAT SAID `dashboard` NO MATTER WHAT THE APPLICATION WAS.
+    #
+    # This is where a calculator became a dashboard. The slot is the answer
+    # space — the whole point of slots is that the agent fills what it is
+    # given rather than inventing — and the only slot an application with no
+    # entities gets is this one. It arrived pre-labelled `dashboard`, the
+    # agent filled it exactly as told, and the dashboard floor then demanded
+    # three KPI tiles, a chart and a recent-activity surface from a keypad.
+    # Every composition was refused; the page author bolted a chart bound to
+    # {{resultHistory}} onto the keys to get past it.
+    #
+    # A dashboard summarises records. With no entities there are none, so the
+    # label was not a default that happened to be wrong here — it was
+    # unsatisfiable by construction. Read from the data model rather than
+    # guessed, and the agent may still choose otherwise: a slot is what to
+    # answer, not what to say.
+    home_pattern = "dashboard" if entities else "tool"
+    home_prompt = ("Where a user lands." if entities else
+                   "The screen itself. This application has no stored records, "
+                   "so its home is the tool, not a summary of anything.")
     slots: list[dict] = [
         {"feature": "home", "entity": None, "requirements": [],
-         "pages": [{"slot": "home", "pattern": "dashboard",
-                    "prompt": "Where a user lands."}],
+         "pages": [{"slot": "home", "pattern": home_pattern,
+                    "prompt": home_prompt}],
          "prompt": "Omit if the app opens on a list."},
     ]
-    entities = (doc.get("data") or {}).get("entities") or []
     names = {e.get("id"): e.get("name") or e.get("id") for e in entities}
     for entity in entities:
         eid = entity.get("id")

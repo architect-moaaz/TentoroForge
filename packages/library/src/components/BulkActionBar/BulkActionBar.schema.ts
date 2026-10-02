@@ -23,4 +23,4 @@ export const BulkActionBarProps = z
   })
   .strict();
 
-export type BulkActionBarPropsType = z.infer<typeof BulkActionBarProps>;
+export type BulkActionBarPropsType = z.input<typeof BulkActionBarProps>;

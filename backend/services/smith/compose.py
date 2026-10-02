@@ -59,6 +59,20 @@ class ComposeError(RuntimeError):
     """The request named something the Blueprint does not have."""
 
 
+class NeedsWorkflowError(ComposeError):
+    """The page cannot make the change: records must change in a way none of
+    the application's workflows does. Nothing was written; `needs` says what
+    the missing workflow is for, so the caller adds it and asks again."""
+
+    def __init__(self, route: str, needs: list[str]):
+        self.route, self.needs = route, list(needs)
+        super().__init__(
+            f"{route} was not changed: the change needs records to {'; '.join(self.needs)}, and "
+            "no workflow of this application does that. Add it with `add_workflow` — describe what "
+            f"it changes and start it from {route}; that also puts its control on the page. A page "
+            "only changes records through a workflow, so nothing was faked in the meantime.")
+
+
 def _page_for_route(doc: dict, route: str) -> dict | None:
     """The page contract for a route, tolerant about how a user typed it."""
     want = (route or "").strip()
@@ -91,7 +105,20 @@ def _name_from_route(route: str) -> str:
     return " ".join(w.capitalize() for w in tail.split())
 
 
-def _ensure_page(svc: Any, route: str, request: str = "") -> dict:
+def _entity_id(doc: dict, ref: str) -> str:
+    """The live entity `ref` names — its id, name or table, any case."""
+    want = (ref or "").strip().lower()
+    if not want:
+        return ""
+    for e in (doc.get("data") or {}).get("entities") or []:
+        if isinstance(e, dict) and e.get("status") != "DEPRECATED" and want in (
+                str(e.get("id") or "").lower(), str(e.get("name") or "").lower(),
+                str(e.get("table") or "").lower()):
+            return str(e.get("id"))
+    return ""
+
+
+def _ensure_page(svc: Any, route: str, request: str = "", entity: str = "") -> dict:
     """The page contract for `route`, CREATING a minimal one when the
     definition does not have it yet.
 
@@ -133,6 +160,23 @@ def _ensure_page(svc: Any, route: str, request: str = "") -> dict:
         "purpose": (" ".join(request.split()) or f"The {name} screen.")[:280],
         "primaryTasks": [],
     }
+    # AN APPLICATION WITH NO SIGN-IN HAS NO SIGNED-IN SCREENS. A page's access
+    # defaults to `authenticated`, so a page added to an app whose security is
+    # `authentication: none` went behind a login the app does not have: into
+    # the signed-in area, off the public menu every other page is on, and a
+    # sign-in redirect at its own address (Test2's Location Explorer,
+    # 2026-09-28 — "I cannot see Location Explorer in the menu", twice).
+    from services.blueprint.account_model import has_sign_in
+    if not has_sign_in(svc.doc):
+        body["access"] = "public"
+    # THE RECORD THE SCREEN IS ABOUT, when Smith named one. Without it the new
+    # page declared no actions and no workflows, and a screen asked to add,
+    # edit and delete areas imported `create`/`update`/`remove` functions that
+    # do not exist, four compile rounds running (Test2's Location Data,
+    # 2026-09-28) — there was no workflow it could have called instead.
+    eid = _entity_id(svc.doc, entity)
+    if eid:
+        body["data"] = {"primaryEntity": eid}
     # ALLOCATING A NEW ID, unlike every write compose did before — recompose and
     # add_widgets only ever UPDATE a page already in the definition. A new id
     # collides if the allocator registry has fallen behind the document (a
@@ -183,7 +227,7 @@ def compose_route(
     §102: a retry that is not told what went wrong is the same request again,
     so the feedback rides on the TaskSpec exactly as it does in a run.
     """
-    from services.blueprint.agent_contract import InvalidPatternTemplate
+    from services.blueprint.agent_contract import InvalidPatternTemplate, AuthorRefusal
     from services.blueprint.executors import make_executor, tiered_router, RunUsage
     from services.blueprint.orchestrator import TaskSpec
     from services.blueprint.service import BlueprintInvalid
@@ -196,11 +240,30 @@ def compose_route(
     # definition before it is laid out.
     page = _ensure_page(svc, route, request)
 
+    # A PAGE WRITTEN AS CODE IS CHANGED AS CODE. The verb path already sent
+    # coded pages to `recode_page`; the seams that compose a page as a side
+    # effect — a new workflow's start screen, a restated requirement, a new
+    # edit screen — called this directly, and the layout composer redrew a
+    # React page as a layout tree. /register was refused twice over a Form
+    # prop and Smith said "nothing has been changed" with the workflow
+    # already added (Test 5, 2026-09-28).
+    if code_row(svc.doc, str(page.get("id"))) is not None or coded_app(svc.doc):
+        from types import SimpleNamespace
+        root = app_root or str(Path(svc.output_dir) / "app")
+        out = recode_page(svc, str(page.get("route") or route), app_root=root,
+                          request=request or f"compose {route}", reasoning=reasoning)
+        if not out.get("applied"):
+            raise ComposeError(f"{route} was not changed: {out.get('reason') or 'the rewrite was refused'}")
+        return SimpleNamespace(committed=list(out.get("committed") or []),
+                               version=out.get("version"), missing=list(out.get("missing") or []),
+                               coded=True)
+
     # The composition is the slow part of the turn — around a minute behind a
     # single message. `reasoning` is how that minute becomes legible: the
     # executor's stream was already open and its thinking events discarded.
     run = executor or make_executor(svc, tiered_router(reasoning=reasoning),
-                                    usage=RunUsage(), reasoning=reasoning)
+                                    usage=RunUsage.for_app(svc, phase="change"),
+                                    reasoning=reasoning)
     feedback = ""
     for attempt in range(1, MAX_ATTEMPTS + 1):
         spec = TaskSpec(task_id=f"smith-compose-{page['id']}-{attempt}",
@@ -242,7 +305,7 @@ def compose_route(
                 app_root=app_root,
                 executor=_traced(run, reasoning),
             )
-        except (BlueprintInvalid, InvalidPatternTemplate) as exc:
+        except (BlueprintInvalid, AuthorRefusal) as exc:
             feedback = f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
             from services.blueprint.refusals import record_refusal
             record_refusal(svc.output_dir, page["id"], attempt,
@@ -581,9 +644,454 @@ def _field_named(svc: Any, route: str, widget: str) -> tuple[dict, dict] | None:
     return ent, max(hits, key=lambda f: len(str(f.get("name") or "")))
 
 
+# ---------------------------------------------------------------------------
+# A page written as React
+# ---------------------------------------------------------------------------
+#
+# THE SCREEN IS ITS CODE. A page the UI engineer wrote renders from its
+# `pageCode` row; its `pageLayouts` tree is the fallback nobody sees. Composing
+# the tree changed nothing on screen: "add an age × gender heatmap to the
+# dashboard" laid a Heatmap node into the tree, the rebuild had no page to
+# write, and the check that looked at the real screen said so (h7gmi93x). So a
+# coded page is changed the way the build writes it — the analytics agent
+# declares what the ask needs to count, the UI engineer rewrites the page
+# around it — and both land as one change.
+
+WIDGET_ATTEMPTS = 2
+
+#: Pages the analytics agent's own rule gives no widgets: "a form, a wizard, a
+#: settings page or a tool carries none". Told only "Open A Dispute page has
+#: nothing in it", the agent filled a dispute FORM with three dashboard charts
+#: (036farqu) — so on these pages it is not asked at all unless the person
+#: named a number or a chart themselves.
+NO_ANALYTICS_PATTERNS = frozenset({"form", "wizard", "settings", "configuration"})
+#: Pages whose job IS numbers: rebuilt with none yet, their charts are designed
+#: even when the ask names none ("this dashboard looks empty").
+NUMBERS_PATTERNS = frozenset({"dashboard", "analytics", "command_center"})
+
+
+def code_row(doc: dict, page_id: str) -> dict | None:
+    """The page's React code, or None when it renders from its layout."""
+    return next((r for r in doc.get("pageCode") or []
+                 if isinstance(r, dict) and str(r.get("page")) == str(page_id)
+                 and str(r.get("view") or "").strip()), None)
+
+
+def _widget_brief(page: dict, request: str, wanted: Sequence[str]) -> str:
+    asks = "".join(f"\n- {w}" for w in wanted)
+    return (f"The person asked, about the page {page.get('route')} ({page.get('id')}, a "
+            f"`{page.get('pattern') or 'page'}` page — {page.get('purpose') or 'no stated purpose'}): "
+            f"\"{request}\"{asks}\n\n"
+            f"Declare ONLY the widgets this ask adds or changes, all on page {page.get('id')} — "
+            "a KPI, a chart, a breakdown — and only when the ask is for something counted or "
+            "charted. A page that looks empty or wrong is the page's code to fix, not a place "
+            "to put charts: never add a widget to fill space. Every other widget stays exactly "
+            "as it is and is not returned. When the ask needs nothing counted or charted, "
+            "return no proposal.")
+
+
+def _declare_widgets(svc: Any, page: dict, request: str, wanted: Sequence[str], *,
+                     run: Any, reasoning: Any) -> list[Any]:
+    """The widget proposals the ask needs on `page`, held to the query rules
+    the editor holds a chart to; re-asked with what was wrong."""
+    from services.blueprint.orchestrator import TaskSpec
+    from services.blueprint.verification import _query_findings
+
+    ents = {str(e.get("id")): e for e in (svc.doc.get("data") or {}).get("entities") or []}
+    ents.update({str(e.get("name")): e for e in ents.values()})
+    feedback = ""
+    for attempt in range(1, WIDGET_ATTEMPTS + 1):
+        tell(reasoning, f"Deciding what {page.get('route')} should count for: {request}.", "step")
+        result = run(TaskSpec(task_id=f"smith-widgets-{page['id']}-{attempt}", node="analytics",
+                              agent="analytics", attempt=attempt, feedback=feedback or None,
+                              brief=_widget_brief(page, request, wanted)))
+        props = [p for p in (getattr(result, "proposals", None) or []) if p.section == "widgets"]
+        problems: list[str] = []
+        for prop in props:
+            body = prop.body
+            body.setdefault("page", page["id"])
+            if str(body.get("page")) != str(page["id"]):
+                problems.append(f"{body.get('label')}: belongs on {page['id']}, not {body.get('page')}")
+                continue
+            src = body.get("dataSource") or {}
+            ent = ents.get(str(src.get("entity")))
+            if src.get("op") == "query" and ent is not None:
+                problems += [f"{body.get('label')}: {f}" for f in _query_findings(body, src, ent)]
+        if not problems:
+            return props
+        feedback = "Refused — fix every one of these:\n" + "\n".join(f"- {x}" for x in problems)
+        tell(reasoning, f"That chart was refused — {problems[0][:160]}. Asking again.", "step")
+    raise ComposeError(f"the chart for {page.get('route')} could not be defined: {feedback}")
+
+
+def _with_widgets(doc: dict, props: Sequence[Any]) -> dict:
+    """The document as it will be once `props` land — what the page is written
+    against, so the SDK it compiles with already has the new widgets."""
+    import copy
+
+    from services.blueprint.app_sdk import widget_keys, widget_sdk_key
+    out = copy.deepcopy(doc)
+    rows = out.setdefault("widgets", [])
+    for i, prop in enumerate(props):
+        body = dict(prop.body)
+        body.setdefault("id", str(prop.natural_key or f"WIDGET-NEW-{i}"))
+        at = next((k for k, w in enumerate(rows) if str(w.get("id")) == str(body["id"])), None)
+        if at is None:
+            # THE KEY THE PAGE IS WRITTEN AGAINST IS THE KEY THAT LANDS. The
+            # commit stores a new widget's key at the write; deciding it here,
+            # on the proposal itself, means the SDK the page compiles with
+            # and the SDK the application ships are the same file.
+            if not body.get("key"):
+                body["key"] = prop.body["key"] = widget_sdk_key(body, widget_keys(out).values())
+            rows.append(body)
+        else:
+            rows[at] = {**rows[at], **body}
+    return out
+
+
+def _into_menu(svc: Any, page: dict, app_root: str | None = None) -> None:
+    """A page the owner asked for is somewhere they expect to find: first in
+    the menu, and — at "/" — where the application opens."""
+    nav = svc.doc.setdefault("navigation", {})
+    tree = nav.setdefault("tree", [])
+    if not any(isinstance(n, dict) and str(n.get("page")) == str(page.get("id")) for n in tree):
+        tree.insert(0, {"label": str(page.get("name") or page.get("route")), "page": page.get("id"),
+                        "icon": "home" if page.get("route") == "/" else "layout-grid"})
+    if page.get("route") == "/":
+        init = nav.get("initialRoute") if isinstance(nav.get("initialRoute"), dict) else {}
+        nav["initialRoute"] = {**init, "default": "/", "authenticated": "/"}
+    svc.save()
+    if app_root:
+        from services.blueprint.projection import project_shell
+        project_shell(svc.doc, app_root)
+
+
+def coded_app(doc: dict) -> bool:
+    """Whether this application's pages are written as React code."""
+    return any(isinstance(r, dict) and r.get("view") for r in doc.get("pageCode") or [])
+
+
+def _where(svc: Any, route: str) -> str:
+    """A page as a person finds it: its name, its address, and whether the
+    menu leads there. "composed /" was the whole reply once, and the person
+    looked for the change on the page they thought of — "built the discover
+    page it is not there" (UAT jubyt8jk)."""
+    page = _page_for_route(svc.doc, route) or {}
+    name = str(page.get("name") or "").strip()
+    label = ""
+
+    def walk(nodes: Any) -> None:
+        nonlocal label
+        for n in nodes or []:
+            if isinstance(n, dict):
+                if str(n.get("page") or "") == str(page.get("id") or "-") and not label:
+                    label = str(n.get("label") or "")
+                walk(n.get("children"))
+
+    walk(((svc.doc.get("navigation") or {}).get("tree")))
+    where = f"**{name}** (`{route}`)" if name else f"`{route}`"
+    if label:
+        return f"{where}, which the menu calls “{label}”"
+    # A ONE-RECORD PAGE IS NOT MISSING FROM THE MENU. "/tools/[id]" is opened
+    # by picking a row on its list; saying it is not in the menu read as a
+    # fault in what had just been done (UAT replay 3).
+    if "[" in route:
+        parent = _page_for_route(svc.doc, route.rsplit("/", 1)[0]) or {}
+        opened = f", opened from **{parent['name']}**" if parent.get("name") else ""
+        return f"{where} — one record's page{opened}"
+    return f"{where} — it is not in the menu; open it at `{route}`"
+
+
+def pages_using(svc: Any, pattern: str, *, entity_id: str = "") -> list[dict]:
+    """The coded pages whose code matches `pattern` — narrowed, when an
+    entity is named, to the pages that show or change that entity."""
+    import re as _re
+    pages = {str(p.get("id")): p for p in svc.doc.get("pages") or [] if isinstance(p, dict)}
+    out = []
+    for row in svc.doc.get("pageCode") or []:
+        page = pages.get(str((row or {}).get("page")))
+        if page is None or str(page.get("status") or "").upper() in ("REMOVED", "DEPRECATED"):
+            continue
+        text = str(row.get("view") or "") + "\n" + str(row.get("load") or "")
+        if not _re.search(pattern, text):
+            continue
+        if entity_id:
+            data = page.get("data") or {}
+            shown = {str(x) for x in [data.get("primaryEntity"), *(data.get("supportingEntities") or [])] if x}
+            if entity_id not in shown:
+                continue
+        out.append(page)
+    return out
+
+
+def recode_pages_using(svc: Any, app_root: str | None, pages: list[dict], request: str, *,
+                       reasoning: Any = None) -> tuple[list[str], list[str]]:
+    """Each page rewritten to `request` — what was removed, taken away.
+    A removal that left a coded page calling it left a page that no longer
+    compiles: its SDK name went with it (F&B live test, 2026-10-02).
+    Returns (routes rewritten, notes for the ones that could not be)."""
+    done: list[str] = []
+    notes: list[str] = []
+    if not app_root:
+        return done, notes
+    for page in pages:
+        route = str(page.get("route") or page.get("id"))
+        try:
+            recode_page(svc, route, app_root=app_root, request=request, reasoning=reasoning)
+            done.append(route)
+        except Exception as exc:  # noqa: BLE001 — the removal stands; what is left is said
+            notes.append(f"{route} could not be rewritten without it: {type(exc).__name__}: {str(exc)[:200]}")
+    return done, notes
+
+
+def recode_page(svc: Any, route: str, *, app_root: str, request: str,
+                wanted: Sequence[str] = (), executor: Any = None, client: Any = None,
+                reasoning: Any = None, whole: bool = False) -> dict:
+    """Change a coded page: its new widgets, then its code, as one change.
+
+    Returns `{applied, committed, version, reason, missing}` — `missing` the
+    asked-for widgets the new code does not draw, read off the code itself.
+    """
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
+    from services.blueprint.app_sdk import project_code_pages, widget_keys
+    from services.blueprint.executors import RunUsage, make_executor, tiered_router
+    from services.blueprint.ui_engineer import CompileError, NeedsWorkflow, compose_page, ensure_sdk
+
+    page = _page_for_route(svc.doc, route)
+    row = code_row(svc.doc, str((page or {}).get("id")))
+    # In an application whose pages are code, a page with none yet is WRITTEN
+    # as code (no current version) — it went to the layout composer, took
+    # seven minutes for "/", and came back a layout in a coded app.
+    if page is None or (row is None and not coded_app(svc.doc)):
+        raise ComposeError(f"{route} is not a page written as code.")
+    usage = RunUsage.for_app(svc, phase="change")
+    run = executor or make_executor(svc, tiered_router(reasoning=reasoning), usage=usage, reasoning=reasoning)
+    # CHARTS ONLY WHEN CHARTS WERE ASKED FOR. Understanding the ask names the
+    # widgets it wants (`wanted`); with none, the analytics author was still
+    # asked what the page "should count" — "change the heading" came back as
+    # four new KPI tiles, or as charts for other pages that were refused and
+    # failed the edit after four minutes (0l133sp2).
+    has_widgets = any(str(w.get("page")) == str(page.get("id")) and w.get("status") != "DEPRECATED"
+                      for w in svc.doc.get("widgets") or [] if isinstance(w, dict))
+    numbers_page = str(page.get("pattern") or "") in NUMBERS_PATTERNS
+    # A FIELD TO SHOW IS NOT A CHART. "Show the product name", "show the
+    # description more prominently" arrive as widgets that ARE a field's name;
+    # handed to the analytics author they came back as six KPI tiles and a
+    # rentals-over-time chart (UAT replay 3). Only the exact name counts — a
+    # "age × gender heatmap" mentions fields and is still a chart.
+    fields = {str(f.get("name") or "").lower() for e in (svc.doc.get("data") or {}).get("entities") or []
+              if isinstance(e, dict) for f in e.get("fields") or [] if isinstance(f, dict)}
+    charted = [w for w in wanted if w.strip().lower() not in fields]
+    if not charted and (wanted or has_widgets or not numbers_page):
+        widgets: list[Any] = []
+    else:
+        widgets = _declare_widgets(svc, page, request, charted, run=run, reasoning=reasoning)
+    doc = _with_widgets(svc.doc, widgets)
+    root = Path(app_root)
+    try:
+        ensure_sdk(doc, root)
+        tell(reasoning, f"Rewriting {route} with what was asked.", "step")
+        brief = request + "".join(f"\n- {w}" for w in wanted)
+        if widgets:
+            keys = widget_keys(doc)
+            brief += ("\n\nDraw these new widgets, each with `WidgetView` from the page's `runWidget` data: "
+                      + ", ".join(f"widgets.{keys.get(str(w.body.get('id')), '?')} ({w.body.get('label')})"
+                                  for w in widgets))
+        router = tiered_router(reasoning=reasoning)
+        llm = client or router.for_task("page_code", "ui_engineer")
+        # A REWRITE IS LOOKED AT LIKE A FIRST WRITE. Smith's rewrites of a
+        # page went out compiled and unseen — the one path a person had just
+        # complained about (rafm22pm: "nothing was written on it?").
+        critic = router.for_task("page_look", "page_reviewer")
+        if not getattr(critic, "accepts_images", False):
+            critic = None
+        try:
+            # `whole`: laid out again from the start, its actions held — not
+            # edited inside the layout it has.
+            body, spent = compose_page(doc, page, root, llm, brief=brief,
+                                       current=None if whole else row, relayout_of=row if whole else None,
+                                       node="page_code", critic=critic)
+        except NeedsWorkflow as exc:
+            raise NeedsWorkflowError(route, exc.needs) from exc
+        except CompileError as exc:
+            raise ComposeError(f"the new {route} did not compile, so nothing was changed: {exc}") from exc
+        # A reviewed rewrite's calls carry who made them — `(usage, elapsed,
+        # "page_reviewer")` beside the engineer's `(usage, elapsed)` — and the
+        # two-name unpack failed every rewrite the reviewer looked at (live,
+        # 2026-09-27: /register, after the page was written).
+        for u, elapsed, *who in spent:
+            usage.record(node="page_code", agent=who[0] if who else "ui_engineer",
+                         usage=u, elapsed_s=elapsed)
+        # EACH SECTION BY THE AGENT THAT OWNS IT (§30) — the widgets are the
+        # analytics agent's, the code the UI engineer's — and ONE commit for
+        # both, so the change is one version and one undo. `apply_change`
+        # versions only what reports artifacts, and a `pageCode` row reports
+        # none: a code-only change through it was saved with no version at
+        # all, and an undo could not reach it.
+        # THE SAME CODE IS NOT A REWRITE. "Rewrote /login (version 59): the
+        # fix lives in account.ts … no edit to load or view is applicable"
+        # committed a version of a page nobody changed and reported it as
+        # changed (F&B replay, 2026-10-01). Said as a refusal, in the
+        # writer's words, so the loop goes where the writer pointed.
+        if not widgets and row is not None and \
+                str(body.get("view") or "") == str(row.get("view") or "") and \
+                str(body.get("load") or "") == str(row.get("load") or ""):
+            why = str(body.get("rationale") or "").strip()
+            return {"applied": False, "committed": [], "version": int(svc.doc.get("version") or 0),
+                    "reason": "the page writer left the code as it was" + (f": {why}" if why else ""),
+                    "missing": []}
+        before = svc.snapshot()
+        committed: list[str] = []
+        steps = [("analytics", list(widgets))] if widgets else []
+        steps.append(("ui_engineer", [ArtifactProposal(section="pageCode", natural_key=str(page["id"]), body=body)]))
+        for agent, proposals in steps:
+            application = apply_agent_result(svc, AgentResult(
+                task_id=f"TASK-smith-recode-{page['id']}-{agent}", agent=agent,
+                proposals=proposals, confidence=1.0), commit=False)
+            if not application.applied:
+                svc.doc = before
+                svc.save()
+                return {"applied": False, "committed": [], "version": int(svc.doc.get("version") or 0),
+                        "reason": application.reason or "the change was refused", "missing": []}
+            committed += list(application.artifacts or [])
+        record = svc.commit(
+            user_request=request or f"change {route}",
+            smith_interpretation=(f"rewrite {route}" + (
+                f", adding {', '.join(str(w.body.get('label')) for w in widgets)}" if widgets else "")),
+            before=before, affected=sorted(set(committed) | {str(page["id"])}))
+        version = int(record["version"])
+    finally:
+        # The SDK as the document has it, whichever way this went.
+        ensure_sdk(svc.doc, root)
+    project_code_pages(svc.doc, root)
+    # SHOWN MEANS DRAWN: a new widget counts when the new view reads it.
+    keys = widget_keys(svc.doc)
+    view = str(body.get("view") or "")
+    declared = {str(w.body.get("label")) for w in widgets}
+    missing = [str(w.get("label")) for w in svc.doc.get("widgets") or []
+               if str(w.get("label")) in declared and f"widgets.{keys.get(str(w.get('id')))}" not in view]
+    # A FIELD ASKED FOR IS CHECKED BY ITS NAME; a layout ask is not guessed
+    # at. The check took a "distinctive" word from each ask and searched the
+    # code for it: "Tools grid — nearby available tools…" was reported as not
+    # shown on a page rewritten as a grid, because "nearby" is not in its
+    # source (UAT replay). What cannot be checked is not claimed missing.
+    def norm(x: Any) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(x or "").lower())
+
+    fields = {norm(f.get("name")): str(f.get("name")) for e in (svc.doc.get("data") or {}).get("entities") or []
+              for f in e.get("fields") or [] if isinstance(f, dict) and f.get("name")}
+    for w in wanted:
+        name = fields.get(norm(w))
+        if name and name not in view:
+            missing.append(w)
+    return {"applied": True, "committed": committed, "version": version,
+            "reason": "", "missing": missing, "widgets": sorted(declared),
+            "rationale": str(body.get("rationale") or "").strip()}
+
+
+#: How many pages are laid out at once — the build's own fan-out width.
+RELAYOUT_WORKERS = 4
+
+
+def relayout_pages(svc: Any, routes: Sequence[str], *, app_root: str, request: str,
+                   reasoning: Any = None, client_for: Any = None) -> dict:
+    """Lay out several coded pages again from the start to `request`, at once,
+    and commit them as ONE version.
+
+    "Rebuild the layout of every screen to follow Myntra's pattern" was done
+    one page per tool call — one, as it turned out, before the turn moved on.
+    Each page is written by the engineer that wrote it, against its own
+    contract and the application's direction, every action it had held,
+    compiled and looked at; the writing runs in parallel, the commit once,
+    so the redesign is one change and one undo. Returns `{applied, done,
+    failed: {route: reason}, version, committed}`."""
+    import concurrent.futures as cf
+
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
+    from services.blueprint.app_sdk import project_code_pages
+    from services.blueprint.executors import RunUsage, tiered_router
+    from services.blueprint.ui_engineer import CompileError, NeedsWorkflow, compose_page, ensure_sdk
+
+    root = Path(app_root)
+    doc = svc.doc
+    targets: list[tuple[str, dict, dict]] = []
+    failed: dict[str, str] = {}
+    for route in dict.fromkeys(str(r).strip() for r in routes if str(r).strip()):
+        page = _page_for_route(doc, route)
+        row = code_row(doc, str((page or {}).get("id")))
+        if page is None:
+            failed[route] = "there is no page at this route"
+        elif row is None:
+            failed[route] = "this page is not written as code"
+        else:
+            targets.append((route, page, row))
+    usage = RunUsage.for_app(svc, phase="change")
+    router = tiered_router(reasoning=reasoning)
+    ensure_sdk(doc, root)
+
+    def write(route: str, page: dict, row: dict) -> tuple[str, dict | None, str]:
+        llm = client_for() if client_for else router.for_task("page_code", "ui_engineer")
+        critic = router.for_task("page_look", "page_reviewer")
+        if not getattr(critic, "accepts_images", False):
+            critic = None
+        try:
+            body, spent = compose_page(doc, page, root, llm, brief=request, relayout_of=row,
+                                       node="page_code", critic=critic)
+        except NeedsWorkflow as exc:
+            return route, None, f"it needs a process the app does not have: {exc.needs}"
+        except CompileError as exc:
+            return route, None, f"the new layout did not compile: {str(exc)[:300]}"
+        except Exception as exc:  # noqa: BLE001 — one page, not the redesign
+            logger.exception("[relayout] %s failed", route)
+            return route, None, f"{type(exc).__name__}: {str(exc)[:200]}"
+        for u, elapsed, *who in spent:
+            usage.record(node="page_code", agent=who[0] if who else "ui_engineer", usage=u, elapsed_s=elapsed)
+        return route, body, ""
+
+    written: list[tuple[str, dict, dict]] = []
+    tell(reasoning, f"Laying out {len(targets)} screen(s) again: {request}", "step")
+    with cf.ThreadPoolExecutor(max_workers=RELAYOUT_WORKERS) as pool:
+        futures = [pool.submit(write, route, page, row) for route, page, row in targets]
+        for fut in cf.as_completed(futures):
+            route, body, why = fut.result()
+            if body is None:
+                failed[route] = why
+            else:
+                page = next(p for r, p, _ in targets if r == route)
+                written.append((route, page, body))
+                tell(reasoning, f"{route} laid out again.", "step")
+    if not written:
+        return {"applied": False, "done": [], "failed": failed, "version": int(svc.doc.get("version") or 0),
+                "committed": []}
+    before = svc.snapshot()
+    committed: list[str] = []
+    for route, page, body in written:
+        application = apply_agent_result(svc, AgentResult(
+            task_id=f"TASK-smith-relayout-{page['id']}", agent="ui_engineer",
+            proposals=[ArtifactProposal(section="pageCode", natural_key=str(page["id"]), body=body)],
+            confidence=1.0), commit=False)
+        if not application.applied:
+            failed[route] = application.reason or "the new code was refused"
+            continue
+        committed += list(application.artifacts or [])
+    done = [r for r, _p, _b in written if r not in failed]
+    if not done:
+        svc.doc = before
+        svc.save()
+        return {"applied": False, "done": [], "failed": failed, "version": int(svc.doc.get("version") or 0),
+                "committed": []}
+    record = svc.commit(user_request=request, smith_interpretation=f"lay out again: {', '.join(done)}",
+                        before=before, affected=sorted(set(committed) | {
+                            str(p["id"]) for r, p, _b in written if r in done}))
+    ensure_sdk(svc.doc, root)
+    project_code_pages(svc.doc, app_root)
+    return {"applied": True, "done": sorted(done), "failed": failed, "version": int(record["version"]),
+            "committed": committed}
+
+
 def run(output_dir: str, verb: str, *, route: str = "",
         widgets: Sequence[str] = (), request: str = "",
-        reasoning: Any = None) -> dict:
+        reasoning: Any = None, entity: str = "") -> dict:
     """One composition, from an `output_dir` — the shape a tool handler needs.
 
     THE ONLY ENTRY POINT WITH BOTH CALLERS ON IT. The ReAct loop dispatches by
@@ -611,6 +1119,14 @@ def run(output_dir: str, verb: str, *, route: str = "",
         return {"applied": False, "edited_paths": [],
                 "reason": f"unknown compose verb {verb!r}; "
                           f"expected one of {', '.join(VERBS)}"}
+    # A SCREEN THAT NAMES NO RECORD ADOPTS THE ONE SMITH NAMED — a page made
+    # before screens were given one (Test2's Location Data) could otherwise
+    # never be prepared: no record, no actions, no workflows to call.
+    existing = _page_for_route(svc.doc, route)
+    eid = _entity_id(svc.doc, entity)
+    if existing is not None and eid and not (existing.get("data") or {}).get("primaryEntity"):
+        existing["data"] = {**(existing.get("data") or {}), "primaryEntity": eid}
+        svc.save()
     try:
         prepared = prepare_capabilities(svc, route, f"{request} {' '.join(wanted)}",
                                         app_root=app_root, reasoning=reasoning)
@@ -622,6 +1138,56 @@ def run(output_dir: str, verb: str, *, route: str = "",
     extra = "".join(
         ([f"; declared {', '.join(prepared['declared'])} on it"] if prepared["declared"] else [])
         + ([f"; created the edit screen {', '.join(prepared['created'])}"] if prepared["created"] else []))
+    page = _page_for_route(svc.doc, route)
+    # A NEW PAGE IN A CODED APP IS WRITTEN AS CODE TOO. It went to the layout
+    # composer (seven minutes), whose tree the frontend then dropped — "I laid
+    # out Home" about a page that was not served: "built the discover page it
+    # is not there" (UAT jubyt8jk). Declared, put in the menu, then written.
+    created = False
+    if page is None and verb == "compose_route" and coded_app(svc.doc):
+        page = _ensure_page(svc, route, request, entity=entity)
+        _into_menu(svc, page, app_root)
+        created = True
+        # …AND PREPARED LIKE ANY PAGE. The preparation above ran before this
+        # page existed and so declared nothing: the actions the request names,
+        # and the workflows that perform them, are declared now.
+        try:
+            again = prepare_capabilities(svc, route, f"{request} {' '.join(wanted)}",
+                                         app_root=app_root, reasoning=reasoning)
+        except Exception:  # noqa: BLE001 — the page is still written; its controls are held to what exists
+            logger.exception("[smith] preparing new page %s failed", route)
+            again = {"declared": [], "created": []}
+        if again["declared"]:
+            extra += f"; declared {', '.join(again['declared'])} on it"
+        page = _page_for_route(svc.doc, route) or page
+    if page is not None and (code_row(svc.doc, str(page.get("id"))) is not None or coded_app(svc.doc)):
+        try:
+            out = recode_page(svc, route, app_root=app_root, request=request, wanted=wanted,
+                              reasoning=reasoning)
+        except ComposeError as exc:
+            return {"applied": False, "edited_paths": [], "reason": str(exc)}
+        except Exception as exc:  # noqa: BLE001 — a tool degrades, it does not crash
+            logger.exception("[smith] rewriting %s failed", route)
+            return {"applied": False, "edited_paths": [], "reason": f"{type(exc).__name__}: {exc}"}
+        if created and out.get("applied"):
+            # A NEW PAGE IS A NEW DOOR, AND EVERY PART OF THE APP HAS TO KNOW IT.
+            # The code landed and the rail was written; the sign-in gate, the
+            # public menu and the route graph were not, so a public page Smith
+            # just built answered with the sign-in screen (Test2's Location
+            # Data, 2026-09-28). The whole app in step, and its database.
+            from services.smith.sync_app import sync
+            try:
+                sync(svc, app_root)
+            except Exception:  # noqa: BLE001 — the page stands; the next sync catches up
+                logger.exception("[smith] bringing the app in step after adding %s failed", route)
+        added = out.get("widgets") or []
+        did = (f"I rewrote {_where(svc, route)}{extra}"
+               + (f", adding {', '.join(added)}" if added else "")
+               + (f", but the new screen does not show {', '.join(out['missing'])}" if out["missing"] else "")
+               + ".")
+        return {"applied": out["applied"], "edited_paths": out["committed"],
+                "diff_summary": did, "version": out["version"], "reason": out["reason"],
+                "missing": out["missing"]}
     # A FIELD THE ENTITY ALREADY HAS NEEDS NO COMPOSER. "Show fathersName on
     # the registration page" asks for a control on a form, and the form is in
     # the layout; putting it there is deterministic. The composer, asked the
@@ -664,11 +1230,11 @@ def run(output_dir: str, verb: str, *, route: str = "",
         if verb == "add_widgets":
             result = add_widgets(svc, route, wanted, app_root=app_root,
                                  request=request, reasoning=reasoning)
-            did = f"added {', '.join(wanted)} to {route}{extra}"
+            did = f"I added {', '.join(wanted)} to {_where(svc, route)}{extra}"
         elif verb == "compose_route":
             result = compose_route(svc, route, app_root=app_root,
                                    request=request, reasoning=reasoning)
-            did = f"composed {route}{extra}"
+            did = f"I laid out {_where(svc, route)} again{extra}"
     except ComposeError as exc:
         # The composer declining is a real outcome and says so.
         return {"applied": False, "edited_paths": [], "reason": str(exc)}

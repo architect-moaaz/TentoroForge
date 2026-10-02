@@ -83,6 +83,21 @@ READ_FOR: dict[str, str] = {
         "read them from. Do not reproduce a specific screen — you are "
         "establishing the language every page inherits, not composing one."
     ),
+    "ui_direction": (
+        "Read them for how the product should FEEL to use — how much air a "
+        "screen leaves, how dense a list is, whether figures sit in a strip or "
+        "in tiles, how a header is built, how much a page leads with before "
+        "it lists. These are the anatomy decisions the direction makes; make "
+        "them so a page built to the direction would sit comfortably next to "
+        "what was shown. Not the palette (the design system owns it) and not "
+        "a screen to copy."
+    ),
+    "page_look": (
+        "They are the bar: the user showed what good looks like to them. "
+        "Hold the page to that standard of finish, spacing and hierarchy — "
+        "not to its layout or its colours, which this application decides "
+        "for itself."
+    ),
 }
 
 #: Derived, so a node cannot be shown a reference without being told what to

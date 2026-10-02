@@ -53,18 +53,69 @@ def split(steps: list[str]) -> tuple[list[str], list[str]]:
     return tidy[:MAX_STEPS], tidy[MAX_STEPS:]
 
 
-def remember(output_dir: str | Path, steps: list[str]) -> None:
-    """Keep the steps still to do, in order."""
+def _write(output_dir: str | Path, steps: list[str], agreed: bool | None, asked: str | None = None) -> None:
+    """`agreed` None keeps what the plan already was: working through an
+    agreed plan rewrites its list and must not un-agree it."""
+    try:
+        path = _path(output_dir)
+        keep = is_agreed(output_dir) if agreed is None else bool(agreed)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        asked = asked_of(output_dir) if asked is None else asked
+        path.write_text(json.dumps({"steps": steps, "agreed": keep, **({"asked": asked} if asked else {})},
+                                   indent=2), "utf-8")
+    except Exception as exc:  # noqa: BLE001 — a plan that cannot be kept is asked again
+        logger.warning("[smith] could not record the plan: %s", exc)
+
+
+def remember(output_dir: str | Path, steps: list[str], *, agreed: bool | None = None,
+             asked: str | None = None) -> None:
+    """Keep the steps still to do, in order — and the ask they came from."""
     kept, _over = split(steps)
     if not kept:
         clear(output_dir)
         return
+    _write(output_dir, kept, agreed, asked)
+
+
+def remember_all(output_dir: str | Path, steps: list[str], *, agreed: bool | None = None,
+                 asked: str | None = None) -> None:
+    """Keep every step still to do, in order — a plan whose step split into
+    sub-steps holds those AND the rest, however many that is."""
+    tidy = [" ".join(str(s).split()) for s in (steps or []) if str(s or "").strip()]
+    if not tidy:
+        clear(output_dir)
+        return
+    _write(output_dir, tidy, agreed, asked)
+
+
+def asked_of(output_dir: str | Path) -> str:
+    """The ask the waiting plan was made from: each step is run carrying it,
+    since a step alone ("show prices as ₹") is Smith's words, not theirs."""
     try:
-        path = _path(output_dir)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"steps": kept}, indent=2), "utf-8")
-    except Exception as exc:  # noqa: BLE001 — a plan that cannot be kept is asked again
-        logger.warning("[smith] could not record the plan: %s", exc)
+        raw = json.loads(_path(output_dir).read_text("utf-8"))
+        return str((raw or {}).get("asked") or "") if isinstance(raw, dict) else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def is_agreed(output_dir: str | Path) -> bool:
+    """Whether the person said yes to the waiting plan. A plan only shown —
+    proposed, never answered — is not theirs: SnapIT's \"make it Dubai
+    centric\" plan sat proposed for two days and was folded into the next,
+    unrelated ask as if agreed, pushing that ask out of its own plan
+    (replay, 2026-10-01)."""
+    try:
+        raw = json.loads(_path(output_dir).read_text("utf-8"))
+        return bool((raw or {}).get("agreed")) if isinstance(raw, dict) else False
+    except Exception:  # noqa: BLE001 — no plan, or unreadable: not agreed
+        return False
+
+
+def agree(output_dir: str | Path) -> None:
+    """The person said yes to the waiting plan."""
+    steps = peek(output_dir)
+    if steps:
+        _write(output_dir, steps, True)
 
 
 def peek(output_dir: str | Path) -> list[str]:
@@ -127,6 +178,6 @@ def remaining_note(steps: list[str]) -> str:
     return f"\n\nStill to do:\n{listed}\n\nSay `next` for the first of them."
 
 
-__all__ = ["ALL_LABEL", "FIRST_LABEL", "REWORD_LABEL", "MAX_STEPS", "PENDING_PATH",
+__all__ = ["ALL_LABEL", "FIRST_LABEL", "REWORD_LABEL", "MAX_STEPS", "PENDING_PATH", "agree", "is_agreed",
            "as_question", "clear", "peek", "remaining_note", "remember", "split",
            "take_next", "wants_next"]

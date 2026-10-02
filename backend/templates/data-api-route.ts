@@ -27,6 +27,13 @@ import {
 // derived from the sum, never stored, so mutating a past row would corrupt
 // the derived history.
 import { isAppendOnly } from "@/lib/append-only-entities";
+// "IT'S REALLY SLOW" HAS TO REACH SOMETHING. Every data operation this route
+// runs is timed, and one that takes longer than the app was told to expect is
+// reported with WHAT was being done — the operation and the entity — so the
+// answer to that sentence can name a screen instead of agreeing that it feels
+// slow. What is measured is the handler inside this process and nothing else:
+// not the browser's render, not the network, not a cold start before this ran.
+import { measured } from "@/lib/error_reporter";
 import { PUBLIC_RESOURCES } from "@/lib/public-resources";
 import { ENTITY_ACCESS } from "@/lib/entity-access";
 
@@ -43,10 +50,12 @@ function deniedFor(entity: string | undefined, session: { user?: { role?: unknow
   const access = ENTITY_ACCESS[entity];
   if (!access) return false;
   const roles = access[op] ?? [];
-  if (roles.includes("*") && op === "read") return false;
-  const role = String(session?.user?.role ?? "");
-  if (!session?.user) return !roles.includes("*");
-  return !roles.includes(role);
+  // "*" is a public page: open to everyone, signed in or not. A write used to
+  // be open only to a caller who was signed OUT, so signing in refused what
+  // an anonymous visitor could do.
+  if (roles.includes("*")) return false;
+  if (!session?.user) return true;
+  return !roles.includes(String(session.user.role ?? ""));
 }
 
 // Auto-register all entities on first request
@@ -189,12 +198,15 @@ export async function GET(
     // GET /api/data/[entity]/stats
     if (rest[0] === "stats") {
       // Same ctx as the list — the count and the rows it counts must agree.
-      return NextResponse.json(await stats(entity, ctx));
+      return NextResponse.json(
+        await measured({ operation: "stats", entity }, () => stats(entity, ctx)),
+      );
     }
 
     // GET /api/data/[entity]/[id]
     if (rest[0] && rest[0] !== "stats") {
-      const record = await findById(entity, rest[0], ctx);
+      const record = await measured({ operation: "read", entity },
+                                    () => findById(entity, rest[0], ctx));
       return NextResponse.json(record);
     }
 
@@ -214,7 +226,8 @@ export async function GET(
       limit: parseInt(url.searchParams.get("limit") || "50"),
     };
 
-    const result = await query(entity, opts, ctx);
+    const result = await measured({ operation: "list", entity },
+                                  () => query(entity, opts, ctx));
     return NextResponse.json(result);
   } catch (error) {
     return errorResponse(error);
@@ -240,7 +253,8 @@ export async function POST(
 
   try {
     const body = await request.json();
-    const result = await create(entity, body, ctx);
+    const result = await measured({ operation: "create", entity },
+                                  () => create(entity, body, ctx));
     return NextResponse.json(result.data, { status: 201 });
   } catch (error) {
     return errorResponse(error);
@@ -285,7 +299,8 @@ export async function PUT(
 
   try {
     const body = await request.json();
-    const result = await update(entity, id, body, ctx);
+    const result = await measured({ operation: "update", entity },
+                                  () => update(entity, id, body, ctx));
     return NextResponse.json(result.data);
   } catch (error) {
     return errorResponse(error);
@@ -314,7 +329,8 @@ export async function DELETE(
   const ctx = { user: session.user as any };
 
   try {
-    const result = await remove(entity, id, ctx);
+    const result = await measured({ operation: "delete", entity },
+                                  () => remove(entity, id, ctx));
     return NextResponse.json(result.data);
   } catch (error) {
     return errorResponse(error);

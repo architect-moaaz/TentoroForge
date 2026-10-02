@@ -76,3 +76,15 @@ def test_resolve_search_columns_restriction_intersects_manifest():
     # actually searchable — silent skip, never an error).
     src = (_RUNTIME_ROOT / "data-engine.ts").read_text()
     assert "allSearchable.includes" in src
+
+
+def test_registration_searches_the_declared_columns_first():
+    """`registerEntity` fell back to six guessed column names and never read the
+    projected manifest, so a search over `fullName` matched every row
+    (22lzrc2p, 2026-09-19). The manifest is consulted before the guess."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2] / "templates/runtime/data-engine.ts").read_text()
+    reg = src[src.index("export function registerEntity("):]
+    reg = reg[:reg.index("const rec = { table, slug, searchFields };")]
+    assert "searchableColumnsFor(name)" in reg
+    assert reg.index("searchableColumnsFor(name)") < reg.index('"firstName", "lastName"')

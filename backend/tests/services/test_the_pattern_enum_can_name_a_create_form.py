@@ -51,7 +51,8 @@ def test_the_enum_can_name_a_create_form():
 def test_every_declared_pattern_still_has_a_family():
     """Adding a pattern without a family is how a page comes to be judged by a
     floor written for a different kind of screen."""
-    missing = [p for p in _pattern_enum() if p not in _FAMILY]
+    # `auth` is deliberately unjudged — see test_every_pattern_is_judged_as_itself.
+    missing = [p for p in _pattern_enum() if p not in _FAMILY and p != "auth"]
     assert missing == [], f"patterns with no family: {missing}"
 
 

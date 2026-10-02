@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from services import app_map as am
-
+from tests.sample_apps import require
 
 _FIXTURE = Path("/Users/m/Work/code/poc/design2ui-forge-v3/output/bpxr6hsv")
 
@@ -30,8 +30,17 @@ def _fresh_cache():
 
 @pytest.fixture
 def app_root(tmp_path: Path) -> Path:
-    if not _FIXTURE.exists():
-        pytest.skip("bpxr6hsv fixture app not present")
+    # `_FIXTURE` EXISTS AND IS EMPTY on a machine whose copy of the
+    # sample app was cleaned, so `.exists()` on the directory let the
+    # copy below run and raise FileNotFoundError in setup. The guard
+    # asks for the files it is about to read.
+    require(
+            _FIXTURE / "contracts" / "resource-registry.json",
+            _FIXTURE / "contracts" / "action-contract.json",
+            _FIXTURE / "contracts" / "generation-dossier.json",
+            _FIXTURE / "registry.json",
+            _FIXTURE / "src" / "schemas",
+    )
     (tmp_path / "contracts").mkdir()
     for name in ("resource-registry.json", "action-contract.json",
                  "generation-dossier.json"):
@@ -94,6 +103,7 @@ def test_missing_output_dir_returns_empty_and_does_not_cache(tmp_path):
     m1 = am.get_app_map(str(tmp_path))
     assert m1["entities"] == {}
     # Materialize the contracts now.
+    require(_FIXTURE / "contracts" / "resource-registry.json")
     (tmp_path / "contracts").mkdir()
     shutil.copy(_FIXTURE / "contracts" / "resource-registry.json",
                 tmp_path / "contracts" / "resource-registry.json")

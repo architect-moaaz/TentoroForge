@@ -28,4 +28,4 @@ export const RichTextEditorProps = z.object({
     .optional(),
   embeds: z.array(z.enum(["image", "link", "table"])).optional(),
 });
-export type RichTextEditorPropsType = z.infer<typeof RichTextEditorProps>;
+export type RichTextEditorPropsType = z.input<typeof RichTextEditorProps>;

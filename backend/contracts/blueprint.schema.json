@@ -56,6 +56,13 @@
             "forge",
             "uxpilot"
           ]
+        },
+        "designLanguage": {
+          "type": "string",
+          "enum": [
+            "company",
+            "custom"
+          ]
         }
       },
       "required": [
@@ -176,6 +183,14 @@
           "type": "string",
           "description": "BCP-47 tag for the language the INTERFACE is written in — 'ar', 'ar-PS', 'fr'. Set it when the request says what language the UI should be in; every string a reader sees is then authored in it and the document is laid out right-to-left where the script requires. A country, currency or market is not a language. Defaults to 'en'.",
           "default": "en"
+        },
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "BCP-47 tags of the OTHER languages people can switch the interface to, beside `locale` — ['hi'] for an English app that must also be shown in Hindi. Only when the request asks for the interface in more than one language. Empty for a single-language app.",
+          "default": []
         }
       },
       "additionalProperties": false,
@@ -312,6 +327,9 @@
             },
             "default": []
           },
+          "deferred": {
+            "type": "boolean"
+          },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
           },
@@ -376,7 +394,16 @@
               "data_explorer",
               "command_center",
               "split_view",
-              "document_workspace"
+              "document_workspace",
+              "tool",
+              "auth"
+            ]
+          },
+          "auth": {
+            "type": "string",
+            "enum": [
+              "login",
+              "signup"
             ]
           },
           "module": {
@@ -489,18 +516,154 @@
             },
             "default": []
           },
+          "content": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "answers": {
+                  "type": "string",
+                  "default": ""
+                },
+                "prominence": {
+                  "type": "string",
+                  "enum": [
+                    "lead",
+                    "key",
+                    "supporting",
+                    "reassurance"
+                  ],
+                  "default": "key"
+                },
+                "source": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "field",
+                        "related",
+                        "reverse",
+                        "count",
+                        "total",
+                        "process",
+                        "distance"
+                      ]
+                    },
+                    "entity": {
+                      "type": "string",
+                      "pattern": "^ENTITY-\\d{3,}$",
+                      "description": "Stable ENTITY identifier (§12)"
+                    },
+                    "field": {
+                      "type": "string"
+                    },
+                    "via": {
+                      "type": "string"
+                    },
+                    "of": {
+                      "type": "string"
+                    },
+                    "where": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean"
+                        ]
+                      }
+                    },
+                    "fn": {
+                      "type": "string",
+                      "enum": [
+                        "sum",
+                        "avg",
+                        "min",
+                        "max"
+                      ]
+                    },
+                    "sort": {
+                      "type": "string"
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "via": {
+                          "type": "string"
+                        },
+                        "entity": {
+                          "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                        },
+                        "field": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "via",
+                        "entity"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "about": {
+                      "type": "string"
+                    },
+                    "newField": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string",
+                          "default": ""
+                        },
+                        "enumValues": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "required": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "required": [
+                        "type"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "label",
+                "source"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
           "data": {
             "type": "object",
             "properties": {
               "primaryEntity": {
-                "type": "string",
-                "pattern": "^ENTITY-\\d{3,}$",
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
                 "description": "Stable ENTITY identifier (§12)"
               },
               "supportingEntities": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
                 },
                 "default": []
               }
@@ -546,7 +709,8 @@
                   "supported",
                   "adaptive",
                   "unsupported"
-                ]
+                ],
+                "default": "primary"
               },
               "tablet": {
                 "type": "string",
@@ -555,7 +719,8 @@
                   "supported",
                   "adaptive",
                   "unsupported"
-                ]
+                ],
+                "default": "supported"
               },
               "mobile": {
                 "type": "string",
@@ -564,14 +729,10 @@
                   "supported",
                   "adaptive",
                   "unsupported"
-                ]
+                ],
+                "default": "adaptive"
               }
             },
-            "required": [
-              "desktop",
-              "tablet",
-              "mobile"
-            ],
             "additionalProperties": false,
             "default": {
               "desktop": "primary",
@@ -647,6 +808,12 @@
               "icon": {
                 "type": "string"
               },
+              "view": {
+                "type": "string"
+              },
+              "tab": {
+                "type": "boolean"
+              },
               "roles": {
                 "type": "array",
                 "items": {
@@ -675,6 +842,13 @@
             "type": "string"
           },
           "default": {}
+        },
+        "mobile": {
+          "type": "string",
+          "enum": [
+            "tabs",
+            "drawer"
+          ]
         }
       },
       "additionalProperties": false,
@@ -753,6 +927,10 @@
           "label": {
             "type": "string"
           },
+          "key": {
+            "type": "string",
+            "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"
+          },
           "dataSource": {
             "anyOf": [
               {
@@ -763,7 +941,7 @@
                     "const": "list"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
                   },
                   "fields": {
                     "type": "array",
@@ -799,7 +977,7 @@
                     "const": "single"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
                   },
                   "filter": {
                     "type": "object",
@@ -821,7 +999,7 @@
                     "const": "aggregate"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
                   },
                   "aggregation": {
                     "type": "string",
@@ -858,7 +1036,7 @@
                     "const": "series"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
                   },
                   "aggregation": {
                     "$ref": "#/properties/widgets/items/properties/dataSource/anyOf/2/properties/aggregation"
@@ -882,6 +1060,139 @@
                   "groupBy"
                 ],
                 "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "op": {
+                    "type": "string",
+                    "const": "query"
+                  },
+                  "entity": {
+                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                  },
+                  "measures": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "aggregation": {
+                          "type": "string",
+                          "enum": [
+                            "count",
+                            "count_distinct",
+                            "sum",
+                            "avg",
+                            "min",
+                            "max"
+                          ]
+                        },
+                        "field": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "aggregation"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1
+                  },
+                  "dimensions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "type": "string"
+                        },
+                        "bucket": {
+                          "type": "string",
+                          "enum": [
+                            "day",
+                            "week",
+                            "month",
+                            "quarter",
+                            "year"
+                          ]
+                        },
+                        "ranges": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "type": "string"
+                              },
+                              "from": {
+                                "type": "number"
+                              },
+                              "to": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 24
+                        }
+                      },
+                      "required": [
+                        "field"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "maxItems": 2,
+                    "default": []
+                  },
+                  "filter": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "default": {}
+                  },
+                  "timeField": {
+                    "type": "string"
+                  },
+                  "sort": {
+                    "type": "object",
+                    "properties": {
+                      "by": {
+                        "type": "string"
+                      },
+                      "order": {
+                        "type": "string",
+                        "enum": [
+                          "asc",
+                          "desc"
+                        ],
+                        "default": "desc"
+                      }
+                    },
+                    "required": [
+                      "by"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 1000
+                  }
+                },
+                "required": [
+                  "op",
+                  "entity",
+                  "measures"
+                ],
+                "additionalProperties": false
               }
             ]
           },
@@ -896,6 +1207,54 @@
               "text"
             ],
             "default": "number"
+          },
+          "description": {
+            "type": "string"
+          },
+          "chart": {
+            "type": "object",
+            "properties": {
+              "mark": {
+                "type": "string",
+                "enum": [
+                  "bar",
+                  "line",
+                  "area",
+                  "pie",
+                  "donut",
+                  "funnel",
+                  "radar",
+                  "scatter",
+                  "heatmap",
+                  "treemap",
+                  "sunburst",
+                  "graph",
+                  "map"
+                ]
+              },
+              "stacked": {
+                "type": "boolean"
+              },
+              "horizontal": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "mark"
+            ],
+            "additionalProperties": false
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "sm",
+              "md",
+              "lg",
+              "full"
+            ]
+          },
+          "order": {
+            "type": "integer"
           },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
@@ -933,7 +1292,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
               },
               "name": {
                 "type": "string"
@@ -979,8 +1338,34 @@
                       "default": false
                     },
                     "references": {
-                      "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+                      "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
                       "description": "Stable ENTITY identifier (§12)"
+                    },
+                    "min": {
+                      "type": "number"
+                    },
+                    "max": {
+                      "type": "number"
+                    },
+                    "examples": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "maxItems": 8
+                    },
+                    "embedding": {
+                      "type": "object",
+                      "properties": {
+                        "of": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "of"
+                      ],
+                      "additionalProperties": false
                     },
                     "description": {
                       "type": "string",
@@ -997,6 +1382,9 @@
               },
               "labelField": {
                 "type": "string"
+              },
+              "account": {
+                "type": "boolean"
               },
               "status": {
                 "$ref": "#/properties/product/properties/capabilities/items/properties/status"
@@ -1029,10 +1417,10 @@
             "type": "object",
             "properties": {
               "from": {
-                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
               },
               "to": {
-                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
               },
               "kind": {
                 "type": "string",
@@ -1073,7 +1461,7 @@
             "type": "object",
             "properties": {
               "entity": {
-                "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity"
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
               },
               "kind": {
                 "type": "string",
@@ -1096,6 +1484,75 @@
               "entity",
               "kind",
               "expression"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "imports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "entity": {
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+              },
+              "table": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "rowCount": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              },
+              "rejectedCount": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 0
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "column": {
+                      "type": "string"
+                    },
+                    "field": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "column",
+                    "field"
+                  ],
+                  "additionalProperties": false
+                },
+                "default": []
+              },
+              "ignoredColumns": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "importedAt": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": [
+              "id",
+              "entity",
+              "table",
+              "source"
             ],
             "additionalProperties": false
           },
@@ -1180,7 +1637,7 @@
                   ]
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "next": {
@@ -1203,6 +1660,12 @@
                           "null"
                         ]
                       }
+                    },
+                    "refused": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
                     }
                   },
                   "additionalProperties": {},
@@ -1242,7 +1705,7 @@
                   ]
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "type": {
@@ -1320,12 +1783,54 @@
             "type": "string",
             "enum": [
               "statement",
-              "condition_action"
+              "condition_action",
+              "prerequisite"
             ],
             "default": "statement"
           },
+          "gates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/properties/pages/items/properties/requires/properties/producedBy"
+            },
+            "default": []
+          },
+          "requires": {
+            "type": "object",
+            "properties": {
+              "entity": {
+                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+              },
+              "account": {
+                "type": "string"
+              },
+              "where": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "default": {}
+              }
+            },
+            "required": [
+              "entity",
+              "account"
+            ],
+            "additionalProperties": false
+          },
+          "message": {
+            "type": "string"
+          },
+          "page": {
+            "$ref": "#/properties/modules/items/properties/pages/items",
+            "description": "Stable PAGE identifier (§12)"
+          },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           },
           "when": {
@@ -1482,7 +1987,7 @@
             "default": ""
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           },
           "permission": {
@@ -1550,6 +2055,10 @@
             },
             "default": []
           },
+          "serves": {
+            "type": "string",
+            "default": ""
+          },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
           },
@@ -1592,6 +2101,10 @@
         "rbac": {
           "type": "boolean",
           "default": true
+        },
+        "signupRole": {
+          "$ref": "#/properties/roles/items/properties/id",
+          "description": "Stable ROLE identifier (§12)"
         },
         "ownershipRules": {
           "type": "array",
@@ -1866,6 +2379,27 @@
           "type": "string",
           "default": ""
         },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "product": {
+                "type": "string"
+              },
+              "takeaway": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "product",
+              "takeaway"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Two to four real, well-known products in THIS application's own field and for its audience whose experience it should match, each with the one thing to take from it (a layout idea, a way of presenting the main record, a tone). Not developer tools unless this is one.",
+          "default": []
+        },
         "colors": {
           "type": "object",
           "additionalProperties": {
@@ -1912,6 +2446,102 @@
           "type": "string",
           "default": ""
         },
+        "imagery": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "role": {
+                "type": "string",
+                "enum": [
+                  "auth",
+                  "hero",
+                  "empty"
+                ]
+              },
+              "query": {
+                "type": "string",
+                "minLength": 1
+              },
+              "alt": {
+                "type": "string",
+                "default": ""
+              },
+              "url": {
+                "type": "string",
+                "default": ""
+              },
+              "thumbUrl": {
+                "type": "string",
+                "default": ""
+              },
+              "credit": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "link": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "link"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "role",
+              "query"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "shell": {
+          "type": "object",
+          "properties": {
+            "chrome": {
+              "type": "string",
+              "enum": [
+                "standard-rail",
+                "wide-rail",
+                "icon-rail",
+                "floating-rail",
+                "right-rail",
+                "topbar",
+                "dock"
+              ]
+            },
+            "auth": {
+              "type": "string",
+              "enum": [
+                "split-editorial",
+                "split-reversed",
+                "side-panel",
+                "centered-minimal",
+                "brand-wash",
+                "top-anchored"
+              ]
+            },
+            "tone": {
+              "type": "string",
+              "enum": [
+                "dark",
+                "brand",
+                "light",
+                "tinted"
+              ]
+            }
+          },
+          "required": [
+            "chrome",
+            "auth"
+          ],
+          "additionalProperties": false
+        },
         "informationDensity": {
           "type": "string",
           "enum": [
@@ -1951,6 +2581,35 @@
           "additionalProperties": {
             "type": "number"
           }
+        },
+        "logo": {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string",
+              "minLength": 1
+            },
+            "alt": {
+              "type": "string",
+              "default": ""
+            },
+            "mediaType": {
+              "type": "string",
+              "default": "image/png"
+            },
+            "width": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "file"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,
@@ -2104,8 +2763,12 @@
                     "list",
                     "get",
                     "aggregate",
-                    "series"
+                    "series",
+                    "similar"
                   ]
+                },
+                "field": {
+                  "type": "string"
                 },
                 "filter": {
                   "type": "object",
@@ -2171,6 +2834,43 @@
                 "name",
                 "entity",
                 "op"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "clientState": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "initial": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "description": {
+                  "type": "string",
+                  "default": ""
+                }
+              },
+              "required": [
+                "name",
+                "type"
               ],
               "additionalProperties": false
             },
@@ -2264,6 +2964,61 @@
           },
           "default": []
         },
+        "rhythm": {
+          "type": "object",
+          "properties": {
+            "header": {
+              "type": "string",
+              "enum": [
+                "eyebrow-title",
+                "title-only",
+                "band",
+                "compact"
+              ]
+            },
+            "lead": {
+              "type": "string",
+              "enum": [
+                "dark-card",
+                "gradient-band",
+                "outlined-panel",
+                "type-only"
+              ]
+            },
+            "lists": {
+              "type": "string",
+              "enum": [
+                "table",
+                "cards",
+                "rows"
+              ]
+            },
+            "figures": {
+              "type": "string",
+              "enum": [
+                "tiles",
+                "strip",
+                "inline"
+              ]
+            },
+            "sections": {
+              "type": "string",
+              "enum": [
+                "cards",
+                "open",
+                "dense"
+              ]
+            }
+          },
+          "required": [
+            "header",
+            "lead",
+            "lists",
+            "figures",
+            "sections"
+          ],
+          "additionalProperties": false
+        },
         "pages": {
           "type": "array",
           "items": {
@@ -2345,6 +3100,75 @@
       "additionalProperties": false,
       "default": {}
     },
+    "pageCode": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "$ref": "#/properties/modules/items/properties/pages/items"
+          },
+          "rationale": {
+            "type": "string",
+            "default": ""
+          },
+          "load": {
+            "type": "string",
+            "minLength": 1
+          },
+          "view": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/status"
+          },
+          "requirements": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/requirements"
+          },
+          "decisions": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/decisions"
+          },
+          "confidence": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/confidence"
+          },
+          "syncNote": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          }
+        },
+        "required": [
+          "page",
+          "load",
+          "view"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "frameCode": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string",
+            "default": ""
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
     "requirements": {
       "type": "array",
       "items": {
@@ -2419,6 +3243,9 @@
             "default": []
           },
           "assumption": {
+            "type": "string"
+          },
+          "area": {
             "type": "string"
           },
           "owner": {
@@ -2712,6 +3539,17 @@
             "type": "string"
           }
         },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "database": {
+          "type": "object",
+          "additionalProperties": {}
+        },
         "pages": {
           "type": "object",
           "properties": {
@@ -2742,6 +3580,59 @@
             "status"
           ],
           "additionalProperties": false
+        },
+        "boot": {
+          "type": "object",
+          "properties": {
+            "entry": {
+              "type": "string"
+            },
+            "port": {
+              "type": "number"
+            },
+            "status": {
+              "type": "number"
+            },
+            "seconds": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "entry",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "pageReview": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "scores": {
+                "type": "array",
+                "items": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "default": []
+              },
+              "passed": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "rewritten": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false,
@@ -2881,7 +3772,7 @@
             "default": []
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/data/properties/primaryEntity",
+            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           }
         },

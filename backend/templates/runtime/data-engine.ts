@@ -11,7 +11,7 @@
  */
 
 import { db } from "@/db";
-import { eq, ilike, or, and, desc, asc, count, sum, avg, min, max, gte, lt, inArray, sql, getTableName, type SQL } from "drizzle-orm";
+import { eq, ilike, or, and, desc, asc, count, countDistinct, sum, avg, min, max, gte, lt, inArray, sql, getTableName, getTableColumns, type SQL } from "drizzle-orm";
 // FK-role authority — decides which columns to auto-fill from the current user.
 // A `domain` FK (target != users) is NEVER user-filled; only `actor` columns are.
 // Absent-table (registry-less app) → legacy name-based fallback below.
@@ -29,6 +29,10 @@ import { encryptSensitive, decryptSensitive, mask, looksMasked } from "./sensiti
 // each entity carries. Empty for apps with no `search: true` columns, so
 // resolveSearch fast-paths to [] on the miss.
 import { searchableColumnsFor } from "./searchable-columns";
+// Embedding columns: filled from their source field on every write, stripped
+// from every read, ranked by op:"similar". Empty manifest → all three no-op.
+import { embeddingColumnsFor } from "./embedding-columns";
+import { embedQuery, embedWrittenRow, stripEmbeddings } from "./embeddings";
 // What to do with a column that names the acting user. Projected from the
 // Blueprint's `security.ownershipRules`: a kind:"scope" column decides who may
 // reach the row, a kind:"attribution" column only records who acted. Both are
@@ -209,6 +213,12 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
   record: T,
   ctx: DataEngineContext,
 ): Promise<T> {
+  // Every read passes through here, so this is also where the vectors leave
+  // the row: they are the engine's to rank by, not anyone's to read.
+  if (record != null) {
+    const t = getEntity(entityName)?.table;
+    stripEmbeddings(t ? getTableName(t as any) : entityName, record);
+  }
   const specs = sensitiveColumnsFor(entityName);
   const keys = Object.keys(specs);
   if (keys.length === 0 || record == null) return record;
@@ -255,6 +265,28 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
     delete (record as any)[encKey];
   }
   return record;
+}
+
+
+// ─── The reader in a filter ──────────────────────────────────────────────
+
+/** Matches no row: a well-formed id nothing has. */
+const NO_READER = "00000000-0000-0000-0000-000000000000";
+
+/** A filter with `$user.id` read as the person reading — the same sentinel a
+ *  workflow step writes. "My children by gender" is a widget filter on the
+ *  parent's own id; sent to the database as the literal text it failed on
+ *  every uuid column, and the chart was empty (aszjcc2k, 2026-09-27). With no
+ *  one signed in it matches nothing, never everything. */
+export function withReader(
+  filter: Record<string, any> | undefined | null,
+  ctx: DataEngineContext,
+): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(filter || {})) {
+    out[k] = v === "$user.id" ? (ctx?.user?.id ?? NO_READER) : v;
+  }
+  return out;
 }
 
 
@@ -471,9 +503,17 @@ export function registerEntity(
 ) {
   const columns = Object.keys(table);
   const slug = opts?.slug || name.replace(/([A-Z])/g, "-$1").toLowerCase().replace(/^-/, "");
-  const searchFields = opts?.searchFields || columns.filter(c =>
+  // WHAT A SEARCH BOX SEARCHES IS DECLARED, NOT GUESSED. The Blueprint's
+  // searchable columns are projected to `searchable-columns.ts`; every
+  // registration used to skip it and fall back to six column names, so a
+  // Record whose text column is `fullName` matched every search with every
+  // row — the box was there and did nothing (22lzrc2p, 2026-09-19). The
+  // manifest first (by export name, then by the entity's own name), the
+  // old guess only for a table the manifest does not know.
+  const declared = searchableColumnsFor(name).filter((c) => columns.includes(c));
+  const searchFields = opts?.searchFields || (declared.length ? declared : columns.filter(c =>
     ["name", "title", "email", "description", "firstName", "lastName"].includes(c)
-  );
+  ));
   const rec = { table, slug, searchFields };
   _entities.set(name.toLowerCase(), rec);
   _entities.set(slug, rec);
@@ -819,6 +859,7 @@ export async function create(
   // Insert
   stringifyDatesForStringColumns(entity.table, validated);
   const [record] = await db.insert(entity.table).values(validated as any).returning();
+  await embedWrittenRow(entity.table, record);
   const event = `${entityName.toLowerCase()}_created`;
 
   // Emit event for workflow engine
@@ -887,6 +928,7 @@ export async function update(
 
   stringifyDatesForStringColumns(entity.table, updateData);
   const [record] = await db.update(entity.table).set(updateData).where(where).returning();
+  await embedWrittenRow(entity.table, record, existing);
   const event = `${entityName.toLowerCase()}_updated`;
 
   emit(event, { entityId: record.id, entity: record, previousEntity: existing, user: ctx.user }).catch(console.error);
@@ -982,7 +1024,7 @@ export async function query(
 
   // Filters
   if (filters) {
-    for (const [key, value] of Object.entries(filters)) {
+    for (const [key, value] of Object.entries(withReader(filters, ctx))) {
       if (value && value !== "undefined" && entity.table[key]) {
         conditions.push(eq(entity.table[key], value));
       }
@@ -1103,6 +1145,33 @@ type AggregateSource = {
 let _testDb: any = null;
 export function __setTestDb(d: any) { _testDb = d; }
 
+/**
+ * A count through a foreign key: `{ ingredientId: { in: "Ingredient", where:
+ * { kind: "harmful" } } }` — the rows whose `ingredientId` points at an
+ * Ingredient of kind harmful. The target is NAMED because a generated app
+ * does not know at run time which entity a foreign key points at (its schema
+ * declares plain uuid columns); the page's author does, and says so.
+ * Compiled to `fk IN (SELECT id FROM target WHERE … AND <target's access>)`,
+ * so the count sees only related rows the reader may read. `null` when it
+ * does not resolve.
+ */
+async function joinedCondition(column: any, spec: unknown, ctx: DataEngineContext): Promise<SQL | null> {
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return null;
+  const { in: targetName, where } = spec as { in?: unknown; where?: Record<string, unknown> };
+  const target = typeof targetName === "string" ? getEntity(targetName) : undefined;
+  const tcols = target?.table as any;
+  if (!target || !tcols?.id) return null;
+  const tconds: SQL[] = [];
+  for (const [k, v] of Object.entries(where || {})) {
+    if (tcols[k] === undefined) return null;
+    tconds.push(eq(tcols[k], v as any));
+  }
+  tconds.push(...(await accessConditions(targetName as string, target, ctx)));
+  const _db = _testDb ?? db;
+  const sub = (_db as any).select({ id: tcols.id }).from(target.table);
+  return inArray(column, tconds.length ? sub.where(and(...tconds)) : sub);
+}
+
 /** Run a single plain aggregate and return a number (0 on missing entity / error).
  *  `range` overrides the metric's own `window` with an explicit half-open
  *  [start, end) — used by period-delta to query the prior window. */
@@ -1138,8 +1207,14 @@ async function computeSimple(
   const start = range ? range.start : windowStart(m.window);
   if (start && dateCol) conds.push(gte(dateCol, start));
   if (range?.end && dateCol) conds.push(lt(dateCol, range.end));
-  for (const [k, v] of Object.entries(m.filter || {})) {
-    if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
+  for (const [k, v] of Object.entries(withReader(m.filter, ctx))) {
+    if (cols[k] !== undefined && (v === null || typeof v !== "object")) { conds.push(eq(cols[k], v as any)); continue; }
+    const joined = cols[k] !== undefined ? await joinedCondition(cols[k], v, ctx) : null;
+    if (joined) { conds.push(joined); continue; }
+    // A filter that names nothing used to be dropped without a word, and the
+    // tile counted every row. It still is not an error — a KPI must not break
+    // a page — but it is said.
+    console.warn(`[data-engine] ${entityName}: filter ${JSON.stringify(k)} does not resolve; ignored`);
   }
 
   const _db = _testDb ?? db;
@@ -1294,7 +1369,7 @@ export async function resolveSeries(
     const orderCol = cols[orderName];
     if (orderCol === undefined) return [];
     const conds: SQL[] = [...scope];
-    for (const [k, v] of Object.entries(source.filter || {})) {
+    for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
     }
     try {
@@ -1337,7 +1412,7 @@ export async function resolveSeries(
   const labelExpr: any = bucket ? sql`date_trunc(${bucket}, ${groupCol})` : groupCol;
 
   const conds: SQL[] = [...scope];
-  for (const [k, v] of Object.entries(source.filter || {})) {
+  for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
     if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
   }
 
@@ -1373,6 +1448,263 @@ export async function resolveSeries(
   } catch {
     return [];
   }
+}
+
+// ─── Query Resolver (op:"query") ───
+
+/** One number per row of a query: an aggregation over a column (or rows). */
+export type QueryMeasure = {
+  key: string;
+  aggregation: "count" | "count_distinct" | "sum" | "avg" | "min" | "max";
+  field?: string;
+};
+
+/** A grouping column; a date column may be truncated to a period. */
+export type QueryDimension = {
+  field: string;
+  bucket?: "day" | "week" | "month" | "quarter" | "year";
+  /** Number bands, in order: `from` ≤ value < `to`, an open end left out. */
+  ranges?: QueryRange[];
+};
+
+export type QueryRange = { label?: string; from?: number; to?: number };
+
+/** What a band is called on the axis when the Blueprint names none. */
+export function rangeLabel(r: QueryRange): string {
+  if (r.label) return r.label;
+  if (r.from !== undefined && r.to !== undefined) return `${r.from}–${r.to}`;
+  return r.from !== undefined ? `${r.from}+` : `under ${r.to}`;
+}
+
+/** The usable bands: finite ends, at least one of them, lower below upper. */
+function validRanges(d: QueryDimension): QueryRange[] {
+  const fin = (v: unknown) => v === undefined || (typeof v === "number" && Number.isFinite(v));
+  return (d.ranges || []).filter((r) => r && fin(r.from) && fin(r.to)
+    && (r.from !== undefined || r.to !== undefined)
+    && (r.from === undefined || r.to === undefined || r.from < r.to));
+}
+
+/**
+ * Shape of an op:"query" dataSource — measures by dimensions, the query every
+ * chart and KPI reads. The Blueprint declares the same shape (`QuerySource`).
+ *
+ * `filter` is equality on the entity's own columns; an array value means "any
+ * of". `range` narrows `timeField` (or the bucketed dimension) to a half-open
+ * [from, to) window — the dashboard's date range.
+ */
+export type QuerySource = {
+  name?: string;
+  entity: string;
+  op: "query";
+  measures: QueryMeasure[];
+  dimensions?: QueryDimension[];
+  filter?: Record<string, unknown>;
+  timeField?: string;
+  range?: { from?: string | Date | null; to?: string | Date | null };
+  sort?: { by: string; order?: "asc" | "desc" };
+  limit?: number;
+};
+
+export type QueryRow = Record<string, string | number | boolean | null>;
+
+const _QUERY_BUCKETS = new Set(["day", "week", "month", "quarter", "year"]);
+const _QUERY_MAX_ROWS = 1000;
+
+/** A truncated date as a label that also sorts: 2026-03-02, 2026-03, 2026-Q1, 2026. */
+function bucketLabel(v: unknown, bucket: string): string | null {
+  if (v === null || v === undefined) return null;
+  const d = v instanceof Date ? v : new Date(v as any);
+  if (isNaN(d.getTime())) return String(v);
+  const iso = d.toISOString();
+  if (bucket === "year") return iso.slice(0, 4);
+  if (bucket === "quarter") return `${iso.slice(0, 4)}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+  if (bucket === "month") return iso.slice(0, 7);
+  return iso.slice(0, 10);
+}
+
+function asDate(v: string | Date | null | undefined): Date | null {
+  if (v === null || v === undefined || v === "") return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Resolve an op:"query" dataSource into tidy rows — one per combination of
+ * dimension values, keyed by each dimension's field and each measure's key:
+ *
+ *   { measures: [{ key: "count", aggregation: "count" }],
+ *     dimensions: [{ field: "createdAt", bucket: "month" }, { field: "status" }] }
+ *   → [{ createdAt: "2026-01", status: "OPEN", count: 4 }, …]
+ *
+ * One GROUP BY, under the same access conditions as a list: a chart over every
+ * tenant's rows leaks what the list would, aggregated into a harmless shape. A
+ * foreign-key dimension gains a `<field>Label` companion, as list rows do, so
+ * an axis reads names rather than ids.
+ *
+ * A measure or dimension naming a column the entity lacks is dropped rather
+ * than failing the page; a query left with no measure resolves to [].
+ */
+/** `available` → "Available" / "Not available"; `isActive` → "Active" / "Not active". */
+function booleanLabel(field: string, on: boolean): string {
+  const words = field.replace(/^(is|has|can)(?=[A-Z])/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ").trim().toLowerCase();
+  const name = words ? words[0].toUpperCase() + words.slice(1) : on ? "Yes" : "No";
+  return on ? name : words ? `Not ${words}` : name;
+}
+
+export async function resolveQuery(
+  source: QuerySource,
+  ctx: DataEngineContext = {},
+): Promise<QueryRow[]> {
+  const entity = getEntity(source.entity);
+  if (!entity) return [];
+  const cols = entity.table as any;
+  const conds: SQL[] = await accessConditions(source.entity, entity, ctx);
+
+  const measures = (source.measures || []).filter((m) =>
+    m && m.key && (m.aggregation === "count" || (m.field && cols[m.field] !== undefined)));
+  if (!measures.length) return [];
+  const dims = (source.dimensions || []).slice(0, 2).filter((d) => d && cols[d.field] !== undefined);
+
+  const shape: Record<string, any> = {};
+  const groupExprs: any[] = [];
+  const bands = dims.map((d) => validRanges(d));
+  dims.forEach((d, i) => {
+    const bucket = d.bucket && _QUERY_BUCKETS.has(d.bucket) ? d.bucket : undefined;
+    // The bucket is whitelisted above, so it is inlined as a literal: the same
+    // expression then appears verbatim in SELECT and GROUP BY, where two bound
+    // parameters would read to Postgres as two different expressions.
+    // A banded number groups by the INDEX of its band, for the same reason:
+    // the ends are checked finite numbers, inlined; the labels never reach SQL.
+    const expr = bands[i].length
+      ? sql`CASE ${sql.join(bands[i].map((r, k) => {
+          const conds = [
+            r.from !== undefined ? sql`${cols[d.field]} >= ${sql.raw(String(Number(r.from)))}` : null,
+            r.to !== undefined ? sql`${cols[d.field]} < ${sql.raw(String(Number(r.to)))}` : null,
+          ].filter(Boolean) as SQL[];
+          return sql`WHEN ${sql.join(conds, sql` AND `)} THEN ${sql.raw(String(k))}`;
+        }), sql` `)} END`
+      : bucket ? sql`date_trunc('${sql.raw(bucket)}', ${cols[d.field]})` : cols[d.field];
+    shape[`d${i}`] = expr;
+    groupExprs.push(expr);
+  });
+  measures.forEach((m, i) => {
+    const c = m.field ? cols[m.field] : undefined;
+    shape[`m${i}`] =
+      m.aggregation === "count" ? (c ? count(c) : count()) :
+      m.aggregation === "count_distinct" ? countDistinct(c) :
+      m.aggregation === "sum" ? sum(c) :
+      m.aggregation === "avg" ? avg(c) :
+      m.aggregation === "min" ? min(c) :
+                                max(c);
+  });
+
+  for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
+    if (cols[k] === undefined || v === undefined) continue;
+    if (Array.isArray(v)) { if (v.length) conds.push(inArray(cols[k], v as any[])); }
+    else conds.push(eq(cols[k], v as any));
+  }
+  const timeField = source.timeField && cols[source.timeField] !== undefined
+    ? source.timeField
+    : dims.find((d) => d.bucket)?.field;
+  if (timeField && source.range) {
+    const from = asDate(source.range.from);
+    const to = asDate(source.range.to);
+    if (from) conds.push(gte(cols[timeField], from));
+    if (to) conds.push(lt(cols[timeField], to));
+  }
+
+  // Sort: an explicit measure key or dimension field; else chronological on a
+  // bucketed axis; else the first measure, largest first (a ranking).
+  const keyOf = (i: number) => dims[i].field;
+  const sortBy = source.sort?.by;
+  const sortMeasure = measures.findIndex((m) => m.key === sortBy);
+  const sortDim = dims.findIndex((d) => d.field === sortBy);
+  // A bucketed or banded axis reads in its own order; anything else is a ranking.
+  const ordered0 = !!dims[0]?.bucket || bands[0]?.length > 0;
+  const order = source.sort?.order ?? (sortMeasure >= 0 || (!sortBy && !ordered0) ? "desc" : "asc");
+  const sortExpr =
+    sortMeasure >= 0 ? shape[`m${sortMeasure}`] :
+    sortDim >= 0 ? shape[`d${sortDim}`] :
+    ordered0 ? shape.d0 :
+    dims.length ? shape.m0 : undefined;
+  const limit = Math.min(Math.max(source.limit ?? _QUERY_MAX_ROWS, 1), _QUERY_MAX_ROWS);
+
+  let raw: any[];
+  try {
+    const _db = _testDb ?? db;
+    let q = (_db as any).select(shape).from(entity.table);
+    if (conds.length) q = q.where(conds.length === 1 ? conds[0] : and(...conds));
+    if (groupExprs.length) q = q.groupBy(...groupExprs);
+    if (sortExpr) q = q.orderBy(order === "asc" ? asc(sortExpr) : desc(sortExpr));
+    q = q.limit(limit);
+    raw = await q;
+  } catch (err) {
+    console.warn(`[data-engine] query ${source.entity} failed:`, err);
+    return [];
+  }
+
+  // A value in no band is left out: it belongs to no group the chart draws.
+  if (bands.some((b) => b.length)) raw = raw.filter((r: any) => dims.every((_, i) => !bands[i].length || r[`d${i}`] !== null && r[`d${i}`] !== undefined));
+  const bandOrder: Array<Record<string, number>> = bands.map((b) => Object.fromEntries(b.map((r, k) => [rangeLabel(r), k])));
+  const rows: Array<QueryRow & { __sort?: number | string | null }> = raw.map((r: any) => {
+    const out: QueryRow = {};
+    dims.forEach((d, i) => {
+      const v = r[`d${i}`];
+      out[keyOf(i)] = bands[i].length ? rangeLabel(bands[i][Number(v)] ?? {})
+        : d.bucket ? bucketLabel(v, d.bucket)
+        : v === null || v === undefined ? null
+        : v instanceof Date ? v.toISOString()
+        // A yes/no group stays yes or no: as the string "false" it was true
+        // to every `row.available ? … : …` written against it.
+        : typeof v === "number" || typeof v === "boolean" ? v : String(v);
+    });
+    // sum/avg arrive as numeric strings from the driver; a missing group is 0.
+    measures.forEach((m, i) => {
+      const v = Number(r[`m${i}`] ?? 0);
+      out[m.key] = Number.isFinite(v) ? v : 0;
+    });
+    // A YES/NO GROUP IS NAMED, NOT PRINTED. F&B's availability chart read
+    // "true" and "false" (fxa532bj, 2026-10-02). The value stays for the
+    // caller; `<field>Label` is what a chart shows, as for a foreign key.
+    dims.forEach((d) => {
+      const v = out[keyOf(dims.indexOf(d))];
+      if (typeof v === "boolean") out[`${d.field}Label`] = booleanLabel(d.field, v);
+    });
+    return out;
+  });
+
+  // The same order again in JS: the driver's order for a bucketed label is
+  // the timestamp's, and this keeps the result right whatever produced it.
+  // A BREAKDOWN BY A NUMBER READS IN THE NUMBER'S ORDER. A rating
+  // distribution came back as a ranking — 2, 4, 1, 3, 5 on the axis, most
+  // books first (looktest on UAT, 2026-09-27). With no sort declared, an
+  // axis whose every value is a number is ordered by it, ascending.
+  const numeric0 = !sortBy && !ordered0 && dims.length > 0 && rows.length > 0
+    && rows.every((r) => r[keyOf(0)] !== null && r[keyOf(0)] !== "" && Number.isFinite(Number(r[keyOf(0)])));
+  if (numeric0) {
+    for (const r of rows) r[keyOf(0)] = Number(r[keyOf(0)]);
+  }
+  const sortKey = sortMeasure >= 0 ? measures[sortMeasure].key
+    : sortDim >= 0 ? keyOf(sortDim)
+    : ordered0 || numeric0 ? keyOf(0)
+    : dims.length ? measures[0].key : undefined;
+  if (sortKey) {
+    const dir = (numeric0 ? "asc" : order) === "asc" ? 1 : -1;
+    // A band sorts by its position, not its label ("under 18" before "18–30").
+    const bandIdx = dims.findIndex((d) => d.field === sortKey);
+    const rank = bandIdx >= 0 && bands[bandIdx].length ? bandOrder[bandIdx] : null;
+    rows.sort((a, b) => {
+      const x = rank ? rank[String(a[sortKey])] : a[sortKey], y = rank ? rank[String(b[sortKey])] : b[sortKey];
+      if (x === y) return 0;
+      if (x === null) return 1;
+      if (y === null) return -1;
+      return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y))) * dir;
+    });
+  }
+  const out = rows.slice(0, limit);
+  await attachFkLabels(source.entity, entity, out);
+  return out;
 }
 
 // ─── Search Resolver (op:"search") ───
@@ -1490,7 +1822,7 @@ export async function resolveSearch(
       sql`${vectorExpr} @@ ${tsq}`,
       ...await accessConditions(entityName, entity, ctx),
     ];
-    for (const [k, v] of Object.entries(source.filter || {})) {
+    for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
     }
 
@@ -1530,6 +1862,72 @@ export async function resolveSearch(
   const merged = perEntityRows.flat();
   merged.sort((a, b) => b.rank - a.rank);
   return merged.slice(0, limit);
+}
+
+// ─── Similarity Resolver (op:"similar") ───
+
+/** An op:"similar" dataSource: records of `entity` ranked by the distance of
+ *  their `field` embedding to the query. Projected from the Blueprint's
+ *  PageDataSource; the query comes from the page URL, not the source. */
+export type SimilarSource = {
+  op: "similar";
+  entity: string;
+  /** The embedding field to rank by; the entity's first when omitted. */
+  field?: string;
+  limit?: number;
+};
+
+export type SimilarQuery = { image?: unknown; text?: unknown };
+
+const _SIMILAR_DEFAULT_LIMIT = 12;
+const _SIMILAR_MAX_LIMIT = 100;
+
+/**
+ * Nearest neighbours by cosine distance over the entity's HNSW index. Each row
+ * comes back as the record the caller may read (scoped, masked, FK-labelled,
+ * vectors removed) plus `similarity`, 0–100.
+ *
+ * No query → []. The embedding service unreachable → EmbeddingUnavailable,
+ * because an empty result would read as "nothing looks like this".
+ */
+export async function resolveSimilar(
+  source: SimilarSource,
+  query: SimilarQuery,
+  ctx: DataEngineContext = {},
+): Promise<Array<Record<string, any>>> {
+  const entity = getEntity(source.entity);
+  if (!entity) throw new Error(`Unknown entity: ${source.entity}`);
+  const cols = embeddingColumnsFor(getTableName(entity.table as any));
+  const col = source.field ? cols.find((c) => c.property === source.field) : cols[0];
+  if (!col) {
+    throw new Error(`${source.entity} has no embedding field${source.field ? ` "${source.field}"` : ""} to rank by`);
+  }
+  const vector = await embedQuery(query);
+  if (!vector) return [];
+
+  const column = (entity.table as any)[col.property];
+  const literal = `[${vector.join(",")}]`;
+  const distance = sql<number>`(${column} <=> ${literal}::vector)`;
+  const where = allOf([sql`${column} IS NOT NULL`,
+                       ...await accessConditions(source.entity, entity, ctx)]);
+  const limit = Math.min(Math.max(Number(source.limit) || _SIMILAR_DEFAULT_LIMIT, 1), _SIMILAR_MAX_LIMIT);
+
+  const _db = _testDb ?? db;
+  const rows: any[] = await (_db as any)
+    .select({ ...getTableColumns(entity.table as any), __distance: distance })
+    .from(entity.table)
+    .where(where)
+    .orderBy(distance)
+    .limit(limit);
+
+  const out = rows.map(({ __distance, ...row }) => ({
+    ...row,
+    // Cosine distance is 0 for the same direction and 2 for the opposite one.
+    similarity: Math.max(0, Math.min(100, Math.round((1 - Number(__distance)) * 100))),
+  }));
+  await Promise.all(out.map((r) => _maskOrUnmaskOnRead(source.entity, r, ctx)));
+  await attachFkLabels(source.entity, entity, out);
+  return out;
 }
 
 // ─── Error Classes ───

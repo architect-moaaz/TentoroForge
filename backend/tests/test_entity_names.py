@@ -95,10 +95,19 @@ def test_accepts_snake_and_kebab_inputs():
     assert derive_names("assessment-day").sourceName == "assessmentDays"
 
 
-def test_empty_input_falls_back_to_record():
-    """Never raises. Empty / None → the reserved fallback name."""
-    assert derive_names("").entity == "Record"
-    assert derive_names(None).entity == "Record"  # type: ignore[arg-type]
+def test_unnameable_input_raises_instead_of_inventing_a_name():
+    """This asserted "never raises: empty / None → the reserved fallback
+    `Record`". That fallback is gone, and the module's own Failure policy says
+    why: substituting `record` meant a planner emitting a nameless entity
+    silently generated CRUD against a `records` table nobody declared. An
+    entity with no name is a pipeline bug and must stop the run."""
+    import pytest
+
+    from services.entity_names import EntityNameError
+
+    for bad in ("", "   ", None):
+        with pytest.raises(EntityNameError):
+            derive_names(bad)  # type: ignore[arg-type]
 
 
 def test_binding_equals_source_name():

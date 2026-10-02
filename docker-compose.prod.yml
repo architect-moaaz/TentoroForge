@@ -22,6 +22,27 @@ services:
       timeout: 3s
       retries: 5
 
+  # THE GENERATED APPS' OWN DATABASES, kept apart from the platform's. The
+  # backend runs with no Docker, so an app's preview and its Verify & fix
+  # review cannot boot a Postgres of their own; each app gets a database here,
+  # created over the network (services/app_databases.py). pgvector, because
+  # an app may search by likeness. Started by name (a profile), so a stack
+  # that does not set APPS_DB_PASSWORD never runs it.
+  apps-db:
+    image: pgvector/pgvector:pg16
+    profiles: ["apps-db"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${APPS_DB_PASSWORD:-}
+    volumes:
+      - ./data/apps-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -50,6 +71,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in .env}
+      # Photographs for generated apps (designSystem.imagery). Optional: without
+      # it pages use the brand gradient. https://unsplash.com/developers
+      UNSPLASH_ACCESS_KEY: ${UNSPLASH_ACCESS_KEY:-}
       # The a2ui MCP composer is spawned over stdio from a checkout of the
       # a2ui repo (services/a2ui_authority.py resolves
       # `$A2UI_REPO/tools/a2ui-mcp/server.py`). The checkout is mounted
@@ -63,6 +87,17 @@ services:
       VERCEL_TEAM_ID: ${VERCEL_TEAM_ID:-}
       NEON_API_KEY: ${NEON_API_KEY:-}
       NEON_ORG_ID: ${NEON_ORG_ID:-}
+      # --- integration keys at rest (services/platform_integrations_crypto.py) ---
+      # Encrypts every connected service's key; ≥16 chars. Never rotate it once
+      # keys are stored: every stored value becomes unreadable. Without it the
+      # Integrations page refuses to save.
+      FORGE_INTEGRATIONS_SECRET: ${FORGE_INTEGRATIONS_SECRET:-}
+      # postgresql://postgres:<APPS_DB_PASSWORD>@apps-db:5432 — no database
+      # name; unset, apps use Docker as on a developer's machine.
+      FORGE_APPS_DATABASE_URL: ${FORGE_APPS_DATABASE_URL:-}
+      # Where a PUBLISHED app reports its failures to Smith (services/app_reporting):
+      # this platform's public address, whose /api/* reaches the backend.
+      FORGE_PUBLIC_URL: ${FORGE_PUBLIC_URL:-}
       # --- feature flags (mirror local dev defaults) ---
       FORGE_SMITH_ARCHITECT: ${FORGE_SMITH_ARCHITECT:-0}
       FORGE_SELF_HEAL: ${FORGE_SELF_HEAL:-1}

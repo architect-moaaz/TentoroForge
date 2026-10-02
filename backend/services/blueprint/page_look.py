@@ -1,0 +1,271 @@
+"""Every page looked at as it is written — by a reviewer, on a screenshot.
+
+A page that compiles can still be a poor page, and the compiler will never
+say so. Until now the only look came after the whole application was
+assembled (`page_review`: boot, database, dev server), as an opt-in verb;
+the pages a build shipped were the pages nobody had seen. This looks at
+each page the moment it compiles, inside the writer's own loop:
+
+1. the candidate is bundled with the editor's JIT — sample data in place of
+   the database, the app's own Tailwind, no dev server (`install` precedes
+   `page_code`, so esbuild is there);
+2. headless Chromium renders it at a desk and a phone width and
+   screenshots both, keeping every error the page threw;
+3. the reviewer sees the screenshots with the page's contract and the app's
+   direction (and the reference images the user attached, as the bar) and
+   returns a score, what works and what to change;
+4. a `revise` goes back to the writer as one more round, with the review as
+   its brief; the better-scoring version is what the page keeps.
+
+A look can only ever improve a page: what the toolchain cannot do (no
+Chromium, no esbuild, a bundle that fails) is logged and the page is
+accepted as the compiler accepted it. Bounded: `LOOKS` looks per page.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import shutil
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+#: Looks per page: one at the compiled page, one at its rewrite.
+LOOKS = 2
+#: Viewports the reviewer is shown — a desk and a phone.
+VIEWPORTS: dict[str, tuple[int, int]] = {"desktop": (1280, 900), "mobile": (390, 844)}
+#: Renders at once per process: Chromium is ~150 MB each, and twelve pages
+#: compose in parallel.
+_RENDERS = threading.BoundedSemaphore(4)
+
+
+class LookUnavailable(RuntimeError):
+    """The page could not be looked at here — the reason is the message."""
+
+
+def frame_html(css: str, vendor_js: str, page_js: str) -> str:
+    """One document of the page: the editor canvas's frame, self-contained."""
+    return ('<!doctype html><html><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            f'<style id="forge-page-css">{css}</style></head><body><div id="root"></div>'
+            '<script>window.__forgeLookErrors=[];window.addEventListener("message",function(e){'
+            'var d=e.data;if(d&&d.type==="forge-editor:error"&&d.payload)window.__forgeLookErrors.push('
+            'String(d.payload.file||"")+": "+String(d.payload.message||""));});</script>'
+            f'<script>{vendor_js}</script><script>{page_js}</script></body></html>')
+
+
+def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir: Path) -> dict[str, Any]:
+    """Bundle the candidate and screenshot it at every viewport.
+
+    ``{"shots": {name: path}, "errors": [...]}`` — the errors are what the
+    page itself threw (a render error, a failed load), proved in the browser."""
+    from services.blueprint.assembly import LOOSE_LIBS, copy_loose_libs
+    from services.react_editor.jit import LOOK_DIR, bundle_source
+    from services.react_editor.service import EditorError, Project
+
+    # WHAT THE BUNDLE NEEDS THAT ASSEMBLY HAS NOT LAID DOWN YET. The vendored
+    # renderer imports `@tentoroforge/feel-lite`, loose TypeScript that
+    # `assemble` copies into `src/lib/` — after every page is written. So on
+    # a fresh build every look failed to bundle and every page shipped
+    # "accepted as compiled" (i3i950po on UAT, 24 of 24 pages, 2026-09-25);
+    # it worked here only on an app that had been assembled before.
+    if any(not (app_root / dst).is_dir() for dst in LOOSE_LIBS.values()):
+        copy_loose_libs(app_root)
+    # …FROM WHERE THE APP'S OWN COPY COMES, NOT ONLY A CHECKOUT'S. The loose
+    # libraries' source is `<repo>/frontend/src/lib`, and the backend image
+    # has no `frontend/`: in the container the copy above resolves to `/` and
+    # copies nothing, silently — so the first fix passed every local test and
+    # every UAT look still failed to bundle (SnapIT, RK_Test, 2026-09-26: 27
+    # of 27 pages "not looked at"). Every assembled app gets feel-lite from
+    # the runtime templates (`inject_runtime`), which the image does carry.
+    from services.runtime_injector import _TEMPLATE_DIR
+    for dst in LOOSE_LIBS.values():
+        target = app_root / dst
+        source = _TEMPLATE_DIR / Path(dst).name
+        if not target.is_dir() and source.is_dir():
+            shutil.copytree(source, target)
+        if not target.is_dir():
+            logger.warning("[page_look] %s is not in the tree and has no source here; looks will not bundle", dst)
+    # …AND THE DESIGN'S OWN TOKENS. `tokens.css` is written by the `frontend`
+    # projection, after every page; until then the scaffold's default theme
+    # is in the tree, and a look would judge the design's colours against a
+    # palette that is not the design's. The design system is decided long
+    # before any page, so its tokens are projected here, idempotently.
+    from services.blueprint.projection import project_design_tokens
+    try:
+        project_design_tokens(doc, app_root)
+    except Exception as exc:  # noqa: BLE001 — the scaffold's theme is still a theme
+        logger.info("[page_look] tokens not projected for the look (%s)", exc)
+    project = Project(root=app_root.parent, app_root=app_root)
+    try:
+        bundle = bundle_source(project, doc, page, view, load)
+    except EditorError as exc:
+        raise LookUnavailable(f"bundle: {exc}") from exc
+    finally:
+        shutil.rmtree(app_root / LOOK_DIR / str(page.get("id")), ignore_errors=True)
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:  # pragma: no cover — depends on the machine
+        raise LookUnavailable("playwright is not installed") from exc
+    html = frame_html(bundle["css"], bundle["vendor"], bundle["js"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    shots: dict[str, str] = {}
+    errors: list[str] = []
+    with _RENDERS:
+        try:
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(headless=True)
+                try:
+                    for name, (w, h) in VIEWPORTS.items():
+                        tab = browser.new_page(viewport={"width": w, "height": h}, device_scale_factor=1)
+                        tab.on("pageerror", lambda e: errors.append(f"view.tsx: {e}"))
+                        tab.on("console", lambda m: errors.append(f"console: {m.text}")
+                               if m.type == "error" and "favicon" not in m.text else None)
+                        tab.set_content(html, wait_until="load")
+                        try:
+                            tab.wait_for_selector("#root > *", timeout=15000)
+                        except Exception:  # noqa: BLE001 — an empty root is itself a finding
+                            errors.append("view.tsx: nothing rendered within 15s")
+                        tab.wait_for_timeout(700)
+                        file = out_dir / f"{name}.png"
+                        tab.screenshot(path=str(file), full_page=True)
+                        shots[name] = str(file)
+                        errors.extend(str(e) for e in (tab.evaluate("window.__forgeLookErrors") or []))
+                        tab.close()
+                finally:
+                    browser.close()
+        except LookUnavailable:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a browser that will not run is a machine fact
+            raise LookUnavailable(f"browser: {type(exc).__name__}: {str(exc)[:200]}") from exc
+    seen: list[str] = []
+    for e in errors:
+        if e not in seen:
+            seen.append(e)
+    return {"shots": shots, "errors": seen[:12]}
+
+
+def change_review_schema() -> dict[str, Any]:
+    """The review's reply, with each issue saying whether the change caused it."""
+    import copy
+
+    from services.blueprint.page_review import REVIEW_SCHEMA
+    schema = copy.deepcopy(REVIEW_SCHEMA)
+    item = schema["properties"]["issues"]["items"]
+    item["properties"]["fromChange"] = {
+        "type": "boolean",
+        "description": ("true when the change caused this, or the change is not done; false for "
+                        "anything the page already had before it"),
+    }
+    item["required"] = [*item["required"], "fromChange"]
+    return schema
+
+
+def caused_by_change(verdict: dict) -> list[dict]:
+    """The issues a change must fix before it is accepted: what it broke, or
+    what it left undone — at more than low severity."""
+    return [i for i in verdict.get("issues") or []
+            if i.get("fromChange") and i.get("severity") in ("high", "medium")]
+
+
+def judge(doc: dict, page: dict, look: dict, client: Any, *, references: list[Path] = (),
+          change: str = "") -> tuple[dict, Any]:
+    """The reviewer's verdict on the screenshots. Returns the verdict and
+    what the call cost, as `(usage, elapsed)`.
+
+    ``change`` is what was just asked of a page that already existed. The
+    reviewer is then judging the change: it still lists what it sees, and
+    says of each issue whether the change caused it. Asked to judge the
+    whole page, it sent a skill filter back for a country column and a phone
+    layout that predated it (Test2, 2026-09-28) — a round and a look spent on
+    problems nobody had asked about, which were still there afterwards."""
+    from services.blueprint.page_review import PASS_SCORE, REVIEW_SCHEMA, reviewer_system
+    from services.blueprint.references import READ_FOR
+    from services.blueprint.ui_engineer import _page_brief
+
+    proved = "\n".join(f"- {e}" for e in look.get("errors") or []) or "(none)"
+    names = list(look.get("shots") or {})
+    user = ("The page's contract:\n```json\n" + json.dumps(_page_brief(doc, page), indent=1)
+            + "\n```\nIt is rendered with sample data in place of the database — judge the design, "
+            "the hierarchy and the behaviour it implies, not the rows.\n\n"
+            f"What the browser proved broken:\n{proved}\n\n"
+            + "The screenshots, in order: " + ", ".join(f"{n} ({VIEWPORTS[n][0]}px wide)" for n in names)
+            + ". Judge both: a page that is right at a desk and broken on a phone does not pass.")
+    if change:
+        user += ("\n\nTHIS PAGE ALREADY EXISTED AND WAS JUST CHANGED. What was asked:\n"
+                 + change.strip()[:2000]
+                 + "\n\nJudge the change: is it done, and did it break or worsen anything on the page? "
+                 "List every issue you see, and mark each with `fromChange`: true when the change "
+                 "caused it or is not done, false when the page already had it.\n\n"
+                 "WHAT WAS ASKED OUTRANKS THE APP'S CONVENTIONS. The conventions were written before "
+                 "this request; where the two disagree the request is the owner's newer decision, "
+                 "and doing what was asked is not an issue. Judge how well it was done, never "
+                 "whether it should have been.")
+    images = [look["shots"][n] for n in names]
+    if references:
+        user += (f"\n\nThe last {len(references)} image(s) are what the user showed as the standard "
+                 f"they want: {READ_FOR['page_look']}")
+        images += [str(p) for p in references]
+    t0 = time.monotonic()
+    reply = client(system=reviewer_system(doc), user=user,
+                   schema=change_review_schema() if change else REVIEW_SCHEMA, images=images)
+    body = json.loads(getattr(reply, "text", reply))
+    body["broken"] = list(look.get("errors") or [])
+    if body["broken"] or any(i.get("severity") == "high" for i in body.get("issues") or []) \
+            or int(body.get("score") or 0) < PASS_SCORE:
+        body["verdict"] = "revise"
+    return body, (getattr(reply, "usage", None), time.monotonic() - t0)
+
+
+def look_brief(verdict: dict, *, change_only: bool = False) -> str:
+    """The review as the writer's brief for its next round. For a change,
+    only what the change caused — the rest is not this round's to fix."""
+    lines = [f"A reviewer looked at your page as it renders (desk and phone) and scored it "
+             f"{verdict.get('score')}/10. Keep what works and fix every issue:"]
+    if change_only:
+        lines = ["A reviewer looked at your change as the page renders (desk and phone). Keep what "
+                 "works and fix what the change broke or left undone:"]
+    for s in verdict.get("strengths") or []:
+        lines.append(f"  + {s}")
+    if verdict.get("broken"):
+        lines.append("BROKEN — proved in the browser, fix every one first:")
+        lines += [f"  ! {b}" for b in verdict["broken"]]
+    for i in (caused_by_change(verdict) if change_only else verdict.get("issues") or []):
+        lines.append(f"  - [{i.get('severity')}] {i.get('where')}: {i.get('problem')} → {i.get('fix')}")
+    return "\n".join(lines)
+
+
+def rank(verdict: dict) -> tuple[int, int]:
+    """Nothing proven broken first, then the score — the order `page_review`
+    keeps the best version by."""
+    return (0 if verdict.get("broken") else 1, int(verdict.get("score") or 0))
+
+
+def look_at(doc: dict, page: dict, app_root: Path, load: str, view: str, client: Any, *,
+            attempt: int = 1, change: str = "") -> tuple[dict, Any]:
+    """Render, then judge. Raises LookUnavailable when this machine cannot."""
+    from services.blueprint import references
+
+    out_dir = Path(app_root).parent / ".forge" / "look" / str(page.get("id")) / f"look-{attempt}"
+    look = render(doc, page, Path(app_root), load, view, out_dir)
+    shown = references.paths(app_root.parent) if getattr(client, "accepts_images", True) else []
+    verdict, spent = judge(doc, page, look, client, references=shown, change=change)
+    verdict["shots"] = look["shots"]
+    verdict["attempt"] = attempt
+    # WHAT WAS LOOKED AT AND WHAT WAS SAID, KEPT BESIDE THE SCREENSHOTS. The
+    # accepted version is the only code the Blueprint keeps; without these a
+    # reader cannot tell what the reviewer asked for or whether the rewrite
+    # did it (the first trial's rewrite of a list page changed one border).
+    try:
+        (out_dir / "view.tsx").write_text(view, encoding="utf-8")
+        (out_dir / "load.ts").write_text(load, encoding="utf-8")
+        (out_dir / "verdict.json").write_text(json.dumps(verdict, indent=1), encoding="utf-8")
+    except OSError:  # a record, never a gate
+        pass
+    logger.info("[page_look] %s look %d: %s %s/10, %d issue(s), %d broken", page.get("id"), attempt,
+                verdict.get("verdict"), verdict.get("score"), len(verdict.get("issues") or []),
+                len(verdict.get("broken") or []))
+    return verdict, spent

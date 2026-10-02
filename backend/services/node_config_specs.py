@@ -59,6 +59,11 @@ class ConfigKey:
       options     — for kind='select', the list of allowed values. UI
                     renders a dropdown; API rejects any PUT whose value
                     isn't in this list. Ignored for other kinds.
+      platform_only — the PLATFORM uses this key while it builds (a design
+                    tool, a photo library); no generated app ever reads it.
+                    It is never written into an app's .env.local nor pushed
+                    into a deployment's environment, where every published
+                    app would otherwise carry the organisation's token.
     """
 
     key: str
@@ -69,6 +74,7 @@ class ConfigKey:
     default: str | None = None
     help_url: str | None = None
     options: tuple[str, ...] | None = None
+    platform_only: bool = False
 
 
 # --------------------------------------------------------------------------- #
@@ -382,6 +388,29 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
         ),
     ],
 
+    # --- Embeddings (image / semantic search) ------------------------ #
+    # Synthetic "action type": no workflow node calls it, but every app
+    # whose Blueprint declares an embedding field (`{type: "vector",
+    # embedding: {of: ...}}`) fills and queries it through the CLIP sidecar
+    # (sidecars/clip) — see templates/runtime/embeddings.ts. URL is what
+    # connects it; the key is only for a sidecar behind a bearer token.
+    "__embeddings__": [
+        ConfigKey(
+            key="EMBEDDINGS_URL",
+            provider="embeddings",
+            label="Embedding service URL (sidecars/clip)",
+            kind="url",
+            required=True,
+        ),
+        ConfigKey(
+            key="EMBEDDINGS_API_KEY",
+            provider="embeddings",
+            label="Embedding service API key (optional)",
+            kind="password",
+            required=False,
+        ),
+    ],
+
     # --- MCP servers (Agent Builder tool_type=mcp) ------------------- #
     # Synthetic "action type": individual MCP server secrets are
     # dynamic (one env var per server row in platform_mcp_servers),
@@ -432,6 +461,7 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
             kind="password",
             required=True,
             help_url="https://www.figma.com/developers/api#access-tokens",
+            platform_only=True,
         ),
         # The desktop app's Dev Mode server (http://127.0.0.1:3845/mcp) only
         # exists while Figma is open on the developer's own machine, so it is
@@ -445,6 +475,7 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
             required=False,
             default="https://mcp.figma.com/mcp",
             help_url="https://help.figma.com/hc/en-us/articles/32132100833559",
+            platform_only=True,
         ),
     ],
 
@@ -464,6 +495,7 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
             kind="password",
             required=True,
             help_url="https://github.com/uxpilot-ai/uxpilot-mcp#authentication",
+            platform_only=True,
         ),
         ConfigKey(
             key="UXPILOT_MCP_URL",
@@ -473,6 +505,25 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
             required=False,
             default="https://mcp.uxpilot.net/mcp",
             help_url="https://github.com/uxpilot-ai/uxpilot-mcp",
+            platform_only=True,
+        ),
+    ],
+
+    # --- Unsplash (photographs) ----------------------------------------- #
+    # The design agent says what each picture is of; the `imagery` service
+    # node searches Unsplash for it while the application is built and writes
+    # the photo's URL and credit into the Blueprint. The app only ever loads
+    # images.unsplash.com addresses — it never calls the API, so the key stays
+    # on the platform. Without one, pages use the brand gradient.
+    "__unsplash__": [
+        ConfigKey(
+            key="UNSPLASH_ACCESS_KEY",
+            provider="unsplash",
+            label="Unsplash access key",
+            kind="password",
+            required=True,
+            help_url="https://unsplash.com/documentation#creating-a-developer-account",
+            platform_only=True,
         ),
     ],
 
@@ -703,6 +754,12 @@ def keys_for_provider(provider: str) -> list[ConfigKey]:
                 continue
             seen[entry.key] = entry
     return list(seen.values())
+
+
+def platform_only_keys() -> set[str]:
+    """Keys only the platform reads — never copied into an app or a deployment."""
+    return {entry.key for entries in NODE_CONFIG_SPECS.values()
+            for entry in entries if entry.platform_only}
 
 
 def all_providers() -> list[str]:

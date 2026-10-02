@@ -51,7 +51,7 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "pageLayouts", "composition", "completeness"}
+       "pageLayouts", "pageCode", "composition", "completeness"}
 )
 
 
@@ -61,6 +61,15 @@ class CapabilityViolation(PermissionError):
 
 class UnknownAgent(KeyError):
     pass
+
+
+class AuthorRefusal(ValueError):
+    """An agent's proposal refused by a check on what it wrote — an outcome the
+    author is asked again about, never a crash. Every such check raises a
+    subclass, so a caller catching this cannot miss a new one: the entity-field
+    and page-content checks were added on 2026-09-19 and neither was in the
+    orchestrator's retry list, which is how InvalidBusinessRule once took a
+    whole build down."""
 
 
 class ContractViolation(ValueError):
@@ -150,6 +159,12 @@ _READS: dict[str, set[str]] = {
     "workflow": {"requirements", "data", "pages", "businessRules", "roles"},
     "business_rules": {"requirements", "data", "workflows"},
 
+    # The analytics each page carries, over the data the pages show and the
+    # processes that move it — the states a workflow changes are what a
+    # dashboard counts.
+    "analytics": {"requirements", "product", "data", "pages", "roles",
+                  "workflows", "security"},
+
     # §100 — permissions guard entities, pages and workflow execution.
     "security": {"requirements", "data", "pages", "workflows"},
 
@@ -159,16 +174,7 @@ _READS: dict[str, set[str]] = {
     "api": {"requirements", "data", "database", "workflows", "pages",
             "widgets", "permissions"},
 
-    # Tests are written against everything that claims to do something.
-    "testing": {"requirements", "data", "pages", "apis", "workflows",
-                "businessRules"},
 
-    # §34 — the whole app at once, and nothing below the page contract. No
-    # entity fields, no endpoints: the sketch carries no props to bind them to,
-    # and seeing them would only invite it to author what the per-page call
-    # authors against the full catalog.
-    "a2ui_composition": {"requirements", "product", "pages", "modules",
-                         "navigation", "widgets", "roles", "designSystem"},
 }
 
 
@@ -197,7 +203,7 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # business rules, database schema, security rules or role permissions.
     "page_design": _cap(
         "page_design",
-        {"pages", "widgets", "navigation"},
+        {"pages", "navigation"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "mcp:a2ui"},
     ),
@@ -223,15 +229,28 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "component_catalog:read", "mcp:a2ui"},
     ),
-    # §34 — the whole app composed once, before any page is. It writes a
-    # skeleton (per page: layout and ordered sections, no props) and the
-    # conventions every page inherits. Its own agent, not a mode of a2ui_pages,
-    # so the boundary reads: this one sketches, it never renders.
-    "a2ui_composition": _cap(
-        "a2ui_composition",
+    # §34 — every page the build lays out, from the page's own contract
+    # (`template_page`) or its drawn frame. Deterministic: no model, no tools.
+    "page_template": _cap(
+        "page_template",
+        {"pageLayouts"},
+        reads={"pages", "data", "workflows", "security", "designSources"},
+        tools={"blueprint:read"},
+    ),
+    # §34 — the whole app's direction, once: `composition.vision` and its
+    # conventions. No model output reaches a page without passing through them.
+    "ui_director": _cap(
+        "ui_director",
         {"composition"},
+        tools={"blueprint:read", "design_system:read"},
+    ),
+    # §34 — each page written as React against the typed app SDK. Its tool is
+    # the compiler: a page is type-checked before it is proposed.
+    "ui_engineer": _cap(
+        "ui_engineer",
+        {"pageCode"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
-               "component_catalog:read", "mcp:a2ui"},
+               "sdk:read", "tsc:check"},
     ),
     "data_model": _cap(
         "data_model",
@@ -239,13 +258,17 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         tools={"blueprint:data", "schema:write", "migration:write"},
     ),
     "api": _cap("api", {"apis"}),
+    # The KPIs, charts and breakdowns attached to each page, each a query of
+    # measures by dimensions over declared columns. Split from page design so
+    # the analytics are designed with every page and every entity in view —
+    # a dashboard summarises what the other pages hold.
+    "analytics": _cap("analytics", {"widgets"}, tools={"blueprint:read"}),
     "backend": _cap("backend", {"apis", "codeMap"}),
     "frontend": _cap("frontend", {"components", "codeMap"}),
     "workflow": _cap("workflow", {"workflows"}),
     "business_rules": _cap("business_rules", {"businessRules"}),
     "integration": _cap("integration", {"integrations"}),
     "security": _cap("security", {"security", "roles", "permissions"}),
-    "testing": _cap("testing", {"tests"}),
     "accessibility": _cap("accessibility", {"designSystem"}),
     "build": _cap("build", {"runtime"}),
     # Verification reports divergence; it never edits an artifact's content.
@@ -256,6 +279,13 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # observer that patched a page directly would be a second author with no
     # §30 boundary.
     "observer": _cap("observer", set(), may_set_status=True),
+    # §73 for the rendered page: looks at each coded page as it renders and
+    # sends the ones that fall short back to the UI engineer, who rewrites
+    # them. Writes nothing itself — the rewrite is the engineer's.
+    "page_reviewer": _cap("page_reviewer", set(), may_set_status=True),
+    # §27's test agent. Registered because §27 names it; no node runs it now —
+    # the declarations it wrote were never written out or run (see the DAG).
+    "testing": _cap("testing", {"tests"}),
     "deployment": _cap(
         "deployment", {"deployment"},
         tools={"build:approved", "deploy:config", "vercel"},
@@ -276,10 +306,9 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     #   apis             derived from entities + workflows + widgets by
     #                    api_derivation; anything authored here is overwritten
     #                    on the next derivation, so writing it is a lie.
-    #   pageLayouts      validated against the real component catalog, which is
-    #   composition      injected into the a2ui prompts and not into Smith's.
-    #                    Authoring blind would fail check_page_layout or
-    #                    check_composition anyway.
+    #   pageLayouts      laid out from each page's contract by `page_template`;
+    #   composition      the catalog is not in Smith's prompt, so authoring
+    #                    blind would fail check_pattern_templates anyway.
     #   codeMap          projection output. A model asked for file paths
     #                    produces plausible ones, and Blueprint↔Implementation
     #                    then goes green against files nobody wrote.
@@ -354,7 +383,19 @@ class AgentResult:
             raise ContractViolation("task_id is required — §103 requires retryable tasks")
         for p in self.proposals:
             if p.section not in WRITABLE_SECTIONS:
-                raise ContractViolation(f"{p.section!r} is not a writable Blueprint section")
+                # SAY WHAT WOULD HAVE BEEN RIGHT. `product.capabilities` is
+                # the shape this takes live (UAT, 2026-09-18): the agent
+                # addressed a field INSIDE a section it may write, and the
+                # refusal named neither the section that does exist nor the
+                # ones that do. A retry told only that its answer was wrong
+                # has nothing to change.
+                parent = p.section.split(".")[0] if "." in p.section else ""
+                hint = (f" — write {parent!r} and put {p.section.split('.', 1)[1]!r} "
+                        f"inside its body" if parent in WRITABLE_SECTIONS else
+                        f" — the writable sections are: "
+                        f"{', '.join(sorted(WRITABLE_SECTIONS))}")
+                raise ContractViolation(
+                    f"{p.section!r} is not a writable Blueprint section{hint}")
             if not p.natural_key:
                 raise ContractViolation(
                     "every proposal needs a natural_key, or re-running the agent "
@@ -405,12 +446,13 @@ def check_capability(result: AgentResult) -> None:
             )
 
 
-class InvalidWorkflowStep(ValueError):
+class InvalidWorkflowStep(AuthorRefusal):
     """A proposed workflow uses a step the node catalog does not offer, or
     leaves a node's declared configuration empty."""
 
 
-def check_workflow_steps(result: "AgentResult", doc: dict | None = None) -> None:
+def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
+                         mcp_servers: list[dict] | None = None) -> None:
     """Reject workflows whose steps are not configured catalog nodes.
 
     The same argument as :func:`check_pattern_templates`: accepting a step
@@ -430,6 +472,24 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None) -> None
     for proposal in proposals:
         name = proposal.body.get("name") or proposal.natural_key
         problems.extend(f"{name}/{e}" for e in catalog.workflow_errors(proposal.body))
+    # A LOOP'S STEPS ARE STEPS: its shape, then each inner action against the
+    # catalog like any other, then (below) every check on the laid-out body.
+    from services.blueprint.functional_completeness import loop_step_errors, with_loop_bodies
+    for proposal in proposals:
+        problems.extend(loop_step_errors(proposal.body))
+        name = proposal.body.get("name") or proposal.natural_key
+        for st in proposal.body.get("steps") or []:
+            cfg = (st or {}).get("config") or {} if isinstance(st, dict) else {}
+            if cfg.get("actionType") != "for_each":
+                continue
+            for inner in cfg.get("steps") or []:
+                if isinstance(inner, dict) and isinstance(inner.get("config"), dict):
+                    problems.extend(f"{name}/{st.get('key')}/{inner.get('key')}: {e}" for e in
+                                    catalog.step_errors({"type": "action", "config": inner["config"]}))
+    # A TOOL STEP NAMES A SERVER THAT EXISTS, A TOOL IT HAS, AND ITS INPUTS.
+    from services.blueprint.mcp_catalog import workflow_errors as mcp_errors
+    for proposal in proposals:
+        problems.extend(mcp_errors(with_loop_bodies(proposal.body), mcp_servers))
     # WOULD THE ENGINE RUN IT. A step whose condition the engine's parser
     # refuses, a function the engine lacks, a template naming what the engine
     # never holds — each is a workflow the author can fix now and nobody can
@@ -439,10 +499,403 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None) -> None
         {"workflows": [p.body for p in proposals], "businessRules": [],
          "data": (doc or {}).get("data") or {}}))
     if problems:
-        raise InvalidWorkflowStep("; ".join(problems[:8]))
+        raise InvalidWorkflowStep(_all_of(problems))
 
 
-class InvalidBusinessRule(ValueError):
+class InvalidEntityFields(AuthorRefusal):
+    """An entity's fields cannot be stored as proposed."""
+
+
+#: What a vector field may be taken of: a picture, or words.
+EMBEDDABLE_TYPES = frozenset({"image", "string", "text"})
+
+
+#: WHAT THE PLATFORM ALREADY DOES, stated once — the refusals below enforce
+#: it, and the observer is shown the same words so it stops asking for the
+#: opposite. Measured: over three weeks the critic demanded a password field
+#: on the login entity again and again, which this module refuses outright —
+#: a round nobody could win, twice in one HippieKit build.
+CREDENTIAL_RULE = ("A person's password, or any credential, is held by the platform's login and "
+                   "never stored as a field of an entity — not even the login entity.")
+AUTH_RULE = ("Signing up, signing in and resetting a password are provided by the platform "
+             "(its /login and /signup pages and its session); they are not written as entity "
+             "fields, business rules or workflows.")
+PLATFORM_RULES: tuple[str, ...] = (CREDENTIAL_RULE, AUTH_RULE)
+
+
+def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
+    """A `vector` field names the image or text field of the same entity it is
+    taken of. 036farqu: Tool and ConditionEvidence came back with
+    `embedding: {of: ""}`, the contract refused the whole document, and the
+    retry was told only "'' should be non-empty" — ConditionEvidence ended with
+    no columns at all. Refused here instead, naming the fields it could be."""
+    problems: list[str] = []
+    for proposal in (p for p in result.proposals if p.section == "data.entities"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        fields = [f for f in body.get("fields") or [] if isinstance(f, dict)]
+        sources = [str(f.get("name")) for f in fields
+                   if str(f.get("type") or "").lower() in EMBEDDABLE_TYPES and f.get("name")]
+        for f in fields:
+            if str(f.get("type") or "").lower() != "vector":
+                continue
+            of = str(((f.get("embedding") or {}) if isinstance(f.get("embedding"), dict) else {}).get("of") or "").strip()
+            if of and of in sources:
+                continue
+            said = (f"`embedding.of` is {of!r}, which is not an image or text field of this entity"
+                    if of else "has no `embedding.of`")
+            fix = (f"set `of` to one of: {', '.join(sources)}" if sources
+                   else "this entity has no image or text field to embed — remove the vector field, "
+                        "or add the image field it should be taken of")
+            problems.append(f"{body.get('name') or proposal.natural_key}.{f.get('name')}: a vector field {said}; {fix}")
+    # AN ENTITY'S LABEL IS ONE OF ITS OWN FIELDS. `labelField: "brandName"` on
+    # an entity with no `brandName` is a contradiction a reader can see in the
+    # proposal itself — checked here, at the author, in the same attempt,
+    # rather than sent back by the observer a round later (HippieKit's
+    # BrandSuggestion). Only once fields are being written: the entity set
+    # names the label before any field exists.
+    known = {str(e.get("name")): e for e in ((doc or {}).get("data") or {}).get("entities") or []
+             if isinstance(e, dict)}
+    for proposal in (p for p in result.proposals if p.section == "data.entities"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        names = [str(f.get("name")) for f in body.get("fields") or [] if isinstance(f, dict) and f.get("name")]
+        if not names:
+            continue
+        ename = str(body.get("name") or proposal.natural_key)
+        label = body.get("labelField") or (known.get(ename) or {}).get("labelField")
+        if label and label not in names:
+            problems.append(f"{ename}: `labelField` is {label!r}, which is not one of its fields "
+                            f"({', '.join(names)}) — add that field, or set `labelField` to one of these")
+    problems.extend(_unique_many_side(result, doc))
+    # THE ACCOUNT ENTITY: at most one, and signup must be able to create it —
+    # a required reference to another record is a field no one can fill when
+    # the account is made.
+    live = [e for e in ((doc or {}).get("data") or {}).get("entities") or []
+            if isinstance(e, dict) and e.get("status") != "DEPRECATED"]
+    for proposal in (p for p in result.proposals if p.section == "data.entities"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        name = body.get("name") or proposal.natural_key
+        same = lambda e: e.get("name") == name or str(e.get("id")) == str(proposal.natural_key)
+        # The flag is set with the entity set; the fields arrive per entity
+        # later and need not repeat it.
+        if not (body.get("account") or any(e.get("account") and same(e) for e in live)):
+            continue
+        other = next((e for e in live if e.get("account") and not same(e)), None)
+        if body.get("account") and other is not None:
+            problems.append(f"{name}: `account: true` is already on {other.get('name')} — one entity is the "
+                            "person behind a login")
+        from services.blueprint.projection import _is_credential_field
+        for f in body.get("fields") or []:
+            # THE LOGIN HOLDS THE PASSWORD. 0l133sp2's Member carried a required
+            # `passwordHash`; signup creates the row without one, so every
+            # signup would have been refused by the database.
+            if isinstance(f, dict) and _is_credential_field(f.get("name")):
+                problems.append(f"{name}.{f.get('name')}: remove this field. {CREDENTIAL_RULE}")
+            if isinstance(f, dict) and f.get("references") and f.get("required"):
+                problems.append(f"{name}.{f.get('name')}: the account entity's row is created at signup, when no "
+                                "other record exists to point at — make this reference optional")
+    if problems:
+        raise InvalidEntityFields(_all_of(problems))
+
+
+def _unique_many_side(result: "AgentResult", doc: dict | None) -> list[str]:
+    """A reference on the MANY side of a one-to-many is never unique by itself.
+
+    HippieKit (2026-09-22) marked `ProductIngredient.productId` and
+    `RecentSearch.shopperId` unique while the data model said a product has
+    many ingredients and a shopper many searches: each product could then
+    carry one ingredient, each shopper keep one search. The observer caught
+    both a round later. The two statements are in the Blueprint side by side —
+    the relationship and the flag — so the contradiction is refused here, in
+    the author's own attempt. One row per PAIR is a `unique` constraint over
+    both columns, which this does not touch."""
+    data = (doc or {}).get("data") or {}
+    name_of = {str(e.get("id")): str(e.get("name")) for e in data.get("entities") or []
+               if isinstance(e, dict)}
+    many: dict[str, dict[str, str]] = {}      # entity name -> {fk field: the "one" entity}
+    rels = list(data.get("relationships") or [])
+    for proposal in (p for p in result.proposals if p.section == "data.relationships"):
+        if isinstance(proposal.body, dict):
+            rels.append(proposal.body)
+    for r in rels:
+        if not isinstance(r, dict) or r.get("kind") != "one_to_many" or r.get("status") == "DEPRECATED":
+            continue
+        fk = str(r.get("toField") or "")
+        if not fk or fk == "id":
+            continue
+        one = name_of.get(str(r.get("from")), str(r.get("from")))
+        many.setdefault(name_of.get(str(r.get("to")), str(r.get("to"))), {})[fk] = one
+    out: list[str] = []
+    for proposal in (p for p in result.proposals if p.section == "data.entities"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        ename = str(body.get("name") or name_of.get(str(proposal.natural_key), proposal.natural_key))
+        for f in body.get("fields") or []:
+            if not isinstance(f, dict) or not f.get("unique") or f.get("primaryKey"):
+                continue
+            one = many.get(ename, {}).get(str(f.get("name")))
+            if one:
+                out.append(f"{ename}.{f.get('name')}: marked `unique`, but the data model says one {one} "
+                           f"has many {ename} rows — unique, each {one} could have only one. Remove "
+                           f"`unique`; if one {ename} per pair is meant, add a `unique` constraint over "
+                           f"both columns")
+    return out
+
+
+class InvalidAnalytics(AuthorRefusal):
+    """A page that should carry charts was given none."""
+
+
+#: The page patterns that carry analytics, and how many charts each must.
+#: A dashboard IS analytics; a list over records with a status, a type, a
+#: date or an amount carries the breakdown or the trend of what it lists.
+CHARTS_REQUIRED: dict[str, int] = {"dashboard": 3, "analytics": 3, "entity_list": 1,
+                                   "master_detail": 1, "approval_inbox": 1}
+#: A dashboard's charts are of at least this many different marks: three
+#: bars is one chart said three times.
+DASHBOARD_MARKS = 2
+#: A dashboard opens with how things stand: this many `metric` tiles at least.
+DASHBOARD_METRICS = 3
+_DATE_TYPES = {"date", "datetime", "timestamp"}
+_NUMBER_TYPES = {"number", "integer", "int", "decimal", "float", "currency", "money"}
+
+
+def plottable_fields(entity: dict) -> list[str]:
+    """The fields of an entity a chart can be drawn over: an enum (a status,
+    a type), a date (a trend), a number (a total, a distribution) or a
+    foreign key (a breakdown by the record it points at)."""
+    out = []
+    for f in entity.get("fields") or []:
+        if not isinstance(f, dict) or f.get("status") == "DEPRECATED":
+            continue
+        t = str(f.get("type") or "").lower()
+        why = ("enum" if f.get("enumValues") or t == "enum"
+               else "date" if t in _DATE_TYPES
+               else "number" if t in _NUMBER_TYPES
+               else "reference" if f.get("references") else "")
+        if why:
+            out.append(f"{f.get('name')} ({why})")
+    return out
+
+
+def customer_facing(doc: dict, page: dict) -> bool:
+    """Whether a page is for the product's customers rather than its staff:
+    public, or — in an application with more than one role — open only to the
+    role people sign up as. Such a page shows the product, not numbers about
+    it: F&B's customer menu carried a "Price range" chart because every list
+    page had to (2026-10-02)."""
+    from services.blueprint.account_model import signup_role
+    if str(page.get("access") or "") == "public":
+        return True
+    roles = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or []
+             if isinstance(r, dict) and r.get("status") != "DEPRECATED"}
+    customer = signup_role(doc)
+    users = [roles.get(str(u), str(u)) for u in page.get("users") or []]
+    return len(roles) > 1 and bool(customer) and bool(users) and all(u == customer for u in users)
+
+
+def check_analytics(result: "AgentResult", doc: dict | None) -> None:
+    """CHARTS SHOW UP ON EVERY RELEVANT PAGE. The analytics agent was asked
+    to decide page by page and decided "none" for a product's home
+    dashboard and for every list of its catalogue (zo9k0ekd: 0 of 24
+    widgets on `/`, `/categories`, `/products`). A dashboard with no chart
+    is not a dashboard; a list of records with a status or a date and no
+    breakdown or trend is a table with nothing to say about itself. Refused
+    at the author, naming each page and the fields it could chart, so the
+    reply is edited rather than shipped bare."""
+    proposals = [p for p in result.proposals if p.section == "widgets"]
+    if not proposals or not doc:
+        return
+    ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []
+            if isinstance(e, dict) and e.get("status") != "DEPRECATED"}
+    charts: dict[str, int] = {}
+    metrics: dict[str, int] = {}
+    marks: dict[str, set[str]] = {}
+    over_time: set[str] = set()
+    problems: list[str] = []
+    known = {str(r.get("id")) for r in doc.get("requirements") or [] if isinstance(r, dict) and r.get("id")}
+    for p in proposals:
+        body = p.body if isinstance(p.body, dict) else {}
+        pid = str(body.get("page") or "")
+        if str(body.get("kind") or "") == "metric":
+            metrics[pid] = metrics.get(pid, 0) + 1
+        if str(body.get("kind") or "") == "chart":
+            charts[pid] = charts.get(pid, 0) + 1
+            mark = str((body.get("chart") or {}).get("mark") or "") if isinstance(body.get("chart"), dict) else ""
+            if mark:
+                marks.setdefault(pid, set()).add(mark)
+            src = body.get("dataSource") if isinstance(body.get("dataSource"), dict) else {}
+            if any(isinstance(d, dict) and d.get("bucket") for d in src.get("dimensions") or []):
+                over_time.add(pid)
+        # EVERYTHING ON IT IS ABOUT THIS APPLICATION. A widget that cites no
+        # requirement is a number nobody asked for; one that cites a
+        # requirement that does not exist is a number nobody can check.
+        cited = [str(r) for r in body.get("requirements") or []]
+        if known and not cited:
+            problems.append(f"{body.get('id') or p.natural_key} ({body.get('label')}): names no requirement it answers; "
+                            "cite the one it does, or leave it out")
+        elif known and not any(c in known for c in cited):
+            problems.append(f"{body.get('id') or p.natural_key} ({body.get('label')}): cites {', '.join(cited)}, "
+                            "which this application does not have")
+    for page in doc.get("pages") or []:
+        if not isinstance(page, dict) or page.get("status") == "DEPRECATED":
+            continue
+        need = CHARTS_REQUIRED.get(str(page.get("pattern") or ""), 0)
+        if not need or customer_facing(doc, page):
+            continue
+        pid = str(page.get("id"))
+        ent = ents.get(str((page.get("data") or {}).get("primaryEntity") or ""))
+        fields = plottable_fields(ent) if ent else []
+        if page.get("pattern") not in ("dashboard", "analytics") and not fields:
+            continue                      # nothing to draw over: a list of free text
+        have = charts.get(pid, 0)
+        over = (f" over {ent.get('name')}: {', '.join(fields[:5])}" if ent and fields
+                else " over the entities the page shows")
+        if have < need:
+            problems.append(f"{pid} {page.get('route')} ({page.get('pattern')}) has {have} chart{'s' if have != 1 else ''}; "
+                            f"it needs at least {need} — a breakdown or a trend{over}")
+            continue
+        if page.get("pattern") in ("dashboard", "analytics"):
+            # HOW THINGS STAND, THEN WHY. The first reply under the chart
+            # rule kept the charts and dropped the KPI tiles on two of three
+            # dashboards (nlwtcyz5): a dashboard opens with its numbers.
+            if metrics.get(pid, 0) < DASHBOARD_METRICS:
+                problems.append(f"{pid} {page.get('route')} (dashboard): has {metrics.get(pid, 0)} metric tile"
+                                f"{'s' if metrics.get(pid, 0) != 1 else ''}; it opens with at least {DASHBOARD_METRICS} "
+                                f"`kind: metric` widgets that say how things stand, each with `timeField` where its entity has a date")
+            # RICH, NOT REPEATED: different marks, and the trend over time
+            # when there is a date to trend over.
+            if len(marks.get(pid, set())) < DASHBOARD_MARKS:
+                problems.append(f"{pid} {page.get('route')} (dashboard): its {have} charts are all "
+                                f"{'/'.join(sorted(marks.get(pid, set())) or ['unmarked'])}; a dashboard reads through at "
+                                f"least {DASHBOARD_MARKS} different marks — a trend over time, a breakdown, a ranking")
+            dated = any(f.endswith("(date)") for e in ents.values() for f in plottable_fields(e))
+            if dated and pid not in over_time:
+                problems.append(f"{pid} {page.get('route')} (dashboard): no chart over time, though the data has "
+                                f"dates — add a line or area with a `bucket` by week or month")
+    if problems:
+        raise InvalidAnalytics(
+            "Charts show up on every relevant page, dashboards are rich, and every widget is about this "
+            "application. " + _all_of(problems)
+            + " Add or amend `kind: chart` widgets for these pages (keep the metrics you have).")
+
+
+class InvalidPageContent(AuthorRefusal):
+    """A page's content plan names a source the data model does not have."""
+
+
+def check_page_content(result: "AgentResult", doc: dict | None) -> None:
+    """Every fact a page's content plan shows resolves — a field its entity
+    has (or proposes in `newField`), a foreign key that points where it says,
+    a count over a real relationship. Refused at the page's author, naming the
+    fault, rather than discovered by the UI engineer as a page with nothing to
+    show."""
+    from services.blueprint.page_content import content_findings
+
+    problems: list[str] = []
+    for proposal in (p for p in result.proposals if p.section == "pages"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        if body.get("content"):
+            problems.extend(content_findings(body, doc or {}))
+    if problems:
+        raise InvalidPageContent(_all_of(problems[:12]))
+
+
+class InconsistentPageAccess(AuthorRefusal):
+    """Pages of one module, for the same people, disagree on who may open them."""
+
+
+def access_findings(pages: list[dict]) -> list[str]:
+    """Pages of one module that name the same audience and disagree on whether
+    that audience is a permission. F&B's back office was five pages for Admin
+    in one module: three `role_restricted`, and "Edit Menu Item" and "Orders"
+    `authenticated` — so a signed-up customer opened the order queue
+    (fxa532bj, 2026-10-02). Either reading can be right; one module saying
+    both of the same people is not a decision, it is a slip."""
+    groups: dict[tuple[str, tuple[str, ...]], dict[str, list[str]]] = {}
+    for page in pages:
+        access = str(page.get("access") or "authenticated")
+        users = tuple(sorted(str(u) for u in page.get("users") or []))
+        module = str(page.get("module") or "")
+        if not module or not users or access == "public":
+            continue
+        groups.setdefault((module, users), {}).setdefault(access, []).append(
+            str(page.get("route") or page.get("id")))
+    problems: list[str] = []
+    for (module, users), by in groups.items():
+        if len(by) > 1:
+            said = "; ".join(f"{a}: {', '.join(sorted(r))}" for a, r in sorted(by.items()))
+            problems.append(
+                f"pages of {module} for {', '.join(users)} disagree on who may open them ({said}) — "
+                "give them the same `access`: `role_restricted` if only those roles may open "
+                "them, `authenticated` if anyone signed in may")
+    return problems
+
+
+def check_page_access(result: "AgentResult", doc: dict | None) -> None:
+    """`access_findings` over the pages as they would stand, refused at the
+    page's author when its own proposal is one of the pages that disagree —
+    and only when it says who the page is for (`access`, `users`, `module`):
+    an edit to a page's content is not the place a module's access is
+    settled, and refusing it would hold that edit hostage to another page."""
+    proposed = [p.body for p in result.proposals
+                if p.section == "pages" and isinstance(p.body, dict)]
+    if not proposed:
+        return
+    merged: dict[str, dict] = {}
+    for page in (doc or {}).get("pages") or []:
+        if isinstance(page, dict) and str(page.get("status") or "").upper() != "REMOVED":
+            merged[str(page.get("id") or page.get("route"))] = page
+    touched: set[str] = set()
+    for body in proposed:
+        key = str(body.get("id") or "") or next(
+            (k for k, v in merged.items() if v.get("route") == body.get("route")), str(body.get("route")))
+        is_new = key not in merged
+        merged[key] = {**merged.get(key, {}), **body}
+        if is_new or {"access", "users", "module"} & set(body):
+            touched.add(str(merged[key].get("route") or key))
+    problems = [f for f in access_findings(list(merged.values()))
+                if any(r in f for r in touched)]
+    if problems:
+        raise InconsistentPageAccess(_all_of(problems))
+
+
+class InvalidNavigation(AuthorRefusal):
+    """Two menu entries lead to the same address."""
+
+
+def check_navigation(result: "AgentResult", doc: dict | None = None) -> None:
+    """Every menu entry is its own address: a page, or a view of it. 0l133sp2's
+    "My Listings" and "Discover" both named the tools page — both lit at once
+    and the phone's tab bar drew two tabs keyed `/tools`. Refused here, naming
+    both, so the architect points one at the view it meant (`view`)."""
+    pages = {str(p.get("id")): p for p in ((doc or {}).get("pages") or []) if isinstance(p, dict)}
+    problems: list[str] = []
+    for proposal in (p for p in result.proposals if p.section == "navigation"):
+        body = proposal.body if isinstance(proposal.body, dict) else {}
+        seen: dict[tuple[str, str], str] = {}
+
+        def walk(nodes: Any) -> None:
+            for node in nodes or []:
+                if not isinstance(node, dict):
+                    continue
+                page = str(node.get("page") or "")
+                if page:
+                    key = (page, str(node.get("view") or ""))
+                    label = str(node.get("label") or page)
+                    if key in seen:
+                        route = str((pages.get(page) or {}).get("route") or page)
+                        problems.append(f"navigation: \"{seen[key]}\" and \"{label}\" both lead to {route}"
+                                        f"{'?view=' + key[1] if key[1] else ''} — point one at a view of the page "
+                                        f"(`view`: a key of its `views`) or at another page, or drop one")
+                    else:
+                        seen[key] = label
+                walk(node.get("children"))
+
+        walk(body.get("tree"))
+    if problems:
+        raise InvalidNavigation(_all_of(problems))
+
+
+class InvalidBusinessRule(AuthorRefusal):
     """A rule the engine could not evaluate as written."""
 
 
@@ -459,11 +912,49 @@ def check_business_rules(result: "AgentResult", doc: dict | None) -> None:
         "workflows": [],
         "data": (doc or {}).get("data") or {},
     })
-    if findings:
-        raise InvalidBusinessRule("; ".join(f["detail"] for f in findings[:8]))
+    problems = [f["detail"] for f in findings[:8]]
+    problems += [f"{p.body.get('name') or p.natural_key}: {e}"
+                 for p in proposals for e in prerequisite_findings(p.body, doc or {})]
+    if problems:
+        raise InvalidBusinessRule("; ".join(problems))
 
 
-class InvalidPatternTemplate(ValueError):
+def prerequisite_findings(rule: dict, doc: dict) -> list[str]:
+    """A prerequisite gates workflows the application has, is satisfied by a
+    record of an entity it has — tied to the acting account by a field that
+    entity has — and says what the person is told. Checked at the author, so
+    a gate that could never be met, or never be checked, is re-asked."""
+    if rule.get("kind") != "prerequisite":
+        return []
+    out: list[str] = []
+    live = lambda rows: [r for r in rows or [] if isinstance(r, dict) and r.get("status") != "DEPRECATED"]
+    flows = {str(w.get("id")) for w in live(doc.get("workflows"))}
+    gates = [str(g) for g in rule.get("gates") or []]
+    if not gates:
+        out.append("a prerequisite gates at least one workflow — name them in `gates`")
+    out += [f"`gates` names {g}, which is not a workflow of this application" for g in gates if flows and g not in flows]
+    req = rule.get("requires") or {}
+    ents = {str(e.get("id")): e for e in live((doc.get("data") or {}).get("entities"))}
+    ent = ents.get(str(req.get("entity") or ""))
+    if ent is None:
+        out.append("`requires.entity` must name the entity whose record satisfies it")
+    else:
+        cols = {str(f.get("name")) for f in ent.get("fields") or []}
+        acct = str(req.get("account") or "")
+        if acct not in cols:
+            out.append(f"`requires.account` must be the field of {ent.get('name')} holding the person's "
+                       f"account id (one of: {', '.join(sorted(cols)) or 'none'})")
+        out += [f"`requires.where` names {k}, which {ent.get('name')} does not have"
+                for k in (req.get("where") or {}) if cols and k not in cols]
+    if not str(rule.get("message") or "").strip():
+        out.append("a prerequisite says in `message` what the person must do first")
+    pages = {str(pg.get("id")) for pg in live(doc.get("pages"))}
+    if rule.get("page") and pages and str(rule["page"]) not in pages:
+        out.append(f"`page` names {rule['page']}, which is not a page of this application")
+    return out
+
+
+class InvalidPatternTemplate(AuthorRefusal):
     """A2UI proposed a template the component registry cannot render."""
 
 
@@ -590,7 +1081,28 @@ def check_pattern_templates(result: AgentResult,
                             and str(f.get("page")) == str(page_id))
 
     if problems:
-        raise InvalidPatternTemplate("; ".join(problems[:6]))
+        raise InvalidPatternTemplate(_all_of(problems))
+
+
+#: EVERY FAULT IN ONE REPLY, NOT THE FIRST FEW.
+#:
+#: A composer fixes what it is told about and re-authors the rest, so a fault
+#: held back is a fault discovered on the next attempt — at the price of a
+#: whole composition. The checks themselves have always accumulated; the joins
+#: below then kept six of them and dropped the rest silently, which is the
+#: same waste with a narrower window.
+#:
+#: Capped rather than unbounded because a reply is read by a model with a
+#: context budget, and a page emitting forty faults has one cause rather than
+#: forty. The cap says so out loud when it bites.
+MAX_REPORTED_FAULTS = 40
+
+
+def _all_of(problems: list[str], limit: int = MAX_REPORTED_FAULTS) -> str:
+    """Every fault, joined, saying how many were held back if any were."""
+    shown = "; ".join(problems[:limit])
+    extra = len(problems) - limit
+    return f"{shown}; (and {extra} more)" if extra > 0 else shown
 
 
 def _canonical_key(alloc: Any, section: str, body: Mapping[str, Any],
@@ -611,60 +1123,6 @@ def _canonical_key(alloc: Any, section: str, body: Mapping[str, Any],
     if alloc.lookup(model_key) and not alloc.lookup(canon):
         return model_key
     return canon
-
-
-class InvalidComposition(ValueError):
-    """A2UI sketched the app against pages or components that do not exist."""
-
-
-def check_composition(result: AgentResult, doc: dict) -> None:
-    """Reject a whole-app sketch that does not fit the app it is for.
-
-    Three things are checked, all structural: every sketch names a page that
-    exists, every page is sketched exactly once, and every component a section
-    names is in the catalog. That is the contract the per-page author relies
-    on — a sketch for a page that does not exist is noise, a page without one
-    is authored blind, and a component that does not exist would be carried
-    into the page prompt as an instruction to use it.
-
-    Nothing about the *quality* of the sketch is gated here. Whether the
-    sections make sense for the page is a judgement, and the observer makes
-    it; a heuristic gate on that would be the kind of validator the old
-    pipeline drowned in.
-    """
-    proposals = [p for p in result.proposals if p.section == "composition"]
-    if not proposals:
-        return
-
-    from services.blueprint.page_planner import load_catalog
-
-    catalog = load_catalog()
-    live = {
-        p["id"] for p in (doc.get("pages") or [])
-        if p.get("id") and p.get("status") != "DEPRECATED"
-    }
-    problems: list[str] = []
-    for proposal in proposals:
-        seen: dict[str, int] = {}
-        for sketch in proposal.body.get("pages") or []:
-            pid = sketch.get("page") or "?"
-            seen[pid] = seen.get(pid, 0) + 1
-            if pid not in live:
-                problems.append(f"{pid}: not a page in this Blueprint")
-            for section in sketch.get("sections") or []:
-                for name in section.get("components") or []:
-                    if name not in catalog:
-                        problems.append(
-                            f"{pid} / {section.get('name', '?')}: {name!r} is "
-                            "not a registered component"
-                        )
-        for pid in sorted(live - set(seen)):
-            problems.append(f"{pid}: no sketch — every page must be sketched once")
-        for pid, count in seen.items():
-            if count > 1:
-                problems.append(f"{pid}: sketched {count} times")
-    if problems:
-        raise InvalidComposition("; ".join(problems[:6]))
 
 
 def apply_agent_result(
@@ -694,9 +1152,14 @@ def apply_agent_result(
     from services.blueprint.layout_vocabulary import translate_layout_vocabulary
     translate_layout_vocabulary(result, svc.doc)
     check_pattern_templates(result, svc.doc)
-    check_composition(result, svc.doc)
-    check_workflow_steps(result, svc.doc)
+    from services.blueprint.mcp_catalog import load as _mcp_servers
+    check_workflow_steps(result, svc.doc, _mcp_servers(getattr(svc, "output_dir", None)))
     check_business_rules(result, svc.doc)
+    check_entity_fields(result, svc.doc)
+    check_page_content(result, svc.doc)
+    check_page_access(result, svc.doc)
+    check_navigation(result, svc.doc)
+    check_analytics(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
     #

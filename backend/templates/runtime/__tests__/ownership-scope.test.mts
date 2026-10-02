@@ -225,12 +225,14 @@ export const or = (...conds) => ({ op: "or", conds: conds.filter(Boolean) });
 export const desc = (c) => c;
 export const asc = (c) => c;
 export const count = () => ({ __agg: "count" });
+export const countDistinct = (c) => ({ __agg: "countDistinct", c });
 export const sum = (c) => ({ __agg: "sum", c });
 export const avg = (c) => ({ __agg: "avg", c });
 export const min = (c) => ({ __agg: "min", c });
 export const max = (c) => ({ __agg: "max", c });
 export const inArray = (col, vals) => ({ op: "in", col: col.__col, vals });
 export const getTableName = (t) => t.__name;
+export const getTableColumns = (t) => ({ ...t });
 export function sql(strings, ...values) {
   return { op: "raw", text: strings.raw.join("?"), values };
 }
@@ -239,6 +241,7 @@ sql.join = (parts) => ({ op: "raw", text: "join", parts });
 
 const STUBS: Record<string, string> = {
   "@/db": "export const db = globalThis.__FAKE_DB__;",
+  "./embedding-columns": "export const EMBEDDING_DIMENSIONS = 512;\nexport const embeddingColumnsFor = () => [];\n",
   "drizzle-orm": DRIZZLE,
   "./fk-roles":
     "export const FK_ROLES = {};\n" +

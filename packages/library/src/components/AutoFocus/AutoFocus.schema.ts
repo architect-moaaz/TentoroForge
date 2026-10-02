@@ -27,4 +27,4 @@ export const AutoFocusProps = z.object({
   className: z.string().optional(),
 });
 
-export type AutoFocusPropsType = z.infer<typeof AutoFocusProps>;
+export type AutoFocusPropsType = z.input<typeof AutoFocusProps>;

@@ -28,4 +28,4 @@ export const FocusTrapProps = z.object({
   className: z.string().optional(),
 });
 
-export type FocusTrapPropsType = z.infer<typeof FocusTrapProps>;
+export type FocusTrapPropsType = z.input<typeof FocusTrapProps>;

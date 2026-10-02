@@ -52,6 +52,27 @@ export function getActionHandler(
 }
 
 /**
+ * Every notice the steps of this run left behind, oldest first.
+ *
+ * A handler returns `notice` when it did less than its name claims — the
+ * email that became an in-app notification because no service is connected.
+ * Read off the log rather than threaded through a handler argument, so a
+ * handler only has to be honest in its return value; duplicates are dropped
+ * because three steps of the same workflow sending mail through a service
+ * that is not connected is one thing for a person to fix, not three.
+ */
+export function noticesOf(log: ExecutionLogEntry[]): string[] {
+  const out: string[] = [];
+  for (const entry of log ?? []) {
+    const notice = (entry?.output as { notice?: unknown } | undefined)?.notice;
+    if (typeof notice === "string" && notice.trim() && !out.includes(notice)) {
+      out.push(notice);
+    }
+  }
+  return out;
+}
+
+/**
  * Execute a workflow definition.
  *
  * Walks the node graph starting from the trigger node, evaluating
@@ -122,6 +143,7 @@ export async function executeWorkflow(
       status: "failed",
       log: ctx.log,
       output: ctx.variables,
+      notices: noticesOf(ctx.log),
       error: "No trigger node found",
     };
   }
@@ -148,6 +170,26 @@ export async function executeWorkflow(
     const lastLog = pausedLog;
     const isPaused = Boolean(pausedLog);
 
+    // A run that ended on a REFUSED end did not do what it was asked. It is a
+    // failure to every caller — the execute route answers 422, the SDK shows
+    // the message as an error — and `refused` tells it apart from a crash, so
+    // nothing reports it as one or retries it.
+    const refusedLog = isPaused ? undefined : ctx.log.find((l) => (l as any)?.output?.refused === true);
+    if (refusedLog) {
+      return {
+        workflowId: workflow.id,
+        workflowName: workflow.name,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        status: "failed",
+        refused: true,
+        log: ctx.log,
+        output: ctx.variables,
+        notices: noticesOf(ctx.log),
+        error: String((refusedLog as any).output.message),
+      };
+    }
+
     return {
       workflowId: workflow.id,
       workflowName: workflow.name,
@@ -156,6 +198,7 @@ export async function executeWorkflow(
       status: isPaused ? "paused" : "completed",
       log: ctx.log,
       output: ctx.variables,
+      notices: noticesOf(ctx.log),
       pausedAt: isPaused ? lastLog.nodeId : undefined,
       pendingTask: isPaused ? {
         nodeId: lastLog.nodeId,
@@ -209,6 +252,7 @@ export async function executeWorkflow(
       status: "failed",
       log: ctx.log,
       output: ctx.variables,
+      notices: noticesOf(ctx.log),
       error,
     };
   }
@@ -646,10 +690,15 @@ async function executeNode(
         // also accept flat fields. The persist layer resolves the actual assignee
         // from the pool when strategy is round_robin / load_balanced.
         const _asn = (config as any).assignment || {};
+        // `$user.id` is the person running the workflow, here as in any step:
+        // stored as the literal text, SnapIT's "which product?" task was
+        // assigned to nobody and the search waited for ever (2026-09-29).
+        const _who = (v: unknown) =>
+          v === "$user.id" ? (((ctx as any).user?.id as string | undefined) ?? v) : v;
         logEntry.output = {
           taskCreated: true,
           taskType: node.type,
-          assignee: config.assignee || _asn.value || config.assigneeRole || "admin",
+          assignee: _who(config.assignee || (config as any).assignTarget || _asn.value || config.assigneeRole || "admin"),
           assigneeRole: config.assigneeRole || _asn.value,
           assignmentStrategy: (config as any).assignmentStrategy ?? _asn.strategy,
           assigneePool: (config as any).assigneePool ?? _asn.pool,
@@ -826,10 +875,23 @@ async function executeNode(
       }
 
       case "end":
-      case "end_event":
-        // Terminal node — workflow complete
+      case "end_event": {
+        // Terminal node — workflow complete. A REFUSED end is the run
+        // stopping without doing what it was asked (a validation branch):
+        // recorded here, reported by `executeWorkflow` as a failure carrying
+        // the end's message. Both ends used to complete alike, so an empty
+        // form was told "Record added successfully." (h7gmi93x).
+        const endCfg = (node.data.config ?? {}) as Record<string, unknown>;
+        if (endCfg.refused === true) {
+          logEntry.output = {
+            refused: true,
+            message: String(interpolateValue(String(endCfg.message ?? ""), ctx.variables) ?? "")
+              || "This could not be done.",
+          };
+        }
         nextEdges = [];
         break;
+      }
 
       default:
         // Unknown node type — log and skip
@@ -1147,15 +1209,16 @@ async function handleAction(
     // which is where applyOutputMappings runs — so an outputMapping on a
     // set_variable node was silently ignored no matter what this returned.
     // finishInline() runs the same tail every other action goes through.
-    return finishInline({ [config.variableName as string]: value, value });
+    return finishInline({ [config.variableName as string]: value, value, output: value });
   }
 
   // Handle transform inline. Panel emits `config.expression`; legacy
   // shape used `config.transformExpression`. Accept either.
   if (actionType === "transform") {
     // A14-3: same double-evaluation risk as set_variable.
+    // Each answers to `output` as well — the name authors reach for (see custom).
     if (preEvaluated.has("expression")) {
-      return finishInline({ value: (config as any).expression });
+      return finishInline({ value: (config as any).expression, output: (config as any).expression });
     }
     const expr =
       (config as any).transformExpression ??
@@ -1166,14 +1229,15 @@ async function handleAction(
       // from. Wrapping it makes the declared path resolvable.
       // A0-8: same early-return problem as set_variable — see above.
       try {
-        return finishInline({ value: evaluateExpression(String(expr), ctx.variables) });
+        const value = evaluateExpression(String(expr), ctx.variables);
+        return finishInline({ value, output: value });
       } catch {
-        return finishInline({ value: null });
+        return finishInline({ value: null, output: null });
       }
     }
     // Same shape on the no-expression path, so a downstream binding always
     // finds `value` whether or not the node was configured.
-    return finishInline({ value: null });
+    return finishInline({ value: null, output: null });
   }
 
   const handler = actionHandlers.get(actionType);

@@ -39,11 +39,27 @@ def test_conversation_seq_column_is_crash_proof():
     stray NULL can never violate a constraint). Without the server_default the
     ORM sent seq=NULL and EVERY chat/Smith/generation write 500'd. The sqlite
     test harness can't reproduce the Postgres sequence, so this asserts the model
-    CONTRACT directly."""
+    CONTRACT directly.
+
+    THE HARNESS TAKES THE DEFAULT AWAY, so the live column is not the whole
+    answer. `conftest._strip_pg_only_server_defaults` removes `nextval(...)`
+    from the real model metadata — SQLite cannot compile it — the moment any
+    test takes the `test_db` fixture. This guard therefore read None and failed
+    in a full run while passing on its own, which reads as the model having
+    lost its default rather than the harness having taken it. The strip records
+    what it removed; either source proves the model declared one.
+    """
+    from tests.conftest import stripped_server_default
+
     from models.project import Conversation
     col = Conversation.__table__.c.seq
-    assert col.server_default is not None, (
+    declared = col.server_default or stripped_server_default("conversations", "seq")
+    assert declared is not None, (
         "Conversation.seq needs a server_default (nextval) or the ORM sends "
         "seq=NULL on every insert and all conversation writes 500"
     )
+    # And it is the SEQUENCE, not merely something non-None: a constant
+    # default would hand every row the same number and lose the ordering this
+    # column exists for.
+    assert "nextval" in str(getattr(declared, "arg", declared)).lower(), declared
     assert col.nullable is True, "Conversation.seq must be nullable so a stray NULL can't 500 a write"

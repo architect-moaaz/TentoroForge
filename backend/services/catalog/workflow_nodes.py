@@ -145,6 +145,65 @@ class WorkflowNodeCatalog:
             if not isinstance(step, dict):
                 continue
             errors.extend(f"{step.get('key') or '?'}: {e}" for e in self.step_errors(step))
+        errors.extend(self.flow_errors(body))
+        return errors
+
+    def flow_errors(self, body: dict) -> list[str]:
+        """Where each step goes, where that is ambiguous.
+
+        A step naming no `next` is chained to the step after it in the list —
+        right for a straight line, wrong for a branch. A condition with no
+        targets had its then-branch run into the next step and nothing on its
+        else-branch, and the two ends listed after it chained into each other,
+        so "Record Created" ran on into "Validation Failed" (22lzrc2p,
+        2026-09-19). So a branching step names both targets, and every target
+        named is a step of this workflow. A straight line still needs nothing."""
+        steps = [s for s in body.get("steps") or [] if isinstance(s, dict) and s.get("key")]
+        keys = {str(s["key"]) for s in steps}
+        branching = set(self.branching_types())
+        errors: list[str] = []
+        for s in steps:
+            targets = [str(t) for t in s.get("next") or []]
+            for t in targets:
+                if t not in keys:
+                    errors.append(f"{s['key']}: `next` names {t!r}, which is not a step of this workflow")
+            if s.get("type") in branching and len([t for t in targets if t in keys]) < 2:
+                errors.append(f"{s['key']}: a {s.get('type')} branches — `next` must name the "
+                              f"then-step first and the else-step second (e.g. the step that "
+                              f"proceeds, then the end that reports the failure)")
+        errors.extend(self.outcome_errors(steps))
+        return errors
+
+    def outcome_errors(self, steps: list[dict]) -> list[str]:
+        """Which of a workflow's ends did what was asked.
+
+        Two ends that say nothing complete alike, and the caller cannot tell
+        "Record Created" from "Validation Failed": h7gmi93x's empty Add Data
+        form took the validation branch, saved nothing, and was told "Record
+        added successfully." So a workflow that can end in more than one place
+        says on every end whether it was refused — not guessed from the branch
+        shape or from the end's name, which are the author's — and a refused
+        end says why, in the words the person is shown. One end is the run
+        finishing; it needs nothing.
+
+        `config.refused`, not `outcome`: agents already write `outcome` as a
+        free label (`not_found`, `created`, an approval's `rejected` — which
+        is a decision made, not a run refused)."""
+        ends = [s for s in steps if s.get("type") in ("end", "end_event")]
+        errors: list[str] = []
+        for s in ends:
+            cfg = s.get("config") if isinstance(s.get("config"), dict) else {}
+            refused = cfg.get("refused")
+            if refused is None:
+                if len(ends) > 1:
+                    errors.append(f"{s['key']}: this workflow can end in {len(ends)} places, so every "
+                                  f"end says config.refused — true where the run stopped without "
+                                  f"doing what was asked (a check failed), false where it did it")
+            elif not isinstance(refused, bool):
+                errors.append(f"{s['key']}: config.refused is true or false, not {refused!r}")
+            elif refused and not str(cfg.get("message") or "").strip():
+                errors.append(f"{s['key']}: a refused end carries config.message — the sentence the "
+                              f"person is shown saying what to correct")
         return errors
 
     # -- prompt rendering ---------------------------------------------------

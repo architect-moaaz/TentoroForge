@@ -298,6 +298,37 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
         except Exception as e:
             errors.append(f"Failed to copy sensitive-crypto: {e}")
 
+    # Embedding fill + query client. The data engine and the workflow runtime
+    # import it unconditionally; with no embedding field in the app's
+    # manifest every call is a no-op.
+    embeddings_src = _TEMPLATE_DIR / "embeddings.ts"
+    embeddings_dst = src_lib / "embeddings.ts"
+    if embeddings_src.exists():
+        try:
+            shutil.copy2(embeddings_src, embeddings_dst)
+            copied.append("src/lib/embeddings.ts")
+        except Exception as e:
+            errors.append(f"Failed to copy embeddings: {e}")
+
+    # The manifest embeddings.ts reads is projected from the Blueprint; an app
+    # built on another path has none, and the import would fail the build. An
+    # empty manifest is the truth for it: no field is embedded.
+    manifest_dst = src_lib / "embedding-columns.ts"
+    if not manifest_dst.exists():
+        manifest_dst.write_text(
+            "// No embedding fields. Projected from the Blueprint when there are.\n"
+            "export type EmbeddingColumn = {\n"
+            "  property: string; column: string; of: string; source: \"image\" | \"text\";\n"
+            "};\n"
+            "export const EMBEDDING_DIMENSIONS = 512;\n"
+            "export const EMBEDDING_COLUMNS: Record<string, EmbeddingColumn[]> = {};\n"
+            "export function embeddingColumnsFor(_entity: string): EmbeddingColumn[] {\n"
+            "  return [];\n"
+            "}\n",
+            "utf-8",
+        )
+        copied.append("src/lib/embedding-columns.ts")
+
     # Copy the file-storage module (pluggable disk/S3 backend for uploads)
     storage_src = _TEMPLATE_DIR / "storage.ts"
     storage_dst = src_lib / "storage.ts"
@@ -320,6 +351,21 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
             copied.append("src/lib/error_reporter.ts")
         except Exception as e:
             errors.append(f"Failed to copy error_reporter: {e}")
+
+    # The two lookups the reporter needs to name a crash in the owner's words:
+    # the routes this app declares, and which control runs which workflow.
+    # `project_dispatches` overwrites it with the real thing; this empty copy
+    # exists so `@/lib/incident-map` resolves in an app that has not been
+    # projected yet — the reporter imports it unconditionally, so a missing
+    # file is a compile error in every generated app.
+    incident_map_src = _TEMPLATE_DIR / "incident-map.ts"
+    incident_map_dst = src_lib / "incident-map.ts"
+    if incident_map_src.exists() and not incident_map_dst.exists():
+        try:
+            shutil.copy2(incident_map_src, incident_map_dst)
+            copied.append("src/lib/incident-map.ts")
+        except Exception as e:
+            errors.append(f"Failed to copy incident-map: {e}")
 
     # Global error boundary (Next.js App Router) — catches uncaught render
     # errors that escape every child boundary, reports them via the reporter
@@ -496,6 +542,23 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
     except Exception as e:
         errors.append(f"Failed to inject file storage: {e}")
 
+    # Inject account setup: the forge_invites table + the set-password route
+    # that gives an invited person a way to choose their own password. Without
+    # these, an account the owner adds has nowhere to get a password from.
+    try:
+        copied.extend(_inject_account_setup(output_path))
+    except Exception as e:
+        errors.append(f"Failed to inject account setup: {e}")
+
+    # The connected-services module the workflow runtime imports. On its own,
+    # because it is a static import in shipped code: folded into another
+    # injector, one unrelated failure there would leave the app unable to
+    # compile.
+    try:
+        copied.extend(_ensure_connected_services_stub(output_path))
+    except Exception as e:
+        errors.append(f"Failed to write the connected-services stub: {e}")
+
     # Rewrite any LLM-hallucinated workflow routes (non-existent getWorkflowEngine)
     # to the real stateless API so `next build` doesn't break.
     try:
@@ -644,6 +707,71 @@ def _plan_has_commerce_flag(output_path: Path) -> bool:
     except Exception:
         return False
     return False
+
+
+def _ensure_connected_services_stub(output_path: Path) -> list[str]:
+    """`src/lib/integrations/connected.ts`, when the projection wrote none.
+
+    The Blueprint projection (`project_integrations`) writes which service
+    each workflow action talks to. The workflow runtime imports that module
+    statically, so it must always resolve — an app whose Blueprint declares no
+    connection, and every app built before connections existed, gets an EMPTY
+    map, which reads as "no service is connected" and is the truth for it.
+    Never overwrites: the projected file is the real answer.
+    """
+    out = output_path / "src" / "lib" / "integrations" / "connected.ts"
+    if out.exists():
+        return []
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(chr(10).join([
+        "// Written by the Blueprint projection (project_integrations).",
+        "// Empty: this application declares no connected service, so every step",
+        "// that would talk to one says so instead of reporting a send it did not",
+        "// make.",
+        "export type ConnectedService = { name: string; provider: string;"
+        " keys: string[]; liveKey: string; fromKey: string };",
+        "export const CONNECTED_SERVICES: Record<string, ConnectedService> = {};",
+        "export function connectedService(action: string): ConnectedService | undefined {",
+        "  return CONNECTED_SERVICES[action];",
+        "}",
+        "",
+    ]), encoding="utf-8")
+    return ["src/lib/integrations/connected.ts"]
+
+
+def _inject_account_setup(output_path: Path) -> list[str]:
+    """Emit the ``forge_invites`` table and ``/api/auth/set-password``.
+
+    The two halves of the only way an account gets a password other than
+    self-service sign-up: a one-time setup link, and the platform route that
+    hashes what the person types with the algorithm ``auth.ts`` verifies. The
+    seed writes the invite rows from the owner's roster
+    (``src/db/accounts.json``); the page that posts to the route ships with the
+    app foundation.
+    """
+    written: list[str] = []
+    schema_dir = output_path / "src" / "db" / "schema"
+
+    inv_schema = _TEMPLATE_DIR / "db" / "forge-invites.schema.ts"
+    if inv_schema.exists() and schema_dir.exists():
+        shutil.copy2(inv_schema, schema_dir / "_forge_invites.ts")
+        written.append("src/db/schema/_forge_invites.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_invites" not in txt:
+                barrel.write_text(
+                    txt.rstrip() + '\nexport { forgeInvites } from "./_forge_invites";\n',
+                    encoding="utf-8",
+                )
+
+    route_src = _TEMPLATE_DIR / "api-auth-set-password" / "route.ts"
+    if route_src.exists():
+        dst = output_path / "src" / "app" / "api" / "auth" / "set-password" / "route.ts"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(route_src, dst)
+        written.append("src/app/api/auth/set-password/route.ts")
+    return written
 
 
 def _inject_file_storage(output_path: Path) -> list[str]:
@@ -1005,7 +1133,7 @@ def _generate_data_api_route(output_path: Path) -> None:
 
     # Register under the registry's alias set (authority-driven) when available, so
     # the API route resolves entities by every known form — matches the SSR path.
-    if _build_entity_alias_map(output_path):
+    if _has_entity_aliases(output_path):
         content = content.replace(
             '} from "@/lib/data-engine";',
             '} from "@/lib/data-engine";\nimport { aliasesFor } from "@/lib/entity-aliases";',
@@ -1138,12 +1266,24 @@ def _generate_entity_aliases_module(output_path: Path) -> None:
     under EVERY name the authority knows, instead of heuristically guessing."""
     alias_map = _build_entity_alias_map(output_path)
     if not alias_map:
+        # A Blueprint app has no registry: its projection wrote this file from
+        # the entities themselves, and that is the one to keep.
         return
+    lib_dir = output_path / "src" / "lib"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    (lib_dir / "entity-aliases.ts").write_text(
+        render_entity_aliases(alias_map, source="resource-registry.json"), encoding="utf-8")
+    logger.info("Wrote src/lib/entity-aliases.ts (%d entities)", len(set(map(id, alias_map.values()))))
+
+
+def render_entity_aliases(alias_map: dict[str, list[str]], *, source: str) -> str:
+    """`src/lib/entity-aliases.ts` for an alias map: every name one entity goes
+    by, looked up by the canonical key of any of them."""
     entries = ",\n".join(
         f"  {json.dumps(k)}: {json.dumps(v)}" for k, v in sorted(alias_map.items())
     )
-    content = (
-        "// Registry-declared entity aliases. Generated from resource-registry.json so\n"
+    return (
+        f"// Declared entity aliases. Generated from {source} so\n"
         "// the data engine registers each entity under every known form (Pascal name,\n"
         "// snake table, kebab slug, camel accessor) — authority, not a heuristic guess.\n"
         "const ENTITY_ALIASES: Record<string, string[]> = {\n"
@@ -1152,15 +1292,18 @@ def _generate_entity_aliases_module(output_path: Path) -> None:
         "function canonKey(s: string): string {\n"
         '  return (s || "").replace(/[^a-z0-9]/gi, "").toLowerCase();\n'
         "}\n\n"
-        "/** Every registry-declared form of the entity a schema export identifies. */\n"
+        "/** Every declared form of the entity a schema export identifies. */\n"
         "export function aliasesFor(name: string): string[] {\n"
         "  return ENTITY_ALIASES[canonKey(name)] || [];\n"
         "}\n"
     )
-    lib_dir = output_path / "src" / "lib"
-    lib_dir.mkdir(parents=True, exist_ok=True)
-    (lib_dir / "entity-aliases.ts").write_text(content, encoding="utf-8")
-    logger.info("Wrote src/lib/entity-aliases.ts (%d entities)", len(set(map(id, alias_map.values()))))
+
+
+def _has_entity_aliases(output_path: Path) -> bool:
+    """Whether registration can name every entity by its declared forms — the
+    legacy registry, or the file a Blueprint's projection wrote."""
+    return bool(_build_entity_alias_map(output_path)) or (
+        output_path / "src" / "lib" / "entity-aliases.ts").is_file()
 
 
 def _generate_data_init_module(output_path: Path) -> None:
@@ -1180,7 +1323,7 @@ def _generate_data_init_module(output_path: Path) -> None:
     imports = "\n".join(f'      import("@/db/schema/{n}"),' for n in names)
     # Register under the registry's alias set when it's available, so the SSR path
     # resolves every entity by every known form (authority-driven, not guessed).
-    has_aliases = bool(_build_entity_alias_map(output_path))
+    has_aliases = _has_entity_aliases(output_path)
     alias_import = 'import { aliasesFor } from "./entity-aliases";\n' if has_aliases else ""
     register_call = (
         "        registerEntity(name, value as any, { slug: name, aliases: aliasesFor(name) });\n"
@@ -1191,11 +1334,14 @@ def _generate_data_init_module(output_path: Path) -> None:
         "// Shared data-engine initialiser. The SSR render path (data-engine-bridge)\n"
         "// does not pass through the API route where entities are registered, so it\n"
         "// must populate the registry itself. Idempotent + concurrency-safe.\n"
-        'import { isInitialized, markInitialized, registerEntity } from "./data-engine";\n'
+        'import { markInitialized, registerEntity } from "./data-engine";\n'
         f"{alias_import}\n"
         "let _initPromise: Promise<void> | null = null;\n\n"
+        "// Once per load of THIS module, not once per server: when a record is added\n"
+        "// the list above is regenerated, the dev server reloads this module, and the\n"
+        "// new record registers. Gating on the engine's own flag kept a record added\n"
+        "// after start unknown until a restart. Registering twice is harmless.\n"
         "export function ensureDataEngineInitialized(): Promise<void> {\n"
-        "  if (isInitialized()) return Promise.resolve();\n"
         "  if (_initPromise) return _initPromise;\n"
         "  _initPromise = (async () => {\n"
         "    const modules = await Promise.allSettled([\n"
@@ -1251,6 +1397,13 @@ export const maxDuration = 300;
 
 import { NextResponse } from "next/server";
 import { triggerWorkflow } from "@/lib/workflows";
+// THE TWO SENTENCES AN OWNER TYPES. "it crashed" and "it's really slow" reach
+// nothing unless the run says so: a dispatch that throws is reported with the
+// workflow and the KEYS of what the control sent (never the values), and one
+// that drags is reported with how long it took. This is the wire the
+// build-time dry run already checks (`verify-dispatches.ts`) — the same route,
+// the same control, reported at run time in the same shape.
+import { measured, reportFromError } from "@/lib/error_reporter";
 import { LAUNCH_ROLES } from "@/lib/workflows/launch-roles";
 import { initializeRuntime } from "@/lib/runtime-loader";
 import { db } from "@/db";
@@ -1263,10 +1416,22 @@ export async function POST(
 ) {
   await initializeRuntime();
 
+  // Hoisted so the catch below can still name what was being run. A crash
+  // report that says only "something threw" is the report an owner already
+  // gave us by typing "it crashed".
+  let workflowId = "";
+  let payloadKeys: string[] = [];
+  let actingRole: string | undefined;
+
   try {
     const { id } = await params;
+    workflowId = id;
     const body = await request.json();
     const input = body.input || {};
+    // THE NAMES, NEVER THE VALUES. `input` is a customer's record — an order,
+    // an address, a diagnosis. Its keys say which wire broke; its values are
+    // the owner's data and do not leave this process.
+    payloadKeys = Object.keys(input ?? {}).filter((k) => !k.startsWith("__")).sort();
     // Acting user from the SERVER session (never trust a client-sent user). The
     // workflow runtime defaults owner FKs (ownerId/landlordId/userId/…) from
     // ctx.user.id; without this an authed create hits a NOT NULL FK error.
@@ -1278,12 +1443,27 @@ export async function POST(
       ? { ...Object.fromEntries(Object.entries(su).filter(([, v]) => v === null || ["string", "number", "boolean"].includes(typeof v))),
           id: String(su.id), role: su.role, email: su.email ?? undefined }
       : body.user;
+    // The ROLE, which is the owner's own vocabulary — never the id or the
+    // email beside it, which are a person.
+    actingRole = user?.role ? String(user.role) : undefined;
     // A LAUNCH IS GATED BY THE ROLES ITS PAGES DECLARE. The Blueprint names
     // the pages a workflow launches from and the roles those pages serve;
     // Reception could post a refund through the API because nothing here
-    // compared the two. "*" admits an anonymous caller (a public page).
+    // compared the two. "*" is a public page: it admits EVERYONE. It used to
+    // admit only a caller who was signed OUT, so signing in locked a person
+    // out of every workflow a public page runs — the seeded admin got 403 on
+    // Add Data while an anonymous visitor could save (h7gmi93x).
+    // "@signed-in" is a page open to EVERYONE SIGNED IN: its `users` say who
+    // it is for, and nothing in the application gates it, so the API must not
+    // be stricter than the app that offers the control. 0l133sp2's admin
+    // filled in "List a Tool", uploaded a photo and got 403 from a page the
+    // menu had just shown them.
     const allowed = LAUNCH_ROLES[id] ?? null;
-    if (allowed && !allowed.includes(String(user?.role ?? "")) && !(allowed.includes("*") && !su?.id)) {
+    const admitted = !allowed
+      || allowed.includes("*")
+      || (allowed.includes("@signed-in") && Boolean(user?.id))
+      || allowed.includes(String(user?.role ?? ""));
+    if (!admitted) {
       return NextResponse.json({ error: "This action is not available to your role" }, { status: 403 });
     }
     let taskId = body.taskId;
@@ -1371,6 +1551,15 @@ export async function POST(
     if (detach) {
       void triggerWorkflow(id, input, user).catch((err: unknown) => {
         console.error("[workflow] detached run failed:", err);
+        // Detached is exactly where an owner has no other way to find out:
+        // the POST already returned 202 and nobody is holding the page.
+        reportFromError(err, {
+          kind: "workflow",
+          source_file: "src/app/api/workflows/[id]/execute/route.ts",
+          workflow_id: id,
+          payload_keys: payloadKeys,
+          role: actingRole,
+        });
       });
       return NextResponse.json(
         { status: "queued", workflowId: id, mode: "detached" },
@@ -1379,7 +1568,12 @@ export async function POST(
     }
 
     // triggerWorkflow persists a pending task itself if the workflow pauses.
-    const result = await triggerWorkflow(id, input, user);
+    // Timed: this is the whole of what a person waits for after clicking the
+    // control, measured on the server that does the waiting.
+    const result = await measured(
+      { operation: id, workflow_id: id, role: actingRole },
+      () => triggerWorkflow(id, input, user),
+    );
 
     // If resuming a completed task: update the task record
     if (taskId) {
@@ -1406,8 +1600,43 @@ export async function POST(
     // error instead of a false success; the body still carries status + message.
     const _wfFailed =
       result && typeof result === "object" && (result as any).status === "failed";
-    return NextResponse.json(result, _wfFailed ? { status: 422 } : undefined);
+    // WHAT THE RUN MADE, BY ID. A page that starts a workflow and then opens
+    // what it created reads `result.id`; the run's reply carried only its
+    // log, so SnapIT's Snap page said "identified this snap but the result
+    // could not be opened" on every snap (2026-09-29). `id` is the first
+    // record the run inserted; `records` names each insert step's.
+    const _records: Record<string, string> = {};
+    for (const e of ((result as any)?.log ?? []) as any[]) {
+      const out = e?.output;
+      if (out && typeof out === "object" && out.inserted && typeof out.id === "string" && e.nodeId) {
+        _records[String(e.nodeId)] = out.id;
+      }
+    }
+    const _first = Object.values(_records)[0];
+    // THE REPLY IS A RECEIPT, NOT THE RUN. `output` (the run's variables) and
+    // each log entry's `output` carry every step's result — a snapped photo in
+    // most of them. SnapIT's reply was 20.8 MB, over the 4.5 MB a Vercel
+    // function may answer with, and the page never opened its result
+    // (2026-09-29). A page reads status, id, records and error; each step
+    // keeps its id, status and error.
+    const { output: _vars, log: _log, ..._rest } = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+    void _vars;
+    const _steps = (Array.isArray(_log) ? _log : []).map((e: any) => ({
+      nodeId: e?.nodeId, status: e?.status,
+      ...(e?.output?.error ? { error: String(e.output.error).slice(0, 500) } : {}),
+    }));
+    const _body = result && typeof result === "object"
+      ? { ..._rest, ...(!(result as any).id && _first ? { id: _first } : {}), records: _records, log: _steps }
+      : result;
+    return NextResponse.json(_body, _wfFailed ? { status: 422 } : undefined);
   } catch (error) {
+    reportFromError(error, {
+      kind: "api_route",
+      source_file: "src/app/api/workflows/[id]/execute/route.ts",
+      workflow_id: workflowId || undefined,
+      payload_keys: payloadKeys,
+      role: actingRole,
+    });
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
       { status: 500 },
@@ -2044,14 +2273,48 @@ fi
 
 # 3. Migrations (DATABASE_URL exported above → drizzle-kit sees it). --force keeps
 #    drizzle-kit push non-interactive; a failed migration is FATAL (no tables = unusable).
+#
+#    `< /dev/null` because --force DOES NOT cover every prompt. drizzle-kit
+#    0.30 still asks before adding a unique constraint to a table that holds
+#    rows — "Do you want to truncate <table>?" — and waits. With no terminal to
+#    answer it, a Vercel build sits there until it times out, and the question
+#    it is waiting on is whether to destroy the data. Reading EOF makes it give
+#    up in a second instead, and the line below reports a real failure. A
+#    deployment that stops with a reason beats one that stops with a clock.
+#    EXTENSIONS FIRST: an embedding field is a `vector` column, and push
+#    cannot create one until pgvector is switched on in THIS database. The
+#    image carried it and nothing enabled it, so 0l133sp2's push failed on
+#    `type "vector" does not exist` and no table was created.
+#    AND A PUSH THAT ERRORS HAS FAILED, whatever its exit code: drizzle-kit
+#    printed the PostgresError, exited 0, and this said "Migrations applied"
+#    over a database with no tables — the seed then failed on every one and
+#    nobody could sign in, because `users` did not exist either.
 if [ -f drizzle.config.ts ]; then
+  if [ -f src/db/extensions.ts ]; then
+    npx tsx src/db/extensions.ts < /dev/null || say "${YELLOW}⚠️  Could not enable database extensions — see above${NC}"
+  fi
+  # A QUESTION PUSH CANNOT BE ALLOWED TO ASK. It waits at "about to add
+  # <table>_<col>_unique ... Do you want to truncate <table>?" on a database
+  # that already holds rows — on a Vercel build, until the clock runs out.
+  # This adds those constraints itself, so push has nothing to ask about.
+  if [ -f src/db/prepare-schema.ts ]; then
+    npx tsx src/db/prepare-schema.ts < /dev/null || {
+      say "${RED}❌ The database cannot take the definition (see above).${NC}"; exit 1; }
+  fi
   say "${YELLOW}🔄 Running database migrations...${NC}"
-  if npx drizzle-kit push --force; then
+  PUSH_LOG="$(mktemp)"
+  npx drizzle-kit push --force < /dev/null 2>&1 | tee "$PUSH_LOG"
+  PUSH_STATUS=${PIPESTATUS[0]}
+  # A question push could not ask ("created or renamed?") is a push that did nothing.
+  if [ "$PUSH_STATUS" -eq 0 ] && ! grep -qE "PostgresError|DrizzleError|^Error:|error: |created or renamed" "$PUSH_LOG" \
+     && { [ ! -f src/db/verify-schema.ts ] || npx tsx src/db/verify-schema.ts < /dev/null; }; then
     say "${GREEN}✅ Migrations applied${NC}"
   else
-    say "${RED}❌ Migration failed — the app needs its tables. Check DATABASE_URL + drizzle.config.ts schema path.${NC}"
+    say "${RED}❌ Migration failed — the app needs its tables (see the error above).${NC}"
+    rm -f "$PUSH_LOG"
     exit 1
   fi
+  rm -f "$PUSH_LOG"
 fi
 
 # 4. Seed (non-fatal; errors surfaced).
@@ -2107,7 +2370,13 @@ def _fix_common_agent_mistakes(output_path: Path) -> None:
                 "\n"
                 "const connectionString = process.env.DATABASE_URL!;\n"
                 "\n"
-                "export const client = postgres(connectionString, { prepare: false });\n"
+                "// One client per process. `next dev` re-evaluates this module on every\n"
+                "// recompile; a fresh `postgres()` each time is a fresh pool of ten, and after\n"
+                "// ten reloads Postgres answers \"too many clients already\" to everyone —\n"
+                "// the page reviewer's crawl of nlwtcyz5 took the database down that way.\n"
+                "const globalForDb = globalThis as unknown as { __forgeSql?: ReturnType<typeof postgres> };\n"
+                "export const client = globalForDb.__forgeSql ?? postgres(connectionString, { prepare: false });\n"
+                "if (process.env.NODE_ENV !== \"production\") globalForDb.__forgeSql = client;\n"
                 "export const db = drizzle(client, { schema });\n",
                 encoding="utf-8",
             )

@@ -78,6 +78,10 @@ ID_MENTION = re.compile(r"\b(?:REQ|ROLE|PERM|MODULE|PAGE|CMP|ENTITY|FLOW|RULE|AP
 ALWAYS: tuple[str, ...] = (
     "schemaVersion", "version", "state", "application", "product",
     "navigation", "designSystem", "completeness",
+    # Every page, workflow step and permission names a role by id; without the
+    # roles Smith read `recipientRole: "ROLE-002"` on the step that notifies
+    # the reviewer and answered that nothing names who receives a submission.
+    "roles",
 )
 
 #: Default artifact budget for one slice.
@@ -286,6 +290,13 @@ def resolve(
         # closure reaches a role, and a role reaches every permission; on the
         # ATS fixture that turned a 60-artifact slice into 152.
         keep |= {a for a in dependencies(doc, set(kept), depth=1) if a in known}
+        # WHAT CAN BE DONE ON A PAGE IN THE SLICE. A workflow points at the
+        # page it is launched from, not the other way, so the walk above never
+        # reached the Approve and Reject a verification page runs.
+        pages = {a for a in keep if str(a).startswith("PAGE-")}
+        keep |= {str(w.get("id")) for w in doc.get("workflows") or []
+                 if isinstance(w, dict) and w.get("id") and w.get("status") != "DEPRECATED"
+                 and pages & {str(x) for x in w.get("launchedFrom") or []}}
 
     ordered = kept + sorted(keep - set(kept), key=lambda i: parse_id(i))
 

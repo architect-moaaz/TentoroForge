@@ -22,10 +22,9 @@ def test_each_verb_asks_for_what_its_own_machinery_needs():
     # A composition does not need a `current_behavior` for a page that does
     # not exist yet.
     assert "current_behavior" not in REQUIRED_BY_VERB["compose_route"]
-    # And a rename keeps exactly what it always required.
-    assert REQUIRED_BY_VERB["rename"] == {
-        "screen", "element_label", "current_behavior", "desired_behavior",
-        "target_file"}
+    # And a rename needs the screen and the text — not the descriptions the
+    # old classifier used to demand alongside them.
+    assert REQUIRED_BY_VERB["rename"] == {"element_label", "target_file"}
 
 
 def test_an_absent_verb_is_a_rename():
@@ -50,24 +49,3 @@ def test_an_invented_verb_is_named_as_unknown():
     assert is_known({"verb": "refactor_everything"}) is False
 
 
-def test_the_understanding_tool_accepts_a_composition():
-    from services.smith_tools import _smith_understand_ask
-
-    ok = _smith_understand_ask({"verb": "compose_route", "route": "/"})
-    assert ok["recorded"] is True
-    assert ok["understanding"]["verb"] == "compose_route"
-    assert ok["understanding"]["route"] == "/"
-
-    bad = _smith_understand_ask({"verb": "add_widgets", "route": "/"})
-    assert bad["recorded"] is False
-    assert "widgets" in bad["error"]
-
-
-def test_the_catalogue_advertises_the_verbs_it_can_run():
-    """A model coached to call a tool with no handler keeps trying, and every
-    attempt reads to the user as stupidity."""
-    from services.smith_tools import TOOL_CATALOG
-
-    entry = next(t for t in TOOL_CATALOG if t["name"] == "understand_ask")
-    for verb in REQUIRED_BY_VERB:
-        assert verb in entry["desc"], verb

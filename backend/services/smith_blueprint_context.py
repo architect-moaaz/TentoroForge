@@ -33,7 +33,11 @@ from services.smith_blueprint import Blueprint
 
 # Default is generous. Only tight budgets force truncation; the
 # common case for a hand-designed ATS-sized app fits comfortably.
-_DEFAULT_MAX_CHARS = 12_000
+# 12,000 characters (~3k tokens) held less than one generated app: the domain
+# and the requirements filled it, and the pages, integrations and most of the
+# workflows were cut off the end — Smith said no one reviewed a verification
+# the Admin's pages approved (0l133sp2). ~10k tokens now.
+_DEFAULT_MAX_CHARS = 40_000
 
 # When rendering the change_log, we start by including the tail this
 # many entries deep and back off if the budget is tight.
@@ -102,12 +106,29 @@ def blueprint_to_context(
     rules = _render_rules(bp)
     workflows = _render_workflows(bp)
     pages = _render_pages(bp)
+    integrations = _render_integrations(bp)
+    accounts = _render_accounts(bp)
     decisions = _render_design_decisions(bp)
 
-    core_sections = "\n".join(
-        s for s in (header, domain, requirements, entities, rules, workflows,
-                    pages, decisions) if s
-    )
+    # WHAT SURVIVES A SMALL BUDGET is what Smith answers and edits from: the
+    # entities, workflows and pages. Requirements, rules, the domain prose and
+    # the decisions are shortened first — the cap used to cut the END, which
+    # was the pages and integrations.
+    sections = [header, domain, requirements, entities, rules, workflows, pages, integrations, decisions, accounts]
+    keep_whole = {id(header), id(entities), id(workflows), id(pages), id(integrations), id(accounts)}
+    over = sum(len(x) for x in sections if x) - (budget.max_chars - 200)
+    if over > 0:
+        for i in (8, 2, 4, 1):          # decisions, requirements, rules, domain
+            if over <= 0:
+                break
+            text = sections[i]
+            if not text or id(text) in keep_whole:
+                continue
+            cut = min(len(text) - 200, over) if len(text) > 200 else 0
+            if cut > 0:
+                sections[i] = text[: len(text) - cut].rstrip() + "\n… (shortened to fit)"
+                over -= cut
+    core_sections = "\n".join(s for s in sections if s)
 
     remaining = max(0, budget.max_chars - len(core_sections) - 200)
     # Reserve ~200 chars for section headers/newlines around the log.
@@ -168,7 +189,8 @@ def _render_domain(bp: Blueprint) -> str:
     if shape:
         parts.append(f"- Distinctive shape: {shape}")
     why = d.get("why")
-    if why:
+    # The adapter fills both from the description; said once.
+    if why and why != shape:
         parts.append(f"- Why this shape: {why}")
     return "\n".join(parts)
 
@@ -262,6 +284,60 @@ def _render_rules(bp: Blueprint) -> str:
     return "\n".join(lines)
 
 
+def _render_integrations(bp: Blueprint) -> str:
+    """The outside services, each said to be CONNECTED or DECLARED.
+
+    Smith only knows what this string says, and it said nothing about
+    integrations at all — so "the confirmation email never came" could only be
+    answered with sympathy, while the document held the answer: a service
+    written down, its key never set, and three steps sending through nothing.
+
+    Names of variables, never values. A value has no business in a prompt.
+    """
+    rows = [i for i in (getattr(bp, "integrations", None) or []) if isinstance(i, dict)]
+    if not rows:
+        return ""
+    lines = ["## Outside services"]
+    for row in rows:
+        steps = [str(x) for x in row.get("sending_steps") or []]
+        if row.get("gap"):
+            lines.append(
+                "- **Email: nothing is connected.** "
+                + (f"These steps try to send and cannot: {'; '.join(steps[:5])}. "
+                   if steps else "")
+                + "Say “connect it to <service>” — Outlook, Gmail, your own "
+                  "mail server, Resend — and the application will send through it.")
+            continue
+        name = row.get("name") or row.get("provider") or "an outside service"
+        what = f" ({row.get('kind')})" if row.get("kind") else ""
+        if not row.get("serves"):
+            lines.append(
+                f"- **{name}**{what} — DECLARED ONLY: it is written down with the "
+                "names of the secrets it would need, and nothing is sent or "
+                "received. There is no adapter for it; do not say it is connected.")
+            continue
+        if row.get("connected"):
+            line = (f"- **{name}**{what} — CONNECTED: `{row.get('needs')}` is set, "
+                    "so it works for real.")
+            unset = [k for k in row.get("secret_names") or []
+                     if k not in (row.get("set_names") or [])]
+            if unset:
+                line += " Still unset: " + ", ".join(f"`{k}`" for k in unset) + "."
+                if "FORGE_EMAIL_FROM" in unset:
+                    line += (" With no from-address of its own the mail goes out "
+                             "from the provider's stand-in address, which is what "
+                             "\"it's sending from a weird address\" means.")
+        else:
+            line = (f"- **{name}**{what} — DECLARED, NOT CONNECTED: the application "
+                    f"is set up to send through it, but `{row.get('needs')}` is not "
+                    "set for this organisation, so nothing is sent. It is set once "
+                    "under Settings → Integrations; never ask for the value here.")
+        if steps:
+            line += f" It carries: {'; '.join(steps[:5])}."
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _render_workflows(bp: Blueprint) -> str:
     if not bp.workflows:
         return "## Workflows\n(none yet.)"
@@ -274,9 +350,15 @@ def _render_workflows(bp: Blueprint) -> str:
         s = f"- **{name}**: {purpose}"
         if trigger:
             s += f"  · trigger: {trigger}"
-        if why:
+        if why and why != purpose:
             s += f"  · why: {why}"
         lines.append(s)
+        run_by, run_from = w.get("run_by") or [], w.get("run_from") or []
+        if run_by or run_from:
+            lines.append(f"  · run by {', '.join(run_by) or 'anyone signed in'}"
+                         + (f" from {', '.join(f'`{r}`' for r in run_from)}" if run_from else ""))
+        for step in w.get("steps") or []:
+            lines.append(f"  · {step}")
     return "\n".join(lines)
 
 
@@ -287,13 +369,45 @@ def _render_pages(bp: Blueprint) -> str:
     for p in bp.pages:
         route = p.get("route") or "?"
         role = p.get("role") or ""
-        lines.append(f"- `{route}` — {role}")
+        who = p.get("who") or []
+        lines.append(f"- `{route}` — {role}" + (f"  · for {', '.join(who)}" if who else "")
+                     + ("  · public" if p.get("access") == "public" else ""))
         for c in (p.get("notable_choices") or [])[:3]:
             if isinstance(c, dict):
                 choice = c.get("choice") or ""
                 why = c.get("why") or ""
                 if choice:
                     lines.append(f"  · {choice}" + (f"  ({why})" if why else ""))
+    return "\n".join(lines)
+
+
+def _render_accounts(bp: Blueprint) -> str:
+    """Who signs in and where each kind of person lands."""
+    a = getattr(bp, "accounts", None) or {}
+    if not isinstance(a, dict) or not a:
+        return ""
+    lines = ["## Accounts"]
+    if a.get("sign_in_page"):
+        lines.append(f"- Sign in at `{a['sign_in_page']}`; after signing in a person lands on `{a.get('after_sign_in') or '/'}`")
+    for role, route in (a.get("landing_by_role") or {}).items():
+        lines.append(f"- After signing in, a {role} lands on `{route}`")
+    if a.get("sign_in_page"):
+        # WHERE IT IS DECIDED, so a change goes there. F&B's "the admin lands
+        # on the customers' menu" rewrote /login twice; landing is not the
+        # sign-in page's, it is the menu definition's (2026-10-01).
+        lines.append("- Where each role lands after signing in is the menu definition's "
+                     "`initialRoute`, a map from role name to route; change it with "
+                     "`write_section` on `navigation`, naming the role and the route")
+    if a.get("sign_up_page"):
+        lines.append(f"- Sign up at `{a['sign_up_page']}`; a new account lands on `{a.get('after_sign_up') or '/'}`"
+                     + (f" with the role {a['sign_up_role']}" if a.get("sign_up_role") else ""))
+    if a.get("person_record"):
+        lines.append(f"- Each person's own record is a **{a['person_record']}**, created with their login")
+    if a.get("admin_role"):
+        lines.append(f"- The built-in admin account holds the role {a['admin_role']}")
+    for r in a.get("must_first") or []:
+        lines.append(f"- Must be done first: **{r.get('rule')}** — before {', '.join(r.get('gates') or [])}"
+                     + (f" (done on `{r['done_on']}`)" if r.get("done_on") else ""))
     return "\n".join(lines)
 
 

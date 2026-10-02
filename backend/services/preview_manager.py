@@ -128,6 +128,16 @@ async def start_project_environment(
     if db_port and drizzle_config.exists():
         env = os.environ.copy()
         env["DATABASE_URL"] = f"postgresql://postgres:postgres@localhost:{db_port}/{project_short_id}"
+        # pgvector before push: an embedding column cannot be created without it.
+        if (Path(output_dir) / "src" / "db" / "extensions.ts").exists():
+            ext = await asyncio.create_subprocess_exec(
+                "npx", "tsx", "src/db/extensions.ts",
+                cwd=output_dir,
+                env=env,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await ext.wait()
         push = await asyncio.create_subprocess_exec(
             "npx", "drizzle-kit", "push",
             cwd=output_dir,

@@ -214,7 +214,9 @@ async def create_mcp_server(
         # Most likely a UNIQUE(org_id, name) violation.
         raise HTTPException(status_code=409, detail=f"could not create: {e}") from e
     await db.refresh(row)
-    return _to_out(row)
+    out = _to_out(row)
+    await _sync_apps(org_id, db)
+    return out
 
 
 @router.patch(
@@ -268,7 +270,9 @@ async def update_mcp_server(
         await db.rollback()
         raise HTTPException(status_code=409, detail=f"could not update: {e}") from e
     await db.refresh(row)
-    return _to_out(row)
+    out = _to_out(row)
+    await _sync_apps(org_id, db)
+    return out
 
 
 @router.delete(
@@ -285,7 +289,19 @@ async def delete_mcp_server(
     row = await _get_row(org_id, server_id, db)
     await db.delete(row)
     await db.commit()
+    await _sync_apps(org_id, db)
     return None
+
+
+async def _sync_apps(org_id: uuid.UUID, db: AsyncSession) -> None:
+    """Every app of the organisation learns the change: its settings are
+    rewritten, as saving an integration already does. An app built before a
+    server was added otherwise never saw it (SnapIT, 2026-09-28)."""
+    try:
+        from routers.platform_integrations import _sync_org_projects_env
+        await _sync_org_projects_env(org_id, db)
+    except Exception as exc:  # noqa: BLE001 — the server change stands either way
+        log.warning("mcp servers: app settings not rewritten for org %s: %s", org_id, exc)
 
 
 # --------------------------------------------------------------------------- #

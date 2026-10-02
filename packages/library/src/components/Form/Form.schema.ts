@@ -125,6 +125,16 @@ const Field = z.discriminatedUnion("kind", [
       fields: z.array(z.record(z.unknown())),
     })
     .strict(),
+  // AN UPLOADED FILE — an `image` column. Stored as soon as it is chosen; the
+  // field's value is the stored file's id, which is what the column holds and
+  // what an embedding of it is computed from.
+  z
+    .object({
+      kind: z.literal("file"),
+      ...fieldBase,
+      accept: z.string().optional(),
+    })
+    .strict(),
   // Free-form string→value map (add/remove rows) for jsonb columns of unknown shape.
   z
     .object({
@@ -209,4 +219,4 @@ export const FormProps = z.object({
     .optional(),
 });
 
-export type FormPropsType = z.infer<typeof FormProps>;
+export type FormPropsType = z.input<typeof FormProps>;

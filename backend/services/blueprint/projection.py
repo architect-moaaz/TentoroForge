@@ -28,6 +28,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+from services.blueprint.embeddings import (
+    EMBEDDING_DIMENSIONS, embedding_columns, is_embedding_field, is_file_field, is_image_field,
+)
 from services.catalog import WorkflowNodeCatalog, workflow_nodes
 from services.workflow_nodes import workflow_node
 logger = logging.getLogger(__name__)
@@ -40,19 +43,38 @@ REMAINING: tuple[str, ...] = (
 )
 
 #: Blueprint field type -> (drizzle builder, import name).
+from services.blueprint.geo_types import LOCATION_TYPES, is_location_field  # noqa: E402
+
 _TYPES: dict[str, str] = {
     "uuid": "uuid", "guid": "uuid",
     "text": "text", "string": "text", "str": "text", "email": "text",
-    "url": "text", "enum": "text", "file": "text",
+    "url": "text", "enum": "text", "file": "text", "document": "text", "attachment": "text",
+    "pdf": "text", "upload": "text", "photo": "text", "picture": "text",
+    # An image is a stored file: the column holds its forge_files id.
+    "image": "text", "photo": "text", "picture": "text",
     "int": "integer", "integer": "integer", "number": "integer",
     "decimal": "numeric", "numeric": "numeric", "float": "numeric",
     "money": "numeric", "currency": "numeric",
     "bool": "boolean", "boolean": "boolean",
     "date": "date",
-    "datetime": "timestamp", "timestamp": "timestamp", "time": "timestamp",
+    # A TIME OF DAY IS A TIME. Med Tracker's "Preferred time" projected as a
+    # timestamp: the form sent "09:00", no date could be made of it, and the
+    # required column got null (2026-09-29).
+    "datetime": "timestamp", "timestamp": "timestamp", "time": "time",
     "json": "jsonb", "jsonb": "jsonb", "object": "jsonb", "array": "jsonb",
+    # A place: `{lat, lng}` (see geo_types).
+    **{t: "jsonb" for t in LOCATION_TYPES},
 }
 _DEFAULT_TYPE = "text"
+
+
+def base_type(type_name: object) -> str:
+    """A field's type as the maps know it: lower-case, its parameters off.
+    The data agent wrote FoodItem.price as `decimal(10,2)`; no map knew it,
+    so the column became text, the SDK typed it a string and the dish form
+    took the price in a text box (2026-10-02). Precision is the column's
+    business; the kind of value is `decimal`."""
+    return re.sub(r"\s*\(.*$", "", str(type_name or "").strip().lower())
 
 
 def _live(items: Any) -> list[dict]:
@@ -91,7 +113,15 @@ def is_list_type(type_name: Any) -> bool:
 
 def drizzle_column(field: dict) -> tuple[str, str]:
     """One column line and the builder it needs imported."""
-    type_name = str(field.get("type") or "").lower()
+    type_name = base_type(field.get("type"))
+    # AN EMBEDDING IS FILLED BY THE PLATFORM, SO IT IS ALWAYS NULLABLE. The
+    # vector arrives after the row does (the Data Engine embeds the source once
+    # it is written), and a row whose image the model could not read must
+    # still save. Its length is the platform model's, not the Blueprint's.
+    if is_embedding_field(field):
+        col = to_snake(field.get("name") or "embedding")
+        return (f'{field.get("name")}: vector("{col}", '
+                f'{{ dimensions: {EMBEDDING_DIMENSIONS} }}),'), "vector"
     # A LIST IS JSON. `string[]` fell through to the text default, so the
     # column held whatever shape reached it: the fixture's JSON text, the
     # create form's comma string. jsonb holds the array the tags field submits.
@@ -102,9 +132,29 @@ def drizzle_column(field: dict) -> tuple[str, str]:
         line += ".primaryKey()"
         if builder == "uuid":
             line += ".defaultRandom()"
-    if field.get("required") and not field.get("primaryKey"):
+    # A required image is required of the FORM. The column stays nullable so
+    # the seeded demo rows, which have no pictures, can still be written.
+    if field.get("required") and not field.get("primaryKey") and not is_image_field(field):
         line += ".notNull()"
-    if field.get("unique"):
+    # A PRIMARY KEY IS ALREADY UNIQUE, AND SAYING SO TWICE STOPS A DEPLOY.
+    #
+    # `.primaryKey().defaultRandom().unique()` emits a second constraint,
+    # `<table>_id_unique`, over the column the primary key already covers. It
+    # indexes nothing new — and `drizzle-kit push` asks before adding a unique
+    # constraint to a table that holds rows:
+    #
+    #   You're about to add records_id_unique unique constraint to the table,
+    #   which contains 3 items. Do you want to truncate records table?
+    #
+    # That prompt waits for an answer. On a Vercel build there is no terminal
+    # to answer it, so the deployment sits there until it times out — and the
+    # question it is asking is whether to destroy the user's data.
+    #
+    # `--force` is already passed and did not suppress this one, so the fix is
+    # to stop asking: the constraint should never have been emitted. A unique
+    # column that is NOT the key still gets one, because that is a real
+    # constraint the entity asked for.
+    if field.get("unique") and not field.get("primaryKey"):
         line += ".unique()"
     # A NOT NULL timestamp nobody can supply must default, or the row cannot be
     # written at all. `created_at` was `.notNull()` with no default, and
@@ -156,7 +206,7 @@ PLATFORM_TABLE_SOURCES: dict[str, str] = {
 _BUILDER_TYPES: dict[str, str] = {
     "uuid": "uuid", "text": "text", "varchar": "text", "boolean": "boolean",
     "integer": "int", "numeric": "numeric", "timestamp": "timestamp",
-    "date": "date", "jsonb": "json",
+    "date": "date", "time": "time", "jsonb": "json",
 }
 
 _COLUMN_RE = re.compile(
@@ -202,6 +252,36 @@ def parse_platform_table(source: str) -> tuple[dict, ...]:
                                 else raw.strip('"'))
         fields.append(field)
     return tuple(fields)
+
+
+#: Read back out of a projected module rather than recomputed from the
+#: Blueprint, because the database holds what drizzle-kit pushed and drizzle
+#: pushed what this file says. A second derivation of "which column is this
+#: field" would be a second derivation that drifts, and the reader that drifts
+#: is the one that SELECTs a column that is not there.
+_TABLE_NAME_RE = re.compile(r"pgTable\(\s*\"(?P<table>[^\"]+)\"")
+
+
+def parse_table_columns(source: str) -> tuple[str, tuple[tuple[str, str], ...]]:
+    """``(table, ((field, column), …))`` for one ``src/db/schema/*.ts`` module.
+
+    The field name is what the Blueprint calls the box and what a person
+    reading a spreadsheet should see at the top of the column; the column name
+    is what a ``SELECT`` has to say. Both come off the same declaration, so
+    they cannot disagree.
+
+    Returns ``("", ())`` for a file with no ``pgTable`` call — an index barrel,
+    or a module that is not a table.
+    """
+    start = source.find("pgTable(")
+    if start == -1:
+        return "", ()
+    named = _TABLE_NAME_RE.search(source[start:])
+    table = named.group("table") if named else ""
+    out: list[tuple[str, str]] = []
+    for m in _COLUMN_RE.finditer(source[start:]):
+        out.append((m.group("field"), m.group("column")))
+    return table, tuple(out)
 
 
 def platform_table(table: str) -> tuple[dict, ...]:
@@ -267,6 +347,16 @@ def emit_entity_module(entity: dict, doc: dict) -> str:
         lines.append("  " + line)
         builders.add(builder)
 
+    # Nearest-neighbour search over an embedding reads an HNSW index; without
+    # one every `op: "similar"` query is a sequential scan of the table.
+    vector_indexes = [
+        f'  index("{entity.get("table")}_{to_snake(f.get("name") or "")}_hnsw")'
+        f'.using("hnsw", t.{f.get("name")}.op("vector_cosine_ops")),'
+        for f in fields if is_embedding_field(f)
+    ]
+    if vector_indexes:
+        builders.add("index")
+
     # Foreign keys, from declared relationships — the reason relationships had
     # to become writable: without them a foreign key is only prose in a
     # description, and the data engine has nothing to join on.
@@ -301,7 +391,7 @@ def emit_entity_module(entity: dict, doc: dict) -> str:
         f'export const {_var_name(entity)} = pgTable("{entity.get("table")}", {{',
         *lines,
         *fk_lines,
-        "});",
+        *(["}, (t) => [", *vector_indexes, "]);"] if vector_indexes else ["});"]),
         "",
     ])
 
@@ -364,7 +454,100 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
     (root / "index.ts").write_text("\n".join(barrel) + "\n", "utf-8")
     written.append("src/db/schema/index.ts")
 
+    aliases = Path(app_root) / ENTITY_ALIASES_PATH
+    aliases.parent.mkdir(parents=True, exist_ok=True)
+    aliases.write_text(entity_aliases_module(entities), "utf-8")
+    written.append(ENTITY_ALIASES_PATH)
+
+    # A REFERENCE IS SHOWN BY ITS NAME. The engine attaches `<field>Label`
+    # beside every foreign key it returns — from this file, which only the
+    # legacy registry pass ever wrote. F&B's "Items by category" chart drew
+    # four UUIDs on its axis (fxa532bj, 2026-10-02).
+    fk_labels = Path(app_root) / FK_LABELS_PATH
+    fk_labels.write_text(json.dumps(fk_label_map(doc), indent=2, sort_keys=True) + "\n", "utf-8")
+    written.append(FK_LABELS_PATH)
+
+    # THE ENGINE'S LIST OF RECORDS FOLLOWS THE SCHEMA. `data-init.ts` (what the
+    # server registers before a page loads) and the data API route import one
+    # module per schema file, and only the runtime injection at build wrote
+    # them — so a record added after the build had a table, rows and a schema
+    # file, and the engine did not know it: Location Data listed "No areas
+    # registered yet" over twelve rows (Test2, 2026-09-28). Regenerated from
+    # the schema directory whenever it is written; only in a built app.
+    if (Path(app_root) / "src" / "lib" / "data-init.ts").is_file():
+        from services.runtime_injector import _generate_data_api_route, _generate_data_init_module
+        _generate_data_api_route(Path(app_root))
+        _generate_data_init_module(Path(app_root))
+        written += ["src/lib/data-init.ts", "src/app/api/data/[...path]/route.ts"]
+
     return {"files": written, "entities": len(entities), "codeMap": code_map}
+
+
+#: Where the data engine learns every name an entity goes by.
+ENTITY_ALIASES_PATH = "src/lib/entity-aliases.ts"
+
+#: Where the data engine learns what each foreign key is shown as.
+FK_LABELS_PATH = "src/lib/fk-labels.json"
+
+
+def fk_label_map(doc: dict) -> dict[str, dict[str, dict[str, str]]]:
+    """{entity name, any spelling -> {fk field -> {targetEntity, labelField}}},
+    from the Blueprint's relationships. A target whose label is its own id has
+    nothing better to show and is left out."""
+    data = doc.get("data") or {}
+    entities = {str(e.get("id")): e for e in _live(data.get("entities")) if e.get("id")}
+    by_entity: dict[str, dict[str, dict[str, str]]] = {}
+    for rel in data.get("relationships") or []:
+        if not isinstance(rel, dict):
+            continue
+        src, dst = entities.get(str(rel.get("from"))), entities.get(str(rel.get("to")))
+        field = str(rel.get("fromField") or "")
+        if not src or not dst or not field or field == "id":
+            continue
+        names = {str(f.get("name")) for f in dst.get("fields") or [] if isinstance(f, dict)}
+        label = str(dst.get("labelField") or "")
+        if not label or label == "id" or label not in names:
+            continue
+        by_entity.setdefault(str(src.get("id")), {})[field] = {
+            "targetEntity": str(dst.get("name")), "labelField": label}
+    out: dict[str, dict[str, dict[str, str]]] = {}
+    aliases = entity_alias_map([entities[eid] for eid in by_entity])
+    for eid, cols in by_entity.items():
+        forms = aliases.get(_canonical_key(str(entities[eid].get("name") or ""))) or [str(entities[eid].get("name"))]
+        for form in forms:
+            for key in (form, form.lower()):
+                out[key] = cols
+    return out
+
+
+def entity_alias_map(entities: list[dict]) -> dict[str, list[str]]:
+    """Every name each entity goes by, keyed by the canonical form of each.
+
+    A page asks for `Child`; the schema exports `children`. The engine's
+    singular/plural guess bridges `Doctor`/`doctors` and not `Child`/`children`
+    or `Person`/`people`, so `list("Child")` was an unknown entity — swallowed
+    into an empty list, and a parent who had just added a child was shown
+    "add your first child" (aszjcc2k, 2026-09-27). The Blueprint declares both
+    names, so the engine is told them rather than left to guess.
+    """
+    out: dict[str, list[str]] = {}
+    for entity in entities:
+        name, table = entity.get("name") or "", entity.get("table") or ""
+        forms: list[str] = []
+        for form in (name, table, _var_name(entity), _module_name(entity),
+                     to_snake(name).replace("_", "-"), table.replace("_", "-")):
+            if form and form not in forms:
+                forms.append(form)
+        for form in forms:
+            key = _canonical_key(form)
+            if key:
+                out.setdefault(key, forms)
+    return out
+
+
+def entity_aliases_module(entities: list[dict]) -> str:
+    from services.runtime_injector import render_entity_aliases
+    return render_entity_aliases(entity_alias_map(entities), source="the Blueprint's entities")
 
 
 #: Every derived endpoint is served by one catch-all route, so an API has no
@@ -469,7 +652,7 @@ def project_frontend(doc: dict, app_root: str | Path,
     for name in stale:
         (root / name).unlink()
 
-    _write_route_registry(root, written)
+    _write_route_registry(root, written, doc)
 
     return {
         "files": written,
@@ -546,22 +729,74 @@ def _route_slug(route: str) -> str:
     return slugify_route(route or "/")
 
 
-def apply_frontend_projection(svc: Any, app_root: str | Path) -> dict[str, Any]:
-    """Project pages, then record each file in ``codeMap`` (§21)."""
-    result = project_frontend(svc.doc, app_root)
+def apply_frontend_projection(svc: Any, app_root: str | Path,
+                              doc: dict | None = None) -> dict[str, Any]:
+    """Project pages, then record each file in ``codeMap`` (§21).
+
+    ``doc`` is what to project when it is not the whole document — the built
+    view, when some modules are not built yet (see `scope.built_view`)."""
+    result = project_frontend(svc.doc if doc is None else doc, app_root)
     for entry in result["codeMap"]:
         svc.upsert("codeMap", entry, natural_key=entry["artifact"])
     svc.save()
     return result
 
 
-def _write_route_registry(root: Path, written: list[str]) -> None:
+def _entry_route(doc: dict | None) -> str:
+    """Where someone arriving at "/" should be sent when no page IS "/".
+
+    MOST APPLICATIONS DECLARE NO PAGE AT THE ROOT. A master-data app is
+    `/add-data` and `/master-data`; nothing is at "/". The scaffold used to
+    ship a landing page there, and it had to be retired because a route group
+    contributes nothing to the URL — so that file WAS "/" and collided with
+    the catch-all that serves every other page. Retiring it left the root with
+    nothing behind it: a sign-in redirect, and a 404 on the way back.
+
+    The Blueprint already says where to go. `entry: true` marks the page each
+    audience arrives at (§ the page contract), and the navigation tree's first
+    item is where a reader would click anyway. Read in that order, and "" when
+    the application genuinely has a page at "/" — then the catch-all renders it
+    and there is nothing to redirect to.
+    """
+    pages = [p for p in ((doc or {}).get("pages") or []) if isinstance(p, dict)]
+    live = [p for p in pages if str(p.get("status") or "") not in ("DEPRECATED", "SUPERSEDED")]
+    routes = {str(p.get("route") or "") for p in live}
+    if "/" in routes:
+        return ""
+
+    # WHAT THE NAVIGATION DECLARES COMES FIRST. `initialRoute.default` is what
+    # Smith's "open on Master Data" changes and what the rail and the edge
+    # pages read (`landing_route`); this read only `entry` flags and the tree,
+    # so the root went one place and the rail another (Test2: the registry
+    # said /register, the root redirect /master-data, 2026-09-28).
+    declared = declared_landing(doc or {})
+    if declared and declared in routes:
+        return declared
+
+    for page in live:
+        if page.get("entry") and str(page.get("route") or "").startswith("/"):
+            return str(page["route"])
+
+    nav = ((doc or {}).get("navigation") or {}).get("tree") or []
+    by_id = {str(p.get("id")): str(p.get("route") or "") for p in live}
+    for item in nav:
+        if isinstance(item, dict) and by_id.get(str(item.get("page"))):
+            return by_id[str(item.get("page"))]
+
+    return next((str(p["route"]) for p in live
+                 if str(p.get("route") or "").startswith("/")), "")
+
+
+def _write_route_registry(root: Path, written: list[str],
+                          doc: dict | None = None) -> None:
     """Emit ``src/schemas/registry.ts`` — the authoritative live-route map.
 
     The catch-all route treats this as authoritative and only falls back to
     probing the filesystem, so a page schema with no registry entry is a page
     that may never resolve. Generated from what was actually written, so the
     two cannot disagree.
+
+    Also carries `entryRoute`: where "/" sends a visitor when no page is "/".
     """
     from services.route_slug import route_from_slug
 
@@ -579,6 +814,8 @@ def _write_route_registry(root: Path, written: list[str]) -> None:
         'import { loadSchema } from "./load";\n\n'
         "export const schemas: Record<string, () => Promise<unknown>> = {\n"
         + "\n".join(entries) + "\n};\n\n"
+        + "// Where \"/\" sends a visitor when no page IS \"/\". Empty when one is.\n"
+        + f'export const entryRoute = "{_entry_route(doc)}";\n\n'
         "export async function getSchema(route: string) {\n"
         "  const loader = schemas[route];\n"
         "  if (!loader) throw new Error(`unknown route '${route}'`);\n"
@@ -600,6 +837,187 @@ def _write_route_registry(root: Path, written: list[str]) -> None:
 # ---------------------------------------------------------------------------
 # navigation — the route graph the guards and breadcrumbs read
 # ---------------------------------------------------------------------------
+
+def brand_mark(doc: dict) -> dict[str, Any]:
+    """The rail props that carry the owner's logo — ``{}`` when there is none.
+
+    Split out because two things need the same answer and must not disagree:
+    `project_shell` writes the reference into `shell.json`, and
+    `project_brand_logo` puts the file at the path that reference resolves to.
+
+    The alt text falls back to the application's name rather than to the file
+    name: a mark in the corner of every screen says WHICH APPLICATION this is,
+    and "a7f3c1e9.png" says nothing to anyone listening.
+    """
+    logo = (doc.get("designSystem") or {}).get("logo")
+    if not isinstance(logo, dict) or not str(logo.get("file") or "").strip():
+        return {}
+    from services import brand_logo
+
+    if not brand_logo.STORED_NAME.match(str(logo["file"])):
+        # A hand-edited path. The projection refuses to build a URL from it
+        # for the same reason `path_of` refuses to read one (§49: the absence
+        # is visible in the log, not swallowed).
+        logger.warning("[shell] logo path %r is not one we stored — ignored",
+                       logo["file"])
+        return {}
+    app_name = str((doc.get("application") or {}).get("name") or "App")
+    out: dict[str, Any] = {
+        "logoSrc": "/" + str(logo["file"]),
+        "logoAlt": str(logo.get("alt") or "").strip() or app_name,
+    }
+    width, height = logo.get("width"), logo.get("height")
+    if isinstance(width, int) and isinstance(height, int) and width > 0 and height > 0:
+        out["logoAspect"] = round(width / height, 4)
+    return out
+
+
+def project_brand_logo(doc: dict, app_root: str | Path,
+                       output_dir: str | Path | None = None) -> dict[str, Any]:
+    """Copy the owner's logo into the generated tree's ``public/``.
+
+    The mark is stored once beside the Blueprint (``<output_dir>/brand/…``) and
+    copied into the app on every projection, because the app tree is
+    re-scaffolded and the Blueprint is not: a build that read the definition and
+    rebuilt the tree would otherwise leave `shell.json` pointing at a file that
+    is no longer there.
+
+    ``output_dir`` defaults to the app root's parent, which is where every
+    caller puts it (``app_root = <output_dir>/app``); it is a parameter so a
+    caller with the project directory in hand does not have to reconstruct it.
+
+    ALWAYS WRITES ``src/contracts/brand.ts``, including when there is no logo.
+    The rail reads the mark off `shell.json`, but the pages that render OUTSIDE
+    the rail — sign-in, sign-up, 404, 403 — have no shell to read, and they are
+    exactly the pages an anonymous visitor sees. They import this module, so it
+    has to exist on every application whether or not one was given: an import
+    of a file the tree does not contain does not fail the page, it fails the
+    build. (The scaffold ships the same module exporting `null`, as a
+    `SCAFFOLD_DEFAULT`, for the case where this projection never ran at all.)
+    """
+    written = [_write_brand_module(doc, app_root)]
+    logo = (doc.get("designSystem") or {}).get("logo")
+    if not isinstance(logo, dict):
+        return {"files": written}
+    from services import brand_logo
+
+    root = Path(output_dir) if output_dir is not None else Path(app_root).parent
+    src = brand_logo.path_of(root, logo)
+    if src is None:
+        # THE DOCUMENT CLAIMS A MARK THE PROJECT DOES NOT HAVE. Said out loud
+        # rather than swallowed: the shell will render the reference, the image
+        # will 404, and a line here is the only place that names why.
+        logger.warning("[brand] designSystem.logo names %r and there is no such "
+                       "file under %s — the shell will reference a missing image",
+                       logo.get("file"), root)
+        return {"files": written, "reason": "logo file missing"}
+
+    rel = str(logo["file"])                       # brand/<digest>.<ext>
+    dest = Path(app_root) / "public" / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(src.read_bytes())
+    written.append(f"public/{rel}")
+    return {"files": written}
+
+
+#: The module every chrome-less page imports to find the owner's mark. Kept
+#: beside the projector that writes it AND shipped by the scaffold with a
+#: `null` body, so the two cannot describe different shapes.
+BRAND_MODULE = "src/contracts/brand.ts"
+
+
+def _write_brand_module(doc: dict, app_root: str | Path) -> str:
+    """``src/contracts/brand.ts`` — the mark, for the pages with no shell.
+
+    A TypeScript module rather than JSON because its readers are CLIENT
+    components. `login/page.tsx` carries "use client" and cannot read a file at
+    render time; it can import a constant, which the bundler inlines.
+
+    Built from the same `brand_mark(doc)` the rail is, so the rail and the
+    sign-in screen cannot disagree about which image the application signs its
+    name with.
+    """
+    mark = brand_mark(doc)
+    body = "null" if not mark else json.dumps({
+        "src": mark["logoSrc"],
+        "alt": mark["logoAlt"],
+        **({"aspect": mark["logoAspect"]} if "logoAspect" in mark else {}),
+    }, indent=2, sort_keys=True)
+    out = Path(app_root) / "src" / "contracts"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "brand.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "//\n"
+        "// The owner's mark, for the pages that render with no shell around them —\n"
+        "// sign-in, sign-up, 404, 403. The rail reads the same thing from\n"
+        "// shell.json; both come from one function, so they cannot disagree.\n"
+        "//\n"
+        "// `null` is the normal case: an application described in words has no mark,\n"
+        "// and each page then draws the initial it has always drawn.\n"
+        "export type BrandLogo = {\n"
+        "  /** Served from the app's own `public/`. */\n"
+        "  src: string;\n"
+        "  /** The application's name unless the owner said otherwise. */\n"
+        "  alt: string;\n"
+        "  /** width / height of the source image, when it could be measured. */\n"
+        "  aspect?: number;\n"
+        "};\n\n"
+        f"export const BRAND_LOGO: BrandLogo | null = {body};\n",
+        "utf-8")
+    return BRAND_MODULE
+
+
+#: A bottom tab bar holds this many destinations; the rest stay in the menu.
+MOBILE_TABS = 5
+
+
+def mobile_style(doc: dict) -> str:
+    """`tabs` or `drawer`: the Blueprint's `navigation.mobile` when it says,
+    else tabs when most pages say a phone is their primary device."""
+    said = str(((doc.get("navigation") or {}).get("mobile")) or "")
+    if said in ("tabs", "drawer"):
+        return said
+    pages = [p for p in doc.get("pages") or []
+             if isinstance(p, dict) and p.get("status") != "DEPRECATED" and p.get("pattern") != "auth"]
+    phone_first = [p for p in pages if str(((p.get("responsive") or {}).get("mobile")) or "") == "primary"]
+    return "tabs" if pages and len(phone_first) * 2 > len(pages) else "drawer"
+
+
+def mobile_tabs(doc: dict, groups: list[dict]) -> list[dict]:
+    """The bottom tab bar of a mobile-first application: the destinations the
+    architect marked `tab: true`, in rail order. Only when it marked none, the
+    first main destinations stand in (a group contributes its first item)."""
+    if mobile_style(doc) != "tabs":
+        return []
+    marked = [it for g in groups for it in [g, *(g.get("items") or [])] if it.get("tab") and it.get("route")]
+    if marked:
+        out = []
+        seen: set[str] = set()
+        for it in marked:
+            if it["route"] in seen or len(out) == MOBILE_TABS:
+                continue
+            seen.add(it["route"])
+            tab = {"label": str(it.get("label") or ""), "route": it["route"]}
+            if it.get("icon"):
+                tab["icon"] = str(it["icon"])
+            if it.get("roles"):
+                tab["roles"] = list(it["roles"])   # the bar hides what the rail hides
+            out.append(tab)
+        return out
+    out: list[dict] = []
+    for g in groups:
+        first = g if g.get("route") else next((i for i in g.get("items") or [] if i.get("route")), None)
+        if first and first["route"] not in [t["route"] for t in out]:
+            tab = {"label": str(first.get("label") or g.get("label") or ""), "route": first["route"]}
+            if first.get("icon") or g.get("icon"):
+                tab["icon"] = str(first.get("icon") or g.get("icon"))
+            if first.get("roles") or g.get("roles"):
+                tab["roles"] = list(first.get("roles") or g.get("roles"))
+            out.append(tab)
+        if len(out) == MOBILE_TABS:
+            break
+    return out if len(out) >= 2 else []
+
 
 def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/schemas/shell.json`` from ``navigation.tree``.
@@ -629,6 +1047,42 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
     routes = {str(p.get("id")): str(p.get("route") or "")
               for p in (doc.get("pages") or []) if p.get("id")}
+    # WHO THE DESTINATION IS FOR — the menu's half of the gate. A
+    # role-restricted page names the roles that may open it, and the rail
+    # offered it to everyone: a neighbour who had just signed up was shown
+    # "Admin — Dispute Queue, Member Verification" and got a 403 for pressing
+    # it (0l133sp2). Only `role_restricted` is a permission (a page's `users`
+    # is its audience, §100), so only that narrows the rail.
+    role_names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or []
+                  if isinstance(r, dict) and r.get("id")}
+    page_roles = {str(p.get("id")): sorted({role_names.get(str(u), str(u)) for u in p.get("users") or []})
+                  for p in (doc.get("pages") or [])
+                  if p.get("id") and str(p.get("access") or "") == "role_restricted"}
+    # WHO THE DESTINATION IS FOR — the menu's other half. A page's `users` is
+    # its audience, not a permission, and a product with several kinds of
+    # user (a parent, a doctor, an administrator) lists each kind's screens
+    # for that kind: the design of nlwtcyz5 said so ("listing only the
+    # current role's items") and the rail showed all three sets to
+    # everyone, headed PARENT / DOCTOR / ADMIN. The layout hides an
+    # audience the signed-in person is not part of; a page for everyone
+    # names none.
+    many_roles = len([r for r in role_names.values() if r]) > 1
+    page_audience = {str(p.get("id")): sorted({role_names.get(str(u), str(u)) for u in p.get("users") or []})
+                     for p in (doc.get("pages") or []) if p.get("id") and many_roles and p.get("users")}
+    # A ROLE'S LANDING PAGE IS THAT ROLE'S. `initialRoute` names where each
+    # kind of user opens ("parent": "/", "admin": "/admin"); a landing page
+    # that names no users is still for the kind that lands on it — "Parent
+    # Dashboard" stayed on the administrator's rail for want of this.
+    initial = nav.get("initialRoute") if isinstance(nav.get("initialRoute"), dict) else {}
+    by_lower = {name.lower(): name for name in role_names.values() if name}
+    for p in (doc.get("pages") or []):
+        pid = str(p.get("id") or "")
+        if not pid or not many_roles or page_audience.get(pid):
+            continue
+        landers = sorted({by_lower[k.lower()] for k, r in initial.items()
+                          if k.lower() in by_lower and str(r) == str(p.get("route") or "")})
+        if landers:
+            page_audience[pid] = landers
 
     # A DYNAMIC ROUTE IS NOT A RAIL DESTINATION. `/rentals/[id]/return` is
     # reached through a row or an action that fills a concrete id, never from the
@@ -650,9 +1104,16 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             return None
         out: dict[str, Any] = {"label": str(node.get("label") or "")}
         if _navigable(route):
-            out["route"] = route
+            view = str(node.get("view") or "").strip()
+            out["route"] = f"{route}?view={view}" if view else route
         if node.get("icon"):
             out["icon"] = str(node["icon"])
+        if node.get("tab"):
+            out["tab"] = True
+        if page_roles.get(page_id):
+            out["roles"] = page_roles[page_id]
+        if page_audience.get(page_id):
+            out["audience"] = page_audience[page_id]
         return out
 
     groups: list[dict[str, Any]] = []
@@ -662,7 +1123,18 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             group: dict[str, Any] = {"label": str(node.get("label") or "")}
             if node.get("icon"):
                 group["icon"] = str(node["icon"])
+            if node.get("tab"):
+                group["tab"] = True
             group["items"] = [it for it in (item(k) for k in kids) if it is not None]
+            # A group is for whoever its children are for: "Admin" holding two
+            # Admin-only screens is an Admin group, and says so, so the whole
+            # heading goes rather than emptying out.
+            kid_roles = [set(it.get("roles") or []) for it in group["items"]]
+            if kid_roles and all(kid_roles):
+                group["roles"] = sorted(set.union(*kid_roles))
+            kid_audience = [set(it.get("audience") or []) for it in group["items"]]
+            if kid_audience and all(kid_audience):
+                group["audience"] = sorted(set.union(*kid_audience))
             if group["items"]:
                 groups.append(group)
         else:
@@ -683,14 +1155,31 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     if not initial or str(initial) in ("/", "/home") or not _navigable(str(initial)):
         first = next((it for g in groups for it in (g.get("items") or [g]) if it.get("route")), None)
         initial = first.get("route") if first else None
+    # THE RAIL IS PAINTED FROM THE DESIGN. Without colours here it fell back
+    # to the library's navy and a blue mark, on an app whose design is a warm
+    # paper and a forest green (0l133sp2). The design's dark lead surface, its
+    # text and its accent, as the tokens the page already reads.
+    # …AND IN THE TONE THE DESIGN CHOSE (`shell.tone`), not the inverse
+    # surface on every app: see `RAIL_PAINT`.
+    paint = RAIL_PAINT[derive_shell(doc)["tone"]]
+    rail: dict[str, Any] = {"groups": groups, "appName": app_name, **paint, "accent": "hsl(var(--accent))"}
+    # THE OWNER'S MARK GOES WHERE THE APPLICATION'S NAME IS. The rail's brand
+    # block draws a square with the first letter of the name in it; given a
+    # logo it draws the logo instead. Only the reference is written here —
+    # `project_brand_logo` is what puts the file where this src resolves, and
+    # it writes nothing when the Blueprint names no logo, so a rail with no
+    # mark is the same rail it has always been.
+    rail.update(brand_mark(doc))
     shell = {
         "type": "AppShell",
         "frame": "topbar" if nav.get("style") == "topbar" else "sidebar",
-        "children": [{"type": "SideNav",
-                      "props": {"groups": groups, "appName": app_name, "mode": "dark"}}],
+        "children": [{"type": "SideNav", "props": rail}],
     }
     if initial:
         shell["initialRoute"] = str(initial)
+    tabs = mobile_tabs(doc, groups)
+    if tabs:
+        shell["mobile"] = {"style": "tabs", "tabs": tabs}
     out = Path(app_root) / "src" / "schemas"
     out.mkdir(parents=True, exist_ok=True)
     (out / "shell.json").write_text(json.dumps(shell, indent=2), "utf-8")
@@ -734,6 +1223,12 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
             "schemaFile": f"src/schemas/{slug}.json",
             "shell": access != "public",
             "access": access,
+            # WHO MAY OPEN IT, for the rail that merges pages the curated menu
+            # does not list: a role-restricted page added later would
+            # otherwise be offered to everyone, which is the fault this file
+            # is read to avoid.
+            **({"roles": sorted({str((roles.get(u) or {}).get("name") or u) for u in page.get("users") or []})}
+               if access == "role_restricted" and page.get("users") else {}),
             "presentation": page.get("presentation") or "page",
             # By route, because that is what a router follows — resolved from
             # the page ids the contract carries, so a rename cannot break it.
@@ -791,11 +1286,23 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
         if concrete:
             entry_by_access["authenticated"] = concrete
 
+    # WHERE EACH KIND OF USER LANDS. The Blueprint's `navigation.initialRoute`
+    # says it per role ("admin": "/admin", "parent": "/"); the session carries
+    # the role's NAME, so the map is keyed by that, matched to the Blueprint's
+    # keys case-insensitively. `default` and any key naming no role are not
+    # a person's landing and are left out. This is the `initialFor` the
+    # emitter's root redirect has always read and the 403 page's "Return to"
+    # link now reads — one map, projected once.
+    from services.blueprint.account_model import landing_by_role
+    initial_for = landing_by_role(doc)
+
     out = Path(app_root) / "src" / "contracts"
     out.mkdir(parents=True, exist_ok=True)
     (out / "nav-flow.json").write_text(json.dumps({
         "version": "1.0",
         "pages": entries,
+        # Per role, by the role's name. Absent when the Blueprint names none.
+        **({"initialFor": initial_for} if initial_for else {}),
         # The guards read this as "reachable without a session".
         "public_routes": sorted(set(public_routes)),
         "auth_routes": sorted(set(gated_routes)),
@@ -941,7 +1448,37 @@ def triplet_luminance(triplet: str) -> float | None:
     return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
 
 
-def _readable_on(triplet: str) -> str:
+def _deepen_to_read(fg: str, bg: str, ratio: float = 4.5) -> str:
+    """`fg` darkened (or, on a dark `bg`, lightened) in its own hue until it
+    reads on `bg`. The accent's text on the accent's tint is the case: a
+    terracotta on its own peach is 3.5:1, and the chip should say it in a
+    deeper terracotta, not in black."""
+    try:
+        h, sat, light = fg.split()
+        lum_bg = triplet_luminance(bg)
+        L = float(light.rstrip("%"))
+    except (ValueError, AttributeError):
+        return fg
+    if lum_bg is None:
+        return fg
+    step = -2.0 if lum_bg > 0.179 else 2.0
+    for _ in range(50):
+        cand = f"{h} {sat} {max(0.0, min(100.0, L)):g}%"
+        lf = triplet_luminance(cand)
+        if lf is not None and (max(lf, lum_bg) + 0.05) / (min(lf, lum_bg) + 0.05) >= ratio:
+            return cand
+        if not 0 < L < 100:
+            break
+        L += step
+    return _readable_on(bg)
+
+
+#: Role tokens whose colour is the design's accent reused as text on the
+#: accent's own tint — deepened until they read rather than refused.
+_DEEPEN_ON = {"accent-subtle-foreground": "accent-subtle"}
+
+
+def _readable_on(triplet: str, ink: str | None = None, paper: str | None = None) -> str:
     """A near-black or near-white foreground for a background triplet, chosen by
     WCAG luminance (not HSL lightness — a saturated amber reads bright at L=50%
     and needs DARK text, which a lightness threshold gets wrong). 0.179 is the
@@ -951,7 +1488,28 @@ def _readable_on(triplet: str) -> str:
     lum = triplet_luminance(triplet)
     if lum is None:
         return "0 0% 100%"
-    return "222 84% 5%" if lum > 0.179 else "0 0% 100%"
+    # THE PALETTE'S OWN INK AND PAPER FIRST. A computed foreground was always
+    # the scaffold's blue-black or pure white, so a forest-green design wrote
+    # its card text in navy and its buttons in a white the page never uses.
+    # The design's text colour (dark) or page ground (light) is used whenever
+    # it reads on this base; the neutral pair only when it does not.
+    def reads(candidate: str | None) -> bool:
+        cl = triplet_luminance(candidate) if candidate else None
+        if cl is None:
+            return False
+        hi, lo = max(lum, cl), min(lum, cl)
+        return (hi + 0.05) / (lo + 0.05) >= 4.5
+    if lum > 0.179:
+        return ink if reads(ink) else "222 84% 5%"
+    return paper if reads(paper) and (triplet_luminance(paper) or 0) > 0.8 else "0 0% 100%"
+
+
+def _ink_and_paper(colors: dict) -> tuple[str | None, str | None]:
+    """The design's own text colour and page ground, as triplets — only what
+    the Blueprint states, never a contract default."""
+    ink = _resolve_role(colors, ["textPrimary", "foreground", "text"])
+    paper = _resolve_role(colors, ["background"])
+    return (_as_triplet(ink) if ink else None), (_as_triplet(paper) if paper else None)
 
 
 def _resolve_role(colors: dict, roles: list[str]) -> str | None:
@@ -990,11 +1548,58 @@ def resolved_palette(doc: dict, theme: str = "light") -> dict[str, str]:
     # 2. Foregrounds: ALWAYS computed for readability against the RESOLVED base,
     #    never a hand-set default that could disagree with a base the design
     #    changed (a white default over an amber accent is the bug this avoids).
+    ink, paper = _ink_and_paper(colors)
     for spec in contract:
         base = spec.get("contrastOf")
         if base and out.get(base):
-            out[str(spec["token"])] = _readable_on(out[base])
+            out[str(spec["token"])] = _readable_on(out[base], ink, paper)
+    for tok, base in _DEEPEN_ON.items():
+        if out.get(tok) and out.get(base):
+            out[tok] = _deepen_to_read(out[tok], out[base])
     return {k: v for k, v in out.items() if v}
+
+
+#: How many series colours the Chart reads (`--chart-1` … `--chart-6`).
+CHART_SLOTS = 6
+
+
+def chart_palette(colors: dict) -> list[str]:
+    """The chart series colours, as HSL triplets, from the design's own palette.
+
+    THE CHARTS WERE EVERY APP'S. The Chart reads `--chart-1…6` and nothing
+    wrote them, so every generated app drew the library's stock blue, orange
+    and green whatever its design said — the reviewer refused a bar chart "in
+    a generic blue that is not one of the app's tokens" (looktest0927,
+    2026-09-27), and it was one more reason two apps looked alike.
+
+    The primary leads and the accent follows; the rest are the primary's
+    hue turned around the wheel, at a saturation and lightness a mark reads
+    at on a light card — so the set is the design's, distinct, and legible.
+    """
+    import colorsys
+
+    def parse(value: Any) -> tuple[float, float, float] | None:
+        trip = _hsl_triplet(str(value)) if isinstance(value, str) else None
+        if not trip:
+            return None
+        h, sat, light = trip.split()
+        return float(h), float(sat.rstrip("%")), float(light.rstrip("%"))
+
+    primary = parse(colors.get("primary"))
+    if primary is None:
+        return []
+    accent = parse(colors.get("accent")) or parse(colors.get("secondary"))
+    h0, s0, _ = primary
+    sat = min(72.0, max(45.0, s0))
+    out = [primary]
+    if accent and abs(((accent[0] - h0 + 180) % 360) - 180) >= 25:
+        out.append(accent)
+    for turn in (150, 210, 60, 300, 100, 260):
+        if len(out) >= CHART_SLOTS:
+            break
+        out.append(((h0 + turn) % 360, sat, 44.0 + (len(out) % 2) * 8))
+    del colorsys
+    return [f"{h:.0f} {sv:.0f}% {lv:.0f}%" for h, sv, lv in out[:CHART_SLOTS]]
 
 
 def _project_contract_colors(colors: dict) -> list[str]:
@@ -1023,10 +1628,17 @@ def _project_contract_colors(colors: dict) -> list[str]:
         trip = _as_triplet(raw)
         if trip is not None:
             emitted[str(spec["token"])] = trip
+    ink, paper = _ink_and_paper(colors)
     for spec in color_tokens:
         base = spec.get("contrastOf")
         if base and base in emitted:
-            emitted[str(spec["token"])] = _readable_on(emitted[base])
+            emitted[str(spec["token"])] = _readable_on(emitted[base], ink, paper)
+    for tok, base in _DEEPEN_ON.items():
+        if tok in emitted:
+            against = emitted.get(base) or next((str(t.get("light")) for t in color_tokens
+                                                 if t.get("token") == base), None)
+            if against:
+                emitted[tok] = _deepen_to_read(emitted[tok], against)
     lines = [f"  --{spec['token']}: {emitted[spec['token']]};"
              for spec in color_tokens if spec["token"] in emitted]
 
@@ -1099,6 +1711,173 @@ _TOKEN_ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+#: Families every machine has; asking Google Fonts for them is a wasted request.
+_SYSTEM_FAMILIES = {"system-ui", "ui-sans-serif", "ui-serif", "ui-monospace", "sans-serif", "serif",
+                    "monospace", "-apple-system", "blinkmacsystemfont", "arial", "helvetica",
+                    "georgia", "times new roman", "inherit"}
+
+#: WHAT THE DESIGNER CALLS A FONT. The projector read `fontFamilyBase` and
+#: `fontFamilyHeading`; Tool Share's design system said `fontFamily: "Inter,
+#: system-ui, sans-serif"`, so no family was written, none was loaded, and the
+#: pages' `font-serif` headings rendered in the browser's Times.
+_FONT_ALIASES = {
+    "fontFamilyBase": ("fontFamilyBase", "fontFamilyBody", "bodyFontFamily", "fontBody", "fontFamily"),
+    "fontFamilyHeading": ("fontFamilyHeading", "fontFamilyDisplay", "headingFontFamily",
+                          "displayFontFamily", "fontHeading", "fontDisplay"),
+    "fontFamilyNumeric": ("fontFamilyNumeric", "fontFamilyMono", "monoFontFamily", "fontMono"),
+}
+
+
+def _font_roles(typography: dict) -> dict:
+    """`typography` with its font families under the names the projector
+    reads, whatever the designer called them."""
+    out = dict(typography)
+    for role, names in _FONT_ALIASES.items():
+        for name in names:
+            v = typography.get(name)
+            if isinstance(v, str) and v.strip():
+                out[role] = v.strip()
+                break
+    return out
+
+
+def _first_family(value: str) -> str:
+    """`"Fraunces", Georgia, serif` → `Fraunces`."""
+    return value.split(",")[0].strip().strip("'\"").strip()
+
+
+def _font_stack(value: str) -> str:
+    """A family or a stack, each multi-word family quoted, as CSS reads it."""
+    parts = []
+    for raw in value.split(","):
+        name = raw.strip().strip("'\"").strip()
+        if not name:
+            continue
+        parts.append(f'"{name}"' if " " in name and name.lower() not in _SYSTEM_FAMILIES else name)
+    return ", ".join(parts)
+
+
+#: What the shell reads its frame from. The scaffold's layout has six
+#: navigation chromes and its sign-in page six compositions, chosen from this
+#: file — which only the old pipeline wrote, so every Blueprint app fell back
+#: to the same rail and the same sign-in (0 of 70 apps had one, 2026-09-24).
+SHELL_IDENTITY_PATH = "src/contracts/design-dna.json"
+
+CHROMES = ("standard-rail", "wide-rail", "icon-rail", "floating-rail", "right-rail", "topbar", "dock")
+AUTH_LAYOUTS = ("split-editorial", "split-reversed", "side-panel", "centered-minimal", "brand-wash", "top-anchored")
+TONES = ("dark", "brand", "light", "tinted")
+
+#: What each tone paints the navigation with — the design's own tokens, so
+#: the rail is the app's palette and not a colour of its own. `mode` is
+#: what the chromes read for borders, hover and active treatment.
+RAIL_PAINT: dict[str, dict[str, str]] = {
+    "dark": {"mode": "dark", "bg": "hsl(var(--inverse))", "text": "hsl(var(--inverse-foreground) / 0.82)",
+             "muted": "hsl(var(--inverse-foreground) / 0.55)"},
+    "brand": {"mode": "dark", "bg": "hsl(var(--primary))", "text": "hsl(var(--primary-foreground) / 0.9)",
+              "muted": "hsl(var(--primary-foreground) / 0.6)"},
+    "light": {"mode": "light", "bg": "hsl(var(--card))", "text": "hsl(var(--foreground) / 0.85)",
+              "muted": "hsl(var(--muted-foreground))"},
+    "tinted": {"mode": "light", "bg": "color-mix(in srgb, hsl(var(--primary)) 9%, hsl(var(--background)))",
+               "text": "hsl(var(--foreground) / 0.88)", "muted": "hsl(var(--muted-foreground))"},
+}
+
+
+def derive_shell(doc: dict) -> dict[str, str]:
+    """The frame: the design's own `shell` when it states one, otherwise read
+    off what it did say — the navigation approach, the mobile style, the
+    density and the personality. Deterministic, so the same Blueprint always
+    gets the same frame."""
+    design = doc.get("designSystem") or {}
+    stated = design.get("shell") if isinstance(design.get("shell"), dict) else {}
+    chrome = str(stated.get("chrome") or "")
+    auth = str(stated.get("auth") or "")
+    tone = str(stated.get("tone") or "")
+    nav = doc.get("navigation") or {}
+    approach = str(design.get("navigationApproach") or "").lower()
+    personality = str(design.get("visualPersonality") or "").lower()
+    density = str(design.get("informationDensity") or "comfortable")
+    pages = [p for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("status") != "DEPRECATED"]
+
+    # WHOLE WORDS. "Persistent left sidebar on desktop" contains "top" and
+    # "bar", and read by substring it was a top bar (every app was, first
+    # time round).
+    # THE DESKTOP CLAUSE DECIDES THE FRAME. An approach reads "persistent
+    # left sidebar on desktop; collapses to a bottom tab bar on mobile" —
+    # the phone's tabs are the scaffold's own business, and read whole they
+    # made every app a dock. Only an approach that LEADS with the phone is
+    # mobile-first.
+    desktop = approach if approach.startswith(("mobile-first", "mobile first")) else \
+        re.split(r"\bcollaps|\bon (?:mobile|phones?|small screens|narrow)|\bmobile[:/]|;", approach)[0]
+    said = lambda *words: any(re.search(r"\b" + w + r"\b", desktop) for w in words)  # noqa: E731
+    if chrome not in CHROMES:
+        # `navigation.mobile: tabs` is nearly universal (a phone gets tabs
+        # either way) and says nothing about the desktop frame; only an
+        # approach that leads with the phone earns the dock.
+        if said("bottom tab bar", "tab bar", "bottom tabs", "mobile-first", "mobile first"):
+            chrome = "dock"
+        elif said("top bar", "topbar", "top nav", "top navigation", "header bar") or nav.get("style") == "topbar":
+            chrome = "topbar"
+        elif said("icon rail", "icons", "narrow rail", "minimal rail") or len(pages) <= 4:
+            chrome = "icon-rail"
+        elif said("right"):
+            chrome = "right-rail"
+        elif any(w in personality for w in ("editorial", "playful", "warm", "friendly", "calm")):
+            chrome = "floating-rail"
+        elif density == "compact" or len(pages) >= 14:
+            chrome = "wide-rail"
+        else:
+            chrome = "standard-rail"
+    if auth not in AUTH_LAYOUTS:
+        if chrome == "dock" or any(w in personality for w in ("consumer", "playful", "warm", "friendly")):
+            auth = "brand-wash"
+        elif any(w in personality for w in ("stark", "utility", "minimal", "tool")):
+            auth = "centered-minimal"
+        elif density == "compact" or any(w in personality for w in ("dense", "back-office", "operations")):
+            auth = "top-anchored"
+        elif chrome in ("right-rail", "topbar"):
+            auth = "split-reversed"
+        elif chrome == "icon-rail":
+            auth = "side-panel"
+        else:
+            auth = "split-editorial"
+    if tone not in TONES:
+        # THE RAIL'S PAINT IS THE PERSONALITY'S. Every Blueprint app's rail
+        # was the inverse surface — one navy rail on a warm pediatric app
+        # ("soft sky blue as the calm anchor for navigation", it said) and
+        # a stark tool alike. A design that says nothing gets a tone from its
+        # density, so two apps still differ.
+        # WHOLE WORDS, A SHORT LIST. A personality is a paragraph ("a warm
+        # paper background … not a complex hospital system"), and substrings
+        # read off it made every app one tone.
+        felt = lambda *words: any(re.search(r"\b" + w + r"\b", personality) for w in words)  # noqa: E731
+        if felt("stark", "utility", "minimal", "tool"):
+            tone = "light"
+        elif felt("bold", "vivid", "energetic", "confident", "brand-forward"):
+            tone = "brand"
+        elif felt("warm", "friendly", "playful", "child", "children", "family", "consumer", "gentle"):
+            tone = "tinted"
+        elif density == "compact" or felt("dense", "operations", "back-office", "console"):
+            tone = "dark"
+        else:
+            tone = {"spacious": "light", "comfortable": "tinted"}.get(density, "dark")
+    return {"chrome": chrome, "auth": auth, "tone": tone, "density": density}
+
+
+def project_shell_identity(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write the frame the shell and the sign-in page read (see
+    :data:`SHELL_IDENTITY_PATH`). Idempotent: rewritten from the Blueprint on
+    every projection, like tokens.css."""
+    shell = derive_shell(doc)
+    out = Path(app_root) / SHELL_IDENTITY_PATH
+    out.parent.mkdir(parents=True, exist_ok=True)
+    body = {"_generated": "from the Living Blueprint (designSystem.shell) — edit the Blueprint, not this file",
+            "layout": {"chrome": shell["chrome"], "auth": shell["auth"], "tone": shell["tone"],
+                       "density": shell["density"]},
+            "skin": ""}
+    out.write_text(json.dumps(body, indent=2) + "\n", "utf-8")
+    return {"files": [SHELL_IDENTITY_PATH], **shell}
+
+
 def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/app/tokens.css`` from ``designSystem``.
 
@@ -1148,7 +1927,10 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # projector falls back to the legacy alias emission below rather than
     # emitting nothing.
     lines.extend(_project_contract_colors(colors))
-    if not lines:
+    # The chart series, in the design's colours (see `chart_palette`).
+    for i, trip in enumerate(chart_palette(colors), 1):
+        lines.append(f"  --chart-{i}: {trip};")
+    if not [l for l in lines if not l.startswith("  --chart-")]:
         # THE NAMES THE SCAFFOLD WRAPS IN hsl(). Legacy path — kept for a tree
         # that carries no token-contract.json. The wrapped set is shadcn's,
         # which is what the scaffold is.
@@ -1183,7 +1965,7 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 lines.append(f"  --radius: {radius[key]};")
                 break
 
-    typography = design.get("typography") or {}
+    typography = _font_roles(design.get("typography") or {})
     for key, token in (("fontFamilyBase", "--font-family-base"),
                        ("fontFamilyNumeric", "--font-family-numeric"),
                        # The names the scaffold's Tailwind config and its sign-in
@@ -1197,7 +1979,7 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
                        ("lineHeightBase", "--line-height-base")):
         value = typography.get(key)
         if isinstance(value, str) and value:
-            lines.append(f"  {token}: {value};")
+            lines.append(f"  {token}: {_font_stack(value) if key.startswith('fontFamily') else value};")
 
     spacing = design.get("spacing")
     if isinstance(spacing, dict):
@@ -1216,19 +1998,53 @@ def project_design_tokens(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # requested from Google Fonts (Inter, Fraunces, JetBrains Mono all live
     # there; a family that does not is simply not served and falls back), and
     # the body is set in the base family with the system sans behind it.
-    families = [str(v).strip() for k, v in (typography or {}).items()
+    families = [_first_family(str(v)) for k, v in (typography or {}).items()
                 if k in ("fontFamilyBase", "fontFamilyHeading", "fontFamilyNumeric") and v]
+    families = [f for f in families if f and f.lower() not in _SYSTEM_FAMILIES]
+    # A FACE FOR EACH SCRIPT THE LANGUAGES NEED. Test2's हिं rendered broken:
+    # nothing loaded a font that draws Devanagari. Text in a language is set
+    # in its script's face wherever it appears — the whole page once <html
+    # lang> is switched, and the switch's own label before that.
+    from services.blueprint.languages import script_fonts
+    scripts = script_fonts(doc)
+    families += [f for f in scripts.values() if f not in families]
     fonts_import = ""
     if families:
         query = "&".join("family=" + f.replace(" ", "+") + ":wght@400;500;600;700"
                          for f in dict.fromkeys(families))
         fonts_import = f'@import url("https://fonts.googleapis.com/css2?{query}&display=swap");\n'
-    body_rule = ""
+    # THE SAME GAP, ONE TOKEN OVER. `--font-size-base` was emitted right next
+    # to `--font-body` and had the identical bug: nothing set the body's own
+    # font-size, so picking "18 px" in the Look tab changed the variable and
+    # nothing on the page.
+    body_decls = []
     if (typography or {}).get("fontFamilyBase"):
-        body_rule = "body {\n  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;\n}\n"
-    body = (fonts_import + "html:root {\n" + "\n".join(lines) + "\n}\n" + body_rule) if lines else (
+        body_decls.append("  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;")
+    if (typography or {}).get("baseSize"):
+        body_decls.append("  font-size: var(--font-size-base);")
+    body_rule = "body {\n" + "\n".join(body_decls) + "\n}\n" if body_decls else ""
+    if (typography or {}).get("fontFamilyHeading"):
+        # Headings in the display face without every page having to ask.
+        body_rule += ("h1, h2, h3, .font-heading {\n  font-family: var(--font-heading), "
+                      "var(--font-body), ui-sans-serif, system-ui, sans-serif;\n}\n")
+    # THE BRAND GRADIENT, AS TWO CLASSES. `bg-gradient-to-br from-gradient-start
+    # to-gradient-end` works too (the tailwind config names both stops); these
+    # are the short spelling pages are told to use, with the primary and the
+    # accent standing in when the design states no gradient of its own.
+    body_rule += (
+        ".bg-brand-gradient {\n  background-image: linear-gradient(135deg, "
+        "hsl(var(--gradient-start, var(--primary))), hsl(var(--gradient-end, var(--accent))));\n"
+        "  color: hsl(var(--gradient-foreground, var(--primary-foreground)));\n}\n"
+        ".text-brand-gradient {\n  background-image: linear-gradient(135deg, "
+        "hsl(var(--gradient-start, var(--primary))), hsl(var(--gradient-end, var(--accent))));\n"
+        "  -webkit-background-clip: text;\n  background-clip: text;\n  color: transparent;\n}\n")
+    script_rule = "".join(
+        f':lang({tag}), :lang({tag}) h1, :lang({tag}) h2, :lang({tag}) h3, :lang({tag}) .font-heading {{\n'
+        f'  font-family: "{family}", var(--font-body, ui-sans-serif), system-ui, sans-serif;\n}}\n'
+        for tag, family in scripts.items())
+    body = (fonts_import + "html:root {\n" + "\n".join(lines) + "\n}\n" + body_rule + script_rule) if lines else (
         "/* designSystem states no colour roles yet — the scaffold's own\n"
-        "   defaults stand rather than inventing a palette here. */\n")
+        "   defaults stand rather than inventing a palette here. */\n" + fonts_import + script_rule)
     (out / "tokens.css").write_text(header + body, "utf-8")
 
     return {"files": ["src/app/tokens.css"], "tokens": len(lines),
@@ -1359,6 +2175,21 @@ def feel_condition(expr: Any) -> Any:
     return "".join(out)
 
 
+#: Step config keys that name a role.
+_ROLE_KEYS = ("recipientRole", "toRole", "assigneeRole", "role")
+
+
+def _roles_by_name(config: dict[str, Any], role_names: dict[str, str]) -> dict[str, Any]:
+    """Role ids in a step's config, as the role names the runtime compares."""
+    for key in _ROLE_KEYS:
+        value = config.get(key)
+        if isinstance(value, str) and value:
+            config[key] = ",".join(role_names.get(v.strip(), v.strip()) for v in value.split(","))
+        elif isinstance(value, list):
+            config[key] = [role_names.get(str(v), v) for v in value]
+    return config
+
+
 def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
                  wf_id: str = "", steps: list[dict] | None = None) -> dict[str, Any]:
     """The node config for one step: the catalog's defaults for that node and
@@ -1465,7 +2296,13 @@ def _edges(chain: list[str], steps: list[dict], catalog: WorkflowNodeCatalog,
         edges.append(e)
 
     if not declared:
+        # A straight line — but an end is an end. Chaining the list in order
+        # ran one end node into the next ("Record Created" into "Validation
+        # Failed"); nothing flows out of a step with no out handle.
         for a, b in zip(chain, chain[1:]):
+            node = catalog.node((by_key.get(a) or {}).get("type")) or {}
+            if not node.get("handles", {}).get("out", True):
+                continue
             add(a, b)
         return edges
 
@@ -1489,6 +2326,41 @@ def _edges(chain: list[str], steps: list[dict], catalog: WorkflowNodeCatalog,
     return edges
 
 
+class WorkflowGraphInvalid(ValueError):
+    """A projected workflow the engine would loop on or could not follow."""
+
+
+def _check_graph(name: str, nodes: list[dict], edges: list[dict],
+                 catalog: WorkflowNodeCatalog) -> None:
+    """What the engine needs of a graph, checked where the graph is made.
+
+    A node id used twice, an edge from a node to itself, an edge out of an
+    end: each is a workflow that loops until the engine's cycle guard stops it
+    or that runs past where it should stop — shipped, and found by someone
+    pressing a button (22lzrc2p's Delete, 2026-09-19). The authoring check
+    (`WorkflowNodeCatalog.flow_errors`) keeps the Blueprint from saying so;
+    this keeps the projection from ever writing it, whatever it was given."""
+    ids = [n.get("id") for n in nodes]
+    problems = [f"node id {i!r} is used twice" for i in sorted({i for i in ids if ids.count(i) > 1})]
+    types = {n.get("id"): n.get("type") for n in nodes}
+    for e in edges:
+        if e["source"] == e["target"]:
+            problems.append(f"{e['source']!r} flows into itself")
+        node = catalog.node(types.get(e["source"])) or {}
+        if types.get(e["source"]) != "trigger" and not node.get("handles", {}).get("out", True):
+            problems.append(f"{e['source']!r} is an end but flows on to {e['target']!r}")
+    if problems:
+        raise WorkflowGraphInvalid(f"workflow {name}: " + "; ".join(problems))
+
+
+def _table_of(doc: dict, entity_id: str) -> str:
+    """The table an entity's rows live in, for a workflow's record input."""
+    for e in (doc.get("data") or {}).get("entities") or []:
+        if isinstance(e, dict) and str(e.get("id")) == entity_id and e.get("status") != "DEPRECATED":
+            return str(e.get("table") or to_snake(str(e.get("name") or "")))
+    return ""
+
+
 def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/lib/workflows/definitions/*.json`` from the Blueprint.
 
@@ -1509,6 +2381,12 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
     written: list[str] = []
     code_map: list[dict] = []
+    # A step names a role as the Blueprint does (`ROLE-002`); the session,
+    # the inbox and /api/notifications know it by its name ("Admin"). An id
+    # there matched nobody — 0l133sp2's "awaiting KYC verification" was
+    # stored for role "ROLE-002" and no admin ever saw it.
+    role_names = {str(r.get("id")): str(r.get("name")) for r in doc.get("roles") or []
+                  if isinstance(r, dict) and r.get("id") and r.get("name")}
     for wf in workflows:
         slug = to_snake(wf.get("name") or wf.get("id") or "workflow").replace("_", "-")
         declared_trigger = wf.get("trigger") or {}
@@ -1526,8 +2404,22 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
         # `start` is the Blueprint's own boundary marker (the trigger node is
         # the start); documents predating the catalog are migrated on load,
         # but a projection must never turn one into an action with no action.
-        steps = [s for s in (wf.get("steps") or [])
-                 if isinstance(s, dict) and s.get("key") and s.get("type") != "start"]
+        #
+        # A step of type `trigger` is the same boundary under the catalog's own
+        # name, and the same rule holds: the Start node is projected from
+        # `wf.trigger` below. Kept, it became a SECOND node — and when its key
+        # was `trigger` too, the same id as Start, with the edge
+        # `trigger -> trigger`. The engine re-entered Start until its cycle
+        # guard stopped it at 200 executions, so a generated Delete button
+        # could never delete (22lzrc2p, 2026-09-19). What the marker hands off
+        # to is where Start goes first.
+        declared = [s for s in (wf.get("steps") or []) if isinstance(s, dict) and s.get("key")]
+        markers = [s for s in declared if s.get("type") in ("start", "trigger")]
+        steps = [s for s in declared if s.get("type") not in ("start", "trigger")]
+        first = next((t for m in markers for t in (m.get("next") or [])
+                      if any(x.get("key") == t for x in steps)), None)
+        if first:
+            steps.sort(key=lambda x: x.get("key") != first)       # stable: only `first` moves
         # Top-to-bottom, one node per row: the editor's handles are top (in)
         # and bottom (out), so this is the layout its edges are drawn for.
         nodes = [_wf_node("trigger", "trigger", 0, trigger_cfg, "Start")]
@@ -1536,7 +2428,8 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             entity = entities.get(s.get("entity")) or {}
             nodes.append(_wf_node(
                 s["key"], s.get("type"), len(chain),
-                _step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
+                _roles_by_name(_step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
+                               role_names),
                 s.get("name") or s["key"],
             ))
             chain.append(s["key"])
@@ -1549,11 +2442,35 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             chain.append(end_id)
 
         edges = _edges(chain, steps, catalog, end_id)
+        # WHAT A PERSON MUST HAVE DONE FIRST, CHECKED FIRST. A `prerequisite`
+        # rule gating this workflow puts its check between the trigger and
+        # the first step — here, from the rule, so no author can leave it out.
+        from services.blueprint.account_model import guard_workflow
+        guard_workflow(doc, wf, nodes, edges,
+                       lambda k, t, cfg, lbl: _wf_node(k, t, len(nodes), cfg, lbl))
+        _check_graph(str(wf.get("name") or wf.get("id")), nodes, edges, catalog)
 
         definition = {
             "id": slug,
             "name": wf.get("name") or slug,
             "blueprintId": wf.get("id"),
+            # WHAT THE RUN CANNOT START WITHOUT. The browser knew (the SDK's
+            # `wf(...)` lists them and the form marks the boxes), the server
+            # did not — so a run that reached the engine without the identity
+            # document set `kycStatus: pending` and wrote NULL over the photo
+            # column, and the member's submission looked filed with nothing
+            # in it (0l133sp2). Carried here, the engine can refuse instead.
+            "requiredInputs": [str(i.get("name")) for i in wf.get("inputs") or []
+                               if isinstance(i, dict) and i.get("name")
+                               and i.get("required", True)],
+            # AND WHICH OF THEM IS A RECORD. A control sends an id; a step
+            # reads `member.kycStatus`. Nothing loaded the row, so the guard
+            # on "Approve verification" was false for every member who WAS
+            # pending, and `{{member.displayName}}` was stored as "".
+            "recordInputs": [{"name": str(i.get("name")), "table": _table_of(doc, str(i.get("entity") or ""))}
+                             for i in wf.get("inputs") or []
+                             if isinstance(i, dict) and i.get("kind") == "record" and i.get("name")
+                             and _table_of(doc, str(i.get("entity") or ""))],
             "processVariables": [],
             "definition": {"trigger": dict(trigger_cfg),
                            "nodes": nodes, "edges": edges},
@@ -1578,10 +2495,24 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": written, "workflows": len(written), "codeMap": code_map}
 
 
+#: Everyone with a session, in `launch-roles.ts`. A page open to anyone signed
+#: in admits any of them, and the API has to say so in the same words.
+SIGNED_IN = "@signed-in"
+
+
 def launch_roles(doc: dict) -> dict[str, list[str] | None]:
-    """Each workflow -> the role names allowed to launch it: the union of the
-    roles the pages it launches from serve; "*" when one of them is public;
-    None when the Blueprint names no launching page (unrestricted)."""
+    """Each workflow -> who may launch it: the union over the pages it is
+    launched from. A public page admits everyone ("*"); a page open to anyone
+    SIGNED IN admits any of them ("@signed-in"); a role-restricted page admits
+    the roles it names. None when the Blueprint names no launching page.
+
+    A page's `users` is its AUDIENCE — who it is for — and only
+    `role_restricted` makes that audience a permission: the middleware gates
+    nothing else, so the application shows a page and its controls to anyone
+    signed in. Reading `users` regardless made the API stricter than the app
+    that calls it: 0l133sp2's admin opened "List a Tool", filled it in,
+    uploaded a photo, pressed the button and got 403 from an application that
+    had just offered it."""
     names = {r.get("id"): r.get("name") for r in _live(doc.get("roles")) if r.get("id")}
     pages = {p.get("id"): p for p in _live(doc.get("pages")) if p.get("id")}
     out: dict[str, list[str] | None] = {}
@@ -1594,8 +2525,13 @@ def launch_roles(doc: dict) -> dict[str, list[str] | None]:
             continue
         roles: set[str] = set()
         for pg in launched:
-            if (pg.get("access") or "authenticated") == "public":
+            access = str(pg.get("access") or "authenticated")
+            if access == "public":
                 roles.add("*")
+                continue
+            if access != "role_restricted":
+                roles.add(SIGNED_IN)
+                continue
             for u in pg.get("users") or []:
                 nm = names.get(u, u)
                 roles.add("*" if nm == "Guest" else str(nm))
@@ -1619,7 +2555,64 @@ def project_dispatches(doc: dict, app_root: str | Path) -> dict[str, Any]:
     entries = dispatches(doc)
     (out / "dispatches.json").write_text(
         json.dumps({"dispatches": entries}, indent=2, sort_keys=True) + "\n", "utf-8")
-    return {"files": ["src/contracts/dispatches.json"], "dispatches": len(entries)}
+    files = ["src/contracts/dispatches.json",
+             project_incident_map(doc, entries, app_root)["files"][0]]
+    return {"files": files, "dispatches": len(entries)}
+
+
+def project_incident_map(doc: dict, entries: list[dict],
+                         app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/incident-map.ts`` — what the running app needs to
+    describe its own failures in the owner's words rather than in ids.
+
+    THE SAME CONTRACT, READ AT THE OTHER END. `verify_dispatches` fails a
+    build naming the route, the control and the workflow; when the same wire
+    breaks in front of a customer months later, the reporter has only a
+    workflow id and a browser path. These two tables close that: the routes
+    let a concrete path (`/cases/8f2a…`) be reported as the pattern it matched
+    (`/cases/[id]`) and never as itself, and the controls let a failed
+    dispatch be named `Approve` on the case page.
+
+    Written from `entries` — the dispatch manifest already computed above —
+    so there is one source for what the build checked and what the run
+    reports, not two that can disagree.
+    """
+    routes = sorted({str(p.get("route")) for p in _live(doc.get("pages")) if p.get("route")}
+                    | {str(e.get("route")) for e in entries if e.get("route")})
+    # KEYED BY BOTH NAMES THE RUNTIME MIGHT USE. A control's `workflow` prop
+    # carries the Blueprint id; the projected definition is filed under its
+    # slug, and the execute route sees whichever the dispatcher sent. This is
+    # the same doubling `project_launch_roles` does, for the same reason — a
+    # lookup that misses names no control and the crash reads as an id again.
+    slugs = {str(w.get("id")): _workflow_slug(w)
+             for w in _live(doc.get("workflows")) if w.get("id")}
+    controls: dict[str, list[dict[str, str]]] = {}
+    for entry in entries:
+        wf = str(entry.get("workflow") or "")
+        if not wf:
+            continue
+        wired = {"route": str(entry.get("route") or ""),
+                 "control": str(entry.get("control") or ""),
+                 "label": str(entry.get("label") or "")}
+        for key in {wf, slugs.get(wf, wf)}:
+            controls.setdefault(key, []).append(dict(wired))
+    lib = Path(app_root) / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    (lib / "incident-map.ts").write_text(
+        "// Written by the Blueprint projection (project_incident_map) from the same\n"
+        "// dispatch contract the build-time dry run reads. Edit the Blueprint, not\n"
+        "// this file.\n"
+        "\n"
+        "/** Every route the application declares, as patterns (`/cases/[id]`). */\n"
+        f"export const ROUTES: string[] = {json.dumps(routes, indent=2)};\n"
+        "\n"
+        "/** workflow id -> the controls wired to it. */\n"
+        "export const CONTROLS: Record<string, Array<{ route: string; control: string; "
+        "label: string }>> =\n"
+        f"{json.dumps(controls, indent=2, sort_keys=True)};\n",
+        "utf-8")
+    return {"files": ["src/lib/incident-map.ts"], "routes": len(routes),
+            "workflows": len(controls)}
 
 
 def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:
@@ -1630,7 +2623,8 @@ def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "// Generated from the Living Blueprint. Edit the Blueprint, not this file.",
         "//",
         "// A workflow may be launched by the roles the pages it launches from serve;",
-        '// "*" admits an anonymous caller (a public page); null leaves it open.',
+        '// "*" admits an anonymous caller (a public page), "@signed-in" anyone with',
+        "// a session (a page open to everyone signed in); null leaves it open.",
         "export const LAUNCH_ROLES: Record<string, string[] | null> = {",
     ]
     for wid, allowed in roles.items():
@@ -1643,6 +2637,121 @@ def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
     (out / "launch-roles.ts").write_text(chr(10).join(lines), "utf-8")
     return {"files": ["src/lib/workflows/launch-roles.ts"], "workflows": len(roles)}
+
+
+#: The module the runtime reads to know what this application is actually
+#: connected to. Its absence means "nothing is declared", which is why
+#: `runtime_injector` writes an empty one for an app whose Blueprint declared
+#: no integration: a static import must always resolve.
+CONNECTED_SERVICES_FILE = "src/lib/integrations/connected.ts"
+
+
+def connected_services(doc: dict) -> list[dict[str, Any]]:
+    """Every integration that SERVES a workflow action, in document order.
+
+    A row with no `serves` is a note for a developer — recorded, not wired —
+    and is deliberately absent here. Only the names of the secrets travel;
+    a value never reaches a projected file any more than it reaches the
+    Blueprint (§42).
+    """
+    from services.smith.email_connect import FROM_KEY, LIVE_KEY
+
+    out: list[dict[str, Any]] = []
+    for row in _live(doc.get("integrations")):
+        serves = str(row.get("serves") or "").strip()
+        if not serves:
+            continue
+        provider = str(row.get("provider") or "")
+        keys = [str(k) for k in row.get("secretRefs") or []]
+        # NO ADAPTER, NO CONNECTION. A row may name a provider nothing in the
+        # runtime can talk to — a hand-authored Blueprint can say
+        # `provider: "mailchimp", serves: "send_email"` — and handing it to
+        # the app would make the step try to send through a path that does not
+        # exist. It is dropped with a reason in the log, and the application
+        # says no service is connected, which is the truth for it.
+        if provider not in LIVE_KEY:
+            logger.warning(
+                "[projection] integration %s serves %s through %r, which has no "
+                "adapter — not projected as a connection",
+                row.get("id"), serves, provider)
+            continue
+        out.append({
+            "action": serves,
+            "name": str(row.get("name") or provider or "an outside service"),
+            "provider": provider,
+            "keys": keys,
+            # Which key makes it live, and which carries the from-address.
+            # Declared once, in `email_connect`, so the runtime does not
+            # re-decide the provider precedence in TypeScript.
+            "liveKey": LIVE_KEY[provider],
+            "fromKey": FROM_KEY if FROM_KEY in keys else "",
+        })
+    return out
+
+
+def project_integrations(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/integrations/connected.ts`` — the declared connections.
+
+    A DECLARATION IS NOT A CONNECTION, and until this file existed the
+    application could not tell the difference. `integrations` recorded the
+    name of a service and the names of its secrets; the `send_email` step
+    read `process.env` directly, sent nothing when it found nothing, and
+    returned `{sent: true}` with an in-app notification instead — so the owner
+    was told the workflow completed and the customer never got the email.
+
+    What this gives the runtime is the one thing it could not derive: WHICH
+    service this application's owner chose, and the name of the variable whose
+    presence means it is live. The value stays where it belongs — the
+    platform's credential store, shipped into the app's environment by
+    `env_writer` locally and by the publish for a deployment.
+    """
+    entries = connected_services(doc)
+    lines = [
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.",
+        "//",
+        "// What this application is CONNECTED to: for each workflow action that",
+        "// talks to an outside service, the service its owner chose and the NAME",
+        "// of the environment variable that carries the credential. Never a",
+        "// value \u2014 the value is set once on the platform and arrives in this",
+        "// app's environment (.env.local locally, the deployment's env on publish).",
+        "//",
+        "// An action absent from this map has no connected service. A step for it",
+        "// must say so rather than report a send it did not make.",
+        "",
+        "export type ConnectedService = {",
+        "  /** The service as its owner names it, e.g. \"Microsoft 365 / Outlook\". */",
+        "  name: string;",
+        "  /** The adapter that carries it, e.g. \"smtp\" or \"resend\". */",
+        "  provider: string;",
+        "  /** Every variable NAME this provider's path reads. */",
+        "  keys: string[];",
+        "  /** The variable whose presence means the service is live. */",
+        "  liveKey: string;",
+        "  /** The variable carrying the from-address, when the action has one. */",
+        "  fromKey: string;",
+        "};",
+        "",
+        "export const CONNECTED_SERVICES: Record<string, ConnectedService> = {",
+    ]
+    for entry in entries:
+        lines.append(f"  {json.dumps(entry['action'])}: " + json.dumps({
+            "name": entry["name"], "provider": entry["provider"],
+            "keys": entry["keys"], "liveKey": entry["liveKey"],
+            "fromKey": entry["fromKey"],
+        }) + ",")
+    lines += [
+        "};",
+        "",
+        "/** The service declared for a workflow action, or undefined. */",
+        "export function connectedService(action: string): ConnectedService | undefined {",
+        "  return CONNECTED_SERVICES[action];",
+        "}",
+        "",
+    ]
+    out = Path(app_root) / "src" / "lib" / "integrations"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "connected.ts").write_text(chr(10).join(lines), "utf-8")
+    return {"files": [CONNECTED_SERVICES_FILE], "services": len(entries)}
 
 
 def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
@@ -1706,8 +2815,25 @@ def project_entity_access(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # seed — enough rows that a preview shows something
 # ---------------------------------------------------------------------------
 
+def category_period(fields: list) -> int:
+    """How often an entity's category examples repeat: the shortest category
+    list with more than one example, or 0 when there is none.
+
+    Example k of every field is record k, and a category's examples repeat
+    past their end. Each cycling on its own length took them out of step —
+    four countries and three states put Nepal beside Uttar Pradesh on the
+    fourth record (Test2, 2026-09-28). Cycling every category of the record
+    type together keeps the k-th of each beside the k-th of the others."""
+    lengths = [len([x for x in (f.get("examples") or []) if str(x).strip()])
+               for f in fields or [] if isinstance(f, dict)
+               and str(f.get("type") or "text").lower() in ("string", "text", "varchar")
+               and not _UNIQUE_TEXT.search(str(f.get("name") or "field"))]
+    lengths = [n for n in lengths if n > 1]
+    return min(lengths) if lengths else 0
+
+
 def _seed_value(field: dict, entity_name: str, row: int,
-                tables_by_id: dict | None = None) -> Any:
+                tables_by_id: dict | None = None, *, period: int = 0) -> Any:
     # A FOREIGN KEY IS A REFERENCE, NOT A LABEL. Written as "Committee Id 1"
     # it failed every child insert as an invalid uuid and the demo database
     # held nothing but the admin. The seeder resolves `ref:<table>[i]` to the
@@ -1715,11 +2841,37 @@ def _seed_value(field: dict, entity_name: str, row: int,
     if field.get("references") and tables_by_id is not None:
         parent = tables_by_id.get(str(field.get("references")))
         if parent:
-            return f"ref:{parent}[{(row - 1) % 3}]"
+            return f"ref:{parent}[{(row - 1) % SEED_ROWS}]"
     from services.blueprint.page_planner import enum_values
 
     kind = str(field.get("type") or "text").lower()
     name = field.get("name") or "field"
+    if kind in LOCATION_TYPES:
+        # NO INVENTED PLACE. Demo rows sat a few streets apart in central
+        # London for every application, so a reader in Bangalore saw each
+        # demo tool "4995 mi" away. A place is the people's own, shared from
+        # their browser; demo rows have none.
+        return None
+    # THE BLUEPRINT'S OWN EXAMPLES AND RANGES FIRST, as the editor's sample
+    # server does: a demo reading list is real titles rated 1–5, not
+    # "Title 3" rated 300.
+    examples = [str(x) for x in (field.get("examples") or []) if str(x).strip()]
+    category = kind in ("string", "text", "varchar") and not _UNIQUE_TEXT.search(str(name))
+    if category and period and len(examples) > 1:
+        return examples[(row - 1) % period]     # in step with the record's other categories
+    if row <= len(examples) and kind in ("string", "text", "varchar"):
+        return examples[row - 1]        # each once — a demo list never lists a title twice
+    # …but a category's examples repeat: "Country 4" is not a country (the
+    # editor's sampler follows the same rule; see `UNIQUE_TEXT` there).
+    if examples and kind in ("string", "text", "varchar") and not _UNIQUE_TEXT.search(str(name)):
+        return examples[(row - 1) % len(examples)]
+    lo, hi = field.get("min"), field.get("max")
+    if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and hi >= lo \
+            and kind in ("integer", "int", "number", "decimal", "float", "numeric", "currency", "money"):
+        span = hi - lo
+        if kind in ("integer", "int") or (float(lo).is_integer() and float(hi).is_integer() and span <= 20):
+            return int(lo + ((row * 2 - 1) % (int(span) + 1)))
+        return round(lo + span * (((row * 37) % 100) / 100), 2)
     # Spread across rows on purpose: with three rows and three states, the
     # seeded data holds one record in each, which is what lets a page that only
     # means something once something is submitted be reviewed at all.
@@ -1733,49 +2885,217 @@ def _seed_value(field: dict, entity_name: str, row: int,
     if kind in ("bool", "boolean"):
         return row % 2 == 1
     if kind in ("date", "datetime", "timestamp"):
-        return f"2026-0{(row % 9) + 1}-15T09:00:00Z"
+        # Across the six months before today, so a trend has a line to draw.
+        import datetime as _dt
+        first = _dt.date.today().replace(day=1)
+        month = first.month - (row % 6)
+        year = first.year + (month - 1) // 12
+        month = (month - 1) % 12 + 1
+        return f"{year:04d}-{month:02d}-{1 + (row * 5) % 27:02d}T{9 + row % 8:02d}:00:00Z"
     if kind == "email":
         return f"{to_snake(entity_name)}{row}@example.com"
     return f"{entity_name} {row}" if name.lower() in ("name", "title") else \
         f"{_humanise_field(name)} {row}"
 
 
+#: A text field whose values are each a different thing — a name, a title.
+_UNIQUE_TEXT = re.compile(r"(^|_)(name|title|subject|label|headline|email)$|[a-z](Name|Title)$")
+
+
+def years_within_age(record: dict, fields: list[dict]) -> dict:
+    """A count of someone's years (experience, service, tenure) is at most
+    their age less the youngest age the Blueprint allows. The two were drawn
+    apart, and a 27-year-old had 51 years' experience (Test2, 2026-09-28)."""
+    age = next((f for f in fields if str(f.get("name") or "").lower() == "age"), None)
+    if not age or not isinstance(record.get(age.get("name")), (int, float)):
+        return record
+    floor = age.get("min") if isinstance(age.get("min"), (int, float)) else 16
+    most = max(0, record[age["name"]] - floor)
+    for f in fields:
+        key = f.get("name")
+        if f is age or not isinstance(record.get(key), (int, float)) or isinstance(record.get(key), bool):
+            continue
+        if re.search(r"years|experience|tenure|service", str(key), re.I) and record[key] > most:
+            record[key] = int(most * 0.6) if isinstance(record[key], int) else round(most * 0.6, 1)
+    return record
+
+
 def _humanise_field(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", " ", name).replace("_", " ").strip().title()
 
 
-def project_seed(doc: dict, app_root: str | Path, rows: int = 3) -> dict[str, Any]:
+#: A field the seed must not invent a value for, however the Blueprint spells
+#: it. Anything this writes is either a plaintext password — a readable
+#: credential in a file that is committed, exported and published (§42) — or a
+#: label like "Password Hash 1", and BOTH produce an account that cannot be
+#: signed into, because `auth.ts` bcrypt-compares what it finds.
+#:
+#: THREE RULES ABOUT CREDENTIAL-SHAPED NAMES, because they answer three
+#: different questions, and each is narrower than the last on purpose:
+#:
+#:   * `sensitive_column_guard.is_sensitive_column` — what never reaches a
+#:     SCREEN or a generated payload. The widest: reset tokens, client
+#:     secrets and private keys have no business being displayed either.
+#:   * `functional_completeness._CREDENTIAL_COLUMNS` — what a WORKFLOW may
+#:     not write to a platform table. Wide is free there: a workflow has no
+#:     business writing `salt` to `users` either.
+#:   * this one — what the seed may not DERIVE A VALUE FOR, in any table.
+#:     Over-reaching here corrupts demo data: `salt` is a real column in a
+#:     recipe app and `passes` in a gym one, and blanking them to protect a
+#:     credential trades one broken application for another. It is also held
+#:     to what the runtime can fill (`_unusableCredentials` fills a
+#:     password column and nothing else), so omitting more than that would
+#:     lose the whole row to a NOT NULL constraint instead.
+#:
+#: A column whose name contains "password" is a credential in every
+#: application there is. That is the whole rule, with no exceptions to keep.
+def _is_credential_field(name: str) -> bool:
+    return "password" in re.sub(r"[^a-z]", "", str(name or "").lower())
+
+
+def _link_target(doc: dict, entity: dict, field: dict) -> str | None:
+    """The entity a foreign key points at, for seeding a real link rather than
+    the text "Owner Id 1" a uuid column refuses (0l133sp2 seeded nothing but
+    the admin: no field carried `references`, and only five of ten links were
+    in `data.relationships`). The field's own `references`, else the declared
+    relationship, else an entity named by the field (`toolId` → Tool), else —
+    an id naming a person (`ownerId`, `borrowerId`) — the account entity."""
+    name = str(field.get("name") or "")
+    ents = [e for e in (doc.get("data") or {}).get("entities") or [] if e.get("status") != "DEPRECATED"]
+    eid = str(entity.get("id") or "")
+    for r in (doc.get("data") or {}).get("relationships") or []:
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("to")) == eid and r.get("toField") == name:
+            return str(r.get("from"))
+        if str(r.get("from")) == eid and r.get("fromField") == name and r.get("toField") in (None, "", "id"):
+            return str(r.get("to"))
+    m = re.match(r"^(.*?)(Id|_id)$", name)
+    if not m or str(field.get("type") or "").lower() not in ("uuid", "string", "text", ""):
+        return None
+    stem = re.sub(r"[^a-z0-9]", "", m.group(1).lower())
+    for e in ents:
+        if re.sub(r"[^a-z0-9]", "", str(e.get("name") or "").lower()) in (stem, stem.rstrip("s")):
+            return str(e.get("id"))
+    account = next((e for e in ents if e.get("account")), None)
+    return str(account.get("id")) if account and str(account.get("id")) != eid else None
+
+
+#: Demo rows per entity. Three drew a trend chart as one point and a
+#: breakdown as three equal slices; a dozen gives a dashboard something to
+#: say without pretending to be data.
+SEED_ROWS = 12
+
+
+def project_seed(doc: dict, app_root: str | Path, rows: int = SEED_ROWS) -> dict[str, Any]:
     """Write ``src/db/seed.json`` — a few rows per entity.
 
     A preview of an empty database shows empty states everywhere, which looks
     identical to a broken one. Values are derived, never random, so the same
     Blueprint seeds the same rows and a screenshot is reproducible.
+
+    NO CREDENTIAL IS DERIVED. A `password`/`passwordHash` field is left out of
+    every row: the seed cannot produce a value that works (a hash is not
+    derivable from a Blueprint) and every value it could produce is a readable
+    credential in a file that ships. The runtime seed fills the column with a
+    hash nobody holds, so the row exists as data and the account cannot be
+    signed into — `admin@example.com` and the invited accounts are the ways in.
+
+    AN ENTITY THE OWNER HAS LOADED DATA INTO GETS NONE. The demo rows exist so
+    an empty screen is not mistaken for a broken one; an entity holding the
+    business's real records does not have that problem, and "Customer 1" sat
+    beside four hundred real customers is not demo data, it is a mistake in
+    their data. `data.imports` is the declaration
+    (`services.smith.data_import`); the rows themselves are in the app's own
+    database, never here.
     """
-    entities = [e for e in (doc.get("data") or {}).get("entities") or []
-                if e.get("status") != "DEPRECATED"]
-    tables_by_id = {str(e.get("id")): (e.get("table") or to_snake(e.get("name") or "entity"))
-                    for e in entities if e.get("id")}
-
-    seed: dict[str, list[dict]] = {}
-    for entity in entities:
-        table = entity.get("table") or to_snake(entity.get("name") or "entity")
-        name = entity.get("name") or table
-        out_rows = []
-        for row in range(1, rows + 1):
-            record = {}
-            for field in entity.get("fields") or []:
-                if field.get("primaryKey"):
-                    continue
-                record[field.get("name")] = _seed_value(field, name, row, tables_by_id)
-            out_rows.append(record)
-        seed[table] = out_rows
-
+    seed = seed_rows(doc, rows)
     out = Path(app_root) / "src" / "db"
     out.mkdir(parents=True, exist_ok=True)
     (out / "seed.json").write_text(
         json.dumps(seed, indent=2, sort_keys=True) + "\n", "utf-8")
     return {"files": ["src/db/seed.json"], "tables": len(seed),
             "rows": sum(len(v) for v in seed.values())}
+
+
+def label_examples(entity: dict) -> list[str]:
+    """The examples that name each sample record of `entity`: its label
+    field's, else the first text field that has any."""
+    fields = [f for f in entity.get("fields") or [] if isinstance(f, dict)]
+    label = next((f for f in fields if f.get("name") == entity.get("labelField")), None)
+    for f in ([label] if label else []) + fields:
+        if str(f.get("type") or "text").lower() in ("string", "text", "varchar"):
+            ex = [str(x) for x in (f.get("examples") or []) if str(x).strip()]
+            if ex:
+                return ex
+    return []
+
+
+def _ref_by_label(field: dict, row: int, tables_by_id: dict, labels_by_id: dict) -> str | None:
+    """A reference whose examples name the parent record, resolved to it.
+
+    Position paired them otherwise: a state's country was "parent row k", so
+    Tamil Nadu sat in Sri Lanka and Pune in Tamil Nadu (Test3, 2026-09-28).
+    """
+    target = str(field.get("references") or "")
+    names = [str(x).strip() for x in (field.get("examples") or []) if str(x).strip()]
+    if not target or not names or target not in tables_by_id:
+        return None
+    labels = [x.lower() for x in labels_by_id.get(target) or []]
+    want = names[(row - 1) % len(names)].lower()
+    if want not in labels:
+        return None
+    return f"ref:{tables_by_id[target]}[{labels.index(want)}]"
+
+
+def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) -> dict[str, list[dict]]:
+    """The demo rows, by table — what `project_seed` writes, without writing
+    it. `services.smith.sample_data` compares the rows a definition seeds
+    before and after its examples change, to replace exactly those."""
+    entities = [e for e in (doc.get("data") or {}).get("entities") or []
+                if e.get("status") != "DEPRECATED"]
+    imported = {str(i.get("entity")) for i in ((doc.get("data") or {}).get("imports") or [])
+                if isinstance(i, dict) and i.get("entity")}
+    tables_by_id = {str(e.get("id")): (e.get("table") or to_snake(e.get("name") or "entity"))
+                    for e in entities if e.get("id")}
+    labels_by_id = {str(e.get("id")): label_examples(e) for e in entities if e.get("id")}
+
+    seed: dict[str, list[dict]] = {}
+    for entity in entities:
+        table = entity.get("table") or to_snake(entity.get("name") or "entity")
+        name = entity.get("name") or table
+        if str(entity.get("id")) in imported:
+            continue
+        out_rows = []
+        # AS MANY RECORDS AS THE EXAMPLES DESCRIBE. Example k of every text
+        # field is record k; past the last example a unique field became
+        # "Area Name 8" beside a real city (Test2, 2026-09-28). A record type
+        # with no examples keeps the default count.
+        described = max((len([x for x in (f.get("examples") or []) if str(x).strip()])
+                         for f in entity.get("fields") or []
+                         if str(f.get("type") or "text").lower() in ("string", "text", "varchar")),
+                        default=0)
+        period = category_period(entity.get("fields") or [])
+        for row in range(1, (min(described, rows) if as_described and described else rows) + 1):
+            record = {}
+            for field in entity.get("fields") or []:
+                if field.get("primaryKey"):
+                    continue
+                if _is_credential_field(field.get("name")):
+                    continue
+                if not field.get("references"):
+                    target = _link_target(doc, entity, field)
+                    if target:
+                        field = {**field, "references": target}
+                # No picture to seed, and a made-up file id is a broken image
+                # plus an embedding that fails; the vector is the platform's.
+                if is_image_field(field) or is_file_field(field) or is_embedding_field(field):
+                    continue
+                record[field.get("name")] = (_ref_by_label(field, row, tables_by_id, labels_by_id)
+                                             or _seed_value(field, name, row, tables_by_id, period=period))
+            out_rows.append(years_within_age(record, entity.get("fields") or []))
+        seed[table] = out_rows
+    return seed
 
 
 # ---------------------------------------------------------------------------
@@ -1990,6 +3310,40 @@ def project_searchable_columns(doc: dict, app_root: str | Path) -> dict[str, Any
             "entities": len({k.lower() for k in manifest})}
 
 
+def project_embedding_columns(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/lib/embedding-columns.ts`` — which column the Data Engine
+    fills from which field, on every write path.
+
+    Always written, even when empty, for the same reason as the search
+    manifest: the runtime imports it statically.
+    """
+    manifest = embedding_columns(doc)
+    out = Path(app_root) / "src" / "lib"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "embedding-columns.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "//\n"
+        "// Keys are every reachable form of the entity name and its table;\n"
+        "// `property` is the column's key on the Drizzle table, `of` the field\n"
+        "// it embeds, `source` whether that field holds an image or text.\n\n"
+        "export type EmbeddingColumn = {\n"
+        "  property: string; column: string; of: string; source: \"image\" | \"text\";\n"
+        "};\n\n"
+        f"export const EMBEDDING_DIMENSIONS = {EMBEDDING_DIMENSIONS};\n\n"
+        "export const EMBEDDING_COLUMNS: Record<string, EmbeddingColumn[]> = "
+        f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"
+        "export function embeddingColumnsFor(entity: string): EmbeddingColumn[] {\n"
+        "  if (!entity) return [];\n"
+        "  return EMBEDDING_COLUMNS[entity]\n"
+        "    ?? EMBEDDING_COLUMNS[entity.toLowerCase()]\n"
+        "    ?? [];\n"
+        "}\n",
+        "utf-8",
+    )
+    return {"files": ["src/lib/embedding-columns.ts"],
+            "entities": len({k.lower() for k in manifest})}
+
+
 # ---------------------------------------------------------------------------
 # ownership — which rows an actor may reach
 # ---------------------------------------------------------------------------
@@ -2197,9 +3551,15 @@ def project_ownership_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
 #: `/signup` was gated — the gate redirected the very visitor who has no account
 #: yet straight back to `/login`, so "Sign up" never opened the signup page.
 #: The pages that create or restore a session cannot themselves require one.
+#:
+#: `set-password` is the third of them. It is where a setup link lands — the
+#: screen on which someone the owner invited, or someone whose password was
+#: reset, chooses a password. Gated, it would redirect the one visitor who
+#: certainly cannot sign in yet to the sign-in they cannot complete. It leaks
+#: nothing: the page shows only the email its own one-time token resolves to.
 _ALWAYS_OPEN: tuple[str, ...] = (
     "api/auth", "_next", "favicon.ico",
-    "login", "signup",
+    "login", "signup", "set-password",
 )
 
 
@@ -2363,7 +3723,18 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     open_routes = [_matcher_segment(r) for r in access["public"]]
     open_routes = [r for r in open_routes if r]
     # A public route at "/" needs the bare root excluded too.
-    root_public = "/" in access["public"]
+    #
+    # AND SO DOES A ROOT THAT ONLY FORWARDS. Most applications declare no page
+    # at "/" — a master-data app is `/add-data` and `/master-data` — so the
+    # root renders nothing of its own and the catch-all sends the visitor to
+    # the entry page. Gating that forward puts a sign-in screen in front of a
+    # public page, which is a login for nothing: the visitor signs in, arrives
+    # back at "/", and is forwarded to the page they could always have seen.
+    #
+    # It leaks nothing. The root holds no content, and the page it forwards to
+    # is public by its own declaration or this does not fire.
+    root_public = "/" in access["public"] or (
+        _entry_route(doc) and _entry_route(doc) in access["public"])
 
     # A public page is only public if what it fetches is reachable too.
     apis = public_apis(doc)
@@ -2398,6 +3769,12 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
     lines += [
         '',
         'import { withAuth } from "next-auth/middleware";',
+        # THE SAME COOKIE THE APP SETS. `withAuth` asks `getToken` for
+        # next-auth's DEFAULT cookie name unless it is told otherwise, and
+        # this application names its own (one browser, two apps on one host).
+        # Unnamed here, a signed-in person was bounced to /login by every
+        # page while a valid session sat in the browser (Vercel, 0l133sp2).
+        'import { sessionCookies } from "@/lib/session-cookie";',
         'import { NextResponse } from "next/server";',
         '',
         '// A role-restricted page names the roles that may open it; the session',
@@ -2418,7 +3795,7 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
         '    }',
         '    return NextResponse.next();',
         '  },',
-        '  { pages: { signIn: "/login" } },',
+        '  { pages: { signIn: "/login" }, cookies: sessionCookies() },',
         ');',
         '',
         'export const config = {',
@@ -2443,14 +3820,41 @@ def project_middleware(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # the root route — `/` is not reachable by the catch-all
 # ---------------------------------------------------------------------------
 
+def declared_landing(doc: dict) -> str | None:
+    """`navigation.initialRoute.default` when it is a route a link can carry:
+    concrete (no `[id]` to fill) and not "/" (a root that forwards to itself).
+    None when the Blueprint declares nothing usable, so the caller falls back."""
+    nav = doc.get("navigation") or {}
+    initial = nav.get("initialRoute")
+    declared = initial.get("default") if isinstance(initial, dict) else initial
+    if isinstance(declared, str) and declared.startswith("/") and declared != "/" \
+            and "[" not in declared:
+        return declared
+    return None
+
+
 def landing_route(doc: dict) -> str:
-    """Where `/` should send someone when no page claims it.
+    """Where `/` should send someone when no page claims it — and where the
+    edge pages' "return to the app" link points.
 
     The declared landing route if navigation names one, else the first page
     that is not an auth screen — never a guess. The scaffold guessed `/home`,
     a route this application does not have, so the root redirected into a 404
     and the 404 redirected into the login gate.
+
+    THE BLUEPRINT SPELLS THE LANDING `navigation.initialRoute.default`. That
+    is the key the navigation agent writes and the key Smith's navigation
+    verb changes ("open on Master Data"), and it is what the rail's
+    `initialRoute` is read from — yet this read `landing`/`home`/`root`,
+    keys no Blueprint carries, so the root redirect and the 403 page's way
+    home fell through to the first page on the list on every application,
+    whatever the navigation said. Read the declared key first. A dynamic
+    route (`/nurses/[id]`) has no id to fill and "/" would forward to itself,
+    so neither counts as declared; the legacy keys still do.
     """
+    declared = declared_landing(doc)
+    if declared:
+        return declared
     nav = doc.get("navigation") or {}
     for key in ("landing", "home", "root"):
         route = nav.get(key)
@@ -2499,6 +3903,30 @@ def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
                       if (p.get("route") or "") == "/"), None)
     app = Path(app_root) / "src" / "app"
     out = app / "(dashboard)"
+    # THE OPTIONAL CATCH-ALL ALREADY SERVES "/". The scaffold's catch-all is
+    # `[[...slug]]` now: it renders a page at "/" and forwards the root to the
+    # registry's `entryRoute` otherwise. A second file for "/" beside it stops
+    # `next dev` from starting ("You cannot define a route with the same
+    # specificity as a optional catch-all route"). Assembly retires that file
+    # on every build, but a navigation change after the build ran this
+    # projection alone and wrote it back — Test2 stopped booting after "add
+    # Location Explorer to the menu" (2026-09-28). So here the root is left
+    # to the catch-all, and what it forwards to is updated in the registry.
+    if (app / "[[...slug]]").is_dir():
+        removed = [rel for rel in ("page.tsx", "(dashboard)/page.tsx") if (app / rel).is_file()]
+        for rel in removed:
+            (app / rel).unlink()
+        entry = _entry_route(doc)
+        registry = Path(app_root) / "src" / "schemas" / "registry.ts"
+        files: list[str] = []
+        if registry.is_file():
+            text = registry.read_text("utf-8")
+            new = re.sub(r'export const entryRoute = "[^"]*";', f'export const entryRoute = "{entry}";', text)
+            if new != text:
+                registry.write_text(new, "utf-8")
+                files.append("src/schemas/registry.ts")
+        return {"files": files, "claimedBy": root_page.get("id") if root_page else None,
+                "removedStaleRoot": bool(removed), "redirectsTo": entry or None}
     out.mkdir(parents=True, exist_ok=True)
 
     # A root page from a previous build shadows the in-group one. Removed
@@ -2550,6 +3978,295 @@ def project_root_route(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": written, "claimedBy": claimed,
             "removedStaleRoot": removed,
             "redirectsTo": None if root_page else landing_route(doc)}
+
+
+def project_navigation(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Everything the navigation section decides, written out together.
+
+    The navigation reaches the application in four places: the rail
+    (`shell.json`), the route graph (`nav-flow.json`), the root redirect
+    (`(dashboard)/page.tsx`) and the edge pages' way home — the `{{home_route}}`
+    the 403, 404 and error pages send someone back through. A build fills the
+    last of these when it lays the scaffold down; a change after the build
+    re-projected the first three and left the fourth as the build wrote it, so
+    "open on Master Data" moved the rail and the root and the 403 page still
+    returned people to the old landing. Every Smith verb that re-runs the
+    navigation's projection runs this, so the four cannot drift apart again.
+    """
+    from services.blueprint.assembly import relay_edge_pages
+
+    files: list[str] = []
+    for fn in (project_shell, project_nav_flow, project_root_route):
+        files += list((fn(doc, app_root) or {}).get("files") or [])
+    files += relay_edge_pages(app_root, doc)
+    return {"files": sorted(set(files))}
+
+
+#: Written into every route file this projector emits, and the only way the
+#: sweep below can tell a file it owns from one the scaffold shipped or a
+#: person wrote. A marker rather than a manifest: a manifest is a second
+#: statement of which routes are public, and the two would drift.
+_PUBLIC_ROUTE_MARKER = "@generated forge:public-route"
+
+#: Top-level directories under `src/app` that belong to the scaffold or to
+#: Next. A Blueprint page that claims one of these routes is refused rather
+#: than written, because writing it would replace the sign-in screen with a
+#: form, or shadow the API the application talks to.
+_RESERVED_APP_SEGMENTS = frozenset({
+    "api", "login", "signup", "403", "_next", "favicon.ico",
+})
+
+#: A path segment is a plain slug or a single dynamic parameter. `route` comes
+#: out of a JSON document and becomes a DIRECTORY NAME; `..` in it would put a
+#: generated file anywhere on the disk the process can write.
+#:
+#: THE FIRST VERSION OF THIS PATTERN ADMITTED `..`, because `[A-Za-z0-9._-]+`
+#: matches it and the comment above says what the author meant rather than what
+#: the regex did. `/a/../b` wrote outside the directory it was given. A segment
+#: has to CONTAIN something that is not a dot.
+_ROUTE_SEGMENT = re.compile(
+    r"^(?:(?=[^.])[A-Za-z0-9._-]+|\[[A-Za-z_][A-Za-z0-9_]*\])$")
+
+
+def _public_route_file(route: str) -> str:
+    """The `page.tsx` that renders one public route, outside the gated group.
+
+    It is a thin call into `renderSchemaPage`, the same one every other route
+    file makes; what makes it different is only WHERE it sits.
+    """
+    segments = [seg for seg in route.split("/") if seg]
+    params = [seg[1:-1] for seg in segments if seg.startswith("[")]
+    head = (
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        f"// {_PUBLIC_ROUTE_MARKER}\n"
+        "//\n"
+        f"// {route} is declared PUBLIC, and a public page must not sit inside\n"
+        "// `(dashboard)` — that group's layout opens with `if (!session)\n"
+        "// redirect(\"/login\")`, so the projected middleware opened the route and\n"
+        "// the layout closed it again. A static segment outranks the group's\n"
+        "// `[entity]`, so this file is what Next matches, and the visitor gets the\n"
+        "// page instead of a sign-in screen.\n"
+        "//\n"
+        "// It also renders with no rail, which is what `nav-flow` already says\n"
+        "// about it (`shell: false`): navigation into a product the visitor\n"
+        "// cannot reach is worse than no navigation.\n"
+        "\n"
+        'import { renderSchemaPage } from "@/lib/schema-page";\n'
+        'import { PublicPageFrame } from "@/components/PublicPageFrame";\n'
+        "\n"
+    )
+    search = ("  searchParams?: Promise<Record<string, string | string[] | "
+              "undefined>>;\n")
+    if not params:
+        return (
+            head
+            + "export default async function PublicPage({ searchParams }: {\n"
+            + search
+            + "}) {\n"
+            + f'  const request = new Request("internal:?path={_encode(route)}");\n'
+            + "  return (\n"
+            + "    <PublicPageFrame>\n"
+            + f'      {{await renderSchemaPage("{route}", request, await searchParams)}}\n'
+            + "    </PublicPageFrame>\n"
+            + "  );\n"
+            + "}\n"
+        )
+    # The CONCRETE path is rebuilt from the params so breadcrumb ancestors
+    # resolve (renderer's `resolveCrumbHrefs` reads it), and the LAST dynamic
+    # segment rides as `id` — the key `data-engine-bridge` reads to turn a
+    # detail page into `engine.findById`. Right-to-left is the same preference
+    # the catch-all applies when it decides which segment was the record.
+    fields = ", ".join(f"{name}: string" for name in params)
+    literal = "/".join(
+        ("${encodeURIComponent(p." + seg[1:-1] + ")}") if seg.startswith("[") else seg
+        for seg in segments
+    )
+    return (
+        head
+        + "export default async function PublicPage({ params, searchParams }: {\n"
+        + f"  params: Promise<{{ {fields} }}>;\n"
+        + search
+        + "}) {\n"
+        + "  const p = await params;\n"
+        + f"  const path = `/{literal}`;\n"
+        + f"  const request = new Request(\n"
+        + f"    `internal:?id=${{encodeURIComponent(p.{params[-1]})}}"
+          "&path=${encodeURIComponent(path)}`,\n"
+        + "  );\n"
+        + "  return (\n"
+        + "    <PublicPageFrame>\n"
+        + f'      {{await renderSchemaPage("{route}", request, await searchParams)}}\n'
+        + "    </PublicPageFrame>\n"
+        + "  );\n"
+        + "}\n"
+    )
+
+
+def _encode(route: str) -> str:
+    from urllib.parse import quote
+    return quote(route, safe="")
+
+
+def public_route_segments(page: dict) -> list[str] | None:
+    """The directory segments a PUBLIC page's own route file sits at, outside
+    `(dashboard)` — or None when the page is not public, is the root (the
+    catch-all serves it), or cannot be a directory there. One rule, read by
+    every writer of a page's route file, so two of them can never put a page
+    at two paths that resolve to the same URL."""
+    if (page.get("access") or "authenticated") != "public":
+        return None
+    route = str(page.get("route") or "")
+    if not route.startswith("/") or route == "/":
+        return None
+    segments = [seg for seg in route.split("/") if seg]
+    if not all(_ROUTE_SEGMENT.match(seg) for seg in segments):
+        return None
+    if segments[0].lower() in _RESERVED_APP_SEGMENTS:
+        return None
+    return segments
+
+
+def project_public_routes(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Give every PUBLIC page its own route file, outside ``(dashboard)``.
+
+    THE MIDDLEWARE OPENED THE DOOR AND THE LAYOUT CLOSED IT. `project_middleware`
+    builds its matcher from what each page declares, so `/nurse-registration`
+    was excluded from the gate exactly as the Blueprint asked. But Next matches
+    a one-segment URL against `src/app/(dashboard)/[entity]/page.tsx`, and that
+    group's layout begins `if (!session) redirect("/login")` — it has no notion
+    of a public route and never did. So an anonymous visitor to a page declared
+    public got the sign-in screen, and `entity_access`'s `"*"` readers and
+    `launch_roles`'s `"*"` launchers — both already projected for exactly this
+    visitor — were never reached by anyone.
+
+    A static segment outranks a dynamic one in Next's matcher, so a file at
+    `src/app/nurse-registration/page.tsx` is what a request resolves to, and it
+    sits outside the group and therefore outside the gate. Which is also the
+    honest structure: a public page is not part of the dashboard, and saying so
+    with a directory is better than teaching the dashboard's layout to render
+    some of its children without itself.
+
+    `/` is left alone: the optional catch-all already serves it from outside
+    the group, so a public root page was the one case that always worked.
+
+    Files this projector wrote before and would not write now are removed. A
+    page that stops being public must stop having a door around the gate, and
+    the sweep is by the marker each file carries rather than by a manifest —
+    a manifest would be a second statement of which routes are public.
+    """
+    app = Path(app_root) / "src" / "app"
+    wanted: dict[Path, str] = {}
+    refused: list[str] = []
+
+    # A page with code has its own route file at the same place (see
+    # `app_sdk.code_page_dir`); writing this one too would be two pages at
+    # one URL, which Next refuses to build.
+    coded = {str(r.get("page")) for r in _live(doc.get("pageCode"))}
+    for page in _live(doc.get("pages")):
+        if (page.get("access") or "authenticated") != "public":
+            continue
+        if str(page.get("id")) in coded:
+            continue
+        route = str(page.get("route") or "")
+        if not route.startswith("/") or route == "/":
+            continue
+        segments = [seg for seg in route.split("/") if seg]
+        if not all(_ROUTE_SEGMENT.match(seg) for seg in segments):
+            refused.append(route)
+            logger.warning("[public-routes] %s is not a shape we can make a "
+                           "directory of — left inside the gate", route)
+            continue
+        if segments[0].lower() in _RESERVED_APP_SEGMENTS:
+            # Writing this would replace the sign-in screen, or shadow the API
+            # the application talks to. Named, not silently skipped: the page
+            # will not be reachable and someone has to know why.
+            refused.append(route)
+            logger.warning("[public-routes] %s collides with a route the scaffold "
+                           "owns (%s) — not written", route, segments[0])
+            continue
+        wanted[app.joinpath(*segments, "page.tsx")] = _public_route_file(route)
+
+    written: list[str] = []
+    for dest, body in sorted(wanted.items()):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(body, "utf-8")
+        written.append(str(dest.relative_to(Path(app_root))))
+
+    removed: list[str] = []
+    # LISTED BEFORE ANYTHING IS DELETED. `rglob` walks the tree lazily, so
+    # removing a directory mid-iteration makes it raise FileNotFoundError on
+    # the descent it had already queued — the sweep died partway through and
+    # left some of the files it had decided to take out.
+    stale = sorted(app.rglob("page.tsx")) if app.is_dir() else []
+    for existing in stale:
+        if existing in wanted:
+            continue
+        try:
+            if _PUBLIC_ROUTE_MARKER not in existing.read_text("utf-8"):
+                continue
+        except OSError:                          # unreadable: not ours to delete
+            continue
+        existing.unlink()
+        removed.append(str(existing.relative_to(Path(app_root))))
+        # A directory that held nothing but that file is now noise Next still
+        # walks; take it back out, parents included, up to `src/app`.
+        parent = existing.parent
+        while parent != app and parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+            parent = parent.parent
+
+    return {"files": sorted(written), "removed": sorted(removed),
+            "refused": sorted(refused)}
+
+
+def public_nav(doc: dict) -> dict[str, Any]:
+    """The public pages a visitor can move between, in navigation order.
+
+    A page that needs a record (`[id]` in its route) is reached from a list,
+    never from the menu. Order follows the navigation tree where it names the
+    page, then the order the pages were declared in."""
+    pages = [p for p in _live(doc.get("pages"))
+             if (p.get("access") or "authenticated") == "public"
+             and str(p.get("pattern") or "") != "auth"      # the header has its own sign-in link
+             and not re.search(r"\[[^\]]+\]", str(p.get("route") or ""))
+             and str(p.get("route") or "").startswith("/")]
+    order: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key in ("page", "pageId", "id"):
+                if isinstance(node.get(key), str):
+                    order.append(node[key])
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+    walk((doc.get("navigation") or {}).get("tree"))
+    rank = {pid: i for i, pid in enumerate(dict.fromkeys(order))}
+    # Home first, wherever the tree lists it: a menu starts where the app does.
+    pages.sort(key=lambda p: (str(p.get("route")) != "/",
+                              rank.get(str(p.get("id")), len(rank)), _live(doc.get("pages")).index(p)))
+    signed_in = any((p.get("access") or "authenticated") != "public"
+                    for p in _live(doc.get("pages")))
+    return {"appName": str((doc.get("application") or {}).get("name") or ""),
+            "items": [{"label": str(p.get("name") or p.get("route")), "route": str(p.get("route"))}
+                      for p in pages],
+            "signIn": signed_in}
+
+
+def project_public_nav(doc: dict, app_root: str | Path) -> str:
+    """Write ``src/contracts/public-nav.ts`` — the public frame's menu."""
+    nav = public_nav(doc)
+    path = Path(app_root) / "src" / "contracts" / "public-nav.ts"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "// The public pages a visitor can move between; `PublicPageFrame` renders them.\n"
+        "export type PublicNavItem = { label: string; route: string };\n\n"
+        "export const PUBLIC_NAV: { appName: string; items: PublicNavItem[]; signIn: boolean } = "
+        + json.dumps(nav, indent=2) + ";\n", "utf-8")
+    return str(path.relative_to(Path(app_root)))
 
 
 def project_append_only_entities(doc: dict, app_root: str | Path) -> dict[str, Any]:

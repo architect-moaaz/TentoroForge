@@ -4,6 +4,8 @@ import type { StyleSlotT } from "@tentoroforge/schema";
 import type { FileUploadPropsType } from "./FileUpload.schema";
 import { resolveStyle } from "../../style/resolveStyle";
 import { useMotion } from "../../style/useMotion";
+import { useUrlState } from "../../style/useUrlState";
+import { fileSrc } from "./fileSrc";
 
 export interface FileUploadRef {
   id: string;
@@ -29,7 +31,16 @@ type Item = { file: File; status: "uploading" | "done" | "error"; ref?: FileUplo
  * (single → the id string; multiple → a JSON array of ids). The id maps cleanly to
  * a uuid column and is resolvable by an ai_extract node's `aiFileRef`.
  */
-export function FileUpload({
+export function FileUpload(props: FileUploadProps) {
+  // Search mode: the upload IS the query. Its id goes to the URL's `image`,
+  // the page re-resolves, and the similar source ranks against it.
+  return props.search
+    ? <SearchUpload label={props.label} hint={props.hint} accept={props.accept}
+        style={props.style} uploadUrl={props.uploadUrl ?? "/api/files/upload"} />
+    : <UploadField {...props} />;
+}
+
+function UploadField({
   name, label, accept, multiple, maxSizeMb, hint, style,
   filenameField = "originalFilename", mimeTypeField = "mimeType",
   onFiles, onUploaded, uploadUrl = "/api/files/upload",
@@ -37,6 +48,7 @@ export function FileUpload({
   const [dragOver, setDragOver] = React.useState(false);
   const [items, setItems] = React.useState<Item[]>([]);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const notify = React.useRef(false);
 
   const uploadOne = async (file: File): Promise<FileUploadRef | null> => {
     try {
@@ -62,12 +74,18 @@ export function FileUpload({
       const ref = await uploadOne(it.file);
       settled.push({ ...it, status: ref ? "done" : "error", ref: ref ?? undefined });
     }
-    setItems((prev) => {
-      const next = multiple ? prev.map((p) => settled.find((s) => s.file === p.file) ?? p) : settled;
-      onUploaded?.(next.filter((n) => n.ref).map((n) => n.ref as FileUploadRef));
-      return next;
-    });
+    // Told after the render, not inside the updater: a parent that stores the
+    // refs (a Form field) would otherwise be set while this one renders.
+    notify.current = true;
+    setItems((prev) => (multiple ? prev.map((p) => settled.find((s) => s.file === p.file) ?? p) : settled));
   };
+  React.useEffect(() => {
+    // The "uploading" render's effect can run after the flag is set; only a
+    // settled list is worth reporting.
+    if (!notify.current || items.some((i) => i.status === "uploading")) return;
+    notify.current = false;
+    onUploaded?.(items.filter((n) => n.ref).map((n) => n.ref as FileUploadRef));
+  }, [items, onUploaded]);
 
   const ids = items.filter((i) => i.ref).map((i) => (i.ref as FileUploadRef).id);
   const value = multiple ? JSON.stringify(ids) : ids[0] ?? "";
@@ -122,6 +140,66 @@ export function FileUpload({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** The image-search box: pick or drop an image, see it, clear it. */
+function SearchUpload({ label, hint, accept, style, uploadUrl }: {
+  label?: string; hint?: string; accept?: string; style?: StyleSlotT; uploadUrl: string;
+}) {
+  const [current, onQuery] = useUrlState("image", "");
+  const [busy, setBusy] = React.useState(false);
+  const [failed, setFailed] = React.useState(false);
+  const [dragOver, setDragOver] = React.useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const take = async (list: FileList | null) => {
+    const file = list?.[0];
+    if (!file) return;
+    setBusy(true);
+    setFailed(false);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(uploadUrl, { method: "POST", body: fd });
+      const ref = res.ok ? ((await res.json()) as FileUploadRef) : null;
+      if (ref?.id) onQuery(ref.id); else setFailed(true);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-col gap-1" data-file-upload="" data-file-search="" style={resolveStyle(style)} {...useMotion(style?.motion)}>
+      {label && <label className="text-sm font-medium text-foreground">{label}</label>}
+      <div className="flex items-center gap-3">
+        {current && (
+          <img src={fileSrc(current)} alt="The image being searched for"
+            className="h-16 w-16 rounded-md border border-border/60 object-cover" />
+        )}
+        <div
+          role="button" tabIndex={0}
+          onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") inputRef.current?.click(); }}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => { e.preventDefault(); setDragOver(false); take(e.dataTransfer.files); }}
+          className={`flex flex-1 cursor-pointer flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed px-4 py-4 text-center text-sm ${dragOver ? "border-primary bg-primary/5" : "border-input text-muted-foreground"}`}
+        >
+          <span>{busy ? "Uploading…" : current ? "Search with a different image" : "Drop an image or click to search by it"}</span>
+          {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
+          {failed && <span className="text-xs text-destructive">That image could not be uploaded.</span>}
+          <input ref={inputRef} data-testid="file-search-input" type="file" accept={accept ?? "image/*"}
+            className="hidden" onChange={(e) => take(e.target.files)} />
+        </div>
+        {current && (
+          <button type="button" onClick={() => onQuery("")}
+            className="text-sm text-muted-foreground underline-offset-2 hover:underline">
+            Clear
+          </button>
+        )}
+      </div>
     </div>
   );
 }

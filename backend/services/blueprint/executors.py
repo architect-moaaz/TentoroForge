@@ -43,6 +43,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 import logging
@@ -58,6 +59,7 @@ from services.blueprint.agent_contract import (
 from services.blueprint import references
 from services.blueprint.orchestrator import DAG, TaskSpec
 from services.blueprint.references import addendum as reference_addendum
+from services.blueprint.verification import PALETTE_ROLES
 from services.blueprint.service import ARTIFACT_SECTIONS, BlueprintService
 
 logger = logging.getLogger(__name__)
@@ -150,6 +152,99 @@ class ModelRefused(RuntimeError):
     """The model declined the request (§ `stop_reason: "refusal"`)."""
 
 
+class NoAnswer(RuntimeError):
+    """The model stopped without writing any answer at all.
+
+    MEASURED ON UAT, and reported there as `StopIteration: ` — an empty
+    message on a failed node, twice, with every node after it skipped.
+    `page_contracts` for a 23-entity application spent its whole output budget
+    reasoning and returned a message holding thinking and no text block, and
+    `next(b.text for b in ...)` raised on the empty generator. The run said
+    nothing a person could act on, and the retry asked the same question with
+    the same budget and got the same nothing.
+
+    Carries the usage so the spend is still recorded: a call that consumed
+    32,000 output tokens is the most expensive kind to lose track of.
+    """
+
+    def __init__(self, message: str, usage: "Usage | None" = None,
+                 stop_reason: str | None = None) -> None:
+        super().__init__(message)
+        self.usage = usage
+        self.stop_reason = stop_reason
+
+
+class BuildCannotStart(RuntimeError):
+    """The API refused a one-token call before the build spent anything."""
+
+
+#: The message the API gives an account with no balance. A 400, so it does
+#: not carry a class of its own in the SDK.
+_NO_CREDIT = ("credit balance", "billing", "purchase credits")
+
+
+def api_outage(exc: BaseException) -> str | None:
+    """What kind of API outage an exception is, or None when it is not one.
+
+    ``"credit"`` — the account cannot pay (no balance, a bad or revoked key):
+    nothing will succeed until a person acts, and every call made meanwhile
+    is a call that fails. ``"transient"`` — the API is busy or the network
+    dropped (429, 5xx, 529, a timeout): the same call a little later is
+    likely to land. Neither says anything about what the author wrote, and
+    neither is worth an attempt: HippieKit's second measured rebuild
+    (2026-09-22) FAILED a page for "Your credit balance is too low", and a
+    build that hits that mid-run used to fail one subject per remaining call.
+    Read from the SDK's exception classes where they exist, and from the
+    message where they do not (a 400 is a 400)."""
+    text = str(exc).lower()
+    if any(word in text for word in _NO_CREDIT):
+        return "credit"
+    try:
+        import anthropic
+    except ImportError:  # pragma: no cover — the SDK is a dependency
+        anthropic = None  # type: ignore[assignment]
+    if anthropic is not None:
+        if isinstance(exc, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+            return "credit"
+        if isinstance(exc, (anthropic.RateLimitError, anthropic.InternalServerError,
+                            anthropic.APIConnectionError)):
+            return "transient"
+        if isinstance(exc, anthropic.APIStatusError) and int(getattr(exc, "status_code", 0) or 0) >= 500:
+            return "transient"
+    # Without a class to go on, only the API's own message shape counts —
+    # "Error code: 529 - {...}" — never a free word like "timeout", which a
+    # composer, a gateway or a test fake may say for reasons of their own.
+    if re.search(r"error code: (429|5\d\d)\b", text):
+        return "transient"
+    return None
+
+
+def preflight(client: Any) -> None:
+    """One token's worth of proof that the API will answer. Raises
+    :class:`BuildCannotStart` for an account that cannot pay; a busy API is
+    let through. A client with no ``preflight`` of its own is trusted.
+
+    NOT CALLED BY THE RUN ITSELF. A run's first model call is its preflight:
+    a request the API refuses for a low balance is not billed, and the
+    scheduler pauses the run on it with nothing sent since (see the
+    orchestrator's `pause`). Wired into `run` it reached the real API from a
+    test suite whose fakes never would have. For a caller that wants the
+    answer before it starts anything — a UI about to show a progress bar —
+    this is the call."""
+    check = getattr(client, "preflight", None)
+    if check is None:
+        return
+    try:
+        check()
+    except BuildCannotStart:
+        raise
+    except Exception as exc:  # noqa: BLE001 — classified, not swallowed
+        if api_outage(exc) == "credit":
+            raise BuildCannotStart(f"the API refused before the build began: {exc}") from exc
+        # Transient, or something a 1-token call cannot tell: the build goes
+        # ahead and each call speaks for itself.
+
+
 # ---------------------------------------------------------------------------
 # §29 — the structured output envelope
 # ---------------------------------------------------------------------------
@@ -209,6 +304,22 @@ PROPOSAL_SCHEMA: dict[str, Any] = {
         "issues": {"type": "array", "items": {"type": "string"}},
         "change_requests": {
             "type": "array",
+            "description": (
+                "§30 — what you return INSTEAD of reaching outside your own "
+                "section. `section` names the section at fault "
+                "(\"data.entities\", \"workflows\"), `reason` says why in "
+                "one sentence.\n\n"
+                "TO ASK FOR SOMETHING TO BE RETIRED, set `retire` to its id. "
+                "That is acted on: the run retires it and every stage after "
+                "you sees it gone. Asked to author the fields of a "
+                "CalculatorSession on an application whose requirements say "
+                "nothing is stored, this is how you say so — "
+                "{section: \"data.entities\", reason: \"REQ-003 says nothing "
+                "is stored; this models screen state as a table\", retire: "
+                "\"ENTITY-001\"} — instead of authoring columns for a table "
+                "that should not exist. Without the id it is recorded and "
+                "read by a person, which is slower and often too late."
+            ),
             "items": {
                 "type": "object",
                 "additionalProperties": False,
@@ -216,6 +327,11 @@ PROPOSAL_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "section": {"type": "string"},
                     "reason": {"type": "string"},
+                    "retire": {
+                        "type": "string",
+                        "description": ("The id of the artifact that should not "
+                                        "exist — ENTITY-001, FLOW-002, PAGE-003."),
+                    },
                 },
             },
         },
@@ -259,6 +375,54 @@ CACHE_MIN_TOKENS = 2048
 
 #: 5-minute TTL. The fan-out it exists for issues its calls seconds apart.
 _CACHE_CONTROL = {"type": "ephemeral"}
+
+#: Where a user message stops being the same for every subject of a fan-out.
+#:
+#: ONLY THE SYSTEM PROMPT WAS CACHED, AND IT WAS THE SMALL HALF. HippieKit's
+#: measured build (2026-09-21) sent 3.2M input tokens at full price. page_details
+#: alone sent 882k over 27 calls and read 63k back from the cache: every call
+#: re-sent the same page set and Blueprint slice, AFTER the subject's own
+#: pages, so no two calls shared a prefix past the system prompt. A fan-out
+#: prompt now puts what every subject shares first and its own part after
+#: this line; the client caches up to it. Plain text on purpose — a client that
+#: does not cache reads a heading, not a token.
+CACHE_BREAK = "\n\n## This call\n\n"
+
+
+#: The event a fan-out's first call sets once its cached prefix is readable —
+#: per worker thread, because the call it belongs to runs on one (see the
+#: orchestrator's `_call_warm`).
+_LEADING = threading.local()
+
+
+class leading_prefix:
+    """While a call runs, the event to set at its first streamed event."""
+
+    def __init__(self, event: Any) -> None:
+        self.event = event
+
+    def __enter__(self) -> None:
+        _LEADING.event = self.event
+
+    def __exit__(self, *exc: Any) -> None:
+        _LEADING.event = None
+
+
+def _prefix_readable() -> None:
+    """A cache entry can be read once the response writing it streams."""
+    event = getattr(_LEADING, "event", None)
+    if event is not None:
+        event.set()
+
+
+def _user_blocks(user: str) -> Any:
+    """The user message, with what every subject shares cache-tagged when it
+    is big enough to be worth a breakpoint (see :data:`CACHE_BREAK`)."""
+    head, sep, tail = user.partition(CACHE_BREAK)
+    if not sep or len(head) // 4 < CACHE_MIN_TOKENS:
+        return user
+    return [{"type": "text", "text": head, "cache_control": _CACHE_CONTROL},
+            {"type": "text", "text": sep.lstrip("\n") + tail}]
 
 
 def _cacheable(system: str) -> Any:
@@ -318,6 +482,14 @@ def image_block(path: str | Path) -> dict[str, Any]:
                    "data": base64.standard_b64encode(p.read_bytes()).decode()},
         "cache_control": _CACHE_CONTROL,
     }
+
+
+def _content(shown: Sequence[str | Path], user: str) -> Any:
+    """Images first (the stable half of the prefix), then the user text."""
+    text = _user_blocks(user)
+    if not shown:
+        return text
+    return [*image_blocks(shown), *(text if isinstance(text, list) else [{"type": "text", "text": text}])]
 
 
 def image_blocks(paths: Sequence[str | Path]) -> list[dict[str, Any]]:
@@ -420,6 +592,58 @@ class AnthropicModel:
         if self.max_tokens == DEFAULT_MAX_TOKENS and self.effort in ("xhigh", "max"):
             self.max_tokens = 64000
 
+    #: A reply that is still only thinking after this much of its budget is not
+    #: going to write an answer. Measured: a Calculator's single page burned
+    #: all 64,000 tokens reasoning at `high` (12m38s), then all 64,000 again at
+    #: `medium` (23m36s in total) — two full budgets to learn the same thing
+    #: twice. Stopping at the mark costs the same lesson at half the price,
+    #: and the retry below gets going sooner.
+    THINKING_ONLY_SHARE = 0.55
+
+    def _drain(self, stream: Any) -> Any:
+        """Consume the stream, forwarding thinking, and give up on a reply
+        that is all reasoning before its budget is gone.
+
+        Iterating consumes the same events `get_final_message` accumulates, so
+        it is still the SDK's assembled message that comes back; nothing here
+        rebuilds a reply out of deltas.
+        """
+        from services.llm_client import ReasoningSink
+
+        sink = ReasoningSink(self.reasoning) if self.reasoning is not None else None
+        ceiling = int(self.max_tokens * self.THINKING_ONLY_SHARE)
+        thinking_chars, answered = 0, False
+        try:
+            for event in stream:
+                _prefix_readable()
+                kind = getattr(event, "type", "")
+                delta = getattr(event, "delta", None)
+                dtype = getattr(delta, "type", None)
+                if dtype == "thinking_delta":
+                    text = str(getattr(delta, "thinking", "") or "")
+                    thinking_chars += len(text)
+                    if sink is not None:
+                        sink.feed(text)
+                elif dtype == "text_delta" or (
+                        kind == "content_block_start"
+                        and getattr(getattr(event, "content_block", None), "type", "") == "text"):
+                    answered = True
+                # ~4 characters to the token is the rule of thumb everything
+                # else here uses; it only has to be right to the nearest
+                # thousand for this to be worth doing.
+                if not answered and thinking_chars // 4 > ceiling:
+                    raise NoAnswer(
+                        f"the model was still reasoning after {thinking_chars // 4:,} of its "
+                        f"{self.max_tokens:,} output tokens and had not begun an answer, so the "
+                        f"call was stopped — this task needs less deliberation, not more budget",
+                        stop_reason="thinking_only")
+        finally:
+            # The tail is usually the conclusion. Flushed even if the stream
+            # raises, so a failed call still shows how far it got.
+            if sink is not None:
+                sink.close()
+        return stream.get_final_message()
+
     def _stream_reasoning(self, stream: Any) -> Any:
         """Drain the stream, forwarding thinking as it lands.
 
@@ -436,6 +660,7 @@ class AnthropicModel:
         sink = ReasoningSink(self.reasoning)
         try:
             for event in stream:
+                _prefix_readable()
                 delta = getattr(event, "delta", None)
                 if getattr(delta, "type", None) == "thinking_delta":
                     sink.feed(str(getattr(delta, "thinking", "") or ""))
@@ -444,6 +669,12 @@ class AnthropicModel:
             # raises, so a failed call still shows how far it got.
             sink.close()
         return stream.get_final_message()
+
+    def preflight(self) -> None:
+        """The cheapest call the API takes. Raises whatever it raises."""
+        self._anthropic().messages.create(
+            model=self.model, max_tokens=1,
+            messages=[{"role": "user", "content": "ok"}])
 
     def __call__(self, *, system: str, user: str, schema: dict[str, Any],
                  image: str | Path | None = None,
@@ -456,26 +687,22 @@ class AnthropicModel:
             model=self.model,
             max_tokens=self.max_tokens,
             system=_cacheable(system),
-            messages=[{"role": "user", "content": (
-                [*image_blocks(shown), {"type": "text", "text": user}]
-                if shown else user)}],
+            messages=[{"role": "user", "content": _content(shown, user)}],
             output_config={
                 "effort": self.effort,
                 "format": {"type": "json_schema", "schema": schema},
             },
         )
         client = self._anthropic()
-        if self.max_tokens > STREAM_ABOVE:
-            # The SDK refuses a non-streaming request it estimates could exceed
-            # ~10 minutes, which any large max_tokens does. Stream and take the
-            # accumulated message.
-            with client.messages.stream(**kwargs) as stream:
-                if self.reasoning is None:
-                    response = stream.get_final_message()
-                else:
-                    response = self._stream_reasoning(stream)
-        else:
-            response = client.messages.create(**kwargs)
+        # EVERY CALL STREAMS. The SDK refuses a non-streaming request it
+        # estimates could exceed ~10 minutes (any large max_tokens), and a
+        # fan-out's followers wait for the leader's FIRST streamed event to
+        # know its cached prefix is readable (`_prefix_readable`). A call made
+        # with `create()` never sends that event, so a node under the old
+        # threshold idled its followers for the whole wait bound. The
+        # accumulated message is the same either way.
+        with client.messages.stream(**kwargs) as stream:
+            response = self._drain(stream)
         # Check before reading content: a refusal returns HTTP 200 with an
         # empty or partial content list, and indexing it blindly raises.
         if response.stop_reason == "refusal":
@@ -484,15 +711,31 @@ class AnthropicModel:
                 f"model declined this task"
                 f"{f' ({detail.category})' if detail else ''}"
             )
-        text = next(b.text for b in response.content if b.type == "text")
         u = response.usage
-        return ModelReply(text=text, usage=Usage(
+        spent = Usage(
             model=self.model,
             input_tokens=getattr(u, "input_tokens", 0) or 0,
             output_tokens=getattr(u, "output_tokens", 0) or 0,
             cache_read_tokens=getattr(u, "cache_read_input_tokens", 0) or 0,
             cache_write_tokens=getattr(u, "cache_creation_input_tokens", 0) or 0,
-        ), stop_reason=getattr(response, "stop_reason", None))
+        )
+        stop = getattr(response, "stop_reason", None)
+        # NO TEXT IS AN OUTCOME WITH A NAME. A reply can hold only thinking —
+        # the budget ran out before the answer began — and reading it with a
+        # bare `next()` raised StopIteration, which surfaced on UAT as a
+        # failed node whose reason was the empty string.
+        text = next((b.text for b in response.content
+                     if getattr(b, "type", None) == "text"), None)
+        if text is None:
+            if stop == "max_tokens":
+                why = (f"the model spent all {spent.output_tokens:,} output tokens "
+                       f"reasoning and wrote no answer — the budget "
+                       f"({self.max_tokens:,}) is too small for this task")
+            else:
+                why = (f"the model stopped ({stop or 'no stop reason'}) without "
+                       f"writing an answer")
+            raise NoAnswer(why, usage=spent, stop_reason=stop)
+        return ModelReply(text=text, usage=spent, stop_reason=stop)
 
 
 
@@ -761,7 +1004,7 @@ class ModelRouter:
 
         router = ModelRouter(
             default=AnthropicModel(),
-            by_node={"testing": kimi, "business_rules": kimi},
+            by_node={"business_rules": kimi},
         )
 
     Whether a given split is *better* is an empirical question, and you can now
@@ -910,19 +1153,6 @@ two modules naming the same entity update one record rather than duplicating \
 it — which makes a near-miss spelling the one thing that creates a duplicate."""
 
 NODE_TASKS: dict[str, str] = {
-    "composition": (
-        "Compose the whole application once. For every page, choose a layout "
-        "and an ordered list of sections, naming the purpose of each section "
-        "and the catalog components it is expected to use. Then state the "
-        "conventions every page will follow: how a page header reads, where "
-        "filters and the primary action sit, how empty and error states are "
-        "treated, how dense the information is.\n\n"
-        "Structure and intent only — no props, no data bindings. You are the "
-        "only call that sees every page at once, so the job is coherence: the "
-        "list page and the dashboard should read as one product, and a user "
-        "moving between them should never have to re-learn where things are. "
-        "Decide from the domain and who uses it; say why in each rationale."
-    ),
     "figma_intelligence": (
         "Read a connected Figma design and record what it is evidence for.\n\n"
         "You are not designing the application and you are not authoring "
@@ -951,16 +1181,109 @@ NODE_TASKS: dict[str, str] = {
         "colour theory rather than defaulting to blue.\n\n"
         "Whichever it is, pick a hue the domain earns — a workshop is not a "
         "clinic is not a reading app — then build the rest as a considered "
-        "scheme around it: an accent that is a true complement or a near-triad "
-        "rather than a second blue, subtle and hover variants derived from the "
-        "primary's own hue, and status colours that stay distinguishable for "
-        "the 8% of men with a red-green deficiency. Say in "
-        "`visualPersonality` which of the three this came from and why, so a "
-        "later change can argue with it.\n\n"
+        "scheme around it. NAME THE HARMONY you are using and keep to it: "
+        "complementary (the accent opposite the primary), split-complementary "
+        "(the accent one step either side of opposite), analogous (everything "
+        "within 60° — calm, editorial, needs a strong accent to point with) or "
+        "triadic. The accent is a true complement or a near-triad, never a "
+        "second blue. Subtle and hover variants are the primary's own hue at "
+        "another lightness. THE NEUTRALS ARE TINTED: the ground, the surface, "
+        "the borders and the secondary text all carry a trace of the primary's "
+        "hue (a few points of saturation), never pure grey — that is what makes "
+        "a palette read as one thing. Weight it 60/30/10: the ground and "
+        "surfaces carry the screen, the primary structures it, the accent is "
+        "the ten percent that says where to act. Status colours stay "
+        "distinguishable for the 8% of men with a red-green deficiency. Say in "
+        "`visualPersonality` which of the three sources this came from, which "
+        "harmony it is, and why, so a later change can argue with it.\n\n"
+        "THE GROUND CAN BE DARK. A product that lives in the evening, in media, "
+        "in a control room, or that wants drama, earns a dark ground with light "
+        "ink (`background` deep and tinted, `surface` one step lighter, "
+        "`inverse` then LIGHTER than the ground, not darker); a product read "
+        "all day at a desk earns a light one. Decide it from the personality, "
+        "not from habit, and keep every text pair readable either way.\n\n"
+        "A GRADIENT IS PART OF THE PALETTE. Name `gradientStart` and "
+        "`gradientEnd`: two stops of the primary's own family — the start is "
+        "the primary's hue, the end the same hue turned 20-40° round the wheel "
+        "(towards the warmer or cooler neighbour the personality wants), both "
+        "deep enough that light text reads on either. It paints the sign-in "
+        "panel, a hero band and the one leading card; it is never the accent, "
+        "and never two unrelated colours.\n\n"
+        "THE PICTURES. Name up to three photographs in `imagery`, one per job "
+        "the product needs — `auth` (the sign-in page's brand panel: the "
+        "world this product serves, not an office stock shot), `hero` (the "
+        "band that leads a dashboard or home) and `empty` (an illustrated "
+        "empty state) — each as a `query` a photo search would answer "
+        "(\"neighbours sharing garden tools\", \"child receiving a vaccine, "
+        "gentle\") and an `alt` a screen reader would say. Leave `url` empty: "
+        "the platform finds and credits the picture, and where it cannot, the "
+        "gradient stands in. A product that should carry no photography (a "
+        "stark tool, a dense back-office) names none and says so.\n\n"
         "Decide from the domain and who uses it. A recruiter working a "
         "pipeline all day and a customer buying once a year want different "
         "densities and different levels of visual quiet. Say why each choice "
-        "follows from the product, not from taste."
+        "follows from the product, not from taste.\n\n"
+        "NAME WHAT IT SHOULD BE AS GOOD AS. In `references`, two to four real, "
+        "well-known products from THIS application's own field and for its "
+        "audience — what its users already use and admire — each with the one "
+        "thing to take from it (how it presents its main record, its layout, "
+        "its tone). Every page is written and judged against them. An ordering "
+        "app is held to the best ordering apps, a shop to the best shops, a "
+        "clinic to the best patient apps; developer tools and admin consoles "
+        "only when that is what this is. Generated applications have all "
+        "looked alike — the same face, the same teal, the same dashboard — "
+        "because every one was held to the same bar; this is where that stops.\n\n"
+        "THE OBVIOUS CHOICE IS EVERY COMPETITOR'S. The hue a domain reaches for "
+        "first (teal for health, blue for money, green for nature) is the one "
+        "every product in it already wears; take it when the brief asks for it, "
+        "otherwise find the colour that makes this one recognisable. The same "
+        "for the frame's tone and the density: choose them from how THIS "
+        "product is used, not from what is usual.\n\n"
+        "EVERY COLOUR HAS A JOB, AND `colors` NAMES EACH ONE by these keys "
+        "(add status colours and hover/subtle variants beside them):\n"
+        + "\n".join(f"- `{role}`: {job}" for role, job in PALETTE_ROLES.items())
+        + "\n"
+        "Pages are written against these jobs, so a colour with no job is a "
+        "colour no page uses: an accent named without a job was drawn three "
+        "times in a whole application while every button stayed the primary. The "
+        "accent is scarce on purpose — one element per screen — which is what "
+        "makes it read as \"do this\". Choose it dark enough to carry the page's "
+        "own light text on a button. The ground is a decision too: a warm "
+        "paper, a cool slate, a soft sage — pure `#FFFFFF` only when the "
+        "product is stark by intent, never because white is the default. "
+        "When the personality you describe is warm, the neutrals are warm.\n\n"
+        "THE FRAME IS A DECISION TOO. Name `shell.chrome` — how the navigation "
+        "is built: `wide-rail` (a labelled sidebar, for a product with many "
+        "destinations worked all day), `icon-rail` (a narrow rail of icons, for "
+        "a focused tool), `standard-rail` (a rail that expands on hover), "
+        "`floating-rail` (the rail as a raised card, for a lighter, editorial "
+        "feel), `right-rail` (navigation after the content), `topbar` (a "
+        "single bar across the top, for a few destinations or a consumer "
+        "product), `dock` (no rail; a floating dock at the bottom, for a "
+        "mobile-first product used on the go). And `shell.auth` — how the "
+        "sign-in screen is composed: `split-editorial` (brand panel left, form "
+        "right), `split-reversed`, `side-panel` (a narrower brand panel), "
+        "`centered-minimal` (the form alone, for a stark tool), `brand-wash` "
+        "(the form over the brand gradient, for a consumer product), "
+        "`top-anchored` (a compact header and the form, for a dense "
+        "back-office). And `shell.tone` — what the navigation is painted "
+        "with: `dark` (the inverse surface, for a product worked in low light "
+        "or a dense console), `brand` (the primary colour, when the brand "
+        "leads), `light` (a card beside the page, for a quiet tool), `tinted` "
+        "(the ground washed with the primary, for a warm or consumer "
+        "product). Choose all three from the personality and how the product "
+        "is used, and make them agree with `navigationApproach`.\n\n"
+        "TYPE IS TWO DECISIONS. Name `typography.fontFamilyBase` (the body, a "
+        "highly legible face) and `typography.fontFamilyHeading` (page and card "
+        "titles — a display serif or a characterful sans when the personality "
+        "calls for one; the body face again only when the product is quiet by "
+        "intent). Both are Google Fonts families, written as the family name "
+        "with a fallback stack: `\"<Family>\", <similar system face>, serif` (or sans-serif). "
+        "Choose them for this product's personality — nothing here is a default. "
+        "Inter is the body face nearly every generated application has had, and "
+        "that is why they read as one product: choose it only when its neutrality "
+        "is the point, and otherwise a face with the character this product needs "
+        "(a warm humanist sans, a geometric, a grotesque, a readable serif)."
     ),
     "requirements": (
         "Extract the application's requirements from the description. Each is one "
@@ -971,7 +1294,19 @@ NODE_TASKS: dict[str, str] = {
         "under SUPPLIED DOCUMENTS cites evidence of type `document`, with `source` "
         "naming the document (\"document 1\") and `message` quoting the sentence it "
         "came from — so the application can say which requirements the uploaded "
-        "document produced. A requirement supported by both cites both."
+        "document produced. A requirement supported by both cites both.\n\n"
+        "GROUP THEM BY WHAT THE PRODUCT DOES. Give every requirement an `area`: "
+        "the capability it belongs to, named in the two or three words the "
+        "person asking would use for that part of their product. Requirements "
+        "that belong together share one area name exactly; most applications "
+        "have between three and seven areas, and an area with one requirement "
+        "is usually part of a neighbour.\n\n"
+        "WHEN THE REQUIREMENTS ALREADY EXIST AND SMITH'S BRIEF ASKS FOR A "
+        "CHANGE, revise rather than restart. Return only the requirements the "
+        "change adds, rewords or retires. A reworded requirement keeps its "
+        "`id`. A retired one is returned exactly as it was, with `status: "
+        "\"DEPRECATED\"`. Everything the brief does not touch is left out of "
+        "your reply and stays exactly as it is."
     ),
     "application_model": (
         "FIRST, THE LANGUAGE. If the request says what language the INTERFACE "
@@ -994,7 +1329,19 @@ NODE_TASKS: dict[str, str] = {
         "English, and defaulting is the right answer far more often than not."
     ),
     "data_model": (
-        "Name the entities behind the requirements and state how they relate. "
+        "SOME APPLICATIONS STORE NOTHING, and then this section is empty. A "
+        "calculator, a converter, a scratch tool — the values live on the "
+        "screen while somebody uses them and are gone when they leave. If the "
+        "requirements say nothing is kept, return `entities: []` and say so in "
+        "`assumptions`; do not model the screen's own working state as a "
+        "table. Asked for a calculator that \"should not store anything in "
+        "database\", this named a CalculatorSession with a display value and a "
+        "pending operator, and every stage after it spent its time on a table "
+        "that should not exist — seven minutes authoring its columns, and a "
+        "page judged against a dashboard's floor because it now had an entity "
+        "to summarise.\n\n"
+        "Otherwise: name the entities behind the requirements and state how "
+        "they relate. "
         "For each entity give `name`, `table`, a one-sentence `description` "
         "and `fields: []` — EMPTY. Do not write fields: each entity's fields, "
         "keys, enums, sensitivity and constraints are authored afterwards, one "
@@ -1005,9 +1352,42 @@ NODE_TASKS: dict[str, str] = {
         "`kind`, `fromField` and `toField` — `jobId: uuid` explained in "
         "English as \"Job the part was consumed on\" is a relationship no "
         "later stage can read, and the page planner could not tell a row only "
-        "ever written while looking at a job from a top-level record."
+        "ever written while looking at a job from a top-level record.\n\n"
+        "THE PERSON BEHIND A LOGIN. When the people who sign in have a record "
+        "of their own in this application — a Member, a Customer, a Patient, "
+        "a Driver — mark exactly that one entity `account: true`. Each of its "
+        "rows IS a signed-in person: its id is their account's id, it is "
+        "created at signup together with their login, and every other record "
+        "that points at a person points at it (`patientId`, `authorId`, "
+        "`customerId` → that entity). Do not model a separate profile or user "
+        "entity beside it, and do not use the platform's own users table; its "
+        "login holds the email and password, so it never stores a password. When "
+        "only staff sign in and nobody's record is about themselves, mark "
+        "none.\n\n"
+        "TERMS TWO PEOPLE NEGOTIATE carry the negotiation in their status — "
+        "requested, countered, accepted, declined, withdrawn — and, when each "
+        "offer should be kept, an Offer entity (who proposed it, the proposed "
+        "terms, when) related to the record being agreed."
     ),
     "entity_fields": (
+        "A NUMBER WITH A FIXED RANGE SAYS SO: a rating from 1 to 5, a "
+        "percentage, a score out of 10 — whatever the request states or the "
+        "domain fixes — declares `min` and `max`. A TEXT FIELD PEOPLE READ — a "
+        "title, a name, a subject — gives six to eight realistic, distinct `examples` from "
+        "this application's own world (for a reading list, real book titles; "
+        "for a clinic, real-sounding clinic names), so the sample and demo data "
+        "the pages are reviewed and shown with speak its language.\n\n"
+        "EXAMPLES ARE READ ROW BY ROW. The first example of every field of "
+        "this entity makes the first sample record, the second the second, and "
+        "so on. Fields whose values depend on each other — a place and the "
+        "region it is in, an item and its price, a person and their role — "
+        "give the same number of examples in the same order, so every sample "
+        "record is true as a whole, and every value stays inside the scope the "
+        "requirements set (the places, kinds and ranges this application is "
+        "for, not their neighbours). A field that points at another record "
+        "gives examples too: the LABEL of the record it points at, row by row "
+        "(a place's region by the region's name), so each sample record is "
+        "linked to the one it belongs to.\n\n"
         "Author the fields of ONE entity, the one given below. Its `name` and "
         "`table` are decided and every other entity is named beside it; keep "
         "them exactly as given and return exactly one entry in `entities`, "
@@ -1018,12 +1398,44 @@ NODE_TASKS: dict[str, str] = {
         "personal or financial — downstream agents rely on that flag and "
         "cannot see this section to second-guess it. The foreign keys are "
         "the declared relationships: give each one its column here, named as "
-        "the relationship's `fromField`. Add `constraints` for uniqueness and "
-        "checks the columns cannot express on their own, for this entity only."
+        "the relationship's `fromField`. Beyond what the workflows need, give "
+        "the entity what a person LOOKS AT to decide about one of these records "
+        "— a listing's category, description, photos and what is included; a "
+        "person's display name and area — because a screen can only show what "
+        "is stored. The entity marked `account` never has a password or "
+        "credential field — the login holds it. A place people are near to each other — where a member "
+        "lives, where a listing is collected — is one field of type "
+        "`location` ({lat, lng}, kept to about 100 m), never a street address "
+        "or separate latitude/longitude columns; it is what lets a page say "
+        "\"0.4 mi away\". Add `constraints` for uniqueness and "
+        "checks the columns cannot express on their own, for this entity only. "
+        "`unique: true` on a field says no two rows of this table may EVER "
+        "hold the same value — an email, a code, a slug, a barcode. Ask of "
+        "each: could two records legitimately share this value? A reference "
+        "to the one side of a one-to-many is shared by definition, and so "
+        "are counts, amounts, dates, statuses and names people choose; "
+        "\"one per pair\" is a `unique` constraint over both columns, not a "
+        "flag on either. "
+        "A picture a person uploads is a field of `type: \"image\"`. When the "
+        "application finds these records by what they look like or mean — "
+        "search by photo, \"find similar\", \"show me ones like this\" — add a "
+        "field `{\"name\": \"photoEmbedding\", \"type\": \"vector\", "
+        "\"embedding\": {\"of\": \"photo\"}}` whose `of` names the image or "
+        "text field it is taken of; the platform computes it, so it is never "
+        "required and never asked of a person."
     ),
     "ux_architecture": (
         "Organise the application into modules and a navigation tree. Every list "
-        "and dashboard page must be reachable from navigation."
+        "and dashboard page must be reachable from navigation." + "\n\n"
+        "HOW A PHONE GETS AROUND. Set `navigation.mobile`: `tabs` for a "
+        "mobile-first product — then mark with `tab: true` the three to five "
+        "destinations people open every visit, which become its bottom tab "
+        "bar — or `drawer` when phones are occasional and the menu can sit "
+        "behind a hamburger. A destination that is a filtered view of a page "
+        "(\"My listings\" on the listings page) names that page and the view's "
+        "key in `view`, so it is its own address. Give every navigation node an `icon`: the "
+        "lucide-react name (kebab-case) that depicts that destination in this "
+        "product."
     ),
     "page_contracts": (
         "Decide the page set, feature by feature, from the slots below: fill "
@@ -1037,7 +1449,30 @@ NODE_TASKS: dict[str, str] = {
         "beyond the set is dropped. A page earns its route when it has a "
         "different job, a different primary entity, or a different audience; "
         "a different filter over the same list is a view the contract will "
-        "declare, not a page."
+        "declare, not a page.\n\n"
+        # THE PATTERN A CALCULATOR HAD TO LIE ABOUT. Every other value in the
+        # enum names a way of showing, entering or arranging RECORDS, so a
+        # self-contained tool took `dashboard` — the least-bad option for one
+        # screen at "/" — and the dashboard floor then demanded three KPI
+        # tiles, a chart and a recent-activity surface it had no records for.
+        # Every composition was refused, and the page author bolted a chart
+        # bound to {{resultHistory}} and a feed bound to {{keystrokeLog}} onto
+        # a keypad to get past it. Naming the value in the enum is not enough;
+        # the agent has to be told when it is the right one.
+        "`tool` is the pattern for a screen that is NOT about the "
+        "application's records: a calculator, a converter, a scratch pad, "
+        "anything whose values live on the screen while someone works and are "
+        "not kept afterwards. Give it no `data.primaryEntity` — there is no "
+        "entity, and inventing one to hold a value nobody wants stored is the "
+        "mistake this value exists to prevent. Choose it on what the screen is "
+        "FOR, never on where it sits: a tool is still a tool at \"/\", and "
+        "`dashboard` means a summary of records someone signs in to read.\n\n"
+        "SIGNING IN IS NOT YOURS TO DECLARE. `/login` and `/signup` are added "
+        "for every application with a sign-in; do not declare them, and do "
+        "not declare a public \"register\" or \"create profile\" page for the "
+        "entity that is the person behind a login (`account: true`) — that "
+        "person's record is created at signup, with their account. A page "
+        "where a signed-in person EDITS their own record is still yours."
     ),
     "page_details": (
         "Write the Page Contracts for the pages of ONE feature, the pages given "
@@ -1093,7 +1528,148 @@ NODE_TASKS: dict[str, str] = {
         "to go, it is a page.\n\n"
         "Fewer, richer pages are the goal. Every page costs its own design pass, "
         "and a navigation with twenty-nine entries is harder to use than one with "
-        "twenty."
+        "twenty.\n\n"
+        "SAY WHAT EACH PAGE SAYS, in `content`. The tasks say what a reader does "
+        "here; the content says what they are shown to do it — the facts they "
+        "weigh, in the order they weigh them. Think as the product's best UX "
+        "designer: ask what the reader is deciding on this page and what they "
+        "would weigh — for a listing, what it is, what comes with it and who "
+        "offers it; for a patient's chart, the latest results and what changed; "
+        "for a job candidate, experience against the role and where they are in "
+        "the process; and what happens if something goes wrong. For each fact "
+        "give a `label`, the reader's "
+        "question it `answers`, a `prominence` (`lead` for the one thing the "
+        "page leads with, `key`, `supporting`, `reassurance` for what sits "
+        "beside the main action) and its `source`:\n"
+        "- `field`: a field of the page's record (`field`), or of `entity`. If "
+        "the entity does not have the field a reader needs — a listing with no "
+        "description, no category, nothing about what is included — propose it "
+        "in `newField` ({type, description, enumValues for an enum}); it is "
+        "added to the data model before any form is written, so the form that "
+        "creates the record asks for it.\n"
+        "- `related`: the record the page's record points at through its "
+        "foreign key `via` (`entity`, and the `field` shown — the owner's name).\n"
+        "- `reverse`: the record that points AT the page's record, when the "
+        "link is stored on the other side — the row of `entity` whose foreign "
+        "key `via` is the page's record, narrowed by `where`, the latest by "
+        "`sort` (default createdAt), shown by `field`; or, with `then` {via, "
+        "entity, field}, a field of the record that row points at. A member's "
+        "current membership tier: Membership `via` memberId, `where` status "
+        "active, `then` {via tierId, entity Tier, field name}.\n"
+        "- `count` / `total`: rows of `entity` whose foreign key `via` points at "
+        "the page's record — or, with `of`, at the record it points at (on an "
+        "order page, the customer's past orders: Order rows `via` customerId "
+        "`of` customerId) — narrowed by `where`; a "
+        "total adds `fn` and a numeric `field`. Leave `via` out to count every "
+        "row that matches `where` — an overview's open tickets belong to no "
+        "one record. A `where` key may reach through a foreign key of "
+        "`entity` as `fk.field` — an order's items that are out of stock: "
+        "OrderItem `via` orderId, `where` {\"productId.stock\": 0}.\n"
+        "- `distance`: how far the reader is from the record — its `location` "
+        "`field`, or through `via` the location of the record it points at "
+        "(the provider's area for a listing). Never the coordinates themselves.\n"
+        "- `process`: what a rule or a workflow means for the reader, `about` "
+        "which — the rule or the workflow's steps, in the reader's terms "
+        "(what is checked before approval, what happens after a complaint is "
+        "raised).\n"
+        "Choose, do not list: a page's content is what the reader weighs, "
+        "usually five to ten facts — a record page is not every field of the "
+        "record, and the rest stays one click away. "
+        "A list page's content is what each row shows (a name and the facts "
+        "that let a reader pick one — never an id). A form's content is the "
+        "reassurance around it. Only what the application actually keeps or "
+        "decides: never invent a figure, a score or a term the description "
+        "and the data model do not have, and nothing the business rules forbid."
+    ),
+    "analytics": (
+        "Design the analytics of this application: the KPIs, charts and "
+        "breakdowns each page carries, written as `widgets`. Every page and "
+        "every entity's fields are already decided; you attach numbers to the "
+        "pages whose users need them and to no others.\n\n"
+        "Decide page by page, from what the page is for and who uses it. A "
+        "dashboard or overview is mostly analytics: lead with three to five "
+        "KPIs (`kind: metric`) that answer how things stand, then the charts "
+        "that explain them — a trend over time, a breakdown by status or "
+        "type, a ranking. A list page may carry a small summary strip (two to "
+        "four metrics over the same records). A record page may carry the "
+        "record's own history — a customer's orders by month — which the page "
+        "narrows to the record. A form, a wizard, a settings page or a tool "
+        "carries none. Every widget serves a requirement or a persona's goal; "
+        "never add a chart to fill space.\n\n"
+        "A DASHBOARD IS RICH, AND EVERYTHING ON IT IS ABOUT THIS APPLICATION. "
+        "Its widgets answer the questions its persona brings to it (the page's "
+        "purpose and primary tasks say which; the requirements and objectives "
+        "say why), in this order: three to five metrics that say how things "
+        "stand — each with `timeField` set to its entity's natural date where "
+        "one exists, so the page's date range narrows it and it shows its "
+        "change against the period before; then at least three charts of at "
+        "least two different marks: the trend over time (a `bucket` by week "
+        "or month, line or area), the breakdown by the status or type that "
+        "matters (donut or bar), the ranking of who or what leads (a "
+        "horizontal bar, `sort` and `limit`) — and, where the domain has "
+        "them, the stages records move through (funnel), the busy hours "
+        "(heatmap), the split by a second dimension (stacked bar). Name in "
+        "`requirements` the requirement each widget answers — a widget that "
+        "answers none does not belong — and write a `description` a reader "
+        "of this product would recognise. Never a generic “total records”: "
+        "the count of the thing this product is about, in its own words.\n\n"
+        "A PAGE FOR THE PRODUCT'S CUSTOMERS SHOWS THE PRODUCT, NOT NUMBERS "
+        "ABOUT IT. A public page, or one only the role people sign up as opens "
+        "— a menu, a shop window, a booking screen, a person's own home — "
+        "carries no KPI tiles and no charts unless a requirement asks that "
+        "person to see a number (their own spending, their own progress); "
+        "numbers about the business belong to the staff who run it.\n\n"
+        "CHARTS SHOW UP ON EVERY RELEVANT STAFF PAGE — the contract refuses a reply "
+        "that leaves one bare. Every staff `dashboard` page carries at least three "
+        "`kind: chart` widgets of at least two marks beside its metrics, one "
+        "of them over time when the data has a date. Every `entity_list`, "
+        "`master_detail` or `approval_inbox` page whose entity has a status "
+        "or type (an enum), a date, an amount or a foreign key carries at "
+        "least one chart of what it lists: the breakdown by that status or "
+        "type, the trend over that date, the total by that amount. A record "
+        "page whose entity has dated records pointing at it carries that "
+        "history. The page writer draws every widget you declare, so a page "
+        "you leave bare stays bare.\n\n"
+        "Every widget reads a `query` data source: measures (count, "
+        "count_distinct, sum, avg, min, max — each with a `key` that names the "
+        "number in each row, and a human `label`) by at most two dimensions "
+        "(the axis, then the split). Only columns the entity declares: `sum` "
+        "and `avg` over numeric fields, a `bucket` (day/week/month/quarter/"
+        "year) only on a date field, a dimension on a field with a small set "
+        "of values (an enum, a status, a foreign key), a bucketed date, or a "
+        "number grouped into `ranges` — never on a free-text field, an id of "
+        "the entity itself, or a raw number with many values. A number "
+        "people think of in groups (age, price, score, duration) is a "
+        "dimension with `ranges`: ordered bands `{label, from, to}` where "
+        "`from` ≤ value < `to` and an open end is left out — age groups are "
+        "`[{label: \"Under 18\", to: 18}, {label: \"18–30\", from: 18, to: "
+        "31}, …, {label: \"61+\", from: 61}]`; bands do not overlap. A metric "
+        "has no dimension; set `timeField` to the entity's natural date so the "
+        "page's date filter narrows it. `filter` holds literal equality values "
+        "(`status: \"OPEN\"`); whose rows a reader sees is already enforced by "
+        "the security rules — do not filter by user.\n\n"
+        "Draw each chart by the job its data does, in `chart.mark`: change over "
+        "time → line (area when the total matters; bar for few periods); "
+        "comparing categories → bar (`horizontal` for long names or a "
+        "ranking, with `sort` and a `limit` for top N); part of a whole with "
+        "up to six parts → donut; ordered stages a record moves through → "
+        "funnel; two measures against each other → scatter (one dimension, two "
+        "or three measures); intensity across two categories, such as weekday "
+        "by hour → heatmap (two dimensions, one measure); a hierarchy of "
+        "shares → treemap, or sunburst when the rings read better; who "
+        "connects to whom, such as referrals from one department to another "
+        "→ graph (two dimensions — where a link starts and where it ends — "
+        "one measure); a number per country → map (one dimension holding "
+        "the country's name or ISO code, one measure); a profile over "
+        "several axes → radar. A split "
+        "dimension on a bar or area may be `stacked`. Never put two measures "
+        "of different scale on one chart — that is two widgets.\n\n"
+        "`unit` says how the number reads: currency for money, percent only "
+        "over an average of a 0–1 ratio column, duration for seconds. `size` "
+        "is the share of the row it takes (sm a quarter — metrics; md a half; "
+        "lg two thirds; full the whole row), and `order` its position on the "
+        "page, metrics first. Give each a one-sentence `description` of what "
+        "the reader learns from it."
     ),
     "apis": (
         "Define the endpoints the pages and workflows need. Every state-changing "
@@ -1101,6 +1677,26 @@ NODE_TASKS: dict[str, str] = {
         "hole."
     ),
     "workflows": (
+        # A CALCULATOR GOT FIVE. `Calculate`, `ClearCalculator`, `EnterDigit`,
+        # `EnterDecimalPoint`, `SetOperator` — one per key — each a server
+        # process posting to an endpoint, against a table the run had already
+        # been told should not exist. Authoring their step graphs took 212
+        # seconds, declaring them 59 more, and the page then wired its keys to
+        # them, so every press was a round trip that wrote to a row nothing
+        # ever created.
+        #
+        # None of it was this agent's mistake: it was asked what processes the
+        # requirements describe, and "clear the display" is one. What it was
+        # never told is that a process here means the SERVER doing something,
+        # and that a screen changing its own values is not that.
+        "SOME APPLICATIONS RUN NO SERVER PROCESS AT ALL, and then this section "
+        "is empty. A workflow reads or writes the application's records; if "
+        "the data model holds no entities, there is nothing for one to act on "
+        "and `workflows: []` is the correct and complete answer. A screen that "
+        "works something out from what is on it — a calculator's keys, a "
+        "converter's fields — does that in the browser through the page's own "
+        "`clientState`, and needs no workflow, no endpoint and no table. Do "
+        "not declare one per button.\n\n"
         "Declare the business processes as workflows: for each, its `name`, "
         "`purpose`, `trigger`, the page that launches it (`launchedFrom`, "
         "required for a manual trigger) and its `inputs`. DO NOT write "
@@ -1120,7 +1716,21 @@ NODE_TASKS: dict[str, str] = {
         "field a step will later read (`{{title}}`) must be declared here as "
         "a `field` input, and a workflow acting on a record must declare the "
         "record; the step author cannot add inputs the pages were not told "
-        "about."
+        "about.\n\n"
+        "EVERY SCREEN THAT CHANGES A RECORD HAS ITS WORKFLOW. Read the pages: "
+        "one that edits a record, one that marks it (fulfilled, approved, "
+        "cancelled), one that deletes it and one that saves something for later "
+        "each needs a workflow doing exactly that, launched from that page. A "
+        "create workflow does not edit, and a record whose state a screen moves "
+        "needs a field holding that state.\n\n"
+        "AGREEING TERMS IS A CONVERSATION OF OFFERS. When two people agree "
+        "something through the application — the dates and terms of a loan, a "
+        "price, a schedule — model each move as its own workflow, not one "
+        "approve/decline: the request, a counter-offer that changes the terms "
+        "and sets the record to a `countered` state, accepting (which locks "
+        "the terms), declining, and withdrawing. Each is launched from the "
+        "record's page by the party whose turn it is. Nothing loops: the "
+        "record's state says whose move it is."
     ),
     "workflow_steps": (
         "Author the steps of ONE workflow, the one given below. Its identity "
@@ -1138,9 +1748,55 @@ NODE_TASKS: dict[str, str] = {
         "step missing a required key is refused. Connect steps with `next` "
         "(a branching node's first target is the then-branch, its second the "
         "else-branch); the workflow's `trigger` is the start, and an `end` "
-        "step is the terminal. Any step that mutates an entity must name a "
-        "real one.\n\n"
+        "step is the terminal. Where a check refuses the input, its branch "
+        "ends on an `end` with `config.refused: true` and `config.message` — "
+        "the sentence the person is shown, saying what to correct — and every "
+        "other end says `config.refused: false`; a refused run is reported "
+        "to the person as a failure, never as the success message. Any step "
+        "that mutates an entity must name a real one.\n\n"
+        "A `custom` or `transform` step's `code` is ONE FEEL formula the engine "
+        "evaluates, never instructions in words. Work you would describe in "
+        "words — write a search query, read fields out of pages, judge how well "
+        "a listing matches — is an `ai_generate` or `ai_extract` step. Many records "
+        "at once — every listing in a page of search results — is an `ai_extract` "
+        "with `aiExtractMany: true`, which returns a list; saving them is one "
+        "`db_insert` whose `values` carry that whole list (`\"rows\": "
+        "\"{{extract_listings.output}}\"`) beside the values every row shares, "
+        "written one row per item, so its `aiExtractFields` must include each "
+        "required field the insert does not give. When each item needs several "
+        "records that point at each other — a merchant, then a product that "
+        "names that merchant, then a result that names both — it is one "
+        "`for_each` action: `items` the list, `as` the item's name, and `steps`, "
+        "a list of `{key, config}` actions run in order for every item, each "
+        "reading the item as `{{<as>.field}}` and an earlier inner step's record "
+        "as `{{<key>.id}}`. A record that may already exist (a merchant met on "
+        "two listings) is a `db_insert` with `findBy: [the columns that identify "
+        "it]`, which returns the existing row instead of inserting a second. An "
+        "item that cannot be saved — a search result with no price where the "
+        "record requires one — is skipped with the loop's `where`, a FEEL "
+        "condition over the item (`listing.price != null`), not left to fail. A "
+        "required field filled from something that may be missing — the brand "
+        "a photo does not show — gets a fallback in its template: "
+        "`{{analyze_image.brand ?? \"Unbranded\"}}` (each side a value or a literal). "
+        "A record the workflow creates is what its pages show, so fill every "
+        "field of its entity the workflow holds a value for — a picture read "
+        "from a source or the one the person gave included — not only the "
+        "required ones; `??` picks the first source that has it "
+        "(`{{extract_listings.output[0].images ?? inputImage}}`). A field each item "
+        "brings itself (its currency, its unit) is read from the item, never written as "
+        "one literal for all of them.\n\n"
         + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
+        + "\n\nTELL THE OTHER PERSON. When a step changes something another person "
+        "must act on or would want to know — a request arrives for them, their "
+        "request is approved or declined, a case is opened against them, a job "
+        "they asked for is done — add an `action` step with `actionType: "
+        "send_notification`, a short `title`, a `message` in the domain's words "
+        "and `recipient`: that person's user id. Find it with a `db_query` "
+        "first when it lives on another record (`{{find_order.customerId}}` — a "
+        "query's fields are read from its first row); never `$user.id`, which "
+        "is the person acting. A whole team is `recipientRole`. Where the "
+        "application has an email integration, a `send_email` step beside it "
+        "reaches them away from the app."
     ),
     "business_rules": (
         "State the rules that constrain the application, each as a sentence a "
@@ -1157,7 +1813,19 @@ NODE_TASKS: dict[str, str] = {
         "actions — set_visibility, set_required, set_readonly, set_options, "
         "set_field, show_error — each naming a field the entity has. Such a "
         "rule fires on the form as a person types; a rule with only a "
-        "statement constrains people, not forms."
+        "statement constrains people, not forms.\n\n"
+        "A person must have DONE SOMETHING BEFORE they may do something else — "
+        "verified their identity before selling or buying, been approved "
+        "before booking, paid before downloading. That is `kind: "
+        "\"prerequisite\"`, never a statement: a statement is prose nothing "
+        "enforces, and anyone could do it anyway. Give `gates` (the "
+        "workflows it blocks, by id), `requires` (the record that satisfies "
+        "it: `entity`, `account` — the field of that entity holding the "
+        "person's account id — and `where`, the values it must have, such as "
+        "`{\"status\": \"approved\"}`), `message` (what the person is told, "
+        "saying what to do first) and `page` (the page where they do it; a "
+        "new account is sent there first). Every gated workflow then starts "
+        "by checking it and refuses with the message when it is not met."
     ),
     "security": (
         "Define roles and the permissions that guard entities and endpoints. "
@@ -1171,11 +1839,11 @@ NODE_TASKS: dict[str, str] = {
         "session carries that column and the engine compares against it. "
         "Where authorisation really "
         "is by role and every holder sees every row, write that as a prose rule "
-        "so the absence of a scoping object reads as a decision."
-    ),
-    "testing": (
-        "Write the tests that verify the requirements. Every approved requirement "
-        "needs at least one."
+        "so the absence of a scoping object reads as a decision.\n\n"
+        "When people create their own accounts, set `signupRole` to the role "
+        "they get — the role whose pages and workflows a new self-registered "
+        "person uses. Without it a new person holds no role the application "
+        "names, and every workflow gated by role refuses them."
     ),
 }
 
@@ -1346,22 +2014,6 @@ that leaves a required group empty is refused with the group named.
 """
 
 
-COMPOSITION_ADDENDUM = """
-
-## The components that exist
-
-Name components from this list only — a section that names one that is not \
-here is rejected. Names are all you give; the per-page author is shown the \
-props and composes against them.
-
-Sketch **every** page listed below, each exactly once. A page with NO PRIMARY \
-ENTITY still gets a sketch — an entry redirect or a sign-in page has a layout \
-too, however small.
-
-{page_facts}
-{catalog}
-"""
-
 CONVENTIONS_ADDENDUM = """
 
 ## The application as a whole
@@ -1418,7 +2070,7 @@ def _conventions_addendum(doc: dict) -> str:
 def build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
     subject: str = "", feedback: str = "", references: Sequence[Path] = (),
-    output_dir: Any = None, brief: str = "",
+    output_dir: Any = None, brief: str = "", agent: str = "",
 ) -> tuple[str, str]:
     """Build (system, user) for a node.
 
@@ -1436,54 +2088,29 @@ def build_prompt(
     ambiguous about its own status, and the expensive reading — a screenshot of
     the system being replaced taken as a specification of the one being built —
     is the one a model reaches for unprompted.
+
+    ``agent`` is who is being asked, when that is not the node's own owner:
+    Smith recomposing a screen asks `a2ui_pages` for a `page_layouts`
+    subject, and the build lays pages out without a model at all.
     """
     spec = DAG[node]
-    cap = capability_for(spec.agent)
+    agent = agent or spec.agent
+    cap = capability_for(agent)
     system = SYSTEM.format(
-        agent=spec.agent,
+        agent=agent,
         writes="\n".join(f"  - {s}" for s in sorted(cap.writes)) or "  (none)",
         reply_rules=(DATA_MODEL_REPLY_RULES if node in SCHEMA_BY_NODE
                      else ENVELOPE_RULES),
         task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns."),
     )
     if inline_shapes:
-        shapes = writable_shapes(spec.agent)
+        shapes = writable_shapes(agent)
         if shapes:
             system += SHAPE_ADDENDUM.format(
                 shapes=json.dumps(shapes, indent=2)[:12000]
             )
     system += reference_addendum(references, node)
-    if spec.agent == "a2ui_composition":
-        from services.blueprint.page_planner import (
-            app_brief, catalog_index, load_catalog, pattern_page_facts,
-        )
-
-        system += COMPOSITION_ADDENDUM.format(
-            catalog=catalog_index(load_catalog()),
-            page_facts=pattern_page_facts(doc) or "(no pages declare a pattern)",
-        )
-        if inline_schema:
-            system += SCHEMA_ADDENDUM.format(
-                schema=json.dumps(PROPOSAL_SCHEMA, indent=2)
-            )
-        user = (
-            "Compose this application as a whole. You are given the product, "
-            "its requirements, its navigation, its roles and every page's "
-            "contract. Return one `composition` artifact with natural_key "
-            "\"composition\" whose `pages` holds one sketch per page, keyed by "
-            "the page's id.\n\n```json\n"
-            + json.dumps(app_brief(doc), indent=2, sort_keys=True)
-            + "\n```"
-        )
-        if feedback:
-            user += (
-                "\n\nYour previous attempt was rejected:\n\n" + feedback +
-                "\n\nFix exactly those. Every page must be sketched once and "
-                "every component name must be one from the list above."
-            )
-        return system, user
-
-    if spec.agent == "a2ui_pages":
+    if agent == "a2ui_pages":
         from services.blueprint.page_planner import (
             catalog_digest, load_catalog, page_brief,
         )
@@ -1573,6 +2200,48 @@ def build_prompt(
             "the control needs, the control navigates instead or is left "
             "out; there is no workflow this application runs that is not in "
             "that list.\n\n"
+            # THE SCREEN'S OWN VALUES. Every action this prompt described above
+            # reaches the server. Asked for a calculator that stores nothing,
+            # the composer had no word for a number that lives on the screen —
+            # so it made the display a column, every key a workflow, and
+            # shipped a page where no key did anything.
+            #
+            # Stated for every page, not only the tool-shaped ones: the hybrid
+            # is the common case (a form that totals as you type and then
+            # submits the total), and a page cannot be told after the fact that
+            # it was allowed to compute.
+            "A value that lives only on this screen — a running total, a "
+            "calculator's display, a unit conversion, a filter someone is "
+            "still typing — is declared in `clientState`: a `name`, a `type` "
+            "of string, number or boolean, and what it starts at. Read it "
+            "anywhere a binding goes, as `{{state.<name>}}`. A control "
+            "changes it with `clientAction`: `{\"kind\": \"set\", "
+            "\"target\": \"display\", \"value\": \"0\"}` writes a "
+            "literal, and `{\"kind\": \"compute\", \"target\": "
+            "\"display\", \"formula\": \"display + '7'\"}` evaluates "
+            "over the current values and writes the result. Nothing declared "
+            "here is stored, sent anywhere or kept after the page closes.\n\n"
+            # MEASURED ON A LIVE RUN. The composer wrote the list before the
+            # contract allowed one, and every attempt at the page was refused:
+            # a Clear key setting the display, the error flag and the message
+            # is three changes and one press, and there was no honest way to
+            # say it. The instinct was right and the contract was too narrow.
+            "One press may change several values: give `clientAction` a LIST "
+            "of actions and they are applied together. Every one of them reads "
+            "the state as it was BEFORE the press, so their order means "
+            "nothing and none can use another's result. Write each value at "
+            "most once in a press, and do not try to chain them.\n\n"
+            "`clientState` and `dataSources` are independent. A screen with "
+            "only data sources is the ordinary server-backed page. A screen "
+            "with only client state is a self-contained tool, and it needs no "
+            "entity, no workflow and no table — do not invent one to hold a "
+            "value the brief says is not kept. A screen with both is the "
+            "hybrid: the same Button may carry a `clientAction` that works out "
+            "a total AND a `workflow` that submits it, and both run, the "
+            "client action first.\n\n"
+            "Declare every value a control writes to, bind every value you "
+            "declare somewhere a person can see it, and do not declare state "
+            "a page does not need — most pages need none.\n\n"
             + sketch_note +
             "Return one `pageLayouts` artifact whose `page` is "
             f"{subject!r}.\n\n```json\n"
@@ -1619,7 +2288,7 @@ def build_prompt(
         slots = workflow_slots(doc)
         user = (
             "Here is the Blueprint.\n\n```json\n"
-            + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
+            + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
             + "\n```"
         )
         if slots:
@@ -1656,7 +2325,7 @@ def build_prompt(
             page_slot_prompt(doc) + "\n\n```json\n"
             + json.dumps(page_slots(doc), indent=2) + "\n```\n\n"
             "Here is the Blueprint the features were derived from.\n\n```json\n"
-            + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
+            + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
             + "\n```"
         )
         # NAME THE FRAME A PAGE IS. `pages[].figmaFrame` has been in the
@@ -1701,6 +2370,8 @@ def build_prompt(
                 "not a failure \u2014 the design does not show them. Never guess "
                 "an id, and never give one frame to two pages."
             )
+        if brief:
+            user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
         if feedback:
             user += "\n\nYour previous attempt was rejected:\n\n" + feedback
         return system, user
@@ -1709,7 +2380,7 @@ def build_prompt(
         system += SCHEMA_ADDENDUM.format(
             schema=json.dumps(PROPOSAL_SCHEMA, indent=2)
         )
-    if spec.agent == "figma_intelligence" and subject:
+    if agent == "figma_intelligence" and subject:
         # §48 — the design is evidence, and the brief is where that bound is
         # set. The agent sees the screens' vocabulary and the extraction's
         # gaps; it does not see the generated TSX, which is layout noise that
@@ -1750,7 +2421,7 @@ def build_prompt(
     user = (
         "Here is the Blueprint as it stands. Propose the artifacts your stage "
         "owns.\n\n```json\n"
-        + json.dumps(context_for(doc, spec.agent), indent=2, sort_keys=True)
+        + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
         + "\n```"
     )
     # WHAT THE USER HANDED OVER. A specification uploaded instead of typed is
@@ -1759,6 +2430,13 @@ def build_prompt(
     # on every run — the first definition, the clarified one, the build.
     from services.blueprint import documents as _documents
     user += _documents.addendum(output_dir, node)
+    # WHAT THE COMPANY LOOKS LIKE AND SOUNDS LIKE, when the owner chose to
+    # build this application in their organisation's design language. Adopted
+    # beside the Blueprint by the same route a supplied document is, and
+    # empty for every node that cannot act on it — the table in
+    # `brand_language.READ_FOR` decides, not a condition here.
+    from services.blueprint import brand_language as _brand
+    user += _brand.addendum(output_dir, node, doc)
     # EVERY BRANCH ABOVE CARRIES THE REJECTION; THIS ONE DROPPED IT. The
     # specialised branches return early having appended `feedback`, so the
     # nodes with no branch of their own — data_model, business_rules, apis,
@@ -1773,7 +2451,7 @@ def build_prompt(
     # usually follows and occasionally does not, and one `references: ""`
     # fails the whole contract. Told what was rejected, the author fixes its
     # own field; told nothing, it re-emits it.
-    if spec.agent == "solution_architecture":
+    if agent == "solution_architecture":
         # THE DESIGN DRAWS THE NAVIGATION. Its sidebar is the same subtree on
         # every screen, and `store.connect` records what it says. This agent
         # is the one author of `navigation.tree`, and it could not see a
@@ -1825,6 +2503,11 @@ def build_prompt(
                 "absence is visible rather than silent."
             )
 
+    # SMITH'S BRIEF, ON THE NODES WITH NO BRANCH OF THEIR OWN. The branches
+    # above append it; this one did not, so a requirements redraft asked for
+    # at the review gate re-ran the agent with nothing saying what to change.
+    if brief:
+        user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
     if feedback:
         user += "\n\nYour previous attempt was rejected:\n\n" + feedback
     return system, user
@@ -1897,6 +2580,15 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                             "another. Names a field below."
                         ),
                     },
+                    "account": {
+                        "type": "boolean",
+                        "description": (
+                            "True on the ONE entity that is the person behind a login "
+                            "(a Member, a Customer, a Patient): each row IS a signed-in "
+                            "person and is created at signup with their account. Omit "
+                            "it everywhere else."
+                        ),
+                    },
                     "fields": {
                         "type": "array",
                         "items": {
@@ -1921,6 +2613,29 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                 "enumValues": {
                                     "type": "array",
                                     "items": {"type": "string"},
+                                },
+                                "min": {"type": "number", "description": "The lowest value a bounded number may take (a rating's 1)."},
+                                "max": {"type": "number", "description": "The highest value a bounded number may take (a rating's 5)."},
+                                # NO maxItems: the API's structured output refuses it on
+                                # an array ("property 'maxItems' is not supported") and
+                                # every build failed at data_model (UAT, 2026-09-27 04:38).
+                                # The contract bounds it; the description asks for 2-4.
+                                "examples": {
+                                    "type": "array", "items": {"type": "string"},
+                                    "description": ("Six to eight realistic, distinct values of a text field people read "
+                                                    "(a title, a name) in this application's own world. Example k of "
+                                                    "every field together is sample record k."),
+                                },
+                                "embedding": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "required": ["of"],
+                                    "description": (
+                                        "ONLY on a `type: \"vector\"` field — omit it on "
+                                        "every other field: the image or text field on "
+                                        "this entity it embeds. The platform fills it."
+                                    ),
+                                    "properties": {"of": {"type": "string"}},
                                 },
                             },
                         },
@@ -1989,12 +2704,21 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
         "issues": {"type": "array", "items": {"type": "string"}},
         "change_requests": {
             "type": "array",
+            "description": (
+                "§30 — what you return instead of reaching outside your own "
+                "section. TO ASK FOR AN ARTIFACT TO BE RETIRED, set `retire` "
+                "to its id: that is acted on, and every stage after you sees "
+                "it gone. `entity_fields` runs against ONE entity and is the "
+                "stage that discovers a table should not exist — say so here "
+                "rather than authoring its columns."
+            ),
             "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "required": ["section", "reason"],
                 "properties": {"section": {"type": "string"},
-                               "reason": {"type": "string"}},
+                               "reason": {"type": "string"},
+                               "retire": {"type": "string"}},
             },
         },
     },
@@ -2035,25 +2759,31 @@ def _workflow_steps_prompt(doc: dict, system: str, subject: str,
     from services.catalog import workflow_nodes
 
     system += WORKFLOW_CATALOG_ADDENDUM.format(catalog=workflow_nodes().digest())
+    from services.blueprint.mcp_catalog import load as _mcp_servers, prompt_block
+    system += prompt_block(_mcp_servers(output_dir))
 
     row = declared_workflow(doc, subject) or {"id": subject}
     context = context_for(doc, "workflow")
-    context["workflows"] = [row]
+    # Written by this node as it runs, so never part of the shared prefix.
+    context.pop("workflows", None)
     # The requirements this workflow answers, when it says which; the whole
     # section otherwise, which is what the declaration was written from.
+    requirements = context.pop("requirements", None) or []
     wanted = set(row.get("requirements") or [])
     if wanted:
-        context["requirements"] = [
-            r for r in context.get("requirements") or []
-            if isinstance(r, dict) and r.get("id") in wanted
-        ]
+        requirements = [r for r in requirements
+                        if isinstance(r, dict) and r.get("id") in wanted]
     natural_key = _declared_key(output_dir, subject) or str(row.get("name") or subject)
     user = (
-        f"Author the steps of workflow {subject} ({row.get('name', '')!s}). "
-        f"Its proposal's `natural_key` is exactly: {natural_key}\n\n"
-        "Here is the workflow as declared, and the Blueprint slice its steps "
-        "may name.\n\n```json\n"
+        "The Blueprint slice a workflow's steps may name.\n\n```json\n"
         + json.dumps(context, indent=2, sort_keys=True)
+        + "\n```" + CACHE_BREAK
+        + f"Author the steps of workflow {subject} ({row.get('name', '')!s}). "
+        f"Its proposal's `natural_key` is exactly: {natural_key}\n\n"
+        "Here is the workflow as declared, and the requirements it answers."
+        "\n\n```json\n"
+        + json.dumps({"workflows": [row], "requirements": requirements},
+                     indent=2, sort_keys=True)
         + "\n```"
     )
     if brief:
@@ -2117,23 +2847,27 @@ def _entity_fields_prompt(doc: dict, system: str, subject: str,
         if isinstance(r, dict) and subject in (r.get("from"), r.get("to"))
     ]
     context = context_for(doc, "data_model")
-    context["data"] = {"entities": others, "relationships": touching,
-                       "constraints": []}
+    requirements = context.pop("requirements", None) or []
     wanted = set(row.get("requirements") or [])
     if wanted:
-        context["requirements"] = [
-            r for r in context.get("requirements") or []
-            if isinstance(r, dict) and r.get("id") in wanted
-        ]
+        requirements = [r for r in requirements
+                        if isinstance(r, dict) and r.get("id") in wanted]
+    # Shared by every entity first; this entity's own part after the break.
+    context["data"] = {"entities": others}
+    own = {"data": {"relationships": touching, "constraints": []},
+           "requirements": requirements}
     user = (
-        f"Author the fields of entity {subject} ({row.get('name', '')!s}, "
+        "Every entity by name, and the Blueprint slice a field may name.\n\n```json\n"
+        + json.dumps(context, indent=2, sort_keys=True)
+        + "\n```" + CACHE_BREAK
+        + f"Author the fields of entity {subject} ({row.get('name', '')!s}, "
         f"table {row.get('table', '')!s}). Return one entry in `entities`, "
         f"named exactly {row.get('name', '')!s}.\n\n"
         "Here is the entity as declared.\n\n```json\n"
         + json.dumps(row, indent=2, sort_keys=True)
-        + "\n```\n\nEvery entity by name, the relationships that touch this "
-        "one, and the Blueprint slice a field may name.\n\n```json\n"
-        + json.dumps(context, indent=2, sort_keys=True)
+        + "\n```\n\nThe relationships that touch this entity, and the "
+        "requirements it answers.\n\n```json\n"
+        + json.dumps(own, indent=2, sort_keys=True)
         + "\n```"
     )
     if brief:
@@ -2193,6 +2927,23 @@ def pin_entity_identity(svc: Any, entity_id: str, result: AgentResult) -> None:
         body["name"] = row.get("name")
         if row.get("table"):
             body["table"] = row["table"]
+        # Whether this is the person behind a login is the entity set's
+        # decision; the field author may not move it (an omitted or false
+        # `account` here would clear it on upsert).
+        body.pop("account", None)
+        if row.get("account"):
+            body["account"] = True
+        # `embedding` MEANS SOMETHING ONLY ON A VECTOR FIELD. The reply schema
+        # offers it on every field, and the author filled it on ordinary ones
+        # — `kycStatus: {embedding: {of: "none"}}`, `{of: ""}` on two more
+        # (0l133sp2). The empty ones failed the contract with a message about
+        # a field that should not have had the key, the retry lost confidence
+        # and was blocked, and the whole build stopped at the data model.
+        body["fields"] = [
+            ({k: v for k, v in f.items() if k != "embedding"}
+             if isinstance(f, dict) and "embedding" in f and str(f.get("type") or "").lower() != "vector" else f)
+            for f in body.get("fields") or []
+        ]
         proposal.body = body
         kept.append(proposal)
     result.proposals = kept
@@ -2254,13 +3005,19 @@ def _page_details_prompt(doc: dict, system: str, subject: str,
         or page_key(str(p.get("route") or ""))
         for p in mine
     }
+    from services.blueprint.orchestrator import PART
+
+    feature, _, part = subject.partition(PART)
+    what = f"feature {feature}" + (
+        f" (part {part}: its other pages are written beside this one)" if part else "")
     user = (
-        f"Write the contracts for feature {subject}: the {len(mine)} page(s) "
+        "The whole page set, by id — `navigatesTo` names any of these — and "
+        "the Blueprint slice a contract may name.\n\n```json\n"
+        + json.dumps(context, indent=2, sort_keys=True)
+        + "\n```" + CACHE_BREAK
+        + f"Write the contracts for {what}: the {len(mine)} page(s) "
         "below, each under the `natural_key` listed for it.\n\n```json\n"
         + json.dumps({"pages": mine, "naturalKeys": keys}, indent=2, sort_keys=True)
-        + "\n```\n\nThe whole page set, by id — `navigatesTo` names any of "
-        "these — and the Blueprint slice a contract may name.\n\n```json\n"
-        + json.dumps(context, indent=2, sort_keys=True)
         + "\n```"
     )
     if feedback:
@@ -2284,6 +3041,18 @@ def pin_page_identity(svc: Any, subject: str, result: AgentResult) -> None:
     declared = feature_pages(svc.doc, subject)
     by_id = {str(p.get("id")): p for p in declared}
     by_route = {page_key(str(p.get("route") or "")): p for p in declared}
+    # A PAGE THAT MOVED SUBJECTS IS STILL A DECLARED PAGE. Subjects are read
+    # off the document each time (`_feature_groups`: an entity's pages, or a
+    # page with no entity on its own), so a contract that ADDS its primary
+    # entity — which the content check asks for by name — moves the page
+    # into the entity's subject, and the next reply for the old subject
+    # finds nothing declared under it: /doctor was dropped and, the reply
+    # replacing what stood, retired (i3i950po, 2026-09-25). What this guard
+    # is for is a page the author invented; a page declared anywhere in the
+    # document is not that, whichever subject writes it now.
+    live = [p for p in (svc.doc.get("pages") or []) if isinstance(p, dict) and p.get("status") != "DEPRECATED"]
+    any_id = {str(p.get("id")): p for p in live}
+    any_route = {page_key(str(p.get("route") or "")): p for p in live}
     try:
         alloc = IdAllocator.load(output_dir=svc.output_dir)
     except Exception:  # noqa: BLE001 — fall back to the route, which bound it
@@ -2297,7 +3066,9 @@ def pin_page_identity(svc: Any, subject: str, result: AgentResult) -> None:
         body = dict(proposal.body or {})
         row = by_id.get(str(body.get("id") or "")) \
             or by_route.get(page_key(str(body.get("route") or ""))) \
-            or by_route.get(page_key(str(proposal.natural_key or "").removeprefix("PAGE:")))
+            or by_route.get(page_key(str(proposal.natural_key or "").removeprefix("PAGE:"))) \
+            or any_id.get(str(body.get("id") or "")) \
+            or any_route.get(page_key(str(body.get("route") or "")))
         if row is None:
             logger.warning("[page_details] %s: dropped a page outside the feature: %s",
                            subject, body.get("route") or proposal.natural_key)
@@ -2348,12 +3119,38 @@ def pin_workflow_identity(svc: Any, workflow_id: str, result: AgentResult) -> No
             continue
         proposal.natural_key = key
         body = dict(proposal.body or {})
+        authored_inputs = body.get("inputs")
         for field_name in _DECLARED_FIELDS:
             if field_name in row:
                 body[field_name] = row[field_name]
             else:
                 body.pop(field_name, None)
+        body["inputs"] = _declared_plus_added(row.get("inputs"), authored_inputs)
+        if not body["inputs"] and "inputs" not in row:
+            body.pop("inputs")
         proposal.body = body
+
+
+def _declared_plus_added(declared: Any, authored: Any) -> list:
+    """The declared inputs, untouched, plus any NEW input the step author adds.
+
+    A REFUSAL THE AUTHOR COULD NOT ANSWER. The reference check tells a step
+    author whose step reads `{{endTime}}` to "declare 'endTime' as an input".
+    It did — and this function's caller put every declared field back from
+    the declaration, `inputs` among them, so the declaration was discarded,
+    the same refusal came back, and after two the author was not asked again.
+    On UAT (2026-09-18) that left a dental app's Book Appointment and Add
+    Service workflows with no steps at all.
+
+    Declared inputs still cannot be changed or removed — pages were designed
+    against them. An input the declaration never had is added, and the page
+    checks then require a form to collect it, like any other.
+    """
+    base = [i for i in (declared or []) if isinstance(i, dict)]
+    have = {str(i.get("name")) for i in base}
+    extra = [i for i in (authored or []) if isinstance(i, dict)
+             and i.get("name") and str(i.get("name")) not in have]
+    return base + extra
 
 
 def expand_data_model(data: dict) -> list["ArtifactProposal"]:
@@ -2416,8 +3213,55 @@ def expand_data_model(data: dict) -> list["ArtifactProposal"]:
     return out
 
 
+class Truncated(ValueError):
+    """The reply ran into ``max_tokens`` mid-answer.
+
+    It parsed as "not JSON: Unterminated string" and was retried as a
+    malformed reply — the same question, the same budget, and often the same
+    cut (HippieKit page_details ENTITY-003, 2026-09-21). A reply that ran out
+    of room is not a reply that was wrong: the retry needs the room and the
+    lighter reasoning the first call lacked, and to be told it was cut off,
+    not that it was rejected. Under structured outputs a reply cannot be
+    continued from where it stopped, so this is the closest thing to it."""
+
+    def __init__(self, message: str, output_tokens: int = 0) -> None:
+        super().__init__(message)
+        self.output_tokens = output_tokens
+
+
 class MalformedEnvelope(ValueError):
     """The model's reply did not parse as the §29 envelope."""
+
+
+def _meant_to_store_nothing(node: str, data: dict) -> bool:
+    """Whether an empty data model is this reply's ANSWER rather than its
+    failure to give one.
+
+    TWO AUTHORITIES THAT DISAGREED. `data_model` is told, in its own task
+    text, that some applications store nothing — a calculator, a converter —
+    and that the right answer is then `entities: []` with the reason in
+    `assumptions`. It did exactly that on a measured run and this check
+    refused the reply as malformed, twice, so the node retried until it
+    invented a table. The instruction and the validator were describing
+    different contracts.
+
+    The distinction the check actually needs is not "did it name entities" but
+    "did it MEAN to name none". A stall produces no `entities` key and no
+    reasoning; the instructed answer produces both, because the instruction
+    asks for both. Read, not inferred.
+
+    Only for `data_model`. `entity_fields` is handed one entity and asked for
+    its columns, and "this entity has no fields" is not an answer it can mean
+    — an entity that should not exist is a `change_request`, which is the path
+    the corrections machinery already acts on.
+    """
+    if node != "data_model":
+        return False
+    declared = data.get("entities")
+    if not isinstance(declared, list) or declared:
+        return False
+    said = [str(a).strip() for a in (data.get("assumptions") or [])]
+    return any(said)
 
 
 def parse_envelope(raw: str, *, task_id: str, agent: str,
@@ -2430,7 +3274,7 @@ def parse_envelope(raw: str, *, task_id: str, agent: str,
     proposals: list[ArtifactProposal] = []
     if node in SCHEMA_BY_NODE:
         proposals = expand_data_model(data)
-        if not proposals:
+        if not proposals and not _meant_to_store_nothing(node, data):
             # A reply that parsed but named nothing is not a data model. Said
             # here rather than committed as an empty section, which is how a
             # missing `data.entities` looked like a stall for three runs.
@@ -2438,7 +3282,10 @@ def parse_envelope(raw: str, *, task_id: str, agent: str,
     for i, p in enumerate(data.get("proposals") or []):
         body_raw = p.get("body")
         try:
-            body = json.loads(body_raw) if isinstance(body_raw, str) else body_raw
+            # strict=False: a raw newline inside a string value is what a model
+            # writes in a long description, and it failed a whole restyle
+            # ("Invalid control character") twice over (UAT replay).
+            body = json.loads(body_raw, strict=False) if isinstance(body_raw, str) else body_raw
         except json.JSONDecodeError as exc:
             raise MalformedEnvelope(f"proposal {i} body was not JSON: {exc}") from exc
         if not isinstance(body, dict):
@@ -2478,9 +3325,42 @@ class RunUsage:
     its tokens intact and its dollar figure withheld — a fabricated total is
     worse than an honest gap, especially when the point of mixing providers is
     to compare what they cost.
+
+    WHOSE SPEND IT IS, AND WHAT IT WAS FOR. ``project`` and ``phase`` are
+    settled once, where the run is started and both are known, because the
+    calls themselves are not all in a position to say. The observer is the
+    case that proved it: it judges a document it was handed and has no
+    ``BlueprintService``, so it recorded ``project=""`` and every critic call
+    landed in the ledger under the literal string ``blueprint``. Summing a
+    project's rows then silently omitted the watching — 19-28% of three
+    measured builds — and the omission looked like a smaller bill rather than
+    a missing one. The alternative, matching those rows back by the times they
+    were written, is a guess: runs overlap, and a guess about money is worse
+    than no answer.
     """
 
     entries: list[dict[str, Any]] = field(default_factory=list)
+    #: The application every call on this run is spending on — its
+    #: ``application.id``. Used whenever a call site cannot say for itself.
+    project: str = ""
+    #: What this run IS to the person who owns the application: ``build``
+    #: while it is being made (defining it, building it, building it again),
+    #: ``change`` for anything asked for afterwards. Recorded per row so the
+    #: two can be told apart without reading timestamps.
+    phase: str = "build"
+
+    @classmethod
+    def for_app(cls, svc: Any, *, phase: str = "build") -> "RunUsage":
+        """A ledger that already knows whose run it is and what it is for.
+
+        The one place the application's id and the run's purpose are both in
+        hand is where the run is started, so that is where they are settled —
+        rather than at each of the dozen call sites that record a call, only
+        some of which are in a position to know either.
+        """
+        doc = getattr(svc, "doc", None) or {}
+        return cls(project=str((doc.get("application") or {}).get("id") or ""),
+                   phase=phase)
 
     def record(self, *, node: str, agent: str, usage: Usage,
                elapsed_s: float, project: str = "") -> None:
@@ -2508,12 +3388,13 @@ class RunUsage:
             from services.build_usage import record_usage
 
             record_usage(
-                project=project or "blueprint",
+                project=project or self.project or "blueprint",
                 agent=f"{node}:{agent}",
                 model=usage.model,
                 usage=usage.as_ledger_dict(),
                 duration_ms=int(elapsed_s * 1000),
                 kind="blueprint",
+                phase=self.phase,
             )
         except Exception:  # ledger is best-effort; never fail a run over it
             pass
@@ -2605,9 +3486,15 @@ EFFORT_BY_NODE: dict[str, str] = {
     # stay_high protects them because everything downstream derives from what
     # they decide. That objection was right about `data_model` too — the fix
     # there was the reply's shape, not its reasoning.
-    "database": "medium",
+    # The same argument as `database`, one level up: `data_model` names the
+    # entity and what it is for, and this authors the columns of ONE of them
+    # against that. Measured at 284s for a first call on a five-field entity —
+    # longer than `database` was before it was tuned — while the two repair
+    # calls that followed took ~60s each, because a repair carries the
+    # finding and has something concrete to do. It fans out per entity, so
+    # the ceiling is paid once per record rather than once per build.
+    "entity_fields": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
-    "testing": "medium",
     # A short list of named third parties.
     "integrations": "low",
 }
@@ -2635,6 +3522,15 @@ EFFORT_BY_NODE: dict[str, str] = {
 #: 64000 is the value `__post_init__` already uses for xhigh/max effort, so
 #: this is the established headroom rather than a new one. These nodes are
 #: above STREAM_ABOVE either way, so they were already streaming.
+#: Effort by AGENT, for the ones that are not a node: the reviewer that
+#: looks at each page as it is written (`page_look`) gives a verdict on two
+#: screenshots against a contract — not a design from nothing. Measured on
+#: one list page: `high` 42s and 3,184 output tokens, `medium` 30s and 1,929,
+#: the same score and the same five issues.
+EFFORT_BY_AGENT: dict[str, str] = {
+    "page_reviewer": "medium",
+}
+
 MAX_TOKENS_BY_NODE: dict[str, int] = {
     # Names the entities and their relationships without a field; the 64k
     # the single call needed went on fields, which `entity_fields` writes one
@@ -2642,14 +3538,77 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     "data_model": 32000,
     # Declares the page set without the contracts; the 64k the single call
     # needed went on contracts, which `page_details` writes per feature.
-    "page_contracts": 32000,
-    "database": 64000,
+    #
+    # BACK TO 64k, BECAUSE THE SLOT LIST GROWS WITH THE APPLICATION. The table
+    # above already recorded this node reaching 32,000 once. On UAT a 23-entity
+    # laboratory app offered 24 slots in a 19,570-character question, and the
+    # model reasoned through the whole 32,000 without writing a single page —
+    # twice, failing the node and skipping every node after it. Unused headroom
+    # is free; this failure cost the entire build.
+    "page_contracts": 64000,
     "security": 64000,
     # Declares thirty-odd workflows without their steps; the 64k the single
     # call needed went on step graphs, which `workflow_steps` now writes one
     # workflow at a time inside the default.
     "workflows": 32000,
+    # One page's thinking plus two whole files — a record workspace's view
+    # runs to several hundred lines — and a compile round re-sends the code.
+    # 48k ran out on a fifteen-fact record page (0l133sp2); headroom is free.
+    "page_code": 64000,
 }
+
+
+#: The budget a retry gets after a reply that was all reasoning and no answer.
+NO_ANSWER_RETRY_TOKENS = 64000
+
+
+def after_no_answer(client: Any, feedback: str) -> Any:
+    """The client for a retry of a call that thought until its budget ran
+    out and wrote nothing: less effort and more room. Asking again at the same
+    effort and budget got the same nothing (UAT twice; 0l133sp2's /rentals/[id],
+    a record page with fifteen facts and ten workflows, spent 48,000 tokens
+    reasoning). A reply CUT OFF mid-answer (`Truncated`) is the same shape
+    one step later: the budget went on reasoning and the answer did not fit
+    in what was left. Any other retry, or a client that has no effort to
+    lower, is returned as it is."""
+    import dataclasses
+
+    if not str(feedback or "").startswith(("NoAnswer", "Truncated")) \
+            or not dataclasses.is_dataclass(client) or not hasattr(client, "effort"):
+        return client
+    # ALL THE WAY DOWN, NOT ONE NOTCH. A notch was measured and is not
+    # enough: a Calculator page spent its whole budget reasoning at `high`,
+    # and the retry — at `medium` — spent the whole budget again. A reply
+    # that never starts is not improved by thinking slightly less; the cure
+    # is to write first. `low` still reasons, it just does not deliberate
+    # its way past the point of writing anything down.
+    lower = "low"
+    return dataclasses.replace(client, effort=lower,
+                               max_tokens=max(int(getattr(client, "max_tokens", 0) or 0), NO_ANSWER_RETRY_TOKENS))
+
+
+#: One notch down, never below `low`.
+_LOWER_EFFORT = {"max": "xhigh", "xhigh": "high", "high": "medium", "medium": "low", "low": "low"}
+
+
+def for_repair(client: Any, spec: Any) -> Any:
+    """The client for an observer repair: the node's own, one effort notch
+    lower.
+
+    A REPAIR IS NOT A FIRST DRAFT. It carries the findings — this entity has
+    no unique key on the pair, this workflow never stores the embedding — and
+    edits an answer that was already accepted. Measured on HippieKit
+    (2026-09-21): one workflow repair took 280s at the node's `high`, and the
+    whole `workflow_steps` node waited on it; `entity_fields` repairs at
+    `medium` took ~60s. What the thinking buys on a first pass — deciding the
+    shape — the repair is handed. A retry after a refusal is not a repair and
+    keeps the node's effort: its answer was never accepted."""
+    import dataclasses
+
+    if not getattr(spec, "repair", False) or not dataclasses.is_dataclass(client) \
+            or not hasattr(client, "effort"):
+        return client
+    return dataclasses.replace(client, effort=_LOWER_EFFORT.get(str(client.effort), client.effort))
 
 
 def tiered_router(
@@ -2673,6 +3632,10 @@ def tiered_router(
                 reasoning=reasoning,
             )
             for node in tuned
+        },
+        by_agent={
+            agent: AnthropicModel(model=model, effort=effort, reasoning=reasoning)
+            for agent, effort in EFFORT_BY_AGENT.items()
         },
     )
 
@@ -2756,7 +3719,7 @@ def make_executor(
         per-subject tolerance exists.
         """
         from services.a2ui_authority import (
-            compose_page_via_a2ui, registry_from_blueprint,
+            compose_page_via_a2ui, is_standalone, registry_from_blueprint,
         )
         from services.a2ui_ui_composition import shared_context
 
@@ -2870,6 +3833,34 @@ def make_executor(
                              f"composed by the Forge UI Designer instead")
             tell(reasoning, f"{fallback_note} for {page.get('route')}.", "step", spec.node)
 
+        # A TOOL GOES STRAIGHT TO THE COMPOSER THAT CAN EXPRESS ONE.
+        #
+        # A self-contained screen is made of `clientState` and `clientAction`,
+        # and the A2UI protocol has no word for either — it describes surfaces
+        # over a data model, which is exactly what a tool does not have. So
+        # A2UI cannot compose one, and the tool floor will refuse whatever it
+        # returns: a guaranteed decline at roughly 135 seconds, three times on
+        # the calculator build, before the page reached the author that could
+        # do it.
+        #
+        # Returning None here is the ordinary "A2UI did not take this page"
+        # answer the caller already handles — the LLM page author picks it up,
+        # and its prompt was taught the vocabulary.
+        if is_standalone(page.get("pattern") or "", page):
+            tell(reasoning,
+                 f"{page.get('route')} is a self-contained tool — composing it "
+                 f"directly, since its values live on the screen.",
+                 "step", spec.node)
+            spec.feedback = (
+                f"{spec.feedback}\n\n" if spec.feedback else ""
+            ) + (
+                "This screen is a self-contained tool: it is about no entity "
+                "and shows no stored records. Declare the values it keeps on "
+                "screen in `clientState` and change them with `clientAction`; "
+                "do not give it a data source, a workflow or a table."
+            )
+            return None
+
         # Read under the lock, compose outside it: the context is a slice of
         # the document, the composition is minutes of network.
         with svc.lock:
@@ -2973,7 +3964,181 @@ def make_executor(
             logger.warning("[patch] %s: %s", spec.subject, exc)
             return None
 
+    def _edit_repair(spec: TaskSpec) -> AgentResult | None:
+        """An observer repair as edits to the accepted answer (see
+        ``artifact_patch``); ``None`` means rewrite in full, as before."""
+        from services.blueprint.artifact_patch import patch_node_output
+        from services.blueprint.orchestrator import DAG
+
+        client = for_repair(model.for_task(spec.node, spec.agent)
+                            if isinstance(model, ModelRouter) else model, spec)
+        try:
+            with svc.lock:
+                system, context = build_prompt(
+                    svc.doc, spec.node,
+                    inline_schema=not getattr(client, "enforces_schema", True),
+                    subject=spec.subject, feedback="", references=[],
+                    output_dir=svc.output_dir, brief="", agent=spec.agent,
+                )
+                project = str(svc.doc.get("application", {}).get("id", ""))
+            result = patch_node_output(
+                spec, client, system=system, produces=DAG[spec.node].produces,
+                task_id=spec.task_id, context=context, usage=usage,
+                project=project, refused=not getattr(spec, "repair", False))
+        except Exception as exc:  # noqa: BLE001 — an edit that breaks is a rewrite
+            if api_outage(exc):
+                raise           # not the edit's fault, and not worth a rewrite call
+            logger.warning("[edit-repair] %s: %s", spec.node, exc)
+            return None
+        if result is None:
+            return None
+        # The same identity pins a rewrite gets, so an edited fan-out subject
+        # still updates only its own artifacts.
+        if spec.node == "workflow_steps":
+            with svc.lock:
+                pin_workflow_identity(svc, spec.subject, result)
+        elif spec.node == "page_details":
+            with svc.lock:
+                pin_page_identity(svc, spec.subject, result)
+        elif spec.node == "data_model":
+            pin_entity_set(result)
+        elif spec.node == "entity_fields":
+            with svc.lock:
+                pin_entity_identity(svc, spec.subject, result)
+        return result
+
+    def _compose_ui(spec: TaskSpec) -> AgentResult:
+        """The UI director and the UI engineer (see ``ui_engineer``). Their
+        replies are code and prose, not artifact envelopes, and the engineer's
+        is compiled before it is returned — so they have their own path."""
+        import copy as _copy
+
+        from services.blueprint import ui_engineer
+        from services.llm_client import tell
+
+        client = after_no_answer(model.for_task(spec.node, spec.agent)
+                                 if isinstance(model, ModelRouter) else model, spec.feedback)
+        project = str((svc.doc.get("application") or {}).get("id", ""))
+
+        def record(u: Any, elapsed: float) -> None:
+            if usage is not None and u is not None:
+                usage.record(node=spec.node, agent=spec.agent, usage=u,
+                             elapsed_s=elapsed, project=project)
+
+        with svc.lock:
+            doc = _copy.deepcopy(svc.doc)
+        if spec.agent == "ui_director":
+            t0 = time.monotonic()
+            body, u = ui_engineer.compose_direction(doc, client, references=references.paths(svc.output_dir))
+            record(u, time.monotonic() - t0)
+            return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
+                               proposals=[ArtifactProposal(section="composition",
+                                                           natural_key="composition", body=body)])
+        page = next((p for p in doc.get("pages") or [] if str(p.get("id")) == spec.subject), None)
+        if page is None:
+            raise ValueError(f"{spec.subject} is not a page of this application")
+        current = next((row for row in doc.get("pageCode") or []
+                        if str(row.get("page")) == spec.subject), None)
+        tell(reasoning, f"Writing {page.get('route')} in React.", "step", spec.node)
+        # THE PAGE IS LOOKED AT AS IT IS WRITTEN (`page_look`): the reviewer
+        # is the page reviewer's tier, and only a client that can see an
+        # image can review one.
+        critic = (model.for_task("page_look", "page_reviewer") if isinstance(model, ModelRouter) else model)
+        if not getattr(critic, "accepts_images", False):
+            critic = None
+        def compose(doc: dict, page: dict) -> tuple[Any, list]:
+            return ui_engineer.compose_page(
+                doc, page, Path(svc.output_dir) / "app", client,
+                feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
+                current=current if (spec.feedback or getattr(spec, "brief", "")) else None,
+                critic=critic,
+                on_look=lambda v: _looked(svc, spec, page, v, reasoning))
+
+        try:
+            body, spent = compose(doc, page)
+        except ui_engineer.NeedsWorkflow as need:
+            # A SCREEN THAT NEEDS AN ACTION GETS IT, THEN IS WRITTEN. F&B's Edit
+            # Category, Edit Menu Item and Incoming Orders, and SnapIt's
+            # Profile and Product Detail, each failed the build with "needs a
+            # workflow that does not exist yet" — the plan had edit screens and
+            # no update workflows (2026-09-30, 2026-10-01). The writer was right
+            # not to draw a Save that saves nothing; the build now adds what it
+            # named, the way a person asking Smith would, and writes the page.
+            if not _add_needed_workflows(page, need.needs, reasoning):
+                raise
+            with svc.lock:
+                doc = _copy.deepcopy(svc.doc)
+            page = next((p for p in doc.get("pages") or [] if str(p.get("id")) == spec.subject), page)
+            body, spent = compose(doc, page)
+        for u, elapsed, *who in spent:
+            if usage is not None and u is not None:
+                usage.record(node=spec.node, agent=who[0] if who else spec.agent, usage=u,
+                             elapsed_s=elapsed, project=project)
+        return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
+                           proposals=[ArtifactProposal(section="pageCode",
+                                                       natural_key=spec.subject, body=body)])
+
+    def _add_needed_workflows(page: dict, needs: list[str], reasoning: Any) -> list[str]:
+        """Each workflow a page named as missing, declared, authored and
+        projected — one at a time under the document's lock, so pages written
+        in parallel never add the same one twice (an ask that an existing
+        workflow already covers becomes an edit of it). Returns what landed."""
+        from services.llm_client import tell
+        from services.smith.workflow_change import WorkflowChangeError, add_workflow
+
+        added: list[str] = []
+        app_root = str(Path(svc.output_dir) / "app")
+        with svc.lock:
+            for need in needs:
+                tell(reasoning, f"{page.get('route')} needs a workflow to {need} — adding it.", "step", "page_code")
+                try:
+                    out = add_workflow(svc, need, route=str(page.get("route") or ""), app_root=app_root,
+                                       executor=executor, reasoning=reasoning, compose=False)
+                except WorkflowChangeError as exc:
+                    tell(reasoning, f"Could not add a workflow to {need}: {exc}", "step", "page_code")
+                    continue
+                added.append(str(out.get("name") or out.get("workflow") or need))
+        return added
+
+    def _looked(svc: Any, spec: TaskSpec, page: dict, v: dict, reasoning: Any) -> None:
+        """A look's verdict, told to whoever watches: the thoughts and the
+        run ledger (from which the panel draws the page's score and picture)."""
+        from services.llm_client import tell
+
+        issues = [str(i.get("problem") or "") for i in (v.get("issues") or []) if i.get("problem")]
+        tell(reasoning, f"Looked at {page.get('route')}: {v.get('score')}/10 — "
+             + ("passed." if v.get("verdict") == "pass" else "sent back: " + "; ".join(issues[:3])),
+             "step", spec.node)
+        ledger = getattr(svc, "run_ledger", None)
+        if ledger is None:
+            return
+        try:
+            ledger.page_look(spec.node, spec.subject, route=str(page.get("route") or ""),
+                             attempt=int(v.get("attempt") or 0), score=int(v.get("score") or 0),
+                             verdict=str(v.get("verdict") or ""), issues=issues,
+                             broken=len(v.get("broken") or []), shots=sorted(v.get("shots") or {}))
+        except Exception:  # noqa: BLE001 — the account of the run never ends it
+            pass
+
     def executor(spec: TaskSpec) -> AgentResult:
+        if spec.agent in ("ui_director", "ui_engineer"):
+            return _compose_ui(spec)
+        # A REPAIR EDITS WHAT WAS ACCEPTED, AND A RETRY EDITS WHAT WAS
+        # REFUSED. An observer repair carries the accepted answer in
+        # `current`; a retry after a contract refusal now carries the refused
+        # proposals in it, so a reply the contract turned back for one bad
+        # field is fixed by an edit rather than written again from nothing
+        # (31 full rewrites in the builds since 2026-09-15, each paid for).
+        # The two data-model envelopes are a different reply shape and are
+        # off the observer, so an observer repair of them still rewrites; a
+        # refused data-model reply has already been parsed into proposals
+        # and edits like any other.
+        if (spec.feedback and getattr(spec, "current", ())
+                and spec.agent != "a2ui_pages"
+                and (not getattr(spec, "repair", False) or spec.node not in SCHEMA_BY_NODE)):
+            edited = _edit_repair(spec)
+            if edited is not None:
+                return edited
         if spec.agent == "a2ui_pages" and spec.subject:
             # A REPAIR EDITS; A FIRST PASS COMPOSES. `feedback` is set only on
             # a retry or an observer repair, and only a page with an accepted
@@ -2986,11 +4151,12 @@ def make_executor(
             composed = _compose_via_a2ui(spec)
             if composed is not None:
                 return composed
-        client = (
+        client = for_repair(after_no_answer(
             model.for_task(spec.node, spec.agent)
             if isinstance(model, ModelRouter)
-            else model
-        )
+            else model,
+            spec.feedback,
+        ), spec)
         # §5 — an application can be described by showing as well as by
         # telling. Resolved per call rather than threaded through `run`,
         # because the references belong to the application and `svc` is the
@@ -3008,24 +4174,44 @@ def make_executor(
                 inline_schema=not getattr(client, "enforces_schema", True),
                 subject=spec.subject, feedback=spec.feedback, references=shown,
                 output_dir=svc.output_dir, brief=getattr(spec, "brief", "") or "",
+                agent=spec.agent,
             )
         last: Exception | None = None
 
         for attempt in range(repair_attempts + 1):
             prompt = user
-            if attempt and last:
+            if attempt and isinstance(last, Truncated):
+                prompt = (
+                    f"{user}\n\nYour previous reply was CUT OFF before it was "
+                    f"complete: {last}. It was not wrong; it was too long for "
+                    "the room. Write the same answer, complete, with no "
+                    "explanation and no repetition — the budget is larger now."
+                )
+            elif attempt and last:
                 prompt = (
                     f"{user}\n\nYour previous reply was rejected: {last}\n"
                     "Return a corrected envelope. Do not explain the mistake."
                 )
             t0 = time.monotonic()
             reply_schema = SCHEMA_BY_NODE.get(spec.node, PROPOSAL_SCHEMA)
-            raw = (
-                client(system=system, user=prompt, schema=reply_schema,
-                       images=shown)
-                if shown else
-                client(system=system, user=prompt, schema=reply_schema)
-            )
+            try:
+                raw = (
+                    client(system=system, user=prompt, schema=reply_schema,
+                           images=shown)
+                    if shown else
+                    client(system=system, user=prompt, schema=reply_schema)
+                )
+            except NoAnswer as exc:
+                # Recorded before it surfaces: the call that wrote nothing is
+                # the one that spent the most. Not retried here — asking again
+                # with the same budget produced the same nothing on UAT, twice.
+                if usage is not None and exc.usage is not None:
+                    usage.record(
+                        node=spec.node, agent=spec.agent, usage=exc.usage,
+                        elapsed_s=time.monotonic() - t0,
+                        project=str(svc.doc.get("application", {}).get("id", "")),
+                    )
+                raise
             elapsed = time.monotonic() - t0
 
             # Clients may return a bare str (test fakes) or a ModelReply.
@@ -3044,6 +4230,16 @@ def make_executor(
                 parsed = parse_envelope(text, task_id=spec.task_id,
                                         agent=spec.agent, node=spec.node)
             except MalformedEnvelope as exc:
+                if getattr(raw, "stop_reason", None) == "max_tokens":
+                    spent_out = getattr(reply_usage, "output_tokens", 0) or 0
+                    last = Truncated(
+                        f"the reply was cut off at {spent_out:,} output tokens "
+                        f"(budget {getattr(client, 'max_tokens', '?')}) before the "
+                        "answer was complete", output_tokens=spent_out)
+                    # THE RETRY GETS ROOM, NOT THE SAME CUT. Same lever as a
+                    # reply that never started: least effort, most budget.
+                    client = after_no_answer(client, f"Truncated: {last}")
+                    continue
                 last = exc
                 continue
             if spec.node == "workflow_steps":
@@ -3054,6 +4250,13 @@ def make_executor(
             elif spec.node == "page_details":
                 with svc.lock:
                     pin_page_identity(svc, spec.subject, parsed)
+                    if spec.attempt >= 2:
+                        # The last attempt keeps the facts that resolve: a
+                        # content plan with one bad source must not cost the
+                        # feature its contracts.
+                        from services.blueprint.page_content import drop_unresolved_content
+                        for fault in drop_unresolved_content(parsed, svc.doc):
+                            logger.warning("[page_details] %s: dropped content — %s", spec.subject, fault)
             elif spec.node == "data_model":
                 pin_entity_set(parsed)
             elif spec.node == "entity_fields":
@@ -3061,6 +4264,12 @@ def make_executor(
                     pin_entity_identity(svc, spec.subject, parsed)
             return parsed
 
+        if isinstance(last, Truncated):
+            raise Truncated(f"{spec.node}: {last}", output_tokens=last.output_tokens)
         raise MalformedEnvelope(f"{spec.node}: {last}")
 
+    # A model executor writes a fan-out's shared prefix to the cache; the
+    # scheduler holds the node's other calls until the first has made it
+    # readable (see the orchestrator's `_call_warm`).
+    executor.warms_prefix = True  # type: ignore[attr-defined]
     return executor

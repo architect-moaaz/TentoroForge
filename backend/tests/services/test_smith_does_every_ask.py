@@ -12,7 +12,7 @@ import pytest
 
 from services.blueprint.service import BlueprintService
 from services.smith import plan
-from services.smith_session import SmithSession, TurnResult
+from tests.services._front_door import SmithSession, TurnResult
 
 STEPS = ["add a phone number to nurses",
          "show the phone number on the registration form",
@@ -35,12 +35,21 @@ def _session(project, done: list[str], asks=()) -> SmithSession:
         return {"verb": "add_field", "entity": "Nurse", "field": {"name": "phone"},
                 "asks": list(asks) if message.strip() == STEPS[0] else []}
 
-    session = SmithSession(
+    from services.smith4 import verbs as v4
+    from services.smith4.outcome import Outcome
+    v4.PERFORM["add_field"] = lambda ctx, u: (                            # noqa: ARG005
+        done.append("did it") or Outcome(status="resolved", said="Done."))
+    return SmithSession(
         project_id="p1", output_dir=str(project.output_dir), guards_fn=lambda *a, **kw: [],
         understand_ask_fn=_understand, iteration_move_fn=lambda *a, **kw: None)
-    session._add_field = lambda understanding: (                      # noqa: ARG005
-        done.append("did it") or TurnResult(status="resolved", answer="Done."))
-    return session
+
+
+@pytest.fixture(autouse=True)
+def _restore_add_field():
+    from services.smith4 import verbs as v4
+    original = v4.PERFORM["add_field"]
+    yield
+    v4.PERFORM["add_field"] = original
 
 
 def test_the_plan_is_shown_and_nothing_is_done_before_the_yes(project):
@@ -56,20 +65,21 @@ def test_the_plan_is_shown_and_nothing_is_done_before_the_yes(project):
     assert plan.peek(project.output_dir) == STEPS
 
 
-def test_agreeing_does_the_first_one_now_and_says_what_is_left(project):
+def test_agreeing_to_all_of_it_does_all_of_it(project):
+    """Test2, 2026-09-28: "Do them in order" did the first step and said
+    "say next" — the person had just agreed to the whole plan."""
     done: list[str] = []
     _session(project, done, STEPS).run_iteration(user_message=STEPS[0])
     result = _session(project, done).run_iteration(user_message=plan.ALL_LABEL)
-    assert result.status == "resolved" and done == ["did it"]
-    assert "Still to do:" in result.answer
-    assert STEPS[1] in result.answer and STEPS[2] in result.answer
-    assert plan.peek(project.output_dir) == STEPS[1:]
+    assert result.status == "resolved" and done == ["did it"] * len(STEPS)
+    assert "Still to do" not in result.answer
+    assert plan.peek(project.output_dir) == []
 
 
 def test_next_works_through_the_rest_one_at_a_time(project):
     done: list[str] = []
     _session(project, done, STEPS).run_iteration(user_message=STEPS[0])
-    _session(project, done).run_iteration(user_message=plan.ALL_LABEL)
+    _session(project, done).run_iteration(user_message="next")
     second = _session(project, done).run_iteration(user_message="next")
     assert len(done) == 2 and plan.peek(project.output_dir) == [STEPS[2]]
     assert f"Still to do: **{STEPS[2]}**" in second.answer
@@ -134,3 +144,82 @@ def test_carrying_on_is_a_whole_message():
     assert plan.wants_next("next") and plan.wants_next("go on") and plan.wants_next("Continue.")
     for said in ("next week it should email them", "go on the dashboard", "", "nope"):
         assert not plan.wants_next(said), said
+
+
+def test_doing_all_of_it_stops_at_a_step_that_asks_and_keeps_the_rest(tmp_path):
+    from services.smith4.handle import _all_steps
+    from services.smith4.outcome import Outcome
+    plan.remember(str(tmp_path), ["add a record", "add its screen", "use it on the form"])
+    seen: list[str] = []
+
+    def run(step):
+        step = step.split("\n")[0]       # the step itself; what came before it follows
+        seen.append(step)
+        if step == "add its screen":
+            return Outcome(status="asked", said="Which fields on the screen?", options=["All", "Some"])
+        return Outcome(status="resolved", said=f"Did {step}.", touched=[step])
+
+    out = _all_steps(str(tmp_path), run)
+    assert seen == ["add a record", "add its screen"]
+    assert out.status == "asked" and "Did add a record." in out.said and "Which fields" in out.said
+    assert out.options == ["All", "Some"]
+    assert plan.peek(str(tmp_path)) == ["use it on the form"]
+
+
+def test_doing_all_of_it_stops_between_steps_when_the_time_is_spent(tmp_path):
+    from services.smith4.handle import _all_steps
+    from services.smith4.outcome import Outcome
+    plan.remember(str(tmp_path), ["one", "two", "three"])
+    ticks = iter([0.0, 500.0, 1000.0, 1500.0])
+    out = _all_steps(str(tmp_path), lambda s: Outcome(status="resolved", said=f"Did {s}."),
+                     budget_s=480.0, clock=lambda: next(ticks))
+    assert "Did one." in out.said and "Did two." not in out.said
+    assert "Still to do" in out.said and plan.peek(str(tmp_path)) == ["two", "three"]
+
+
+def test_a_turn_that_changed_the_app_leaves_it_in_step_with_its_definition(tmp_path, monkeypatch):
+    """Test2, 2026-09-28: asked twice why Location Data listed no areas over
+    twelve rows, Smith rewrote the page twice — the engine's list of records
+    predated the record. Every change-making turn now writes the application
+    out again from its definition, so drift lasts one turn."""
+    from services.smith import sync_app
+    from services.smith4.handle import _in_step
+    from services.smith4.outcome import Outcome
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app/package.json").write_text("{}")
+    monkeypatch.setattr("services.blueprint.service.BlueprintService.load",
+                        classmethod(lambda cls, output_dir: object()))
+    synced = []
+    monkeypatch.setattr(sync_app, "sync", lambda svc, app_root: synced.append(app_root) or
+                        {"changed": ["src/lib/data-init.ts"], "added": [], "removed": []})
+    out = _in_step(str(tmp_path), 0, Outcome(status="resolved", said="Rewrote it.", touched=["src/app/x/view.tsx"]))
+    assert synced == [str(tmp_path / "app")]
+    assert out.touched == ["src/app/x/view.tsx", "src/lib/data-init.ts"]
+    _in_step(str(tmp_path), 0, Outcome(status="asked", said="Which one?"))
+    _in_step(str(tmp_path), 0, Outcome(status="resolved", said="Nothing to change."))
+    assert len(synced) == 1, "a question, or a turn that changed nothing, writes nothing"
+    # A turn that changed a page and then gave up on the rest still changed it.
+    _in_step(str(tmp_path), 0, Outcome(status="needs_user", said="I could not…", touched=["src/app/x/view.tsx"]))
+    assert len(synced) == 2
+
+
+def test_a_turn_whose_change_reported_no_files_is_still_brought_in_step(tmp_path, monkeypatch):
+    """A code rewrite reports no files — its commit list comes back empty —
+    and the definition's version is what says it landed."""
+    import json
+    from services.smith import sync_app
+    from services.smith4.handle import _in_step
+    from services.smith4.outcome import Outcome
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app/package.json").write_text("{}")
+    (tmp_path / ".forge/blueprint").mkdir(parents=True)
+    (tmp_path / ".forge/blueprint/current.json").write_text(json.dumps({"version": 53}))
+    monkeypatch.setattr("services.blueprint.service.BlueprintService.load",
+                        classmethod(lambda cls, output_dir: object()))
+    synced = []
+    monkeypatch.setattr(sync_app, "sync", lambda svc, app_root: synced.append(1) or
+                        {"changed": [], "added": [], "removed": []})
+    _in_step(str(tmp_path), 52, Outcome(status="resolved", said="Rewrote /x (version 53)."))
+    assert synced == [1]
+    _in_step(str(tmp_path), 53, Outcome(status="resolved", said="Nothing changed."))
+    assert synced == [1]

@@ -27,4 +27,4 @@ export const UndoManagerProps = z
   })
   .strict();
 
-export type UndoManagerPropsType = z.infer<typeof UndoManagerProps>;
+export type UndoManagerPropsType = z.input<typeof UndoManagerProps>;

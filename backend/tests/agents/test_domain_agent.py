@@ -48,7 +48,10 @@ def test_discovery_output_defaults():
     assert d["personas"]["schema_designer"] == ""
     assert d["personas"]["auth_agent"] == ""
     assert d["designPatterns"] == []
-    assert d["visualLanguage"]["paletteCharacter"] == "neutral"
+    # "" — nobody said — not a silent "neutral". The sibling persona defaults
+    # asserted just above are "" for the same reason: a default that picks a
+    # palette character is a design decision made by an absent field.
+    assert d["visualLanguage"]["paletteCharacter"] == ""
     assert d["complianceNotes"] == []
     assert d["source"] == "domain_agent"
 

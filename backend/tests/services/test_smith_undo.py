@@ -107,7 +107,7 @@ def test_the_tool_entry_reports_a_refusal_rather_than_raising(tmp_path):
 
 
 def test_the_turn_undoes_and_says_what_it_undid(svc, monkeypatch):
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     _change(svc, "add Nurse.phone",
             lambda s: s.doc["data"]["entities"][0]["fields"].append({"name": "phone", "type": "string"}))
@@ -120,3 +120,21 @@ def test_the_turn_undoes_and_says_what_it_undid(svc, monkeypatch):
     assert "Undone: **add Nurse.phone**" in result.answer
     assert [f["name"] for f in BlueprintService.load(output_dir=str(svc.output_dir))
             .doc["data"]["entities"][0]["fields"]] == ["id", "fullName"]
+
+
+# ------------------------------------------------- the tool the agent can see
+
+
+def test_an_undo_writes_a_coded_page_back_too(tmp_path, monkeypatch):
+    """036farqu: undoing a rewrite restored the page's code in the Blueprint,
+    but the app kept serving the newer view.tsx — the re-projection never
+    wrote React pages or their SDK."""
+    from services.smith import reproject
+    from services.blueprint import app_sdk, ui_engineer
+
+    calls = []
+    monkeypatch.setattr(ui_engineer, "ensure_sdk", lambda doc, root: calls.append("sdk"))
+    monkeypatch.setattr(app_sdk, "project_code_pages", lambda doc, root: calls.append("pages") or ["src/app/x/view.tsx"])
+    svc = type("S", (), {"doc": {"pageCode": []}})()
+    assert reproject._code_pages(svc, str(tmp_path))["files"] == ["src/app/x/view.tsx"]
+    assert calls == ["sdk", "pages"], "the SDK first, then the pages that compile against it"

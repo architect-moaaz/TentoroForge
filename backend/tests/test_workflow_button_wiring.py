@@ -201,4 +201,7 @@ def test_build_workflow_index_from_files(tmp_path):
 
 def test_build_workflow_index_no_dir_is_safe(tmp_path):
     idx = build_workflow_index(tmp_path)
-    assert idx == {"exact": [], "norm": {}}
+    # The index grew an `ambiguous` bucket; "safe" means every bucket is
+    # empty, not that there are exactly two of them.
+    assert set(idx) >= {"exact", "norm"}
+    assert not any(v for v in idx.values()), idx

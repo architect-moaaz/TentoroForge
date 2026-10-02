@@ -10,6 +10,21 @@ knows the project id can report an error). The public surface is bounded
 by rate limits in :mod:`services.self_heal` and by the fact that
 persistence side-effects are limited to writing rows into a project's
 own ledger.
+
+IT ALSO LANDS ON DISK. Every crash is appended to the project's own
+``.forge/incidents.jsonl`` beside its run ledger — see
+:mod:`services.incident_ledger`. The table answers "how many are open" for
+the self-heal loop; the file answers "what happened to me on Tuesday" for the
+owner and for Smith, on a host with no database and with nothing to query.
+The file is the one Smith reads, because the answer belongs beside the
+application it is about.
+
+WHAT IT NO LONGER TAKES. ``request_body`` and ``user_context`` were free
+dicts filled by the generated app with the whole POST body and the whole
+session user, and stored verbatim: a customer's record and a customer's
+identity, in the platform's tables. The body now declares every field it
+accepts and rejects the rest, and what stands in their place is
+``payload_keys`` — the NAMES of what a control sent, never the values.
 """
 from __future__ import annotations
 
@@ -60,8 +75,28 @@ class RuntimeExceptionIn(BaseModel):
     page_route: Optional[str] = Field(default=None, max_length=512)
     request_url: Optional[str] = Field(default=None, max_length=2048)
     request_method: Optional[str] = Field(default=None, max_length=16)
-    request_body: Optional[dict] = None
-    user_context: Optional[dict] = None
+    #: The action type of the step that threw — `send_email`, `db_insert`.
+    action_type: Optional[str] = Field(default=None, max_length=64)
+    #: The control that started this, and its visible text — the owner's own
+    #: wording, resolved by the app from its own dispatch contract.
+    control: Optional[str] = Field(default=None, max_length=255)
+    control_label: Optional[str] = Field(default=None, max_length=255)
+    #: The NAMES of the keys the control put on the wire. Never the values.
+    payload_keys: Optional[list[str]] = None
+    #: The acting role. A role is the owner's own vocabulary; a user id or an
+    #: email is a customer, and neither is accepted here.
+    role: Optional[str] = Field(default=None, max_length=128)
+    #: How many identical occurrences this report stands for (the app
+    #: coalesces a crash loop rather than sending each turn of it).
+    occurrences: int = Field(default=1, ge=1)
+
+    #: NOTHING ELSE. `request_body` and `user_context` used to be here, as
+    #: free dicts, and the generated app filled them with the POST body and
+    #: the session user — a customer's record and a customer's identity,
+    #: copied into the platform's tables. An unknown field is now rejected
+    #: rather than stored: a payload we did not design is a payload we cannot
+    #: promise anything about.
+    model_config = {"extra": "forbid"}
 
 
 class RuntimeExceptionOut(BaseModel):
@@ -147,7 +182,10 @@ async def ingest_runtime_exception(
     )).scalar_one_or_none()
 
     if existing is not None:
-        existing.occurrence_count = (existing.occurrence_count or 0) + 1
+        # The app coalesces a crash loop rather than sending each turn of it,
+        # so one report can stand for several occurrences. Counting it as one
+        # would make "it crashed twice" out of two hundred.
+        existing.occurrence_count = (existing.occurrence_count or 0) + body.occurrences
         existing.last_seen_at = now
         # If the previous heal marked it `unresolvable` and we're seeing it
         # again, reset to `open` so the next window's heal budget can try
@@ -160,6 +198,7 @@ async def ingest_runtime_exception(
             "[runtime-exc] repeat #%d project=%s dedup=%s",
             existing.occurrence_count, project_id, dedup_key,
         )
+        _append_to_ledger(project, body)
         return RuntimeExceptionOut.model_validate(existing)
 
     row = RuntimeException(
@@ -174,10 +213,10 @@ async def ingest_runtime_exception(
         page_route=body.page_route,
         request_url=body.request_url,
         request_method=body.request_method,
-        request_body=body.request_body,
-        user_context=body.user_context,
         dedup_key=dedup_key,
-        occurrence_count=1,
+        # What this report stands for, not how many reports arrived — a first
+        # report that already coalesced some is still one row and N crashes.
+        occurrence_count=body.occurrences,
         first_seen_at=now,
         last_seen_at=now,
         status=RuntimeExceptionStatus.open,
@@ -190,6 +229,7 @@ async def ingest_runtime_exception(
         project_id, body.kind.value, body.source_file, body.source_line,
         body.workflow_id, body.node_id,
     )
+    _append_to_ledger(project, body)
 
     # Kick self-heal in the background — feature-gated so we can flip it
     # off if it misbehaves in prod.
@@ -200,6 +240,44 @@ async def ingest_runtime_exception(
             asyncio.create_task(_schedule_self_heal(project_id, row.id))
 
     return RuntimeExceptionOut.model_validate(row)
+
+
+# --------------------------------------------------------------------------- #
+# The file beside the application
+# --------------------------------------------------------------------------- #
+
+def _append_to_ledger(project: Project, body: RuntimeExceptionIn) -> None:
+    """Mirror one crash into the project's own incident ledger.
+
+    Both branches above call this, the new one and the repeat, because the
+    ledger's question is "what has been happening" and the table's is "what is
+    still open". The table keeps one row and a counter; the ledger keeps every
+    report, each saying when it came and how many crashes it stands for, which
+    is what makes "it started on Tuesday" answerable.
+
+    Every field written is one the body declares, mapped to the ledger's own
+    names; nothing is passed through as a blob. A project with no
+    ``output_dir`` has no directory to write beside, which is a project that
+    was never built.
+    """
+    if not project.output_dir:
+        return
+    from services.incident_ledger import KIND_CRASH, record
+    record(project.output_dir, {
+        "kind": KIND_CRASH,
+        "where": body.kind.value,
+        "route": body.page_route,
+        "control": body.control,
+        "label": body.control_label,
+        "actionType": body.action_type,
+        "workflow": body.workflow_id,
+        "step": body.node_id,
+        "message": body.message,
+        "stack": body.stack,
+        "payloadKeys": body.payload_keys,
+        "role": body.role,
+        "occurrences": body.occurrences,
+    })
 
 
 # --------------------------------------------------------------------------- #

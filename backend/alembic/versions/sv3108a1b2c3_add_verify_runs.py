@@ -15,10 +15,24 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "sv3108a1b2c3"
-# Merge migration: consumes both pre-existing heads (mobile_builds +
-# enterprise_readiness_tables) so `alembic upgrade head` doesn't
+# Merge migration: consumes the two heads that were open when it was written
+# (mobile_builds + decision_tables) so `alembic upgrade head` does not
 # complain about multiple heads. Adds the verify_runs table too.
-down_revision = ("mb2907c3d4e5", "d1e2f3a4b5c6", "b8d4e1f9a3c2")
+#
+# `d1e2f3a4b5c6` (enterprise_readiness_tables) USED TO BE LISTED HERE TOO, and
+# it is an ancestor of both parents already — through f3ffbf62087c, the merge
+# that consumed it. A revision can only be consumed once: on an EMPTY database,
+# where every migration is walked in order, this merge then tried to remove a
+# head that f3ffbf62087c had already taken and alembic raised
+#
+#     KeyError: 'd1e2f3a4b5c6'
+#
+# so no new deployment could create its schema at all. Live databases never
+# saw it — they are already at a head, so the walk starts past this point. It
+# surfaced the first time this platform was deployed beside itself
+# (smithv3 on UAT, 2026-09-20), which is exactly what a customer's first
+# install would have hit.
+down_revision = ("mb2907c3d4e5", "b8d4e1f9a3c2")
 branch_labels = None
 depends_on = None
 

@@ -63,4 +63,4 @@ export const EditableLineGridProps = z.object({
   style:     StyleSlot.optional(),
 });
 
-export type EditableLineGridPropsType = z.infer<typeof EditableLineGridProps>;
+export type EditableLineGridPropsType = z.input<typeof EditableLineGridProps>;

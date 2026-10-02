@@ -135,10 +135,11 @@ def test_skeleton_under_4kb_for_realistic_app():
     """Real app-map for bpxr6hsv (7 entities, 18 pages, 15 workflows) must
     fit under ~4 KB — the whole point is 'cheap enough to inject every turn'.
     """
-    from pathlib import Path
-    src = Path("/Users/m/Work/code/poc/design2ui-forge-v3/output/bpxr6hsv")
-    if not src.exists():
-        return  # skip in CI without fixture
+    # A bare `return` reported this as PASSED on every machine without the
+    # fixture — a green tick for a budget nothing measured.
+    from tests.sample_apps import SAMPLE_APP, require
+    require(SAMPLE_APP / "contracts" / "resource-registry.json")
+    src = SAMPLE_APP
     m = build_app_map(str(src))
     s = render_app_map_skeleton(m)
     # Budget: ~4 KB is the design target; leave a little headroom for

@@ -39,6 +39,8 @@ from __future__ import annotations
 
 import copy
 import json
+import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -47,9 +49,9 @@ from services.blueprint import approval
 from services.blueprint.agent_contract import (
     AgentResult,
     ArtifactProposal,
-    InvalidComposition,
+    ContractViolation,
     InvalidPatternTemplate,
-    InvalidWorkflowStep, InvalidBusinessRule,
+    InvalidWorkflowStep, InvalidBusinessRule, AuthorRefusal,
     apply_agent_result,
     capability_for,
 )
@@ -167,7 +169,8 @@ PROJECTIONS: dict[str, tuple[str, str]] = {
     "integration": ("workflows + businessRules -> workflow definitions and "
                     "route wiring", "workflow engine"),
     "install": ("scaffold + vendored engines -> node_modules", "npm"),
-    "preview": ("runtime config + a running container", "build/preview service"),
+    "assemble": ("runtime config + a compiled, booting application",
+                 "build/assemble service"),
 }
 
 
@@ -191,12 +194,19 @@ class DagNode:
     #: (e.g. `testing`, which is verification, and is the last node to spend
     #: the API — so a low credit balance there should not sink a ready build).
     optional: bool = False
+    #: Every subject must land. A fan-out otherwise counts as done while any
+    #: subject landed — right for pages, one of which can fall back to its
+    #: floor, and wrong for the data model: 036farqu's `entity_fields` lost
+    #: Member and ConditionEvidence, reported done, and the run spent 22
+    #: minutes building pages and workflows on two entities with no columns
+    #: before `assemble` refused a form that inserted into nothing.
+    whole: bool = False
 
 
 def _n(key, agent, depends_on=(), produces=(), note="", kind="agent",
-       fanout="", optional=False) -> DagNode:
+       fanout="", optional=False, whole=False) -> DagNode:
     return DagNode(key, agent, frozenset(depends_on), frozenset(produces),
-                   note, kind, fanout, optional)
+                   note, kind, fanout, optional, whole)
 
 
 #: §28's graph. Tier names follow the PRD's diagram.
@@ -230,12 +240,17 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # One call per declared entity, in parallel, each given the whole entity
     # set by name so a foreign key can name what it points at.
     _n("entity_fields", "data_model", ("data_model",), ("data.entities",),
-       fanout="entities",
+       fanout="entities", whole=True,
        note="fields, keys, enums, sensitivity and constraints, per entity"),
-    _n("database", "data_model", ("entity_fields",), ("database",)),
+    # NO `database` NODE. It was one model call that wrote the same four
+    # constants every time (`engine: postgres`, `provider: neon`, nothing
+    # applied, nothing seeded), which no projection and no check read — the
+    # tables come from `data.entities`. It sat on the path to the APIs at 75s
+    # median and 9 minutes at p90. The section stays in the contract for the
+    # documents that carry it.
     # Derived, not authored: mutations from workflows, reads from the data
     # engine, analytics from widgets. See services.blueprint.api_derivation.
-    _n("apis", "api", ("database", "workflow_steps", "page_details"), ("apis",),
+    _n("apis", "api", ("entity_fields", "content_fields", "workflow_steps", "page_details", "analytics"), ("apis",),
        kind="service",
        note="endpoints are implied by entities + workflows + widgets"),
     _n("backend", "backend", ("apis",), ("codeMap",), kind="projection"),
@@ -249,6 +264,11 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # which is also what blocks the theme-token projection.
     _n("design_system", "accessibility", ("application_model",), ("designSystem",),
        note="§37; must precede page design so composition has a language"),
+    # THE PICTURES THE DESIGN NAMED, FOUND. The design agent writes what each
+    # photograph is of; this looks them up (Unsplash, when the platform has a
+    # key) so the page authors are handed URLs and credits, not queries.
+    _n("imagery", "accessibility", ("design_system",), ("designSystem",), kind="service",
+       note="the design's photographs, found and credited; nothing without a key"),
     # THE PAGE SET IS DECIDED ONCE AND THE CONTRACTS ARE WRITTEN PER FEATURE.
     # This node answers the slot question — which features exist, which are
     # declined, and for each page its route, pattern, module and entity —
@@ -269,6 +289,29 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("page_details", "page_design", ("page_contracts",), ("pages",),
        fanout="page_features",
        note="the contracts: tasks, states, views, actions, widgets, per feature"),
+    # SIGNING IN IS A PAGE. `/login` and `/signup` were template files the
+    # build never saw — no contract, no design, not in the editor — so every
+    # app opened on the same sign-in screen. Declared here, from the security
+    # section, for every application with a sign-in: no agent decides whether
+    # an app has a login page. The UI engineer then writes them like any page.
+    # THE DATA MODEL GROWS TO SERVE THE SCREEN. A page's content plan may need
+    # a field its entity lacks (what comes with a tool, its category); it is
+    # proposed on the page and added here — before `workflows`, so the form
+    # that creates the record asks for it.
+    _n("content_fields", "data_model", ("page_details",), ("data.entities",), kind="service",
+       note="fields the pages' content plans need, added to their entities"),
+    _n("auth_pages", "page_design", ("page_details",), ("pages",), kind="service",
+       note="the sign-in and create-account pages, declared for every app with a login"),
+    # THE ANALYTICS ARE DESIGNED ONCE, WITH THE WHOLE APPLICATION IN VIEW.
+    # Every page's contract is written and every entity has its fields, so one
+    # call can decide which pages carry numbers — the dashboard, a list's
+    # summary strip, a record's history — and write each as a query of
+    # measures by dimensions over columns that exist. It was a side effect of
+    # `page_details`, one feature at a time, which is why a dashboard (a page
+    # about every feature) so often came out empty. `page_layouts` and
+    # `page_code` read what it writes; the Data Engine runs it live.
+    _n("analytics", "analytics", ("page_details", "entity_fields", "content_fields", "workflows"), ("widgets",),
+       note="KPIs, charts and breakdowns per page, as measures by dimensions"),
     # §47 — the design language the connected file already states, projected
     # onto the Blueprint. Deterministic (§116): published variables *are* the
     # colour system and type scale, so a model asked to "extract" them can only
@@ -280,50 +323,62 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # key wins, and §40/§53 rank an explicit user design above anything the
     # platform recommends on its own. Precedence by merge order instead of by
     # asking an agent to defer. Before `page_layouts`, so composition sees it.
-    _n("figma_design_system", "figma_intelligence", ("design_system",),
+    # THE ORGANISATION'S OWN DESIGN LANGUAGE, when the owner chose it at the
+    # approval gate. Deterministic for the same reason the Figma projection
+    # is: the palette was counted off the company's rendered site and a model
+    # asked to honour a hex can only restate it, while a model asked to
+    # "apply the brand" returns a plausible neighbour of it.
+    #
+    # Between the design agent and the Figma projection, and the ordering is
+    # the precedence. `designSystem` is a singleton, so `upsert` shallow
+    # merges and the last writer of a key wins: the company outranks what the
+    # platform recommended on its own, and a design the user attached to THIS
+    # application outranks the company default, because attaching one is a
+    # statement about this application specifically. A no-op unless
+    # `application.designLanguage` is `company`.
+    _n("brand_design_system", "accessibility", ("design_system",),
+       ("designSystem",), kind="service",
+       note="the organisation's discovered design language, when chosen"),
+    _n("figma_design_system", "figma_intelligence", ("brand_design_system",),
        ("designSystem",), kind="service",
        note="§40, §47, §53; explicit design outranks generic recommendation"),
-    # §34 — one composed tree per page. There were two nodes ahead of this one
-    # and both were residue from the pipeline A2UI replaced.
+    # §34 — ONE TREE PER PAGE, FROM THE PAGE'S OWN CONTRACT. No model designs
+    # a screen. A page's contract already says what it is for, which entity it
+    # shows and which workflows launch from it, and the templates in
+    # `template_page` turn exactly that into a tree — a list, a form, a record,
+    # or a workspace for everything else — built against the checks a page is
+    # held to, so every control runs something. A page bound to a drawn frame
+    # is built from the drawing instead (`figma_layout`, also deterministic).
     #
-    # `page_designs` authored `components` and `uiRegistry`: two LLM sections
-    # naming components that were never code. `uiRegistry` reached exactly two
-    # consumers — pasted into this node's own prompt, and cross-checked against
-    # the components the `frontend` projection derives. Neither is worth a
-    # model call, and a page composed against invented component names is
-    # composed against nothing.
+    # This replaced six producers: a whole-app composition sketch, the A2UI
+    # composer, UX Pilot, an LLM page author, the retry ladder between them and
+    # the template as their last resort. They were the dominant cost and time of
+    # a run (~102s a page, 44 pages) for pages the critic then passed none of.
     #
-    # `patterns` authored one template per pattern, back when the planner
-    # instantiated those templates per page with no model call. That was the
-    # primary path; A2UI composing each page made it the fallback, and a full
-    # LLM node maintaining a fallback for the exception is the wrong trade.
-    # A page nobody composes is now skipped and reported, not silently stubbed
-    # from a template that never saw it (§76).
-    # `workflows` is a dependency, not an ordering nicety: the composer is told
-    # which workflows this page launches so a button can name one, and a
-    # workflow that has not been authored yet is a button that cannot exist.
-    # Dropping the two nodes that used to sit in front of this one moved it two
-    # waves earlier, into the same wave as `workflows` — concurrent with the
-    # thing it reads.
-    # §34 — THE WHOLE APP SKETCHED ONCE, BEFORE ANY PAGE IS. One call, no
-    # props: per page a layout and ordered sections, plus the conventions
-    # every page inherits. Per-page composition never sees the page next
-    # door, so a bespoke page could re-decide the header, the filters and the
-    # empty state and nothing had looked at both. This is the only call that
-    # sees every page at once, and it is what gives the fan-out below a
-    # shared rhythm — the one thing per-page authoring cannot give itself.
-    # After the page set is complete and the design language is final, so
-    # the sketch is made of real pages under the design the user chose.
-    _n("composition", "a2ui_composition",
-       ("page_details", "design_system", "figma_design_system"), ("composition",),
-       note="§34; whole-app skeleton and conventions, no props, one call"),
-    _n("page_layouts", "a2ui_pages",
-       ("composition", "page_details", "design_system", "figma_design_system",
-        "workflows"),
-       ("pageLayouts",),
-       fanout="pages",
-       note="§34; one composed tree per page, gated on the component catalog"),
-    _n("frontend", "frontend", ("page_layouts",), ("codeMap",), kind="projection",
+    # After `workflow_steps`, not `workflows`: a Form collects a workflow's
+    # inputs, and the inputs are written with the steps.
+    _n("page_layouts", "page_template",
+       ("page_details", "auth_pages", "content_fields", "analytics", "workflow_steps", "figma_design_system"),
+       ("pageLayouts",), kind="service",
+       note="§34; one tree per page from its contract, no model call"),
+    # §34 — THE DESIGNED PAGE. The layout above is every page's floor; this is
+    # the page as a UI engineer writes it — React against the app's UI kit, the
+    # component library and an SDK typed from this document — compiled before
+    # it is accepted (see `ui_engineer`). First one call decides the whole
+    # app's direction, so thirty pages written apart read as one product.
+    #
+    # Both optional: a direction that fails leaves the engineer the defaults,
+    # and a page whose code never compiles keeps its layout — the run is
+    # degraded, never stopped. `install` because the compiler lives in the
+    # app's node_modules; `workflow_steps` because a form collects inputs.
+    _n("ui_direction", "ui_director",
+       ("page_details", "design_system", "figma_design_system", "imagery"), ("composition",),
+       optional=True, note="§34; the whole app's look and conventions, one call"),
+    _n("page_code", "ui_engineer",
+       ("ui_direction", "page_layouts", "workflow_steps", "install"), ("pageCode",),
+       fanout="pages", optional=True,
+       note="§34; each page as React, type-checked against the app SDK"),
+    _n("frontend", "frontend", ("page_layouts", "page_code"), ("codeMap",), kind="projection",
        note="pattern templates + page contracts -> engine page schemas"),
 
     # §107 step 16 places workflow and rules alongside backend/API generation;
@@ -343,7 +398,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # everything at its level had. A page needs a workflow's identity and
     # contract to wire a button, never its steps; `page_layouts` depends on
     # this node and not on `workflow_steps` for exactly that reason.
-    _n("workflows", "workflow", ("entity_fields", "page_contracts"), ("workflows",),
+    _n("workflows", "workflow", ("entity_fields", "page_contracts", "content_fields"), ("workflows",),
        note="§107 step 16; declares each workflow's identity and contract"),
     # One call per declared workflow, in parallel, each given the node
     # catalog and one workflow to fill in. A step is a catalog node carrying
@@ -353,7 +408,12 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("workflow_steps", "workflow", ("workflows",), ("workflows",),
        fanout="workflows",
        note="§107 step 16; one authored step graph per declared workflow"),
-    _n("business_rules", "business_rules", ("entity_fields",), ("businessRules",),
+    # AFTER THE WORKFLOWS ARE DECLARED: a prerequisite ("verified before
+    # listing or buying") names the workflows it gates, and before `workflows`
+    # there were none to name — 0l133sp2's KYC rule was refused for empty
+    # `gates` and dropped on the retry, so nothing was enforced. Nothing waits
+    # on rules but `integration` and `memory`, so this costs no time.
+    _n("business_rules", "business_rules", ("entity_fields", "workflows"), ("businessRules",),
        note="§107 step 16; not a distinct box in §28"),
     _n("security", "security", ("entity_fields",), ("security", "roles", "permissions"),
        note="§100; placed after the data model because permissions guard entities"),
@@ -363,17 +423,17 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("integration", "backend",
        ("backend", "frontend", "workflow_steps", "business_rules", "security", "integrations"),
        (), kind="projection"),
-    # Reads requirements, data, pages, apis, workflows and rules — never a
-    # projected file — so it waits for the producers of those and runs beside
-    # the projections instead of behind them. `apis` carries the data model
-    # and the pages transitively; the other two are named because nothing
-    # between them and this node would.
-    _n("testing", "testing", ("apis", "workflow_steps", "business_rules"),
-       ("tests",), optional=True),
+    # NO `testing` NODE. It declared tests — names and file paths — that were
+    # never written and never run; the one reader counted them against the
+    # requirements. About a tenth of a build's spend for a number. Behaviour
+    # is proven where it can be: the compiler on every coded page, the dry
+    # run of every control's workflow, the build, the boot, and the page
+    # review looking at each page as it renders.
     # §20 + §23 — both read off what the Blueprint already carries, so neither
     # is an agent. Placed after authoring and before verification, so the
     # verification report is made against a document that knows what it assumed.
-    _n("memory", "memory", ("testing",), ("decisions", "completeness"),
+    _n("memory", "memory", ("apis", "workflow_steps", "business_rules"),
+       ("decisions", "completeness"),
        kind="service",
        note="§20 decision memory + §23 completeness, both derived"),
     _n("verification", "verification", ("memory",), (), kind="service"),
@@ -389,8 +449,18 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # the tree being compiled, so a compile that waited for them was waiting
     # for a report it does not read. §94's state walk still gates PREVIEW on
     # `verification` having run — see `smith.BUILD_WALK`.
-    _n("preview", "build", ("integration", "install"), ("runtime",),
+    # NAMED FOR WHAT IT DOES. It was `preview`, and it previews nothing: no
+    # server is left running and there is no URL at the end of it. What it
+    # does is assemble the scaffold around the projected tree, compile it, and
+    # prove it starts — which is why a reader asking "what is preview doing
+    # here" was asking a fair question.
+    _n("assemble", "build", ("integration", "install"), ("runtime",),
        kind="projection"),
+    # NO `page_review` NODE. Each page is looked at as it is written, inside
+    # `page_code` (`page_look`: rendered with sample data, judged on the
+    # screenshots, sent back once). Looking at the BUILT application — the
+    # database, every control pressed — is the user's call after the build,
+    # taken as "Verify & fix" (`review_coded_pages`).
 )}
 
 
@@ -404,9 +474,11 @@ FANOUT: dict[str, Any] = {
     "design_sources": lambda doc: [
         s["id"] for s in (doc.get("designSources") or []) if s.get("id")
     ],
+    # A deferred module's screens are declared and not written (see `scope`).
     "pages": lambda doc: [
         p["id"] for p in (doc.get("pages") or [])
         if p.get("id") and p.get("status") != "DEPRECATED"
+        and p["id"] not in _deferred_pages(doc)
     ],
     # §107 step 16 — one call per declared workflow.
     "workflows": lambda doc: [
@@ -425,28 +497,77 @@ FANOUT: dict[str, Any] = {
 }
 
 
-def page_features(doc: Mapping[str, Any]) -> list[str]:
-    """The subjects `page_details` fans out over, in first-seen order."""
-    seen: list[str] = []
+def _deferred_pages(doc: Mapping[str, Any]) -> set[str]:
+    from services.blueprint.scope import deferred_page_ids
+    return deferred_page_ids(doc)
+
+
+#: The most pages one `page_details` call writes.
+#:
+#: A FEATURE IS NOT A UNIT OF TIME. Subjects were an entity's pages together,
+#: and the node is done when its slowest subject is: HippieKit's Product owned
+#: eight pages while most features owned one to three, and every other feature
+#: had been written for ten minutes when Product's second attempt landed
+#: (2026-09-21, 1,417s into the run against the others' 780s). Three pages is
+#: the size most features already are; a larger one is written in parts of
+#: that size, side by side, each shown the whole page set so `navigatesTo`
+#: still reaches across.
+PAGES_PER_SUBJECT = 3
+
+#: Separates a feature from its part: ``ENTITY-003~2``.
+PART = "~"
+
+
+def _feature_groups(doc: Mapping[str, Any]) -> dict[str, list[dict]]:
+    """Each feature's pages, in first-seen order: an entity's pages together,
+    and a page that belongs to no entity on its own. An auth page is declared
+    whole by `auth_pages` and belongs to no feature."""
+    groups: dict[str, list[dict]] = {}
+    held = _deferred_pages(doc)
     for page in doc.get("pages") or []:
         if not isinstance(page, dict) or not page.get("id") \
-                or page.get("status") == "DEPRECATED":
+                or page.get("status") == "DEPRECATED" or page.get("pattern") == "auth" \
+                or page["id"] in held:
             continue
-        subject = str((page.get("data") or {}).get("primaryEntity") or "") \
-            or str(page["id"])
-        if subject not in seen:
-            seen.append(subject)
-    return seen
+        key = str((page.get("data") or {}).get("primaryEntity") or "") or str(page["id"])
+        groups.setdefault(key, []).append(page)
+    return groups
+
+
+def _parts(pages: list[dict]) -> list[list[dict]]:
+    """Pages in parts of at most PAGES_PER_SUBJECT, as even as they go."""
+    n = -(-len(pages) // PAGES_PER_SUBJECT)
+    size = -(-len(pages) // n) if n else 0
+    return [pages[i:i + size] for i in range(0, len(pages), size)] if size else []
+
+
+def page_subjects(doc: Mapping[str, Any]) -> dict[str, list[dict]]:
+    """``{subject: its pages}`` — a feature, or ``feature~n`` for its n-th part."""
+    out: dict[str, list[dict]] = {}
+    for key, pages in _feature_groups(doc).items():
+        parts = _parts(pages)
+        if len(parts) == 1:
+            out[key] = parts[0]
+        else:
+            for i, part in enumerate(parts, 1):
+                out[f"{key}{PART}{i}"] = part
+    return out
+
+
+def page_features(doc: Mapping[str, Any]) -> list[str]:
+    """The subjects `page_details` fans out over, in first-seen order."""
+    return list(page_subjects(doc))
 
 
 def feature_pages(doc: Mapping[str, Any], subject: str) -> list[dict]:
     """The declared pages one `page_details` subject is asked to write."""
-    return [
-        p for p in doc.get("pages") or []
-        if isinstance(p, dict) and p.get("status") != "DEPRECATED"
-        and ((str((p.get("data") or {}).get("primaryEntity") or "") or str(p.get("id")))
-             == subject)
-    ]
+    return page_subjects(doc).get(subject, [])
+
+
+def page_subject_of(doc: Mapping[str, Any]) -> dict[str, str]:
+    """``{page id: the subject that writes it}``."""
+    return {str(p.get("id")): subject
+            for subject, pages in page_subjects(doc).items() for p in pages}
 
 
 def subjects_for(node: "DagNode", doc: dict) -> list[str]:
@@ -646,9 +767,8 @@ def sections_of(doc: dict, artifact_ids: Iterable[str]) -> set[str]:
 #: any of them.
 INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "requirements", "pages", "components", "widgets", "pageLayouts",
-    # A sketch is a composition of components, and adding a page has to give
-    # that page a sketch — so the composition follows the pages, not the frame.
-    "composition",
+    # A page's code follows its page: adding a page must give it one.
+    "pageCode",
     "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
     "codeMap", "database", "runtime", "roles", "permissions", "security",
@@ -926,9 +1046,10 @@ def completed_nodes(
     return done
 
 
-def _layout_present(doc: Mapping[str, Any], page_id: str) -> bool:
+def _code_present(doc: Mapping[str, Any], page_id: str) -> bool:
+    """A page is written once it has its `pageCode` row."""
     return any(isinstance(row, dict) and str(row.get("page") or "") == page_id
-               for row in doc.get("pageLayouts") or [])
+               for row in doc.get("pageCode") or [])
 
 
 def _fields_present(doc: Mapping[str, Any], entity_id: str) -> bool:
@@ -965,7 +1086,7 @@ def _steps_present(doc: Mapping[str, Any], workflow_id: str) -> bool:
 #: section-level rule above, which is the behaviour every run had before this
 #: existed.
 _SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
-    "pages": _layout_present,
+    "pages": _code_present,
     "workflows": _steps_present,
     "page_features": _contracts_present,
     "entities": _fields_present,
@@ -999,6 +1120,15 @@ class TaskSpec:
     #: design system: primary colour green"). Feedback is about the last
     #: attempt; a brief is about this one.
     brief: str = ""
+    #: What this subject currently has in the document, as
+    #: ``({section, natural_key, body}, ...)`` — set only on an observer
+    #: repair, so the author can EDIT its accepted answer rather than write
+    #: it again (see ``artifact_patch``). Empty on a first pass and on a retry
+    #: after a refusal, where there is no accepted answer to edit.
+    current: tuple = ()
+    #: An observer repair — a targeted fix against named findings, run one
+    #: effort notch below the node's own (see ``executors.for_repair``).
+    repair: bool = False
 
 
 @dataclass
@@ -1034,6 +1164,10 @@ class RunReport:
     #: behaved correctly and said nothing.
     blocked_because: dict[str, str] = field(default_factory=dict)
     change_requests: list = field(default_factory=list)
+    #: What the run corrected about itself, as {node, retired}. A change
+    #: request that was ACTED ON rather than filed — see
+    #: `services.blueprint.corrections`.
+    corrections: list = field(default_factory=list)
     artifacts: list[str] = field(default_factory=list)
     #: Optional node -> why it failed, having been allowed through. The app
     #: SHIPPED WITHOUT IT: `testing` is verification, not the running app, so a
@@ -1051,13 +1185,15 @@ class RunReport:
     #: not a failure of the run, because nothing was lost — it is a divergence
     #: the report names rather than a repair the platform hid.
     unrepaired: dict[str, str] = field(default_factory=dict)
-    #: Subjects composed by the node's fallback after every model attempt was
-    #: refused (`FALLBACK_BY_NODE`) — served plain rather than not at all.
-    fallbacks: list[str] = field(default_factory=list)
+    #: Why the run stopped before its plan was done, when the API could not
+    #: be paid rather than because anything went wrong with the work. Nothing
+    #: authored is lost: what completed is in the Blueprint, what did not is
+    #: in `skipped` with this reason, and the next run continues from there.
+    paused_because: str = ""
 
     @property
     def ok(self) -> bool:
-        return not self.failed and not self.blocked
+        return not self.failed and not self.blocked and not self.paused_because
 
 
 import logging
@@ -1072,6 +1208,16 @@ def _run_id() -> str:
     import uuid as _u
 
     return _t.strftime("%Y%m%d-%H%M%S", _t.gmtime()) + "-" + _u.uuid4().hex[:6]
+
+
+def _landed(svc: Any, key: str, subject: str) -> str:
+    """One line on what `subject` is now that it is written (see `landed`)."""
+    from services.blueprint.landed import summarize_subject
+    try:
+        with svc.lock:
+            return summarize_subject(svc.doc, key, subject)
+    except Exception:  # noqa: BLE001 — a summary is a courtesy
+        return ""
 
 
 def _note(ledger: Any, method: str, *args: Any) -> None:
@@ -1147,6 +1293,10 @@ def run(
     ledger = RunLedger(svc.output_dir, _run_id(),
                        phase="build" if commit else "dry", observer=observer)
     ledger.planned(order)
+    # WHERE AN EXECUTOR CAN FIND THE LEDGER. A page looked at as it is
+    # written (`page_look`) happens inside the executor, which was built
+    # before the run and has no ledger of its own; the run's is here for it.
+    svc.run_ledger = ledger
 
     # A PULSE WHILE THE LONG STEPS RUN. page_layouts and the observer repair go
     # minutes between events, so the ledger fell silent and a live run looked
@@ -1255,9 +1405,18 @@ def _execute(
     #: future absent here is an ordinary call.
     kinds: dict[Future, str] = {}
     watches: dict[str, _Watch] = {}
+    #: Set once the API says it cannot be paid: nothing new is sent, what is
+    #: in flight is allowed to land, and the run ends with the reason.
+    paused: list[str] = []
+    #: Future -> the subjects an "observe" future is judging.
+    judging: dict[Future, list[str]] = {}
+    #: The "observe" futures that are a node's closing sweep.
+    sweeps: set[Future] = set()
     rounds = int(getattr(observer_agent, "rounds", 1) or 1)
 
     def ready() -> list[str]:
+        if paused:
+            return []
         return [
             key for key in order
             if key not in started
@@ -1290,17 +1449,57 @@ def _execute(
     def finish(pool: ThreadPoolExecutor, key: str) -> None:
         state = runs[key]
         finished.add(key)
-        if observer_agent is not None and _watchable(key, state, order, in_plan,
-                                                    finished):
+        # NOT JUDGED WHEN NOTHING CAN BE DONE ABOUT THE VERDICT. A node whose
+        # repair rounds are zero was still sent to the critic on every
+        # subject, and the only thing the verdict could become was a note. On
+        # a four-page build that was 4 of 29 observer calls, 13% of the
+        # observer's cost and 105 seconds, with no repair behind any of them;
+        # it grows with the page count. `page_layouts` is the node, and its
+        # rounds were set to zero on measurement (149 composed pages judged,
+        # none passed after repair). The page is still held to its contract
+        # and its floor when it is composed — that is where its correctness is
+        # enforced — and still checked by `verification` at the end.
+        if key in watches and _applied(state):
+            # Its subjects were judged as they landed; what is left is what
+            # needs all of them — the graph checks and the coverage pass.
+            observe(pool, key, _applied(state), mode="sweep")
+            return
+        if (observer_agent is not None
+                and OBSERVER_ROUNDS_BY_NODE.get(key, 1) != 0
+                and _watchable(key, state, order, in_plan, finished)):
             observe(pool, key, _applied(state))
             return
+        if key in watches:
+            # Judged early, then every subject failed: nothing to sweep.
+            watches[key].authoring = False
+            advance(pool, key)
+            return
         complete(key)
+
+    def judge_early(key: str, state: _NodeRun) -> bool:
+        """Whether a fan-out subject is judged the moment it lands.
+
+        ONE SLOW SUBJECT USED TO HOLD EVERY VERDICT. A node was judged when
+        its last subject landed, so a feature written at 606s waited for one
+        written at 1,417s before anyone looked at it, and its repair started
+        after that (HippieKit, 2026-09-21: every page_details verdict at
+        1,538s; workflow_steps the same at 2,161s). A subject's own judgement
+        needs only its own output and the requirements its author was given,
+        so it starts as soon as that output exists; what needs every subject
+        waits for the sweep in `finish`."""
+        return (observer_agent is not None
+                and OBSERVER_ROUNDS_BY_NODE.get(key, 1) != 0
+                and len(state.subjects) > 1
+                and _watchable(key, state, order, in_plan, finished))
 
     def complete(key: str) -> None:
         state = runs[key]
         # Only a node that authored nothing at all has genuinely failed;
-        # anything less is a partial result its dependents can still use.
-        if state.subjects and len(state.failed) == len(state.subjects):
+        # anything less is a partial result its dependents can still use —
+        # unless the node is `whole`, where one missing subject is a hole
+        # every dependent would build on.
+        if state.subjects and state.failed and (
+                len(state.failed) == len(state.subjects) or DAG[key].whole):
             # Every subject failed: the node authored nothing. Recorded with
             # the reasons, because "which of the eighteen stopped it, and why"
             # is the question the ledger exists to answer.
@@ -1309,8 +1508,8 @@ def _execute(
                 for s in state.failed
             ]
             _note(ledger, "node_failed", key,
-                  "; ".join(r for r in reasons if r)[:600]
-                  or f"all {len(state.subjects)} subjects failed")
+                  "; ".join(f"{s}: {r}" if s and r else r for s, r in zip(state.failed, reasons) if r)[:600]
+                  or f"{len(state.failed)} of {len(state.subjects)} subjects failed")
         else:
             report.completed.append(key)
             _note(ledger, "node_done", key, len(state.subjects or []))
@@ -1320,7 +1519,7 @@ def _execute(
     def pump(pool: ThreadPoolExecutor, key: str) -> None:
         """Submit queued subjects up to the node's own width."""
         state = runs[key]
-        while state.queue and len(state.in_flight) < FANOUT_CONCURRENCY:
+        while state.queue and len(state.in_flight) < FANOUT_CONCURRENCY and not paused:
             subject = state.queue.pop(0)
             attempt = state.attempts.get(subject, 0) + 1
             state.attempts[subject] = attempt
@@ -1332,8 +1531,12 @@ def _execute(
                 attempt=attempt,
                 subject=subject,
                 feedback=state.feedback.get(subject, ""),
+                current=state.current.get(subject, ()),
             )
-            futures[pool.submit(_call, executor, spec)] = spec
+            leads = state.warm is not None and subject == state.leader and attempt == 1
+            # After an outage, the re-send waits — on its worker, not here.
+            delay = OUTAGE_BACKOFF_S * state.stalled.get(subject, 0)
+            futures[pool.submit(_call_after, delay, executor, spec, state.warm, leads)] = spec
 
     def start(pool: ThreadPoolExecutor, key: str) -> None:
         started.add(key)
@@ -1361,6 +1564,8 @@ def _execute(
         _note(ledger, "node_start", key, len(subjects))
         runs[key] = _NodeRun(subjects=subjects, pending=list(subjects),
                              queue=list(subjects))
+        if len(subjects) > 1:
+            runs[key].warm, runs[key].leader = threading.Event(), subjects[0]
         if not subjects:
             finish(pool, key)
             return
@@ -1378,6 +1583,15 @@ def _execute(
             done.add(key)
         settle_optional(key)
 
+    def pause(reason: str) -> None:
+        """Stop sending. Everything already landed stays; the run ends with
+        the reason once what is in flight has come back."""
+        if paused:
+            return
+        paused.append(reason)
+        _note(ledger, "run_paused", "", reason)
+        logger.warning("[run] paused: %s", reason)
+
     def settle(pool: ThreadPoolExecutor, spec: TaskSpec, outcome: Any) -> None:
         key = spec.node
         if DAG[key].kind != "agent":
@@ -1392,62 +1606,134 @@ def _execute(
                 commit=commit, user_request=user_request,
                 report=report, ledger=ledger,
             )
-            # PERSIST AS GENERATED. A composed page reaches disk the moment its
-            # layout commits — under the same lock that guarded the commit, so it
-            # reads exactly what landed — rather than waiting for the frontend
-            # node. A build interrupted at page_layouts then still has, and can
-            # render, the pages it made. Best-effort; never fail the run over it.
-            if verdict == "applied" and commit and app_root \
-                    and key == "page_layouts" and spec.subject:
-                try:
-                    from services.blueprint.projection import project_page_schema
-                    project_page_schema(svc.doc, spec.subject, app_root)
-                except Exception:  # noqa: BLE001 — the node re-projects at the end
-                    pass
         state.in_flight.discard(spec.subject)
-        if verdict == "retry":
+        if verdict == "paused":
+            pause(f"{spec.node}{':' + spec.subject if spec.subject else ''}: {_reason(outcome)}")
+            # The subject is not failed; it is still to do. Back in the queue
+            # so the tail records it as pending, and the next run sends it.
+            state.attempts[spec.subject] -= 1
             state.queue.append(spec.subject)
+        elif verdict == "again":
+            n = state.stalled[spec.subject] = state.stalled.get(spec.subject, 0) + 1
+            state.attempts[spec.subject] -= 1           # the API's failure, not an attempt
+            if n > OUTAGE_RETRIES:
+                # The outage outlasted what we wait for. Now it is a failure,
+                # in the API's own words — not an attempt, and not sent to
+                # `_apply_subject`, which would read those words as one more
+                # outage and send it round for ever.
+                label = f"{key}:{spec.subject}" if spec.subject else key
+                report.failed.append(label)
+                report.failed_because[label] = f"the API failed this call {n} times: {_reason(outcome)}"
+                state.failed.append(spec.subject)
+                _note(ledger, "node_subject", key, spec.subject,
+                      (state.subjects.index(spec.subject) + 1) if spec.subject in state.subjects else 0,
+                      len(state.subjects or [""]), False)
+            else:
+                state.queue.append(spec.subject)
+        elif verdict == "retry":
+            state.queue.append(spec.subject)
+        elif verdict == "applied" and judge_early(key, state):
+            observe(pool, key, [spec.subject], mode="subjects")
         pump(pool, key)
         if not state.in_flight and not state.queue:
             finish(pool, key)
 
     # -- the observer's half ------------------------------------------------
 
-    def observe(pool: ThreadPoolExecutor, key: str, subjects: list[str]) -> None:
+    def observe(pool: ThreadPoolExecutor, key: str, subjects: list[str],
+                *, final: bool = False, mode: str = "all") -> None:
         """Judge ``subjects`` of ``key`` on a worker, against the document as
         it is right now. The snapshot is taken here, under the lock, so the
         observer reads what the node finished with and not what the next
-        apply writes."""
-        watches.setdefault(key, _Watch(
+        apply writes. ``final``: the check after a subject's last repair,
+        which the node does not wait for (see `advance`)."""
+        w = watches.setdefault(key, _Watch(
             subjects=list(subjects),
             authored={k: set(v) for k, v in runs[key].authored.items()},
+            authoring=mode == "subjects",
         ))
+        for subject in subjects:
+            # A subject that landed after the watch opened. Never overwrites:
+            # after a repair this is the repair's answer.
+            w.authored.setdefault(subject, set(runs[key].authored.get(subject, set())))
+        if mode == "sweep":
+            w.sweeping = True
+        else:
+            w.observing.update(subjects)
+        if final:
+            w.final.update(subjects)
         with svc.lock:
             snapshot = copy.deepcopy(svc.doc)
         fut = pool.submit(
-            observer_agent.observe, key, agent=DAG[key].agent,
+            _observe_with_database, observer_agent, key, app_root, agent=DAG[key].agent,
             subjects=list(subjects), doc=snapshot,
             pending=_pending_sections(in_plan, finished),
             planned=_planned_sections(in_plan), user_request=user_request,
-            subject_of=_subject_resolver(DAG[key], snapshot),
+            subject_of=_subject_resolver(DAG[key], snapshot), mode=mode,
         )
         futures[fut] = TaskSpec(task_id=f"OBSERVE-{key}", node=key,
                                 agent=OBSERVER_AGENT)
         kinds[fut] = "observe"
+        judging[fut] = list(subjects)
+        if mode == "sweep":
+            sweeps.add(fut)
 
-    def settle_observation(pool: ThreadPoolExecutor, key: str, obs: Any) -> None:
+    def settle_observation(pool: ThreadPoolExecutor, key: str, obs: Any,
+                           subjects: list[str], *, sweep: bool = False) -> None:
         w = watches[key]
+        if sweep:
+            w.sweeping = w.authoring = False
+        else:
+            w.observing.difference_update(subjects)
+            w.final.difference_update(subjects)
+        if isinstance(obs, Exception) and sweep:
+            logger.warning("[%s] observer sweep failed: %s", key, _reason(obs))
+            report.observed[key] = {"node": key, "ok": None, "error": _reason(obs)}
+            advance(pool, key)
+            return
         if isinstance(obs, Exception):
             # The observer's own failure is not the node's. Recorded, and the
-            # node completes as its author left it.
+            # subjects it was judging stand as their author left them.
             logger.warning("[%s] observer failed: %s", key, _reason(obs))
             report.observed[key] = {"node": key, "ok": None,
                                     "error": _reason(obs)}
-            complete(key)
+            for subject in subjects:
+                w.open.pop(subject, None)
+            advance(pool, key)
             return
         _record_observation(report, ledger, obs)
+        from services.blueprint.observer import CRITIC_EDGE as _CRITIC_EDGE
+        # WHAT THIS NODE CANNOT FIX, SAID ONCE AND KEPT. Deferred findings
+        # used to be counted and dropped. The ones the critic raised are the
+        # useful kind — "no Patient entity is defined" — so they travel as
+        # change requests to the report, where Smith and a person can read
+        # them, instead of burning repair rounds on an author that cannot act.
+        for f in getattr(obs, "deferred", ()) or ():
+            if getattr(f, "edge", "") != _CRITIC_EDGE:
+                continue
+            key_ = (key, f.section, f.detail)
+            if key_ in w.deferred_seen:
+                continue
+            w.deferred_seen.add(key_)
+            report.change_requests.append({
+                "section": f.section or "", "reason": f.detail,
+                "raisedBy": f"observer:{key}"})
+            _note(ledger, "deferred", key, f.section or "", f.detail)
         for subject in obs.subjects:
             label = f"{key}:{subject}" if subject else key
+            if sweep:
+                found = obs.findings.get(subject) or []
+                if not found:
+                    # The sweep did not judge the subject itself; its silence
+                    # is not a pass.
+                    continue
+                if subject in w.awaiting or subject in w.observing:
+                    # Being repaired or judged right now: these join the
+                    # verdict that is on its way.
+                    w.extra.setdefault(subject, []).extend(found)
+                    continue
+            elif w.extra.get(subject):
+                obs.findings.setdefault(subject, []).extend(w.extra.pop(subject))
             if obs.findings.get(subject):
                 # Did the round that just ran change anything at all? If a repair
                 # already ran and came back with the IDENTICAL findings, the
@@ -1458,16 +1744,25 @@ def _execute(
                 # re-author whose output merely shifted keeps its full rounds.
                 prev = w.last.get(subject)
                 if prev is not None:
-                    def _sig(fs):
-                        return frozenset((f.edge, f.artifact_id, f.detail) for f in fs)
-                    if _sig(obs.findings[subject]) == _sig(prev.findings.get(subject, [])):
+                    before = prev.findings.get(subject, [])
+                    if subject in w.edited:
+                        # AN EDIT THAT LEFT A FINDING STANDING IS NOT STUCK —
+                        # the rewrite has not been tried. The critic words
+                        # the same finding differently each time, so a repeat
+                        # is the same artifact and requirement, not the same
+                        # text (dogfood bgjyuh1o: RULE-003 / REQ-005 twice,
+                        # reworded, and the edit's second try was a condition
+                        # that can never be true).
+                        if _finding_keys(obs.findings[subject]) & _finding_keys(before):
+                            w.rewrite.add(subject)
+                    elif _finding_sig(obs.findings[subject]) == _finding_sig(before):
                         w.stuck.add(subject)
                 w.open[subject] = RepairTask(
                     node=key, agent=DAG[key].agent, subject=subject,
                     feedback=obs.brief(subject),
                 )
                 w.last[subject] = obs
-            elif subject in w.open:
+            elif subject in w.open and not sweep:
                 w.open.pop(subject)
                 w.stuck.discard(subject)
                 report.repaired.append(label)
@@ -1476,6 +1771,8 @@ def _execute(
     def _flag(key: str, subject: str, task: Any) -> None:
         """Leave a subject as its author last wrote it, flagged OUT_OF_SYNC."""
         obs = watches[key].last[subject]
+        if watches[key].extra.get(subject):
+            obs.findings.setdefault(subject, []).extend(watches[key].extra.pop(subject))
         with svc.lock:
             flag_unrepaired(svc, obs, subject)
         why = "; ".join(
@@ -1485,39 +1782,91 @@ def _execute(
         _note(ledger, "unrepaired", key, subject, why)
 
     def advance(pool: ThreadPoolExecutor, key: str) -> None:
-        """Repair what is open, or flag it — once the rounds are spent, or as soon
-        as a round leaves a subject no better (see `_Watch.stuck`)."""
+        """Move every subject on by itself: repair what is open, or flag it —
+        once its rounds are spent, or as soon as a round leaves it no better
+        (see `_Watch.stuck`) — and complete the node when nothing it waits
+        on is left.
+
+        SUBJECT BY SUBJECT, NOT ROUND BY ROUND. A round used to wait for its
+        slowest repair before judging any of them, so one feature's rewrite
+        held every other feature's verdict. Each subject now goes back to the
+        critic the moment its own repair lands.
+
+        THE LAST CHECK DOES NOT HOLD THE NODE. After a subject's final repair
+        its verdict can only mark it repaired or flag it — nothing is sent
+        back again — so no dependent can consume an outcome that is about to
+        change (§28). The node completes as soon as only those checks are
+        outstanding; they finish on their workers and write their flag.
+        """
         w = watches[key]
-        # EARLY STOP: subjects a repair round did not improve. Flag them now
-        # rather than re-authoring against an identical brief that already failed.
-        for subject in [s for s in list(w.open) if s in w.stuck]:
-            _flag(key, subject, w.open.pop(subject))
-            w.stuck.discard(subject)
-        if not w.open:
+        limit = OBSERVER_ROUNDS_BY_NODE.get(key, rounds)
+        for subject in list(w.open):
+            if subject in w.awaiting or subject in w.observing:
+                continue
+            task = w.open[subject]
+            if paused:
+                # Left as its author wrote it. Not flagged: nothing judged it
+                # wrong after a repair, the API stopped answering.
+                w.open.pop(subject)
+                continue
+            if subject in w.stuck or w.rounds.get(subject, 0) >= limit:
+                # EARLY STOP, or rounds spent: flag rather than re-author
+                # against a brief that has already failed.
+                _flag(key, subject, w.open.pop(subject))
+                w.stuck.discard(subject)
+                continue
+            dispatch_repair(pool, key, subject, task, limit)
+        if not w.closed and not w.authoring and not w.sweeping \
+                and not w.awaiting and w.observing <= w.final:
+            w.closed = True
             complete(key)
-            return
-        if w.round >= OBSERVER_ROUNDS_BY_NODE.get(key, rounds):
-            for subject, task in list(w.open.items()):
-                _flag(key, subject, task)
-            complete(key)
-            return
-        w.round += 1
-        for subject, task in w.open.items():
-            spec = TaskSpec(
-                task_id=f"TASK-{task.label}-observer{w.round}",
-                node=key, agent=task.agent, attempt=w.round,
-                subject=subject, feedback=task.feedback,
-            )
-            _note(ledger, "repair", key, subject, w.round, rounds, task.feedback)
-            fut = pool.submit(_call, executor, spec)
-            futures[fut] = spec
-            kinds[fut] = "repair"
-            w.awaiting.add(subject)
+
+    def dispatch_repair(pool: ThreadPoolExecutor, key: str, subject: str,
+                        task: Any, limit: int) -> None:
+        """Send one subject back to its author with the observer's brief."""
+        from services.blueprint.artifact_patch import editable_artifacts
+        w = watches[key]
+        n = w.rounds[subject] = w.rounds.get(subject, 0) + 1
+        # THE ACCEPTED ANSWER, SO THE REPAIR CAN EDIT IT. Read under the
+        # lock from what this subject is currently recorded as having
+        # written; after a landed repair that is the repaired output.
+        with svc.lock:
+            try:
+                current = () if subject in w.rewrite else tuple(editable_artifacts(
+                    svc.doc, DAG[key].produces,
+                    w.authored.get(subject, set()),
+                    output_dir=getattr(svc, "output_dir", None)))
+            except Exception as exc:  # noqa: BLE001 — then it rewrites
+                logger.info("[%s] no editable output for %s: %s",
+                            key, subject, exc)
+                current = ()
+        spec = TaskSpec(
+            task_id=f"TASK-{task.label}-observer{n}",
+            node=key, agent=task.agent, attempt=n,
+            subject=subject, feedback=task.feedback, current=current,
+            repair=True,
+        )
+        _note(ledger, "repair", key, subject, n, limit, task.feedback)
+        fut = pool.submit(_call, executor, spec)
+        futures[fut] = spec
+        kinds[fut] = "repair"
+        w.awaiting.add(subject)
 
     def settle_repair(pool: ThreadPoolExecutor, spec: TaskSpec, outcome: Any) -> None:
+        from services.blueprint.artifact_patch import was_edited
         key = spec.node
         w = watches[key]
         w.awaiting.discard(spec.subject)
+        from services.blueprint.executors import api_outage
+        if isinstance(outcome, Exception) and api_outage(outcome):
+            # The API failed the repair call; the author was never asked.
+            # The round is given back, and the subject waits for the API.
+            w.rounds[spec.subject] = max(0, w.rounds.get(spec.subject, 0) - 1)
+            if api_outage(outcome) == "credit":
+                pause(f"{key}:{spec.subject} (repair): {_reason(outcome)}")
+                w.open.pop(spec.subject, None)      # left as authored; not flagged
+            advance(pool, key)
+            return
         with svc.lock:
             refused, application = _repair_apply(
                 svc, outcome, commit=commit, user_request=user_request)
@@ -1536,6 +1885,10 @@ def _execute(
                             note=f"superseded by the observer's repair of "
                                  f"{spec.task_id}")
                 w.authored[spec.subject] = now
+                if was_edited(outcome):
+                    w.edited.add(spec.subject)
+                else:
+                    w.edited.discard(spec.subject)
         if refused is not None:
             # The author's repair was refused; the original stands, and the
             # next round is told why. Nothing half-applied: apply validates
@@ -1547,15 +1900,16 @@ def _execute(
                          f"rejected: {refused}",
             )
         else:
-            w.landed.append(spec.subject)
-        if w.awaiting:
-            return
-        landed, w.landed = w.landed, []
-        if landed:
-            # Verify again — the half of the loop that decides.
-            observe(pool, key, landed)
-        else:
-            advance(pool, key)
+            # Verify again — the half of the loop that decides — for this
+            # subject alone, now.
+            limit = OBSERVER_ROUNDS_BY_NODE.get(key, rounds)
+            # While its siblings are still being written, a repaired subject
+            # is judged as it was the first time — on its own; the sweep
+            # runs the graph checks once they have all landed.
+            observe(pool, key, [spec.subject],
+                    final=w.rounds.get(spec.subject, 0) >= limit,
+                    mode="subjects" if w.authoring else "all")
+        advance(pool, key)
 
     def flush(pool: ThreadPoolExecutor) -> None:
         """Apply what arrived, holding back what must wait its turn."""
@@ -1591,7 +1945,10 @@ def _execute(
                     outcome = exc
                 kind = kinds.pop(fut, None)
                 if kind == "observe":
-                    settle_observation(pool, spec.node, outcome)
+                    settle_observation(pool, spec.node, outcome,
+                                       judging.pop(fut, []),
+                                       sweep=fut in sweeps)
+                    sweeps.discard(fut)
                     continue
                 if kind == "repair":
                     settle_repair(pool, spec, outcome)
@@ -1614,12 +1971,26 @@ def _execute(
     # Blueprint simply kept the endpoints it already had, with nothing to
     # indicate the derivation never ran.
     for key in order:
+        if key in done or key in report.failed:
+            continue
+        if paused:
+            # Not a failure and not a dependency: the API stopped. Said so,
+            # per node, and the next run picks these up where they stopped.
+            state = runs.get(key)
+            left = f" ({len(state.queue) + len(state.in_flight)} of {len(state.subjects)} subjects still to author)" \
+                if state is not None and state.subjects != [""] else ""
+            report.skipped.append(key)
+            report.skipped_because[key] = f"paused: {paused[0]}{left}"
+            ledger.node_skipped(key, report.skipped_because[key])
+            continue
         if key in started:
             continue
         unmet = {d for d in DAG[key].depends_on if d in in_plan and d not in done}
         report.skipped.append(key)
         report.skipped_because[key] = ", ".join(sorted(unmet))
         ledger.node_skipped(key, ", ".join(sorted(unmet)))
+    if paused:
+        report.paused_because = paused[0]
 
     ledger.finish(report)
     return report
@@ -1630,15 +2001,20 @@ class _Watch:
     """One node's passage through the observer: what is open, what round."""
 
     subjects: list[str]
-    round: int = 0
+    #: Subject -> repair rounds dispatched for it so far.
+    rounds: dict[str, int] = field(default_factory=dict)
     #: Subject -> the repair task it is waiting on (or about to be given).
     open: dict[str, Any] = field(default_factory=dict)
     #: Subject -> the observation that last failed it.
     last: dict[str, Any] = field(default_factory=dict)
-    #: Repair calls out on a worker this round.
+    #: Subjects with a repair call out on a worker.
     awaiting: set[str] = field(default_factory=set)
-    #: Repairs applied this round, to be judged again together.
-    landed: list[str] = field(default_factory=list)
+    #: Subjects with a critic check out on a worker.
+    observing: set[str] = field(default_factory=set)
+    #: Of those, the checks after a last repair — the node does not wait.
+    final: set[str] = field(default_factory=set)
+    #: The node has completed; later verdicts only record and flag.
+    closed: bool = False
     #: Subject -> identities the node's current answer for it consists of.
     authored: dict[str, set[tuple]] = field(default_factory=dict)
     #: Subjects a repair round left NO better (finding count did not drop). A
@@ -1646,12 +2022,68 @@ class _Watch:
     #: burning the remaining round — the observer's biggest source of wasted
     #: re-authoring on hard apps (measured: NKit page_layouts).
     stuck: set[str] = field(default_factory=set)
+    #: Subjects whose last repair was an edit.
+    edited: set[str] = field(default_factory=set)
+    #: Subjects an edit left with a finding the observer had already sent.
+    #: Their next repair rewrites in full: an edit that did not clear a
+    #: finding once is not the tool to clear it the second time.
+    rewrite: set[str] = field(default_factory=set)
+    #: Findings already reported as deferred, so a second round's identical
+    #: verdict does not repeat them in the report.
+    deferred_seen: set[tuple] = field(default_factory=set)
+    #: Judged as they land: the node's subjects are still being written, so
+    #: it cannot complete however quiet its watch looks.
+    authoring: bool = False
+    #: The closing sweep (graph checks + coverage) is out on a worker.
+    sweeping: bool = False
+    #: Subject -> sweep findings that arrived while it was being repaired or
+    #: judged; they join its next verdict.
+    extra: dict[str, list] = field(default_factory=dict)
+
+
+def _finding_sig(findings: Iterable[Any]) -> frozenset:
+    """A verdict's findings, word for word."""
+    return frozenset((f.edge, f.artifact_id, f.detail) for f in findings)
+
+
+_REQUIREMENT_ID = re.compile(r"\b(REQ-\d+)\b")
+
+
+def _finding_keys(findings: Iterable[Any]) -> frozenset:
+    """What each finding is about — its edge, artifact and the requirement it
+    cites first — so the same finding reworded still matches."""
+    keys = set()
+    for f in findings:
+        req = _REQUIREMENT_ID.search(f.detail or "")
+        keys.add((f.edge, f.artifact_id or f.section or "",
+                  req.group(1) if req else (f.detail or "")))
+    return frozenset(keys)
 
 
 def _applied(state: _NodeRun) -> list[str]:
     """The subjects a node actually authored: given, not failed. A blocked
     subject is in ``failed`` too."""
     return [s for s in state.subjects if s not in state.failed]
+
+
+#: The nodes whose outcome is also proven in a real database when judged.
+DATABASE_CHECKED_NODES = frozenset({"entity_fields"})
+
+
+def _observe_with_database(observer_agent: Any, key: str, app_root: str | None, **kw: Any) -> Any:
+    """The observer's verdict, plus — for the data model — what a throwaway
+    database said about its tables (`data_gate`). Filed like any finding, so a
+    table the database refuses goes back to the entity's author with the
+    database's own words, while nothing downstream is built on it yet."""
+    obs = observer_agent.observe(key, **kw)
+    if key in DATABASE_CHECKED_NODES and app_root:
+        from services.blueprint.data_gate import early_findings
+        try:
+            for f in early_findings(kw["doc"], app_root):
+                observer_agent._file(obs, f, kw.get("subject_of"))
+        except Exception as exc:  # noqa: BLE001 — a gate that cannot look says so
+            logger.warning("[%s] database check could not run: %s", key, exc)
+    return obs
 
 
 def _watchable(key: str, state: _NodeRun, order: Sequence[str],
@@ -1668,9 +2100,13 @@ def _watchable(key: str, state: _NodeRun, order: Sequence[str],
     if not _applied(state):
         return False
     mine = set(DAG[key].produces)
+    # Only a later AGENT defers the verdict: it is judged in this node's place.
+    # A service node (`auth_pages`, `content_fields`) adds derived rows and is
+    # never judged, so deferring to one judged nothing — adding `auth_pages`
+    # silently took `page_details`, the observer's busiest node, off its watch.
     return not any(
         other != key and other in in_plan and other not in finished
-        and DAG[other].produces & mine
+        and DAG[other].kind == "agent" and DAG[other].produces & mine
         for other in order
     )
 
@@ -1691,12 +2127,7 @@ def _subject_resolver(node: DagNode, doc: Mapping[str, Any]) -> Any:
     the feature that page belongs to."""
     if node.fanout != "page_features":
         return None
-    by_page = {
-        p["id"]: (str((p.get("data") or {}).get("primaryEntity") or "") or p["id"])
-        for p in doc.get("pages") or []
-        if isinstance(p, dict) and p.get("id")
-    }
-    return by_page.get
+    return page_subject_of(doc).get
 
 
 def _record_observation(report: RunReport, ledger: Any, obs: Any) -> None:
@@ -1725,8 +2156,7 @@ def _repair_apply(
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
-    except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
-            InvalidWorkflowStep, InvalidBusinessRule) as exc:
+    except (BlueprintInvalid, AuthorRefusal) as exc:
         return _reason(exc), None
     if application.applied:
         return None, application
@@ -1791,6 +2221,50 @@ def _retire(svc: BlueprintService, identities: set[tuple], *, note: str) -> None
                             and tuple(row.get(k) for k in keys) == key)
                 ]
     svc.save()
+
+
+#: How long a fan-out's other calls wait for the first to make its cached
+#: prefix readable before going anyway. Prefill on a 30k-token prefix takes
+#: seconds; the bound is for a call that cannot signal (a transport that does
+#: not stream) and for one that hangs, which must not hold the node.
+PREFIX_WARM_WAIT_S = 30.0
+
+
+def _call_after(delay: float, executor: Executor, spec: TaskSpec, warm: Any, leads: bool) -> Any:
+    """`_call_warm` after a pause — the wait an outage earns, spent on the
+    worker so the scheduler keeps settling everything else."""
+    if delay > 0:
+        import time as _time
+        _time.sleep(delay)
+    return _call_warm(executor, spec, warm, leads)
+
+
+def _call_warm(executor: Executor, spec: TaskSpec, warm: Any, leads: bool) -> Any:
+    """`_call`, with one call writing a fan-out's cache and the rest reading it.
+
+    ONE CALL WRITES THE CACHE; THE REST READ IT. A cache entry is readable
+    only once the response writing it has begun streaming, so a fan-out whose
+    calls start together all WRITE the shared prefix at 1.25x and none reads
+    it at 0.1x. HippieKit's rebuild (2026-09-22) paid that for every first
+    call of page_details (35,649 tokens, ten times over) and workflow_steps
+    (42,527, nine times): the warm-up that prevented it (b6588932) went with
+    the wave scheduler it lived in (bda6f7a6). The first call goes alone; the
+    others wait the seconds prefill takes, then run exactly as wide."""
+    # Only an executor that WRITES a cache is worth waiting for: a fake or a
+    # non-model executor returns in its own time, and holding its siblings
+    # for it re-serialises the fan-out (test_applies_happen_one_at_a_time).
+    if warm is None or not getattr(executor, "warms_prefix", False):
+        return _call(executor, spec)
+    if not leads:
+        warm.wait(PREFIX_WARM_WAIT_S)
+        return _call(executor, spec)
+    from services.blueprint.executors import leading_prefix
+
+    try:
+        with leading_prefix(warm):
+            return _call(executor, spec)
+    finally:
+        warm.set()      # however it ended, the others are not held for it
 
 
 def _call(executor: Executor, spec: TaskSpec) -> Any:
@@ -1919,45 +2393,55 @@ def _run_deterministic(
 #: worth having and a fourth is just the same failure twice more.
 ATTEMPTS_BY_NODE: dict[str, int] = {
     "data_model": 4,
-    # A page refusal names one specific fault and the composer answers it, so
-    # retries converge: across 1,132 compositions, 66 pages were accepted on
-    # the retry and 69 more were still converging when the two-attempt cap
-    # cut them off. Four attempts rescue those; a page that passes first time
-    # costs nothing extra.
-    "page_layouts": 4,
+    # One reply for every page's widgets: a refusal names several pages and
+    # the edit that answers it can leave one; the third attempt is an edit.
+    "analytics": 3,
 }
 
 #: Observer repair rounds per node, where the default (the observer's own
-#: `rounds`) is wrong. `page_layouts`: 0 — the critic has judged 149 composed
-#: pages and 78 repaired ones and passed none; two repair rounds per page were
-#: minutes spent to reach the verdict the first look gave. The verdict is still
-#: taken and recorded as the page's note; nothing is re-composed for it.
+#: `rounds`) is wrong. A node at 0 is NOT JUDGED AT ALL: `finish` does not send
+#: it to the critic, since a verdict nothing can act on only costs a call.
+#: `entity_fields` is WATCHED again (2026-09-19, product decision): it was at 0
+#: after 25 of 71 runs' send-backs passed only 4 times, most findings asking
+#: for what only the whole data model can change — those now travel as change
+#: requests (`observer:deferred`) rather than being repaired here. Tool Share
+#: (036farqu) then shipped Tool with two columns and Member with none, and
+#: nothing looked at it; a field author asked again about its own entity is
+#: worth the calls.
+#: `requirements`: 0 — a product decision (2026-09-17), taken for the time and
+#: spend. It was the node the observer repaired best (14 of 15 sent back
+#: passed), so what it caught now reaches later nodes and the terminal
+#: `verification` unrepaired.
+#: `integrations`: 0 — sent back once and flagged. Product decision the same
+#: day, for time and spend.
+#: `page_code`: 0 — a page's code is judged by the compiler before it is
+#: accepted and by the reviewer on its screenshots (`page_look`, inside the
+#: writer's loop); a critic reading the source had nothing either of those
+#: does not see better, and its repair would be a rewrite neither had asked for.
+#: `ux_architecture`: 0 — 17 of 19 failed the first look and 9 were repaired;
+#: most findings judged what later nodes fill ("the module's pages array is
+#: empty" before any page exists, an empty `initialRoute`, a missing citation),
+#: and it sat on the critical path.
 OBSERVER_ROUNDS_BY_NODE: dict[str, int] = {
-    "page_layouts": 0,
+    "requirements": 0,
+    "integrations": 0,
+    "page_code": 0,
+    "ux_architecture": 0,
 }
 
 
-def _template_page_result(svc: "BlueprintService", subject: str, task_id: str) -> Any:
-    """The composer of last resort for one page — the deterministic template
-    from the page's own contract (see ``template_page``). ``None`` when the
-    page's family has none."""
-    from services.blueprint.template_page import template_layout
-    with svc.lock:
-        page = next((p for p in svc.doc.get("pages") or [] if p.get("id") == subject), None)
-        body = template_layout(svc.doc, page) if page else None
-    if not body:
-        return None
-    return AgentResult(task_id=task_id, agent=DAG["page_layouts"].agent,
-                       proposals=[ArtifactProposal(section="pageLayouts",
-                                                   natural_key=subject, body=body)],
-                       confidence=0.5)
+def _same_refusal(previous: str, reason: str) -> bool:
+    """Whether `reason` is what the last attempt was already told.
 
-
-#: What composes a subject when every model attempt has been refused — the
-#: last resort a node has before its subject is lost.
-FALLBACK_BY_NODE: dict[str, Any] = {
-    "page_layouts": _template_page_result,
-}
+    Compared on the words, ignoring spacing, because that is what the author
+    reads. A reason that differs only in which page id it names is a different
+    refusal and still worth another attempt.
+    """
+    said = " ".join(str(reason or "").split())
+    if not said or not previous.strip():
+        return False
+    last = previous.rstrip().rsplit("\n", 1)[-1]
+    return said in " ".join(last.split())
 
 
 def accumulate_refusals(previous: str, attempt: int, reason: str) -> str:
@@ -1974,39 +2458,6 @@ def accumulate_refusals(previous: str, attempt: int, reason: str) -> str:
         return ("Every refusal so far — the next reply must satisfy ALL of them "
                 f"together, not trade one for another:\n{line}")
     return f"{previous.rstrip()}\n{line}"
-
-
-def _fallback_compose(svc: "BlueprintService", key: str, subject: str, *,
-                      attempt: int, reason: str, commit: bool, user_request: str,
-                      report: "RunReport", ledger: Any = None,
-                      authored: dict | None = None) -> bool:
-    """The node's composer of last resort, once every model attempt was
-    refused. Held to the same contract as an authored result; ``True`` when
-    its subject landed, in which case the report counts it under
-    ``fallbacks`` and the ledger says what it replaced."""
-    make = FALLBACK_BY_NODE.get(key)
-    if make is None or not subject:
-        return False
-    label = f"{key}:{subject}"
-    try:
-        result = make(svc, subject, f"TASK-{label}-fallback")
-        if result is None:
-            return False
-        application = apply_agent_result(svc, result, commit=commit, user_request=user_request)
-    except Exception as exc:  # noqa: BLE001 — a fallback that fails is a failure, not a crash
-        logger.warning("[fallback] %s: %s", label, exc)
-        return False
-    if not application.applied:
-        return False
-    report.artifacts.extend(application.artifacts)
-    report.fallbacks.append(label)
-    if authored is not None:
-        authored.setdefault(subject, set()).update(_proposed_identities(result, application))
-    logger.info("[fallback] %s composed from its template after %d refused attempt(s): %s",
-                label, attempt, reason[:160])
-    _note(ledger, "node_retry", key, subject, attempt, attempt,
-          f"composed from the template instead: {reason[:200]}")
-    return True
 
 
 #: How many model calls one fanning-out node keeps in flight. Pages are
@@ -2078,6 +2529,26 @@ class _NodeRun:
     #: measured against: anything here the repair does not re-propose is
     #: retired, because a repair is the subject's whole answer.
     authored: dict[str, set[tuple]] = field(default_factory=dict)
+    #: Set once the first call's cached prefix is readable (see `_call_warm`);
+    #: None for a node that does not fan out.
+    warm: Any = None
+    #: The subject whose first call writes that prefix.
+    leader: str = ""
+    #: Subject -> the proposals its last attempt made and the contract
+    #: refused, as ``({section, natural_key, body}, ...)`` — what the retry
+    #: EDITS rather than writes again (see the executor's `_edit_repair`).
+    current: dict[str, tuple] = field(default_factory=dict)
+    #: Subject -> how many times the API, not the author, failed its call.
+    stalled: dict[str, int] = field(default_factory=dict)
+
+
+#: How many times one subject's call is re-sent after the API failed it
+#: (busy, timed out, dropped) before the run gives up on that subject. The SDK
+#: already retries three times inside a call; this is the layer above, with a
+#: pause between, for outages that outlast those.
+OUTAGE_RETRIES = 3
+#: The pause before re-sending, multiplied by the number of failures so far.
+OUTAGE_BACKOFF_S = 20.0
 
 
 def _apply_subject(
@@ -2113,20 +2584,30 @@ def _apply_subject(
         except ValueError:  # pragma: no cover — a subject not in its own list
             return 0
 
-    def _rejected(reason: str) -> str:
+    def _rejected(reason: str, *, deterministic: bool = False) -> str:
         """The proposal was refused. Either it goes round again (§103), or
         this was the last attempt: the node's fallback composes the subject,
         or the subject is lost."""
+        # THE SAME REFUSAL TWICE IS NOT WORTH PAYING FOR A THIRD TIME. A retry
+        # earns its cost by telling the author something it did not know; a
+        # refusal word for word identical to the last one tells it nothing,
+        # and the next attempt is the same call with the same answer.
+        #
+        # ONLY WHERE THE ANSWER CANNOT CHANGE. A validator is a function of
+        # what was proposed: refuse the same proposal the same way and it will
+        # again. A CRASH is not — a provider timeout or a truncated reply is
+        # the same message twice and a third call may well succeed — so an
+        # exception still gets every attempt it is allowed.
+        repeated = deterministic and _same_refusal(state.feedback.get(subject, ""), reason)
         state.feedback[subject] = accumulate_refusals(
             state.feedback.get(subject, ""), attempt, reason)
-        if attempt >= max_attempts:
-            if _fallback_compose(svc, key, subject, attempt=attempt, reason=reason,
-                                 commit=commit, user_request=user_request, report=report,
-                                 ledger=ledger, authored=state.authored):
-                _note(ledger, "node_subject", key, subject, _at(), total, True)
-                return "applied"
+        if repeated and attempt < max_attempts:
+            _note(ledger, "node_retry", key, subject, attempt, max_attempts,
+                  f"refused the same way twice; not asking again — {reason}")
+        if attempt >= max_attempts or repeated:
             report.failed.append(label)
-            report.failed_because[label] = reason
+            # The report's line is for reading; the retry above got the whole reason.
+            report.failed_because[label] = reason[:400]
             state.failed.append(subject)
             _note(ledger, "node_subject", key, subject, _at(), total, False)
             return "failed"
@@ -2134,29 +2615,87 @@ def _apply_subject(
         return "retry"
 
     if isinstance(outcome, Exception):
+        # THE API'S FAILURE IS NOT THE AUTHOR'S ATTEMPT. A busy API, a dropped
+        # connection or an account that cannot pay says nothing about what
+        # was written, and charging it to the subject's attempts turned an
+        # outage into a failed node (HippieKit, 2026-09-22: a page "failed"
+        # for a low balance). The scheduler re-sends or pauses; see `settle`.
+        from services.blueprint.executors import api_outage
+        kind = api_outage(outcome)
+        # An OPTIONAL node never holds the application, and that includes
+        # for an account that cannot pay: what is required has landed, and
+        # the app ships without the extra, recorded as degraded — the policy
+        # `settle_optional` already states. Only a required node pauses.
+        if kind == "credit" and not DAG[key].optional:
+            return "paused"
+        if kind == "transient":
+            _note(ledger, "node_stalled", key, subject, _reason(outcome))
+            return "again"
+        state.current.pop(subject, None)
         return _rejected(_reason(outcome))
 
     try:
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
-    except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
-                InvalidWorkflowStep, InvalidBusinessRule) as exc:
+    except (BlueprintInvalid, AuthorRefusal, ContractViolation) as exc:
         # The author's refusals are outcomes here too. InvalidBusinessRule
         # escaped this path on 2026-09-06 and took a whole build down with
-        # no end event written.
+        # no end event written. ContractViolation — the §29 output contract,
+        # raised by `result.validate()` — did the same on UAT on 2026-09-18:
+        # an agent proposed the section `product.capabilities`, a field
+        # inside a section it may write, and the whole turn died where one
+        # subject should have been asked again.
         from services.blueprint.refusals import record_refusal
-        record_refusal(svc.output_dir, subject or key, 0,
-                       list(getattr(outcome, "proposals", None) or []), _reason(exc))
-        return _rejected(_reason(exc))
+        proposals = list(getattr(outcome, "proposals", None) or [])
+        record_refusal(svc.output_dir, subject or key, 0, proposals, _reason(exc))
+        # WHAT WAS REFUSED IS WHAT THE RETRY EDITS. The proposals are kept
+        # for the next attempt, which fixes the named faults in place rather
+        # than authoring the whole subject again.
+        # ...unless the fault is the ENVELOPE — a section that is not
+        # writable, a key an edit may not change — which an edit cannot
+        # reach. That retry rewrites, as before.
+        state.current[subject] = () if isinstance(exc, ContractViolation) else tuple(
+            {"section": p.section, "natural_key": p.natural_key, "body": p.body}
+            for p in proposals if isinstance(getattr(p, "body", None), dict))
+        # A validator's verdict on a proposal: deterministic, so the same
+        # words twice mean the same words a third time.
+        return _rejected(_reason(exc), deterministic=True)
 
     if application.applied:
+        state.current.pop(subject, None)
         report.artifacts.extend(application.artifacts)
         report.change_requests.extend(application.change_requests)
+        _act_on(svc, key, application.change_requests, report, commit=commit)
         state.authored.setdefault(subject, set()).update(
             _proposed_identities(outcome, application))
+        _note(ledger, "node_subject", key, subject, _at(), total, True, _landed(svc, key, subject))
+        return "applied"
+    # A STAGE THAT REFUSES ITS OWN WORK IS THE ONE WORTH LISTENING TO. The
+    # calculator's `entity_fields` came back at confidence 0.35 saying the
+    # entity should not exist — the correction belongs here, before the retry
+    # asks the same impossible question again.
+    retired = _act_on(svc, key, getattr(outcome, "change_requests", None),
+                      report, commit=commit)
+
+    # A SUBJECT THAT NO LONGER EXISTS IS NOT A SUBJECT TO RE-ASK ABOUT.
+    #
+    # The correction above is carried out and the retry then asked the same
+    # agent for the same artifact anyway. On the calculator, `entity_fields`
+    # spent 227 seconds concluding that CalculatorSession should not be a
+    # table, said so, had the entity retired — and was immediately asked to
+    # author its columns again. It produced a worse answer in 57 seconds, and
+    # the observer then spent two repair rounds, 126 seconds, judging the
+    # columns of a table the run had already agreed to remove.
+    #
+    # Retiring the subject IS the outcome. Nothing is left to write, and the
+    # ledger records why rather than leaving a node that looks skipped.
+    if subject and subject in retired:
+        report.change_requests.extend(
+            getattr(outcome, "change_requests", None) or [])
         _note(ledger, "node_subject", key, subject, _at(), total, True)
         return "applied"
+
     if application.needs_clarification or outcome.status == "blocked":
         if attempt < max_attempts:
             return _rejected(_asked(application))
@@ -2206,6 +2745,33 @@ def _apply_round(
     return retry
 
 
+def _act_on(svc: "BlueprintService", key: str, change_requests: Any,
+            report: "RunReport", *, commit: bool) -> set[str]:
+    """Carry out the corrections this node asked for (§30).
+
+    Every agent could already say "the fault is in that section", and the run
+    collected those and read none of them. Three agents on one build said a
+    table should not exist; the run authored its columns anyway.
+
+    Only on a committing run: a dry run must not change the document it is
+    reporting on.
+    """
+    if not commit or not change_requests:
+        return set()
+    try:
+        from services.blueprint.corrections import apply_corrections
+        retired = apply_corrections(svc, change_requests, asked_by=key)
+    except Exception as exc:  # noqa: BLE001 — a correction never fails a run
+        logger.warning("[corrections] %s: %s", key, exc)
+        return set()
+    for artifact in retired:
+        report.corrections.append({"node": key, "retired": artifact})
+    # WHICH ONES WENT, not just that some did. A node whose own subject was
+    # retired has nothing left to author, and the caller cannot know that from
+    # a count.
+    return {str(a) for a in retired}
+
+
 def _asked(application: Any) -> str:
     """What a blocked node is waiting to be told, in one line.
 
@@ -2228,9 +2794,17 @@ def _asked(application: Any) -> str:
     return (reason or "the agent declined without giving a reason")[:600]
 
 
+#: How much of a refusal survives into the retry. It was 400 characters —
+#: enough for a report line, and exactly wrong for a contract refusal that
+#: names five pages: the agent was told the first two, fixed them, and was
+#: failed for the third it never saw (nlwtcyz5 analytics, 2026-09-24). The
+#: reason IS the repair instruction; the level map shortens it for display.
+REASON_KEPT = 4000
+
+
 def _reason(exc: Exception) -> str:
-    """One line naming what went wrong, kept short enough to read in a report."""
-    return f"{type(exc).__name__}: {exc}".replace("\n", " ")[:400]
+    """One line naming what went wrong — whole, so a retry is told all of it."""
+    return f"{type(exc).__name__}: {exc}".replace("\n", " ")[:REASON_KEPT]
 
 
 def _run_agent_subject(
@@ -2269,9 +2843,6 @@ def _run_agent_subject(
             # trades faults (see `accumulate_refusals`).
             feedback = accumulate_refusals(feedback, attempt, str(exc))
             if attempt == max_attempts:
-                if _fallback_compose(svc, key, subject, attempt=attempt, reason=_reason(exc),
-                                     commit=commit, user_request=user_request, report=report):
-                    return "completed"
                 report.failed.append(label)
                 report.failed_because[label] = _reason(exc)
                 return None
@@ -2281,8 +2852,7 @@ def _run_agent_subject(
             application = apply_agent_result(
                 svc, result, commit=commit, user_request=user_request,
             )
-        except (BlueprintInvalid, InvalidPatternTemplate, InvalidComposition,
-                InvalidWorkflowStep, InvalidBusinessRule) as exc:
+        except (BlueprintInvalid, AuthorRefusal) as exc:
             feedback = accumulate_refusals(feedback, attempt, str(exc))
             # A rejected proposal is an outcome, not a crash. This used to
             # escape and kill the whole run: one page whose tree failed
@@ -2290,9 +2860,6 @@ def _run_agent_subject(
             # traceback surfaced instead of a report. Nothing was written —
             # apply validates before it commits — so a retry is clean.
             if attempt == max_attempts:
-                if _fallback_compose(svc, key, subject, attempt=attempt, reason=_reason(exc),
-                                     commit=commit, user_request=user_request, report=report):
-                    return "completed"
                 report.failed.append(label)
                 report.failed_because[label] = _reason(exc)
                 return None
@@ -2349,8 +2916,8 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     """
     from services.blueprint.projection import (
         apply_data_projection, project_append_only_entities,
-        project_ownership_rules, project_searchable_columns,
-        project_sensitive_columns,
+        project_embedding_columns, project_ownership_rules,
+        project_searchable_columns, project_sensitive_columns,
     )
 
     apply_data_projection(svc, app_root)
@@ -2358,6 +2925,7 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     project_business_rules(svc.doc, app_root)
     project_sensitive_columns(svc.doc, app_root)
     project_searchable_columns(svc.doc, app_root)
+    project_embedding_columns(svc.doc, app_root)
     project_append_only_entities(svc.doc, app_root)
     project_ownership_rules(svc.doc, app_root)
 
@@ -2365,9 +2933,9 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
 def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     """Everything the browser reads: page schemas, the route graph, the tokens."""
     from services.blueprint.projection import (
-        apply_frontend_projection, project_design_tokens, project_middleware,
-        project_public_resources,
-        project_nav_flow, project_root_route, project_shell,
+        apply_frontend_projection, project_brand_logo, project_design_tokens,
+        project_middleware, project_public_resources, project_public_routes,
+        project_nav_flow, project_root_route, project_shell, project_shell_identity,
     )
 
     # NO SECOND COMPOSER. A landing page whose composition is refused leaves no
@@ -2388,7 +2956,37 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # looking alike is unacceptable, and a second composer is a second answer
     # to "what does this screen look like". An honest 404 on the front door is
     # a defect anyone can see; a tile grid nobody authored is one they cannot.
-    result = apply_frontend_projection(svc, app_root)
+    # THE LOOK FIRST, BECAUSE NOTHING ABOUT A PAGE CAN BREAK IT. The tokens and
+    # the logo read the design system and nothing else. After the page
+    # projection they shared its fate twice: once when a landing-page composer
+    # threw (above), and again when a route with a camelCase param was refused
+    # — HippieKit's green (#17B65C) never reached tokens.css, so the app ran on
+    # the scaffold's near-black and every button came out the wrong colour.
+    project_brand_logo(svc.doc, app_root)
+    project_design_tokens(svc.doc, app_root)
+    # THE FRAME, BESIDE THE TOKENS: the shell chrome and the sign-in
+    # composition the design decided, written where the layout reads them.
+    project_shell_identity(svc.doc, app_root)
+    # WHAT IS BUILT, NOT EVERYTHING DECLARED. A module the person chose not
+    # to build yet keeps its screens in the Blueprint and gets no route, no
+    # rail entry and no front door here (see `scope`). With nothing deferred
+    # the view is the document itself.
+    from services.blueprint.scope import built_view
+    view = built_view(svc.doc)
+    result = apply_frontend_projection(svc, app_root, doc=view)
+    # THE DESIGNED PAGES, OVER THEIR FLOORS. The SDK they were compiled against
+    # (the fixed half ships with the scaffold; the typed half is this
+    # document), then each `pageCode` row as its route's page/load/view — a
+    # static route segment, so it outranks the schema catch-all that still
+    # serves the page's layout to the editor and to any page without code.
+    from services.blueprint.app_sdk import project_code_pages
+    from services.blueprint.ui_engineer import ensure_sdk
+
+    ensure_sdk(svc.doc, Path(app_root))
+    project_code_pages(view, app_root)
+    # Who signs in and where a new account goes — read by signup and the SDK.
+    from services.blueprint.account_model import project_account
+    project_account(svc.doc, app_root)
     # A page A2UI authored and the planner cannot render is a defect, not an
     # acceptable loss. This projection wrote 23 schemas from 30 authored trees
     # and reported success: every collection page — /jobs, /customers, /bikes,
@@ -2415,16 +3013,24 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # So they are run first and the refusal is raised after: the node still
     # fails, the retry still happens, and what the failure destroys is now the
     # page that failed rather than everything around it.
-    project_nav_flow(svc.doc, app_root)
+    project_nav_flow(view, app_root)
     # The rail itself, from the same tree the route graph was read from:
     # `shell.json` is what the scaffold's layout builds its sidebar from, and
     # nothing wrote it, so every rail was the flat fallback.
-    project_shell(svc.doc, app_root)
-    project_design_tokens(svc.doc, app_root)
-    project_middleware(svc.doc, app_root)
+    project_shell(view, app_root)
+    # The rail references `/brand/<digest>.<ext>`; this is what puts the file
+    # there. After `project_shell`, so the two are read together, and before
+    # the tokens for no reason but that the look belongs in one place.
+    project_middleware(view, app_root)
     # The data route needs the same list the matcher was built from.
-    project_public_resources(svc.doc, app_root)
-    project_root_route(svc.doc, app_root)
+    project_public_resources(view, app_root)
+    # …and a page the matcher lets through needs a door that is not inside
+    # `(dashboard)`, whose layout redirects anyone without a session. After
+    # the middleware, because the two are one statement about the same pages.
+    project_public_routes(view, app_root)
+    from services.blueprint.projection import project_public_nav
+    project_public_nav(view, app_root)
+    project_root_route(view, app_root)
 
     # DROP-AND-CONTINUE, NOT DROP-THE-APPLICATION. A page whose authored tree
     # the planner cannot render is dropped — its route 404s — which is exactly
@@ -2454,15 +3060,22 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
 
 
 def _project_integration(svc: BlueprintService, app_root: str) -> None:
-    """Everything the server reads: workflow definitions and seed rows."""
+    """Everything the server reads: workflow definitions, connections, seed rows.
+
+    The connections belong beside the definitions because they are read
+    together: a `send_email` step and the service it sends through are one
+    fact, and a step projected without it is the step that reports a send it
+    never made.
+    """
     from services.blueprint.projection import (
-        project_dispatches, project_seed, project_workflows,
+        project_dispatches, project_integrations, project_seed, project_workflows,
     )
 
     result = project_workflows(svc.doc, app_root)
     for entry in result["codeMap"]:
         svc.upsert("codeMap", entry, natural_key=entry["artifact"])
     project_dispatches(svc.doc, app_root)
+    project_integrations(svc.doc, app_root)
     project_seed(svc.doc, app_root)
     svc.save()
 
@@ -2494,7 +3107,7 @@ def _project_install(svc: BlueprintService, app_root: str) -> Any:
     return future
 
 
-def _project_preview(svc: BlueprintService, app_root: str) -> None:
+def _project_assemble(svc: BlueprintService, app_root: str) -> None:
     """Assemble the scaffold and engines around the projected application.
 
     Deliberately does not run ``app_emitter``'s repair cascade — see
@@ -2502,7 +3115,7 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     projection makes it unnecessary.
     """
     from services.blueprint.assembly import (
-        apply_assembly, page_funnel, verify_build,
+        apply_assembly, page_funnel, verify_boot, verify_build,
     )
 
     assembled = apply_assembly(
@@ -2515,12 +3128,51 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     # missing directory means it did not run (no app_root at the time, a
     # resumed plan without it) and the build installs for itself.
     from pathlib import Path as _P
+    from services.blueprint.assembly import check_route_tree
+    from services.blueprint.executors import RunUsage, tiered_router
+    from services.blueprint.ui_engineer import settle_code_pages
 
-    result = verify_build(app_root, install=not (_P(app_root) / "node_modules").is_dir())
+    # Every coded page compiled once more, now the tree is final; a page that
+    # fails is rewritten from the compiler's errors or served by its layout.
+    if svc.doc.get("pageCode"):
+        settle_code_pages(svc, app_root, tiered_router().for_task("page_code", "ui_engineer"),
+                          usage=RunUsage.for_app(svc, phase="build"))
+    check_route_tree(app_root)
+    # COMPILE, THEN PROVE — AND REPAIR WHAT THE PROOF FINDS. A compile or boot
+    # failure is no app and stays fatal; a control that would refuse its first
+    # click, or a table the database refuses, goes back to the step that owns
+    # it (`build_repair`) and, if still wrong, is recorded as an issue while
+    # the app ships — 0l133sp2 lost thirty minutes of generation to one form.
+    from services.blueprint.build_repair import database_with_repair, dispatches_with_repair
+    usage = RunUsage.for_app(svc, phase="build")
+    issues: list[dict] = []
+    result = verify_build(app_root, install=not (_P(app_root) / "node_modules").is_dir(), dispatches=False)
     result.setdefault("install", 0)
+    result["dispatches"] = dispatches_with_repair(svc, app_root, issues, usage=usage)
+    database = database_with_repair(svc, app_root, issues, usage=usage)
+
+    # AND THEN IT HAS TO START. `next build` does not catch a route collision:
+    # an app with two files resolving to "/" built clean, exit 0, full route
+    # listing — and `next dev` refused to start. Every node had completed and
+    # the first person to learn the application was broken was the person
+    # running it.
+    #
+    # Booted AFTER the production build so the verified `.next` is what the
+    # tree is left holding; the dev server writes its own and is stopped.
+    # `entry` comes from the Blueprint rather than being assumed: "/" for a
+    # single-page tool that IS the root, the entry page for an app whose root
+    # forwards. Asserting a shape here would refuse a calculator for correctly
+    # serving its own landing page.
+    from services.blueprint.projection import _entry_route
+
+    boot = verify_boot(app_root, entry=_entry_route(svc.doc) or "/")
+
     runtime = dict(svc.doc.get("runtime") or {})
+    runtime["boot"] = boot
     runtime["build"] = {"install": result["install"], "build": result["build"],
-                        "status": "passed"}
+                        "status": "passed" if not issues else "passed_with_issues"}
+    runtime["issues"] = issues
+    runtime["database"] = {k: v for k, v in database.items() if k in ("ok", "skipped", "rebuilt", "push", "seed")}
     # An unsubstituted placeholder does fail the build above — but as a
     # prerender error in a file nobody edited, which reads as a compiler
     # problem rather than as a substitution pass that did not run. Recorded
@@ -2533,14 +3185,59 @@ def _project_preview(svc: BlueprintService, app_root: str) -> None:
     # because every node downstream of composition faithfully projected what
     # survived. Recorded on every run, `complete` included: a missing key would
     # mean the check did not run, which is a different fact from no shortfall.
-    runtime["pages"] = page_funnel(svc.doc, app_root)
+    # Planned means planned to be built now: a deferred module's screens are
+    # waiting by choice, not missing (see `scope`).
+    from services.blueprint.scope import built_view
+    runtime["pages"] = page_funnel(built_view(svc.doc), app_root)
     if runtime["pages"]["missing"]:
         logger.warning(
-            "[preview] %d of %d planned pages are not served: %s",
+            "[assemble] %d of %d planned pages are not served: %s",
             len(runtime["pages"]["missing"]), runtime["pages"]["planned"],
             ", ".join(runtime["pages"]["missing"][:8]))
     svc.doc["runtime"] = runtime
     svc.save()
+
+
+def review_coded_pages(svc: BlueprintService, app_root: str, *,
+                       only: set[str] | None = None, emit: Any = None, asked: str = "") -> dict:
+    """Verify & fix for coded pages: judge each as it renders; have the weak
+    ones rewritten. `only` narrows it to those page ids.
+
+    A rewrite is compiled before it is committed, and the application is built
+    again once any page changed. Should that build fail, the pages go back to
+    what they were before the review and the tree is projected from them again
+    — a review can only ever leave the application better or as it was."""
+    import copy as _copy
+
+    from services.blueprint.app_sdk import project_code_pages
+    from services.blueprint.assembly import verify_build
+    from services.blueprint.executors import RunUsage, tiered_router
+    from services.blueprint.page_review import review_app
+
+    router = tiered_router()
+    client = router.for_task("page_review", "page_reviewer")
+    with svc.lock:
+        before = _copy.deepcopy(svc.doc.get("pageCode") or [])
+    outcome = review_app(svc, app_root, client, usage=RunUsage.for_app(svc, phase="review"),
+                         only=only, emit=emit, asked=asked)
+    rewritten = [pid for pid, r in (outcome.get("pages") or {}).items() if r.get("rewritten")]
+    if rewritten:
+        try:
+            verify_build(app_root, install=False)
+        except Exception as exc:  # noqa: BLE001 — undone below, then reported
+            with svc.lock:
+                svc.doc["pageCode"] = before
+                svc.save()
+                project_code_pages(svc.doc, app_root)
+            raise RuntimeError(f"the reviewed pages did not build; restored the pages as they were: {exc}")
+    with svc.lock:
+        runtime = dict(svc.doc.get("runtime") or {})
+        runtime["pageReview"] = {pid: {"scores": r.get("scores"), "passed": r.get("passed"),
+                                       "rewritten": r.get("rewritten")}
+                                 for pid, r in (outcome.get("pages") or {}).items()}
+        svc.doc["runtime"] = runtime
+        svc.save()
+    return outcome
 
 
 PROJECTION_HANDLERS: dict[str, Any] = {
@@ -2548,7 +3245,7 @@ PROJECTION_HANDLERS: dict[str, Any] = {
     "backend": _project_data_layer,
     "frontend": _project_frontend,
     "integration": _project_integration,
-    "preview": _project_preview,
+    "assemble": _project_assemble,
 }
 
 
@@ -2569,6 +3266,84 @@ def _record_memory(svc: BlueprintService) -> None:
     apply_completeness(svc)
 
 
+def _compose_page_layouts(svc: BlueprintService) -> None:
+    """§34 — a tree for every page that has none, from its drawn frame when
+    it has one and its contract otherwise. A page that already has a layout
+    keeps it: Smith's edits to a screen live there, and a page whose contract
+    changes has its layout dropped by the change that changed it.
+
+    Each page goes through `apply_agent_result` like any authored layout, so
+    the catalog and completeness checks still hold it. A page refused there is
+    logged and left without a layout, which `verification` reports."""
+    from services.blueprint import figma_layout
+    from services.blueprint.template_page import template_layout
+
+    have = {str(l.get("page")) for l in svc.doc.get("pageLayouts") or [] if isinstance(l, dict)}
+    held = _deferred_pages(svc.doc)
+    for page in list(svc.doc.get("pages") or []):
+        pid = str(page.get("id") or "")
+        if not pid or page.get("status") == "DEPRECATED" or pid in have or pid in held:
+            continue
+        if page.get("pattern") == "auth":
+            continue            # its floor is the template's sign-in page, not a tree
+        body = None
+        try:
+            drawn = figma_layout.compose(svc, page, app_root=Path(svc.output_dir) / "app")
+        except Exception as exc:  # noqa: BLE001 — a design must never cost the page
+            logger.warning("[page_layouts] %s: frame not usable: %s", pid, exc)
+            drawn = None
+        if drawn is not None:
+            body = {"page": pid, "root": drawn["root"],
+                    "dataSources": drawn["dataSources"],
+                    "composedBy": str(drawn.get("provider") or "figma"),
+                    **({"canvas": drawn["canvas"]} if drawn.get("canvas") else {}),
+                    "rationale": f"built from its drawn frame {page.get('figmaFrame')} (§48)",
+                    "requirements": list(page.get("requirements") or [])}
+        body = body or template_layout(svc.doc, page)
+        result = AgentResult(task_id=f"TASK-page_layouts-{pid}", agent=DAG["page_layouts"].agent,
+                             proposals=[ArtifactProposal(section="pageLayouts",
+                                                         natural_key=pid, body=body)],
+                             confidence=1.0)
+        try:
+            apply_agent_result(svc, result, commit=True)
+        except Exception as exc:  # noqa: BLE001 — one page never costs the others
+            logger.warning("[page_layouts] %s refused: %s", pid, exc)
+
+
+def _declare_auth_pages(svc: BlueprintService) -> None:
+    """`/login` and `/signup` as `auth` pages, for an application with a
+    sign-in that does not have them yet (see `account_model`)."""
+    from services.blueprint.account_model import auth_page_bodies
+
+    for body in auth_page_bodies(svc.doc):
+        apply_agent_result(svc, AgentResult(
+            task_id=f"TASK-auth_pages-{body['auth']}", agent=DAG["auth_pages"].agent, confidence=1.0,
+            proposals=[ArtifactProposal(section="pages", natural_key=body["route"], body=body)]),
+            commit=True)
+
+
+def _add_content_fields(svc: BlueprintService) -> None:
+    """The fields the pages' content plans propose, added to their entities
+    (see `page_content`). Nothing to add is the normal case."""
+    from services.blueprint.ids import IdAllocator
+    from services.blueprint.page_content import entity_bodies_with_requested_fields
+
+    bodies = entity_bodies_with_requested_fields(svc.doc)
+    if not bodies:
+        return
+    try:
+        alloc = IdAllocator.load(output_dir=svc.output_dir)
+    except Exception:  # noqa: BLE001 — the name bound it
+        alloc = None
+    for body in bodies:
+        key = (alloc.key_for(str(body.get("id"))) if alloc else None) or str(body.get("name"))
+        apply_agent_result(svc, AgentResult(
+            task_id=f"TASK-content_fields-{body.get('id')}", agent=DAG["content_fields"].agent,
+            confidence=1.0,
+            proposals=[ArtifactProposal(section="data.entities", natural_key=key, body=body)]),
+            commit=True)
+
+
 def _project_design_reference(svc: BlueprintService) -> None:
     """§47 — the connected design's own tokens. No-op without one."""
     from services.figma.projection import apply_design_reference
@@ -2576,7 +3351,72 @@ def _project_design_reference(svc: BlueprintService) -> None:
     apply_design_reference(svc)
 
 
+def _project_company_language(svc: BlueprintService) -> None:
+    """The organisation's design language, when this application is built in it.
+
+    Two conditions, both read from the document rather than from a flag: the
+    owner answered `company` at the approval gate, and a language was adopted
+    into this build. Either missing is a no-op — an application whose owner
+    chose `custom`, or whose organisation never finished discovery, keeps the
+    design the agent authored.
+
+    A shallow merge, deliberately. The company states colour, type, corners
+    and density; the agent owns accessibility rules, responsive rules,
+    interaction conventions and navigation approach, and those survive
+    untouched because the overlay does not carry those keys.
+    """
+    from services.blueprint import brand_language
+
+    choice = str((svc.doc.get("application") or {}).get("designLanguage") or "")
+    if choice != "company":
+        return
+    overlay = brand_language.tokens(svc.output_dir)
+    if not overlay:
+        logger.info("[brand] designLanguage=company but nothing was adopted "
+                    "into %s; the design agent's own system stands",
+                    svc.output_dir)
+        return
+
+    # The personality line is rewritten rather than merged: the agent wrote
+    # one explaining the palette IT chose, and leaving that beside a palette
+    # it did not choose is a document that contradicts itself — which is
+    # exactly what a later change would argue with.
+    existing = svc.doc.get("designSystem") or {}
+    company = overlay.get("_companyName") or "the company"
+    overlay = {k: v for k, v in overlay.items() if not k.startswith("_")}
+    overlay["visualPersonality"] = (
+        f"{company}'s own design language, read from their website and chosen "
+        f"by the owner for this application. "
+        + str(existing.get("visualPersonality") or "")
+    ).strip()
+
+    # A plain merge onto the section, the way the Figma projection writes
+    # its own — `designSystem` is a singleton and the last writer of a key
+    # wins, which is the precedence this node exists to express.
+    current = svc.doc.get("designSystem") or {}
+    svc.doc["designSystem"] = {**current, **overlay}
+    svc.save()
+    logger.info("[brand] projected %s over designSystem in %s",
+                ", ".join(sorted(overlay)), svc.output_dir)
+
+
+def _find_imagery(svc: BlueprintService) -> None:
+    """Fill the design's `imagery` entries from Unsplash (see `imagery`)."""
+    from services.blueprint.imagery import fill_imagery
+
+    out = fill_imagery(svc.doc, output_dir=svc.output_dir)
+    if out.get("found"):
+        svc.save()
+    logger.info("[imagery] found=%s kept=%s empty=%s %s", out.get("found"), out.get("kept"),
+                out.get("empty"), out.get("why") or "")
+
+
 SERVICE_HANDLERS: dict[str, Any] = {
+    "imagery": _find_imagery,
+    "page_layouts": _compose_page_layouts,
+    "auth_pages": _declare_auth_pages,
+    "content_fields": _add_content_fields,
+    "brand_design_system": _project_company_language,
     "figma_design_system": _project_design_reference,
     "verification": _run_verification,
     "apis": _derive_apis,

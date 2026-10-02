@@ -111,6 +111,28 @@ def product_digest(doc: dict) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
 
 
+def requirements_digest(doc: dict) -> str:
+    """A fingerprint of what the requirements say.
+
+    The understanding gate is answered against the requirements alone — at
+    that gate nothing else exists yet, so the product surface is empty and its
+    digest would call every later requirements edit "still approved". Here the
+    prose IS the thing agreed to: rewording "24 hours" to "12 hours" changes
+    what the application must do.
+    """
+    material = sorted(
+        f"{r.get('id') or ''}:{r.get('description') or ''}"
+        for r in _items(doc, "requirements")
+    )
+    encoded = json.dumps(material, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+
+
+def digest_for(doc: dict, gate: str) -> str:
+    """What an answer at ``gate`` is taken against."""
+    return requirements_digest(doc) if gate == "understanding" else product_digest(doc)
+
+
 # ---------------------------------------------------------------------------
 # Reading the record
 # ---------------------------------------------------------------------------
@@ -128,7 +150,7 @@ def state_of(doc: dict, gate: str) -> ApprovalState:
     answer = latest(doc, gate)
     if answer is None or answer.get("outcome") != "accepted":
         return "open"
-    return "approved" if answer.get("digest") == product_digest(doc) else "stale"
+    return "approved" if answer.get("digest") == digest_for(doc, gate) else "stale"
 
 
 def is_approved(doc: dict, gate: str) -> bool:
@@ -150,7 +172,7 @@ def record(svc: Any, gate: str, outcome: str = "accepted", *,
         "outcome": outcome,
         "version": int(svc.doc.get("version") or 1),
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "digest": product_digest(svc.doc),
+        "digest": digest_for(svc.doc, gate),
         "message": message_id,
         "note": note,
     }

@@ -48,6 +48,72 @@ def _live(items: Any) -> list[dict]:
             if isinstance(i, dict) and i.get("status") != "SUPERSEDED"]
 
 
+def _accounts(doc: dict[str, Any], role_names: dict[str, str]) -> dict[str, Any]:
+    """Who signs in and where they land — read off the same functions the
+    projection uses, so Smith says what the application actually does. Asked
+    "after login it takes me to the signup page", Smith had no way to say
+    where signing in is meant to go."""
+    try:
+        from services.blueprint.account_model import (
+            account_entity, admin_role, after_signup_route, auth_page_bodies, home_route,
+            landing_by_role, prerequisites, signup_role,
+        )
+    except Exception:  # noqa: BLE001 — an older tree without the account model
+        return {}
+    pages = _live(doc.get("pages"))
+    auth = {str(p.get("auth")): str(p.get("route")) for p in pages if p.get("pattern") == "auth"}
+    ent = account_entity(doc) or {}
+    rules = []
+    wf_names = {str(w.get("id")): str(w.get("name")) for w in _live(doc.get("workflows"))}
+    page_routes = {str(p.get("id")): str(p.get("route")) for p in pages}
+    for r in prerequisites(doc):
+        rules.append({"rule": r.get("name"),
+                      "gates": [wf_names.get(str(g), str(g)) for g in r.get("gates") or []],
+                      "done_on": page_routes.get(str(r.get("page") or ""), "")})
+    return {
+        "sign_in_page": auth.get("login") or ("/login" if not auth_page_bodies(doc) else ""),
+        "sign_up_page": auth.get("signup") or "",
+        "after_sign_in": home_route(doc),
+        "landing_by_role": landing_by_role(doc),
+        "after_sign_up": after_signup_route(doc),
+        "person_record": ent.get("name") or "",
+        "sign_up_role": signup_role(doc) or "",
+        "admin_role": admin_role(doc) or "",
+        "must_first": rules,
+    }
+
+
+def _step_lines(w: dict[str, Any], role_names: dict[str, str]) -> list[str]:
+    """A workflow's steps as one short line each — what it changes, who it
+    tells, who it asks, when it refuses. The engine's own step graph is the
+    source; nothing here is inferred."""
+    def role(v: Any) -> str:
+        return ", ".join(role_names.get(x.strip(), x.strip()) for x in str(v or "").split(",") if x.strip())
+
+    out: list[str] = []
+    for st in w.get("steps") or []:
+        if not isinstance(st, dict):
+            continue
+        c = st.get("config") if isinstance(st.get("config"), dict) else {}
+        kind, act = str(st.get("type") or ""), str(c.get("actionType") or "")
+        line = ""
+        if act == "send_notification" or act == "send_email":
+            who = role(c.get("recipientRole") or c.get("toRole")) or str(c.get("recipient") or c.get("to") or "")
+            line = f"notifies {who or 'someone'}: \"{str(c.get('message') or c.get('subject') or '')[:90]}\""
+        elif act in ("db_update", "db_insert", "db_delete"):
+            vals = c.get("values") or c.get("sets") or {}
+            shown = ", ".join(f"{k}={v}" for k, v in list(vals.items())[:3]) if isinstance(vals, dict) else ""
+            verb = {"db_update": "updates", "db_insert": "creates a row in", "db_delete": "deletes from"}[act]
+            line = f"{verb} {c.get('table') or 'a record'}" + (f" ({shown})" if shown else "")
+        elif kind in ("approval", "user_task", "assignment", "task_pool"):
+            line = f"asks {role(c.get('assigneeRole') or c.get('assignTarget')) or 'someone'} to {kind.replace('_', ' ')}"
+        elif kind in ("end", "end_event") and c.get("refused"):
+            line = f"refuses: \"{str(c.get('message') or '')[:90]}\""
+        if line:
+            out.append(line)
+    return out[:8]
+
+
 def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
     """The engine's document in the shape Smith's `Blueprint` holds.
 
@@ -59,6 +125,8 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
     app = doc.get("application") or {}
     product = doc.get("product") or {}
     entities = (doc.get("data") or {}).get("entities")
+    role_names = {str(r.get("id")): str(r.get("name")) for r in _live(doc.get("roles")) if r.get("id")}
+    pages_by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
 
     domain = {
         "name": app.get("domain") or product.get("domain") or "",
@@ -75,6 +143,7 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "domain": domain,
+        "accounts": _accounts(doc, role_names),
         # WHAT THE APP MUST DO, AND WHERE EACH LINE CAME FROM. Smith answers
         # questions from this context, and "which requirements came from the
         # document I uploaded?" has its answer in `requirements[].evidence`
@@ -115,12 +184,23 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
             }
             for e in _live(entities)
         ],
+        # WHO DOES WHAT, NOT ONLY WHAT IS CALLED WHAT. The workflows reached
+        # Smith as a name and a purpose, so asked where a member's identity
+        # verification goes, it answered — three times — that nothing says,
+        # while the submit step notified the Admin role and the Admin's
+        # verification page ran Approve and Reject (0l133sp2).
         "workflows": [
             {
                 "name": w.get("name"),
                 "purpose": w.get("purpose") or "",
                 "trigger": (w.get("trigger") or {}).get("kind") or "manual",
                 "why": w.get("purpose") or "",
+                "run_from": [str((pages_by_id.get(str(x)) or {}).get("route") or x)
+                             for x in w.get("launchedFrom") or []],
+                "run_by": sorted({role_names.get(str(u), str(u))
+                                  for x in w.get("launchedFrom") or []
+                                  for u in (pages_by_id.get(str(x)) or {}).get("users") or []}),
+                "steps": _step_lines(w, role_names),
             }
             for w in _live(doc.get("workflows"))
         ],
@@ -140,11 +220,79 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
                 # it, so the two agree.
                 "schema_path": _schema_path(str(p.get("route") or "")),
                 "role": p.get("name") or p.get("id") or "",
+                # Who may open it: "Member Verification Detail — Admin only".
+                "who": [role_names.get(str(u), str(u)) for u in p.get("users") or []],
+                "access": p.get("access") or "",
                 "notable_choices": [],
             }
             for p in _live(doc.get("pages"))
         ],
     }
+
+
+def connection_lines(doc: dict[str, Any], output_dir: str) -> list[dict[str, Any]]:
+    """Each outside service, and whether it is connected or only declared.
+
+    Two halves, from two places. The DECLARATION — what service, which
+    variables carry its credential — is in the document. Whether those
+    variables are SET is in the platform's credential store (or this
+    environment), which no document can know; `platform_secrets.keys_set_for`
+    answers it with NAMES and never touches a value.
+
+    The store is asked only about a service that claims to serve a runtime
+    action. A row with no `serves` is a note for a developer: it is declared,
+    it is reported as declared, and there is nothing to look up.
+    """
+    from services.smith.email_connect import LIVE_KEY, SERVES, sending_steps
+
+    rows = [i for i in (doc.get("integrations") or [])
+            if isinstance(i, dict) and i.get("status") not in ("DEPRECATED", "SUPERSEDED")]
+    steps = [f"{step} in {wf}" for wf, step in sending_steps(doc)]
+    if not rows and not steps:
+        return []
+
+    serving = [r for r in rows if str(r.get("serves") or "").strip()]
+    set_keys: set[str] = set()
+    if serving and output_dir:
+        from services.platform_secrets import keys_set_for
+
+        keys = [str(k) for r in serving for k in r.get("secretRefs") or []]
+        set_keys = keys_set_for(output_dir, sorted(set(keys)))
+
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        serves = str(row.get("serves") or "").strip()
+        keys = [str(k) for k in row.get("secretRefs") or []]
+        live = LIVE_KEY.get(str(row.get("provider") or ""), "")
+        # A ROW CAN CLAIM TO SERVE SOMETHING THERE IS NO ADAPTER FOR — a
+        # hand-authored Blueprint saying `provider: "mailchimp"`. There is no
+        # key whose presence would make it work, so it is what it is: a
+        # declaration. The projection drops it for the same reason.
+        if serves and not live:
+            serves = ""
+        out.append({
+            "gap": False,
+            "name": str(row.get("name") or ""),
+            "kind": str(row.get("kind") or ""),
+            "provider": str(row.get("provider") or ""),
+            "serves": serves,
+            "secret_names": keys,
+            # NAMES, both of them. A value never enters this context any more
+            # than it enters the Blueprint (§42).
+            "set_names": [k for k in keys if k in set_keys],
+            "connected": bool(serves) and live in set_keys,
+            "needs": live,
+            "sending_steps": steps if serves == SERVES else [],
+        })
+    if steps and not any(i["serves"] == SERVES for i in out):
+        # A GAP IS A FACT ABOUT THIS APPLICATION, not the absence of one.
+        # Steps that send email and no service to send through is the state
+        # behind "the confirmation email never came", and a context that
+        # simply omitted email left Smith with nothing to say about it.
+        out.append({"gap": True, "name": "", "kind": "email", "provider": "",
+                    "serves": SERVES, "secret_names": [], "set_names": [],
+                    "connected": False, "needs": "", "sending_steps": steps})
+    return out
 
 
 def _schema_path(route: str) -> str:

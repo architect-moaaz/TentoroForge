@@ -32,6 +32,76 @@ _previews: dict[str, dict] = {}
 _health_tasks: dict[str, asyncio.Task] = {}
 
 
+async def _stop_strays(output_dir: str) -> None:
+    """A `next dev` left running in this app from before the platform
+    restarted. The registry of previews is in memory, so a restart forgot it
+    and the next start spawned a second server in the same folder; the two
+    shared `.next` and pages came back with unprefixed asset URLs, stuck on
+    "Loading…" (Test4, 2026-09-28)."""
+    binary = str(Path(output_dir).resolve() / "node_modules" / ".bin" / "next")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pkill", "-f", f"{binary} dev",
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        if await proc.wait() == 0:
+            logger.info("[preview] stopped a stray dev server in %s", output_dir)
+            await asyncio.sleep(1)
+    except OSError:
+        pass
+
+
+_BARE_PROVIDER = "<SessionProvider>"
+_PREFIXED_PROVIDER = '<SessionProvider basePath={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/auth`}>'
+
+
+def _session_under_prefix(output_dir: str) -> None:
+    """An app scaffolded before the template carried the base path gets it:
+    `providers.tsx` is the platform's file, not the app's content."""
+    p = Path(output_dir) / "src" / "app" / "providers.tsx"
+    try:
+        text = p.read_text("utf-8")
+        if _BARE_PROVIDER in text:
+            p.write_text(text.replace(_BARE_PROVIDER, _PREFIXED_PROVIDER), "utf-8")
+    except OSError:
+        pass
+
+
+async def _ensure_database(output_dir: str) -> None:
+    """The app's own database, up, migrated and seeded, before its preview.
+
+    `next dev` alone read a DATABASE_URL nothing was listening on: a fresh
+    build's preview showed empty dropdowns and saved nothing (Test4,
+    2026-09-28). The app's `start.sh --seed-only` is the one way it boots
+    its database (Docker Postgres on a free port, drizzle push, seed) and
+    rewrites .env.local to match; it runs here when the database does not
+    answer. A preview without Docker still starts, and says why it has no data.
+    """
+    from services import app_databases
+    from services.blueprint.schema_push import database_exists, database_url
+
+    if app_databases.server():
+        # No Docker in the platform's container: the apps server holds it.
+        try:
+            await asyncio.to_thread(app_databases.ensure, output_dir)
+        except Exception as exc:  # noqa: BLE001 — a preview still starts, and the log says why
+            logger.warning("[preview] %s: apps database not ready: %s", output_dir, exc)
+        return
+    script = Path(output_dir) / "start.sh"
+    if not script.is_file() or database_exists(database_url(output_dir)):
+        return
+    log = Path(output_dir) / ".forge-preview-db.log"
+    try:
+        with open(log, "w") as out:
+            proc = await asyncio.create_subprocess_exec(
+                "bash", "start.sh", "--seed-only", cwd=output_dir,
+                stdin=asyncio.subprocess.DEVNULL, stdout=out, stderr=out)
+            code = await asyncio.wait_for(proc.wait(), timeout=300)
+        if code != 0:
+            logger.warning("[preview] %s: database did not come up (exit %s); see %s", output_dir, code, log)
+    except (OSError, asyncio.TimeoutError) as exc:
+        logger.warning("[preview] %s: database did not come up: %s", output_dir, exc)
+
+
 async def start_preview(project_id: str, output_dir: str) -> int:
     """Spawn `npx next dev` for a project, poll until ready, return port.
 
@@ -63,6 +133,9 @@ async def start_preview(project_id: str, output_dir: str) -> int:
         )
         await install.wait()
 
+    await _ensure_database(output_dir)
+    await _stop_strays(output_dir)
+
     # basePath so Next generates page + asset URLs under the platform
     # proxy path. Reads next.config.ts (env-gated PREVIEW_BASE_PATH).
     # The proxy at /api/projects/<id>/preview/serve/... forwards to
@@ -73,7 +146,13 @@ async def start_preview(project_id: str, output_dir: str) -> int:
         **os.environ,
         "NEXT_BASE_PATH": prefix,
         "NEXT_ASSET_PREFIX": prefix,
+        # SIGN-IN UNDER THE PREFIX. next-auth's client posts to /api/auth at
+        # the origin's root unless told the base path; behind the proxy that
+        # reached the platform, and every preview sign-in ended on
+        # /api/auth/error (Test4, 2026-09-28). Inlined by next dev.
+        "NEXT_PUBLIC_BASE_PATH": prefix,
     }
+    _session_under_prefix(output_dir)
 
     # Start the dev server
     proc = await asyncio.create_subprocess_exec(

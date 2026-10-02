@@ -77,7 +77,7 @@ def test_a_field_is_renamed_everywhere_the_blueprint_names_it(svc):
     assert kids[1]["props"]["columns"][1]["key"] == "experienceYears" and kids[2]["props"]["fields"][1]["name"] == "experienceYears"
     assert kids[3]["props"]["content"] == "Most experienced: {{nurses.0.experienceYears}} years"
     assert len(out["hits"]) >= 8 and fresh.doc["changeHistory"][-1]["userRequest"].startswith("rename Nurse.yearsOfExperience")
-    assert "drop and re-add" in fc.summary_of("rename_field", out)
+    assert "renamed in the database with its data" in fc.summary_of("rename_field", out)
 
 
 def test_a_field_is_removed_with_its_uses_and_what_still_reads_it_is_named(svc):
@@ -113,7 +113,7 @@ def test_a_new_field_is_added_and_shown_where_the_entity_is_edited_or_listed(svc
                                {"page": "Master Data", "route": "/master-data", "where": "form field"}]
     assert fresh.doc["changeHistory"][-1]["userRequest"] == "add Nurse.fathersName"
     said = fc.summary_of("add_field", out)
-    assert "**fathersName**" in said and "`/master-data`" in said and "form field" in said and "migration" in said
+    assert "**fathersName**" in said and "`/master-data`" in said and "form field" in said and "existing rows keep their data" in said
     with pytest.raises(sc.SectionChangeError, match="already has a field named fathersName"):
         fc.add_field(svc, "Nurse", {"name": "fathersname"})
     with pytest.raises(sc.SectionChangeError, match="not a field name"):
@@ -308,28 +308,3 @@ def test_an_integration_is_declared_with_secret_names_only(svc):
 
 # --- the verbs and the tools -----------------------------------------------------
 
-def test_every_new_verb_is_offered_dispatched_and_tooled(monkeypatch, tmp_path):
-    import services.smith_tools as smith_tools
-    from services.smith.understand_ask import _PROMPT
-    from services.smith.verbs import REQUIRED_BY_VERB
-    for v in ("rename_field", "remove_field", "add_requirement", "edit_requirement", "remove_requirement", "edit_product",
-              "add_api", "remove_api", "add_integration", "remove_integration"):
-        assert v in REQUIRED_BY_VERB and f'"{v}"' in _PROMPT, v
-    calls = []
-    monkeypatch.setattr("services.smith.field_change.run", lambda d, verb, **k: calls.append((verb, k)) or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
-    monkeypatch.setattr("services.smith.definition_change.run", lambda d, verb, **k: calls.append((verb, k)) or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
-    (tmp_path / ".forge" / "blueprint").mkdir(parents=True)
-    (tmp_path / ".forge" / "blueprint" / "current.json").write_text("{}")
-    H = smith_tools.READONLY_HANDLERS
-    assert H["edit_field"](str(tmp_path), {"entity": "Nurse", "field_name": "location", "new_name": "town"})["applied"]
-    assert H["remove_field"](str(tmp_path), {"entity": "Nurse", "field_name": "location"})["applied"]
-    assert H["edit_product"](str(tmp_path), {"change": "call it Roster"})["applied"]
-    assert H["add_integration"](str(tmp_path), {})["applied"] is False
-    assert [c[0] for c in calls] == ["rename_field", "remove_field", "edit_product"]
-    assert calls[0][1]["new_value"] == "town" and calls[2][1]["text"] == "call it Roster"
-    from services.smith_session import SmithSession
-    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=lambda _d: [],
-                           understand_ask_fn=lambda m, c, history=None: {"verb": "rename_field", "entity": "Nurse", "field": {"name": "location"}, "new_value": "town"},
-                           iteration_move_fn=lambda *a, **k: None)
-    assert session.run_iteration(user_message="rename location to town").status == "resolved"
-    assert calls[-1][0] == "rename_field" and calls[-1][1]["field"] == "location"

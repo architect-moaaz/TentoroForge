@@ -52,12 +52,22 @@ both are decided once and inherited by every screen:
   settles it outright, do not ask.
 
   COLOUR. If the description names no colours and points at no existing
-  design, propose two or three palettes the domain actually earns and ask
-  which. Name each one and say what it is for — "Ink and oxblood: quiet,
-  papery, for long reading", "Slate and amber: dense and operational, for a
-  queue worked all day". Not "blue or green": a choice between adjectives is
-  not a choice. Where colours are named or a reference is attached, do not
-  ask.
+  design, propose three palettes the domain actually earns and ask which.
+  THEY MUST BE THREE DIFFERENT DIRECTIONS, not three shades of one: one
+  warm, one cool, and one that is dark-grounded or otherwise characterful
+  (a deep green, an oxblood, a plum) — and never more than one of them a
+  slate, navy or charcoal scheme, which is what every app was offered and
+  what made every app look the same. Name each one and say what it is for —
+  "Ink and oxblood: quiet, papery, for long reading", "Slate and amber:
+  dense and operational, for a queue worked all day", "Forest and cream on
+  a dark ground: evening, a workshop". Not "blue or green": a choice between
+  adjectives is not a choice. The LAST option is always "Let the designer
+  choose from the domain" — many people have no preference and should not
+  be made to invent one. Where colours are named or a reference is
+  attached, do not ask. This question is also where taste is asked, so end
+  it by inviting a picture: "…or attach a screenshot of a product whose
+  look you like, and it will be designed to that standard." A screenshot
+  reaches the designer, the director and the reviewer; an adjective does not.
 
 Otherwise ask only what a definition cannot proceed honestly without: who uses
 this and whether they differ, whether records are shared or private, what
@@ -94,11 +104,51 @@ typography, spacing and layout are settled by it: do not ask about any of
 them, and do not propose palettes."""
 
 
+#: Appended when the ORGANISATION has a design language on record.
+#:
+#: Not a suppression, unlike `_DESIGN_ATTACHED`. A Figma file attached to this
+#: brief has settled the question; a company palette has only made an answer
+#: available, and "not every app a company builds should look like the
+#: company" is a real position — a public storefront or a white-label tool are
+#: the obvious cases. So the question still gets asked, with the company's own
+#: palette as the first thing offered.
+#:
+#: Which is the whole point: the clarifier was asking "which colour palette
+#: should this use?" of an organisation that had already told us, during
+#: onboarding, exactly what it looks like. Being asked to retype an answer the
+#: product already holds is the same failure the discovery exists to prevent.
+_COMPANY_PALETTE = """
+
+THIS ORGANISATION HAS A DESIGN LANGUAGE ON RECORD, read from its own website.
+If you ask about colour, the FIRST option you offer must be exactly this
+string, copied verbatim:
+
+    {option}
+
+Offer one or two alternatives after it for an application that should NOT look
+like the rest of the company's things, and keep them concrete in the usual
+way. Do not describe the company's palette in your own words and do not
+propose a variation on it."""
+
+
+def company_palette_option(company_name: str, summary: str = "") -> str:
+    """The exact option string offered for the company's own design language.
+
+    One definition, used by the prompt that offers it and by the recogniser
+    that reads the answer back — two spellings of this would mean a person
+    picking the option and nothing happening.
+    """
+    label = (company_name or "").strip() or "our company"
+    detail = f" ({summary.strip()})" if summary.strip() else ""
+    return f"Use {label}'s own palette{detail}"
+
+
 def clarify_brief(
     brief: str,
     *,
     provider: Callable[[str], str] | None = None,
     design_attached: bool = False,
+    company_palette: str = "",
 ) -> list[dict[str, Any]]:
     """`[{question, options}]` — empty when the brief stands on its own.
 
@@ -106,12 +156,20 @@ def clarify_brief(
     already tells the model not to ask about colour when a reference is
     attached; a bare link in the prose did not read as one, and it asked which
     palette fits a design that had already chosen its own.
+
+    `company_palette` is the option string for the organisation's own design
+    language, when it has one (`company_palette_option`). An attached design
+    outranks it — that file was attached to THIS application, which is a
+    statement about this application specifically — so the two are not
+    combined.
     """
     text = (brief or "").strip()
     if not text:
         return []
     if design_attached:
         text = text + _DESIGN_ATTACHED
+    elif company_palette.strip():
+        text = text + _COMPANY_PALETTE.format(option=company_palette.strip())
 
     # BUILT BEFORE THE TRY. `str.format` on a prompt containing literal JSON
     # braces raises KeyError, and inside the guard below that is indis-

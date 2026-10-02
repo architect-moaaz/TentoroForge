@@ -1680,6 +1680,120 @@
             "type": "object",
             "additionalProperties": {}
           },
+          "clientAction": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "set"
+                      },
+                      "target": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "value": {
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "target",
+                      "value"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "compute"
+                      },
+                      "target": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "formula": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "target",
+                      "formula"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "set"
+                        },
+                        "target": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "value": {
+                          "type": [
+                            "string",
+                            "number",
+                            "boolean"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "target",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "compute"
+                        },
+                        "target": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "formula": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "target",
+                        "formula"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "minItems": 1
+              }
+            ]
+          },
           "submit": {
             "type": "boolean"
           },
@@ -2106,6 +2220,9 @@
               "regular",
               "loose"
             ]
+          },
+          "navigate": {
+            "type": "string"
           },
           "style": {
             "type": "object",
@@ -2550,7 +2667,7 @@
       "name": "Chart",
       "category": "data",
       "acceptsChildren": false,
-      "doc": "Chart dispatcher.\n\nSchema accepts `props.data` as either an inline array OR a Mustache\nbinding string (the LLM commonly emits `\"{{stats.daily}}\"` for live-data\nbindings). When the binding hasn't been resolved by the runtime data\npipeline, `data` arrives as a string and recharts blows up with\n`displayedData.map is not a function`. Guard with an empty-state.",
+      "doc": "Every chart the library draws — bar, line, area, pie, donut, funnel, radar,\nscatter, heatmap, treemap, sunburst, graph and map — on ECharts (`EChart`).\n\nSchema accepts `props.data` as either an inline array OR a Mustache\nbinding string (`\"{{stats.daily}}\"`). When the binding hasn't been resolved\nby the runtime data pipeline, `data` arrives as a string; that, and an empty\narray, render a quiet empty state instead of blank axes.",
       "props": {
         "type": "object",
         "properties": {
@@ -2563,7 +2680,13 @@
               "pie",
               "donut",
               "funnel",
-              "radar"
+              "radar",
+              "scatter",
+              "heatmap",
+              "treemap",
+              "sunburst",
+              "graph",
+              "map"
             ]
           },
           "data": {
@@ -2575,7 +2698,8 @@
                   "additionalProperties": {
                     "type": [
                       "string",
-                      "number"
+                      "number",
+                      "null"
                     ]
                   }
                 }
@@ -2610,6 +2734,33 @@
               ],
               "additionalProperties": false
             }
+          },
+          "colorKey": {
+            "type": "string"
+          },
+          "yKey": {
+            "type": "string"
+          },
+          "valueKey": {
+            "type": "string"
+          },
+          "sizeKey": {
+            "type": "string"
+          },
+          "labelKey": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "number",
+              "currency",
+              "percent",
+              "duration"
+            ]
+          },
+          "currency": {
+            "type": "string"
           },
           "height": {
             "type": "number"
@@ -2649,7 +2800,8 @@
                       "additionalProperties": {
                         "type": [
                           "string",
-                          "number"
+                          "number",
+                          "null"
                         ]
                       }
                     }
@@ -2699,6 +2851,9 @@
             "type": "object",
             "properties": {
               "leaderboard": {
+                "type": "boolean"
+              },
+              "horizontal": {
                 "type": "boolean"
               },
               "stacked": {
@@ -5262,6 +5417,9 @@
           "mimeTypeField": {
             "type": "string"
           },
+          "search": {
+            "type": "boolean"
+          },
           "resumable": {
             "type": "boolean"
           },
@@ -6966,6 +7124,140 @@
                     "name",
                     "label",
                     "fields"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "file"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "hint": {
+                      "type": "string"
+                    },
+                    "placeholder": {
+                      "type": "string"
+                    },
+                    "interaction": {
+                      "type": "object",
+                      "properties": {
+                        "computed": {
+                          "type": "object",
+                          "properties": {
+                            "formula": {
+                              "type": "string"
+                            },
+                            "readOnly": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "formula"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "optionsFrom": {
+                          "type": "object",
+                          "properties": {
+                            "source": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "filter": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "source",
+                            "value",
+                            "label"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "dependsOn": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "onChange": {
+                          "type": "object",
+                          "properties": {
+                            "fetch": {
+                              "type": "object",
+                              "properties": {
+                                "resource": {
+                                  "type": "string"
+                                },
+                                "by": {
+                                  "type": "string"
+                                },
+                                "from": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "resource",
+                                "by",
+                                "from"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "set": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "fetch",
+                            "set"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "visibleIf": {
+                          "type": "string"
+                        },
+                        "requiredIf": {
+                          "type": "string"
+                        },
+                        "enabledIf": {
+                          "type": "string"
+                        },
+                        "readOnlyIf": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "accept": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name",
+                    "label"
                   ],
                   "additionalProperties": false
                 },
@@ -13485,6 +13777,15 @@
           },
           "appName": {
             "type": "string"
+          },
+          "logoSrc": {
+            "type": "string"
+          },
+          "logoAlt": {
+            "type": "string"
+          },
+          "logoAspect": {
+            "type": "number"
           },
           "mode": {
             "type": "string",

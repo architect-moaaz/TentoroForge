@@ -9,4 +9,4 @@ export const BarcodeScannerProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type BarcodeScannerPropsType = z.infer<typeof BarcodeScannerProps>;
+export type BarcodeScannerPropsType = z.input<typeof BarcodeScannerProps>;

@@ -75,13 +75,27 @@ async def _collect_integrations(
 ) -> dict[str, str]:
     """Decrypt every set integration for this org into a flat dict the
     env-sync module can merge. Ciphertext failures are logged and skipped
-    so a single corrupted row doesn't block the whole publish."""
+    so a single corrupted row doesn't block the whole publish.
+
+    THIS IS WHERE A CONNECTED SERVICE'S CREDENTIAL ENTERS A PUBLISHED APP.
+    The Blueprint records the service and the NAMES of its variables
+    (`services.smith.email_connect`); the owner sets the value once, here, on
+    the platform, encrypted per organisation; and this publish is what puts it
+    in the deployment's environment, where the app's `getSecret` reads it. No
+    credential is ever typed into a conversation, written into the Blueprint
+    or committed to the generated app — so a connection that is live in
+    production and one that is only declared differ by exactly one row in this
+    table, which is why the app asks for presence by name and says so when it
+    is missing.
+    """
     res = await db.execute(
         select(PlatformIntegration).where(PlatformIntegration.org_id == org_id)
     )
+    from services.node_config_specs import platform_only_keys
+    platform_only = platform_only_keys()
     out: dict[str, str] = {}
     for row in res.scalars().all():
-        if not row.value_ct or not row.value_iv:
+        if not row.value_ct or not row.value_iv or row.key in platform_only:
             continue
         try:
             out[row.key] = decrypt(row.provider, row.value_ct, row.value_iv)
@@ -90,6 +104,15 @@ async def _collect_integrations(
                 "skipping corrupted integration row org=%s key=%s: %s",
                 row.org_id, row.key, e,
             )
+    # THE ORGANISATION'S MCP SERVERS TRAVEL WITH IT. A published app's
+    # `mcp_tool_call` resolves a server from MCP_SERVER_* in its environment,
+    # and nothing put them there, so a Firecrawl step that ran nowhere else
+    # could not run published either.
+    from models.platform_mcp_server import PlatformMcpServer
+    from services.env_writer import mcp_env
+    mcp = await db.execute(select(PlatformMcpServer).where(
+        PlatformMcpServer.org_id == org_id, PlatformMcpServer.enabled.is_(True)))
+    out.update(mcp_env(mcp.scalars().all()))
     return out
 
 

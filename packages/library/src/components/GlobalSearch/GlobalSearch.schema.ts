@@ -16,4 +16,4 @@ export const GlobalSearchProps = z
   })
   .strict();
 
-export type GlobalSearchPropsType = z.infer<typeof GlobalSearchProps>;
+export type GlobalSearchPropsType = z.input<typeof GlobalSearchProps>;

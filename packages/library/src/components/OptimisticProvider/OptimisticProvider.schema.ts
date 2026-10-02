@@ -34,4 +34,4 @@ export const OptimisticProviderProps = z
   })
   .strict();
 
-export type OptimisticProviderPropsType = z.infer<typeof OptimisticProviderProps>;
+export type OptimisticProviderPropsType = z.input<typeof OptimisticProviderProps>;

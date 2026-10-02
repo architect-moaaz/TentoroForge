@@ -41,4 +41,4 @@ export const InputProps = z.object({
   iconRight:   z.string().optional(),
 });
 
-export type InputPropsType = z.infer<typeof InputProps>;
+export type InputPropsType = z.input<typeof InputProps>;

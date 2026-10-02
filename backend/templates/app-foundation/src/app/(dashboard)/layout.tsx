@@ -1,4 +1,4 @@
-import type * as React from "react";
+import * as React from "react";
 import { redirect } from "next/navigation";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -15,11 +15,17 @@ import {
   Stethoscope, Tag, Target, Ticket, TrendingUp, Truck, User, UserCheck,
   UserCog, Users, Wallet, Wrench, Zap,
 } from "lucide-react";
+import { icons as lucideIcons } from "lucide-react";
 import { ShellStateProvider } from "@tentoroforge/renderer";
 import { MobileNav } from "./MobileNav";
+import { NotificationBell } from "./NotificationBell";
+import { LanguageSwitch } from "@/sdk/i18n";
+import { AccountMenu } from "./AccountMenu";
+import { MobileTabBar } from "./MobileTabBar";
 import { PersonaChrome } from "./PersonaChrome";
 import { RouteBreadcrumb, type RouteNode } from "./RouteBreadcrumb";
 import { AppNavigator } from "@/components/AppNavigator";
+import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
 import { schemas } from "@/schemas/registry";
 
 // The app shell renders the generated SideNav: a collapsible rail that expands on
@@ -28,8 +34,10 @@ import { schemas } from "@/schemas/registry";
 // carries the dynamically chosen frame, palette, and grouped nav). Falls back to a
 // flat menu built from nav-flow.json if shell.json is absent.
 
-type Sub = { label: string; route: string; icon?: string };
-type Group = { label?: string; icon?: string; route?: string; items?: Sub[] };
+// `roles`: who MAY open it (a role-restricted page); `audience`: who it is
+// FOR (the page's users) — the projection writes both.
+type Sub = { label: string; route: string; icon?: string; roles?: string[]; audience?: string[] };
+type Group = { label?: string; icon?: string; route?: string; items?: Sub[]; roles?: string[]; audience?: string[] };
 type NavProps = {
   groups: Group[];
   appName?: string;
@@ -39,7 +47,7 @@ type NavProps = {
   muted?: string;
   accent?: string;
 };
-type NavPage = { route?: string; title?: string; shell?: boolean; params?: string[] };
+type NavPage = { route?: string; title?: string; shell?: boolean; params?: string[]; roles?: string[] };
 
 function humanize(title: string | undefined, route: string): string {
   let raw = (title || "").replace(/(List|Detail|Create|Edit|Index)?Page$/, "");
@@ -103,6 +111,44 @@ function findSideNav(node: unknown): { props?: NavProps } | null {
   return null;
 }
 
+/** The rail as this person may use it.
+ *
+ * A destination carries `roles` when its page is role-restricted (the
+ * projection puts them there). Offering the rest to everyone showed a
+ * neighbour who had just signed up an "Admin" heading with the dispute queue
+ * and the verification queue under it — both of which answer 403 (0l133sp2).
+ * A menu that offers what it will refuse is worse than one that says less.
+ */
+function visibleTo(groups: Group[], role: string): Group[] {
+  const mayOpen = (roles?: string[]) => !roles?.length || roles.includes(role);
+  // A product with several kinds of user lists each kind's screens for that
+  // kind: a parent's dashboard is not on the administrator's rail. Only a
+  // signed-in role narrows it; a page for everyone names no audience.
+  const forMe = (audience?: string[]) => !role || !audience?.length || audience.includes(role);
+  const out: Group[] = [];
+  for (const group of groups) {
+    if (!mayOpen(group.roles) || !forMe(group.audience)) continue;
+    if (!group.items?.length) {
+      out.push(group);
+      continue;
+    }
+    const items = group.items.filter((i) => mayOpen(i.roles) && forMe(i.audience));
+    // A heading whose every destination is somebody else's goes with them.
+    if (items.length) out.push({ ...group, items });
+  }
+  // ONE HEADING IS NO HEADING. When what is left is a single labelled group
+  // (the administrator's, after the parent's and the doctor's went), the
+  // label says what the rail already says; its destinations stand alone.
+  const labelled = out.filter((g) => g.items?.length);
+  if (labelled.length === 1 && out.length === 1) return labelled[0].items!.map((i) => ({ ...i }));
+  return out;
+}
+
+/** Whether the rail was told who any destination is for. */
+function hasAudience(groups: Group[]): boolean {
+  return groups.some((g) => g.audience?.length || g.items?.some((i) => i.audience?.length));
+}
+
 const AUTH_ROUTES = new Set(["/login", "/signup"]);
 
 // Every route already represented in a SideNav groups array — walks BOTH flat
@@ -136,7 +182,9 @@ function navFlowShellItems(nf: unknown, have: Set<string>): Group[] {
     if (isDetailPage(p.title, route)) continue;
     seen.add(route);
     const label = route === "/" ? "Dashboard" : humanize(p.title, route);
-    out.push({ label, route, icon: iconFor(label, route) });
+    // A merged page keeps the roles nav-flow records for it, so `visibleTo`
+    // holds it to the same rule as a curated destination.
+    out.push({ label, route, icon: iconFor(label, route), ...(p.roles?.length ? { roles: p.roles } : {}) });
   }
   return out;
 }
@@ -212,8 +260,15 @@ function frameClass(density?: string): string {
 
 async function shellIdentity(): Promise<ShellIdentity> {
   try {
-    const dp = path.join(process.cwd(), "src", "contracts", "design-spec.json");
-    const spec = JSON.parse(await fs.readFile(dp, "utf8"));
+    // OPTIONAL. Only the old pipeline writes design-spec.json; a Blueprint
+    // app has none, and reading it first threw straight to the fallback —
+    // before design-dna.json, which the Blueprint DOES write, was ever
+    // looked at. Every Blueprint app got the same rail for that alone.
+    let spec: any = {};
+    try {
+      const dp = path.join(process.cwd(), "src", "contracts", "design-spec.json");
+      spec = JSON.parse(await fs.readFile(dp, "utf8"));
+    } catch { /* no design-spec — the dna and the defaults decide */ }
     const pal = (spec?.colorPalette ?? {}) as Record<string, string>;
     const hex = (v?: string) => (typeof v === "string" && /^#[0-9a-fA-F]{6}/.test(v.trim())
       ? v.trim().slice(0, 7) : undefined);
@@ -249,14 +304,15 @@ async function shellIdentity(): Promise<ShellIdentity> {
     // shipping the identical hover-expand rail.
     let chrome = String((spec?.layout ?? {}).chrome ?? "standard-rail");
     let skin = String(spec?.skin ?? "");
+    let density = String((spec?.layout ?? {}).density ?? "comfortable");
     try {
       const dnaRaw = await fs.readFile(
         path.join(process.cwd(), "src", "contracts", "design-dna.json"), "utf8");
       const dna = JSON.parse(dnaRaw);
       chrome = String(dna?.layout?.chrome ?? dna?.shell?.chrome ?? chrome);
       skin = String(dna?.skin ?? "");
+      density = String(dna?.layout?.density ?? density);
     } catch { /* design-dna optional */ }
-    const density = String((spec?.layout ?? {}).density ?? "comfortable");
     return { frame, chrome, density, skin, ...(bg ? { bg } : {}), ...(text ? { text } : {}),
              ...(accent ? { accent } : {}), mode, primary: hex(pal.primary) };
   } catch {
@@ -312,7 +368,7 @@ function flattenNav(groups: Group[]): Sub[] {
  * them). Mobile: the link row scrolls horizontally instead of collapsing, so
  * every destination stays reachable without client-side chrome.
  */
-function TopNav({ items, appName, id }: { items: Sub[]; appName: string; id: ShellIdentity }) {
+function TopNav({ items, appName, id, right }: { items: Sub[]; appName: string; id: ShellIdentity; right?: React.ReactNode }) {
   const dark = id.mode !== "light";
   const bg = id.bg ?? (dark ? "#101418" : "#ffffff");
   const text = id.text ?? (dark ? "#cbd5e1" : "#334155");
@@ -327,15 +383,16 @@ function TopNav({ items, appName, id }: { items: Sub[]; appName: string; id: She
         style={{ background: bg, color: text, borderBottom: dark ? "none" : "1px solid rgba(0,0,0,0.08)" }}
         className="hidden md:flex h-14 shrink-0 items-center gap-6 px-4 lg:px-6"
       >
-        <span className="text-[15px] font-semibold tracking-tight whitespace-nowrap" style={{ fontFamily: "var(--font-heading)" }}>
-          {appName}
+        <span className="flex items-center text-[15px] font-semibold tracking-tight whitespace-nowrap"
+          style={{ fontFamily: "var(--font-heading)" }}>
+          <ShellBrand appName={appName} height={28}>{appName}</ShellBrand>
         </span>
         <nav data-shell-nav="" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {items.map((it) => (
             <a
               key={it.route}
               href={it.route}
-              data-nav-item=""
+              data-nav-item="" suppressHydrationWarning
               className="whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] opacity-80 transition-opacity hover:opacity-100"
               style={{ color: text }}
             >
@@ -344,6 +401,7 @@ function TopNav({ items, appName, id }: { items: Sub[]; appName: string; id: She
           ))}
         </nav>
         <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: accent }} />
+        {right && <div className="flex shrink-0 items-center gap-2">{right}</div>}
       </header>
     </>
   );
@@ -490,7 +548,7 @@ function _LegacyPersonaPillsNav({ personas, appName, id }: {
                   <a
                     key={screen.route}
                     href={screen.route}
-                    data-nav-item=""
+                    data-nav-item="" suppressHydrationWarning
                     data-persona-subnav-link=""
                     data-nav-active="false"
                     className="rounded-full px-3 h-8 inline-flex items-center text-[12.5px] font-medium transition-colors"
@@ -531,6 +589,21 @@ async function readNavPersonas(): Promise<NavPersona[]> {
   try {
     const nf = await readNavFlow() as { personas?: NavPersona[] };
     return Array.isArray(nf?.personas) ? nf.personas : [];
+  } catch {
+    return [];
+  }
+}
+
+// A mobile-first application's bottom tabs (shell.json `mobile.tabs`), or none.
+async function readMobileTabs(): Promise<Sub[]> {
+  try {
+    const sp = path.join(process.cwd(), "src", "schemas", "shell.json");
+    const shell = JSON.parse(await fs.readFile(sp, "utf8"));
+    const tabs = shell?.mobile?.style === "tabs" ? shell.mobile.tabs : null;
+    return Array.isArray(tabs)
+      ? tabs.filter((t: Sub) => t && t.route && !/\[/.test(t.route))
+          .map((t: Sub) => ({ ...t, icon: t.icon || iconFor(t.label ?? "", t.route) }))
+      : [];
   } catch {
     return [];
   }
@@ -627,13 +700,59 @@ const GLYPHS: Record<string, React.ComponentType<{ size?: number; strokeWidth?: 
   wrench: Wrench, zap: Zap,
 };
 
+// Any lucide icon the Blueprint names ("map-pin", "hammer"), not only the
+// ones listed above: the architect picks the icon that depicts a destination
+// in this product. Resolved here, on the server, so no icon set ships to the
+// browser.
+function lucideByName(name: string): React.ComponentType<{ size?: number; strokeWidth?: number }> | undefined {
+  const pascal = name.split(/[-_\s]+/).filter(Boolean).map((w) => w[0]!.toUpperCase() + w.slice(1)).join("");
+  return (lucideIcons as Record<string, React.ComponentType<{ size?: number; strokeWidth?: number }>>)[pascal];
+}
+
 function RailGlyph({ name, size = 17 }: { name?: string; size?: number }) {
-  const C = GLYPHS[(name || "circle").toLowerCase()] ?? Circle;
+  const key = (name || "circle").toLowerCase();
+  const C = GLYPHS[key] ?? lucideByName(key) ?? Circle;
   return <C size={size} strokeWidth={2} />;
 }
 
 /** Wide sectioned rail: 272px, uppercase group labels, pill actives, footer. */
-function WideRail({ props, appName }: { props: NavProps; appName: string }) {
+/**
+ * How a shell says which application it is.
+ *
+ * ONE RULE, EVERY CHROME: the owner's mark REPLACES the app-name lockup — the
+ * letter-in-a-box, the name in text, or both. It is not set beside the name,
+ * because a logo is how a company writes its name and the two together read as
+ * a stutter ("Bright Care | Bright Care") — worst exactly where the mark is a
+ * wordmark, which is what most of them are.
+ *
+ * Every branch below drew that lockup itself, and the logo landed in only one
+ * of them (`standard-rail`, through the library's SideNav). An application
+ * whose design DNA chose `wide-rail`, `icon-rail`, `dock`, `topbar` or
+ * `persona-pills` showed the owner's logo on its sign-in screen and an initial
+ * in its own shell.
+ *
+ * An application that gave no mark keeps the lockup it has always had; this
+ * renders nothing of its own.
+ */
+function ShellBrand({ appName, height, children }: {
+  appName: string;
+  height: number;
+  /** The lockup this surface draws when there is no mark. */
+  children: React.ReactNode;
+}) {
+  if (BRAND_LOGO) return <BrandMark height={height} alt={appName} />;
+  return <>{children}</>;
+}
+
+function WideRail({ props, appName, caption, footer }: {
+  props: NavProps; appName: string;
+  /** Who this rail is for — the signed-in role, when the product has several. */
+  caption?: string;
+  /** The frame's own controls (notifications, the account) — in the rail,
+   *  not floating over the page's header where they collided with its
+   *  primary action. */
+  footer?: React.ReactNode;
+}) {
   const dark = props.mode !== "light";
   const bg = props.bg ?? (dark ? "#141a18" : "#ffffff");
   const text = props.text ?? (dark ? "#c9d2ce" : "#3f4a45");
@@ -643,11 +762,18 @@ function WideRail({ props, appName }: { props: NavProps; appName: string }) {
     <nav data-shell-nav="" className="hidden h-full shrink-0 flex-col overflow-y-auto md:flex"
       style={{ width: "var(--sk-nav-w, 272px)", background: bg, color: text,
                borderRight: dark ? "none" : "1px solid rgba(0,0,0,0.08)" }}>
-      <div className="flex items-center gap-2.5 px-5 pb-2 pt-5">
-        <span className="grid h-8 w-8 place-items-center rounded-[var(--radius)] text-sm font-bold text-white"
-          style={{ background: accent }}>{appName.slice(0, 1)}</span>
-        <span className="text-[15px] font-semibold tracking-tight"
-          style={{ fontFamily: "var(--font-heading)" }}>{appName}</span>
+      <div className="px-5 pb-2 pt-5">
+        <div className="flex items-center gap-2.5">
+          <ShellBrand appName={appName} height={32}>
+            <span className="grid h-8 w-8 place-items-center rounded-[var(--radius)] text-sm font-bold text-white"
+              style={{ background: accent }}>{appName.slice(0, 1)}</span>
+            <span className="text-[15px] font-semibold tracking-tight"
+              style={{ fontFamily: "var(--font-heading)" }}>{appName}</span>
+          </ShellBrand>
+        </div>
+        {caption && (
+          <div data-rail-caption="" className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.12em] opacity-60">{caption}</div>
+        )}
       </div>
       <div className="flex-1 px-3 py-3">
         {props.groups.map((g, gi) => (
@@ -658,7 +784,7 @@ function WideRail({ props, appName }: { props: NavProps; appName: string }) {
                   {g.label ?? ""}
                 </div>
                 {g.items.map((it) => (
-                  <a key={it.route} href={it.route} data-nav-item=""
+                  <a key={it.route} href={it.route} data-nav-item="" suppressHydrationWarning
                     className="mb-0.5 flex items-center gap-2.5 rounded-full px-3 py-[7px] text-[13px] opacity-85 transition hover:opacity-100"
                     style={{ color: text }}>
                     <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={16} /></span>
@@ -667,7 +793,7 @@ function WideRail({ props, appName }: { props: NavProps; appName: string }) {
                 ))}
               </>
             ) : g.route ? (
-              <a href={g.route} data-nav-item=""
+              <a href={g.route} data-nav-item="" suppressHydrationWarning
                 className="mb-0.5 flex items-center gap-2.5 rounded-full px-3 py-[7px] text-[13px] opacity-85 transition hover:opacity-100"
                 style={{ color: text }}>
                 <span data-nav-icon="" className="inline-flex"><RailGlyph name={g.icon} size={16} /></span>
@@ -677,18 +803,18 @@ function WideRail({ props, appName }: { props: NavProps; appName: string }) {
           </div>
         ))}
       </div>
-      <div className="mx-3 mb-4 flex items-center gap-2.5 rounded-[var(--radius)] px-3 py-2.5"
-        style={{ background: pillBg }}>
-        <span className="grid h-7 w-7 place-items-center rounded-full text-[11px] font-semibold text-white"
-          style={{ background: accent }}>A</span>
-        <span className="text-xs opacity-80">Account</span>
-      </div>
+      {footer && (
+        <div data-rail-footer="" className="mx-3 mb-4 flex items-center justify-between gap-2 rounded-[var(--radius)] px-2 py-2"
+          style={{ background: pillBg }}>
+          {footer}
+        </div>
+      )}
     </nav>
   );
 }
 
 /** Icon-only rail: 64px of pure glyphs — dense, technical, maximal canvas. */
-function IconRail({ props, appName }: { props: NavProps; appName: string }) {
+function IconRail({ props, appName, footer }: { props: NavProps; appName: string; footer?: React.ReactNode }) {
   const dark = props.mode !== "light";
   const bg = props.bg ?? (dark ? "#101418" : "#ffffff");
   const text = props.text ?? (dark ? "#c7d2de" : "#334155");
@@ -698,17 +824,26 @@ function IconRail({ props, appName }: { props: NavProps; appName: string }) {
     <nav data-shell-nav="" className="hidden h-full shrink-0 flex-col items-center overflow-y-auto md:flex"
       style={{ width: "var(--sk-nav-w, 64px)", background: bg, color: text,
                borderRight: dark ? "none" : "1px solid rgba(0,0,0,0.08)" }}>
-      <span className="mb-4 mt-4 grid h-9 w-9 place-items-center rounded-[var(--radius)] text-sm font-bold text-white"
-        style={{ background: accent }}>{appName.slice(0, 1)}</span>
+      {/* 64px of rail. `BrandMark` caps the mark at its container, so a wide
+          wordmark letterboxes into the width rather than pushing the rail
+          open — legible at 64px in a way it is not at the 28px the
+          hover-expand rail collapses to. */}
+      <div className="mb-4 mt-4 flex w-full justify-center px-2">
+        <ShellBrand appName={appName} height={36}>
+          <span className="grid h-9 w-9 place-items-center rounded-[var(--radius)] text-sm font-bold text-white"
+            style={{ background: accent }}>{appName.slice(0, 1)}</span>
+        </ShellBrand>
+      </div>
       <div className="flex flex-1 flex-col items-center gap-1 pb-4">
         {items.map((it) => (
-          <a key={it.route} href={it.route} title={it.label} data-nav-item=""
+          <a key={it.route} href={it.route} title={it.label} data-nav-item="" suppressHydrationWarning
             className="grid h-10 w-10 place-items-center rounded-[var(--radius)] opacity-75 transition hover:opacity-100"
             style={{ color: text }}>
             <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={18} /></span>
           </a>
         ))}
       </div>
+      {footer && <div data-rail-footer="" className="mb-4 flex flex-col items-center gap-2">{footer}</div>}
     </nav>
   );
 }
@@ -727,11 +862,12 @@ function DockNav({ props, appName }: { props: NavProps; appName: string }) {
     <nav data-shell-nav="" data-dock=""
       className="fixed bottom-4 left-1/2 z-40 flex max-w-[calc(100vw-1rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-2xl px-2 py-1.5 shadow-2xl backdrop-blur"
       style={{ background: bg, color: text, border: "1px solid rgba(127,127,127,.18)" }}>
-      <span className="mx-1.5 text-[13px] font-bold tracking-tight" style={{ fontFamily: "var(--font-heading)" }}>
-        {appName.slice(0, 1)}
+      <span className="mx-1.5 flex items-center text-[13px] font-bold tracking-tight"
+        style={{ fontFamily: "var(--font-heading)" }}>
+        <ShellBrand appName={appName} height={20}>{appName.slice(0, 1)}</ShellBrand>
       </span>
       {items.map((it) => (
-        <a key={it.route} href={it.route} data-nav-item="" title={it.label}
+        <a key={it.route} href={it.route} data-nav-item="" suppressHydrationWarning title={it.label}
           className="flex flex-col items-center gap-0.5 rounded-xl px-2.5 py-1.5 opacity-80 transition hover:opacity-100"
           style={{ color: text }}>
           <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={17} /></span>
@@ -751,15 +887,54 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
 
   const navProps = await loadNavProps();
+  const role = String((session.user as { role?: string } | undefined)?.role ?? "");
+  const scoped = hasAudience(navProps.groups);
+  navProps.groups = visibleTo(navProps.groups, role);
   const identity = await shellIdentity();
+  // THE FRAME'S OWN CONTROLS. Rendered once, and placed where the frame has
+  // room for them: a rail's footer, a top bar's right end, or — for the
+  // chromes with neither — a row above the page. Floating over the page's
+  // header they sat on top of its primary action.
+  const cluster = session?.user ? (
+    <>
+      <LanguageSwitch />
+      <NotificationBell />
+      <AccountMenu name={session.user.name} email={session.user.email}
+                   role={(session.user as { role?: string }).role} />
+    </>
+  ) : null;
+  const chromeName = identity.chrome ?? "standard-rail";
+  const clusterInRail = ["wide-rail", "icon-rail", "right-rail", "floating-rail"].includes(chromeName);
+  const clusterInBar = chromeName === "topbar" || identity.frame === "topbar";
+  const caption = scoped && role ? role : undefined;
   const routeTree = await loadRouteTree();
   // Every frame below renders `body` rather than `children` directly, so
   // the crumb lands above page content in all four shell shapes without
   // four copies of the same JSX.
+  const mobileTabs = (await readMobileTabs()).filter(
+    (t) => !t.roles?.length || t.roles.includes(String((session.user as { role?: string } | undefined)?.role ?? "")));
   const body = (
     <>
-      <RouteBreadcrumb routes={routeTree} />
+      {/* The frame's own row: where you are, and what the app told you. */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1"><RouteBreadcrumb routes={routeTree} /></div>
+        {/* THE WAY OUT. Only the persona frame had one; every other app
+            shipped with no way to sign out at all. */}
+        {cluster && !clusterInRail && !clusterInBar && (
+          <div className="flex shrink-0 items-center gap-2">{cluster}</div>
+        )}
+      </div>
       {children}
+      {mobileTabs.length > 0 && (
+        <>
+          {/* Room under the last row for the bar, on a phone only. */}
+          <div aria-hidden="true" className="h-20 md:hidden" />
+          <React.Suspense fallback={null}>
+            <MobileTabBar tabs={mobileTabs.map((t) => ({ label: t.label ?? t.route, route: t.route,
+                                                        icon: <RailGlyph name={t.icon} size={20} /> }))} />
+          </React.Suspense>
+        </>
+      )}
     </>
   );
   const appName = navProps.appName || "__APP_NAME__";
@@ -768,8 +943,24 @@ export default async function DashboardLayout({
   // A structurally different shell, not just different paint.
   // Highlights the current destination in every rail/dock (server components
   // can't know the URL; this tiny tracker follows soft navigations too).
-  const activeTracker = `(function(){function m(){document.querySelectorAll("[data-nav-item]").forEach(function(a){a.setAttribute("data-active",String(a.getAttribute("href")===location.pathname))})}m();addEventListener("popstate",m);var p=history.pushState;history.pushState=function(){p.apply(this,arguments);m()}})()`;
-  const trackerTag = <script dangerouslySetInnerHTML={{ __html: activeTracker }} />;
+  // THE CURRENT PAGE IS LIT IN EVERY FRAME. The tracker ran once, as it was
+  // parsed — before the frame it sits in front of existed — so it found no
+  // item and nothing was ever lit; and it matched only the exact address, so
+  // a record page under a destination lit nothing either. F&B's admin clicked
+  // Menu Items and the rail stayed as it was (2026-10-02). Now: run when the
+  // page is ready and on every navigation; the destination whose address is
+  // the longest prefix of where you are is the one lit; the style is below.
+  // It sets `data-active` and `aria-current` before React hydrates, so every
+  // nav item says `suppressHydrationWarning`: without it each page logged a
+  // hydration mismatch, and every trial of every page read as broken
+  // (F&B live test, 2026-10-02).
+  const activeTracker = `(function(){function m(){var path=location.pathname,here=path+location.search;var items=Array.prototype.slice.call(document.querySelectorAll("[data-nav-item]"));var best="";items.forEach(function(a){var h=a.getAttribute("href")||"";if(!h||h.charAt(0)!=="/")return;var bare=h.split("?")[0];var hit=h===here||bare===path||(bare!=="/"&&path.indexOf(bare+"/")===0);if(hit&&(h===here||bare.length>best.length))best=h===here?here:bare;});items.forEach(function(a){var h=a.getAttribute("href")||"";var on=!!best&&(h===best||(h.split("?")[0]===best&&!items.some(function(b){return b.getAttribute("href")===here})));a.setAttribute("data-active",String(on));if(on)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current");});}function soon(){m();setTimeout(m,0);}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",soon);else soon();addEventListener("popstate",soon);var p=history.pushState;history.pushState=function(){p.apply(this,arguments);setTimeout(m,0)};var r=history.replaceState;history.replaceState=function(){r.apply(this,arguments);setTimeout(m,0)}})()`;
+  const trackerTag = (
+    <>
+      <style dangerouslySetInnerHTML={{ __html: `[data-nav-item][data-active="true"]{opacity:1!important;background:hsl(var(--primary) / .14)!important;color:hsl(var(--primary))!important;font-weight:600}` }} />
+      <script dangerouslySetInnerHTML={{ __html: activeTracker }} />
+    </>
+  );
   // PB-6: persona-pills frame — the Claude-yoga-demo top-strip. When the
   // deterministic shell picker (services/shell_templates.select_frame) chose
   // "persona-pills" (i.e. 2-4 personas in nav-flow.personas, attached by
@@ -824,7 +1015,7 @@ export default async function DashboardLayout({
         <AppNavigator>
           <div data-skin={identity.skin || undefined} className="flex h-screen flex-col overflow-hidden bg-background">
             {trackerTag}
-            <TopNav items={flattenNav(navProps.groups)} appName={appName} id={identity} />
+            <TopNav items={flattenNav(navProps.groups)} appName={appName} id={identity} right={cluster} />
             <main data-shell-main className="min-h-0 flex-1 overflow-y-auto">
               <div className={frameClass(identity.density)}>{body}</div>
             </main>
@@ -859,7 +1050,7 @@ export default async function DashboardLayout({
       <div className="flex h-screen flex-col overflow-hidden bg-background">
         {mobileNav}
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <WideRail props={navProps} appName={appName} />{main}
+          <WideRail props={navProps} appName={appName} caption={caption} footer={cluster} />{main}
         </div>
       </div>
     );
@@ -868,7 +1059,7 @@ export default async function DashboardLayout({
       <div className="flex h-screen flex-col overflow-hidden bg-background">
         {mobileNav}
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          <IconRail props={navProps} appName={appName} />{main}
+          <IconRail props={navProps} appName={appName} footer={cluster} />{main}
         </div>
       </div>
     );
@@ -879,7 +1070,10 @@ export default async function DashboardLayout({
         <main data-shell-main className="h-full overflow-y-auto pb-24">
           <div className={frameClass(identity.density)}>{body}</div>
         </main>
-        <DockNav props={navProps} appName={appName} />
+        {/* A phone has the tab bar; two bottom bars would overlap. */}
+        <div className={mobileTabs.length ? "hidden md:block" : undefined}>
+          <DockNav props={navProps} appName={appName} />
+        </div>
       </div>
     );
   } else if (chrome === "right-rail") {
@@ -889,7 +1083,7 @@ export default async function DashboardLayout({
       <div className="flex h-screen flex-col overflow-hidden bg-background">
         {mobileNav}
         <div className="flex min-h-0 flex-1 flex-row-reverse overflow-hidden">
-          <WideRail props={navProps} appName={appName} />{main}
+          <WideRail props={navProps} appName={appName} caption={caption} footer={cluster} />{main}
         </div>
       </div>
     );
@@ -900,7 +1094,7 @@ export default async function DashboardLayout({
         {mobileNav}
         <div className="flex min-h-0 flex-1 gap-1 overflow-hidden p-3">
           <div className="hidden overflow-hidden rounded-2xl shadow-xl md:block">
-            <WideRail props={navProps} appName={appName} />
+            <WideRail props={navProps} appName={appName} caption={caption} footer={cluster} />
           </div>
           {main}
         </div>
@@ -910,7 +1104,13 @@ export default async function DashboardLayout({
     // standard-rail: the classic hover-expand SideNav.
     shell = (
       <div className="flex h-screen overflow-hidden bg-background">
-        <SideNav {...navProps} appName={appName} />
+        {/* Each destination's icon drawn here, where any icon the Blueprint
+            names resolves; the library's own list is short on purpose. */}
+        <SideNav {...navProps} appName={appName}
+          groups={navProps.groups.map((g) => ({
+            ...g, glyph: <RailGlyph name={g.icon} size={20} />,
+            items: g.items?.map((it) => ({ ...it, glyph: <RailGlyph name={it.icon} size={17} /> })),
+          }))} />
         {main}
       </div>
     );

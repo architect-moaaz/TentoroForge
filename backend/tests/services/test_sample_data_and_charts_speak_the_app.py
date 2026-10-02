@@ -1,0 +1,195 @@
+"""What a reviewer (and a person in the editor) sees is the app's, not the platform's.
+
+From the look-test build on UAT (looktest0927, 2026-09-27): a reading list
+reviewed full of books called "Quarterly review 1" by "Author 1", rated
+"13.5 / 5"; every chart in the stock blue; every chart titled twice.
+"""
+import json
+import subprocess
+from pathlib import Path
+
+from services.blueprint.executors import NODE_TASKS, SCHEMA_BY_NODE
+from services.blueprint.projection import CHART_SLOTS, _seed_value, chart_palette, project_design_tokens
+from services.blueprint.ui_engineer import SDK_GUIDE
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _sample_rows(entities, n=4):
+    shim = ROOT / "static/jit-samples.mjs"
+    out = subprocess.run(["node", "-e", f"""
+      import({json.dumps(str(shim))}).then(m => {{
+        const ents = {json.dumps(entities)};
+        console.log(JSON.stringify([...Array({n}).keys()].map(i => m.sampleRow(ents[0], i, ents))));
+      }})"""], capture_output=True, text=True, check=True).stdout
+    return json.loads(out)
+
+
+def test_a_field_declares_its_range_and_examples_and_the_author_is_asked():
+    schema = json.loads((ROOT / "contracts" / "blueprint.schema.json").read_text())
+    text = json.dumps(schema)
+    assert '"min"' in text and '"max"' in text and '"examples"' in text
+    fields = SCHEMA_BY_NODE["entity_fields"]["properties"]["entities"]["items"]["properties"]["fields"]["items"]["properties"]
+    assert {"min", "max", "examples"} <= set(fields)
+    task = NODE_TASKS["entity_fields"]
+    assert "A NUMBER WITH A FIXED RANGE SAYS SO" in task and "`examples`" in task
+
+
+def test_sample_rows_keep_the_range_and_use_the_examples():
+    book = {"name": "Book", "fields": [{"name": "id", "type": "uuid"},
+                                       {"name": "title", "type": "string", "examples": ["Middlemarch", "Beloved"]},
+                                       {"name": "author", "type": "string"},
+                                       {"name": "rating", "type": "integer", "min": 1, "max": 5}]}
+    rows = _sample_rows([book], 6)
+    assert [r["title"] for r in rows[:2]] == ["Middlemarch", "Beloved"]
+    assert all(1 <= r["rating"] <= 5 for r in rows)
+    assert all(not r["author"].startswith("Author ") for r in rows), "a person-named field reads as a person"
+
+
+def test_without_examples_a_thing_is_named_as_itself_not_as_office_words():
+    note = {"name": "Book", "fields": [{"name": "id", "type": "uuid"}, {"name": "title", "type": "string"},
+                                       {"name": "stars", "type": "integer"}]}
+    rows = _sample_rows([note], 4)
+    assert [r["title"] for r in rows] == ["Book 1", "Book 2", "Book 3", "Book 4"]
+    assert all(1 <= r["stars"] <= 5 for r in rows), "a rating with no declared range still keeps to 1–5"
+
+
+def test_the_demo_seed_keeps_the_range_and_uses_the_examples():
+    rating = {"name": "rating", "type": "integer", "min": 1, "max": 5}
+    assert all(1 <= _seed_value(rating, "Book", r) <= 5 for r in range(1, 13))
+    assert _seed_value({"name": "title", "type": "string", "examples": ["Middlemarch", "Beloved"]}, "Book", 2) == "Beloved"
+
+
+def test_charts_are_drawn_in_the_designs_colours(tmp_path):
+    a = chart_palette({"primary": "#9C5A24", "accent": "#2F6F5E"})
+    b = chart_palette({"primary": "#2D6A93", "accent": "#1F7A66"})
+    assert len(a) == CHART_SLOTS and len(set(a)) == CHART_SLOTS, "six distinct series colours"
+    assert a[0] == "27 63% 38%", "the primary leads"
+    assert a != b, "two designs, two chart palettes"
+    assert chart_palette({}) == []
+    doc = {"designSystem": {"colors": {"primary": "#9C5A24", "accent": "#2F6F5E"}}}
+    project_design_tokens(doc, tmp_path)
+    css = (tmp_path / "src/app/tokens.css").read_text()
+    assert all(f"--chart-{i}: " in css for i in range(1, CHART_SLOTS + 1))
+
+
+def test_a_chart_is_named_once():
+    view = (ROOT / "templates/app-foundation/src/sdk/widget-view.tsx").read_text()
+    assert "title?: boolean;" in view and "title = true" in view and "sr-only" in view
+    assert "title?={false}" in SDK_GUIDE and "Say a chart's name ONCE" in SDK_GUIDE
+
+
+#: JSON-schema keywords the model API's structured output refuses. One
+#: `maxItems` on the new `examples` array failed every build at data_model
+#: (UAT, 2026-09-27 04:38) — the model never answered, the request was
+#: refused. Bounds belong in the contract and the prompt, not the reply schema.
+UNSUPPORTED = {"maxItems", "minItems", "maxLength", "minLength", "pattern", "maximum", "minimum",
+               "exclusiveMaximum", "exclusiveMinimum", "uniqueItems", "multipleOf"}
+
+
+def test_no_reply_schema_carries_a_keyword_the_api_refuses():
+    from services.blueprint.executors import PROPOSAL_SCHEMA
+    hits: list[str] = []
+
+    def walk(o, path):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k in UNSUPPORTED and not path.endswith("properties"):
+                    hits.append(f"{path}.{k}")
+                walk(v, f"{path}.{k}")
+        elif isinstance(o, list):
+            for i, v in enumerate(o):
+                walk(v, f"{path}[{i}]")
+    for node, schema in {**SCHEMA_BY_NODE, "proposal": PROPOSAL_SCHEMA}.items():
+        walk(schema, node)
+    assert hits == [], hits
+
+
+def test_a_persons_own_sample_records_cover_every_status():
+    """Owned rows point at the sample person every third row; a reader whose
+    books were all "Want to read" made the list page's chart one ring."""
+    ents = [{"name": "Reader", "account": True, "fields": [{"name": "id", "type": "uuid"}]},
+            {"name": "Book", "fields": [{"name": "id", "type": "uuid"}, {"name": "readerId", "type": "uuid"},
+                                        {"name": "status", "type": "string", "enumValues": ["Want to read", "Reading", "Finished"]}]}]
+    shim = ROOT / "static/jit-samples.mjs"
+    out = subprocess.run(["node", "-e", f"""
+      import({json.dumps(str(shim))}).then(m => {{
+        const ents = {json.dumps(ents)};
+        console.log(JSON.stringify([...Array(8).keys()].map(i => m.sampleRow(ents[1], i, ents))));
+      }})"""], capture_output=True, text=True, check=True).stdout
+    rows = json.loads(out)
+    mine = [r["status"] for r in rows if r["readerId"] == "sample-reader-1"]
+    assert set(mine) == {"Want to read", "Reading", "Finished"}, mine
+    assert {r["status"] for r in rows} == {"Want to read", "Reading", "Finished"}
+
+
+def test_charts_are_not_reserved_to_the_dashboard():
+    from services.blueprint.page_review import reviewer_system
+    from services.blueprint.ui_engineer import direction_prompts
+    _, user = direction_prompts({"application": {"name": "A"}, "designSystem": {}, "pages": [], "roles": []})
+    assert "CHARTS GO WHERE THE ANALYTICS PUTS THEM" in user and "never reserves charts" in user
+    system = reviewer_system({"application": {"name": "A"}, "designSystem": {"colors": {"primary": "#123456"}},
+                              "composition": {"vision": "v", "conventions": []}, "pages": []})
+    assert "never whether it belongs on the page" in system
+
+
+def test_the_data_engines_numeric_axis_order_is_proven_by_its_own_suite():
+    out = subprocess.run(["bash", str(ROOT / "templates/runtime/__tests__/run-query-tests.sh")],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout[-1500:] + out.stderr[-1500:]
+    assert "a numeric axis ascends by its value" in (ROOT / "templates/runtime/__tests__/resolve-query.test.mts").read_text()
+
+
+def test_sample_examples_are_used_once_and_a_numeric_axis_ascends():
+    book = {"name": "Book", "fields": [{"name": "id", "type": "uuid"},
+                                       {"name": "title", "type": "string", "examples": ["Circe", "Educated", "Beloved"]},
+                                       {"name": "rating", "type": "integer", "min": 1, "max": 5}]}
+    rows = _sample_rows([book], 8)
+    titles = [r["title"] for r in rows]
+    assert titles[:3] == ["Circe", "Educated", "Beloved"] and len(set(titles)) == len(titles), titles
+    shim = ROOT / "static/jit-samples.mjs"
+    out = subprocess.run(["node", "-e", f"""
+      import({json.dumps(str(shim))}).then(async m => {{
+        const src = m.sampleServer([{json.dumps(book)}], ["reader"]);
+        console.log(src.includes("numeric0") ? "ok" : "missing");
+      }})"""], capture_output=True, text=True, check=True).stdout.strip()
+    assert out == "ok"
+    assert _seed_value({"name": "title", "type": "string", "examples": ["Circe", "Educated"]}, "Book", 3) != "Circe", \
+        "the demo seed uses each example once"
+
+
+#: Test2's worker (2026-09-28): the reviewer judged a Master Data page whose
+#: Country column read 12, 15, 18, 21, 24 — "country" contains "count", so
+#: once its three examples ran out it was sampled as a count — and whose
+#: 27-year-old had 51 years' experience.
+WORKER = {"name": "Worker", "fields": [
+    {"name": "id", "type": "uuid"},
+    {"name": "name", "type": "string", "examples": ["Ramesh Kumar", "Suresh Yadav"]},
+    {"name": "age", "type": "integer", "min": 16, "max": 75},
+    {"name": "yearsOfExperience", "type": "number", "min": 0, "max": 60},
+    {"name": "country", "type": "string", "examples": ["India", "Nepal", "Bangladesh"]},
+    {"name": "state", "type": "string"},
+    {"name": "city", "type": "string"}]}
+
+
+def test_a_category_repeats_its_examples_and_text_is_never_a_number():
+    rows = _sample_rows([WORKER], 8)
+    assert [r["country"] for r in rows] == ["India", "Nepal", "Bangladesh"] * 2 + ["India", "Nepal"]
+    assert all(isinstance(r["state"], str) and r["state"] not in ("Open", "In progress", "Done", "On hold")
+               for r in rows), "a state beside a city is where someone lives, not a status"
+    # A name is still each example once.
+    assert [r["name"] for r in rows[:2]] == ["Ramesh Kumar", "Suresh Yadav"] and rows[2]["name"] != "Ramesh Kumar"
+
+
+def test_nobody_has_more_years_of_experience_than_their_age_allows():
+    for r in _sample_rows([WORKER], 8):
+        assert r["yearsOfExperience"] <= r["age"] - 16, r
+
+
+def test_the_demo_seed_follows_the_same_two_rules():
+    from services.blueprint.projection import years_within_age
+    fields = WORKER["fields"]
+    rows = [years_within_age({f["name"]: _seed_value(f, "Worker", r) for f in fields if f["name"] != "id"}, fields)
+            for r in range(1, 9)]
+    assert [r["country"] for r in rows[:4]] == ["India", "Nepal", "Bangladesh", "India"]
+    assert all(r["yearsOfExperience"] <= r["age"] - 16 for r in rows), rows

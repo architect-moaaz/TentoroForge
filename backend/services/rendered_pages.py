@@ -337,7 +337,7 @@ async def _shoot(
     """
     from playwright.async_api import async_playwright
 
-    from services.preview_session import cookie as session_cookie
+    from services.preview_session import cookies as session_cookies
 
     doc = doc or {}
     out = Capture()
@@ -353,8 +353,8 @@ async def _shoot(
                 context = await browser.new_context(
                     viewport=viewport or DEFAULT_VIEWPORT)
                 if session is not None:
-                    await context.add_cookies([session_cookie(
-                        session, base_url=base_url, secret=secret)])
+                    await context.add_cookies(session_cookies(
+                        session, base_url=base_url, secret=secret))
                 page = await context.new_page()
                 try:
                     await _sweep(page, base_url, group, doc, out,

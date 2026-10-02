@@ -38,6 +38,12 @@ _CHART_ALIASES = {
     "BubbleChart":     "bubble",
     "RadarChart":      "radar",
     "TreemapChart":    "treemap",
+    "SunburstChart":   "sunburst",
+    "GraphChart":      "graph",
+    "NetworkChart":    "graph",
+    "MapChart":        "map",
+    "GeoChart":        "map",
+    "ChoroplethChart": "map",
     "SparklineChart":  "sparkline",
     "Sparkline":       "sparkline",
     "GaugeChart":      "gauge",  # will be routed further downstream if needed

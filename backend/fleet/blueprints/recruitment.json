@@ -237,7 +237,7 @@
     "colors": {
       "primary": "#125E8A",
       "surface": "#FFFFFF",
-      "textPrimary": "#1A1A1A"
+      "textPrimary": "#1A1A1A", "background": "#F6F8FA", "textSecondary": "#5B6570", "accent": "#B4541A", "accentSubtle": "#FCEBDD", "inverse": "#0F2F45"
     },
     "spacing": {
       "unit": "4px",

@@ -37,9 +37,16 @@ def test_the_build_runs_in_its_own_directory(monkeypatch, tmp_path):
 
 
 def test_every_generated_next_config_reads_that_directory():
-    for cfg in ("standalone-app/next.config.js", "app-foundation/next.config.ts"):
-        text = (TEMPLATES / cfg).read_text()
-        assert 'distDir: process.env.NEXT_DIST_DIR || ".next"' in text, cfg
+    """FOUND, NOT LISTED. This named two files and one of them —
+    `app-foundation/next.config.ts` — is not there, so the test raised
+    FileNotFoundError in place of checking the one that is. A hardcoded list is
+    also the wrong shape for "EVERY generated config": a template that gains
+    one without the distDir line would pass a list it is not on.
+    """
+    configs = sorted(TEMPLATES.glob("*/next.config.*"))
+    assert configs, f"no next config under {TEMPLATES} — nothing was checked"
+    for cfg in configs:
+        assert 'distDir: process.env.NEXT_DIST_DIR || ".next"' in cfg.read_text(), cfg
 
 
 WARNING = ("⚠ Warning: Next.js inferred your workspace root, but it may not be correct.\n"

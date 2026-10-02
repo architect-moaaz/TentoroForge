@@ -229,3 +229,59 @@ async def test_publish_swallows_mid_pipeline_exception(
     row = res.scalars().first()
     assert row.status == "failed"
     assert row.error and "Neon outage" in row.error
+
+
+async def _prior_live_deployment(db_session, project_id) -> None:
+    """A deployment that already owns a Neon project: the next publish is a
+    redeploy over live data."""
+    db_session.add(Deployment(project_id=project_id, target="vercel", status="succeeded",
+                              neon_project_id="np_live", vercel_project_id="prj_abc"))
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_redeploy_the_live_data_would_refuse_stops_before_anything_is_uploaded(
+    db_session, sample_project_id, tmp_path, monkeypatch
+) -> None:
+    _mk_app_tree(tmp_path)
+    await _prior_live_deployment(db_session, sample_project_id)
+    asked = []
+
+    async def refused(neon, neon_project_id, output_dir, **kw):
+        asked.append(neon_project_id)
+        return {"ok": False, "ran": True, "fixed": False, "reason": "prepare refused",
+                "lines": ["  - menu_items.price cannot become integer: values such as \"twelve\""]}
+    monkeypatch.setattr("services.deploy.migration_trial.ensure_publishable", refused)
+    vercel, neon = _mock_vercel_client(), _mock_neon_client()
+    provider = VercelDeployProvider(db=db_session, vercel=vercel, neon=neon)
+    snap = DeploySnapshot(project_id=str(sample_project_id), project_slug="acme",
+                          output_dir=str(tmp_path), integrations={})
+    events = [e async for e in provider.publish(snap)]
+    assert asked == ["np_live"]
+    assert events[-1].stage == "error" and "twelve" in events[-1].message
+    assert "keeps running" in events[-1].message
+    assert vercel.upload_file.call_count == 0 and vercel.create_deployment.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_redeploy_the_live_data_takes_goes_on(
+    db_session, sample_project_id, tmp_path, monkeypatch
+) -> None:
+    _mk_app_tree(tmp_path)
+    await _prior_live_deployment(db_session, sample_project_id)
+
+    async def taken(*a, **kw):
+        return {"ok": True, "ran": True, "fixed": True, "reason": "", "lines": []}
+    monkeypatch.setattr("services.deploy.migration_trial.ensure_publishable", taken)
+
+    async def _fake_smoke(url: str):
+        return True, None
+    monkeypatch.setattr("services.deploy.vercel_provider._smoke_test_db", _fake_smoke)
+    vercel, neon = _mock_vercel_client(), _mock_neon_client()
+    neon.get_connection_uri.return_value = "postgres://live"
+    provider = VercelDeployProvider(db=db_session, vercel=vercel, neon=neon)
+    snap = DeploySnapshot(project_id=str(sample_project_id), project_slug="acme",
+                          output_dir=str(tmp_path), integrations={})
+    events = [e async for e in provider.publish(snap)]
+    assert any(e.stage == "migrate" and "takes the change" in e.message for e in events)
+    assert events[-1].stage == "done"

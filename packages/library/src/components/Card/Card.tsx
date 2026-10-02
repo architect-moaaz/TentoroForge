@@ -6,6 +6,7 @@ import { useMotion } from "../../style/useMotion";
 import { RADIUS_SURFACE_CLASS } from "../../style/radius";
 import { useDensity, useElevation, useRadiusScale } from "../../theme/tokens-context";
 import { SurfaceBackground } from "../surfaces/SurfaceBackground";
+import { NavigateSurface } from "@tentoroforge/renderer";
 
 type SchemaDensity = "tight" | "regular" | "loose";
 type SchemaElevation = "none" | "sm" | "md" | "lg";
@@ -17,6 +18,8 @@ type Props = {
   elevation?: SchemaElevation;
   /** Schema-level density — overrides token density when set (undefined = use token). */
   density?: SchemaDensity;
+  /** Route this card opens when pressed. Renders the card as a link surface. */
+  navigate?: string;
   children?: ReactNode;
   style?: StyleSlotT;
   /** Schema-supplied class hook — appended to the computed class string. */
@@ -64,7 +67,7 @@ const TOKEN_ELEVATION_CLASSES: Record<"flat" | "bordered" | "layered" | "floatin
   floating: "shadow-lg",
 };
 
-export function Card({ title, footer, elevation = "md", density, children, style, className: callerClass, ...rest }: Props) {
+export function Card({ title, footer, elevation = "md", density, navigate, children, style, className: callerClass, ...rest }: Props) {
   const dataAttrs = dataAttrProps(rest);
   const tokenDensity = useDensity();
   const tokenElevation = useElevation();
@@ -116,6 +119,33 @@ export function Card({ title, footer, elevation = "md", density, children, style
   // radius via rounded-[inherit]. The outer chrome (border/shadow/radius)
   // remains on the outer div. When no background, render the body directly
   // to avoid an extra wrapper div in the default case.
+  // A card that navigates is the same card with the affordance a clickable
+  // surface owes a reader: pointer, link role, Enter and Space. The look is
+  // untouched — only the box it renders in changes.
+  if (navigate) {
+    return (
+      <NavigateSurface
+        navigate={navigate}
+        data-card=""
+        className={rootClass}
+        style={resolveStyleNoBackground(style)}
+        {...useMotion(style?.motion)}
+        {...dataAttrs}
+      >
+        {style?.background ? (
+          <SurfaceBackground
+            background={style.background}
+            className="flex flex-1 flex-col rounded-[inherit]"
+          >
+            {cardBody}
+          </SurfaceBackground>
+        ) : (
+          cardBody
+        )}
+      </NavigateSurface>
+    );
+  }
+
   return (
     <div
       data-card=""

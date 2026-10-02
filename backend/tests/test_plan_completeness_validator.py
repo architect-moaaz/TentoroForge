@@ -280,6 +280,22 @@ def test_complete_plan_produces_no_violations():
                  "fk": {"table": "users", "column": "id"}},
             ]},
         },
+        # EVERY ENTITY NEEDS A SURFACE. The `entity_has_surface` rule was added
+        # after this fixture and it declared no pages at all, so the plan this
+        # file calls complete was incomplete by the definition it is checked
+        # against — two violations, read as false positives from the new rule.
+        # An entity with nowhere to be seen is either a missing page or an
+        # `internal: true` nobody wrote; the rule's message says both.
+        # `dataSource` names the rows, `actions` names the controls — an empty
+        # list is a declaration, an absent field is downstream inventing them.
+        "pages": [
+            {"route": "/users", "name": "Users", "archetype": "list",
+             "entity": "User", "actions": [],
+             "dataSource": {"entity": "User", "op": "list"}},
+            {"route": "/applications", "name": "Applications",
+             "archetype": "list", "entity": "Application", "actions": [],
+             "dataSource": {"entity": "Application", "op": "list"}},
+        ],
         "workflows": [
             {"name": "Shortlist", "trigger": "manual",
              "inputs": ["applicationId"],
@@ -291,3 +307,20 @@ def test_complete_plan_produces_no_violations():
     }
     vs = validate_plan_completeness(plan)
     assert vs == [], f"expected no violations; got: {vs}"
+
+
+def test_an_entity_with_nowhere_to_be_seen_is_a_violation():
+    """The other half — without it the fixture above could go back to having
+    no pages and still pass on a rule that had stopped firing."""
+    plan = {"entities": {"Ghost": {"fields": [
+        {"name": "id", "type": "uuid", "primaryKey": True}]}}, "pages": []}
+    rules = {v.rule for v in validate_plan_completeness(plan)}
+    assert "entity_has_surface" in rules
+
+
+def test_an_internal_entity_needs_no_surface():
+    """…and the escape the rule's own message offers actually works."""
+    plan = {"entities": {"AuditLog": {"internal": True, "fields": [
+        {"name": "id", "type": "uuid", "primaryKey": True}]}}, "pages": []}
+    rules = {v.rule for v in validate_plan_completeness(plan)}
+    assert "entity_has_surface" not in rules

@@ -296,20 +296,61 @@ def navigation_from(chrome_nodes: Iterable[dict]) -> dict:
     for node in chrome_nodes:
         walk(node)
 
-    # A HEADING IS A LABEL THAT INTRODUCES ITEMS; THE BRAND IS WHAT COMES
-    # BEFORE THE FIRST HEADING. Decided by what follows, not by counting: the
-    # first rule here took "up to two unactioned labels" as brand, which was
-    # right for a two-line brand (Criterion / Case Management) and wrong for a
-    # one-line one, where it swallowed the first heading and left its group
-    # unlabelled.
-    def _is_item(idx: int) -> bool:
+    # A DESTINATION DOES NOT HAVE TO ANNOUNCE ITSELF.
+    #
+    # This required a positive signal — an action, or the icon glyph Dev Mode
+    # bakes into an item's label — for a label to count as a destination, and
+    # dropped everything else. A rail captured as plain text carries that
+    # glyph on some entries and not others, so of
+    #
+    #     Criterion / ⬡Dashboard / Front Desk / +New Case / Ticket Queue
+    #
+    # it read two destinations and lost Front Desk and Ticket Queue. A frame
+    # titled "Ticket Queue" then matched nothing the rail names, and
+    # `_frame_headings` fell through to the first text the chrome does not own
+    # — the property switcher — which is the "fifteen frames called Criterion"
+    # failure one layer down.
+    #
+    # Turned around: everything in a rail is a destination unless it is the
+    # brand or a heading, which are the two things a rail draws that are not
+    # places. The cost is that a footer or a version string at the bottom of a
+    # rail now reads as a destination. That is the right way round — a
+    # spurious entry is visible in the menu, where a missing one silently
+    # re-titles a frame and routes it to the wrong page.
+    def _drawn_as_navigation(idx: int) -> bool:
+        """The drawing marks this one: it carries an action, or the glyph."""
         raw, props = entries[idx]
-        return bool(_clean(raw)) and (
-            any(props.get(k) for k in _ACTIONS) or bool(_GLYPH.match(raw)))
+        return any(props.get(k) for k in _ACTIONS) or bool(_GLYPH.match(raw))
 
-    heading_at = {i for i, (raw, props) in enumerate(entries)
-                  if _clean(raw) and not _is_item(i)
-                  and i + 1 < len(entries) and _is_item(i + 1)}
+    def _drawn_as_heading(idx: int) -> bool:
+        """A group heading is DRAWN as one, and introduces something.
+
+        Set in capitals — every example in this function's own docstring is
+        (OVERVIEW, CASES, APPROVALS), because that is how a rail draws a
+        section label and not how it draws a place. A heading in title case is
+        read as a destination; that is the trade named above.
+        """
+        raw, _props = entries[idx]
+        label = _clean(raw)
+        if not label or _drawn_as_navigation(idx):
+            return False
+        if not (label.isupper() and any(ch.isalpha() for ch in label)):
+            return False
+        return idx + 1 < len(entries) and bool(_clean(entries[idx + 1][0]))
+
+    # THE BRAND IS THE RUN AT THE TOP, and it ends at the first label the rail
+    # draws as navigation. Decided by what follows, not by counting: the rule
+    # before this took "up to two unactioned labels", which was right for a
+    # two-line brand (Criterion / Case Management) and wrong for a one-line
+    # one, where it swallowed the first heading and left its group unlabelled.
+    brand_idx: set[int] = set()
+    for i, (raw, _props) in enumerate(entries):
+        label = _clean(raw)
+        if not label:
+            continue
+        if _drawn_as_navigation(i) or _drawn_as_heading(i) or len(label) >= 40:
+            break
+        brand_idx.add(i)
 
     brand: list[str] = []
     groups: list[dict] = []
@@ -319,18 +360,17 @@ def navigation_from(chrome_nodes: Iterable[dict]) -> dict:
         label = _clean(raw)
         if not label:
             continue
-        if _is_item(i):
+        if i in brand_idx:
+            brand.append(label)
+        elif _drawn_as_heading(i):
+            current = {"label": label, "items": []}
+            groups.append(current)
+        else:
             action = {k: props[k] for k in _ACTIONS if props.get(k)}
             if current is None:
                 current = {"label": "", "items": []}
                 groups.append(current)
             current["items"].append({"label": label, **action})
-        elif i in heading_at:
-            current = {"label": label, "items": []}
-            groups.append(current)
-        elif current is None and not groups and len(label) < 40:
-            brand.append(label)
-        # Any other unactioned label — a footer, a version string — is noise.
 
     groups = [g for g in groups if g["items"]]
     return {"brand": brand, "groups": groups}

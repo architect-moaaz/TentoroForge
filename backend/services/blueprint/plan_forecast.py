@@ -23,11 +23,6 @@ def _live(items: Any) -> list[dict]:
     return [i for i in (items or []) if i.get("status") != "DEPRECATED"]
 
 
-#: What one page is worth in tests, roughly. §77 wants a test per requirement
-#: and per workflow branch; this is the coarse version, honest about being an
-#: estimate rather than a promise.
-TESTS_PER_PAGE = 2
-TESTS_PER_WORKFLOW = 3
 
 
 def forecast(doc: dict) -> dict[str, int]:
@@ -47,11 +42,10 @@ def forecast(doc: dict) -> dict[str, int]:
         "roles": len(_live(doc.get("roles"))),
         "integrations": len(_live(doc.get("integrations"))),
     }
-    # Tests are the one figure that does not exist yet at planning time, so it
-    # is labelled as expected rather than counted.
-    counts["expectedTests"] = (
-        len(pages) * TESTS_PER_PAGE + len(workflows) * TESTS_PER_WORKFLOW
-    )
+    # No "expected tests": a build writes none and runs none, so a figure for
+    # them would be a promise the plan cannot keep. What proves the app works
+    # is the compiler, the workflow dry run, the build, the boot and the page
+    # review — none of which is a count to forecast.
     return counts
 
 
@@ -61,7 +55,6 @@ def render(counts: dict[str, int]) -> str:
         "requirements": "requirements", "pages": "pages", "entities": "entities",
         "workflows": "workflows", "businessRules": "business rules",
         "apis": "APIs", "roles": "roles", "integrations": "integrations",
-        "expectedTests": "expected tests",
     }
     return "\n".join(f"{counts[k]:>4} {label[k]}" for k in label if counts.get(k))
 

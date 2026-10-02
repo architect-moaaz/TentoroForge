@@ -6,6 +6,7 @@ the translation against the shape `app-foundation` already ships — an emitted
 module that does not match what the data engine expects is worse than no module,
 because it compiles and then behaves wrongly.
 """
+import inspect
 import json
 import pathlib
 from pathlib import Path
@@ -346,8 +347,12 @@ def test_the_platform_declaration_is_parsed_not_transcribed():
     from services.blueprint.projection import parse_platform_table, platform_table
 
     declared = {f["name"]: f for f in platform_table("users")}
+    # `accountType` joined the scaffold's users table — the account type the
+    # user picked at signup, which auth folds into the session role so the menu
+    # can gate on it. Parsing is what makes this a one-line acknowledgement
+    # instead of a fourth hand-copy drifting off the original.
     assert set(declared) == {"id", "email", "password", "name",
-                             "isActive", "createdAt"}
+                             "accountType", "isActive", "createdAt"}
     assert declared["email"] == {"name": "email", "type": "text",
                                  "required": True, "unique": True}
     # The default `authorize()` depends on — a falsy isActive rejects the login.
@@ -836,7 +841,13 @@ def test_a_select_offers_the_values_the_entity_declares():
 
 def test_launch_roles_come_from_the_pages_a_workflow_launches_from(tmp_path):
     """Reception posted a refund through the API: the posting queue page was
-    Finance's, but nothing compared the caller to it."""
+    Finance's, but nothing compared the caller to it.
+
+    And the other way round: `users` is "roles for whom this page is
+    meaningful", which only `role_restricted` turns into a gate. Reading it
+    on an `authenticated` page made the API stricter than the application —
+    0l133sp2's admin was shown "List a Tool", filled it in, uploaded a photo
+    and got 403 from the page that had just offered it."""
     from services.blueprint.projection import launch_roles, project_launch_roles
 
     doc = {
@@ -853,11 +864,18 @@ def test_launch_roles_come_from_the_pages_a_workflow_launches_from(tmp_path):
             {"id": "FLOW-099", "name": "Nightly sweep", "steps": []},
         ],
     }
-    assert launch_roles(doc) == {"FLOW-008": ["Finance"], "FLOW-002": ["*"], "FLOW-001": ["Reception"], "FLOW-099": None}
+    assert launch_roles(doc) == {"FLOW-008": ["Finance"], "FLOW-002": ["*"],
+                                 "FLOW-001": ["@signed-in"], "FLOW-099": None}
     project_launch_roles(doc, tmp_path / "app")
     text = (tmp_path / "app" / "src" / "lib" / "workflows" / "launch-roles.ts").read_text()
     assert '"FLOW-008": ["Finance"]' in text and '"post-refund": ["Finance"]' in text
     assert '"FLOW-002": ["*"]' in text and '"FLOW-099": null' in text
+    assert '"FLOW-001": ["@signed-in"]' in text, "a page anyone signed in may open admits them all"
+
+    from services import runtime_injector
+    gate = inspect.getsource(runtime_injector)
+    assert 'allowed.includes("@signed-in") && Boolean(user?.id)' in gate, (
+        "the route has to read the same word the projection writes")
 
 
 def test_entity_access_comes_from_the_pages_that_use_an_entity(tmp_path):
@@ -920,3 +938,50 @@ def test_a_retired_workflows_definition_is_removed(tmp_path):
     doc["workflows"][1]["status"] = "DEPRECATED"
     project_workflows(doc, tmp_path)
     assert sorted(p.name for p in defs.glob("*.json")) == ["delete-thing.json"]
+
+
+# ---------------------------------------------------------------------------
+# reading a projected module back — what a spreadsheet of the records needs
+# ---------------------------------------------------------------------------
+
+def test_a_projected_module_reads_back_as_field_and_column_pairs():
+    """`services.smith.records_out` has to SELECT what the database has and
+    head the column with what the owner calls it. Both are in the declaration
+    this emits, so neither is re-derived anywhere."""
+    from services.blueprint.projection import emit_entity_module, parse_table_columns
+
+    entity = {"id": "ENTITY-001", "name": "Nurse", "table": "nurses",
+              "fields": [{"name": "id", "type": "uuid", "primaryKey": True},
+                         {"name": "fullName", "type": "string", "required": True},
+                         {"name": "yearsOfExperience", "type": "int"}]}
+    doc = {"data": {"entities": [entity], "relationships": []}}
+
+    table, columns = parse_table_columns(emit_entity_module(entity, doc))
+    assert table == "nurses"
+    assert columns == (("id", "id"), ("fullName", "full_name"),
+                       ("yearsOfExperience", "years_of_experience"))
+
+
+def test_a_foreign_key_column_is_read_back_too():
+    """A relationship adds a column no entity field declares. It is data, and
+    an export that dropped it would lose which job a part was used on."""
+    from services.blueprint.projection import emit_entity_module, parse_table_columns
+
+    part = {"id": "ENTITY-002", "name": "PartUsage", "table": "part_usages",
+            "fields": [{"name": "id", "type": "uuid", "primaryKey": True}]}
+    job = {"id": "ENTITY-003", "name": "Job", "table": "jobs",
+           "fields": [{"name": "id", "type": "uuid", "primaryKey": True}]}
+    doc = {"data": {"entities": [part, job],
+                    "relationships": [{"from": "ENTITY-002", "to": "ENTITY-003",
+                                       "kind": "one_to_many", "fromField": "jobId"}]}}
+
+    _table, columns = parse_table_columns(emit_entity_module(part, doc))
+    assert ("jobId", "job_id") in columns
+
+
+def test_a_module_with_no_table_declares_nothing():
+    """The barrel re-exports and declares no columns; a reader must not
+    invent a table for it."""
+    from services.blueprint.projection import parse_table_columns
+
+    assert parse_table_columns('export * from "./nurse";\n') == ("", ())

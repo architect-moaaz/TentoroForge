@@ -31,9 +31,7 @@ export default function DashboardError({
   useEffect(() => {
     reportFromError(error, {
       kind: "page_render",
-      page_route: typeof window !== "undefined" ? window.location.pathname : undefined,
       source_file: "src/app/(dashboard)/error.tsx",
-      user_context: error.digest ? { digest: error.digest } : undefined,
     });
   }, [error]);
 

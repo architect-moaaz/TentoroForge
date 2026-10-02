@@ -29,6 +29,11 @@ ASKS: dict[str, str] = {
     "api": "Which endpoint?",
     "integration": "Which outside service?",
     "change": "What should be different about it?",
+    # An account is identified by the address its person signs in with, so the
+    # question asks for that and says why — "which person?" invites "Dave",
+    # which is the request again rather than an answer to it.
+    "email": "What email address will they sign in with?",
+    "person": "Which person? Their email address, or the name their login was set up under.",
     "new_value": "What should it say instead?",
     "element_label": "Which control? Copy the words printed on it.",
     "widgets": "What should go on it?",
@@ -100,6 +105,15 @@ def options_for(slot: str, doc: dict, understanding: dict | None = None) -> list
                 if a.get("path")][:MAX_OPTIONS]
 
     if slot == "integration":
+        # WHICH SERVICE, depends on what is being asked of it. Retiring one is
+        # a choice among the services this application already names;
+        # connecting one is a choice among the services there is an adapter
+        # for, which is a different list and the only one worth offering when
+        # the answer has to be a service that can actually be connected.
+        if str(said.get("verb") or "") == "connect_service":
+            from services.smith.email_connect import CHOICES
+
+            return list(CHOICES)[:MAX_OPTIONS]
         return [str(i.get("name")) for i in _live(doc.get("integrations")) if i.get("name")][:MAX_OPTIONS]
 
     return []                              # open question: a value, not a choice

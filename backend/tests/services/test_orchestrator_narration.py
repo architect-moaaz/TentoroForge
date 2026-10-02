@@ -74,11 +74,13 @@ def test_a_run_announces_its_plan_before_it_starts(svc):
 def test_each_node_is_bracketed_by_start_and_done(svc):
     """Both start together — they are independent — and each is done the
     moment its own result applies, not when the other's does."""
-    seen = watch(svc, ok, plan=["business_rules", "workflows"])
+    # Two nodes with no edge between them. (`business_rules` now follows
+    # `workflows`: a prerequisite names the workflows it gates.)
+    seen = watch(svc, ok, plan=["security", "workflows"])
 
     assert kinds(seen)[:4] == ["run:start", "plan", "node:start", "node:start"]
     assert kinds(seen)[-1] == "run:end"
-    for node in ("business_rules", "workflows"):
+    for node in ("security", "workflows"):
         mine = [line["event"] for line in seen if line.get("node") == node]
         assert mine == ["node:start", "node:subject", "node:done"], mine
 
@@ -129,11 +131,12 @@ def test_a_fanning_out_node_records_each_subject(svc):
     """"Which of the eighteen stopped it" is unanswerable from one aggregate
     line, and eighteen model calls with no lines between them is a silence the
     office cannot draw progress through."""
-    # The standing fixture already carries every layout, and resume is
-    # continue-not-redo: a composed page is not a subject. Uncompose them.
-    svc.doc["pageLayouts"] = []
+    # `entity_fields` fans out over the entities; resume is continue-not-redo,
+    # so an entity already detailed is not a subject. Undetail them.
+    for entity in svc.doc["data"]["entities"]:
+        entity["fields"] = []
     svc.save()
-    seen = watch(svc, ok, plan=["page_layouts"])
+    seen = watch(svc, ok, plan=["entity_fields"])
 
     start = next(line for line in seen if line["event"] == "node:start")
     subjects = [line for line in seen if line["event"] == "node:subject"]

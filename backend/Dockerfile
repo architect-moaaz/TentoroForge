@@ -35,8 +35,47 @@ RUN ARCH=$(dpkg --print-architecture) && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# THE BROWSER THE BUILD LOOKS AT PAGES WITH. `page_look` renders every page
+# as it is written and `page_review` every page of the built app, both in
+# headless Chromium through Playwright; without the browser in the image
+# every look is "unavailable" and pages ship unseen, as they did before it.
+# Installed to a path the non-root user below can read (the default is
+# root's own cache). The system libraries are named here rather than by
+# `playwright install --with-deps`: Playwright 1.49 does not know Debian 13
+# (this image's base) and falls back to Ubuntu 20.04's package names, two of
+# which do not exist, so the install fails (forge-v3, 2026-09-24). The list
+# was proven on python:3.12-slim: apt finds every one and Chromium launches.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libatspi2.0-0t64 libcups2t64 libdbus-1-3 \
+      libdrm2 libgbm1 libglib2.0-0t64 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+      libpango-1.0-0 libcairo2 libasound2t64 libx11-6 libxcb1 libxext6 libxi6 libxtst6 libfontconfig1 \
+      fonts-liberation fonts-unifont fonts-noto-color-emoji && \
+    rm -rf /var/lib/apt/lists/* && \
+    playwright install chromium && chmod -R a+rX /ms-playwright
+
+# THE REVIEW'S BROWSER SCRIPT IS NODE. Verify & fix clicks through a running
+# app with `scripts/page_shots.mjs`, which imports the npm `playwright`; the
+# image had only the Python one, so it said "Playwright is not installed" on
+# forge-v3 (2026-10-01). Installed at the Python package's own version, which
+# drives the same Chromium build already in /ms-playwright — nothing more is
+# downloaded.
+RUN mkdir -p /opt/review-node && cd /opt/review-node && echo '{"private": true}' > package.json && \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install --no-audit --no-fund --no-package-lock \
+      "playwright@$(python -c 'import importlib.metadata as m; print(m.version("playwright"))')" && \
+    chmod -R a+rX /opt/review-node
+ENV FORGE_PLAYWRIGHT_MODULES=/opt/review-node/node_modules
+
 # Copy application code
 COPY . .
+
+# WHAT THE EDITOR'S SCRIPTS IMPORT, WHERE NODE LOOKS FOR IT. `static/*.mjs`
+# parse and rewrite a page's React source with @babel/parser; on a developer's
+# machine those resolve from the repo root's node_modules, and in this image
+# there is no repo root — so every attempt to open a page in the editor
+# answered "Cannot find package '@babel/parser'" (UAT, both stacks).
+RUN cd /app/static && npm install --omit=dev --no-audit --no-fund --no-package-lock
 
 # Create output directory
 RUN mkdir -p /app/output

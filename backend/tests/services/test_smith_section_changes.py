@@ -177,7 +177,11 @@ def test_an_entity_is_declared_then_authored_then_projected(svc, tmp_path):
     assert [f["name"] for f in ents["Ward"]["fields"]] == ["id", "name", "capacity"]          # the declaration's sneaky field never landed
     assert out["requirement"] in ents["Ward"]["requirements"]
     assert (tmp_path / "app" / "src" / "db" / "schema" / "ward.ts").exists()
-    assert "migration on the next install" in ec.summary_of("add_entity", out)
+    # Not installed here, so the table waits for the preview — and says why.
+    assert not out["pushed"]
+    assert "created the next time the preview starts (the application is not installed yet)" \
+        in ec.summary_of("add_entity", out)
+    assert "in the application's database now" in ec.summary_of("add_entity", {**out, "pushed": True})
 
 
 def test_retiring_an_entity_takes_its_screens_workflows_and_menu_entry_with_it(svc, tmp_path):
@@ -199,34 +203,6 @@ def test_retiring_an_entity_takes_its_screens_workflows_and_menu_entry_with_it(s
 
 
 # --- the verbs and the tools ---------------------------------------------------
-
-def test_every_new_verb_is_offered_dispatched_and_tooled(monkeypatch, tmp_path):
-    import services.smith_tools as smith_tools
-    from services.smith.understand_ask import _PROMPT
-    from services.smith.verbs import REQUIRED_BY_VERB
-    for v in ("edit_access", "add_rule", "edit_rule", "remove_rule", "add_entity", "remove_entity"):
-        assert v in REQUIRED_BY_VERB and f'"{v}"' in _PROMPT, v
-    calls = []
-    monkeypatch.setattr("services.smith.access_change.run", lambda d, change, **k: calls.append(("access", change)) or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
-    monkeypatch.setattr("services.smith.rule_change.run", lambda d, verb, **k: calls.append((verb, k.get("rule"))) or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
-    monkeypatch.setattr("services.smith.entity_change.run", lambda d, verb, **k: calls.append((verb, k.get("entity"))) or {"applied": True, "edited_paths": [], "diff_summary": "ok"})
-    (tmp_path / ".forge" / "blueprint").mkdir(parents=True)
-    (tmp_path / ".forge" / "blueprint" / "current.json").write_text("{}")
-    H = smith_tools.READONLY_HANDLERS
-    assert H["add_role"](str(tmp_path), {"role_name": "Ward Manager"})["applied"]
-    assert H["restrict_page_to_role"](str(tmp_path), {"page_route": "/master-data", "role_name": "Admin"})["applied"]
-    assert H["create_business_rule"](str(tmp_path), {"name": "cap", "rule_type": "validation"})["applied"]
-    assert H["add_entity"](str(tmp_path), {"name": "Ward", "fields": [{"name": "name", "type": "text"}]})["applied"]
-    assert H["remove_entity"](str(tmp_path), {"entity": "Ward"})["applied"]
-    assert H["add_rule"](str(tmp_path), {})["applied"] is False
-    assert [c[0] for c in calls] == ["access", "access", "add_rule", "add_entity", "remove_entity"]
-    assert calls[0][1] == "add a role named Ward Manager" and calls[3][1] == "Ward with name (text)"
-    from services.smith_session import SmithSession
-    session = SmithSession(project_id="p1", output_dir=str(tmp_path), guards_fn=lambda _d: [],
-                           understand_ask_fn=lambda m, c, history=None: {"verb": "edit_rule", "rule": "cap", "change": "raise it"},
-                           iteration_move_fn=lambda *a, **k: None)
-    assert session.run_iteration(user_message="raise the cap").status == "resolved"
-    assert calls[-1] == ("edit_rule", "cap")
 
 
 def test_several_new_rules_are_refused_until_exactly_one_comes_back(svc):

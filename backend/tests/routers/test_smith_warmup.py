@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
+from tests.sample_apps import require
 
 _FIXTURE = Path("/Users/m/Work/code/poc/design2ui-forge-v3/output/bpxr6hsv")
 
@@ -17,8 +17,17 @@ _FIXTURE = Path("/Users/m/Work/code/poc/design2ui-forge-v3/output/bpxr6hsv")
 def client(tmp_path):
     """TestClient over an isolated OUTPUT_ROOT with the bpxr6hsv contracts
     copied into a project named ``bpxr6hsv``."""
-    if not _FIXTURE.exists():
-        pytest.skip("bpxr6hsv fixture app not present")
+    # `_FIXTURE` EXISTS AND IS EMPTY on a machine whose copy of the
+    # sample app was cleaned, so `.exists()` on the directory let the
+    # copy below run and raise FileNotFoundError in setup. The guard
+    # asks for the files it is about to read.
+    require(
+            _FIXTURE / "contracts" / "resource-registry.json",
+            _FIXTURE / "contracts" / "action-contract.json",
+            _FIXTURE / "contracts" / "generation-dossier.json",
+            _FIXTURE / "registry.json",
+            _FIXTURE / "src" / "schemas",
+    )
     import services.project_paths as pp
     from services import app_map as am
     original = pp.OUTPUT_ROOT

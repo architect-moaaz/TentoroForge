@@ -17,7 +17,7 @@ from services.blueprint.service import BlueprintService
 from services.smith import confirm
 from services.smith.entity_change import consequences as entity_consequences
 from services.smith.field_change import consequences as field_consequences
-from services.smith_session import SmithSession
+from tests.services._front_door import SmithSession
 
 
 @pytest.fixture()
@@ -137,7 +137,7 @@ def test_a_box_is_always_confirmed_because_its_data_always_goes(project):
 def test_a_record_that_cascades_into_nothing_is_not_gated(project):
     """A question with nothing to show is friction, not safety — retiring a
     record no screen and no process stands on takes nothing with it."""
-    from services.smith_session import SmithSession
+    from tests.services._front_door import SmithSession
 
     project.doc["data"]["entities"].append({"id": "ENTITY-003", "name": "Note", "table": "notes",
                                             "fields": [{"name": "id", "type": "uuid", "primaryKey": True}]})

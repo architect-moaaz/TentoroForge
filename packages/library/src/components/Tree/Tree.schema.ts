@@ -8,4 +8,4 @@ export const TreeProps = z.object({
   className: z.string().optional(),
   style:     z.record(z.unknown()).optional(),
 });
-export type TreePropsType = z.infer<typeof TreeProps>;
+export type TreePropsType = z.input<typeof TreeProps>;

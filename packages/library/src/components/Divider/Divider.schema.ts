@@ -8,4 +8,4 @@ export const DividerProps = z
   })
   .strict();
 
-export type DividerPropsType = z.infer<typeof DividerProps>;
+export type DividerPropsType = z.input<typeof DividerProps>;

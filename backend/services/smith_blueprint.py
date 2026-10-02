@@ -95,6 +95,13 @@ class Blueprint:
     #: The rules in force. Read for the same reason as the fields: a question
     #: Smith can answer from the document must not be asked of the person.
     business_rules: list[dict[str, Any]] = field(default_factory=list)
+    #: The outside services, and for each one whether it is CONNECTED or only
+    #: DECLARED. Not persisted here and not Smith's to save: the declaration
+    #: belongs to the engine's document and the "is its key set" half belongs
+    #: to the platform's credential store, so both are read at load. Without
+    #: it "the confirmation email never came" was unanswerable — the context
+    #: had no line about email at all, and Smith could only sympathise.
+    integrations: list[dict[str, Any]] = field(default_factory=list)
     design_decisions: list[dict[str, Any]] = field(default_factory=list)
     change_log: list[dict[str, Any]] = field(default_factory=list)
 
@@ -141,6 +148,15 @@ class Blueprint:
             bp = cls(project_id=project_id)
             for key, value in to_smith_fields(engine).items():
                 setattr(bp, key, value)
+            # The connection state, which no document holds: a declaration is
+            # in the engine's Blueprint and whether its credential is set is
+            # in the platform's store. Read here, where the output_dir is
+            # known, and only when something actually claims to serve a
+            # runtime action — an application with no connections asks the
+            # store nothing.
+            from services.smith.engine_blueprint_adapter import connection_lines
+
+            bp.integrations = connection_lines(engine, output_dir)
             if path.exists():
                 try:
                     mine = json.loads(path.read_text(encoding="utf-8"))

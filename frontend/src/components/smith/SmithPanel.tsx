@@ -50,9 +50,13 @@ import {
   XCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
+import { STAGE_VERB, labelFor } from "./stages";
+import { QuestMap } from "./QuestMap";
+import { progressMark, slowStepNote } from "./slowStep";
 import {
   AppTile,
   BlueprintSummary,
@@ -60,6 +64,13 @@ import {
   blueprintName,
   type BlueprintStatus,
 } from "./BlueprintSummary";
+import {
+  ProductModelReview,
+  RequirementsReview,
+  WaitingModules,
+  gateCardLine,
+  useGates,
+} from "./GateReview";
 import {
   useBlueprintRun,
   type RunNode,
@@ -86,33 +97,9 @@ type Greeting = {
  * A present participle says the machine is working on something specific,
  * which is the difference between waiting and wondering whether it hung.
  */
-const STAGE_VERB: Record<string, string> = {
-  requirements: "Reading what you asked for",
-  application_model: "Modelling the product",
-  ux_architecture: "Arranging the application",
-  design_system: "Choosing the design language",
-  page_contracts: "Deciding the page set",
-  page_details: "Writing each feature's contracts",
-  data_model: "Naming the entities",
-  entity_fields: "Detailing the entities",
-  database: "Laying out the database",
-  workflows: "Declaring the workflows",
-  workflow_steps: "Authoring the workflow steps",
-  business_rules: "Writing the rules down",
-  apis: "Designing the endpoints",
-  figma_design_system: "Holding to the Figma design",
-  page_layouts: "Composing the screens",
-  backend: "Generating the backend",
-  frontend: "Generating the frontend",
-  integration: "Wiring it together",
-  testing: "Writing the tests",
-  security: "Checking who may do what",
-  verification: "Checking its own work",
-  preview: "Starting the preview",
-  install: "Installing dependencies",
-  memory: "Remembering the decisions",
-  integrations: "Noting the third parties",
-};
+/** Messages sent with each turn — Smith reads the last six; a little slack. */
+const SENT_HISTORY = 10;
+
 
 /** `4m 12s`, or `48s` — a duration a person reads at a glance. */
 function human(ms: number): string {
@@ -121,35 +108,7 @@ function human(ms: number): string {
                  : `${s}s`;
 }
 
-const STAGE_LABEL: Record<string, string> = {
-  requirements: "Requirements",
-  application_model: "Product Model",
-  ux_architecture: "Application Architecture",
-  design_system: "Design System",
-  page_contracts: "Page Set",
-  page_details: "Page Contracts",
-  data_model: "Entities",
-  entity_fields: "Data Model",
-  database: "Database Schema",
-  workflows: "Workflows",
-  workflow_steps: "Workflow Steps",
-  business_rules: "Business Rules",
-  security: "Security & Roles",
-  integrations: "Integrations",
-  apis: "API Surface",
-  figma_design_system: "Figma Design System",
-  page_layouts: "Page Design",
-  frontend: "Frontend",
-  backend: "Backend",
-  integration: "Assembly",
-  testing: "Tests",
-  memory: "Decisions",
-  verification: "Verification",
-  preview: "Preview",
-  install: "Install",
-};
 
-const labelFor = (key: string) => STAGE_LABEL[key] ?? key;
 
 const _BASE_TITLE =
   typeof document !== "undefined" ? document.title : "Tentoro Forge";
@@ -264,7 +223,12 @@ function SmithProse({ text }: { text: string }) {
         "[&_table]:my-1.5 [&_table]:text-xs [&_th]:py-0.5 [&_td]:py-0.5",
       )}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      {/* `a` is overridden so an export link downloads with the platform's
+          Bearer token — a plain href comes back 401. Every other link is
+          untouched. See MarkdownLink. */}
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: MarkdownLink }}>
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -278,6 +242,10 @@ export function SmithPanel({
   className,
 }: SmithPanelProps) {
   const { run, start, stop } = useBlueprintRun(projectId);
+  // THE TWO REVIEWS — requirements, then the product model. Re-read whenever
+  // the Blueprint does, which is after every turn and every run.
+  const gates = useGates(projectId, blueprint);
+  const [wideModel, setWideModel] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [greeting, setGreeting] = useState<Greeting | null>(null);
   const [draft, setDraft] = useState("");
@@ -300,6 +268,7 @@ export function SmithPanel({
         setOpenPlan(run);
       }
       onRunComplete?.();
+      void gates.reload();
       // A build runs for ten minutes or more, so nobody watches it finish.
       // Told where they actually are rather than only in a pane they have
       // left: the tab title carries it back, and a notification reaches them
@@ -673,7 +642,11 @@ export function SmithPanel({
       // Taken BEFORE the new turn is appended: the history is what came before
       // this message, and including the message in its own history would have
       // Smith read the question as its own answer.
-      const prior = messages.map((m) => ({ role: m.role, text: m.text }));
+      // Only the recent exchange travels: Smith reads the last few turns (a
+      // question and its answer are adjacent), and an ask it could not act on
+      // is carried on the server (`pending_ask`). The whole transcript went
+      // with every message and was dropped there.
+      const prior = messages.slice(-SENT_HISTORY).map((m) => ({ role: m.role, text: m.text }));
       setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
       void start({ description: text, evidence, history: prior });
     },
@@ -751,6 +724,29 @@ export function SmithPanel({
     ]);
     void start({ description: brief.text, evidence, approved: true });
   };
+
+  // THE REQUIREMENTS' YES. Said in the conversation, so the transcript shows
+  // who agreed to what; the server locks them and works out the product model.
+  const approveRequirements = () => {
+    const prior = messages.slice(-SENT_HISTORY).map((m) => ({ role: m.role, text: m.text }));
+    setMessages((m) => [...m, { role: "user", text: "Approve requirements", at: Date.now() }]);
+    void start({ description: "Approve requirements", evidence, history: prior,
+                 approved: true, gate: "requirements" });
+  };
+
+  // THE PRODUCT MODEL'S YES: build all of it, or the modules ticked.
+  const buildModules = (modules: string[] | null) => {
+    const all = gates.data?.product_model.items.modules ?? [];
+    const names = modules
+      ? all.filter((m) => modules.includes(m.id)).map((m) => m.name)
+      : [];
+    const text = modules ? `Build ${names.join(", ") || "the selected modules"}` : "Build app";
+    const prior = messages.slice(-SENT_HISTORY).map((m) => ({ role: m.role, text: m.text }));
+    setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
+    void start({ description: text, evidence, history: prior, approved: true,
+                 gate: "product_model", modules });
+  };
+  const openGate = busy ? null : gates.data?.gate ?? null;
 
   // A definition exists and nothing has been built from it. Read off the
   // Blueprint so it survives reloads and later turns, unlike `awaitingApproval`.
@@ -903,9 +899,11 @@ export function SmithPanel({
                   <span className="block truncate text-sm font-semibold">
                     {blueprintName(blueprint)}
                   </span>
-                  <span className="block text-xs text-muted-foreground">App Blueprint</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {gateCardLine(gates.data)?.label ?? "App Blueprint"}
+                  </span>
                   <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-                    {blueprintCountsLine(blueprint)}
+                    {gateCardLine(gates.data)?.line ?? blueprintCountsLine(blueprint)}
                   </span>
                 </span>
                 <span className="flex shrink-0 items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
@@ -1033,13 +1031,18 @@ export function SmithPanel({
         <div className="flex items-end gap-2">
           <label
             className="cursor-pointer rounded-md border p-2 text-muted-foreground hover:bg-muted"
-            title="Show Smith a screenshot or design"
+            title="Attach a screenshot, a design, or a spreadsheet to load in"
           >
             <Paperclip className="h-4 w-4" />
+            {/* A SPREADSHEET IS THE POINT OF THE PAPERCLIP for an owner who
+                already has a business: they attach customers.xlsx and say
+                "load it in" (services/smith/data_import.py). Leaving the sheet
+                formats out of this list made the import unreachable from the
+                panel it is driven from. */}
             <input
               type="file"
               multiple
-              accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown"
+              accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.markdown,.csv,.tsv,.xlsx"
               className="hidden"
               disabled={busy}
               onChange={(e) => {
@@ -1113,7 +1116,14 @@ export function SmithPanel({
       less than the Blueprint; below 360px the card's two-column rows broke.
       So it takes just over a third of what is available, between those bounds.
     */}
-    <aside className="hidden w-[clamp(360px,36%,440px)] shrink-0 flex-col border-l bg-muted/30 lg:flex">
+    <aside
+      className={cn(
+        "hidden shrink-0 flex-col border-l bg-muted/30 lg:flex",
+        openGate === "product_model" && wideModel
+          ? "w-[clamp(420px,60%,920px)]"
+          : "w-[clamp(360px,36%,440px)]",
+      )}
+    >
       {sidePlan &&
       !(sidePlan.awaitingApproval && sidePlan.status === "complete") ? (
         // A RUN IN PROGRESS, OR ONE PICKED FROM THE TRANSCRIPT: its stages.
@@ -1127,8 +1137,30 @@ export function SmithPanel({
               ← Back to the current run
             </button>
           )}
-          <StageList run={sidePlan} />
+          <StageList run={sidePlan} projectId={projectId ?? undefined} />
         </div>
+      ) : openGate === "requirements" && gates.data ? (
+        // THE FIRST REVIEW: what the app must do.
+        <RequirementsReview
+          doc={bp}
+          data={gates.data.requirements}
+          busy={busy}
+          onApprove={approveRequirements}
+          onEdit={() => composerRef.current?.focus()}
+          className="min-h-0 flex-1"
+        />
+      ) : openGate === "product_model" && gates.data ? (
+        // THE SECOND: what it is made of, module by module.
+        <ProductModelReview
+          doc={bp}
+          gates={gates.data}
+          busy={busy}
+          wide={wideModel}
+          onToggleWide={() => setWideModel((w) => !w)}
+          onBuild={buildModules}
+          onEdit={() => composerRef.current?.focus()}
+          className="min-h-0 flex-1"
+        />
       ) : hasDefinition ? (
         // THE BLUEPRINT. Read off the document rather than the run, so a
         // reload or a later turn — connecting a design, answering a question
@@ -1144,6 +1176,9 @@ export function SmithPanel({
             >
               ← Back to the current run
             </button>
+          )}
+          {gates.data && (
+            <WaitingModules gates={gates.data} busy={busy} onBuild={buildModules} />
           )}
           <BlueprintSummary
             doc={bp}
@@ -1178,10 +1213,12 @@ export function SmithPanel({
  * — `page_layouts` makes one per page. Showing calls as nodes is what made an
  * earlier progress display read "44 of 22" and keep climbing.
  */
-function StageList({
+export function StageList({
   run,
+  projectId,
 }: {
   run: ReturnType<typeof useBlueprintRun>["run"];
+  projectId?: string;
 }) {
   // WHEN THIS RUN BEGAN, and a clock that moves. Elapsed time read from a
   // static render would freeze at whatever it was when a node last landed —
@@ -1201,6 +1238,16 @@ function StageList({
     return () => clearInterval(t);
   }, [run.status]);
   const started = startedAt.current;
+  // WHEN THE BUILD LAST MOVED. A slow call that is still alive changes
+  // nothing but the clock; after a while the panel says it is still working.
+  const lastMark = useRef<string | null>(null);
+  const lastMovedAt = useRef<number>(Date.now());
+  const mark = progressMark(run);
+  if (mark !== lastMark.current) {
+    lastMark.current = mark;
+    lastMovedAt.current = Date.now();
+  }
+  const slowNote = run.status === "running" ? slowStepNote(now - lastMovedAt.current) : null;
 
   return (
     <div className="rounded-lg border bg-card p-3">
@@ -1285,6 +1332,11 @@ function StageList({
           </div>
         </div>
       )}
+      {slowNote && (
+        <p role="status" className="mb-2 text-xs text-muted-foreground">
+          {slowNote}
+        </p>
+      )}
 
       {/*
         ROUTES THAT WILL 404, SAID OUT LOUD. A page whose composition failed
@@ -1318,11 +1370,11 @@ function StageList({
           I had already worked this out — nothing needed redoing.
         </p>
       ) : (
-        <ul className="space-y-1">
-          {run.nodes.map((n) => (
-            <StageRow key={n.key} node={n} />
-          ))}
-        </ul>
+        // THE BUILD AS A LEVEL MAP, not a list. A list of stages ticking
+        // off said how far and nothing about what a build is: steps running
+        // side by side, a step that is twelve calls at once, the reviewer
+        // sending one back. See `questModel`.
+        <QuestMap run={run} projectId={projectId} />
       )}
 
       {run.alreadyComplete.length > 0 && (
@@ -1344,7 +1396,6 @@ function StageList({
               ["workflows", "Workflows"],
               ["apis", "APIs"],
               ["businessRules", "Rules"],
-              ["expectedTests", "Tests"],
             ] as const
           ).map(([key, label]) =>
             // Zero here means "not planned yet", not "none" — during the
@@ -1549,40 +1600,5 @@ function _duration(secs: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-function StageRow({ node }: { node: RunNode }) {
-  const Icon =
-    node.state === "done"
-      ? CheckCircle2
-      : node.state === "running"
-        ? Loader2
-        : node.state === "failed"
-          ? XCircle
-          : Circle;
-
-  return (
-    <li className="flex items-center gap-2 text-xs">
-      <Icon
-        className={cn(
-          "h-3.5 w-3.5 shrink-0",
-          node.state === "done" && "text-green-600",
-          node.state === "running" && "animate-spin text-primary",
-          node.state === "failed" && "text-destructive",
-          node.state === "waiting" && "text-muted-foreground/40",
-        )}
-      />
-      <span
-        className={cn(
-          node.state === "waiting" && "text-muted-foreground",
-          node.state === "done" && "text-foreground",
-        )}
-      >
-        {labelFor(node.key)}
-      </span>
-      {node.subject && (
-        <span className="truncate text-muted-foreground">{node.subject}</span>
-      )}
-    </li>
-  );
-}
 
 export default SmithPanel;

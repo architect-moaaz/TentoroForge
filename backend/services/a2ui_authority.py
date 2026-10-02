@@ -221,6 +221,13 @@ UNCLASSIFIED_FAMILY = "collection"
 #: :data:`UNCLASSIFIED_FAMILY`; see :func:`build_requirement`.
 STANDALONE_FAMILY = "standalone"
 
+#: The pattern a page contract uses to SAY it is one, rather than leaving it to
+#: be inferred from an absence. Added to the enum because every other value
+#: names a way of showing records, so a calculator's contract had to choose
+#: `dashboard` and everything downstream then behaved correctly on a false
+#: premise. Kept in step with `PagePattern` in packages/schema.
+STANDALONE_PATTERN = "tool"
+
 
 def _family_of(kind: Any, route: Any = "") -> str:
     """Every declared kind reduced to one of the four shapes above.
@@ -599,7 +606,19 @@ def build_requirement(root: Path, kind: str = "dashboard",
         # application's records.
         family = STANDALONE_FAMILY
 
+    # THE JOB SAYS WHAT THE SCREEN IS FOR; THE DEMANDS SAY WHAT IT WILL BE
+    # JUDGED ON, and the second is rendered from the objects the floor reads.
+    # They were two hand-written descriptions of one thing and agreed only
+    # where somebody noticed: the dashboard job never mentioned a chart while
+    # the floor demanded one unconditionally, so every dashboard was refused
+    # for `dashboard_no_chart` after 140 seconds of composition. A composer
+    # can no longer be refused for a rule it was never shown.
+    from services.page_demands import brief as demands_brief
+
     parts = [f"Compose the {route} screen of {app}.", "", _JOB[family]]
+    demanded = demands_brief(family)
+    if demanded:
+        parts.extend(["", demanded])
 
     # WHAT THIS ONE IS FOR, BEFORE ANYTHING GENERAL. The page's own purpose
     # and tasks, then the words that asked for it.
@@ -864,12 +883,23 @@ def _owed_controls(contract: dict | None, registry: dict, page_id: str) -> list[
 def is_standalone(kind: Any, contract: dict | None) -> bool:
     """Whether this screen is about something other than the app's records.
 
-    Both halves come from the page contract — no declared pattern and no
-    entity — so this is a reading of the definition, not a guess from the
-    route's spelling. Shared by the requirement and the domain context, which
-    otherwise contradicted each other.
+    Two readings, and the first is now a declaration. `tool` is a value of the
+    pattern enum: a page that says it is a self-contained tool IS one, and no
+    inference is needed or wanted. The enum could not say this until it could,
+    which is why the second reading exists.
+
+    The second — no declared pattern and no entity — still holds, for the page
+    whose contract names no pattern at all. It is a reading of the definition
+    rather than a guess from the route's spelling, and it stays because the
+    contract's `pattern` is optional and always has been.
+
+    Shared by the requirement and the domain context, which otherwise
+    contradicted each other.
     """
-    return not str(kind or "").strip() and not _entities_named(contract)
+    declared = str(kind or "").strip().lower()
+    if declared == STANDALONE_PATTERN:
+        return True
+    return not declared and not _entities_named(contract)
 
 
 def _entities_named(contract: dict | None) -> list[str]:
@@ -1366,15 +1396,65 @@ def _stderr_pump(progress: Any) -> tuple[Any, threading.Thread, Any]:
 
 # ------------------------------------------------------------------ compose
 
-def _floor_findings(kind: str, route: str, schema: dict, registry: dict) -> list[dict]:
+def _summarises_something(schema: dict, contract: dict | None = None) -> bool:
+    """Whether this page has records to summarise.
+
+    A KPI counts something, a chart plots something, an activity surface lists
+    recent something. All three need records; a page with none is not a
+    dashboard whatever its route says, and holding it to a dashboard's floor
+    asks the composer to invent numbers it is forbidden to invent.
+
+    THE PAGE CONTRACT IS THE AUTHORITY, not the composition. "This page names
+    no entity" is the Blueprint's own statement about what the screen is for;
+    "this composition declared no data source" could equally be a composer
+    that forgot to bind one, and excusing that would let a real dashboard
+    ship blank. With no contract to read — a caller composing a page the
+    Blueprint has not described — it is judged exactly as before.
+    """
+    if contract is None:
+        return True
+    data = contract.get("data") or {}
+    if data.get("primaryEntity") or data.get("supportingEntities"):
+        return True
+    # The contract names none, but the composer bound some anyway: then the
+    # page does summarise something and the floor is the right judge of it.
+    sources = (schema or {}).get("dataSources")
+    return bool(sources)
+
+
+def _floor_findings(kind: str, route: str, schema: dict, registry: dict,
+                    contract: dict | None = None) -> list[dict]:
     """The substance floor for this page kind. One dispatch point, so the
     decline criterion can never drift from what the delivery gate reports."""
     from services.dashboard_anatomy import dashboard_findings
     from services.page_kind_anatomy import page_kind_findings
 
     from services.a2ui_to_forge import dangling_bindings
+    from services.client_state_anatomy import (
+        client_state_findings, tool_findings,
+    )
 
-    if _family_of(kind, route) == "dashboard":
+    family = _family_of(kind, route)
+    if family == "dashboard" and not _summarises_something(schema, contract):
+        # A DASHBOARD FLOOR OVER NOTHING IS UNSATISFIABLE. The floor demands
+        # three KPI tiles, a chart and a recent-activity surface; every one of
+        # those counts, plots or lists RECORDS, and the composer is separately
+        # forbidden from writing a number it cannot bind. A page with no data
+        # source cannot satisfy both rules, so it fails for ever: a
+        # single-page calculator was declined three times, at 135 seconds a
+        # composition, for having no KPIs it could honestly show.
+        #
+        # `is_dashboard_route` says anything at "/" is a dashboard, and a
+        # route says nothing about what a page is for. What the page is for is
+        # in the page itself.
+        #
+        # NAMED RATHER THAN DISPATCHED ELSEWHERE. This used to call
+        # `page_kind_findings`, which happened to have no dashboard rules and
+        # so returned nothing — a floor skipped by accident of a table being
+        # incomplete. Now that the rules live in one place and cover every
+        # family, the skip has to be said out loud.
+        findings = []
+    elif family == "dashboard":
         findings = dashboard_findings(route, schema, registry)
     else:
         findings = page_kind_findings(kind, route, schema)
@@ -1393,6 +1473,25 @@ def _floor_findings(kind: str, route: str, schema: dict, registry: dict) -> list
     findings += [{"rule": f"binding '{name}' has no declared data source",
                   "ref": name}
                  for name in dangling_bindings(schema)]
+
+    # A SCREEN THAT IS NOT ABOUT RECORDS STILL HAS TO WORK. Every floor above
+    # counts, plots or lists records, so a tool page satisfied all of them by
+    # having none — which is how a calculator whose keys did nothing passed.
+    # The tool floor asks the only two questions that mean anything here: does
+    # it keep values of its own, and do its controls change them.
+    # A page that DECLARED itself a tool was judged by `page_kind_findings`
+    # above, which owns the question of what a kind owes. This covers the other
+    # reading — a contract naming no pattern at all — without reporting the
+    # same fault twice.
+    if family != STANDALONE_FAMILY and is_standalone(kind, contract):
+        findings += tool_findings(route, schema)
+
+    # THE MIRROR OF A DANGLING BINDING, FOR EVERY PAGE. `{{state.total}}` with
+    # nothing declared is already refused above; a control WRITING to an
+    # undeclared `total` is the same fault authored from the other end, and it
+    # fails silently. Not scoped to tools: a server-backed form that computes
+    # a total before submitting it can get this wrong in exactly the same way.
+    findings += client_state_findings(route, schema)
     return findings
 
 
@@ -1612,7 +1711,33 @@ def compose_page_via_a2ui(
 
     schema = result["schema"]
 
-    findings = _floor_findings(kind, route, schema, registry)
+    # WHAT THE TRANSLATION TOOK AWAY, BEFORE THE FLOOR JUDGES THE REMAINS.
+    #
+    # `a2ui_to_forge` removes things: a component nothing referenced, a page
+    # whose root never resolved, a select whose source could not be found. It
+    # recorded most of them on channels no caller read, so a page that lost
+    # its table was refused for having no list surface — true, and not the
+    # cause. The composer was then asked again and told the symptom.
+    #
+    # Only MATERIAL losses refuse: the ones that change what a reader would
+    # see. A renamed prop and a coerced number are recorded and pass, because
+    # the page still shows what the composer meant. This is reported BEFORE
+    # the floor so the reason names the cause rather than its consequence.
+    lost = result.get("material_losses") or []
+    if lost:
+        from services.a2ui_to_forge import Losses
+
+        ledger = Losses()
+        ledger.entries = list(result.get("losses") or [])
+        return {"applied": False, "route": route, "kind": kind,
+                "reason": "the composition did not survive translation: "
+                          + ledger.summary(),
+                "findings": [f"translation_{e['kind']}" for e in lost],
+                "losses": list(result.get("losses") or []),
+                "unresolved": result["unresolved"],
+                "warnings": result["warnings"]}
+
+    findings = _floor_findings(kind, route, schema, registry, contract)
     pruned: list[str] = []
     # NO SALVAGE. This used to drop the widgets the floor named and re-judge,
     # on the argument that a dashboard missing one chart beats no dashboard.
@@ -1632,6 +1757,10 @@ def compose_page_via_a2ui(
                           + ", ".join(f["rule"] for f in findings),
                 "findings": [f["rule"] for f in findings],
                 "pruned": pruned,
+                # Carried even on the floor's own refusal: a loss that was not
+                # material can still be the reason a floor rule failed, and a
+                # reader of this result should not have to guess.
+                "losses": list(result.get("losses") or []),
                 "unresolved": result["unresolved"],
                 "warnings": result["warnings"]}
 
@@ -1648,9 +1777,10 @@ def compose_page_via_a2ui(
                        encoding="utf-8")
         tmp.replace(target)
 
-    logger.info("[a2ui] composed %s (%s) — %d dataSources, %d unresolved",
+    logger.info("[a2ui] composed %s (%s) — %d dataSources, %d unresolved, "
+                "%d translation loss(es)",
                 route, kind, len(schema.get("dataSources") or []),
-                len(result["unresolved"]))
+                len(result["unresolved"]), len(result.get("losses") or []))
     return {
         "applied": True, "route": route, "kind": kind, "reason": "ok",
         "pruned": pruned,
@@ -1664,6 +1794,11 @@ def compose_page_via_a2ui(
         "schema_path": str(target) if target is not None else None,
         "data_sources": len(schema.get("dataSources") or []),
         "assumptions": result["assumptions"],
+        # An accepted page can still have lost something immaterial — a
+        # renamed prop, a coerced number, a series descriptor the runtime
+        # supplies. Carried so the run's ledger can show what the translation
+        # changed rather than leaving it to be rediscovered from a diff.
+        "losses": list(result.get("losses") or []),
         "unresolved": result["unresolved"],
         "warnings": result["warnings"],
         "dropped_data_model_keys": result["dropped_data_model_keys"],

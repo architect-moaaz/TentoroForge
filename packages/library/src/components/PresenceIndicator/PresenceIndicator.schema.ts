@@ -25,4 +25,4 @@ export const PresenceIndicatorProps = z
   })
   .strict();
 
-export type PresenceIndicatorPropsType = z.infer<typeof PresenceIndicatorProps>;
+export type PresenceIndicatorPropsType = z.input<typeof PresenceIndicatorProps>;

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
 
 // Design adapts to the app: brand panel shows an industry-relevant photo
 // (__AUTH_IMAGE_URL__) under a primary-colour overlay; app name (__APP_NAME__) +
@@ -110,6 +111,13 @@ export default function SignupPage() {
       )}
       <div className="flex flex-1 items-center justify-center bg-background p-6">
         <form onSubmit={onSubmit} className="w-full max-w-sm space-y-5">
+          {/* The owner's mark, where the brand panel is not (it is `hidden
+              lg:block`, and two of the layouts have none at all). Shown only
+              when they gave one — this screen has never carried a lockup, and
+              an application with no mark keeps the screen it has. */}
+          {BRAND_LOGO && (
+            <BrandMark height={36} className="mb-2" />
+          )}
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold text-foreground">Create account</h1>
             <p className="text-sm text-muted-foreground">Join __APP_NAME__</p>

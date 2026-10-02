@@ -66,15 +66,6 @@ def _m_traceability(doc: dict, flagged: set[str]) -> tuple[int, int]:
     return sum(1 for r in reqs if r.get("id") not in flagged), len(reqs)
 
 
-def _m_tested(doc: dict, flagged: set[str]) -> tuple[int, int]:
-    """Approved requirements a test verifies (Requirement↔Test)."""
-    reqs = _approved(doc.get("requirements"))
-    verified: set[str] = set()
-    for t in _live(doc.get("tests")):
-        verified.update(t.get("verifies") or [])
-    return sum(1 for r in reqs if r.get("id") in verified), len(reqs)
-
-
 def _m_guarded(doc: dict, flagged: set[str]) -> tuple[int, int]:
     """Mutating endpoints carrying a permission (API↔Permission, §100)."""
     from services.blueprint.verification import MUTATING
@@ -123,7 +114,6 @@ def _m_implemented(doc: dict, flagged: set[str]) -> tuple[int, int]:
 #: twice in the composite.
 METRICS: dict[str, tuple[str, Callable[[dict, set[str]], tuple[int, int]]]] = {
     "traceability": ("Requirement↔Code", _m_traceability),
-    "tested": ("Requirement↔Test", _m_tested),
     "guarded": ("API↔Permission", _m_guarded),
     "grounded": ("API↔Database", _m_grounded),
     "reachable": ("Navigation↔Page", _m_reachable),

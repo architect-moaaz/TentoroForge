@@ -26,6 +26,8 @@ not composed correctly, and the composer is the thing that should hear about it.
 
 from __future__ import annotations
 
+import functools
+import json
 import re
 from typing import Any, Iterator
 
@@ -87,8 +89,16 @@ def _planner_placeholders() -> set[str]:
 
 
 def _live(items: Any) -> list[dict]:
-    # SUPERSEDED (replaced by a later version) and DEPRECATED (retired — a page
-    # removed in the editor) are both gone: nothing about them is a defect.
+    """Artifacts still in play — the same reading `projection` and
+    `completeness` take.
+
+    DEPRECATED was missing here, and it is not a nicety: a retired page kept
+    being graded. Its controls were checked, its contract was held to a screen
+    that no longer resolves, and the observer opened repair rounds against a
+    screen the owner had asked to be rid of. A retired artifact is not part of
+    the application the Blueprint describes, so it is not part of the question
+    "would this application work".
+    """
     return [i for i in (items or [])
             if isinstance(i, dict) and i.get("status") not in ("SUPERSEDED", "DEPRECATED")]
 
@@ -255,6 +265,42 @@ def _workflow_by_id(doc: dict, wid: str) -> dict | None:
 #: (a Save can insert or update), so they are left out rather than guessed. This
 #: is the closed CRUD vocabulary, not a growing exception list: a control that
 #: says one of these must run a workflow that does the matching thing.
+def _acts_on_another_thing(label: str, entity_name: str) -> bool:
+    """Whether an action's object is something OTHER than this page's record.
+
+    Read from the action's own name. `add_test_to_package` joins two things
+    and creates neither, `add_lab_staff` adds staff rather than a Lab, while
+    `add_package` on a TestPackage page is that page's own create — the
+    contract's short name for the entity, which is why the object only has to
+    be part of the entity's name, not equal to it.
+
+    Ambiguous names (`create_user_account` on a User page) fall on the side of
+    NOT demanding, on purpose: a demand that should not have been made costs
+    the page every attempt it has and then the page itself, while a demand
+    that is not made is still caught by the terminal `verification` node.
+    """
+    words = [w for w in re.split(r"[^a-z0-9]+", str(label or "").lower()) if w]
+    if len(words) < 2:
+        return False                       # a bare `add` is a create
+    if {"to", "from", "into", "onto"} & set(words[1:]):
+        return True                        # joins two things; creates neither
+    entity = re.sub(r"[^a-z0-9]", "", str(entity_name or "").lower())
+    obj = "".join(words[1:])
+    for candidate in (obj, obj.rstrip("s"), obj + "s"):
+        if candidate and candidate in entity:
+            return False
+    return True
+
+
+#: What a view action calls the record without using the entity's name.
+_RECORD_WORDS = frozenset({"detail", "details", "record", "records", "row", "item", "items", "entry"})
+
+
+def _names_the_record(label: str) -> bool:
+    words = [w for w in re.split(r"[^a-z0-9]+", str(label or "").lower()) if w]
+    return bool(_RECORD_WORDS & set(words[1:]))
+
+
 _VERB_DB_OP: dict[str, str] = {
     "create": "db_insert", "add": "db_insert", "new": "db_insert", "register": "db_insert",
     "edit": "db_update", "update": "db_update",
@@ -490,6 +536,15 @@ def declared_action_findings(doc: dict, page: dict, layout: dict) -> list[str]:
             continue
         verb = _verb_of(label)
         op = _VERB_DB_OP.get(verb)
+        if op and _acts_on_another_thing(label, ent_name):
+            # `add_test_to_package` ADDS A TEST, NOT A PACKAGE. The verb is
+            # the first word and the object is not read at all, so an
+            # association action on a record page was demanding a control
+            # that CREATES the record the page is already showing.
+            # LabConnect's /packages/[id] was refused eight times for not
+            # offering "Create TestPackage" on the package's own detail page,
+            # and never composed. `add_package` still reads as a create.
+            continue
         if op:
             if op in seen or runs_op(op):
                 continue
@@ -514,6 +569,13 @@ def declared_action_findings(doc: dict, page: dict, layout: dict) -> list[str]:
                        f"{_does[op]} a {ent_name} — a control the contract promises is "
                        f"missing, and a page that quietly drops it is not fixed. Add {how}.")
         elif verb in _VIEW_VERBS and "[" not in route and detail_routes:
+            # The same object check the ops take. `view inline validation
+            # errors` on /add-data views ERRORS, not a Record, and demanding a
+            # link to /master-data/[id] refused the create form's every
+            # template — the page kept only its coded view. `view details`
+            # and `open record` still name the record.
+            if _acts_on_another_thing(label, ent_name) and not _names_the_record(label):
+                continue
             if "view" in seen or opens_record():
                 continue
             seen.add("view")
@@ -535,20 +597,61 @@ def page_findings(doc: dict) -> list[dict]:
     actions = _action_props()
     workflows = {str(w["id"]) for w in _live(doc.get("workflows")) if w.get("id")}
     layouts = {l.get("page"): l for l in _live(doc.get("pageLayouts"))}
+    # A page the UI engineer wrote renders from its `pageCode` row (its own
+    # route files), whether or not a template tree sits under it — and its
+    # controls were held to the workflows by the compile gate, not here.
+    coded = {str(c.get("page")) for c in doc.get("pageCode") or []
+             if isinstance(c, dict) and str(c.get("view") or "").strip()}
+    # A screen in a module the person chose to build later is not missing.
+    from services.blueprint.scope import deferred_page_ids
+    held = deferred_page_ids(doc)
 
     for page in _live(doc.get("pages")):
         pid = str(page.get("id") or "")
+        if pid in held:
+            continue
         route = page.get("route") or pid
         layout = layouts.get(pid)
 
         # A page nothing composed has no schema, so its route 404s. The run
         # reports the composition failure; without this the Blueprint still
         # claims the page exists and every consumer believes it.
+        if not layout and pid in coded:
+            continue
+        if not layout and page.get("pattern") == "auth":
+            continue            # without code it is the template's sign-in page
         if not layout:
             out.append({"rule": "page-not-composed", "page": pid,
                         "detail": f"{route} has no composed tree, so the route "
                                   f"cannot render"})
             continue
+
+        # A DECLARED VIEW THAT NOTHING RENDERS IS A QUEUE THAT SHOWS
+        # EVERYTHING. /admin/members declared "Pending review" as its default
+        # view, and the composed tree had a plain table of every member with
+        # no filter on the fetch and no picker — a submitted verification was
+        # lost among the rest (0l133sp2). The planner puts both in
+        # (`$savedViews`, the default filter on the source); this is what
+        # notices when a composition came back without them.
+        views = [v for v in (page.get("views") or []) if isinstance(v, dict)]
+        if views:
+            default = next((v for v in views if v.get("isDefault")), None)
+            filtered = any((s.get("filter") or {}) for s in (layout.get("dataSources") or [])
+                           if isinstance(s, dict))
+            rendered = any((n.get("props") or {}).get("savedViews") or (n.get("props") or {}).get("views")
+                           for n in _walk(layout.get("root")))
+            if not rendered or (default and default.get("filter") and not filtered):
+                out.append({"rule": "views-not-composed", "page": pid,
+                            "detail": f"{route} declares "
+                                      + ", ".join(f"{v.get('label')!r}" for v in views)
+                                      + " as saved views"
+                                      + (f" (opening on {default.get('label')!r})" if default else "")
+                                      + ", and the composed page "
+                                      + ("neither offers them nor opens on one"
+                                         if not rendered else "does not open on it")
+                                      + " — it lists everything. Put the views on the list "
+                                        "(FilterBar.savedViews or SavedViewsPicker) and narrow the "
+                                        "source by the default view's filter."})
 
         declared = {str(s.get("name")) for s in (layout.get("dataSources") or [])
                     if isinstance(s, dict) and s.get("name")}
@@ -621,6 +724,22 @@ def page_findings(doc: dict) -> list[dict]:
                                                   f"({ref}), which {did} — the control does something other than "
                                                   f"what it says, so it looks broken. Bind it to {correct!r}, the "
                                                   f"workflow that {_op_of[expected]} this record."})
+                # A CONTROL IS OFFERED TO THE PEOPLE WHO MAY RUN IT. The
+                # Blueprint says which pages launch a workflow, and those
+                # pages say who opens them. 0l133sp2 composed "Approve Member
+                # Verification" — launched from the admin's member page —
+                # onto /profile, which members open: a member was shown a
+                # button that approves their own identity check. Flagged only
+                # when the audiences do not overlap AT ALL, so a row action
+                # beside its own detail page stays fine.
+                if _runner_mismatch(doc, page, ref):
+                    launchers = ", ".join(_launcher_routes(doc, ref)) or "no page"
+                    out.append({"rule": "workflow-audience-mismatch", "page": pid,
+                                "detail": f"{route}: {kind} "
+                                          f"{props.get('label') or props.get('submitLabel') or kind!r} runs "
+                                          f"{_workflow_name(doc, ref)} ({ref}), which is launched from "
+                                          f"{launchers} — nobody who opens {route} may run it. Put the "
+                                          f"control on the page whose audience runs it, or leave it off."})
                 for missing in unsatisfied_inputs(doc, page, layout, node, ref):
                     out.append({"rule": "workflow-inputs-unsatisfied", "page": pid,
                                 "detail": f"{route}: {missing}"})
@@ -636,6 +755,8 @@ def page_findings(doc: dict) -> list[dict]:
         # two places and only one of them learned.
         for finding in search_findings(doc, page, layout):
             out.append({"rule": finding[0], "page": pid, "detail": f"{route}: {finding[1]}"})
+        for finding in similar_findings(doc, page, layout):
+            out.append({"rule": finding[0], "page": pid, "detail": f"{route}: {finding[1]}"})
         for detail in dependent_option_findings(doc, page, layout):
             out.append({"rule": "dependent-options-unsatisfied", "page": pid, "detail": f"{route}: {detail}"})
         for detail in form_field_findings(doc, page, layout):
@@ -644,6 +765,12 @@ def page_findings(doc: dict) -> list[dict]:
             out.append({"rule": "declared-action-without-control", "page": pid, "detail": detail})
         unresolved = set(_dangling(
             {"dataSources": layout.get("dataSources") or [],
+             # THE SCREEN'S OWN VALUES ARE A SOURCE. `dangling_bindings` reads
+             # `clientState` to decide whether `{{state.x}}` resolves, and a
+             # caller that hands it only the fetches makes every screen value
+             # look like a binding with nothing behind it — so a correctly
+             # composed calculator was refused for reading its own display.
+             "clientState": layout.get("clientState") or [],
              "root": layout.get("root")})) - _planner_placeholders()
         for name in sorted(unresolved):
             out.append({"rule": "binding-without-source", "page": pid,
@@ -660,17 +787,139 @@ def page_findings(doc: dict) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# A WORKFLOW DOES NOT WRITE THE PLATFORM'S CREDENTIALS.
+#
+# `users` is a platform table (§97): auth owns it, the signup route writes
+# `password` and `name`, NextAuth reads them back, and the projector folds a
+# Blueprint `passwordHash` INTO the platform's `password` rather than adding a
+# column beside it. A workflow step, authored against the Blueprint's field
+# names, then writes `passwordHash` — a column the shipped table does not have.
+#
+# LabConnect (d1bl1nes) shipped exactly that: FLOW-001 wrote
+# `passwordHash: "{{password}}"` and FLOW-004 `passwordHash: "$uuid"`, and the
+# only thing that noticed was the engine dry run at `assemble`, forty minutes
+# into a build, where no repair round can reach it.
+#
+# Folding the name here would be worse than the failure: `{{password}}` is the
+# raw password, the platform's column holds a bcrypt hash, and a silent rename
+# would store a plaintext credential that cannot log in. So the credential is
+# refused outright — account creation belongs to the platform's signup — and a
+# field the projector merely renames is told its real column.
+# ---------------------------------------------------------------------------
+
+#: Columns of a platform table that hold a credential, by the name the platform
+#: uses and by the names a Blueprint reaches for.
+_CREDENTIAL_COLUMNS = {"password", "passwordhash", "hashedpassword",
+                       "passwordsalt", "salt"}
+
+
+def platform_write_findings(doc: dict) -> list[dict]:
+    from services.blueprint.projection import (
+        _PLATFORM_SYNONYMS, PLATFORM_TABLE_SOURCES,
+    )
+
+    out: list[dict] = []
+    for wf in _live(doc.get("workflows")):
+        for st in wf.get("steps") or []:
+            if not isinstance(st, dict):
+                continue
+            cfg = st.get("config") or {}
+            if cfg.get("actionType") not in ("db_insert", "db_update"):
+                continue
+            table = str(cfg.get("table") or "").lower()
+            if table not in PLATFORM_TABLE_SOURCES:
+                continue
+            values = cfg.get("values") if isinstance(cfg.get("values"), dict) else {}
+            synonyms = _PLATFORM_SYNONYMS.get(table, {})
+            where = f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}"
+            for column in sorted(str(k) for k in values):
+                folded = column.lower().replace("_", "")
+                if folded in _CREDENTIAL_COLUMNS:
+                    out.append({"rule": "platform-credential-write", "page": str(wf.get("id")),
+                                "detail": f"{where}: sets {column!r} on the platform's {table!r} "
+                                          f"table. The platform owns the credential — its signup "
+                                          f"route hashes the password and NextAuth reads it back — "
+                                          f"so a workflow that writes it either names a column the "
+                                          f"shipped table does not have, or stores a password the "
+                                          f"login cannot verify. Drop it from `values` and let the "
+                                          f"account be created through sign-up; write only what the "
+                                          f"Blueprint adds to {table!r}."})
+                elif folded in synonyms:
+                    out.append({"rule": "platform-column-renamed", "page": str(wf.get("id")),
+                                "detail": f"{where}: sets {column!r} on the platform's {table!r} "
+                                          f"table, which the platform already stores as "
+                                          f"{synonyms[folded]!r} — the shipped table has that column "
+                                          f"and not this one. Write {synonyms[folded]!r}."})
+    return out
+
+
+def with_loop_bodies(workflow: dict) -> dict:
+    """The workflow as its checks read it: each `for_each` step followed by
+    the item's name (as a variable) and its inner steps, in order. The engine
+    runs those steps once per item with the item and each earlier inner
+    output in scope, which is exactly what a step after the loop sees here —
+    so every check (templates, inserts, columns, formulas, MCP) holds the
+    inner steps to the same rules as any other."""
+    steps: list = []
+    for st in workflow.get("steps") or []:
+        if not isinstance(st, dict):
+            steps.append(st)
+            continue
+        cfg = st.get("config") or {}
+        if cfg.get("actionType") != "for_each":
+            steps.append(st)
+            continue
+        steps.append({**st, "config": {k: v for k, v in cfg.items() if k != "steps"}})
+        name = str(cfg.get("as") or "item")
+        for var in (name, f"{name}Index"):
+            steps.append({"key": f"__{st.get('key')}_{var}", "type": "action",
+                          "config": {"actionType": "set_variable", "variableName": var}})
+        for inner in cfg.get("steps") or []:
+            if isinstance(inner, dict):
+                steps.append({"type": "action", "name": inner.get("name") or inner.get("key"),
+                              **inner, "key": inner.get("key")})
+    return {**workflow, "steps": steps}
+
+
+def loop_step_errors(workflow: dict) -> list[str]:
+    """What is wrong with a `for_each` step's own shape."""
+    out: list[str] = []
+    name = workflow.get("name") or workflow.get("id") or "workflow"
+    for st in workflow.get("steps") or []:
+        cfg = (st or {}).get("config") or {} if isinstance(st, dict) else {}
+        if cfg.get("actionType") != "for_each":
+            continue
+        key = st.get("key")
+        inner = cfg.get("steps")
+        if not isinstance(inner, list) or not inner:
+            out.append(f"{name}/{key}: a for_each runs `steps`, a list of {{key, config}} actions — it has none")
+            continue
+        for s in inner:
+            c = (s or {}).get("config") if isinstance(s, dict) else None
+            if not isinstance(s, dict) or not s.get("key") or not isinstance(c, dict) or not c.get("actionType"):
+                out.append(f"{name}/{key}: each step it runs is {{key, config}} with a `config.actionType` — "
+                           f"got {json.dumps(s)[:120]}")
+            elif c.get("actionType") == "for_each":
+                out.append(f"{name}/{key}: a for_each inside a for_each is not run — flatten it")
+    return out
+
+
 def authoring_findings(doc: dict) -> list[dict]:
     """What the engine would refuse in a workflow or rule as written — the
     author's refusals. Kept apart from :func:`page_findings` because a page
     composer cannot fix a workflow: on 2026-09-05 one workflow's `concat(...)`
     refused seven pages that had nothing to do with it."""
-    out: list[dict] = []
+    out: list[dict] = list(item_value_findings(doc))
+    doc = {**doc, "workflows": [with_loop_bodies(w) if isinstance(w, dict) else w
+                                for w in doc.get("workflows") or []]}
     out.extend(rule_findings(doc))
     out.extend(expression_findings(doc))
     out.extend(template_findings(doc))
     out.extend(insert_findings(doc))
+    out.extend(table_findings(doc))
     out.extend(column_findings(doc))
+    out.extend(platform_write_findings(doc))
     # A step reads what no input declares and no earlier step produces — the
     # wire side of the contract (see dispatch_contract). Imported here: that
     # module reads this one's helpers.
@@ -679,9 +928,197 @@ def authoring_findings(doc: dict) -> list[dict]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# WHO RUNS A WORKFLOW, AND WHERE IT IS RUN FROM
+#
+# `launchedFrom` is the Blueprint's own wiring: the pages a workflow is started
+# from. Those pages say who opens them (`users`), so between them they say who
+# runs it. Two things follow, and 0l133sp2 broke both on one page: the control
+# for "Submit Identity Verification" was never composed onto /profile, which is
+# the only page that launches it (so a member could not submit at all, and the
+# document field stayed empty), while "Approve Member Verification" — the
+# admin's — was composed onto /profile instead.
+# ---------------------------------------------------------------------------
+
+def _workflow_by_ref(doc: dict, ref: str) -> dict | None:
+    return next((w for w in _live(doc.get("workflows")) if str(w.get("id")) == str(ref)), None)
+
+
+def _workflow_name(doc: dict, ref: str) -> str:
+    return str((_workflow_by_ref(doc, ref) or {}).get("name") or ref)
+
+
+def _launcher_routes(doc: dict, ref: str) -> list[str]:
+    wf = _workflow_by_ref(doc, ref) or {}
+    by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    return [str(by_id[pid].get("route") or pid) for pid in wf.get("launchedFrom") or [] if pid in by_id]
+
+
+def _audience(page: dict) -> set[str]:
+    """The roles that open a page. A page open to everyone signed in names no
+    role, and that is not the same as naming none by mistake — it is read as
+    "anyone", which overlaps every audience."""
+    return {str(u) for u in page.get("users") or []}
+
+
+def _runner_mismatch(doc: dict, page: dict, ref: str) -> bool:
+    wf = _workflow_by_ref(doc, ref)
+    if wf is None:
+        return False
+    by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    launchers = [by_id[pid] for pid in wf.get("launchedFrom") or [] if pid in by_id]
+    if not launchers or str(page.get("id")) in {str(p.get("id")) for p in launchers}:
+        return False
+    here = _audience(page)
+    theirs: set[str] = set()
+    for p in launchers:
+        if not _audience(p):
+            return False          # launched from a page anyone may open
+        theirs |= _audience(p)
+    return bool(here) and not (here & theirs)
+
+
+def _runs_workflow(doc: dict, page: dict, layout: dict | None, code: str, ref: str) -> bool:
+    """Whether this page has anything that runs `ref` — a control in its
+    composed tree, or, for a page written as code, the SDK name the projection
+    gives that workflow (`sdk/workflows.ts`)."""
+    if layout:
+        for node in _walk(layout.get("root")):
+            if ref in set(_workflow_refs(node.get("props") or {})):
+                return True
+            # A CONTROL THAT IS A TEMPLATE NAMES NOTHING YET. A button
+            # repeated over `primaryActions`, or labelled `$item.label`,
+            # becomes one control per action when the page renders — which
+            # workflow each runs is not in the tree, so a tree holding one
+            # cannot be read as missing anything.
+            props = node.get("props") or {}
+            if node.get("repeat") or str(props.get("label") or "").startswith("$"):
+                return True
+    if code:
+        from services.blueprint.app_sdk import camel
+
+        name = camel(str((_workflow_by_ref(doc, ref) or {}).get("name") or ref))
+        if ref in code or re.search(rf"\b{re.escape(name)}\b", code):
+            return True
+    return False
+
+
+def launcher_findings(doc: dict) -> list[dict]:
+    """A page the Blueprint says launches a workflow has something that runs
+    it. Nothing on 0l133sp2's /profile ran "Submit Identity Verification",
+    the only page that launches it — the member had no way to send their
+    document, and the workflow, started from anywhere else, saved none."""
+    layouts = {str(l.get("page")): l for l in _live(doc.get("pageLayouts"))}
+    code = {str(c.get("page")): str(c.get("view") or "") for c in doc.get("pageCode") or []
+            if isinstance(c, dict)}
+    by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    out: list[dict] = []
+    for wf in _live(doc.get("workflows")):
+        if str((wf.get("trigger") or {}).get("kind") or "manual") != "manual":
+            continue
+        ref = str(wf.get("id") or "")
+        for pid in wf.get("launchedFrom") or []:
+            page = by_id.get(str(pid))
+            if page is None:
+                continue
+            layout, view = layouts.get(str(pid)), code.get(str(pid), "")
+            if not layout and not view:
+                continue          # the page itself is missing; said elsewhere
+            if _runs_workflow(doc, page, layout, view, ref):
+                continue
+            out.append({"rule": "launcher-without-control", "page": str(pid),
+                        "detail": f"{page.get('route') or pid} launches {wf.get('name') or ref} "
+                                  f"({ref}), and nothing on it runs that workflow — the people who "
+                                  f"open this page have no way to start it. Put the control here, "
+                                  f"with the fields it needs ("
+                                  + ", ".join(str(i.get("name")) for i in wf.get("inputs") or []
+                                              if i.get("kind") == "field") + ")."})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# A QUEUE OPENS ON WHAT IS WAITING
+#
+# When a workflow puts a record into a state and tells a role about it, that
+# role has work to do: those records, and not the rest. 0l133sp2 told the Admin
+# "a member is awaiting KYC verification" and its Member Verification Queue
+# listed every member, with no column for the status it was a queue of — the
+# submission arrived and was invisible among the rest.
+#
+# Read from the Blueprint, not from words: the step that notifies names the
+# role, a step in the same workflow sets a field to a value, and the pages that
+# role opens say which list is over that entity. The page contract already has
+# somewhere to put it (`views`, with `isDefault`), which is why this is worth
+# asking for rather than inventing a page.
+# ---------------------------------------------------------------------------
+
+def _notified_states(doc: dict) -> list[tuple[str, str, str, str]]:
+    """`(role, entity id, field, value)` — a state a role is told about."""
+    out: list[tuple[str, str, str, str]] = []
+    for wf in _live(doc.get("workflows")):
+        steps = [st for st in wf.get("steps") or [] if isinstance(st, dict)]
+        roles = {str((st.get("config") or {}).get("recipientRole") or "")
+                 for st in steps
+                 if str((st.get("config") or {}).get("actionType") or "") == "send_notification"}
+        roles.discard("")
+        if not roles:
+            continue
+        for st in steps:
+            config = st.get("config") or {}
+            if str(config.get("actionType") or "") != "db_update":
+                continue
+            # The step names its entity beside its config, not inside it.
+            entity = str(st.get("entity") or config.get("entity") or "")
+            for field, value in (config.get("values") or {}).items():
+                # A literal, not a template: the state it puts the record INTO.
+                if not isinstance(value, str) or "{{" in value or not value:
+                    continue
+                for role in roles:
+                    out.append((role, entity, str(field), value))
+    return out
+
+
+def queue_findings(doc: dict) -> list[dict]:
+    """The list a notified role opens shows what it was told about."""
+    roles = {str(r.get("id")): str(r.get("name") or "") for r in _live(doc.get("roles"))}
+    by_name = {name: rid for rid, name in roles.items() if name}
+    entities = {str(e.get("id")): e for e in _live((doc.get("data") or {}).get("entities"))}
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for role, entity, field, value in _notified_states(doc):
+        rid = role if role in roles else by_name.get(role, "")
+        ent = entities.get(entity)
+        if not rid or ent is None:
+            continue
+        if not any(str(f.get("name")) == field for f in ent.get("fields") or []):
+            continue
+        for page in _live(doc.get("pages")):
+            if str((page.get("data") or {}).get("primaryEntity") or "") != entity:
+                continue
+            if "[" in str(page.get("route") or "") or rid not in {str(u) for u in page.get("users") or []}:
+                continue
+            views = [v for v in page.get("views") or [] if isinstance(v, dict)]
+            if any(str(v.get("filter", {}).get(field) or "") == value for v in views):
+                continue
+            key = (str(page.get("id")), field)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"rule": "queue-without-its-state", "page": str(page.get("id")),
+                        "detail": f"{page.get('route') or page.get('id')} is the list "
+                                  f"{roles[rid]} opens for {ent.get('name')}, and "
+                                  f"{roles[rid]} is told when a {ent.get('name')} becomes "
+                                  f"{field}={value!r} — but this page has no view for those "
+                                  f"records, so what is waiting is lost among the rest. Add a "
+                                  f"default view filtering {field} to {value!r}, and show "
+                                  f"{field} on the list."})
+    return out
+
+
 def functional_findings(doc: dict) -> list[dict]:
     """Everything, for verification."""
-    return page_findings(doc) + authoring_findings(doc)
+    return (page_findings(doc) + launcher_findings(doc) + queue_findings(doc) + authoring_findings(doc)
+            + handoff_findings(doc))
 
 
 # ---------------------------------------------------------------------------
@@ -761,9 +1198,7 @@ def _form_fields_of(form: dict) -> set[str]:
     for inner in _walk(form):
         props = inner.get("props") or {}
         name = props.get("name")
-        if inner.get("type") in ("Input", "Select", "Textarea", "Checkbox", "DatePicker", "Field", "Combobox", "MultiSelect") and name:
-            names.add(str(name))
-        elif inner.get("type") == "FileUpload":
+        if inner.get("type") == "FileUpload":
             # A file input is not typed by hand: a FileUpload provides the URL
             # column (its `name`, default "file") and, via the companion
             # fields, the file name and mime type. So a Form holding a
@@ -773,7 +1208,38 @@ def _form_fields_of(form: dict) -> set[str]:
                 v = props.get(key)
                 if v:
                     names.add(str(v))
+        elif name and inner.get("type") in _field_input_types():
+            names.add(str(name))
     return names
+
+
+@functools.lru_cache(maxsize=1)
+def _field_input_types() -> frozenset[str]:
+    """Every component that collects a named field, read off the catalogue.
+
+    READ, NOT LISTED. This was eight names typed by hand, and `NumberInput`
+    was not one of them — so a Form that collected latitude and longitude
+    with NumberInputs was judged to collect neither. The dispatch manifest
+    uses this same function, so the engine's dry run sent a payload without
+    them and refused a working form (Neighbourhood Kit, UAT, 2026-09-18).
+    Sixteen other inputs were missing the same way: MoneyInput, RadioGroup,
+    Switch, Slider, TimePicker, DateRangePicker among them.
+
+    The rule is the catalogue's own: a component of the `form` category that
+    declares a `name` prop. `Avatar` and `PersonCard` declare a `name` too and
+    are not inputs, which is why the category matters. `Field` is kept for
+    trees written before the catalogue named it.
+    """
+    try:
+        from services.blueprint.page_planner import load_catalog
+        catalog = load_catalog()
+    except Exception:  # noqa: BLE001 — no catalogue, fall back to the old set
+        catalog = {}
+    derived = {n for n, e in catalog.items()
+               if e.get("category") == "form"
+               and "name" in ((e.get("props") or {}).get("properties") or {})}
+    return frozenset(derived | {"Input", "Select", "Textarea", "Checkbox",
+                                "DatePicker", "Combobox", "MultiSelect", "Field"})
 
 
 def _form_chooses(doc: dict, layout: dict, control: dict, name: str,
@@ -869,6 +1335,19 @@ def _entity_of_source(doc: dict, layout: dict, name: str) -> str | None:
         if isinstance(src, dict) and src.get("name") == name:
             ent = _entity_by_ref(doc, str(src.get("entity") or ""))
             return str((ent or {}).get("id") or src.get("entity") or "") or None
+    # A NAME THE PAGE NEVER DECLARED CAN STILL BE A DATA RESOURCE. A Form's
+    # dropdown loads `optionsFrom.source` through `fetchData(source)`, which is
+    # `/api/data/<source>` — and the data route registers every table under its
+    # Drizzle export name (`clinics`, `dentistSchedules`). A dental app's forms
+    # chose a clinic and an appointment that way with no page source declared
+    # (UAT, 2026-09-18); the running app filled both dropdowns, and this check
+    # reported "nothing there names one" — a refusal the composer could only
+    # retry. Resolved with the projector's own naming, so the two cannot drift.
+    if name:
+        from services.blueprint.projection import _var_name
+        for ent in _live((doc.get("data") or {}).get("entities")):
+            if isinstance(ent, dict) and _var_name(ent) == name:
+                return str(ent.get("id") or "") or None
     return None
 
 
@@ -980,6 +1459,29 @@ def _session_filled_records(doc: dict, page: dict) -> set[str]:
     return out
 
 
+# The HEAD of a reference: `latitude` in `{{latitude}}`, and `clinic` in
+# `{{clinic.id}}` or `{{rows[0].x}}`. Matching only the bare form missed every
+# record reference, so an optional record input a step writes through
+# `{{appointment.id}}` was never demanded of the form (dental app, UAT,
+# 2026-09-18: Book Appointment's clinic, Upload Document's appointment).
+_TEMPLATE_NAME = re.compile(r"\{\{\s*([A-Za-z_]\w*)(?:[.\[][^}]*)?\s*\}\}")
+
+
+def _inputs_a_step_writes(wf: dict) -> set[str]:
+    """Input names a db_insert/db_update step templates into its `values` —
+    exactly the set the engine's dry run resolves against the payload."""
+    names: set[str] = set()
+    for st in wf.get("steps") or []:
+        cfg = (st or {}).get("config") or {}
+        if cfg.get("actionType") not in ("db_insert", "db_update"):
+            continue
+        values = cfg.get("values") if isinstance(cfg.get("values"), dict) else {}
+        for ref in values.values():
+            if isinstance(ref, str):
+                names.update(_TEMPLATE_NAME.findall(ref))
+    return names
+
+
 def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
                        workflow_id: str) -> list[str]:
     """What the control cannot supply for the workflow it runs."""
@@ -993,8 +1495,18 @@ def unsatisfied_inputs(doc: dict, page: dict, layout: dict, control: dict,
     session_records = _session_filled_records(doc, page)
     out: list[str] = []
     fields = None
+    written = _inputs_a_step_writes(wf)
     for inp in wf.get("inputs") or []:
-        if not inp.get("required", True):
+        # OPTIONAL IS NOT THE SAME AS UNUSED. This skipped every optional
+        # input, while the engine's dry run (templates/runtime/workflows/
+        # dry-run.ts) refuses any `{{name}}` a step writes that the payload
+        # leaves empty — optional or not. So a form passed composition and
+        # failed `assemble` for the same field: Neighbourhood Kit's "Add
+        # Listing" never collected latitude/longitude, and "Submit Decision"
+        # never collected agreedStartDate/agreedEndDate (UAT, 2026-09-18),
+        # found only after the pages were paid for. An optional input a step
+        # writes must be collectable; one nothing writes may still be left out.
+        if not inp.get("required", True) and str(inp.get("name") or "") not in written:
             continue
         name = str(inp.get("name") or "")
         if name in args:
@@ -1073,6 +1585,8 @@ def search_findings(doc: dict, page: dict, layout: dict) -> list[tuple[str, str]
     if not boxes:
         return []
     lists = _list_sources(layout)
+    if not lists and _similar_sources(layout):
+        return []                          # the box is a similar source's text query
     if not lists:
         return [("search-without-source",
                  "has a search box and no list source — nothing on this page can be "
@@ -1089,6 +1603,61 @@ def search_findings(doc: dict, page: dict, layout: dict) -> list[tuple[str, str]
                         f"searches {name}, which has no text column to search "
                         f"(its fields: {', '.join(map(str, fields))}) — a text field "
                         f"on {name} is what a search needs"))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# A "FIND SIMILAR" RANKS BY AN EMBEDDING THE ENTITY HAS, AND SOMETHING ASKS.
+#
+# An op:"similar" source ranks records by distance to the URL's `image` or
+# `q`. It needs an embedding field on its entity to rank by, and the page needs
+# a box that writes the query — a FileUpload with `search` for an image, an
+# Input of type "search" for text. An image box with no similar source finds
+# nothing; a similar source with nothing asking is always empty.
+# ---------------------------------------------------------------------------
+
+def _similar_sources(layout: dict) -> list[dict]:
+    return [s for s in (layout.get("dataSources") or [])
+            if isinstance(s, dict) and s.get("op") == "similar"]
+
+
+def similar_findings(doc: dict, page: dict, layout: dict) -> list[tuple[str, str]]:
+    from services.blueprint.embeddings import entity_embeddings
+
+    nodes = list(_walk(layout.get("root")))
+    image_boxes = [n for n in nodes if n.get("type") == "FileUpload"
+                   and (n.get("props") or {}).get("search")]
+    text_boxes = [n for n in nodes if n.get("type") == "Input"
+                  and (n.get("props") or {}).get("type") == "search"]
+    sources = _similar_sources(layout)
+    out: list[tuple[str, str]] = []
+    if image_boxes and not sources:
+        out.append(("similar-without-source",
+                    "has an image search box and no similar source — give the page an "
+                    "op:\"similar\" source over the entity whose images it searches"))
+    for src in sources:
+        ent = _entity_by_ref(doc, str(src.get("entity") or ""))
+        name = (ent or {}).get("name") or str(src.get("entity") or "")
+        embedded = entity_embeddings(ent or {})
+        wanted = str(src.get("field") or "")
+        match = [e for e in embedded if not wanted or e["property"] == wanted]
+        if not match:
+            have = ", ".join(e["property"] for e in embedded) or "none"
+            out.append(("similar-without-embedding",
+                        f"source {src.get('name')!r} ranks {name} by "
+                        f"{wanted or 'an embedding'}, and {name} has no such embedding "
+                        f"field (embedding fields: {have}) — declare one on {name}, "
+                        f"e.g. {{\"name\": \"photoEmbedding\", \"type\": \"vector\", "
+                        f"\"embedding\": {{\"of\": \"photo\"}}}}"))
+            continue
+        # CLIP puts images and text in one space, so either box can ask.
+        kind = match[0]["source"]
+        if not (image_boxes or text_boxes):
+            box = ('a FileUpload with `search: true`' if kind == "image"
+                   else 'an Input of type "search"')
+            out.append(("similar-without-query",
+                        f"source {src.get('name')!r} ranks {name} by its {kind} embedding "
+                        f"and nothing on the page asks for a query — add {box}"))
     return out
 
 
@@ -1174,6 +1743,20 @@ def _expressions(doc: dict) -> list[tuple[str, str, str]]:
                 continue
             cfg = step.get("config") or {}
             expr = cfg.get("expression") or cfg.get("condition")
+            # A CUSTOM STEP'S CODE IS A FORMULA TOO. The engine evaluates
+            # `code` exactly as it evaluates a condition; SnapIT's author wrote
+            # "For each deduplicated listing … upsert a Merchant …" there, and
+            # three steps failed at run time with "Unexpected token … each"
+            # because only conditions were ever parsed here (2026-09-29).
+            if not (isinstance(expr, str) and expr.strip()) and _is_formula_step(step):
+                code = cfg.get("code") or cfg.get("script")
+                if isinstance(code, str) and code.strip() and not code.strip().startswith("//"):
+                    out.append((f"workflow#{n}/{step.get('key') or step.get('id') or m}#code",
+                                f"{wf.get('name') or wf.get('id')}, step {step.get('key') or step.get('id')!r}",
+                                code))
+                continue
+            if not (isinstance(expr, str) and expr.strip()) and cfg.get("actionType") == "for_each":
+                expr = cfg.get("where")
             if isinstance(expr, str) and expr.strip():
                 out.append((f"workflow#{n}/{step.get('key') or step.get('id') or m}",
                             f"{wf.get('name') or wf.get('id')}, step {step.get('key') or step.get('id')!r}", expr))
@@ -1181,6 +1764,15 @@ def _expressions(doc: dict) -> list[tuple[str, str, str]]:
         if rule.get("kind") == "condition_action" and isinstance(rule.get("when"), str) and rule["when"].strip():
             out.append((f"rule#{n}/when", f"rule {rule.get('name') or rule.get('id')}", rule["when"]))
     return out
+
+
+#: Steps whose config is evaluated as one FEEL formula by the engine.
+FORMULA_ACTIONS = frozenset({"custom", "transform"})
+
+
+def _is_formula_step(step: dict) -> bool:
+    cfg = step.get("config") or {}
+    return cfg.get("actionType") in FORMULA_ACTIONS or step.get("type") in FORMULA_ACTIONS
 
 
 def expression_findings(doc: dict) -> list[dict]:
@@ -1191,6 +1783,17 @@ def expression_findings(doc: dict) -> list[dict]:
     errors = check_expressions([(i, e) for i, _w, e in items])
     out = []
     for i, where, expr in items:
+        if i in errors and i.endswith("#code"):
+            out.append({"rule": "expression-invalid", "page": i.split("/")[0],
+                        "detail": f"{where}: its `code` is evaluated as ONE FEEL formula over the "
+                                  f"workflow's variables, and the engine cannot parse {expr[:160]!r} — "
+                                  f"{errors[i]}. Code is never instructions in words: work described in "
+                                  f"words (writing a query, reading fields out of pages, scoring a match) "
+                                  f"is an `ai_generate` or `ai_extract` step; many records at once are an "
+                                  f"`ai_extract` with `aiExtractMany: true`, saved by one `db_insert` whose "
+                                  f"`values` carry that whole list (one row per item); a value worked out "
+                                  f"from others is a formula such as `count(listings) > 0`."})
+            continue
         if i in errors:
             out.append({"rule": "expression-invalid", "page": i.split("/")[0],
                         "detail": f"{where}: the engine cannot parse {expr!r} — {errors[i]}. "
@@ -1211,6 +1814,11 @@ def expression_findings(doc: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 _TEMPLATE_RE = re.compile(r"\{\{\s*([\w.\[\]|:]+)\s*\}\}")
+#: Anything written between double braces, name or not.
+_ANY_TEMPLATE_RE = re.compile(r"\{\{(.*?)\}\}")
+#: One side of `??`: a name the engine walks, or a literal.
+_NAME_RE = re.compile(r"[\w.\[\]]+")
+_LITERAL_RE = re.compile(r'"[^"]*"|\'[^\']*\'|-?\d+(\.\d+)?|true|false')
 _WRONG_ROOTS = {
     "now": "the sentinel `$now` as the whole value",
     "today": "the sentinel `$today` as the whole value",
@@ -1246,6 +1854,33 @@ def template_findings(doc: dict) -> list[dict]:
         seen: set[str] = set()
         for st in steps:
             for text in _strings(st.get("config") or {}):
+                # A TEMPLATE NAMES A VALUE; IT DOES NOT COMPUTE ONE.
+                # `{{count(list_results)}}` reached the database as that text
+                # and SnapIT's last step failed on it (2026-09-29): the pattern
+                # below only matches names, so a formula inside braces was
+                # never seen here at all.
+                for inner in _ANY_TEMPLATE_RE.findall(text):
+                    if "??" in inner:
+                        # `{{a.b ?? "text"}}`: each side a name or a literal;
+                        # a name's root must be something the engine holds.
+                        sides = [s.strip() for s in inner.split("??")]
+                        bad = [s for s in sides if not (_LITERAL_RE.fullmatch(s) or _NAME_RE.fullmatch(s))]
+                        unknown = [s for s in sides if _NAME_RE.fullmatch(s) and not _LITERAL_RE.fullmatch(s)
+                                   and s.split(".")[0].split("[")[0] not in known]
+                        if bad or unknown:
+                            out.append({"rule": "template-unknown", "page": str(wf.get("id")),
+                                        "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
+                                                  f"{{{{{inner.strip()}}}}} — each side of `??` is a value the engine "
+                                                  f"holds or a literal (\"text\", a number, true/false); "
+                                                  f"{', '.join(repr(s) for s in bad + unknown)} is neither"})
+                        continue
+                    if _TEMPLATE_RE.fullmatch("{{" + inner + "}}") is None:
+                        out.append({"rule": "template-computes", "page": str(wf.get("id")),
+                                    "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
+                                              f"{{{{{inner.strip()}}}}} computes, and a template only names a "
+                                              f"value the engine holds — a step's field (`{{{{list_results.count}}}}`, "
+                                              f"`{{{{persist_listings.done}}}}`) or an input; work a value out in "
+                                              f"a `custom` step whose `code` is the formula, then name its result"})
                 for ref in _TEMPLATE_RE.findall(text):
                     root = ref.split(".")[0].split("[")[0].split("|")[0]
                     if root in known or (root, str(st.get("key"))) in seen:
@@ -1283,6 +1918,103 @@ def _entity_for_table(doc: dict, table: str | None) -> dict | None:
     return None
 
 
+_WHOLE_REF = re.compile(r"^\s*\{\{\s*([A-Za-z_][\w]*)(?:\.(output|data|items|extracted))?\s*\}\}\s*$")
+
+
+def list_source(wf: dict, value: Any) -> list[str] | None:
+    """The fields each item carries, when `value` is the whole list an
+    `ai_extract` step with `aiExtractMany` returns — the engine then writes one
+    row per item, the item's fields beside the insert's other values. None when
+    it is anything else."""
+    if not isinstance(value, str):
+        return None
+    m = _WHOLE_REF.match(value)
+    if not m:
+        return None
+    step = next((s for s in wf.get("steps") or [] if isinstance(s, dict) and s.get("key") == m.group(1)), None)
+    cfg = (step or {}).get("config") or {}
+    if (step or {}).get("type") != "ai_extract" or cfg.get("aiExtractMany") not in (True, "true"):
+        return None
+    fields = cfg.get("aiExtractFields") or []
+    return [str(f.get("name") if isinstance(f, dict) else f) for f in fields if f]
+
+
+def _fixed(value: Any) -> bool:
+    """A literal: the same for every row — not a template, not a sentinel."""
+    if isinstance(value, bool) or isinstance(value, (int, float)):
+        return True
+    return isinstance(value, str) and "{{" not in value and not value.startswith("$")
+
+
+def item_value_findings(doc: dict) -> list[dict]:
+    """A FIELD EACH ITEM CARRIES IS READ FROM THE ITEM. SnapIT extracted every
+    listing's `currency`, then saved each one with the literal "INR", so a
+    StockX price of $60 read as ₹60 (2026-09-29). A value written as a literal,
+    for a field the list's items bring themselves, says the same for all of
+    them and drops what each one said."""
+    out: list[dict] = []
+    for wf in _live(doc.get("workflows")):
+        name = wf.get("name") or wf.get("id")
+        for st in wf.get("steps") or []:
+            cfg = (st or {}).get("config") or {} if isinstance(st, dict) else {}
+            writes: list[tuple[str, list[str], str, dict]] = []  # (step key, item fields, item name, values)
+            if cfg.get("actionType") == "for_each":
+                fields = list_source(wf, cfg.get("items"))
+                if fields:
+                    item = str(cfg.get("as") or "item")
+                    for inner in cfg.get("steps") or []:
+                        ic = (inner or {}).get("config") or {} if isinstance(inner, dict) else {}
+                        if isinstance(ic.get("values"), dict):
+                            writes.append((str(inner.get("key")), fields, item, ic["values"]))
+            elif cfg.get("actionType") == "db_insert" and isinstance(cfg.get("values"), dict):
+                for v in cfg["values"].values():
+                    fields = list_source(wf, v)
+                    if fields:
+                        writes.append((str(st.get("key")), fields, "", cfg["values"]))
+                        break
+            for key, fields, item, values in writes:
+                for field, value in values.items():
+                    if field in fields and _fixed(value):
+                        read = f"`{{{{{item}.{field} ?? {json.dumps(value)}}}}}`" if item else \
+                               f"the item's own `{field}` (leave it out of the shared values)"
+                        out.append({"rule": "item-value-fixed", "page": str(wf.get("id")),
+                                    "detail": f"{name}, step {key!r}: writes {field!r} as {json.dumps(value)} for "
+                                              f"every item, but each item carries its own {field!r} — read it "
+                                              f"from the item: {read}"})
+    return out
+
+
+def table_findings(doc: dict) -> list[dict]:
+    """A DATABASE STEP NAMES A RECORD OF THIS APPLICATION. F&B's "Mark
+    Notifications Read" wrote `notifications.readAt` — a table the app does not
+    have — and every press answered 422 (2026-10-01); the column check skipped
+    it because no entity matched, so nothing said so. The platform's own login
+    table is the one other table a workflow may name."""
+    from services.blueprint.projection import PLATFORM_TABLE_SOURCES
+    platform = set(PLATFORM_TABLE_SOURCES) | {"users"}
+    records = sorted({str(e.get("table") or "") for e in (doc.get("data") or {}).get("entities") or []
+                      if isinstance(e, dict) and e.get("table")})
+    if not records:
+        # No record declared yet: nothing to judge a table against.
+        return []
+    out: list[dict] = []
+    for wf in _live(doc.get("workflows")):
+        for st in wf.get("steps") or []:
+            cfg = (st or {}).get("config") or {} if isinstance(st, dict) else {}
+            table = str(cfg.get("table") or "").strip()
+            if not table or not str(cfg.get("actionType") or "").startswith("db_") or table in platform:
+                continue
+            if _entity_for_table(doc, table) is not None:
+                continue
+            out.append({"rule": "unknown-table", "page": str(wf.get("id")),
+                        "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
+                                  f"{cfg.get('actionType')} names the table {table!r}, which is no record of this "
+                                  f"application (its records: {', '.join(records) or 'none'}). Notifications are "
+                                  "sent with send_notification and marked read by the application's own bell; a "
+                                  "step reads and writes the records above"})
+    return out
+
+
 def insert_findings(doc: dict) -> list[dict]:
     out: list[dict] = []
     for wf in _live(doc.get("workflows")):
@@ -1296,7 +2028,10 @@ def insert_findings(doc: dict) -> list[dict]:
             if entity is None:
                 continue
             values = cfg.get("values") if isinstance(cfg.get("values"), dict) else {}
-            given = {str(k) for k in values}
+            # A LIST WRITES A ROW PER ITEM, and each item brings its fields.
+            listed = {k: list_source(wf, v) for k, v in values.items()}
+            given = {str(k) for k, f in listed.items() if f is None}
+            given |= {f for fields in listed.values() if fields for f in fields}
             missing = [f["name"] for f in entity.get("fields") or []
                        if f.get("required") and not f.get("primaryKey") and f.get("name") not in given
                        and not (f.get("references") and f["name"] in ("createdById", "updatedById"))]
@@ -1344,7 +2079,9 @@ def column_findings(doc: dict) -> list[dict]:
             for key in ("values", "where"):
                 block = cfg.get(key)
                 if isinstance(block, dict):
-                    columns |= {str(k) for k in block}
+                    # The key that carries a list of rows names no column.
+                    columns |= {str(k) for k, v in block.items()
+                                if not (key == "values" and list_source(wf, v) is not None)}
             unknown = sorted(
                 c for c in columns
                 if c not in fields and c.lower().replace("_", "") not in _SYSTEM_COLUMNS
@@ -1359,3 +2096,74 @@ def column_findings(doc: dict) -> list[dict]:
                                       f"restore the field."})
     return out
 
+
+
+# ---------------------------------------------------------------------------
+# WHAT ONE PAGE HANDS ANOTHER, THE OTHER READS.
+#
+# F&B's menu collected a basket and opened Place Order with it in the address
+# (`href(pages.placeOrder, {}, { items })`); Place Order never read `items`
+# and started empty, so the customer chose everything twice (fxa532bj,
+# 2026-10-02). Each page compiled, rendered and looked finished on its own.
+# Read from the code both pages have: the keys a link passes, and whether the
+# page it opens reads them.
+# ---------------------------------------------------------------------------
+
+#: `href(pages.key, {...}, { a, b: x })` — the page key and the query literal.
+_HREF_QUERY = re.compile(r"\bhref\(\s*pages\.(\w+)\s*,\s*(?:\{[^{}]*\}|[\w.]+|undefined)\s*,\s*\{([^{}]*)\}")
+#: `${href(pages.key)}?a=…` and `href(pages.key) + "?a=…"`.
+_HREF_SUFFIX = re.compile(r"\bhref\(\s*pages\.(\w+)[^)]*\)\s*\}?\s*(?:\+\s*[`\"'])?\?(\w+)=")
+
+
+def _query_keys(literal: str) -> set[str]:
+    keys = set()
+    for part in literal.split(","):
+        m = re.match(r"\s*(?:\.\.\.)?([A-Za-z_]\w*|\"[^\"]+\"|'[^']+')\s*(?::|$)", part)
+        if m and not part.strip().startswith("..."):
+            keys.add(m.group(1).strip("\"'"))
+    return keys
+
+
+def handoffs(doc: dict) -> list[tuple[str, str, str]]:
+    """(source page id, target page id, query key) for every link in the
+    application's code that passes something in the address."""
+    from services.blueprint.app_sdk import page_keys
+
+    by_key = {k: pid for pid, k in page_keys(doc).items()}
+    out: set[tuple[str, str, str]] = set()
+    for row in doc.get("pageCode") or []:
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("view") or "") + "\n" + str(row.get("load") or "")
+        for key, literal in _HREF_QUERY.findall(code):
+            for q in _query_keys(literal):
+                if key in by_key:
+                    out.add((str(row.get("page")), by_key[key], q))
+        for key, q in _HREF_SUFFIX.findall(code):
+            if key in by_key:
+                out.add((str(row.get("page")), by_key[key], q))
+    return sorted(out)
+
+
+def reads_query(code: str, key: str) -> bool:
+    """Whether a page's code reads `key` from its address."""
+    k = re.escape(key)
+    return bool(re.search(rf"searchParams\??\.{k}\b|searchParams\??\.?\[\s*[\"']{k}[\"']\s*\]"
+                          rf"|\.get\(\s*[\"']{k}[\"']\s*\)|\{{[^}}]*\b{k}\b[^}}]*\}}\s*=\s*\w*\.?searchParams", code))
+
+
+def handoff_findings(doc: dict) -> list[dict]:
+    """A link that hands a page something the page never reads."""
+    code = {str(c.get("page")): str(c.get("load") or "") + "\n" + str(c.get("view") or "")
+            for c in doc.get("pageCode") or [] if isinstance(c, dict)}
+    by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    out: list[dict] = []
+    for src, dst, key in handoffs(doc):
+        if dst not in code or dst not in by_id or src not in by_id or reads_query(code[dst], key):
+            continue
+        out.append({"rule": "handoff-not-read", "page": dst,
+                    "detail": f"{by_id[src].get('route')} opens {by_id[dst].get('route')} with `?{key}=` "
+                              f"and {by_id[dst].get('route')} never reads `{key}` — what the person chose "
+                              f"there is lost on arrival. Read it in load.ts (`ctx.searchParams.{key}`) "
+                              f"and start the page from it."})
+    return out

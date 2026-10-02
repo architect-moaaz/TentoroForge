@@ -41,8 +41,19 @@
   font-family: var(--font-display, var(--font-body, system-ui, sans-serif));
 }
 
+/* The owner's own mark, in the monogram's place. Given the same 56px of
+   height and left to be as wide as its ratio asks — a wordmark squared off
+   into the monogram's box would be a smudge — and capped to the card so a
+   very wide one cannot push the card open. No background: the mark brings
+   its own, and painting `--primary` behind a logo that already has a
+   backdrop is how you get a coloured rectangle around someone's brand. */
+.edge-mark {
+  max-width: min(260px, 100%);
+}
+
 @media (prefers-reduced-motion: no-preference) {
-  .edge-monogram--pulse {
+  .edge-monogram--pulse,
+  .edge-mark--pulse {
     animation: edge-monogram-pulse 1.8s ease-in-out infinite;
   }
 }

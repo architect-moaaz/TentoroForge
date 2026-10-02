@@ -55,6 +55,16 @@ def _ref(screens: list[tuple[str, str]]) -> DesignReference:
 
 
 def test_the_title_is_the_rail_destination_the_content_shows_not_the_brand_crumb():
+    """The rail here names four places and only two carry an icon glyph.
+
+    `navigation_from` used to need a positive signal — an action or that glyph
+    — so it read Dashboard and New Case and dropped Front Desk and Ticket
+    Queue. A frame titled "Ticket Queue" then matched nothing the rail named
+    and fell through to the first text its chrome does not own: the property
+    switcher in the topbar. The rule is turned around now — everything in a
+    rail is a place unless it is the brand or a heading — so this frame is
+    named by its own rail again.
+    """
     ticket_queue = _frame("1:2", "1:9", ["Criterion", "Ticket Queue"], "Ticket Queue", "Recent tickets")
     new_case = _frame("1:360", "1:9", ["Criterion", "Front Desk", "New Case"], "New Case", "Guest details")
 

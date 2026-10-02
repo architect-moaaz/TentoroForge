@@ -42,5 +42,5 @@ export const FilterBuilderProps = z
   })
   .strict();
 
-export type FilterBuilderPropsType = z.infer<typeof FilterBuilderProps>;
+export type FilterBuilderPropsType = z.input<typeof FilterBuilderProps>;
 export type FilterFieldType = z.infer<typeof FilterField>;

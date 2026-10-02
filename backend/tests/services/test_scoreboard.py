@@ -64,7 +64,6 @@ def test_the_degraded_fixture_fails_on_every_axis_it_should(fleet):
     assert s.metrics["reachable"] == 0.0   # list page not in nav
     assert s.metrics["wired"] == 0.0       # orphan manual workflow
     assert s.metrics["bound"] == 0.0       # count displayed as a percent
-    assert s.metrics["tested"] == 0.0      # untested requirement
     assert s.metrics["implemented"] == 0.0 # built, but no codeMap
     assert s.metrics["grounded"] == 1.0, "entities are still sound; not a blanket zero"
 
