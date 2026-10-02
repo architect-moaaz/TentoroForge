@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import type { WidgetRef } from "./widgets";
 
-type Row = Record<string, string | number | null>;
+type Row = Record<string, string | number | boolean | null>;
 
 /** What `runWidget` returned (from "@/sdk/server"). */
 export interface WidgetViewData {

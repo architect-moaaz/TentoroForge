@@ -175,6 +175,27 @@ def _failing_note(observations: list[Observation]) -> str:
             "the same way. Say “carry on” and I will keep at it.")
 
 
+def standing_faults(doc: dict | None) -> list[str]:
+    """Faults the platform's own checks see in a built application: a page
+    handed something it never reads, pages of one module disagreeing on who
+    may open them. Best-effort — a check that cannot run says nothing."""
+    if not doc:
+        return []
+    out: list[str] = []
+    try:
+        from services.blueprint.functional_completeness import handoff_findings
+        out += [f["detail"] for f in handoff_findings(doc)]
+    except Exception:  # noqa: BLE001
+        logger.debug("[smith] handoff check failed", exc_info=True)
+    try:
+        from services.blueprint.agent_contract import access_findings
+        out += access_findings([p for p in doc.get("pages") or [] if isinstance(p, dict)
+                                and str(p.get("status") or "").upper() != "REMOVED"])
+    except Exception:  # noqa: BLE001
+        logger.debug("[smith] access check failed", exc_info=True)
+    return out
+
+
 def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation],
          max_steps: int, bench: "trials.Bench | None" = None) -> Outcome:
     bench = bench or trials.Bench(ctx.out)
@@ -189,6 +210,18 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             f"out again from its definition on the current one ({len(ctx.engine_refreshed)} "
             f"file(s): {shown}). A fault they reported may already be fixed by that: try it before "
             "changing anything, and if the try passes, say it works now and why.")))
+    faults = standing_faults(ctx.doc()) if not observations else []
+    if faults:
+        # WHAT THE PLATFORM ALREADY KNOWS IS WRONG, SAID BEFORE ANYTHING ELSE.
+        # F&B's order page dropped the basket the menu handed it, and its
+        # order queue opened to any signed-in customer; the checks that see
+        # both ran only when a page was written, so an app built before them
+        # carried them until somebody tripped over each (fxa532bj, 2026-10-02).
+        observations.append(Observation(tool="standing_faults", status="read", said=(
+            "The platform's checks find these faults in the application as it stands:\n- "
+            + "\n- ".join(faults[:8])
+            + "\nFix any that bear on what they asked as part of this turn, and try the fix. "
+              "Leave the rest unchanged and name them in your answer as found, not fixed.")))
     landed: list[str] = []
     touched: list[str] = []
     last: Outcome | None = None

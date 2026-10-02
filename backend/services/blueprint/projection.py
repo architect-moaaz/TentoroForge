@@ -450,6 +450,14 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
     aliases.write_text(entity_aliases_module(entities), "utf-8")
     written.append(ENTITY_ALIASES_PATH)
 
+    # A REFERENCE IS SHOWN BY ITS NAME. The engine attaches `<field>Label`
+    # beside every foreign key it returns — from this file, which only the
+    # legacy registry pass ever wrote. F&B's "Items by category" chart drew
+    # four UUIDs on its axis (fxa532bj, 2026-10-02).
+    fk_labels = Path(app_root) / FK_LABELS_PATH
+    fk_labels.write_text(json.dumps(fk_label_map(doc), indent=2, sort_keys=True) + "\n", "utf-8")
+    written.append(FK_LABELS_PATH)
+
     # THE ENGINE'S LIST OF RECORDS FOLLOWS THE SCHEMA. `data-init.ts` (what the
     # server registers before a page loads) and the data API route import one
     # module per schema file, and only the runtime injection at build wrote
@@ -468,6 +476,39 @@ def project_data_layer(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
 #: Where the data engine learns every name an entity goes by.
 ENTITY_ALIASES_PATH = "src/lib/entity-aliases.ts"
+
+#: Where the data engine learns what each foreign key is shown as.
+FK_LABELS_PATH = "src/lib/fk-labels.json"
+
+
+def fk_label_map(doc: dict) -> dict[str, dict[str, dict[str, str]]]:
+    """{entity name, any spelling -> {fk field -> {targetEntity, labelField}}},
+    from the Blueprint's relationships. A target whose label is its own id has
+    nothing better to show and is left out."""
+    data = doc.get("data") or {}
+    entities = {str(e.get("id")): e for e in _live(data.get("entities")) if e.get("id")}
+    by_entity: dict[str, dict[str, dict[str, str]]] = {}
+    for rel in data.get("relationships") or []:
+        if not isinstance(rel, dict):
+            continue
+        src, dst = entities.get(str(rel.get("from"))), entities.get(str(rel.get("to")))
+        field = str(rel.get("fromField") or "")
+        if not src or not dst or not field or field == "id":
+            continue
+        names = {str(f.get("name")) for f in dst.get("fields") or [] if isinstance(f, dict)}
+        label = str(dst.get("labelField") or "")
+        if not label or label == "id" or label not in names:
+            continue
+        by_entity.setdefault(str(src.get("id")), {})[field] = {
+            "targetEntity": str(dst.get("name")), "labelField": label}
+    out: dict[str, dict[str, dict[str, str]]] = {}
+    aliases = entity_alias_map([entities[eid] for eid in by_entity])
+    for eid, cols in by_entity.items():
+        forms = aliases.get(_canonical_key(str(entities[eid].get("name") or ""))) or [str(entities[eid].get("name"))]
+        for form in forms:
+            for key in (form, form.lower()):
+                out[key] = cols
+    return out
 
 
 def entity_alias_map(entities: list[dict]) -> dict[str, list[str]]:

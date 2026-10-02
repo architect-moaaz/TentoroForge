@@ -65,11 +65,19 @@ ENGINE_DIRS: dict[str, str] = {
 RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     ("storage.ts", "src/lib/storage.ts"),
     ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts"),
+    # The engine's reads (labels on a chart's groups) and the seed (a login
+    # per role) are the platform's logic, copied verbatim into every app.
+    ("data-engine.ts", "src/lib/data-engine.ts"),
+    ("seed.ts", "src/db/seed.ts"),
 )
 
 #: Database scripts every app runs, the platform's: prepare, verify, reset.
 DB_SCRIPTS: tuple[str, ...] = ("src/db/prepare-schema.ts", "src/db/verify-schema.ts",
                                "src/db/reset-schema.ts", "src/db/extensions.ts")
+
+#: The engine's typed doorway for pages, the platform's too — it carries the
+#: row type the engine returns, so the two move together.
+ENGINE_FOUNDATION_FILES: tuple[str, ...] = ("src/lib/data-engine-bridge.ts",)
 
 
 def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
@@ -128,6 +136,12 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
         except OSError:
             pass
         dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        changed.append(rel)
+    for rel in ENGINE_FOUNDATION_FILES:
+        src, dst = foundation / rel, root / rel
+        if not src.is_file() or not dst.is_file() or dst.read_bytes() == src.read_bytes():
+            continue
         shutil.copyfile(src, dst)
         changed.append(rel)
     for tmpl, rel in RUNTIME_FILES:

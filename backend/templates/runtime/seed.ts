@@ -35,7 +35,10 @@ import { db } from "./index";
 import * as schema from "./schema";
 // Who signs in (projected from the Blueprint by account_model). Relative, not
 // `@/`: the seed runs under tsx, outside Next's path aliases.
+import * as accountModule from "../lib/account";
 import { ACCOUNT, ADMIN_ROLE, SIGNUP_ROLE } from "../lib/account";
+// Read through the module so an app projected before `ROLES` existed builds.
+const ROLES: string[] = ((accountModule as unknown as { ROLES?: string[] }).ROLES) ?? [];
 import { accountTable } from "../lib/account-table";
 
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@example.com";
@@ -253,6 +256,45 @@ async function ensureAccountRow(id: string | null, email: string, name: string):
     await db.insert(accountTable).values(row as any).onConflictDoNothing();
   } catch (err) {
     console.warn(`⚠️  ${ACCOUNT.entity} for ${email} not seeded:`, err);
+  }
+}
+
+/** `customer@example.com` for the role "Customer". */
+function demoEmail(role: string): string {
+  return `${role.toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.|\.$/g, "") || "user"}@example.com`;
+}
+
+/**
+ * ONE PERSON TO SIGN IN AS, PER ROLE. F&B had an administrator and no way to
+ * see the app as a Customer — "it didn't provide the option to login with
+ * different type of users" (2026-10-02). Each role besides the
+ * administrator's gets a demo login with the administrator's demo password;
+ * an existing account is never touched. FORGE_DEMO_LOGINS=0 turns this off.
+ */
+async function seedRoleLogins(): Promise<void> {
+  const users = tableFor("users");
+  if (!users || process.env.FORGE_DEMO_LOGINS === "0") return;
+  const roleColumn = "role" in users ? "role" : "accountType" in users ? "accountType" : null;
+  if (!roleColumn) return;
+  const password = await bcrypt.hash(ADMIN_PASSWORD, 12);
+  for (const role of ROLES) {
+    if (!role || role === ADMIN_ROLE) continue;
+    const email = demoEmail(role);
+    const row: Record<string, unknown> = { email, password, [roleColumn]: role };
+    if ("name" in users) row.name = `${role} (demo)`;
+    if ("isActive" in users) row.isActive = true;
+    try {
+      await resolveRequiredFks(users, row);
+      Object.assign(row, minimalRow(users, `${role} (demo)`, row, /* skipFk */ true));
+      const created = await db.insert(users).values(row as any)
+        .onConflictDoNothing({ target: (users as any).email }).returning();
+      if (created[0]?.id) {
+        await ensureAccountRow(String(created[0].id), email, `${role} (demo)`);
+        console.log(`✅ demo login: ${email} (${role}, password: ${ADMIN_PASSWORD})`);
+      }
+    } catch (e) {
+      console.warn(`demo login for ${role} not seeded:`, e);
+    }
   }
 }
 
@@ -937,6 +979,7 @@ async function main(): Promise<void> {
   // was impossible. `seedAdmin` upserts on email, so running it every time is
   // idempotent and never clobbers a real admin.
   const adminId = await seedAdmin();
+  await seedRoleLogins();
   await ensureAccountRow(adminId, ADMIN_EMAIL, "Admin");
 
   // AND SO MUST THE PEOPLE THE OWNER ADDED — for the same reason and above the

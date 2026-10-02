@@ -132,6 +132,8 @@ _PLATFORM_REFRESH_RUNTIME_MAP = (
     # store; an app built before that kept failing every upload on Vercel.
     ("storage.ts", "src/lib/storage.ts"),
     ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts"),
+    # The engine: foreign keys and yes/no groups shown by name on charts.
+    ("data-engine.ts", "src/lib/data-engine.ts"),
 )
 _TEMPLATE_RUNTIME_DIR = (
     Path(__file__).resolve().parents[2] / "templates" / "runtime"
@@ -145,6 +147,8 @@ _TEMPLATE_FOUNDATION_DIR = (
 # ends up in a non-runtime location in the generated tree (build-time
 # scripts, deploy-time DB reset, etc.).
 _PLATFORM_REFRESH_FOUNDATION_FILES = (
+    # Carries the row type the engine returns; travels with data-engine.ts.
+    "src/lib/data-engine-bridge.ts",
     "src/db/reset-schema.ts",
     # reset-schema.ts imports it, so the two travel together.
     "src/db/extensions.ts",
@@ -191,6 +195,20 @@ def _refresh_platform_files(output_dir: Path) -> None:
         dst = output_dir / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(src.read_bytes())
+    # THE FRAME TOO — the platform's version of each frame file, or the one
+    # the application owns (`frameCode`). A frame fix (the current page lit
+    # in the rail) otherwise reached a published app only after a Smith turn.
+    try:
+        import json as _json
+        from services.smith.sync_app import refresh_frame
+        for blueprint in (output_dir.parent / ".forge" / "blueprint" / "current.json",
+                          output_dir / ".forge" / "blueprint" / "current.json"):
+            if blueprint.is_file():
+                refresh_frame(output_dir, _json.loads(blueprint.read_text("utf-8")))
+                break
+    except Exception:  # noqa: BLE001 — a stale frame is not a failed publish
+        import logging as _logging
+        _logging.getLogger(__name__).warning("[vercel] could not refresh the frame of %s", output_dir, exc_info=True)
 
 
 class VercelDeployProvider:

@@ -628,6 +628,23 @@ def _report_payload(report: Any, doc: dict | None = None) -> dict:
     }
 
 
+def _sign_in_line(doc: dict) -> str:
+    """Who to sign in as, one login per role. F&B's owner could only ever be
+    the administrator: "it didn't provide the option to login with different
+    type of users" (2026-10-02). The seed makes these; this says so."""
+    try:
+        from services.blueprint.account_model import demo_logins
+        from services.post_gen_actions import admin_credentials
+        logins = demo_logins(doc)
+        if len(logins) < 2:
+            return ""
+        each = ", ".join(f"**{email}** ({role})" for email, role in logins)
+        return (f"\n\nSign in as {each} — the password for each is "
+                f"**{admin_credentials()['password']}**.")
+    except Exception:  # noqa: BLE001 — the announcement never fails a build
+        return ""
+
+
 def _build_complete_message(doc: dict | None) -> str | None:
     """One line, in Smith's voice, saying the build finished — or ``None``
     when nothing was built to announce.
@@ -670,6 +687,8 @@ def _build_complete_message(doc: dict | None) -> str | None:
         # Nothing to announce — a run that stopped before it composed a page
         # is not a built application, and saying so would be a false claim.
         return None
+
+    later += _sign_in_line(full)
 
     if not unbuilt:
         s = "" if planned == 1 else "s"

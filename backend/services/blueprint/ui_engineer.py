@@ -1115,6 +1115,24 @@ def _unwired_actions(doc: dict, page: dict, view: str) -> list[str]:
     return out
 
 
+def _unread_handoffs(doc: dict, page: dict, load: str, view: str) -> list[str]:
+    """What another page hands this one in its address, that this one never
+    reads. F&B's Place Order was opened with the basket in `?items=` and
+    started empty (fxa532bj, 2026-10-02)."""
+    from services.blueprint.functional_completeness import handoffs, reads_query
+
+    pid = str(page.get("id"))
+    names = {str(p.get("id")): str(p.get("route") or p.get("id")) for p in doc.get("pages") or []
+             if isinstance(p, dict)}
+    out = []
+    for src, dst, key in handoffs(doc):
+        if dst == pid and src != pid and not reads_query(load + "\n" + view, key):
+            out.append(f"load.ts: {names.get(src, src)} opens this page with `?{key}=` — read "
+                       f"`ctx.searchParams.{key}` and start the page from it; what the person chose "
+                       f"there must not be lost on arrival.")
+    return out
+
+
 #: A pause dressed as work: `await new Promise((r) => setTimeout(r, 300))`.
 _TIMED_PRETENCE = re.compile(r"await\s+new\s+Promise\s*\([^)]*=>\s*setTimeout\s*\(")
 #: A row taken out of the page's own copy of the records.
@@ -1218,6 +1236,14 @@ def _static_findings(load: str, view: str) -> list[str]:
         out.append("load.ts/view.tsx: calls fetch — read through @/sdk/server, write through workflows.")
     if re.search(r"@/lib/|@/db", load + view):
         out.append("load.ts/view.tsx: imports app internals — only @/sdk, @/sdk/server, @/sdk/client, @/sdk/camera, @/sdk/i18n.")
+    # SIGNING IN IS THE SDK'S. F&B's sign-in page was rewritten to call
+    # next-auth itself and send everyone to two fixed addresses, so a person
+    # landed wherever the page guessed rather than on their role's own page
+    # (fxa532bj, 2026-10-02). `SignInForm`/`useSignIn` and `SignUpForm`/
+    # `useSignUp` land each role where the definition says.
+    if re.search(r"""from\s+["']next-auth""", load + view):
+        out.append("load.ts/view.tsx: imports next-auth — sign in and up through @/sdk/client "
+                   "(SignInForm, useSignIn, SignUpForm, useSignUp); they send each role to its own page.")
     if re.search(r"lorem ipsum|coming soon", view, re.I) or re.search(r"\bTODO\b", view):
         out.append("view.tsx: placeholder copy.")
     # AN ESCAPE IN JSX TEXT IS PRINTED, NOT DECODED. SnapIT's redesigned home
@@ -1393,6 +1419,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         view = _use_client_first(view)
         design = _design_findings(doc, page, view)
         errors = (_static_findings(load, view) + _simulated_writes(view) + _unwired_actions(doc, page, view)
+                  + _unread_handoffs(doc, page, load, view)
                   + typecheck(doc, app_root, str(page.get("id")), load, view))
         if original_view:
             dropped = _dropped_controls(original_view, view, change or brief)

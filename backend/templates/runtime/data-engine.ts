@@ -1505,7 +1505,7 @@ export type QuerySource = {
   limit?: number;
 };
 
-export type QueryRow = Record<string, string | number | null>;
+export type QueryRow = Record<string, string | number | boolean | null>;
 
 const _QUERY_BUCKETS = new Set(["day", "week", "month", "quarter", "year"]);
 const _QUERY_MAX_ROWS = 1000;
@@ -1544,6 +1544,14 @@ function asDate(v: string | Date | null | undefined): Date | null {
  * A measure or dimension naming a column the entity lacks is dropped rather
  * than failing the page; a query left with no measure resolves to [].
  */
+/** `available` → "Available" / "Not available"; `isActive` → "Active" / "Not active". */
+function booleanLabel(field: string, on: boolean): string {
+  const words = field.replace(/^(is|has|can)(?=[A-Z])/, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ").trim().toLowerCase();
+  const name = words ? words[0].toUpperCase() + words.slice(1) : on ? "Yes" : "No";
+  return on ? name : words ? `Not ${words}` : name;
+}
+
 export async function resolveQuery(
   source: QuerySource,
   ctx: DataEngineContext = {},
@@ -1647,12 +1655,21 @@ export async function resolveQuery(
         : d.bucket ? bucketLabel(v, d.bucket)
         : v === null || v === undefined ? null
         : v instanceof Date ? v.toISOString()
-        : typeof v === "number" ? v : String(v);
+        // A yes/no group stays yes or no: as the string "false" it was true
+        // to every `row.available ? … : …` written against it.
+        : typeof v === "number" || typeof v === "boolean" ? v : String(v);
     });
     // sum/avg arrive as numeric strings from the driver; a missing group is 0.
     measures.forEach((m, i) => {
       const v = Number(r[`m${i}`] ?? 0);
       out[m.key] = Number.isFinite(v) ? v : 0;
+    });
+    // A YES/NO GROUP IS NAMED, NOT PRINTED. F&B's availability chart read
+    // "true" and "false" (fxa532bj, 2026-10-02). The value stays for the
+    // caller; `<field>Label` is what a chart shows, as for a foreign key.
+    dims.forEach((d) => {
+      const v = out[keyOf(dims.indexOf(d))];
+      if (typeof v === "boolean") out[`${d.field}Label`] = booleanLabel(d.field, v);
     });
     return out;
   });

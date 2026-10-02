@@ -57,14 +57,55 @@ def account_entity(doc: dict) -> dict | None:
 
 def signup_role(doc: dict) -> str | None:
     """The role a self-registered person gets: `security.signupRole`, else the
-    application's only role, else none."""
+    application's only role, else — with the administrator's role set aside —
+    the one role left. F&B had Admin and Customer and no `signupRole`: a
+    person who signed up held no role at all, landed on the public home and
+    saw none of the Customer's menu (2026-10-02). Two or more roles besides
+    the administrator's stay undecided: that is a choice, not a default."""
     roles = _live(doc.get("roles"))
     rid = str(((doc.get("security") or {}).get("signupRole")) or "")
     if rid:
         hit = next((r for r in roles if str(r.get("id")) == rid), None)
         if hit and hit.get("name"):
             return str(hit["name"])
-    return str(roles[0].get("name")) if len(roles) == 1 and roles[0].get("name") else None
+    if len(roles) == 1 and roles[0].get("name"):
+        return str(roles[0].get("name"))
+    admin = admin_role(doc)
+    others = [r for r in roles if r.get("name") and str(r.get("name")) != admin]
+    if not admin or len(others) != 1:
+        return None
+    # ONLY WHEN THE DEFINITION SAYS WHICH IS THE ADMINISTRATOR: a page
+    # restricted to that role which the other cannot open. Two roles nothing
+    # tells apart (a Member and a Moderator with the same screens) are a
+    # choice, and `admin_role`'s tie-break must not make it.
+    admin_id = next((str(r.get("id")) for r in roles if str(r.get("name")) == admin), "")
+    other_id = str(others[0].get("id"))
+    marked = any(str(p.get("access") or "") == "role_restricted"
+                 and admin_id in [str(u) for u in p.get("users") or []]
+                 and other_id not in [str(u) for u in p.get("users") or []]
+                 for p in _live(doc.get("pages")))
+    return str(others[0].get("name")) if marked else None
+
+
+def demo_email(role: str) -> str:
+    """The demo login the seed makes for a role — `seedRoleLogins` in
+    templates/runtime/seed.ts derives it the same way."""
+    import re as _re
+    local = _re.sub(r"[^a-z0-9]+", ".", role.lower()).strip(".")
+    return f"{local or 'user'}@example.com"
+
+
+def demo_logins(doc: dict) -> list[tuple[str, str]]:
+    """(email, role) for every way into a freshly seeded application: the
+    administrator first, then one demo person per other role."""
+    from services.smith.accounts import SEEDED_ADMIN
+    admin = admin_role(doc)
+    out = [(SEEDED_ADMIN, admin or "Admin")]
+    for r in _live(doc.get("roles")):
+        name = str(r.get("name") or "")
+        if name and name != admin:
+            out.append((demo_email(name), name))
+    return out
 
 
 def admin_role(doc: dict) -> str | None:
@@ -320,6 +361,8 @@ def project_account(doc: dict, app_root: str | Path) -> dict[str, Any]:
         + f"export const SIGNUP_ROLE: string | null = {json.dumps(signup_role(doc))};\n\n"
         + "/** The role the built-in admin account holds: the one that reaches the most of the app. */\n"
         + f"export const ADMIN_ROLE: string | null = {json.dumps(admin_role(doc))};\n\n"
+        + "/** Every role of the application, by name: the seed signs a demo person into each. */\n"
+        + f"export const ROLES: string[] = {json.dumps([str(r.get('name')) for r in _live(doc.get('roles')) if r.get('name')])};\n\n"
         + f"export const AFTER_SIGNUP: string = {json.dumps(after_signup_route(doc))};\n\n"
         + f"export const HOME: string = {json.dumps(home_route(doc))};\n\n"
         + "/** Where each role lands once signed in, by the role's name; anyone else goes HOME. */\n"

@@ -799,6 +799,65 @@ def check_page_content(result: "AgentResult", doc: dict | None) -> None:
         raise InvalidPageContent(_all_of(problems[:12]))
 
 
+class InconsistentPageAccess(AuthorRefusal):
+    """Pages of one module, for the same people, disagree on who may open them."""
+
+
+def access_findings(pages: list[dict]) -> list[str]:
+    """Pages of one module that name the same audience and disagree on whether
+    that audience is a permission. F&B's back office was five pages for Admin
+    in one module: three `role_restricted`, and "Edit Menu Item" and "Orders"
+    `authenticated` — so a signed-up customer opened the order queue
+    (fxa532bj, 2026-10-02). Either reading can be right; one module saying
+    both of the same people is not a decision, it is a slip."""
+    groups: dict[tuple[str, tuple[str, ...]], dict[str, list[str]]] = {}
+    for page in pages:
+        access = str(page.get("access") or "authenticated")
+        users = tuple(sorted(str(u) for u in page.get("users") or []))
+        module = str(page.get("module") or "")
+        if not module or not users or access == "public":
+            continue
+        groups.setdefault((module, users), {}).setdefault(access, []).append(
+            str(page.get("route") or page.get("id")))
+    problems: list[str] = []
+    for (module, users), by in groups.items():
+        if len(by) > 1:
+            said = "; ".join(f"{a}: {', '.join(sorted(r))}" for a, r in sorted(by.items()))
+            problems.append(
+                f"pages of {module} for {', '.join(users)} disagree on who may open them ({said}) — "
+                "give them the same `access`: `role_restricted` if only those roles may open "
+                "them, `authenticated` if anyone signed in may")
+    return problems
+
+
+def check_page_access(result: "AgentResult", doc: dict | None) -> None:
+    """`access_findings` over the pages as they would stand, refused at the
+    page's author when its own proposal is one of the pages that disagree —
+    and only when it says who the page is for (`access`, `users`, `module`):
+    an edit to a page's content is not the place a module's access is
+    settled, and refusing it would hold that edit hostage to another page."""
+    proposed = [p.body for p in result.proposals
+                if p.section == "pages" and isinstance(p.body, dict)]
+    if not proposed:
+        return
+    merged: dict[str, dict] = {}
+    for page in (doc or {}).get("pages") or []:
+        if isinstance(page, dict) and str(page.get("status") or "").upper() != "REMOVED":
+            merged[str(page.get("id") or page.get("route"))] = page
+    touched: set[str] = set()
+    for body in proposed:
+        key = str(body.get("id") or "") or next(
+            (k for k, v in merged.items() if v.get("route") == body.get("route")), str(body.get("route")))
+        is_new = key not in merged
+        merged[key] = {**merged.get(key, {}), **body}
+        if is_new or {"access", "users", "module"} & set(body):
+            touched.add(str(merged[key].get("route") or key))
+    problems = [f for f in access_findings(list(merged.values()))
+                if any(r in f for r in touched)]
+    if problems:
+        raise InconsistentPageAccess(_all_of(problems))
+
+
 class InvalidNavigation(AuthorRefusal):
     """Two menu entries lead to the same address."""
 
@@ -1098,6 +1157,7 @@ def apply_agent_result(
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)
+    check_page_access(result, svc.doc)
     check_navigation(result, svc.doc)
     check_analytics(result, svc.doc)
 

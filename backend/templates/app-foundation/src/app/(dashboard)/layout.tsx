@@ -943,8 +943,20 @@ export default async function DashboardLayout({
   // A structurally different shell, not just different paint.
   // Highlights the current destination in every rail/dock (server components
   // can't know the URL; this tiny tracker follows soft navigations too).
-  const activeTracker = `(function(){function m(){var here=location.pathname+location.search;var items=document.querySelectorAll("[data-nav-item]");var exact=Array.prototype.some.call(items,function(a){return a.getAttribute("href")===here});items.forEach(function(a){var h=a.getAttribute("href")||"";a.setAttribute("data-active",String(exact?h===here:h===location.pathname))})}m();addEventListener("popstate",m);var p=history.pushState;history.pushState=function(){p.apply(this,arguments);m()}})()`;
-  const trackerTag = <script dangerouslySetInnerHTML={{ __html: activeTracker }} />;
+  // THE CURRENT PAGE IS LIT IN EVERY FRAME. The tracker ran once, as it was
+  // parsed — before the frame it sits in front of existed — so it found no
+  // item and nothing was ever lit; and it matched only the exact address, so
+  // a record page under a destination lit nothing either. F&B's admin clicked
+  // Menu Items and the rail stayed as it was (2026-10-02). Now: run when the
+  // page is ready and on every navigation; the destination whose address is
+  // the longest prefix of where you are is the one lit; the style is below.
+  const activeTracker = `(function(){function m(){var path=location.pathname,here=path+location.search;var items=Array.prototype.slice.call(document.querySelectorAll("[data-nav-item]"));var best="";items.forEach(function(a){var h=a.getAttribute("href")||"";if(!h||h.charAt(0)!=="/")return;var bare=h.split("?")[0];var hit=h===here||bare===path||(bare!=="/"&&path.indexOf(bare+"/")===0);if(hit&&(h===here||bare.length>best.length))best=h===here?here:bare;});items.forEach(function(a){var h=a.getAttribute("href")||"";var on=!!best&&(h===best||(h.split("?")[0]===best&&!items.some(function(b){return b.getAttribute("href")===here})));a.setAttribute("data-active",String(on));if(on)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current");});}function soon(){m();setTimeout(m,0);}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",soon);else soon();addEventListener("popstate",soon);var p=history.pushState;history.pushState=function(){p.apply(this,arguments);setTimeout(m,0)};var r=history.replaceState;history.replaceState=function(){r.apply(this,arguments);setTimeout(m,0)}})()`;
+  const trackerTag = (
+    <>
+      <style dangerouslySetInnerHTML={{ __html: `[data-nav-item][data-active="true"]{opacity:1!important;background:hsl(var(--primary) / .14)!important;color:hsl(var(--primary))!important;font-weight:600}` }} />
+      <script dangerouslySetInnerHTML={{ __html: activeTracker }} />
+    </>
+  );
   // PB-6: persona-pills frame — the Claude-yoga-demo top-strip. When the
   // deterministic shell picker (services/shell_templates.select_frame) chose
   // "persona-pills" (i.e. 2-4 personas in nav-flow.personas, attached by

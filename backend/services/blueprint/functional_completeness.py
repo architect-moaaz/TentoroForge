@@ -1117,7 +1117,8 @@ def queue_findings(doc: dict) -> list[dict]:
 
 def functional_findings(doc: dict) -> list[dict]:
     """Everything, for verification."""
-    return page_findings(doc) + launcher_findings(doc) + queue_findings(doc) + authoring_findings(doc)
+    return (page_findings(doc) + launcher_findings(doc) + queue_findings(doc) + authoring_findings(doc)
+            + handoff_findings(doc))
 
 
 # ---------------------------------------------------------------------------
@@ -2095,3 +2096,74 @@ def column_findings(doc: dict) -> list[dict]:
                                       f"restore the field."})
     return out
 
+
+
+# ---------------------------------------------------------------------------
+# WHAT ONE PAGE HANDS ANOTHER, THE OTHER READS.
+#
+# F&B's menu collected a basket and opened Place Order with it in the address
+# (`href(pages.placeOrder, {}, { items })`); Place Order never read `items`
+# and started empty, so the customer chose everything twice (fxa532bj,
+# 2026-10-02). Each page compiled, rendered and looked finished on its own.
+# Read from the code both pages have: the keys a link passes, and whether the
+# page it opens reads them.
+# ---------------------------------------------------------------------------
+
+#: `href(pages.key, {...}, { a, b: x })` — the page key and the query literal.
+_HREF_QUERY = re.compile(r"\bhref\(\s*pages\.(\w+)\s*,\s*(?:\{[^{}]*\}|[\w.]+|undefined)\s*,\s*\{([^{}]*)\}")
+#: `${href(pages.key)}?a=…` and `href(pages.key) + "?a=…"`.
+_HREF_SUFFIX = re.compile(r"\bhref\(\s*pages\.(\w+)[^)]*\)\s*\}?\s*(?:\+\s*[`\"'])?\?(\w+)=")
+
+
+def _query_keys(literal: str) -> set[str]:
+    keys = set()
+    for part in literal.split(","):
+        m = re.match(r"\s*(?:\.\.\.)?([A-Za-z_]\w*|\"[^\"]+\"|'[^']+')\s*(?::|$)", part)
+        if m and not part.strip().startswith("..."):
+            keys.add(m.group(1).strip("\"'"))
+    return keys
+
+
+def handoffs(doc: dict) -> list[tuple[str, str, str]]:
+    """(source page id, target page id, query key) for every link in the
+    application's code that passes something in the address."""
+    from services.blueprint.app_sdk import page_keys
+
+    by_key = {k: pid for pid, k in page_keys(doc).items()}
+    out: set[tuple[str, str, str]] = set()
+    for row in doc.get("pageCode") or []:
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("view") or "") + "\n" + str(row.get("load") or "")
+        for key, literal in _HREF_QUERY.findall(code):
+            for q in _query_keys(literal):
+                if key in by_key:
+                    out.add((str(row.get("page")), by_key[key], q))
+        for key, q in _HREF_SUFFIX.findall(code):
+            if key in by_key:
+                out.add((str(row.get("page")), by_key[key], q))
+    return sorted(out)
+
+
+def reads_query(code: str, key: str) -> bool:
+    """Whether a page's code reads `key` from its address."""
+    k = re.escape(key)
+    return bool(re.search(rf"searchParams\??\.{k}\b|searchParams\??\.?\[\s*[\"']{k}[\"']\s*\]"
+                          rf"|\.get\(\s*[\"']{k}[\"']\s*\)|\{{[^}}]*\b{k}\b[^}}]*\}}\s*=\s*\w*\.?searchParams", code))
+
+
+def handoff_findings(doc: dict) -> list[dict]:
+    """A link that hands a page something the page never reads."""
+    code = {str(c.get("page")): str(c.get("load") or "") + "\n" + str(c.get("view") or "")
+            for c in doc.get("pageCode") or [] if isinstance(c, dict)}
+    by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    out: list[dict] = []
+    for src, dst, key in handoffs(doc):
+        if dst not in code or dst not in by_id or src not in by_id or reads_query(code[dst], key):
+            continue
+        out.append({"rule": "handoff-not-read", "page": dst,
+                    "detail": f"{by_id[src].get('route')} opens {by_id[dst].get('route')} with `?{key}=` "
+                              f"and {by_id[dst].get('route')} never reads `{key}` — what the person chose "
+                              f"there is lost on arrival. Read it in load.ts (`ctx.searchParams.{key}`) "
+                              f"and start the page from it."})
+    return out

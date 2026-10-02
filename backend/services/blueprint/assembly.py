@@ -80,6 +80,8 @@ PROJECTED_PATHS: tuple[str, ...] = (
     "src/lib/embedding-columns.ts",
     # Every name each entity goes by (`projection.entity_alias_map`).
     "src/lib/entity-aliases.ts",
+    # What each foreign key is shown as (`projection.fk_label_map`).
+    "src/lib/fk-labels.json",
     # Who signs in (`account_model.project_account`).
     "src/lib/account.ts", "src/lib/account-table.ts",
     # The interface's languages (`languages.project_languages`).

@@ -322,7 +322,7 @@ export async function similar<E extends EntityName>(
 /** One row of a query: each dimension's value under its field name (a date
  *  bucket as "2026-03", "2026-Q1"…), each measure under its key, and — for a
  *  dimension that points at another record — its name under `<field>Label`. */
-export type QueryRow = Record<string, string | number | null>;
+export type QueryRow = Record<string, string | number | boolean | null>;
 
 export type Measure<E extends EntityName> =
   | { fn: "count" }

@@ -80,7 +80,7 @@ export async function resolveSeries(source: unknown, ctx?: ActorCtx): Promise<Ar
 
 /** Resolve an op:"query" dataSource — measures by dimensions — to tidy rows.
  *  Degrades to [] so an analytic shows its empty state, never a broken page. */
-export async function resolveQuery(source: unknown, ctx?: ActorCtx): Promise<Array<Record<string, string | number | null>>> {
+export async function resolveQuery(source: unknown, ctx?: ActorCtx): Promise<Array<Record<string, string | number | boolean | null>>> {
   try {
     await ensureDataEngineInitialized();
     return await _resolveQuery(source as any, ctx as any);
