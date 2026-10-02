@@ -58,8 +58,8 @@ class _Bench:
 def _client(seen):
     def call(*, system, user, schema):
         seen.append(json.loads(user))
-        return json.dumps({"runs": [{"workflow": "FLOW-001", "as": "Admin", "input": {"name": "Soups"}},
-                                    {"workflow": "FLOW-005", "as": "Admin", "input": {"order": "o-1"}}]})
+        return json.dumps({"runs": [{"workflow": "FLOW-001", "as": "Admin", "input": [{"name": "name", "value": '"Soups"'}]},
+                                    {"workflow": "FLOW-005", "as": "Admin", "input": [{"name": "order", "value": '"o-1"'}]}]})
     return call
 
 
@@ -94,16 +94,17 @@ def test_the_inputs_are_written_from_what_the_process_declares_and_real_ids(tmp_
     svc = _Svc(tmp_path, DOC)
     out = pt.prove_processes(svc, str(tmp_path), client=_client(seen), bench_factory=_Bench,
                              run_turn=lambda *a, **k: (_ for _ in ()).throw(AssertionError("no repair needed")))
-    brief = seen[0]
-    assert [p["workflow"] for p in brief["processes"]] == ["FLOW-001", "FLOW-005"]
-    assert brief["records"]["Order"][0]["id"] == "o-1"
-    assert brief["processes"][1]["inputs"][0]["entity"] == "Order"
+    makes, acts = seen                      # what makes records first, then what acts on them
+    assert [p["workflow"] for p in makes["processes"]] == ["FLOW-001"]
+    assert [p["workflow"] for p in acts["processes"]] == ["FLOW-005"]
+    assert acts["records"]["Order"][0]["id"] == "o-1"
+    assert acts["processes"][0]["inputs"][0]["entity"] == "Order"
     assert runs[1] == {"workflow": "FLOW-005", "input": {"order": "o-1"}, "as": "Admin"}
     assert out["passed"] == ["Create Category", "Mark Order Fulfilled"] and not out["left"]
 
 
 def test_a_failing_process_goes_to_smith_and_is_run_again(tmp_path, monkeypatch):
-    _setup(tmp_path, monkeypatch, {"FLOW-001": [OK], "FLOW-005": [REFUSED, OK]})
+    _setup(tmp_path, monkeypatch, {"FLOW-001": [OK] * 3, "FLOW-005": [REFUSED, OK]})
     asks = []
 
     def smith(project_id, output_dir, message, *, max_steps, unattended):
@@ -118,7 +119,7 @@ def test_a_failing_process_goes_to_smith_and_is_run_again(tmp_path, monkeypatch)
 
 
 def test_what_still_fails_is_recorded_and_said(tmp_path, monkeypatch):
-    _setup(tmp_path, monkeypatch, {"FLOW-001": [OK], "FLOW-005": [REFUSED, REFUSED, REFUSED]})
+    _setup(tmp_path, monkeypatch, {"FLOW-001": [OK] * 3, "FLOW-005": [REFUSED, REFUSED, REFUSED]})
     svc = _Svc(tmp_path, DOC)
     out = pt.prove_processes(svc, str(tmp_path), client=_client([]), bench_factory=_Bench,
                              run_turn=lambda *a, **k: {"answer": "tried"})
@@ -182,3 +183,115 @@ def test_a_rewrite_that_names_no_file_still_lets_smith_look_again():
     read = Observation(tool="read_section", args={"name": "pages"}, status="read", said="…")
     assert _changed_after([tried, rewrote], 0)
     assert not _changed_after([tried, read], 0)
+
+
+def test_every_object_in_the_inputs_schema_is_closed():
+    """The API refuses a structured-output schema with an open object (the
+    first live run lost the whole stage to it)."""
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "object":
+                assert node.get("additionalProperties") is False, node
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+    walk(pt.INPUTS_SCHEMA)
+
+
+def test_values_come_back_typed_and_a_failed_call_still_runs_every_process():
+    assert pt._pairs([{"name": "price", "value": "12.5"}, {"name": "items", "value": '[{"q": 2}]'},
+                      {"name": "note", "value": "not json"}]) == {"price": 12.5, "items": [{"q": 2}], "note": "not json"}
+
+    def broken(**_k):
+        raise RuntimeError("400 schema")
+    assert pt.compose_inputs(DOC, FLOWS[:2], {}, broken) == {}
+
+
+def test_a_real_clients_reply_object_is_read():
+    from services.blueprint.executors import ModelReply
+    reply = ModelReply(text=json.dumps({"runs": [{"workflow": "FLOW-001", "as": "", "input": [{"name": "name", "value": '"Soups"'}]}]}))
+    assert pt.compose_inputs(DOC, FLOWS[:1], {}, lambda **_k: reply) == {"FLOW-001": {"as": "", "input": {"name": "Soups"}}}
+
+
+def test_the_second_run_is_chosen_knowing_why_the_first_was_refused(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch, {"FLOW-001": [OK] * 3, "FLOW-005": [REFUSED, OK]})
+    seen = []
+    svc = _Svc(tmp_path, DOC)
+    pt.prove_processes(svc, str(tmp_path), client=_client(seen), bench_factory=_Bench,
+                       run_turn=lambda *a, **k: {"answer": "The process is right; that order is already fulfilled."})
+    second = {p["workflow"]: p for p in seen[-1]["processes"]}
+    assert "no status field" in second["FLOW-005"]["lastRun"] and "already fulfilled" in second["FLOW-005"]["lastRun"]
+    assert "lastRun" not in {p["workflow"]: p for p in seen[1]["processes"]}["FLOW-005"]
+
+
+def test_what_makes_records_runs_before_what_acts_on_them(tmp_path, monkeypatch):
+    runs = _setup(tmp_path, monkeypatch, {"FLOW-001": [OK], "FLOW-005": [OK]})
+    reads = []
+    monkeypatch.setattr(pt, "_records", lambda app, doc: reads.append(len(runs)) or {})
+    seen = []
+    doc = json.loads(json.dumps(DOC))
+    doc["workflows"] = [doc["workflows"][1], doc["workflows"][0]]       # the record-taking one listed first
+    pt.prove_processes(_Svc(tmp_path, doc), str(tmp_path), client=_client(seen), bench_factory=_Bench,
+                       run_turn=lambda *a, **k: {})
+    assert [r["workflow"] for r in runs] == ["FLOW-001", "FLOW-005"]
+    assert reads == [0, 1], "the records are read again after the create ran"
+    assert [p["workflow"] for p in seen[0]["processes"]] == ["FLOW-001"]
+
+
+def test_records_are_read_from_the_columns_the_table_has(monkeypatch):
+    from services.blueprint import page_review
+    asked = []
+
+    def query(app, sql):
+        asked.append(sql)
+        if "information_schema" in sql:
+            return [["id"], ["customer_name"], ["created_at"]] if "'orders'" in sql else [["id"]]
+        return [["o-2", "Rina"], ["o-1", "Ahmad"]]
+    monkeypatch.setattr(page_review, "_query", query)
+    doc = {"data": {"entities": [
+        {"name": "Order", "table": "orders", "labelField": "customerName"},
+        {"name": "Tag", "table": "tags", "labelField": "title"}]}}
+    got = pt._records(object(), doc)
+    assert got["Order"][0] == {"id": "o-2", "label": "Rina"}
+    reads = [q for q in asked if "information_schema" not in q]
+    assert 'select id::text, "customer_name"::text from "orders" order by created_at desc nulls last limit 10' in reads
+    assert """select id::text, '' from "tags" limit 10""" in reads
+
+
+def test_creates_then_changes_then_deletes():
+    def flow(fid, ops, takes):
+        return {"id": fid, "steps": [{"config": {"actionType": o}} for o in ops],
+                "inputs": [{"name": "r", "kind": "record"}] if takes else []}
+    flows = [flow("DEL", ["db_query", "db_delete"], True), flow("EDIT", ["db_update"], True),
+             flow("ADD", ["db_insert"], True), flow("ORDER", ["db_insert", "db_update"], False)]
+    assert pt._phases(flows) == [["ADD", "ORDER"], ["EDIT"], ["DEL"]]
+
+
+def test_a_later_round_runs_the_proven_creates_again_first_unjudged(tmp_path, monkeypatch):
+    runs = _setup(tmp_path, monkeypatch, {"FLOW-001": [OK, REFUSED], "FLOW-005": [REFUSED, OK]})
+    out = pt.prove_processes(_Svc(tmp_path, DOC), str(tmp_path), client=_client([]), bench_factory=_Bench,
+                             run_turn=lambda *a, **k: {"answer": ""})
+    assert [r["workflow"] for r in runs] == ["FLOW-001", "FLOW-005", "FLOW-001", "FLOW-005"]
+    assert out["passed"] == ["Create Category"] and out["fixed"] == ["Mark Order Fulfilled"] and not out["left"]
+
+
+def test_a_process_the_writer_left_out_is_asked_for_on_its_own(tmp_path, monkeypatch):
+    runs = _setup(tmp_path, monkeypatch, {"FLOW-001": [OK], "FLOW-005": [OK]})
+    calls = []
+
+    def writer(*, system, user, schema):
+        listed = [p["workflow"] for p in json.loads(user)["processes"]]
+        calls.append(listed)
+        if listed == ["FLOW-005"]:
+            return json.dumps({"runs": [{"workflow": "FLOW-005", "as": "", "input": [{"name": "order", "value": '"o-1"'}]}]})
+        return json.dumps({"runs": [{"workflow": "FLOW-001", "as": "", "input": []}]})   # FLOW-005 left out
+
+    doc = json.loads(json.dumps(DOC))
+    doc["workflows"][0]["inputs"] = [{"name": "order", "kind": "record", "entity": "ENTITY-003"}]   # both in one phase
+    doc["workflows"][0]["steps"] = doc["workflows"][1]["steps"] = [{"config": {"actionType": "db_update"}}]
+    pt.prove_processes(_Svc(tmp_path, doc), str(tmp_path), client=writer, bench_factory=_Bench,
+                       run_turn=lambda *a, **k: {})
+    assert calls == [["FLOW-001", "FLOW-005"], ["FLOW-005"]]
+    assert {r["workflow"]: r["input"] for r in runs}["FLOW-005"] == {"order": "o-1"}
