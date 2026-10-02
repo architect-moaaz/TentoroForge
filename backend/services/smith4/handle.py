@@ -27,7 +27,8 @@ def handle(*, project_id: str, output_dir: str, message: str,
            max_steps: int | None = None,
            attachments: list[dict] | None = None,
            evidence: list[str] | None = None,
-           app_name: str = "") -> Outcome:
+           app_name: str = "",
+           unattended: bool = False) -> Outcome:
     """One turn on a built application. `choose` decides each step; absent,
     `services.smith.loop.next_step` on the real model. `move` is the tree
     editor for layout pages; absent, `move_dispatcher`."""
@@ -44,7 +45,14 @@ def handle(*, project_id: str, output_dir: str, message: str,
                    ask=ask, reasoning=reasoning, guards=guards or (lambda _o: []), move=move,
                    attachments=list(attachments or []), history=list(history or []),
                    evidence=[str(e) for e in (evidence or []) if str(e).strip()],
-                   app_name=str(app_name or ""), engine_refreshed=_once(refreshed))
+                   app_name=str(app_name or ""), engine_refreshed=_once(refreshed),
+                   unattended=unattended)
+
+    # A TURN THE PLATFORM STARTED is the fault and nothing else: the person's
+    # waiting plan or held question is theirs, not something to clear or join.
+    if unattended:
+        return _in_step(output_dir, version_before,
+                        turn(ctx_for(typed), choose=choose, history=history, max_steps=max_steps))
 
     # AGREED TO ALL OF IT, SO DO ALL OF IT. "Do them in order" did the first
     # step and said "say next" — the person had just said the whole plan

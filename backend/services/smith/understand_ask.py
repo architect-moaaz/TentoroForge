@@ -169,7 +169,31 @@ def _parse(raw: str) -> dict | None:
         parsed = json.loads(_escape_inner_quotes(match.group(0)))
         return parsed if isinstance(parsed, dict) else None
     except ValueError:
-        return None
+        pass
+    return _first_object(text)
+
+
+def _first_object(text: str) -> dict | None:
+    """The first whole JSON object in `text`, decoded from each `{` in turn —
+    one with a `tool` preferred. First-`{`-to-last-`}` spans two objects, or
+    a fenced object and a sentence after it that mentions `{{$input.id}}`;
+    Smith's repair of F&B's Edit Category lost six of its twelve steps to
+    replies that were each a sentence and a perfectly good object
+    (2026-10-02)."""
+    decoder = json.JSONDecoder()
+    found: dict | None = None
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            obj, _end = decoder.raw_decode(text, i)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            if "tool" in obj:
+                return obj
+            found = found or obj
+    return found
 
 
 def _escape_inner_quotes(text: str) -> str:

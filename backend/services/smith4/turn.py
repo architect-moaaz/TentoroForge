@@ -68,6 +68,10 @@ UNWIRED = "Not working yet:"
 TRY_WIRED = ("Not tried yet. A control was found leading nowhere and has been changed since: "
              "try it now (`open_page` the screen it leads to, with what it sends) and see it "
              "work before ending.")
+#: What a question or a plan hears on a turn the platform started.
+NOBODY_TO_ASK = ("Nobody can answer: this turn was started by the build, not a person. Decide from "
+                 "the definition — what the requirements, pages and workflows say — and act. "
+                 "Several changes are made one after another in this turn, not proposed.")
 #: The start of the message when the try after the change still fails.
 STILL_FAILING = "Still not working:"
 
@@ -95,7 +99,13 @@ def _trial_key(o: Observation) -> str:
 
 
 def _changed_after(observations: list[Observation], i: int) -> bool:
-    return any(o.touched for o in observations[i + 1:])
+    """Whether anything landed after step `i`. A rewrite that reports no file
+    is still a change: Smith rewrote F&B's Orders page to fix what its try
+    showed, and every try after was refused as "nothing has changed since" —
+    five steps lost to not being allowed to look at its own fix (2026-10-02)."""
+    return any(o.touched or (o.status == "resolved" and not tools.is_read(o.tool)
+                             and not tools.is_trial(o.tool))
+               for o in observations[i + 1:])
 
 
 def _still_failing(observations: list[Observation]) -> list[str]:
@@ -256,6 +266,9 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         args = chosen.get("args") if isinstance(chosen.get("args"), dict) else {}
         args = {k: v for k, v in args.items() if v not in (None, "")}
 
+        if ctx.unattended and tool in ("ask_user", "propose_plan"):
+            observations.append(Observation(tool=tool, args=args, status="error", said=NOBODY_TO_ASK))
+            continue
         if tool == "ask_user" and not any(o.status == "read" for o in observations) \
                 and not any(o.said == LOOK_FIRST for o in observations):
             observations.append(Observation(tool=tool, args=args, status="error", said=LOOK_FIRST))

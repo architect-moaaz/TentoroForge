@@ -645,6 +645,18 @@ def _sign_in_line(doc: dict) -> str:
         return ""
 
 
+def _failing_processes_line(doc: dict) -> str:
+    """The processes the build ran, tried to fix, and could not get through
+    (`process_trials`) — said, never shipped as working."""
+    left = [i for i in ((doc.get("runtime") or {}).get("issues") or [])
+            if isinstance(i, dict) and i.get("kind") == "process"]
+    if not left:
+        return ""
+    names = ", ".join(str(i.get("name") or i.get("workflow")) for i in left)
+    return (f"\n\nStill not working after I tried to fix {'it' if len(left) == 1 else 'them'}: {names}. "
+            "Tell me to carry on and I will keep at it.")
+
+
 def _build_complete_message(doc: dict | None) -> str | None:
     """One line, in Smith's voice, saying the build finished — or ``None``
     when nothing was built to announce.
@@ -688,7 +700,7 @@ def _build_complete_message(doc: dict | None) -> str | None:
         # is not a built application, and saying so would be a false claim.
         return None
 
-    later += _sign_in_line(full)
+    later += _sign_in_line(full) + _failing_processes_line(full)
 
     if not unbuilt:
         s = "" if planned == 1 else "s"
@@ -2280,6 +2292,8 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             logger.info("[blueprint] %s: model drafted at %s", Path(output_dir).name,
                         svc.doc.get("state"))
         _gates.record_version(output_dir, _gates.PRODUCT_MODEL, svc.doc)
+    if approved and phase not in ("define", "model") and not getattr(report, "paused_because", ""):
+        _finish_unfinished_pages(svc, output_dir, app_root, report, emit)
     state = str(svc.doc.get("state") or "")
     if approved:
         # THE BUILD USED TO LEAVE THE STATE WHERE THE DEFINITION LEFT IT. This
@@ -2308,6 +2322,35 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     return {"awaitingApproval": phase != "build", "forecast": counts,
             "state": state, "phase": phase,
             "report": _report_payload(report, svc.doc)}
+
+
+def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: Any, emit) -> None:
+    """Every page the build did not finish goes to Smith with why it failed,
+    to fix the cause and write it (`page_repair`); then every process is run
+    once and what fails is fixed the same way. Only for a built tree —
+    there is nothing to run before assembly — and never fatal: what is still
+    unfinished is recorded and said in the completion message."""
+    try:
+        if not (Path(app_root) / "package.json").is_file():
+            return
+        from services.blueprint.page_repair import repair_pages
+        out = repair_pages(svc, output_dir, app_root, report, emit=emit)
+        if out["fixed"] or out["left"]:
+            logger.info("[blueprint] %s: pages finished by repair %s; still unfinished %s",
+                        Path(output_dir).name, out["fixed"] or "-",
+                        [t["route"] for t in out["left"]] or "-")
+    except Exception:  # noqa: BLE001 — the build's own result stands
+        logger.warning("[blueprint] %s: page repair failed", Path(output_dir).name, exc_info=True)
+    # THEN EVERY PROCESS IS RUN THROUGH, after the pages — a page's repair
+    # may have added the process it needed (`process_trials`).
+    try:
+        from services.blueprint.process_trials import prove_processes
+        out = prove_processes(svc, output_dir, emit=emit)
+        logger.info("[blueprint] %s: processes ran %d, fixed %s, still failing %s",
+                    Path(output_dir).name, len(out["passed"]), out["fixed"] or "-",
+                    [t["name"] for t in out["left"]] or "-")
+    except Exception:  # noqa: BLE001
+        logger.warning("[blueprint] %s: process trials failed", Path(output_dir).name, exc_info=True)
 
 
 def _approve_requirements(output_dir: str, app_root: str, *, emit, app_name: str = "",

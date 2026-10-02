@@ -74,6 +74,9 @@ class Ctx:
     #: Engine files brought up to the platform's at the start of this turn
     #: (`sync_app.refresh_engine`). A fault reported before may be gone.
     engine_refreshed: list[str] = field(default_factory=list)
+    #: Started by the platform (the build finishing a page), not a person:
+    #: nobody can answer a question or agree to a plan.
+    unattended: bool = False
 
     @property
     def out(self) -> str:

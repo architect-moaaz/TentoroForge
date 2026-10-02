@@ -291,14 +291,48 @@ def read_section(doc: dict, name: str) -> str:
     for part in name.split("."):
         if isinstance(node, dict) and part in node:
             node = node[part]
+        elif isinstance(node, list) and _item(node, part) is not None:
+            node = _item(node, part)
         else:
-            have = ", ".join(sorted(node)) if isinstance(node, dict) else "(not a section)"
+            have = (", ".join(sorted(node)) if isinstance(node, dict)
+                    else ", ".join(_labels(node)) if isinstance(node, list) else "(not a section)")
             raise ReadRefused(f"The Blueprint has no `{name}`. At that level there is: {have}.")
     text = json.dumps(node, indent=1, ensure_ascii=False)
     lines = text.splitlines()
     if len(lines) > MAX_LINES:
-        text = "\n".join(lines[:MAX_LINES]) + f"\n… [{len(lines) - MAX_LINES} more lines; ask for a narrower name, e.g. `{name}.<key>`]"
+        # SAY WHAT THE CUT-OFF PART HOLDS. "Ask for `workflows.<key>`" named
+        # a key a list does not have: Smith, finishing F&B's Edit Category,
+        # could not see the workflow it had just added — the last one, past
+        # the cut — and asked for it five times (2026-10-02).
+        more = (f"; it holds: {', '.join(_labels(node))} — ask for one, e.g. `{name}.{_labels(node)[-1].split(' ')[0]}`"
+                if isinstance(node, list) and _labels(node) else f"; ask for a narrower name, e.g. `{name}.<key>`")
+        text = "\n".join(lines[:MAX_LINES]) + f"\n… [{len(lines) - MAX_LINES} more lines{more}]"
     return f"{name}:\n{scrub(text)}"
+
+
+def _item(items: list, ref: str) -> Any:
+    """A list's item by its id, key, name or route (any case), or by position."""
+    want = ref.strip().lower()
+    for it in items:
+        if isinstance(it, dict) and any(str(it.get(k) or "").lower() == want
+                                        for k in ("id", "key", "name", "route", "page")):
+            return it
+    if want.isdigit() and int(want) < len(items):
+        return items[int(want)]
+    return None
+
+
+def _labels(items: list) -> list[str]:
+    """How each item of a list is asked for: its id, with its name."""
+    out = []
+    for i, it in enumerate(items):
+        if isinstance(it, dict):
+            ref = str(it.get("id") or it.get("key") or it.get("route") or it.get("page") or i)
+            name = str(it.get("name") or "")
+            out.append(f"{ref} ({name})" if name and name != ref else ref)
+        else:
+            out.append(str(i))
+    return out[:60]
 
 
 def _by_id(doc: dict) -> dict[str, tuple[str, dict]]:
