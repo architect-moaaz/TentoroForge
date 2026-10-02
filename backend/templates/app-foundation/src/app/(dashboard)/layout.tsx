@@ -392,7 +392,7 @@ function TopNav({ items, appName, id, right }: { items: Sub[]; appName: string; 
             <a
               key={it.route}
               href={it.route}
-              data-nav-item=""
+              data-nav-item="" suppressHydrationWarning
               className="whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] opacity-80 transition-opacity hover:opacity-100"
               style={{ color: text }}
             >
@@ -548,7 +548,7 @@ function _LegacyPersonaPillsNav({ personas, appName, id }: {
                   <a
                     key={screen.route}
                     href={screen.route}
-                    data-nav-item=""
+                    data-nav-item="" suppressHydrationWarning
                     data-persona-subnav-link=""
                     data-nav-active="false"
                     className="rounded-full px-3 h-8 inline-flex items-center text-[12.5px] font-medium transition-colors"
@@ -784,7 +784,7 @@ function WideRail({ props, appName, caption, footer }: {
                   {g.label ?? ""}
                 </div>
                 {g.items.map((it) => (
-                  <a key={it.route} href={it.route} data-nav-item=""
+                  <a key={it.route} href={it.route} data-nav-item="" suppressHydrationWarning
                     className="mb-0.5 flex items-center gap-2.5 rounded-full px-3 py-[7px] text-[13px] opacity-85 transition hover:opacity-100"
                     style={{ color: text }}>
                     <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={16} /></span>
@@ -793,7 +793,7 @@ function WideRail({ props, appName, caption, footer }: {
                 ))}
               </>
             ) : g.route ? (
-              <a href={g.route} data-nav-item=""
+              <a href={g.route} data-nav-item="" suppressHydrationWarning
                 className="mb-0.5 flex items-center gap-2.5 rounded-full px-3 py-[7px] text-[13px] opacity-85 transition hover:opacity-100"
                 style={{ color: text }}>
                 <span data-nav-icon="" className="inline-flex"><RailGlyph name={g.icon} size={16} /></span>
@@ -836,7 +836,7 @@ function IconRail({ props, appName, footer }: { props: NavProps; appName: string
       </div>
       <div className="flex flex-1 flex-col items-center gap-1 pb-4">
         {items.map((it) => (
-          <a key={it.route} href={it.route} title={it.label} data-nav-item=""
+          <a key={it.route} href={it.route} title={it.label} data-nav-item="" suppressHydrationWarning
             className="grid h-10 w-10 place-items-center rounded-[var(--radius)] opacity-75 transition hover:opacity-100"
             style={{ color: text }}>
             <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={18} /></span>
@@ -867,7 +867,7 @@ function DockNav({ props, appName }: { props: NavProps; appName: string }) {
         <ShellBrand appName={appName} height={20}>{appName.slice(0, 1)}</ShellBrand>
       </span>
       {items.map((it) => (
-        <a key={it.route} href={it.route} data-nav-item="" title={it.label}
+        <a key={it.route} href={it.route} data-nav-item="" suppressHydrationWarning title={it.label}
           className="flex flex-col items-center gap-0.5 rounded-xl px-2.5 py-1.5 opacity-80 transition hover:opacity-100"
           style={{ color: text }}>
           <span data-nav-icon="" className="inline-flex"><RailGlyph name={it.icon} size={17} /></span>
@@ -950,6 +950,10 @@ export default async function DashboardLayout({
   // Menu Items and the rail stayed as it was (2026-10-02). Now: run when the
   // page is ready and on every navigation; the destination whose address is
   // the longest prefix of where you are is the one lit; the style is below.
+  // It sets `data-active` and `aria-current` before React hydrates, so every
+  // nav item says `suppressHydrationWarning`: without it each page logged a
+  // hydration mismatch, and every trial of every page read as broken
+  // (F&B live test, 2026-10-02).
   const activeTracker = `(function(){function m(){var path=location.pathname,here=path+location.search;var items=Array.prototype.slice.call(document.querySelectorAll("[data-nav-item]"));var best="";items.forEach(function(a){var h=a.getAttribute("href")||"";if(!h||h.charAt(0)!=="/")return;var bare=h.split("?")[0];var hit=h===here||bare===path||(bare!=="/"&&path.indexOf(bare+"/")===0);if(hit&&(h===here||bare.length>best.length))best=h===here?here:bare;});items.forEach(function(a){var h=a.getAttribute("href")||"";var on=!!best&&(h===best||(h.split("?")[0]===best&&!items.some(function(b){return b.getAttribute("href")===here})));a.setAttribute("data-active",String(on));if(on)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current");});}function soon(){m();setTimeout(m,0);}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",soon);else soon();addEventListener("popstate",soon);var p=history.pushState;history.pushState=function(){p.apply(this,arguments);setTimeout(m,0)};var r=history.replaceState;history.replaceState=function(){r.apply(this,arguments);setTimeout(m,0)}})()`;
   const trackerTag = (
     <>

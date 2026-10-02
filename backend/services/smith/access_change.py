@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 NODE = "security"
 
+#: What step 1 hears back when the roles and permissions need no change.
+UNCHANGED = "the roles and permissions need no change"
+
 PAGE_ACCESS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -198,9 +201,17 @@ def change_access(svc: Any, change: str, *, app_root: str | None = None, executo
     )
     def keep(props):
         return [p for p in props if p.section in ("roles", "permissions", "security")]
-    rerun(svc, NODE, brief=brief, request=change, interpretation=f"change access: {change}", keep=keep,
-          executor=executor, reasoning=reasoning, app_root=app_root,
-          say=f"Re-deciding roles and permissions: {change}.")
+    # NOTHING TO CHANGE IS AN ANSWER. Told to return the model unchanged when
+    # the ask is only about screens, the agent returned nothing; that was read
+    # as a refusal twice, and "only admins can open order details" never
+    # reached the screens step (F&B live test, 2026-10-02).
+    try:
+        rerun(svc, NODE, brief=brief, request=change, interpretation=f"change access: {change}", keep=keep,
+              executor=executor, reasoning=reasoning, app_root=app_root, empty=UNCHANGED,
+              say=f"Re-deciding roles and permissions: {change}.")
+    except SectionChangeError as exc:
+        if UNCHANGED not in str(exc):
+            raise
 
     # 2. which roles reach which screen — held to the roles that now exist
     call = client or _client()

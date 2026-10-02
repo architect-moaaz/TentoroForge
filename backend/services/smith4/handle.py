@@ -63,6 +63,16 @@ def handle(*, project_id: str, output_dir: str, message: str,
     # and at a time budget, and says what is still to do either way.
     answers_plan = (typed in (plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL) or plan_mod.wants_next(typed)
                     or " ".join(typed.lower().rstrip(".!").split()) in _PLAN_YES)
+    # A YES TO THE QUESTION JUST ASKED, NOT TO THE PLAN. A step asked "this
+    # also removes what is written in it — shall I go ahead?"; the yes was
+    # read as agreeing to the plan, its NEXT step ran, and the removal it
+    # answered never happened — twice (F&B live test, 2026-10-02). With a
+    # confirmation waiting, a yes goes to it: the held step runs again with
+    # the yes, and the rest of the plan stays waiting.
+    from services.smith import confirm as confirm_mod
+    if answers_plan and typed not in (plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL) \
+            and confirm_mod.waiting(output_dir) and confirm_mod.is_yes(typed):
+        answers_plan = False
     if plan_mod.peek(output_dir):
         if answers_plan:
             plan_mod.agree(output_dir)
@@ -209,7 +219,7 @@ def _all_steps(output_dir: str, run_step: Callable[[str], Outcome],
         if not step:
             break
         pending_ask.clear(output_dir)
-        last = run_step(step)
+        last = run_step(_with_done(step, said))
         if last.said.strip():
             said.append(last.said.strip())
         touched += [t for t in last.touched if t not in touched]
@@ -226,6 +236,18 @@ def _all_steps(output_dir: str, run_step: Callable[[str], Outcome],
                    options=list(last.options), touched=touched,
                    diff_summary=", ".join(touched[:8]) if touched else "", finding=last.finding,
                    steps=steps)
+
+
+def _with_done(step: str, said: list[str]) -> str:
+    """A plan step, with what the steps before it already did. Each step was
+    its own turn, blind to the last: "show the spice level on the admin
+    forms" redid what "add the spice level" had just done, failed at it, and
+    added a second process to save it — the time the menu step needed (F&B
+    live test, 2026-10-02)."""
+    if not said:
+        return step
+    done = "\n".join(f"- {s[:600]}" for s in said[-4:])
+    return (f"{step}\n\nAlready done earlier in this plan — check it, do not do it again:\n{done}")
 
 
 def _image_paths(attachments: list[dict] | None) -> list[str]:

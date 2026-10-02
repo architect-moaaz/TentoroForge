@@ -347,9 +347,12 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
                             catalogue=tools.render())
     try:
         raw = call(prompt)
-    except Exception:  # noqa: BLE001 — a turn degrades, it does not crash
-        logger.warning("smith loop: provider unreachable; ending the turn")
-        return {"tool": "done", "args": {},
+    except Exception as exc:  # noqa: BLE001 — a turn degrades, it does not crash
+        # The provider's own words go to the log, for whoever runs the
+        # platform: "credit balance is too low" is theirs to act on.
+        logger.warning("smith loop: provider unreachable (%s: %s); ending the turn",
+                       type(exc).__name__, str(exc)[:300])
+        return {"tool": "done", "args": {}, "unreachable": True,
                 "why": "I could not reach my reasoning service for the next step."}
 
     data = _parse(raw)

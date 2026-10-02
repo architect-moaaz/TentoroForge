@@ -651,6 +651,13 @@ def remove_workflow(svc: Any, ref: str, *, app_root: str | None = None, reasonin
     touched: list[str] = []
     notes: list[str] = []
     forms = 0
+    # THE SCREENS WRITTEN AS CODE THAT RUN IT, found before it goes: its SDK
+    # key leaves with it, and a page still calling it no longer compiles.
+    from services.blueprint.app_sdk import workflow_keys
+    from services.smith.compose import pages_using, recode_pages_using
+    import re as _re
+    key = workflow_keys(svc.doc).get(wf_id, "")
+    coded = pages_using(svc, rf"\bworkflows\.{_re.escape(key)}\b") if key else []
     for layout in svc.doc.get("pageLayouts") or []:
         if not isinstance(layout, dict) or layout.get("status") in ("SUPERSEDED", "DEPRECATED"):
             continue
@@ -671,6 +678,15 @@ def remove_workflow(svc: Any, ref: str, *, app_root: str | None = None, reasonin
         from services.blueprint.projection import apply_frontend_projection
         result = apply_frontend_projection(svc, app_root)
         files.extend(str(f) for f in (result or {}).get("files", []))
+    # AND THE CODED ONES ARE REWRITTEN WITHOUT IT. Only the layouts were
+    # stripped: F&B's Category Details kept its Delete button over
+    # `workflows.deleteCategory` after the process was gone (live test,
+    # 2026-10-02).
+    done, left = recode_pages_using(svc, app_root, coded, reasoning=reasoning, request=(
+        f"The process {wf.get('name')} was removed: take away the control that ran it "
+        f"(workflows.{key}) and anything on the page that only served it. Keep everything else."))
+    touched += done
+    notes += left
     return {"applied": True, "workflow": wf_id, "name": str(wf.get("name")), "pages": touched,
             "notes": notes, "forms_left": forms, "edited_paths": files}
 

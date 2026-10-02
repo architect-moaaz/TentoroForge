@@ -157,6 +157,53 @@ def consequences(doc: dict, ref: str) -> dict:
     }
 
 
+def rename_entity(svc: Any, ref: str, new: str, *, app_root: str | None = None,
+                  reasoning: Any = None) -> dict:
+    """A record type renamed in place: the same id, every field, relationship
+    and rule as they are, and its table kept — the rows stay where they are,
+    nothing to migrate. The SDK's type is the new name, so the coded screens
+    that use the old one are rewritten with it.
+
+    Through `write_section` the data agent returned "Feedback" keyed by its
+    new name and it was added beside "Review", the reviews still in the old
+    one (F&B live test, 2026-10-02). A rename is a setting, not a re-authoring."""
+    import re as _re
+    from services.blueprint.app_sdk import pascal
+    from services.smith.compose import pages_using, recode_pages_using
+
+    ent = find_named(_live(svc.doc), ref, id_prefix="ENTITY-")
+    if ent is None:
+        canon = _re.sub(r"[^a-z0-9]", "", str(ref or "").lower())
+        ent = next((e for e in _live(svc.doc) if canon in {_re.sub(r"[^a-z0-9]", "", str(e.get(k) or "").lower())
+                                                          for k in ("name", "table")}), None)
+    if ent is None:
+        raise SectionChangeError(f"I cannot tell which record {ref!r} means. The records are: {names(_live(svc.doc))}.")
+    old, want = str(ent.get("name") or ""), pascal(new) or str(new).strip()
+    if not want:
+        raise SectionChangeError("no new name was given.")
+    if want == old:
+        return {"applied": True, "entity": str(ent.get("id")), "old": old, "name": want, "already": True,
+                "pages": [], "notes": [], "edited_paths": []}
+    before = svc.snapshot()
+    ent["name"] = want
+    if ent.get("label") and str(ent.get("label")).strip().lower() == old.lower():
+        ent["label"] = want
+    svc.validate()
+    svc.commit(user_request=f"rename {old} to {want}", smith_interpretation=f"rename the record {old} to {want}",
+               before=before, affected=[str(ent.get("id"))])
+    tell(reasoning, f"Renamed {old} to {want}; its table and rows stay as they are.", "step")
+    files = _project_data(svc, app_root)
+    if app_root:
+        from services.blueprint.ui_engineer import ensure_sdk
+        ensure_sdk(svc.doc, Path(app_root))
+    done, notes = recode_pages_using(svc, app_root, pages_using(svc, rf"\b{_re.escape(old)}\b"),
+                                     reasoning=reasoning, request=(
+        f"The record {old} is now called {want}: use the SDK's {want} wherever the page used {old} "
+        f"(its type and its reads), and say {want} where the page says {old}. Keep everything else."))
+    return {"applied": True, "entity": str(ent.get("id")), "old": old, "name": want, "already": False,
+            "pages": done, "notes": notes, "edited_paths": files}
+
+
 def _retire_pages(svc: Any, pages: list[dict]) -> list[str]:
     """The record's screens go the way a screen goes when it is asked for by
     name — `page_change.retire`, which is the same job.

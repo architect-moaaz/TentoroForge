@@ -609,8 +609,21 @@ def remove_field(svc: Any, entity_ref: str, field_ref: str, *, app_root: str | N
     svc.commit(user_request=f"remove {ename}.{old}", smith_interpretation=f"remove the field and {len(removed) - 1} reference(s)",
                before=before, affected=sorted({eid, *[h.split(':')[0] for h in removed if ':' in h]}))
     tell(reasoning, f"Removed {ename}.{old} and {len(removed) - 1} reference(s).", "step")
+    edited = _project(svc, app_root)
+    # THE CODED SCREENS THAT USE IT, rewritten without it: the SDK's type
+    # lost the field, and a page still reading it — or still offering it as a
+    # form field (`spiceLevel: {…}`), which the search for `.spiceLevel`
+    # missed (F&B live test, 2026-10-02) — no longer compiles.
+    import re as _re
+    from services.smith.compose import pages_using, recode_pages_using
+    done, notes = recode_pages_using(svc, app_root, pages_using(svc, rf"\b{_re.escape(old)}\b", entity_id=eid),
+                                     reasoning=reasoning, request=(
+        f"The field {ename}.{old} was removed from the app: take away everything on the page that "
+        f"shows, edits or filters by it. Keep everything else."))
+    removed += [f"screen {r} rewritten without it" for r in done]
+    left += notes
     return {"applied": True, "entity": eid, "name": ename, "field": old, "removed": removed, "left": left,
-            "edited_paths": _project(svc, app_root)}
+            "edited_paths": edited}
 
 
 def _walk(node: Any):

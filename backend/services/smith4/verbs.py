@@ -712,6 +712,24 @@ def section_write(ctx: Ctx, u: dict) -> Outcome:
     verb = u["verb"]
     ent, new = _s(u, "entity"), _s(u, "new_value")
     field = _field_name(u)
+    if verb == "rename_entity" and ent and new:
+        # IN PLACE, NOT RE-AUTHORED (`entity_change.rename_entity`).
+        from services.blueprint.service import BlueprintService
+        from services.smith.entity_change import rename_entity
+        from services.smith.section_change import SectionChangeError
+        try:
+            svc = BlueprintService.load(output_dir=ctx.out)
+        except FileNotFoundError:
+            svc = None
+        if svc is not None:
+            try:
+                out = rename_entity(svc, ent, new, app_root=str(Path(ctx.out) / "app"), reasoning=ctx.reasoning)
+            except SectionChangeError as exc:
+                return Outcome(status="needs_user", said="", finding=f"{ent} was not renamed: {exc}")
+            said = (f"{out['old']} is now called {out['name']} — the same record, every field and every row kept."
+                    + (f" Rewritten to the new name: {', '.join(out['pages'][:8])}." if out["pages"] else "")
+                    + (f" Not yet: {'; '.join(out['notes'][:3])}" if out["notes"] else ""))
+            return Outcome(status="resolved", said=said, touched=list(out.get("edited_paths") or []))
     if verb == "rename_entity":
         section, subject = "data.entities", ""
         brief = (f"Rename the record kind **{ent}** to **{new}** — its name and label, and its table "

@@ -153,6 +153,7 @@ def test_doing_all_of_it_stops_at_a_step_that_asks_and_keeps_the_rest(tmp_path):
     seen: list[str] = []
 
     def run(step):
+        step = step.split("\n")[0]       # the step itself; what came before it follows
         seen.append(step)
         if step == "add its screen":
             return Outcome(status="asked", said="Which fields on the screen?", options=["All", "Some"])

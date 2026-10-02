@@ -293,6 +293,14 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             observations.append(Observation(tool=tool, args=args, status="error",
                                             said="`answer` needs `text`. Say it, or end with `done`."))
             continue
+        if chosen.get("unreachable"):
+            # NOT "NOTHING NEEDED DOING". The model could not be reached (the
+            # account's credit ran out mid-test, 2026-10-02) and the turn said
+            # nothing needed doing — a false answer to "add a spice level".
+            return _finished(landed, touched, Outcome(status="no_op", said=(
+                "I could not reach my reasoning service just now, so I stopped here"
+                + (" — what is above is done and kept." if landed else " and nothing was changed.")
+                + " Please try again in a few minutes.")))
         if tool == "done":
             first = _before_done(observations, landed)
             if first:
@@ -414,15 +422,29 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
         said = ""
         try:
             observations.append(Observation(tool="done", status="error", said=OUT_OF_STEPS))
-            final = choose(ctx.ask, opening(ctx.project_id, ctx.out, ctx.ask), observations, history) or {}
-            if str(final.get("tool") or "") == "answer":
-                said = str((final.get("args") or {}).get("text") or "").strip()
+            for _ask in range(2):
+                final = choose(ctx.ask, opening(ctx.project_id, ctx.out, ctx.ask), observations, history) or {}
+                if str(final.get("tool") or "") == "answer":
+                    said = str((final.get("args") or {}).get("text") or "").strip()
+                    break
+                # A STEP INSTEAD OF AN ANSWER IS ASKED FOR AGAIN, ONCE.
+                observations.append(Observation(tool=str(final.get("tool") or "?"), status="error", said=(
+                    "No more steps can run. Reply with `answer` only: what your tries showed.")))
         except Exception:  # noqa: BLE001 — the fallback below is still true
             logger.warning("smith4: the out-of-steps answer could not be had", exc_info=True)
         if not said:
             last = next((o for o in reversed(observations) if o.status == "finding" and o.said), None)
             if last is not None:
                 said = f"The last thing I tried did not work: {' '.join(last.said.split())[:600]}"
+        if not said:
+            # WHAT THE TRIES SHOWED, IN THEIR OWN WORDS. Asked why images did
+            # not show, Smith uploaded one, saved a dish with it and opened the
+            # list — all of it worked — and the reply was "I have not changed
+            # anything yet" (F&B live test, 2026-10-02).
+            tried = [o.said.split("\n", 1)[0][:200] for o in observations
+                     if tools.is_trial(o.tool) and o.status == "read" and o.said]
+            if tried:
+                said = "What I tried, and what it showed:\n" + "\n".join(f"- {t}" for t in tried[-6:])
         tail = (f"\n\nThis turn ran out of steps ({max_steps}) before I changed anything. "
                 "Say “carry on” and I will pick up from there.")
         return Outcome(status="no_op", touched=list(touched), said=(said + tail) if said else (

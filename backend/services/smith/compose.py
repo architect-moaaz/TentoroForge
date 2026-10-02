@@ -802,6 +802,48 @@ def _where(svc: Any, route: str) -> str:
     return f"{where} — it is not in the menu; open it at `{route}`"
 
 
+def pages_using(svc: Any, pattern: str, *, entity_id: str = "") -> list[dict]:
+    """The coded pages whose code matches `pattern` — narrowed, when an
+    entity is named, to the pages that show or change that entity."""
+    import re as _re
+    pages = {str(p.get("id")): p for p in svc.doc.get("pages") or [] if isinstance(p, dict)}
+    out = []
+    for row in svc.doc.get("pageCode") or []:
+        page = pages.get(str((row or {}).get("page")))
+        if page is None or str(page.get("status") or "").upper() in ("REMOVED", "DEPRECATED"):
+            continue
+        text = str(row.get("view") or "") + "\n" + str(row.get("load") or "")
+        if not _re.search(pattern, text):
+            continue
+        if entity_id:
+            data = page.get("data") or {}
+            shown = {str(x) for x in [data.get("primaryEntity"), *(data.get("supportingEntities") or [])] if x}
+            if entity_id not in shown:
+                continue
+        out.append(page)
+    return out
+
+
+def recode_pages_using(svc: Any, app_root: str | None, pages: list[dict], request: str, *,
+                       reasoning: Any = None) -> tuple[list[str], list[str]]:
+    """Each page rewritten to `request` — what was removed, taken away.
+    A removal that left a coded page calling it left a page that no longer
+    compiles: its SDK name went with it (F&B live test, 2026-10-02).
+    Returns (routes rewritten, notes for the ones that could not be)."""
+    done: list[str] = []
+    notes: list[str] = []
+    if not app_root:
+        return done, notes
+    for page in pages:
+        route = str(page.get("route") or page.get("id"))
+        try:
+            recode_page(svc, route, app_root=app_root, request=request, reasoning=reasoning)
+            done.append(route)
+        except Exception as exc:  # noqa: BLE001 — the removal stands; what is left is said
+            notes.append(f"{route} could not be rewritten without it: {type(exc).__name__}: {str(exc)[:200]}")
+    return done, notes
+
+
 def recode_page(svc: Any, route: str, *, app_root: str, request: str,
                 wanted: Sequence[str] = (), executor: Any = None, client: Any = None,
                 reasoning: Any = None, whole: bool = False) -> dict:

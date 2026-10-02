@@ -40,9 +40,33 @@ YES_LABEL = "Go ahead"
 NO_LABEL = "No, leave it"
 
 
-def is_yes(message: str) -> bool:
+#: Words a plain yes is made of, besides the thing it is a yes to.
+_CONSENT_WORDS = frozenset({
+    "yes", "yeah", "yep", "y", "please", "go", "ahead", "do", "it", "delete", "remove", "proceed",
+    "ok", "okay", "sure", "confirm", "confirmed", "carry", "on", "that's", "thats", "fine", "the",
+    "this", "that", "them", "all", "and", "now", "just", "page", "field", "record", "process",
+    "workflow", "rule", "go-ahead",
+})
+#: At least one of these, so "the page" alone is not a yes.
+_AGREEING = frozenset({"yes", "yeah", "yep", "y", "ahead", "do", "delete", "remove", "proceed", "ok",
+                       "okay", "sure", "confirm", "confirmed", "fine"})
+
+
+def is_yes(message: str, target: str = "") -> bool:
+    """A whole-message yes — "yes", "go ahead", or a yes made only of
+    agreeing words and the name of what it agrees to: "Yes, delete it",
+    "yes please remove the about page". Asked to delete F&B's About page,
+    "Yes, delete it" was not heard as a yes and the question came back four
+    times (2026-10-02). Anything else in it ("yes, but rename it first") is
+    a new request, not consent."""
     m = " ".join((message or "").strip().lower().rstrip(".!").split())
-    return m in _YES or m == YES_LABEL.lower()
+    if m in _YES or m == YES_LABEL.lower():
+        return True
+    import re
+    words = re.findall(r"[a-z0-9'’-]+", m)
+    named = set(re.findall(r"[a-z0-9]+", str(target or "").lower()))
+    return bool(words) and any(w in _AGREEING for w in words) \
+        and all(w in _CONSENT_WORDS or w in named for w in words)
 
 
 def fingerprint(verb: str, target: str) -> str:
@@ -52,6 +76,14 @@ def fingerprint(verb: str, target: str) -> str:
 
 def _path(output_dir: str | Path) -> Path:
     return Path(output_dir) / PENDING_PATH
+
+
+def waiting(output_dir: str | Path) -> bool:
+    """Whether a confirmation is waiting for its answer — read, not taken."""
+    try:
+        return bool(json.loads(_path(output_dir).read_text("utf-8")).get("fingerprint"))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def remember(output_dir: str | Path, fp: str) -> None:
@@ -86,7 +118,7 @@ def clear(output_dir: str | Path) -> None:
 
 def granted(output_dir: str | Path, message: str, verb: str, target: str) -> bool:
     """Whether THIS operation was described last turn and agreed to now."""
-    return take(output_dir) == fingerprint(verb, target) and is_yes(message)
+    return take(output_dir) == fingerprint(verb, target) and is_yes(message, target)
 
 
 __all__ = ["granted", "remember", "take", "clear", "is_yes", "fingerprint",

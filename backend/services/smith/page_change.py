@@ -439,6 +439,11 @@ def remove_page(svc: Any, ref: str, *, app_root: str | None = None, reasoning: A
     if refused:
         raise SectionChangeError(refused)
 
+    from services.blueprint.app_sdk import page_keys
+    import re as _re
+    from services.smith.compose import pages_using, recode_pages_using
+    key = page_keys(svc.doc).get(str(page.get("id")), "")
+    linking = [p for p in pages_using(svc, rf"\bpages\.{_re.escape(key)}\b") if p is not page] if key else []
     before = svc.snapshot()
     out = retire(svc, [page])
     svc.validate()
@@ -450,9 +455,17 @@ def remove_page(svc: Any, ref: str, *, app_root: str | None = None, reasoning: A
     tell(reasoning, f"Retired {page.get('name') or page.get('route')}"
                     + (f"; took {len(out['links'])} link(s) to it off other screens" if out["links"] else "") + ".",
          "step")
+    edited = _project(svc, app_root)
+    # THE CODED SCREENS THAT LINK TO IT, rewritten without the link: its SDK
+    # name went with it, and a page still linking no longer compiles.
+    done, notes = recode_pages_using(svc, app_root, linking, reasoning=reasoning, request=(
+        f"The screen {page.get('name') or page.get('route')} ({page.get('route')}) was removed: take away "
+        f"every link to it (pages.{key}). Keep everything else."))
+    out["links"] = list(out.get("links") or []) + done
+    out["notes"] = list(out.get("notes") or []) + notes
     return {"applied": True, "page": str(page.get("id")), "name": str(page.get("name") or ""),
             "route": str(page.get("route") or ""), "already": False, "opens_on": opens_on,
-            "edited_paths": _project(svc, app_root), **out}
+            "edited_paths": edited, **out}
 
 
 def summary_of(out: dict) -> str:
