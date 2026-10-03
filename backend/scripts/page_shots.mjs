@@ -28,6 +28,8 @@ const cfg = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 fs.mkdirSync(cfg.outDir, { recursive: true });
 const browser = await chromium.launch();
 const viewport = { width: cfg.width ?? 1440, height: cfg.height ?? 900 };
+// The tallest screenshot a reviewer is sent (scale factor 1): under the API's 8000.
+const MAX_SHOT_PX = 7800;
 const ctx = await browser.newContext({ viewport });
 
 // NextAuth's own credentials endpoint; the session cookie lands in this context.
@@ -130,7 +132,11 @@ async function open(context, url, { shot } = {}) {
   if (shot) {
     await unclip(page);
     await page.waitForTimeout(250);
-    await page.screenshot({ path: shot, fullPage: true, animations: "disabled", timeout: 30000 })
+    // At most MAX_SHOT_PX tall: the API refuses an image with a side over
+    // 8000, and a long list's full page passed it (wz7a99ir, 2026-10-04).
+    const tall = await page.evaluate(() => document.documentElement.scrollHeight).catch(() => viewport.height);
+    await page.screenshot({ path: shot, fullPage: true, animations: "disabled", timeout: 30000,
+                            clip: { x: 0, y: 0, width: viewport.width, height: Math.min(Math.max(tall, viewport.height), MAX_SHOT_PX) } })
       .catch((e) => errors.push(`screenshot: ${e.message}`));
   }
   // What the page SAYS it is — streaming sends a not-found page as HTTP 200.

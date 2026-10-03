@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 LOOKS = 2
 #: Viewports the reviewer is shown — a desk and a phone.
 VIEWPORTS: dict[str, tuple[int, int]] = {"desktop": (1280, 900), "mobile": (390, 844)}
+#: The tallest screenshot sent to the reviewer, in pixels (scale factor 1).
+#: The API refuses an image with a side over 8000: a long admin list's full
+#: page did, and the page's first attempt died on a 400 (wz7a99ir,
+#: 2026-10-04). The top of a page is what a reviewer judges first.
+MAX_SHOT_PX = 7800
 #: Renders at once per process: Chromium is ~150 MB each, and twelve pages
 #: compose in parallel.
 _RENDERS = threading.BoundedSemaphore(4)
@@ -131,7 +136,9 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
                             errors.append("view.tsx: nothing rendered within 15s")
                         tab.wait_for_timeout(700)
                         file = out_dir / f"{name}.png"
-                        tab.screenshot(path=str(file), full_page=True)
+                        tall = int(tab.evaluate("document.documentElement.scrollHeight") or h)
+                        tab.screenshot(path=str(file), full_page=True,
+                                       clip={"x": 0, "y": 0, "width": w, "height": min(max(tall, h), MAX_SHOT_PX)})
                         shots[name] = str(file)
                         errors.extend(str(e) for e in (tab.evaluate("window.__forgeLookErrors") or []))
                         tab.close()
