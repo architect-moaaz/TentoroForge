@@ -70,6 +70,8 @@ interface Props {
 /** What the build found when it used the app (GET /api/projects/{id}/check). */
 interface CheckNote {
   checked: boolean;
+  /** The app changed since anyone last used it (an edit outside Smith). */
+  stale?: boolean;
   pages: number;
   working: number;
   failing: Array<{ route: string; detail: string }>;
@@ -320,6 +322,13 @@ export function PublishDialog({
             </ul>
             <p className="mt-1">Publishing puts them live as they are. Ask Smith to carry on to fix them first.</p>
           </div>
+        )}
+
+        {!started && check?.checked && check.stale && (
+          <p role="status" className="text-xs text-amber-800 dark:text-amber-300">
+            The app has changed since it was last checked. Ask Smith to check it again before
+            publishing if you want to be sure it all still works.
+          </p>
         )}
 
         {!started && (

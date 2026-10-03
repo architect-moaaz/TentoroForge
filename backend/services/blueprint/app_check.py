@@ -267,9 +267,11 @@ def check_app(svc: Any, output_dir: str, *args: Any, **kwargs: Any) -> dict:
 def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] | None = None,
                run_turn: Callable[..., dict] | None = None,
                app_factory: Callable[[Path], Any] | None = None,
-               rounds: int = ROUNDS, record: bool = True) -> dict:
-    """Use every page as every role; repair what fails; returns the check's
-    summary (also written to `runtime.check`)."""
+               rounds: int = ROUNDS, record: bool = True, only: set[str] | None = None) -> dict:
+    """Use every page as every role — or only the pages `only` names — repair
+    what fails; returns the check's summary (also written to `runtime.check`,
+    merged over the last one when only some pages were looked at). The summary
+    carries `touched`: what the repairs changed."""
     from services.blueprint.page_repair import _ledger
 
     say = emit or (lambda _e, _d: None)
@@ -290,11 +292,15 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
 
     all_visits = visits(svc.doc)
     if not all_visits:
-        return {"pages": 0, "working": 0, "fixed": [], "left": []}
+        return {"pages": 0, "working": 0, "fixed": [], "left": [], "touched": []}
     pages_total = len({v["page"] for v in all_visits})
-    say("message", {"text": f"Opening every page as each kind of person it is for "
-                            f"({pages_total} pages) and trying what they would do."})
-    todo = all_visits
+    todo = [v for v in all_visits if only is None or v["page"] in only]
+    if not todo:
+        return {"pages": pages_total, "working": pages_total, "fixed": [], "left": [], "touched": []}
+    if only is None:
+        say("message", {"text": f"Opening every page as each kind of person it is for "
+                                f"({pages_total} pages) and trying what they would do."})
+    touched: list[str] = []
     fixed: list[str] = []
     last: dict[str, dict] = {}
     log = Path(output_dir) / ".forge" / "check" / "server.log"
@@ -346,7 +352,8 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
                 say("message", {"text": f"{item['name']} ({item['route']}) does not work yet — "
                                         f"{item['findings'][0][1][:160]}. Fixing it."})
                 try:
-                    run_turn("", output_dir, fault_ask(pid, item), max_steps=STEPS, unattended=True)
+                    done = run_turn("", output_dir, fault_ask(pid, item), max_steps=STEPS, unattended=True) or {}
+                    touched += [t for t in done.get("edited_paths") or [] if t not in touched]
                 except Exception as exc:  # noqa: BLE001 — one repair never ends the build
                     logger.warning("[app-check] %s: %s", item["route"], exc)
                 reload()
@@ -360,20 +367,124 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
         ledger_note = "; ".join(item["findings"][:3])[:600]
         logger.info("[app-check] still failing %s: %s", item["route"], ledger_note)
     summary = {"pages": pages_total, "working": pages_total - len(left),
-               "fixed": sorted(set(fixed)), "left": left}
+               "fixed": sorted(set(fixed)), "left": left, "touched": touched}
+    _record(svc, last, left, fixed, pages_total, partial=only is not None)
+    if only is not None:
+        failing = list((svc.doc.get("runtime") or {}).get("check", {}).get("failing") or [t["route"] for t in left])
+        summary["working"] = pages_total - len(failing)
+    return summary
+
+
+def _record(svc: Any, last: dict[str, dict], left: list[dict], fixed: list[str], pages_total: int, *,
+            partial: bool) -> None:
+    """Write what the check found. A check of some pages updates those pages
+    and keeps what the last check said of the rest; without a whole check to
+    build on it records the failures alone, never a count it did not see."""
     runtime = dict(svc.doc.get("runtime") or {})
-    issues = [i for i in runtime.get("issues") or [] if not (isinstance(i, dict) and i.get("kind") == "page_check")]
+    checked = {pid for pid in last}
+    prior = runtime.get("check") if isinstance(runtime.get("check"), dict) else None
+    issues = [i for i in runtime.get("issues") or []
+              if not (isinstance(i, dict) and i.get("kind") == "page_check"
+                      and (not partial or str(i.get("page")) in checked))]
     issues += [{"kind": "page_check", "page": t["page"], "name": t["name"], "route": t["route"],
                 "detail": " | ".join(t["findings"])[:600]} for t in left]
     runtime["issues"] = issues
-    runtime["check"] = {"pages": summary["pages"], "working": summary["working"],
-                        "fixed": summary["fixed"], "failing": [t["route"] for t in left]}
+    failing = sorted({str(i.get("route")) for i in issues if isinstance(i, dict) and i.get("kind") == "page_check"})
+    if not partial or prior is not None:
+        runtime["check"] = {"pages": pages_total, "working": max(pages_total - len(failing), 0),
+                            "fixed": sorted(set(list((prior or {}).get("fixed") or []) + list(fixed)))
+                            if partial else sorted(set(fixed)),
+                            "failing": failing,
+                            "version": int(svc.doc.get("version") or 0)}
     svc.doc["runtime"] = runtime
     try:
         svc.save()
     except Exception:  # noqa: BLE001
         logger.warning("[app-check] could not record the check", exc_info=True)
-    return summary
+
+
+# --------------------------------------------------------------------------- #
+# After a change
+# --------------------------------------------------------------------------- #
+
+#: Pages one change is checked on. A change that reaches more than this is
+#: checked where it is most likely to show; the rest waits for the next build.
+MAX_CHANGE_PAGES = 10
+_FRAME = re.compile(r"^src/(app/(\(dashboard\)/)?layout\.tsx|components/|app/globals\.css|app/tokens\.css|lib/nav)")
+
+
+def _camel(name: str) -> str:
+    words = re.findall(r"[A-Za-z0-9]+", name or "")
+    return (words[0].lower() + "".join(w[:1].upper() + w[1:] for w in words[1:])) if words else ""
+
+
+def affected_pages(doc: dict, touched: list[str]) -> set[str]:
+    """The pages a change could have reached: a page whose own files changed;
+    every page showing a record type whose schema changed; every page whose
+    code starts a process that changed; and every page when the frame they
+    share changed."""
+    from services.blueprint.app_sdk import code_page_dir
+    from services.blueprint.projection import to_snake
+    from services.blueprint.scope import built_view
+
+    view = built_view(doc)
+    pages = [p for p in view.get("pages") or [] if isinstance(p, dict) and p.get("route")
+             and str(p.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
+    rel = [re.sub(r"^app/", "", str(t).replace("\\", "/")) for t in touched or []]
+    out: set[str] = set()
+    if any(_FRAME.match(r) for r in rel):
+        return {str(p.get("id")) for p in pages}
+    for p in pages:
+        d = code_page_dir(p).rstrip("/") + "/"
+        if any(r.startswith(d) and "/" not in r[len(d):] for r in rel):
+            out.add(str(p.get("id")))
+    stems = {Path(r).stem for r in rel if r.startswith("src/db/schema/")}
+    if stems:
+        ents = {str(e.get("id")) for e in (view.get("data") or {}).get("entities") or [] if isinstance(e, dict)
+                and stems & {to_snake(str(e.get("name") or "")), str(e.get("table") or ""),
+                             to_snake(str(e.get("name") or "")).rstrip("s")}}
+        out |= {str(p.get("id")) for p in pages if str((p.get("data") or {}).get("primaryEntity") or "") in ents}
+    slugs = {Path(r).stem for r in rel if r.startswith("src/lib/workflows/definitions/")}
+    if slugs:
+        flows = [w for w in view.get("workflows") or [] if isinstance(w, dict)
+                 and to_snake(str(w.get("name") or w.get("id") or "")).replace("_", "-") in slugs]
+        marks = {m for w in flows for m in (str(w.get("id")), _camel(str(w.get("name") or "")),
+                                            to_snake(str(w.get("name") or "")).replace("_", "-")) if m}
+        code = {str(c.get("page")): f"{c.get('view') or ''}\n{c.get('load') or ''}"
+                for c in view.get("pageCode") or [] if isinstance(c, dict)}
+        out |= {pid for pid, text in code.items() if any(m in text for m in marks)}
+    return out
+
+
+def check_change(output_dir: str, touched: list[str], *, run_turn: Callable[..., dict] | None = None,
+                 app_factory: Callable[[Path], Any] | None = None) -> dict | None:
+    """After a change: check the pages it could have reached, as the people
+    they are for; repair once what it broke. None when it reached no page.
+    `said` is the sentence for the reply; `touched` what the repair changed."""
+    from services.blueprint.service import BlueprintService
+    from services.build_usage import usage_scope
+
+    if app_factory is None and not (Path(output_dir) / "app" / "package.json").is_file():
+        return None                          # nothing built to open
+    with usage_scope(agent="change_check", output_dir=str(output_dir), phase="change", kind="smith"):
+        svc = BlueprintService.load(output_dir=output_dir)
+        reached = affected_pages(svc.doc, touched)
+        if not reached:
+            return None
+        order = [v["page"] for v in visits(svc.doc) if v["page"] in reached]
+        only = set(list(dict.fromkeys(order))[:MAX_CHANGE_PAGES])
+        out = _check_app(svc, output_dir, run_turn=run_turn, app_factory=app_factory, rounds=1,
+                         record=False, only=only)
+    routes = sorted({v["route"] for v in visits(svc.doc) if v["page"] in only})
+    if out["left"]:
+        names = "; ".join(f"{t['route']} — {t['findings'][0]}" for t in out["left"][:4])
+        said = (f"I then opened the {len(routes)} page{'' if len(routes) == 1 else 's'} this change reaches, as the "
+                f"people they are for. Still not working: {names}. Tell me to carry on and I will keep at it.")
+    else:
+        said = (f"I then opened the {len(routes)} page{'' if len(routes) == 1 else 's'} this change reaches, as the "
+                f"people they are for, and used them: they work"
+                + (f" (fixed on the way: {', '.join(out['fixed'])})" if out["fixed"] else "") + ".")
+    return {"checked": routes, "left": out["left"], "fixed": out["fixed"], "touched": out["touched"], "said": said}
 
 
 def publish_note(output_dir: str) -> dict:
@@ -384,12 +495,16 @@ def publish_note(output_dir: str) -> dict:
         from services.blueprint.service import BlueprintService
         doc = BlueprintService.load(output_dir=output_dir).doc
     except Exception:  # noqa: BLE001 — nothing to say is not an error
-        return {"checked": False, "pages": 0, "working": 0, "failing": [], "processes": []}
+        return {"checked": False, "stale": False, "pages": 0, "working": 0, "failing": [], "processes": []}
     runtime = doc.get("runtime") or {}
     check = runtime.get("check") if isinstance(runtime.get("check"), dict) else None
     issues = [i for i in runtime.get("issues") or [] if isinstance(i, dict)]
+    version = (check or {}).get("version")
     return {
         "checked": check is not None,
+        # A CHANGE NOBODY USED THE APP AFTER. Smith checks the pages each of
+        # its changes reaches; an edit made elsewhere (the editor) is not.
+        "stale": check is not None and version is not None and int(version) < int(doc.get("version") or 0),
         "pages": int((check or {}).get("pages") or 0),
         "working": int((check or {}).get("working") or 0),
         "failing": [{"route": str(i.get("route") or ""), "detail": str(i.get("detail") or "").split(" | ")[0][:200]}
@@ -398,5 +513,5 @@ def publish_note(output_dir: str) -> dict:
     }
 
 
-__all__ = ["MAX_REPAIRS", "publish_note", "ROUNDS", "check_app", "check_pages", "fault_ask", "screen_findings",
+__all__ = ["MAX_CHANGE_PAGES", "MAX_REPAIRS", "affected_pages", "check_change", "publish_note", "ROUNDS", "check_app", "check_pages", "fault_ask", "screen_findings",
            "shot_findings", "visits"]

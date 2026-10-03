@@ -2408,6 +2408,9 @@ export const Runtime = z.object({
       working: z.number(),
       fixed: z.array(z.string()).default([]),
       failing: z.array(z.string()).default([]),
+      /** The Blueprint version the check reflects; a later version is a
+       *  change nobody has used the app after. */
+      version: z.number().optional(),
     })
     .optional(),
 });

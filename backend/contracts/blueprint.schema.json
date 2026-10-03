@@ -3656,6 +3656,9 @@
                 "type": "string"
               },
               "default": []
+            },
+            "version": {
+              "type": "number"
             }
           },
           "required": [

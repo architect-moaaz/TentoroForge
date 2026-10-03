@@ -69,7 +69,7 @@ def test_publish_is_told_what_still_does_not_work(tmp_path, monkeypatch):
     monkeypatch.setattr(service.BlueprintService, "load", classmethod(
         lambda cls, output_dir: type("S", (), {"doc": doc})()))
     assert ac.publish_note(str(tmp_path)) == {
-        "checked": True, "pages": 3, "working": 2,
+        "checked": True, "stale": False, "pages": 3, "working": 2,
         "failing": [{"route": "/p3", "detail": "as Parent: it answers HTTP 500"}], "processes": ["Book Slot"]}
 
 

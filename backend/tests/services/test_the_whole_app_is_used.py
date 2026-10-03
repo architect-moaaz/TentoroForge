@@ -156,8 +156,9 @@ def test_a_failing_page_goes_to_smith_and_is_checked_again(monkeypatch, tmp_path
                        run_turn=lambda pid, od, ask, **k: asks.append((ask, k)) or {"answer": "fixed"})
     assert rounds == [["/dashboard", "/slots"], ["/slots"]]          # only the repaired page again
     assert len(asks) == 1 and "as Parent: slots show dates in 2001" in asks[0][0] and asks[0][1]["unattended"]
-    assert out == {"pages": 2, "working": 2, "fixed": ["/slots"], "left": []}
-    assert svc.doc["runtime"]["check"] == {"pages": 2, "working": 2, "fixed": ["/slots"], "failing": []}
+    assert out == {"pages": 2, "working": 2, "fixed": ["/slots"], "left": [], "touched": []}
+    assert svc.doc["runtime"]["check"] == {"pages": 2, "working": 2, "fixed": ["/slots"], "failing": [],
+                                           "version": 0}
 
 
 def test_what_still_fails_is_recorded_by_name(monkeypatch, tmp_path):
