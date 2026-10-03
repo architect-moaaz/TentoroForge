@@ -56,7 +56,10 @@ function matches(row: any, c: Cond | undefined): boolean {
     case "gt": return row[c.col] > (c.val as any);
     case "lte": return row[c.col] <= (c.val as any);
     case "lt": return row[c.col] < (c.val as any);
-    case "in": return c.vals.includes(row[c.col]);
+    // A subquery (`inArray(col, db.select(...).from(...).where(...))`) is
+    // evaluated against the same in-memory rows, its ids the set.
+    case "in": return (Array.isArray(c.vals) ? c.vals : runQuery((c.vals as any).__state).map((r) => r.id))
+      .includes(row[c.col]);
     case "isNull": return row[c.col] == null;
     case "isNotNull": return row[c.col] != null;
     case "not": return !matches(row, c.cond);
@@ -96,6 +99,8 @@ const announcements = makeTable(tableOf("Announcement"), fieldsOf("Announcement"
 const tickets = makeTable(tableOf("Ticket"), fieldsOf("Ticket"));
 // RefundCase is workspace-scoped; the rule names the users column that IS the workspace.
 const refundCases = makeTable(tableOf("RefundCase"), fieldsOf("RefundCase"));
+const children = makeTable(tableOf("Child"), fieldsOf("Child"));
+const appointments = makeTable(tableOf("Appointment"), fieldsOf("Appointment"));
 const ST_GILES = "prop-st-giles";
 const ROYAL = "prop-royal";
 
@@ -112,6 +117,16 @@ const ROWS: Record<string, any[]> = {
   ],
   [tickets.__name]: [
     { id: "t1", title: "Printer jammed", createdAt: d(1) },
+  ],
+  [children.__name]: [
+    { id: "c-ava", parentId: ALICE, fullName: "Ava", createdAt: d(1) },
+    { id: "c-eli", parentId: ALICE, fullName: "Eli", createdAt: d(2) },
+    { id: "c-max", parentId: BOB, fullName: "Max", createdAt: d(3) },
+  ],
+  [appointments.__name]: [
+    { id: "ap1", childId: "c-ava", status: "booked", createdAt: d(1) },
+    { id: "ap2", childId: "c-eli", status: "done", createdAt: d(2) },
+    { id: "ap3", childId: "c-max", status: "booked", createdAt: d(3) },
   ],
   [refundCases.__name]: [
     { id: "r1", propertyId: ST_GILES, guestName: "Patel", createdAt: d(1) },
@@ -166,6 +181,7 @@ function insertBuilder() {
 function builder(shape: Shape) {
   const state: any = { shape, table: null, where: undefined, limit: null, offset: 0 };
   const b: any = {
+    __state: state,
     from(t: any) { state.table = t; return b; },
     // REPLACES, exactly like drizzle. A second .where() drops the first.
     where(c: Cond) { state.where = c; return b; },
@@ -291,6 +307,8 @@ engine.registerEntity(invoices.__name, invoices, { slug: invoices.__name });
 engine.registerEntity(announcements.__name, announcements, { slug: announcements.__name });
 engine.registerEntity(tickets.__name, tickets, { slug: tickets.__name });
 engine.registerEntity(refundCases.__name, refundCases, { slug: refundCases.__name });
+engine.registerEntity(children.__name, children, { slug: children.__name });
+engine.registerEntity(appointments.__name, appointments, { slug: appointments.__name });
 
 // ── Assertions ─────────────────────────────────────────────────────────────
 
@@ -519,6 +537,34 @@ console.log("query(): search and filter apply together");
     asAlice,
   );
   eqJson(ids(scoped.data), [], "and both AND with the ownership predicate");
+}
+
+// ── Owned through another record ───────────────────────────────────────────
+
+console.log("through: an appointment is a parent's because its child is");
+{
+  const alice = await engine.query(appointments.__name, {}, asAlice);
+  const bob = await engine.query(appointments.__name, {}, asBob);
+  eqJson(ids(alice.data), ["ap1", "ap2"], "Alice sees her children's appointments");
+  eqJson(ids(bob.data), ["ap3"], "Bob sees only his child's");
+  eqJson(alice.total, 2, "and the total counts them, not the table");
+  eqJson(ids((await engine.query("Appointment", {}, asAdmin)).data), ["ap1", "ap2", "ap3"],
+    "a role the rule exempts reads every appointment");
+  await throwsNamed(() => engine.findById(appointments.__name, "ap3", asAlice),
+    "NotFoundError", "Bob's child's appointment is Not Found for Alice");
+}
+
+console.log("through: a parent books for their own child, not anyone's");
+{
+  const own = await engine.create(appointments.__name, { childId: "c-ava", status: "booked" }, asAlice);
+  eqJson((own as any).data?.childId ?? (own as any).childId, "c-ava",
+    "the child is kept — a through column is never stamped with the actor's id");
+  await throwsNamed(() => engine.create(appointments.__name, { childId: "c-max", status: "booked" }, asAlice),
+    "ValidationError", "booking for someone else's child is refused");
+  await throwsNamed(() => engine.update(appointments.__name, "ap1", { childId: "c-max" }, asAlice),
+    "ValidationError", "nor can an appointment be moved onto their child");
+  const onBehalf = await engine.create(appointments.__name, { childId: "c-max", status: "booked" }, asAdmin);
+  ok(!!onBehalf, "an administrator books for any child");
 }
 
 // ── row_access rules — the configurable half ───────────────────────────────

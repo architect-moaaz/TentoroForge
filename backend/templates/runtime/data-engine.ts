@@ -335,6 +335,7 @@ function scopeConditions(
   entityName: string,
   entity: { table: PgTableWithColumns<any> },
   ctx: DataEngineContext,
+  depth = 0,
 ): SQL[] {
   // Tested for "not attribution" rather than "is scope" deliberately: a
   // manifest from an older projection carries no `kind`, and the safe reading
@@ -357,6 +358,19 @@ function scopeConditions(
       conds.push(sql`false`);
       continue;
     }
+    if (rule.through) {
+      // OWNED THROUGH ANOTHER RECORD. An appointment is a parent's because its
+      // child is: `childId` must be one of the children this actor reaches
+      // under Child's own rule. A target the actor reaches unscoped (no rule,
+      // or a role the rule exempts) adds nothing.
+      const inner = throughConditions(rule, ctx, depth);
+      if (inner === null) {
+        conds.push(sql`false`);
+        continue;
+      }
+      if (inner.where) conds.push(inArray(col, db.select({ id: inner.id }).from(inner.table).where(inner.where)));
+      continue;
+    }
     const actor = actorValue(rule, ctx);
     if (actor === undefined) {
       conds.push(sql`false`);
@@ -365,6 +379,56 @@ function scopeConditions(
     conds.push(eq(col, actor as any));
   }
   return conds;
+}
+
+/**
+ * What reaching a `through` rule's target means for this actor: the target's
+ * table, its id column and the WHERE its own scope rules give — `where`
+ * undefined when the actor reaches every row of it. `null` when the target
+ * cannot be resolved (or the chain runs deeper than any real ownership does),
+ * which fails closed like a missing column.
+ */
+function throughConditions(
+  rule: OwnershipRule,
+  ctx: DataEngineContext,
+  depth: number,
+): { table: PgTableWithColumns<any>; id: any; where: SQL | undefined } | null {
+  const target = depth < 3 && rule.through ? getEntity(rule.through) : undefined;
+  const id = (target?.table as any)?.id;
+  if (!target || id === undefined) {
+    console.error(
+      `[data-engine] ownership rule reaches ${rule.through} through "${rule.column}", ` +
+      `which is not a record the engine knows — returning no rows rather than every row.`,
+    );
+    return null;
+  }
+  return { table: target.table, id, where: allOf(scopeConditions(rule.through!, target, ctx, depth + 1)) };
+}
+
+/**
+ * A row written with a `through` column must point at a record the actor
+ * reaches: a parent books for their own child, not for anyone's. Reads are
+ * already narrowed by scopeConditions; this is the write side of the same rule.
+ */
+async function assertReachableThrough(
+  entityName: string,
+  data: Record<string, any>,
+  ctx: DataEngineContext,
+): Promise<void> {
+  for (const rule of ownershipRulesFor(entityName)) {
+    if (!rule.through || rule.kind === "attribution") continue;
+    if (ctx.user?.role && (rule.unscopedRoles || []).includes(ctx.user.role)) continue;
+    const value = data[rule.column];
+    if (value === undefined || value === null || value === "") continue;
+    const inner = throughConditions(rule, ctx, 0);
+    if (inner && !inner.where) continue;
+    const hit = inner
+      ? await db.select({ id: inner.id }).from(inner.table).where(and(eq(inner.id, value), inner.where!)).limit(1)
+      : [];
+    if (!hit.length) {
+      throw new ValidationError([`That ${String(rule.through).toLowerCase()} is not one of yours.`]);
+    }
+  }
 }
 
 /**
@@ -805,6 +869,8 @@ export async function create(
   for (const rule of ownershipRulesFor(entityName)) {
     if (ctx.user?.role && (rule.unscopedRoles || []).includes(ctx.user.role)) continue;
     if (!(rule.column in entity.table)) continue;
+    // A `through` column holds another record's id, never the actor's.
+    if (rule.through) continue;
     const actor = actorValue(rule, ctx);
     // No actor value to write: leave what the tenancy fill above put there
     // rather than nulling a NOT NULL column. A scope column's read path
@@ -812,6 +878,8 @@ export async function create(
     if (actor === undefined) continue;
     cleanData[rule.column] = actor;
   }
+
+  await assertReachableThrough(entityName, cleanData, ctx);
 
   // jsonb columns arrive as JSON strings from KeyValueInput — parse them back.
   coerceJsonColumns(entity.table, cleanData);
@@ -893,6 +961,7 @@ export async function update(
 
   // Strip system fields
   const { id: _, createdAt, updatedAt, created_at, updated_at, ...cleanData } = data;
+  await assertReachableThrough(entityName, cleanData, ctx);
 
   // jsonb columns arrive as JSON strings from KeyValueInput — parse them back.
   coerceJsonColumns(entity.table, cleanData);

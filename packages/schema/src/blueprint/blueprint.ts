@@ -1788,7 +1788,8 @@ export const RecordScopeRule = z.object({
   ),
   /** Column holding the actor's value (`ownerId`, `createdByUserId`, …). */
   column: z.string().describe(
-    "Column on that entity holding the actor's value, e.g. ownerId, workspaceId or createdByUserId.",
+    "Column on that entity holding the actor's value, e.g. ownerId, workspaceId or createdByUserId — " +
+    "or, with `through`, the reference to the record that does (childId). It must be a field the entity has.",
   ),
   /**
    * `scope` — the column decides who may reach the row: set on create and
@@ -1840,6 +1841,24 @@ export const RecordScopeRule = z.object({
       "the actor's workspace — homePropertyId, organisationId, tenantId. The " +
       "session carries that column and the engine compares `column` to it. " +
       "Omit for scope \"user\", where the actor's id is the value.",
+    )
+    .optional(),
+  /**
+   * OWNED THROUGH ANOTHER RECORD. An appointment is a parent's because its
+   * child is; the appointment carries `childId`, not `parentId`. The security
+   * agent wrote a rule on an Appointment `parentId` the table never had, the
+   * data engine refused it, and every parent saw no appointments (Kids
+   * Vaccination Tracker, forge-v3, 2026-09-26). With `through`, `column` is
+   * the reference (`childId`) and the row is reachable when the record it
+   * points to is reachable under that entity's own rule.
+   */
+  through: z
+    .string()
+    .describe(
+      "When the row belongs to the actor through another record: the entity " +
+      "`column` references (an Appointment's childId -> \"Child\"). The row " +
+      "is reachable when that record is reachable under its own scope rule, " +
+      "which it must have. Omit when `column` holds the actor's value itself.",
     )
     .optional(),
   note: z.string().describe("Why this rule exists, in one sentence.").default(""),

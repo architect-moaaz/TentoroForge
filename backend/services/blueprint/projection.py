@@ -3457,6 +3457,14 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
         # it. Without one, `scope: "workspace"` compared every row to nothing.
         if item.get("actorColumn"):
             rule["actorColumn"] = str(item["actorColumn"])
+        # OWNED THROUGH ANOTHER RECORD: `column` references a record of
+        # `through`, and the row is reachable when that one is. Written as
+        # the target's TABLE, which the engine's registry always resolves —
+        # "Child" does not lead to `children` without an alias file.
+        if item.get("through"):
+            target = by_key.get(_canonical_key(str(item["through"])))
+            rule["through"] = str((target.get("table") or to_snake(target.get("name") or ""))
+                                  if target else item["through"])
         # Key the rule under every spelling of the entity it actually resolves
         # to, so an SSR source asking for `rentPayments` and a route asking for
         # `rent-payments` both find it. An unresolved entity is still emitted
@@ -3506,6 +3514,9 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         "  unscopedRoles: string[];\n"
         "  /** For scope \"workspace\": the users column whose value is the actor's workspace. */\n"
         "  actorColumn?: string;\n"
+        "  /** The entity `column` references when the row is owned through it: reachable\n"
+        "   *  when that record is reachable under its own rule. */\n"
+        "  through?: string;\n"
         "}\n\n"
         "export const OWNERSHIP_RULES: Record<string, OwnershipRule[]> = "
         f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"

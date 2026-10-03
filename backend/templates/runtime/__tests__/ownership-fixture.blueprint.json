@@ -16,7 +16,12 @@
     "column the rule names (actorColumn: homePropertyId), so a hotel group whose",
     "managers sit at a home property reads only that property's cases. Finance",
     "is exempt. Without actorColumn the engine fell back to a workspaceId the",
-    "session did not carry and every property-scoped read returned nothing."
+    "session did not carry and every property-scoped read returned nothing.",
+    "",
+    "Child is scoped to its parent (parentId); Appointment carries no owner column",
+    "and is reached THROUGH its child: childId must be one of the actor's children.",
+    "Kids Vaccination Tracker's parents saw no appointments when the rule named a",
+    "parentId the appointments table never had (forge-v3, 2026-09-26)."
   ],
   "data": {
     "entities": [
@@ -111,6 +116,52 @@
             "type": "timestamp"
           }
         ]
+      },
+      {
+        "name": "Child",
+        "table": "children",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "parentId",
+            "type": "uuid"
+          },
+          {
+            "name": "fullName",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          }
+        ]
+      },
+      {
+        "name": "Appointment",
+        "table": "appointments",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "childId",
+            "type": "uuid"
+          },
+          {
+            "name": "status",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          }
+        ]
       }
     ]
   },
@@ -149,6 +200,24 @@
           "finance"
         ],
         "note": "A refund case belongs to the property it was raised at; the actor's home property is the workspace."
+      },
+      {
+        "entity": "Child",
+        "column": "parentId",
+        "kind": "scope",
+        "scope": "user",
+        "unscopedRoles": [
+          "admin"
+        ]
+      },
+      {
+        "entity": "Appointment",
+        "column": "childId",
+        "kind": "scope",
+        "through": "Child",
+        "unscopedRoles": [
+          "admin"
+        ]
       }
     ]
   }
