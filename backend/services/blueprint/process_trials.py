@@ -58,7 +58,9 @@ INPUTS_SYSTEM = (
     "values you are shown; a record input or a reference to another record — including an id "
     "inside a list of items — takes one of the real ids listed, never a made-up one. A new "
     "record's name must not be one already listed among that record's rows. Fill every required input with a value the process should accept; fill "
-    "optional ones when a real person would. Leave out file and image inputs. Do not try to make "
+    "optional ones when a real person would. Leave out file and image inputs: the run attaches a test file to "
+    "each. A row marked `new` was made by this run moments ago — for a process that changes or deletes a "
+    "record, take a `new` one of the right kind when there is one, as nothing depends on it yet. Do not try to make "
     "a process refuse: the run proves it works. When a process shows `lastRun`, its last input "
     "was refused or failed for the reason given there: choose one that the rule accepts — a name "
     "not already taken, a record nothing else depends on."
@@ -188,6 +190,36 @@ def _phases(flows: list[dict]) -> list[list[str]]:
     return [g for g in (makes, changes, removes) if g]
 
 
+#: Input types a person fills by choosing a file. `compose_inputs` leaves them
+#: out; the run attaches a stored test file. Left empty, F&B's Create Category
+#: and Add Food Item were refused "needs image" on every build, and a Smith
+#: turn each was spent finding that the input, not the app, was short
+#: (wz7a99ir, 2026-10-04).
+FILE_INPUTS = frozenset({"image", "photo", "picture", "file", "document", "pdf", "attachment"})
+
+
+def attach_files(bench: Any, doc: dict, flow: dict, run: dict) -> None:
+    """Give each file or image input the run left empty a stored test file."""
+    from services.smith import trials
+    given = run.setdefault("input", {})
+    for i in flow.get("inputs") or []:
+        if not isinstance(i, dict) or not i.get("name") or given.get(i["name"]) not in (None, ""):
+            continue
+        kind = str(i.get("type") or i.get("kind") or "").lower()
+        if kind not in FILE_INPUTS:
+            continue
+        stored = trials.stored_file(bench, doc, "file" if kind in ("file", "document", "pdf", "attachment")
+                                    else "image", run.get("as") or "")
+        if stored:
+            given[i["name"]] = stored
+
+
+def _mark_new(records: dict[str, list[dict]], before: set[str]) -> dict[str, list[dict]]:
+    """Rows this run made since `before` was read, marked `new`."""
+    return {k: [{**r, "new": True} if r.get("id") not in before else r for r in rows]
+            for k, rows in records.items()}
+
+
 def run_failed(said: str) -> bool:
     """A trial that shows the process not working — and one that could not
     finish at all (the trial's own timeout or a crash), which `trials.failed`
@@ -257,6 +289,10 @@ def _prove_processes(svc: Any, output_dir: str, *,
         return {"passed": [], "fixed": [], "left": []}
     passed: list[str] = []
     fixed: list[str] = []
+    # FIXED MEANS SOMETHING CHANGED. A repair that only ran the process again
+    # with a better input left the app as it was; counting that as "fixed"
+    # told the owner three working processes had been broken (wz7a99ir).
+    changed: set[str] = set()
     left: list[dict] = []
     pending = [str(w["id"]) for w in flows]
     lessons: dict[str, str] = {}
@@ -282,10 +318,15 @@ def _prove_processes(svc: Any, output_dir: str, *,
                 # delete left for a later round has something new to delete.
                 makes = (_phases([by_id[p] for p in by_id]) or [[]])[0]
                 setup = [p for p in proven if p in makes and p not in pending]
+                seeded: set[str] | None = None
                 for group in _phases([by_id[p] for p in pending + setup]):
                     if not group:
                         continue
                     records = _records(app, svc.doc)
+                    if seeded is None:
+                        seeded = {r.get("id") for rows in records.values() for r in rows}
+                    else:
+                        records = _mark_new(records, seeded)
                     plan = compose_inputs(svc.doc, [by_id[p] for p in group], records, client, before=lessons)
                     # A PROCESS LEFT OUT IS ASKED FOR AGAIN, ON ITS OWN. Told its
                     # last run was rightly refused, the writer skipped F&B's
@@ -296,6 +337,7 @@ def _prove_processes(svc: Any, output_dir: str, *,
                                                    before=lessons))
                     for pid in group:
                         run = plan.get(pid) or {"as": "", "input": {}}
+                        attach_files(bench, svc.doc, by_id[pid], run)
                         said = trials.run("try_workflow", {"workflow": pid, "input": run["input"], "as": run["as"]},
                                           bench=bench, doc=svc.doc)
                         if pid in setup:
@@ -312,7 +354,7 @@ def _prove_processes(svc: Any, output_dir: str, *,
                             failing.append((by_id[pid], run, said))
                         else:
                             proven.append(pid)
-                            (fixed if round_ > 1 else passed).append(str(by_id[pid].get("name") or pid))
+                            (fixed if round_ > 1 and pid in changed else passed).append(str(by_id[pid].get("name") or pid))
                             ledger.node_subject("process_trials", pid, len(passed) + len(fixed), len(flows), True)
             except trials.TrialUnavailable as exc:
                 logger.warning("[process-trials] the app could not be run: %s", exc)
@@ -331,8 +373,11 @@ def _prove_processes(svc: Any, output_dir: str, *,
                 say("message", {"text": f"{flow.get('name')} did not run through — fixing the cause and running it again."})
                 found = ""
                 try:
-                    found = str((run_turn("", output_dir, fault_ask(flow, run, said), max_steps=STEPS,
-                                          unattended=True) or {}).get("answer") or "")
+                    turn = run_turn("", output_dir, fault_ask(flow, run, said), max_steps=STEPS,
+                                    unattended=True) or {}
+                    found = str(turn.get("answer") or "")
+                    if turn.get("edited_paths"):
+                        changed.add(str(flow.get("id")))
                 except Exception as exc:  # noqa: BLE001 — one repair never ends the build
                     logger.warning("[process-trials] %s: %s", flow.get("id"), exc)
                 lessons[str(flow.get("id"))] = (f"input {json.dumps(run.get('input') or {}, default=str)[:400]} -> "

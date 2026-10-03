@@ -457,7 +457,8 @@ def _sign_in(bench: Bench, doc: dict, route: str, as_: str) -> str:
     return scrub("\n".join(out))
 
 
-def try_upload(bench: Bench, doc: dict, kind: str, as_: str) -> str:
+def _upload(bench: Bench, doc: dict, kind: str, as_: str) -> tuple[str, str, int, str, list[dict], Any]:
+    """Upload a small picture (or PDF) as a role: (who, filename, status, body, cookies, app)."""
     import uuid as _uuid
     pdf = (kind or "").strip().lower() in ("file", "pdf", "document")
     data, name, ctype = (_PDF, "trial.pdf", "application/pdf") if pdf else (_PNG, "trial.png", "image/png")
@@ -475,6 +476,22 @@ def try_upload(bench: Bench, doc: dict, kind: str, as_: str) -> str:
             status, text = r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         status, text = e.code, e.read().decode("utf-8", "replace")
+    return who, name, status, text, jar, app
+
+
+def stored_file(bench: Bench, doc: dict, kind: str, as_: str) -> str | None:
+    """The id of a small test picture (or PDF) stored as a role — what a
+    process's file or image input takes — or None when the app would not
+    store it."""
+    try:
+        _who, _name, status, text, _jar, _app = _upload(bench, doc, kind, as_)
+        return str(json.loads(text).get("id") or "") or None if status < 400 else None
+    except Exception:  # noqa: BLE001 — no file is a refusal the run will show
+        return None
+
+
+def try_upload(bench: Bench, doc: dict, kind: str, as_: str) -> str:
+    who, name, status, text, jar, app = _upload(bench, doc, kind, as_)
     out = [f"upload of {name} as {who}: HTTP {status}", f"answer: {_body(text)}"]
     try:
         stored = json.loads(text).get("id")

@@ -109,7 +109,8 @@ def test_a_failing_process_goes_to_smith_and_is_run_again(tmp_path, monkeypatch)
 
     def smith(project_id, output_dir, message, *, max_steps, unattended):
         asks.append((message, unattended))
-        return {"answer": "Added a status field and the step that sets it."}
+        return {"answer": "Added a status field and the step that sets it.",
+                "edited_paths": [".forge/blueprint/current.json", "app/src/db/schema/order.ts"]}
 
     svc = _Svc(tmp_path, DOC)
     out = pt.prove_processes(svc, str(tmp_path), client=_client([]), bench_factory=_Bench, run_turn=smith)
@@ -272,7 +273,7 @@ def test_creates_then_changes_then_deletes():
 def test_a_later_round_runs_the_proven_creates_again_first_unjudged(tmp_path, monkeypatch):
     runs = _setup(tmp_path, monkeypatch, {"FLOW-001": [OK, REFUSED], "FLOW-005": [REFUSED, OK]})
     out = pt.prove_processes(_Svc(tmp_path, DOC), str(tmp_path), client=_client([]), bench_factory=_Bench,
-                             run_turn=lambda *a, **k: {"answer": ""})
+                             run_turn=lambda *a, **k: {"answer": "", "edited_paths": ["app/x.ts"]})
     assert [r["workflow"] for r in runs] == ["FLOW-001", "FLOW-005", "FLOW-001", "FLOW-005"]
     assert out["passed"] == ["Create Category"] and out["fixed"] == ["Mark Order Fulfilled"] and not out["left"]
 
@@ -295,3 +296,46 @@ def test_a_process_the_writer_left_out_is_asked_for_on_its_own(tmp_path, monkeyp
                        run_turn=lambda *a, **k: {})
     assert calls == [["FLOW-001", "FLOW-005"], ["FLOW-005"]]
     assert {r["workflow"]: r["input"] for r in runs}["FLOW-005"] == {"order": "o-1"}
+
+
+# --- wz7a99ir (2026-10-04): a test file for a file input; "fixed" only when something changed ---
+
+IMAGE_FLOW = {"id": "FLOW-002", "name": "Create Category", "trigger": {"kind": "manual"},
+              "inputs": [{"name": "name", "kind": "field", "type": "string", "required": True},
+                         {"name": "image", "kind": "field", "type": "image", "required": True}]}
+
+
+def test_a_file_or_image_input_gets_a_stored_test_file(tmp_path, monkeypatch):
+    runs = _setup(tmp_path, monkeypatch, {"FLOW-002": [OK]})
+    stored = []
+    monkeypatch.setattr(trials, "stored_file", lambda bench, doc, kind, as_: stored.append((kind, as_)) or "file-1")
+
+    def client(*, system, user, schema):
+        return json.dumps({"runs": [{"workflow": "FLOW-002", "as": "Admin",
+                                     "input": [{"name": "name", "value": '"Vegan Specials"'}]}]})
+    doc = {**DOC, "workflows": [IMAGE_FLOW]}
+    out = pt.prove_processes(_Svc(tmp_path, doc), str(tmp_path), client=client, bench_factory=_Bench,
+                             run_turn=lambda *a, **k: (_ for _ in ()).throw(AssertionError("no repair needed")))
+    assert runs[0]["input"] == {"name": "Vegan Specials", "image": "file-1"}
+    assert stored == [("image", "Admin")] and out["passed"] == ["Create Category"]
+
+
+def test_a_given_file_is_kept_and_other_inputs_are_left_alone():
+    run = {"as": "Admin", "input": {"image": "mine", "name": "x"}}
+    pt.attach_files(None, {}, IMAGE_FLOW, run)
+    assert run["input"] == {"image": "mine", "name": "x"}
+
+
+def test_a_rerun_with_a_better_input_is_passed_not_fixed(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch, {"FLOW-001": [OK] * 3, "FLOW-005": [REFUSED, OK]})
+    out = pt.prove_processes(_Svc(tmp_path, DOC), str(tmp_path), client=_client([]), bench_factory=_Bench,
+                             run_turn=lambda *a, **k: {"answer": "The process is right; ran it with an open order.",
+                                                       "edited_paths": []})
+    assert out["passed"] == ["Create Category", "Mark Order Fulfilled"] and out["fixed"] == []
+
+
+def test_rows_made_by_this_run_are_marked_new():
+    records = {"FoodItem": [{"id": "f-9", "label": "Beef Wellington"}, {"id": "f-1", "label": "Samosa"}]}
+    assert pt._mark_new(records, {"f-1"}) == {"FoodItem": [{"id": "f-9", "label": "Beef Wellington", "new": True},
+                                                           {"id": "f-1", "label": "Samosa"}]}
+    assert "marked `new`" in pt.INPUTS_SYSTEM and "the run attaches a test file" in pt.INPUTS_SYSTEM

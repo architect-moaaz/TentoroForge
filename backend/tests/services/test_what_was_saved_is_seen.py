@@ -137,7 +137,7 @@ def test_a_process_whose_record_cannot_be_seen_goes_to_smith(tmp_path, monkeypat
         asks.append(message)
         pages.served["/children/c-1"] = (200, "<h1>Trial Kid</h1>")
         pages.served["/children"] = (200, "<li>Trial Kid</li>")
-        return {"answer": "Registered the Child alias."}
+        return {"answer": "Registered the Child alias.", "edited_paths": ["app/src/lib/entity-aliases.ts"]}
 
     out = pt.prove_processes(_Svc(tmp_path, doc), str(tmp_path), client=_client([]), bench_factory=Bench,
                              run_turn=smith)
