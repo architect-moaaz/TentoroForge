@@ -119,6 +119,8 @@ class Bench:
         self._app: Any = None
         self._log_at = 0
         self.log = Path(output_dir) / ".forge" / "trials" / "server.log"
+        #: The last `try_workflow`'s tables before and after it ran.
+        self.last_written: tuple[dict[str, Any], dict[str, Any]] | None = None
 
     def app(self) -> Any:
         if self._app is None:
@@ -319,6 +321,9 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     status, _where, text = _http(app, "POST", f"/api/workflows/{flow.get('id')}/execute",
                                  {"input": payload if isinstance(payload, dict) else {}}, jar)
     after = _snapshot(app, tables)
+    # Kept whole for whoever reads the run back (`round_trips`): the report
+    # below cuts a wide row at 300 characters.
+    bench.last_written = (before, after)
     steps = _query(app, "select step_index, node_label, action_type, status, coalesce(error, ''), "
                         "replace(coalesce(outputs::text, ''), E'\\n', ' ') "
                         f"from workflow_execution_log where created_at > '{started.replace(chr(39), '')}' "

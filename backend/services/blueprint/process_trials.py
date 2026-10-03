@@ -231,6 +231,7 @@ def _prove_processes(svc: Any, output_dir: str, *,
                     rounds: int = ROUNDS, record: bool = True) -> dict:
     """Run every process; repair what fails; returns {passed, fixed, left}."""
     from services.blueprint.page_repair import _ledger
+    from services.blueprint.round_trips import read_back
     from services.smith import trials
 
     say = emit or (lambda _e, _d: None)
@@ -299,7 +300,15 @@ def _prove_processes(svc: Any, output_dir: str, *,
                                           bench=bench, doc=svc.doc)
                         if pid in setup:
                             continue
-                        if run_failed(said):
+                        if not run_failed(said):
+                            # RAN THROUGH IS HALF. The other half is what a
+                            # person then sees: Add Child wrote every child
+                            # and My Children showed none (`round_trips`).
+                            unseen = read_back(bench, svc.doc, run["as"])
+                            if unseen:
+                                said += ("\n\nthen, looking for it as the person who ran it:\n"
+                                         + "\n".join(f"  {u}" for u in unseen))
+                        if run_failed(said) or "\nthen, looking for it as the person who ran it:" in said:
                             failing.append((by_id[pid], run, said))
                         else:
                             proven.append(pid)
