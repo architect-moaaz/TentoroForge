@@ -1339,6 +1339,12 @@ async function handleAction(
     (ctx as unknown as { workflowId?: string }).workflowId ||
     (ctx as unknown as { workflow?: { id?: string } }).workflow?.id ||
     "";
+  // A HANDLER THAT ANSWERS { error } FAILED TOO. executeNode fails the run
+  // on it, but the row said "completed" with the error tucked in its output:
+  // RK_Test's insert of patientId "001" read as a success in the log Smith
+  // and the owner look at (2026-09-28).
+  const answered = !runError && result && typeof result === "object"
+    ? (result as { error?: unknown }).error : undefined;
   void writeExecutionLog({
     runId: String(runId),
     workflowId: String(workflowId),
@@ -1348,8 +1354,8 @@ async function handleAction(
     stepIndex: Math.max(0, ctx.log.length - 1),
     inputs: resolved,
     outputs: runError ? null : (result as any),
-    status: runError ? "failed" : "completed",
-    error: runError?.message,
+    status: runError || answered ? "failed" : "completed",
+    error: runError?.message ?? (answered ? String(answered) : undefined),
     durationMs,
   });
 
