@@ -261,7 +261,10 @@ async function ensureAccountRow(id: string | null, email: string, name: string):
 
 /** `customer@example.com` for the role "Customer". */
 function demoEmail(role: string): string {
-  return `${role.toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.|\.$/g, "") || "user"}@example.com`;
+  const local = role.toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.|\.$/g, "") || "user";
+  // Never the administrator's own address: a role named "Admin" that is not
+  // the built-in admin's would share admin@example.com and get no login.
+  return `${local}@example.com` === "admin@example.com" ? `${local}.role@example.com` : `${local}@example.com`;
 }
 
 /**

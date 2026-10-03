@@ -89,10 +89,18 @@ def signup_role(doc: dict) -> str | None:
 
 def demo_email(role: str) -> str:
     """The demo login the seed makes for a role — `seedRoleLogins` in
-    templates/runtime/seed.ts derives it the same way."""
+    templates/runtime/seed.ts derives it the same way.
+
+    NEVER THE ADMINISTRATOR'S ADDRESS. A role named "Admin" that is not the
+    built-in administrator's came out as admin@example.com — the seeded
+    admin's own address — so it got no login of its own and the test-logins
+    table listed one account under two roles (wz7a99ir, 2026-10-04)."""
     import re as _re
-    local = _re.sub(r"[^a-z0-9]+", ".", role.lower()).strip(".")
-    return f"{local or 'user'}@example.com"
+
+    from services.smith.accounts import SEEDED_ADMIN
+    local = _re.sub(r"[^a-z0-9]+", ".", role.lower()).strip(".") or "user"
+    email = f"{local}@example.com"
+    return f"{local}.role@example.com" if email == SEEDED_ADMIN else email
 
 
 def demo_logins(doc: dict) -> list[tuple[str, str]]:
@@ -118,6 +126,15 @@ def admin_role(doc: dict) -> str | None:
     roles = _live(doc.get("roles"))
     if not roles:
         return None
+    # THE ROLE PEOPLE GIVE THEMSELVES IS NOT THE BACK OFFICE'S. Anyone who
+    # signs up holds it, so it is never the administrator's while another
+    # role exists. F&B's admin pages named no role and the customer pages
+    # named Customer; the ranking below then made admin@example.com a
+    # Customer, and the admin never saw an admin menu (wz7a99ir, 2026-10-04).
+    signup = str(((doc.get("security") or {}).get("signupRole")) or "")
+    if signup and len(roles) > 1:
+        others = [r for r in roles if signup not in (str(r.get("id")), str(r.get("name")))]
+        roles = others or roles
     pages = [p for p in _live(doc.get("pages")) if str(p.get("pattern") or "") != "auth"]
 
     def opens(rid: str) -> list[dict]:

@@ -1019,34 +1019,14 @@ def mobile_tabs(doc: dict, groups: list[dict]) -> list[dict]:
     return out if len(out) >= 2 else []
 
 
-def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
-    """Write ``src/schemas/shell.json`` from ``navigation.tree``.
 
-    THE SHELL READS ONE FILE, AND NOTHING WROTE IT. The scaffold's layout builds
-    its rail from `shell.json` — a `SideNav` node whose `props.groups` carry
-    grouped destinations — and only falls back to a flat menu from nav-flow's
-    page list when the file is absent. Every Blueprint application was absent
-    it, so every rail was the fallback: one flat list of page titles, whatever
-    `navigation.tree` said. When the tree began carrying a connected design's
-    own groups (Overview, Cases, Approvals…), they had nowhere to go.
-
-    Written only when the tree has grouped nodes: a flat tree is exactly what
-    the fallback already renders, and writing it again would be a second
-    representation of one fact. Destinations resolve `page` ids to routes
-    through the page list, so a rename cannot break the rail; a drawn
-    destination with no page is kept, route-less, so its absence is visible
-    in the rail rather than silent (§49).
-    """
-    nav = doc.get("navigation") or {}
-    tree = [n for n in (nav.get("tree") or []) if isinstance(n, dict)]
-    # A FLAT RAIL IS STILL A RAIL. This returned without writing when no node
-    # had children, so a one-screen application had no shell file at all and
-    # the root page, which reads it, failed to compile.
-    if not tree:
-        return {"files": [], "groups": 0, "reason": "no navigation"}
-
-    routes = {str(p.get("id")): str(p.get("route") or "")
-              for p in (doc.get("pages") or []) if p.get("id")}
+def menu_scopes(doc: dict, nav: dict | None = None) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Who each page's menu entry is shown to: `(roles, audience)` by page id —
+    the role names a role-restricted page admits, and the kinds of user a page
+    is for. The shell's rail and Smith's navigation tool both read this: the
+    menu has no visibility of its own, an entry is shown to whoever its page
+    is for. An id in neither map is shown to everyone."""
+    nav = nav if isinstance(nav, dict) else (doc.get("navigation") or {})
     # WHO THE DESTINATION IS FOR — the menu's half of the gate. A
     # role-restricted page names the roles that may open it, and the rail
     # offered it to everyone: a neighbour who had just signed up was shown
@@ -1083,6 +1063,38 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
                           if k.lower() in by_lower and str(r) == str(p.get("route") or "")})
         if landers:
             page_audience[pid] = landers
+
+    return page_roles, page_audience
+
+def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/schemas/shell.json`` from ``navigation.tree``.
+
+    THE SHELL READS ONE FILE, AND NOTHING WROTE IT. The scaffold's layout builds
+    its rail from `shell.json` — a `SideNav` node whose `props.groups` carry
+    grouped destinations — and only falls back to a flat menu from nav-flow's
+    page list when the file is absent. Every Blueprint application was absent
+    it, so every rail was the fallback: one flat list of page titles, whatever
+    `navigation.tree` said. When the tree began carrying a connected design's
+    own groups (Overview, Cases, Approvals…), they had nowhere to go.
+
+    Written only when the tree has grouped nodes: a flat tree is exactly what
+    the fallback already renders, and writing it again would be a second
+    representation of one fact. Destinations resolve `page` ids to routes
+    through the page list, so a rename cannot break the rail; a drawn
+    destination with no page is kept, route-less, so its absence is visible
+    in the rail rather than silent (§49).
+    """
+    nav = doc.get("navigation") or {}
+    tree = [n for n in (nav.get("tree") or []) if isinstance(n, dict)]
+    # A FLAT RAIL IS STILL A RAIL. This returned without writing when no node
+    # had children, so a one-screen application had no shell file at all and
+    # the root page, which reads it, failed to compile.
+    if not tree:
+        return {"files": [], "groups": 0, "reason": "no navigation"}
+
+    routes = {str(p.get("id")): str(p.get("route") or "")
+              for p in (doc.get("pages") or []) if p.get("id")}
+    page_roles, page_audience = menu_scopes(doc, nav)
 
     # A DYNAMIC ROUTE IS NOT A RAIL DESTINATION. `/rentals/[id]/return` is
     # reached through a row or an action that fills a concrete id, never from the
