@@ -148,6 +148,11 @@ def shot_findings(shot: dict, visit: dict, doc: dict) -> list[str]:
         return []
     out: list[str] = []
     status = shot.get("status")
+    edge = str(shot.get("state") or "")
+    if edge and edge != "loading" and not (isinstance(status, int) and status >= 400):
+        # A STREAMED NOT-FOUND IS HTTP 200. Edit Category was not there; its
+        # address answered 200 and drew the app's 404 page (F&B, 2026-10-03).
+        out.append(f"it shows the app's {edge} page instead of itself")
     if isinstance(status, int) and status >= 400:
         out.append(f"it answers HTTP {status}" + (" — the role it is for is refused" if status == 403 else ""))
     landed = str(shot.get("landed") or "")

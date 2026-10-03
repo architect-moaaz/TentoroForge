@@ -186,3 +186,27 @@ def test_the_build_uses_the_app_after_its_processes_run():
     body = src[src.index("def _finish_unfinished_pages"):]
     body = body[:body.index("\ndef ")]
     assert body.index("prove_processes(") < body.index("check_app(")
+
+
+# --- found on F&B's copy, 2026-10-03 -------------------------------------------------
+
+def test_a_page_that_draws_the_apps_404_is_not_there_whatever_its_status():
+    """Edit Category was never written; its address answered HTTP 200 and drew
+    the app's not-found page, and only the list's links were caught."""
+    found = ac.shot_findings({"status": 200, "state": "404", "landed": "/admin/categories/x"}, _visit(), DOC)
+    assert found == ["it shows the app's 404 page instead of itself"]
+    assert ac.shot_findings({"status": 200, "state": "loading"}, _visit(), DOC) == []
+
+
+def test_an_option_already_chosen_is_not_a_dead_button():
+    """"Dine-in" was the order type the page opened with: pressing it changed
+    nothing, rightly. page_shots says so, or presses another option first."""
+    shots = (Path(__file__).resolve().parents[2] / "scripts/page_shots.mjs").read_text()
+    assert 'outcome: "chosen", detail: "the option already chosen"' in shots
+    assert "const again = await press(who.ctx, url, c, c.alt);" in shots
+    from services.blueprint.page_review import BROKEN_OUTCOMES
+    assert "chosen" not in BROKEN_OUTCOMES
+    assert ac.shot_findings({"status": 200, "controls": [{"kind": "button", "label": "Dine-in", "outcome": "chosen"}]},
+                            _visit(), DOC) == []
+    writer = (Path(__file__).resolve().parents[2] / "services/blueprint/ui_engineer.py").read_text()
+    assert "says which is picked: `aria-pressed`" in writer

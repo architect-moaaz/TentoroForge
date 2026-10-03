@@ -174,7 +174,16 @@ async function controls(page) {
       const key = `${el.tagName}|${label}|${href.replace(/[0-9a-f-]{8,}/gi, ":id")}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ index: all.indexOf(el), label, kind: href ? "link" : "button", href });
+      // AN OPTION ALREADY CHOSEN. "Dine-in" was the order type a page opened
+      // with; pressing it changed nothing, rightly, and read as a dead button
+      // (F&B, 2026-10-03). Said by the control itself when it says it, and
+      // otherwise found by pressing an option beside it first (`alt`).
+      const chosen = ["aria-pressed", "aria-checked", "aria-selected"].some((a) => el.getAttribute(a) === "true")
+        || (el.hasAttribute("aria-current") && el.getAttribute("aria-current") !== "false");
+      const sibling = href ? null : [...(el.parentElement?.children || [])]
+        .find((x) => x !== el && x.matches(SEL) && !x.disabled);
+      out.push({ index: all.indexOf(el), label, kind: href ? "link" : "button", href, chosen,
+                 alt: sibling ? all.indexOf(sibling) : null });
     }
     return out;
   });
@@ -193,7 +202,7 @@ function fingerprint(page) {
   });
 }
 
-async function press(context, url, control) {
+async function press(context, url, control, firstIndex = null) {
   const page = await context.newPage();
   const errors = watch(page);
   const calls = [];
@@ -210,6 +219,12 @@ async function press(context, url, control) {
   try {
     await page.goto(cfg.baseUrl + url, { waitUntil: "load", timeout: 60000 });
     await page.waitForTimeout(700);
+    if (firstIndex !== null) {
+      // Another option first, so this one is not the one already chosen.
+      await page.locator("button, a[href], [role='button'], [role='menuitem'], [role='tab']")
+        .nth(firstIndex).click({ timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
     const before = await fingerprint(page);
     const target = page.locator("button, a[href], [role='button'], [role='menuitem'], [role='tab']")
       .nth(control.index);
@@ -340,6 +355,14 @@ for (const p of cfg.pages) {
       // sends Smith to fix what works. Pressed again, the page is compiled.
       let outcome = await press(who.ctx, url, c);
       if (outcome.outcome === "nothing") outcome = await press(who.ctx, url, c);
+      if (outcome.outcome === "nothing" && c.chosen) {
+        outcome = { ...outcome, outcome: "chosen", detail: "the option already chosen" };
+      } else if (outcome.outcome === "nothing" && c.alt !== null) {
+        const again = await press(who.ctx, url, c, c.alt);
+        if (again.outcome !== "nothing") {
+          outcome = { ...again, detail: `the option already chosen; after another is chosen it ${again.detail}` };
+        }
+      }
       result.controls.push(outcome);
     }
   }

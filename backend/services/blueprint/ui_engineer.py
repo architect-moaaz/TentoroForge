@@ -596,7 +596,9 @@ What a finished page looks like:
   375px; wide tables scroll horizontally inside their card.
 - ACCESSIBLE. Real <button>/<a>, labels on inputs, aria-label on icon-only buttons,
   visible focus (`focus-visible:ring-2 ring-ring` on anything you build yourself),
-  sufficient contrast (use the tokens).
+  sufficient contrast (use the tokens). A button that picks one of several options
+  (a segmented choice, a filter chip, a tab) says which is picked: `aria-pressed`
+  on the picked one, or `role="tab"` with `aria-selected`.
 - TOKENS, NOT HEX. Only the semantic classes, each for its job: bg-background (the
   ground), bg-card (panels), bg-muted / bg-secondary (quiet fills), text-foreground,
   text-muted-foreground, border, bg-primary / text-primary (brand, default button,
