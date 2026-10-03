@@ -10,7 +10,7 @@
  *   cd backend/templates/runtime && \
  *   node --experimental-strip-types __tests__/record-inputs.test.mts
  */
-import { hydrateRecordInputs } from "../workflows/record-inputs.ts";
+import { fillSelfInputs, hydrateRecordInputs } from "../workflows/record-inputs.ts";
 
 let passed = 0;
 let failed = 0;
@@ -52,6 +52,25 @@ check("other inputs are untouched",
 
 check("a workflow with no record inputs is handed back as it came",
   await hydrateRecordInputs({}, { a: 1 }, load), { a: 1 });
+
+// Kids Vaccination Tracker (forge-v3, 2026-10-03): "Add Child needs parent —
+// nothing was changed" for every parent. `parent` is the signed-in person.
+console.log("fillSelfInputs");
+const addChild = { recordInputs: [{ name: "parent", table: "parents" }, { name: "doctor", table: "doctors" }] };
+const isAccount = (t: string) => t === "parents";
+check("a missing record input of the account's table is the signed-in person",
+  fillSelfInputs(addChild, { fullName: "Ava" }, { id: "u-parent" }, isAccount),
+  { fullName: "Ava", parent: "u-parent" });
+check("a value the caller sent is kept — an admin filing for someone names whom",
+  fillSelfInputs(addChild, { parent: "p-other" }, { id: "u-admin" }, isAccount), { parent: "p-other" });
+check("an empty string is missing, and filled",
+  fillSelfInputs(addChild, { parent: "" }, { id: "u-parent" }, isAccount), { parent: "u-parent" });
+check("a record of another table is never the person",
+  fillSelfInputs(addChild, {}, { id: "u-parent" }, isAccount), { parent: "u-parent" });
+check("nobody signed in, nothing filled",
+  fillSelfInputs(addChild, { fullName: "Ava" }, undefined, isAccount), { fullName: "Ava" });
+check("an app with no account entity fills nothing",
+  fillSelfInputs(addChild, {}, { id: "u-parent" }, () => false), {});
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

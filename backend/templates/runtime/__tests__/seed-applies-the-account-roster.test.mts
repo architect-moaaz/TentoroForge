@@ -131,6 +131,9 @@ const db = {
 
 installHarness({
   stubs: {
+    // seed.ts reads the account model (d8b972a0): an app with no account entity.
+    "../lib/account": "export const ACCOUNT = null; export const ADMIN_ROLE = 'Admin'; export const SIGNUP_ROLE = null; export const ROLES = [];",
+    "../lib/account-table": "export const accountTable = null;",
     "./index": "export const db = globalThis.__db;",
     "./schema": "export const users = globalThis.__tables.users; export const forgeInvites = globalThis.__tables.forgeInvites;",
     // A distinct hash per call, the way bcrypt gives one: the point of the

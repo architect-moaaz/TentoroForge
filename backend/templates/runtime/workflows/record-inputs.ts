@@ -43,3 +43,32 @@ export async function hydrateRecordInputs(
   }
   return out;
 }
+
+/**
+ * THE SIGNED-IN PERSON IS A RECORD THE CALLER NEED NOT SEND. A record input
+ * of the account's own table — Add Child's `parent`, KYC's `member` — is the
+ * person running the workflow, and the build deliberately does not make the
+ * form ask for it (`_session_filled_records`). Nothing then supplied it, so
+ * the run was refused before it started: "Add Child needs parent — nothing
+ * was changed" for every parent who tried (Kids Vaccination Tracker,
+ * forge-v3, 2026-10-03). A value the caller did send is kept: an
+ * administrator filing on someone's behalf names whom.
+ */
+export function fillSelfInputs(
+  workflow: Pick<WorkflowDefinition, "recordInputs">,
+  input: Record<string, unknown>,
+  user: { id?: unknown } | undefined,
+  isAccountTable: (table: string) => boolean,
+): Record<string, unknown> {
+  const id = user?.id;
+  if (typeof id !== "string" || !id) return input;
+  let out = input;
+  for (const { name, table } of workflow.recordInputs ?? []) {
+    const value = input?.[name];
+    if (value !== undefined && value !== null && value !== "") continue;
+    if (!table || !isAccountTable(table)) continue;
+    if (out === input) out = { ...input };
+    out[name] = id;
+  }
+  return out;
+}

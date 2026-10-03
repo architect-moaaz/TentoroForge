@@ -52,6 +52,9 @@ const db = {
 };
 installHarness({
   stubs: {
+    // seed.ts reads the account model (d8b972a0): an app with no account entity.
+    "../lib/account": "export const ACCOUNT = null; export const ADMIN_ROLE = 'Admin'; export const SIGNUP_ROLE = null; export const ROLES = [];",
+    "../lib/account-table": "export const accountTable = null;",
     "./index": "export const db = globalThis.__db;",
     "./schema": "export const users = globalThis.__tables.users; export const bills = globalThis.__tables.bills; export const billSponsors = globalThis.__tables.billSponsors;",
     "bcryptjs": "export default { hashSync: () => 'hash', hash: async () => 'hash' };",

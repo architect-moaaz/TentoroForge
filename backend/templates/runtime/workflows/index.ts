@@ -17,7 +17,7 @@
 
 import { promises as fs } from "fs";
 import { missingRequiredInputs } from "./required-inputs";
-import { hydrateRecordInputs } from "./record-inputs";
+import { fillSelfInputs, hydrateRecordInputs } from "./record-inputs";
 import { queryResult } from "./query-result";
 import crypto from "node:crypto";
 import path from "path";
@@ -146,6 +146,19 @@ export async function loadWorkflows(
   return workflowCache;
 }
 
+/** Whether a table is the account entity's — the table each login's own row
+ * lives in. Loaded when first needed: an app with no account entity has a
+ * `null` there and no record input is ever the signed-in person. */
+async function accountTableMatcher(): Promise<(table: string) => boolean> {
+  let accountTable: unknown = null;
+  try {
+    accountTable = (await import("@/lib/account-table")).accountTable;
+  } catch {
+    accountTable = null;
+  }
+  return (table: string) => !!accountTable && _resolveTable(table) === accountTable;
+}
+
 /**
  * Trigger a workflow by ID or name.
  *
@@ -179,6 +192,8 @@ export async function triggerWorkflow(
   // column it was meant to fill — the run said "completed" and the person
   // was told their document was submitted (0l133sp2). Refused here, the
   // caller gets 422 and the form says which box is empty.
+  input = fillSelfInputs(workflow, input as Record<string, unknown>, user as any,
+                         await accountTableMatcher());
   const missing = missingRequiredInputs(workflow, input as Record<string, unknown>);
   if (missing.length) {
     const now = new Date().toISOString();
