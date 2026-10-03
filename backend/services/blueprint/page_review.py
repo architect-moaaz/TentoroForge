@@ -151,9 +151,7 @@ def _clone_database(app_root: Path) -> tuple[str, str, str] | None:
     # environment variable `.env` does not keep, so `docker compose ps` run
     # later from the app finds nothing. The port is what the app itself uses.
     port = _database_port(app_root)
-    ps = subprocess.run(["docker", "ps", "-q", "--filter", f"publish={port}"],
-                        capture_output=True, text=True, timeout=60) if port else None
-    container = (ps.stdout.strip().splitlines() or [""])[0] if ps and ps.stdout else ""
+    container = _database_container(port)
     if not container:
         return None
     script = (f'dropdb -U postgres --if-exists {copy} && createdb -U postgres {copy} && '
@@ -164,6 +162,20 @@ def _clone_database(app_root: Path) -> tuple[str, str, str] | None:
         logger.warning("[page_review] could not copy the database: %s", done.stderr[-300:])
         return None
     return container, copy, base + copy
+
+
+def _database_container(port: int | None) -> str:
+    """The Docker container publishing the app's database port, or "" — the
+    app's own database, as opposed to anything else that happens to listen
+    there."""
+    if not port or not shutil.which("docker"):
+        return ""
+    try:
+        ps = subprocess.run(["docker", "ps", "-q", "--filter", f"publish={port}"],
+                            capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return (ps.stdout.strip().splitlines() or [""])[0] if ps.stdout else ""
 
 
 def _listening(port: int | None) -> bool:
@@ -211,7 +223,14 @@ class RunningApp:
         # moves the app to another one and rewrites `.env` under the running
         # server; stopping compose afterwards took the person's database down.
         # So a running database is used as it is and left running.
-        if not _listening(_database_port(self.root)):
+        # …BUT A PORT IN USE IS NOT THE APP'S DATABASE. A new app still names
+        # the default 5432, and a Postgres installed on the machine answers
+        # there: the review took it for the app's, started nothing, found no
+        # container to copy and checked no page (wz7a99ir, 2026-10-04). Up
+        # means a container serves the app's port; anything else is started,
+        # and `start.sh` moves the app off a port that is taken.
+        port = _database_port(self.root)
+        if not (_listening(port) and _database_container(port)):
             if not shutil.which("docker"):
                 raise ReviewUnavailable("Docker is not available for the app's database")
             seeded = subprocess.run(["bash", "start.sh", "--seed-only"], cwd=self.root,
