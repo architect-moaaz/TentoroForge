@@ -669,6 +669,36 @@ def _failing_processes_line(doc: dict) -> str:
             "Tell me to carry on and I will keep at it.")
 
 
+def _check_score(doc: dict) -> str:
+    """What using the application found (`app_check`, `process_trials`),
+    as the sentence that opens the completion message — or "" when no check
+    ran (a build before it existed). "Built" stopped meaning "works" the day a
+    page could be on disk and broken; this says how many were proven to work."""
+    check = (doc.get("runtime") or {}).get("check")
+    if not isinstance(check, dict) or not check.get("pages"):
+        return ""
+    from services.blueprint.process_trials import manual_workflows
+    pages, working = int(check.get("pages") or 0), int(check.get("working") or 0)
+    issues = [i for i in (doc.get("runtime") or {}).get("issues") or [] if isinstance(i, dict)]
+    flows = len(manual_workflows(doc))
+    stuck = [i for i in issues if i.get("kind") == "process"]
+    fixed = list(check.get("fixed") or [])
+    parts = [f"{working} of {pages} page{'' if pages == 1 else 's'} opened and worked for every kind of "
+             f"person they are for"]
+    if flows:
+        parts.append(f"{flows - len(stuck)} of {flows} process{'' if flows == 1 else 'es'} ran through and "
+                     f"showed what they saved")
+    said = "I used the whole application before handing it over: " + "; ".join(parts) + "."
+    if fixed:
+        said += f" Fixed while checking: {', '.join(fixed[:6])}{' and more' if len(fixed) > 6 else ''}."
+    failing = [i for i in issues if i.get("kind") == "page_check"]
+    if failing:
+        lines = "\n".join(f"- {i.get('route')} — {str(i.get('detail') or '').split(' | ')[0][:160]}"
+                           for i in failing[:8])
+        said += f"\n\nStill not working:\n{lines}\nTell me to carry on and I will keep at it."
+    return said
+
+
 def _build_complete_message(doc: dict | None) -> str | None:
     """One line, in Smith's voice, saying the build finished — or ``None``
     when nothing was built to announce.
@@ -714,6 +744,14 @@ def _build_complete_message(doc: dict | None) -> str | None:
 
     later += _sign_in_line(full) + _failing_processes_line(full)
 
+    # WHAT WAS PROVEN, NOT WHAT WAS WRITTEN. When the build used the app,
+    # the message says how much of it worked, and names what did not.
+    score = _check_score(full)
+    if score:
+        lead = ("Your application is built. " if not unbuilt else
+                f"Your application is built — {served} of {planned} pages are served. ")
+        return lead + score + later
+
     if not unbuilt:
         s = "" if planned == 1 else "s"
         return (f"Your application is built — {planned} page{s} ready. Open the "
@@ -745,6 +783,13 @@ _VERIFY_OFFER_TEXT = (
     "is it laid out well, does it match what you asked for — and check the "
     "buttons, search and links actually work, then re-compose anything that's off."
 )
+#: After a build that already used every page, the offer is for what using it
+#: cannot judge: how each page looks and reads.
+_LOOK_OFFER_TEXT = (
+    "Want me to also review how each page looks? I'll read every page as it renders — "
+    "is it laid out well, does it read clearly, does it match what you asked for — and "
+    "re-compose anything that's off."
+)
 
 
 def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
@@ -768,7 +813,8 @@ def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
             return
         emit("message", {"text": done})
         if offer_verify:
-            emit("message", {"text": _VERIFY_OFFER_TEXT,
+            checked = isinstance(((doc or {}).get("runtime") or {}).get("check"), dict)
+            emit("message", {"text": _LOOK_OFFER_TEXT if checked else _VERIFY_OFFER_TEXT,
                              "options": list(_VERIFY_OFFER_OPTIONS),
                              "status": "asked"})
     except Exception:  # noqa: BLE001 — never let the announcement fail the build

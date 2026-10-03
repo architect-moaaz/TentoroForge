@@ -376,5 +376,27 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
     return summary
 
 
-__all__ = ["MAX_REPAIRS", "ROUNDS", "check_app", "check_pages", "fault_ask", "screen_findings",
+def publish_note(output_dir: str) -> dict:
+    """What the Publish dialog says before anyone presses Publish: whether the
+    application was used before it was handed over, and what still does not
+    work — the pages and the processes, by name. Never raises."""
+    try:
+        from services.blueprint.service import BlueprintService
+        doc = BlueprintService.load(output_dir=output_dir).doc
+    except Exception:  # noqa: BLE001 — nothing to say is not an error
+        return {"checked": False, "pages": 0, "working": 0, "failing": [], "processes": []}
+    runtime = doc.get("runtime") or {}
+    check = runtime.get("check") if isinstance(runtime.get("check"), dict) else None
+    issues = [i for i in runtime.get("issues") or [] if isinstance(i, dict)]
+    return {
+        "checked": check is not None,
+        "pages": int((check or {}).get("pages") or 0),
+        "working": int((check or {}).get("working") or 0),
+        "failing": [{"route": str(i.get("route") or ""), "detail": str(i.get("detail") or "").split(" | ")[0][:200]}
+                    for i in issues if i.get("kind") == "page_check"],
+        "processes": [str(i.get("name") or i.get("workflow")) for i in issues if i.get("kind") == "process"],
+    }
+
+
+__all__ = ["MAX_REPAIRS", "publish_note", "ROUNDS", "check_app", "check_pages", "fault_ask", "screen_findings",
            "shot_findings", "visits"]
