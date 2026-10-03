@@ -2123,7 +2123,7 @@
                   },
                   "column": {
                     "type": "string",
-                    "description": "Column on that entity holding the actor's value, e.g. ownerId, workspaceId or createdByUserId."
+                    "description": "Column on that entity holding the actor's value, e.g. ownerId, workspaceId or createdByUserId — or, with `through`, the reference to the record that does (childId). It must be a field the entity has."
                   },
                   "kind": {
                     "type": "string",
@@ -2154,6 +2154,10 @@
                   "actorColumn": {
                     "type": "string",
                     "description": "For scope \"workspace\": the column on the users table whose value is the actor's workspace — homePropertyId, organisationId, tenantId. The session carries that column and the engine compares `column` to it. Omit for scope \"user\", where the actor's id is the value."
+                  },
+                  "through": {
+                    "type": "string",
+                    "description": "When the row belongs to the actor through another record: the entity `column` references (an Appointment's childId -> \"Child\"). The row is reachable when that record is reachable under its own scope rule, which it must have. Omit when `column` holds the actor's value itself."
                   },
                   "note": {
                     "type": "string",
