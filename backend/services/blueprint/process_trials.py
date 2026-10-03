@@ -216,7 +216,14 @@ def fault_ask(flow: dict, run: dict, said: str) -> str:
     )
 
 
-def prove_processes(svc: Any, output_dir: str, *,
+def prove_processes(svc: Any, output_dir: str, *args: Any, **kwargs: Any) -> dict:
+    """See `_prove_processes`; its model calls, and the Smith turns it starts, are the build's spend."""
+    from services.build_usage import usage_scope
+    with usage_scope(agent="process_trials", output_dir=str(output_dir), phase="build", kind="build"):
+        return _prove_processes(svc, output_dir, *args, **kwargs)
+
+
+def _prove_processes(svc: Any, output_dir: str, *,
                     emit: Callable[[str, dict], None] | None = None,
                     client: Any = None,
                     run_turn: Callable[..., dict] | None = None,

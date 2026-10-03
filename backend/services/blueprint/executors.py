@@ -726,6 +726,8 @@ class AnthropicModel:
         # failed node whose reason was the empty string.
         text = next((b.text for b in response.content
                      if getattr(b, "type", None) == "text"), None)
+        from services.build_usage import spent as _report_spent
+        _report_spent(spent)
         if text is None:
             if stop == "max_tokens":
                 why = (f"the model spent all {spent.output_tokens:,} output tokens "
@@ -800,14 +802,14 @@ class OpenAICompatibleModel:
         if choice.finish_reason == "content_filter":
             raise ModelRefused(f"{self.model} declined this task")
         u = response.usage
-        return ModelReply(
-            text=choice.message.content or "",
-            usage=Usage(
-                model=self.model,
-                input_tokens=getattr(u, "prompt_tokens", 0) or 0,
-                output_tokens=getattr(u, "completion_tokens", 0) or 0,
-            ),
+        used = Usage(
+            model=self.model,
+            input_tokens=getattr(u, "prompt_tokens", 0) or 0,
+            output_tokens=getattr(u, "completion_tokens", 0) or 0,
         )
+        from services.build_usage import spent as _report_spent
+        _report_spent(used)
+        return ModelReply(text=choice.message.content or "", usage=used)
 
 
 
@@ -986,12 +988,15 @@ class GeminiModel:
             # way a refusal is surfaced elsewhere rather than returning "".
             raise ModelRefused(f"{self.model} returned no content")
         m = getattr(response, "usage_metadata", None)
-        return ModelReply(text=text, usage=Usage(
+        used = Usage(
             model=self.model,
             input_tokens=getattr(m, "prompt_token_count", 0) or 0,
             output_tokens=getattr(m, "candidates_token_count", 0) or 0,
             cache_read_tokens=getattr(m, "cached_content_token_count", 0) or 0,
-        ))
+        )
+        from services.build_usage import spent as _report_spent
+        _report_spent(used)
+        return ModelReply(text=text, usage=used)
 
 
 @dataclass
@@ -3385,7 +3390,9 @@ class RunUsage:
         # Also append to the platform-wide ledger so a Blueprint run shows up
         # alongside everything else rather than in its own silo.
         try:
-            from services.build_usage import record_usage
+            from services.build_usage import claim, record_usage
+
+            claim(usage)
 
             record_usage(
                 project=project or self.project or "blueprint",

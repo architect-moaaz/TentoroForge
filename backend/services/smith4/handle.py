@@ -18,7 +18,14 @@ from services.smith4.turn import turn
 from services.smith4.verbs import Ctx
 
 
-def handle(*, project_id: str, output_dir: str, message: str,
+def handle(**kwargs: Any) -> Outcome:
+    """One Smith turn, its model calls written to the usage ledger."""
+    from services.build_usage import usage_scope
+    with usage_scope(agent="smith", output_dir=str(kwargs.get("output_dir") or ""), kind="smith"):
+        return _handle(**kwargs)
+
+
+def _handle(*, project_id: str, output_dir: str, message: str,
            history: list | None = None,
            choose: Callable | None = None,
            move: Callable | None = None,

@@ -3200,6 +3200,14 @@ def _project_assemble(svc: BlueprintService, app_root: str) -> None:
 
 def review_coded_pages(svc: BlueprintService, app_root: str, *,
                        only: set[str] | None = None, emit: Any = None, asked: str = "") -> dict:
+    """See `_review_coded_pages`; the review's model calls are written to the ledger."""
+    from services.build_usage import usage_scope
+    with usage_scope(agent="page_review", output_dir=str(getattr(svc, "output_dir", "") or ""), kind="review"):
+        return _review_coded_pages(svc, app_root, only=only, emit=emit, asked=asked)
+
+
+def _review_coded_pages(svc: BlueprintService, app_root: str, *,
+                        only: set[str] | None = None, emit: Any = None, asked: str = "") -> dict:
     """Verify & fix for coded pages: judge each as it renders; have the weak
     ones rewritten. `only` narrows it to those page ids.
 

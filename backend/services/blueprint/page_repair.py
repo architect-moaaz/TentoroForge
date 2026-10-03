@@ -77,7 +77,14 @@ def fault_ask(item: dict) -> str:
     )
 
 
-def repair_pages(svc: Any, output_dir: str, app_root: str, report: Any, *,
+def repair_pages(svc: Any, output_dir: str, *args: Any, **kwargs: Any) -> dict:
+    """See `_repair_pages`; its model calls, and the Smith turns it starts, are the build's spend."""
+    from services.build_usage import usage_scope
+    with usage_scope(agent="page_repair", output_dir=str(output_dir), phase="build", kind="build"):
+        return _repair_pages(svc, output_dir, *args, **kwargs)
+
+
+def _repair_pages(svc: Any, output_dir: str, app_root: str, report: Any, *,
                  emit: Callable[[str, dict], None] | None = None,
                  run_turn: Callable[..., dict] | None = None,
                  funnel: Callable[[dict, str], dict] | None = None,

@@ -366,8 +366,11 @@ def _get(url: str) -> tuple[str, int, str, bytes]:
 def _in_thread(coro_fn, *args) -> Any:
     """Run an async browser job to completion from synchronous code, whether
     or not this thread already has an event loop running."""
+    import contextvars
+
+    context = contextvars.copy_context()         # the turn's usage scope goes along
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(lambda: asyncio.run(coro_fn(*args))).result(timeout=TIMEOUT_S + 30)
+        return pool.submit(lambda: context.run(asyncio.run, coro_fn(*args))).result(timeout=TIMEOUT_S + 30)
 
 
 async def _guarded_context(browser: Any, device: str = "desktop") -> Any:
