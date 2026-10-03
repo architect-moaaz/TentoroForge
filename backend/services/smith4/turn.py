@@ -29,7 +29,7 @@ from typing import Any, Callable
 
 from services.smith import loop as loop_mod
 from services.smith import plan as plan_mod
-from services.smith import reads, tools, trials, writes
+from services.smith import reads, tools, trials, web, writes
 from services.smith.loop import Observation
 from services.smith.verbs import missing_fields
 from services.smith4.context import opening
@@ -339,6 +339,12 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
 
         if tools.is_read(tool):
             seen = reads.run(tool, args, output_dir=ctx.out, doc=ctx.doc())
+            observations.append(Observation(tool=tool, args=args, status="read", said=seen))
+            continue
+
+        if tools.is_web(tool):
+            seen = web.run(tool, args, said=web.person_said(ctx.ask, history), output_dir=ctx.out)
+            logger.info("[smith-web] %s %s -> %s", tool, args, " | ".join(seen.splitlines()[:2])[:300])
             observations.append(Observation(tool=tool, args=args, status="read", said=seen))
             continue
 
