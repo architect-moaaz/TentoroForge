@@ -568,7 +568,12 @@ function prepRow(table: any, row: Record<string, unknown>, ids: Record<string, s
             ? (s || new Date().toISOString())
             : (s ? s.slice(0, 10) : new Date().toISOString().slice(0, 10));
         } else if (!(val instanceof Date)) {
-          const d = new Date(val as any);
+          // ONLY WHAT READS AS A DATE. V8 reads a label as one: "Start Time
+          // 12" is 1 December 2001, and a booking app showed every slot in
+          // 2001 (RK_Test, 2026-09-28). Text that does not begin with a date
+          // is not trusted to be one.
+          const dated = typeof val !== "string" || /^\d{4}-\d{2}-\d{2}/.test(val.trim());
+          const d = dated ? new Date(val as any) : new Date(NaN);
           val = isNaN(d.getTime()) ? new Date() : d;
         }
       }

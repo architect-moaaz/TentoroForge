@@ -2884,6 +2884,17 @@ def _seed_value(field: dict, entity_name: str, row: int,
         return row * 100
     if kind in ("bool", "boolean"):
         return row % 2 == 1
+    if kind == "time":
+        # A TIME OF DAY IS A TIME. It fell through to the label below, so a
+        # slot started at "Start Time 12" — which the seed's `new Date()` read
+        # as 1 December 2001, the "junk value in place of time" a booking app
+        # showed (RK_Test, 2026-09-28). The field's own examples when they are
+        # times; else the working day, an end an hour after its start.
+        times = [x for x in examples if _TIME_OF_DAY.match(x)]
+        if times:
+            return times[(row - 1) % len(times)]
+        hour = 9 + (row - 1) % 8 + (1 if _ENDS.search(str(name)) else 0)
+        return f"{hour:02d}:{30 if row % 2 == 0 else 0:02d}"
     if kind in ("date", "datetime", "timestamp"):
         # Across the six months before today, so a trend has a line to draw.
         import datetime as _dt
@@ -2897,6 +2908,12 @@ def _seed_value(field: dict, entity_name: str, row: int,
     return f"{entity_name} {row}" if name.lower() in ("name", "title") else \
         f"{_humanise_field(name)} {row}"
 
+
+#: "09:00", "9:30", "14:45:00" — a time of day as an example gives it.
+_TIME_OF_DAY = re.compile(r"^\s*\d{1,2}:\d{2}(:\d{2})?\s*$")
+#: A field that closes a span its sibling opens: endTime, closesAt, untilTime.
+_ENDS = re.compile(r"(^|_)(end|ends|close|closes|until|finish)([A-Z_]|$)"
+                   r"|[a-z0-9](End|Ends|Close|Closes|Until|Finish)([A-Z_]|$)")
 
 #: A text field whose values are each a different thing — a name, a title.
 _UNIQUE_TEXT = re.compile(r"(^|_)(name|title|subject|label|headline|email)$|[a-z](Name|Title)$")
