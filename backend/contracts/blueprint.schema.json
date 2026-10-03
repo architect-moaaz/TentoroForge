@@ -3633,6 +3633,36 @@
             },
             "additionalProperties": false
           }
+        },
+        "check": {
+          "type": "object",
+          "properties": {
+            "pages": {
+              "type": "number"
+            },
+            "working": {
+              "type": "number"
+            },
+            "fixed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "failing": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            }
+          },
+          "required": [
+            "pages",
+            "working"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,

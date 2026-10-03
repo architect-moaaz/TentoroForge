@@ -2833,7 +2833,7 @@ def category_period(fields: list) -> int:
 
 
 def _seed_value(field: dict, entity_name: str, row: int,
-                tables_by_id: dict | None = None, *, period: int = 0) -> Any:
+                tables_by_id: dict | None = None, *, period: int = 0, person: bool = False) -> Any:
     # A FOREIGN KEY IS A REFERENCE, NOT A LABEL. Written as "Committee Id 1"
     # it failed every child insert as an invalid uuid and the demo database
     # held nothing but the admin. The seeder resolves `ref:<table>[i]` to the
@@ -2905,6 +2905,22 @@ def _seed_value(field: dict, entity_name: str, row: int,
         return f"{year:04d}-{month:02d}-{1 + (row * 5) % 27:02d}T{9 + row % 8:02d}:00:00Z"
     if kind == "email":
         return f"{to_snake(entity_name)}{row}@example.com"
+    # A VALUE BEFORE A LABEL. "Full Name 1", "Phone 1", "Email 1" read as a
+    # broken page to anyone looking at one (RK_Test's patients, 2026-10-03), and
+    # the build's check of what a screen shows says so. A field whose name says
+    # what it holds gets a plausible one; only what nothing recognises keeps
+    # the label.
+    from services.seed_values import column_role, person_name, value_for_role
+    low = str(name).lower()
+    if person and low in ("name", "fullname", "displayname"):
+        return person_name(row - 1)          # the record a login IS: its name is somebody's
+    if "email" in low:
+        return person_name(row - 1).lower().replace(" ", ".") + "@example.com"
+    if any(k in low for k in ("phone", "mobile", "tel")):
+        return f"+1 555 01{row % 100:02d}"
+    shaped = value_for_role(column_role(str(name), entity_name), str(name), entity_name, row - 1)
+    if shaped not in (None, ""):
+        return shaped
     return f"{entity_name} {row}" if name.lower() in ("name", "title") else \
         f"{_humanise_field(name)} {row}"
 
@@ -3109,7 +3125,8 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                 if is_image_field(field) or is_file_field(field) or is_embedding_field(field):
                     continue
                 record[field.get("name")] = (_ref_by_label(field, row, tables_by_id, labels_by_id)
-                                             or _seed_value(field, name, row, tables_by_id, period=period))
+                                             or _seed_value(field, name, row, tables_by_id, period=period,
+                                                            person=bool(entity.get("account"))))
             out_rows.append(years_within_age(record, entity.get("fields") or []))
         seed[table] = out_rows
     return seed

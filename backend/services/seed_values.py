@@ -38,7 +38,7 @@ _PLACES = ("North Depot", "Harbour Point", "Westfield", "Central Hub",
 
 # Column-name signals. Order matters: id checks run first so `recipientId`
 # never reads as a person.
-_PERSON_QUALIFIERS = ("recipient", "assignee", "assigned", "owner", "author",
+_PERSON_QUALIFIERS = ("full", "first", "last", "recipient", "assignee", "assigned", "owner", "author",
                       "createdby", "updatedby", "requester", "approver",
                       "manager", "employee", "user", "member", "staff",
                       "contact", "customer", "person", "reviewer")

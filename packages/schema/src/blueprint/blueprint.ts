@@ -2394,6 +2394,22 @@ export const Runtime = z.object({
       }),
     )
     .optional(),
+  /**
+   * The whole application used before the build is done: every page opened
+   * as every role it is for, its controls pressed, what it shows read
+   * (`services/blueprint/app_check`). `working` of `pages` work for everyone
+   * they are for; `fixed` were repaired during the check; `failing` still do
+   * not, and are named in the completion message. Declared before its
+   * producer writes it.
+   */
+  check: z
+    .object({
+      pages: z.number(),
+      working: z.number(),
+      fixed: z.array(z.string()).default([]),
+      failing: z.array(z.string()).default([]),
+    })
+    .optional(),
 });
 
 export const Database = z.object({

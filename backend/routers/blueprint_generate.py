@@ -2339,7 +2339,8 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
 def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: Any, emit) -> None:
     """Every page the build did not finish goes to Smith with why it failed,
     to fix the cause and write it (`page_repair`); then every process is run
-    once and what fails is fixed the same way. Only for a built tree —
+    once and what fails is fixed the same way; then every page is used as
+    each role it is for (`app_check`). Only for a built tree —
     there is nothing to run before assembly — and never fatal: what is still
     unfinished is recorded and said in the completion message."""
     try:
@@ -2363,6 +2364,18 @@ def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: A
                     [t["name"] for t in out["left"]] or "-")
     except Exception:  # noqa: BLE001
         logger.warning("[blueprint] %s: process trials failed", Path(output_dir).name, exc_info=True)
+    # THEN THE WHOLE APPLICATION IS USED, as each kind of person it is for —
+    # every page opened, every control pressed, what it shows read — and
+    # what fails is fixed the same way (`app_check`). The build knew when a
+    # page was missing; only this knows when one is wrong.
+    try:
+        from services.blueprint.app_check import check_app
+        out = check_app(svc, output_dir, emit=emit)
+        logger.info("[blueprint] %s: pages working %d of %d, fixed %s, still failing %s",
+                    Path(output_dir).name, out["working"], out["pages"], out["fixed"] or "-",
+                    [t["route"] for t in out["left"]] or "-")
+    except Exception:  # noqa: BLE001
+        logger.warning("[blueprint] %s: the app check failed", Path(output_dir).name, exc_info=True)
 
 
 def _approve_requirements(output_dir: str, app_root: str, *, emit, app_name: str = "",
