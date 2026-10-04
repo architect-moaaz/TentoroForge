@@ -9,6 +9,7 @@ loop: it decides what the ask IS. Everything after that is the loop's.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from services.smith import pending_ask
@@ -55,6 +56,24 @@ def handle(*, project_id: str, output_dir: str, message: str,
         return _in_step(output_dir, version_before,
                         turn(ctx_for(typed), choose=choose, history=history, max_steps=max_steps))
 
+    # A REQUEST TO LOOK IS A QUESTION. Answered here, before any plan logic, so
+    # it never joins, creates or clears a waiting plan or held ask.
+    from services.smith import look_ask
+    if look_ask.is_look_request(typed):
+        return _in_step(output_dir, version_before,
+                        Outcome(status="resolved", said=look_ask.answer(output_dir)))
+
+    # A SHIFT THAT TOUCHES MOST OF THE APP (a market, a currency): offered with
+    # what will and will not change, and on a yes done - through the one
+    # pending confirmation, like removing a field.
+    from services.smith import big_shift, confirm as _confirm
+    shifted = big_shift.handle(str(output_dir), typed)
+    if shifted is not None:
+        asking = _confirm.pending_fingerprint(output_dir).startswith(big_shift.VERB + ":")
+        return _in_step(output_dir, version_before, Outcome(
+            status="asked" if asking else "resolved", said=shifted,
+            options=["Go ahead", "No, leave it"] if asking else []))
+
     # AGREED TO ALL OF IT, SO DO ALL OF IT. "Do them in order" did the first
     # step and said "say next" — the person had just said the whole plan
     # (Test2, 2026-09-28: an Area record added, and the screen, the explorer
@@ -70,6 +89,17 @@ def handle(*, project_id: str, output_dir: str, message: str,
     # confirmation waiting, a yes goes to it: the held step runs again with
     # the yes, and the rest of the plan stays waiting.
     from services.smith import confirm as confirm_mod
+    # A CONFIRMATION ANSWERED BY ANYTHING BUT ITS YES IS OVER. "No, leave it"
+    # left it waiting, and it swallowed the next yes to a plan nobody had
+    # confirmed was theirs: the plan was dropped and the loop got "Go ahead".
+    # THE LATEST QUESTION WINS: a plan proposed AFTER the confirmation was asked is what a
+    # plain "Go ahead" now answers; the older confirmation is stale and is dropped.
+    if confirm_mod.waiting(output_dir) and plan_mod.peek(output_dir) and _asked_after(output_dir, plan_mod.PENDING_PATH, confirm_mod.PENDING_PATH):
+        confirm_mod.clear(output_dir)
+    declined = confirm_mod.decline_if_not_yes(output_dir, typed)
+    if declined == "no" and not answers_plan:
+        return _in_step(output_dir, version_before,
+                        Outcome(status="resolved", said="Okay, I left it as it was."))
     if answers_plan and typed not in (plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL) \
             and confirm_mod.waiting(output_dir) and confirm_mod.is_yes(typed):
         answers_plan = False
@@ -159,6 +189,13 @@ def _version(output_dir: str) -> int:
         return int(doc.get("version") or 0)
     except (OSError, ValueError, TypeError):
         return 0
+
+
+def _asked_after(output_dir: Any, a: Any, b: Any) -> bool:
+    """Was the question in file ``a`` asked after the one in ``b``? By the sequence number each
+    carries (equal or coarse file times cannot order them), else by file time."""
+    from services.smith.ordering import asked_after
+    return asked_after(output_dir, a, b)
 
 
 def _in_step(output_dir: str, version_before: int, result: Outcome) -> Outcome:
