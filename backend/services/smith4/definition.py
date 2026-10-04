@@ -62,8 +62,16 @@ def open_decisions(ctx: Ctx, args: dict) -> str:
     design = bool(figma_in(brief) or uxpilot_in(brief)) or brief_mod.has_design_references(ctx.project_id)
     offer = brief_mod.design_language_offer(Path(ctx.out))
     palette = company_palette_option(offer[0], offer[1]) if offer else ""
+    from services.smith.clarify_brief import NATIVE_DECLINED_SAY, _native_demanded, native_declined
+    if _native_demanded(brief) and native_declined(brief):
+        return NATIVE_DECLINED_SAY
     asked = clarify_brief(brief, design_attached=design, company_palette=palette)
     if not asked:
+        from services.smith.clarify_brief import is_very_small
+        if is_very_small(brief):
+            return ("The brief stands on its own: a very small application, so no colour question - "
+                    "the design direction is the designer's default, chosen from the domain "
+                    "(it can be changed any time by asking for a look). Define it.")
         return "The brief stands on its own: nothing material is left unsaid. Define it."
     lines = ["Open decisions, one per turn — ask the first with its options as chips:"]
     for item in asked:
