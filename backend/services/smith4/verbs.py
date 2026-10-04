@@ -666,6 +666,24 @@ def records_out(ctx: Ctx, u: dict) -> Outcome:
     return Outcome(status="resolved", said=str(out.get("diff_summary") or ""))
 
 
+_LIVE_CHANGES = ("\n\nChanges I make from chat are already in the application as I make them; Publish "
+                 "carries them live without a rebuild.")
+
+
+def _app_is_built(out: Any) -> bool:
+    """A BUILT app: its package.json AND something built from the definition (the
+    screens it serves, or a compiled .next). A package.json alone can be a build
+    that has only just started."""
+    app = Path(str(out)) / "app"
+    if not (app / "package.json").is_file():
+        return False
+    # A production build leaves BUILD_ID; a dev server leaves .next/server and an early shell.json, which
+    # are not "built". So: BUILD_ID, or a screen of the app's own (not the shell/nav files).
+    if (app / ".next" / "BUILD_ID").is_file():
+        return True
+    return any(p.name not in ("shell.json", "nav-flow.json") for p in (app / "src" / "schemas").rglob("*.json"))
+
+
 def rebuild(ctx: Ctx, u: dict) -> Outcome:
     """A chat turn cannot start a run, so it must not imply that it can."""
     stale = ""
@@ -686,7 +704,11 @@ def rebuild(ctx: Ctx, u: dict) -> Outcome:
     # card to press for a whole rebuild — then, asked "can I republish?", the
     # next turn said yes, the fix is in place (aszjcc2k, 2026-09-27). Both
     # cannot be true; the second was. Say it the first time.
-    if ctx.applied:
+    # ONLY OF A BUILT APP. Before the build a "change" is an edit to the
+    # definition (the requirements, the plan): there is no application for it
+    # to be "already in", nothing to launch, nothing to publish (UAT SimpleApp).
+    built = _app_is_built(ctx.out)
+    if ctx.applied and built:
         return Outcome(status="resolved", said=(
             "That change is already in the application — nothing needs rebuilding. "
             "Launch the preview to try it, or Publish to put it live."))
@@ -694,16 +716,14 @@ def rebuild(ctx: Ctx, u: dict) -> Outcome:
         return Outcome(status="needs_user", said=(
             f"Not building on the current approval: {stale}. Open the “Definition ready to "
             "review” card above and press “Approve and build” to renew it against the "
-            "definition as it now stands; the build then proceeds.\n\nChanges I make "
-            "from chat are already in the application as I make them; Publish carries "
-            "them live without a rebuild."))
+            "definition as it now stands; the build then proceeds."
+            + (_LIVE_CHANGES if built else "")))
     return Outcome(status="needs_user", said=(
         "Building the whole application is started from the definition, not from chat: open "
         "the “Definition ready to review” card above and press “Approve and build”. That runs "
-        "the pages, the data and the workflows, which takes a few minutes.\n\nChanges I "
-        "make from chat are already in the application as I make them; Publish carries "
-        "them live without a rebuild. I can also change one screen from here — name the "
-        "route and I will rebuild that."))
+        "the pages, the data and the workflows, which takes a few minutes."
+        + (_LIVE_CHANGES + " I can also change one screen from here — name the route and I will rebuild that."
+           if built else "")))
 
 
 def section_write(ctx: Ctx, u: dict) -> Outcome:
