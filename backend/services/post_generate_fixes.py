@@ -1113,6 +1113,17 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
     except Exception as e:  # noqa: BLE001
         logger.warning("table_row_nav_guard failed: %s", e)
 
+    # Every link must reach a page — a row linked to /admin/categories/<id>
+    # with no [id] page rendered the 404 page under HTTP 200 (UAT F&B). Builds
+    # the missing record page, else repoints; a link it must remove is a
+    # warning naming page + link + target, so it reaches the verdict.
+    try:
+        from services.link_target_guard import ensure_links_resolve
+        lt = ensure_links_resolve(str(root))
+        applied += len(lt["created"]) + len(lt["repointed"]) + len(lt["removed"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("link_target_guard failed: %s", e)
+
     # Auth gate — the scaffold's (dashboard) layout unconditionally redirects to
     # /login. Honour the app's authGated decision: a public app (authGated=false)
     # must start at / rather than be bounced to a login page. Gated apps unchanged.
