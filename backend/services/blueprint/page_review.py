@@ -378,6 +378,7 @@ def run_shots(app: RunningApp, pages: list[dict], out_dir: Path, *, probe: bool 
         link.symlink_to(modules)
     script = work / "page_shots.mjs"
     shutil.copyfile(_SHOTS, script)
+    shutil.copyfile(_SHOTS.with_name("probe_judge.mjs"), work / "probe_judge.mjs")
     env = {**os.environ}
     env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(Path.home() / "Library/Caches/ms-playwright"))
     proc = subprocess.run(["node", str(script), str(cfg)], cwd=work, capture_output=True,

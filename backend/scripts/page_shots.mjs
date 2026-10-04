@@ -23,6 +23,7 @@
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
+import { judgeQuiet, choiceFingerprintSource } from "./probe_judge.mjs";
 
 const cfg = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 fs.mkdirSync(cfg.outDir, { recursive: true });
@@ -174,23 +175,30 @@ async function controls(page) {
       const key = `${el.tagName}|${label}|${href.replace(/[0-9a-f-]{8,}/gi, ":id")}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ index: all.indexOf(el), label, kind: href ? "link" : "button", href });
+      const choice = ["aria-pressed", "aria-checked", "aria-selected"].some((a) => el.hasAttribute(a));
+      // Other options of the same choice: siblings under the same parent that carry a selected-state attribute.
+      const siblings = choice && el.parentElement
+        ? [...el.parentElement.children].filter((s) => s !== el && ["aria-pressed", "aria-checked", "aria-selected"].some((a) => s.hasAttribute(a))).length
+        : 0;
+      out.push({ index: all.indexOf(el), label, kind: href ? "link" : "button", href, choice, siblings });
     }
     return out;
   });
 }
 
 function fingerprint(page) {
-  return page.evaluate(() => {
+  return page.evaluate(`(() => {
+    const choiceFingerprint = ${choiceFingerprintSource.toString()};
     const main = document.querySelector("main") || document.body;
     return {
+      ...choiceFingerprint(),
       url: location.href,
       text: main.innerText.length + ":" + main.innerText.slice(0, 2000),
       dialogs: document.querySelectorAll("[role='dialog'], [role='alertdialog'], dialog[open]").length,
       expanded: [...document.querySelectorAll("[aria-expanded='true']")].length,
       toasts: document.querySelectorAll("[data-sonner-toast]").length,
     };
-  });
+  })()`);
 }
 
 async function press(context, url, control) {
@@ -213,6 +221,8 @@ async function press(context, url, control) {
     const before = await fingerprint(page);
     const target = page.locator("button, a[href], [role='button'], [role='menuitem'], [role='tab']")
       .nth(control.index);
+    const wasSelected = await target.evaluate((el) =>
+      ["aria-pressed", "aria-checked", "aria-selected"].some((a) => el.getAttribute(a) === "true")).catch(() => false);
     await target.click({ timeout: 5000 });
     // Wait for SOMETHING — a route the dev server has not compiled yet takes
     // seconds to answer the first press, and reading "nothing" at 1.5s made a
@@ -222,7 +232,8 @@ async function press(context, url, control) {
       await page.waitForTimeout(400);
       after = await fingerprint(page).catch(() => before);
       if (calls.length || dialog || errors.length || after.url !== before.url || after.dialogs !== before.dialogs
-          || after.expanded !== before.expanded || after.toasts !== before.toasts || after.text !== before.text) break;
+          || after.expanded !== before.expanded || after.toasts !== before.toasts || after.text !== before.text
+          || after.pressed !== before.pressed || after.fields !== before.fields) break;
     }
     await page.waitForLoadState("load", { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(calls.length ? 800 : 0);            // let a workflow's reply land
@@ -243,10 +254,9 @@ async function press(context, url, control) {
       const bad = status >= 400 || (landed && landed !== "loading");
       outcome = bad ? "broken-link" : "navigated";
       detail = `${new URL(after.url).pathname} (HTTP ${status}${landed ? `, shows the ${landed} page` : ""})`;
-    } else if (dialog || after.dialogs > before.dialogs || after.expanded !== before.expanded
-               || after.toasts > before.toasts || after.text !== before.text) {
-      outcome = "changed";
-      detail = dialog ? `asked "${dialog}"` : "the page changed";
+    } else {
+      // A choice changes what is selected, not where you are: judged apart.
+      ({ outcome, detail } = judgeQuiet({ before, after, choice: Boolean(control.choice), wasSelected, dialog, siblings: control.siblings || 0 }));
     }
     return { label: control.label, kind: control.kind, outcome, detail };
   } catch (e) {

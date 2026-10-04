@@ -613,6 +613,19 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
     except Exception as e:  # noqa: BLE001
         logger.warning("file_first_forms skipped: %s", e)
 
+    # An either/or choice (Dine-in | Delivery) drawn as inert buttons holds no
+    # value and shows no state (UAT F&B /order). Turn the group into a `choice`
+    # field of the page's Form and carry it into the form's workflow (input +
+    # saved column). Runs BEFORE the submit-authority guards and the input-map
+    # backfill below, so they see the finished form; a choice it cannot place is
+    # a named warning.
+    try:
+        from services.choice_control_guard import ensure_choices_are_controls
+        cc = ensure_choices_are_controls(str(root))
+        applied += len(cc["converted"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("choice_control_guard failed: %s", e)
+
     # Slice A T7 + T8 — SUBMIT-AUTHORITY guards. Run AFTER all wiring
     # passes so we only report gaps that survived every synthesis
     # attempt. v1 logs warnings; v2 will hard-fail the pipeline on any
