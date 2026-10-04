@@ -62,16 +62,30 @@ def _citing(doc: dict, req_id: str) -> dict[str, list[dict]]:
     return out
 
 
-def add_requirement(svc: Any, text: str, *, reasoning: Any = None) -> dict:
+def add_requirement(svc: Any, text: str, *, reasoning: Any = None, app_root: str | None = None,
+                    executor: Any = None, changers: dict | None = None) -> dict:
+    """Record a requirement AND make it reach the app: what implements it is
+    found, linked to it and changed, or the lack of one is said plainly with
+    what to add (requirement_reach)."""
+    from services.smith import requirement_reach as rr
     text = (text or "").strip()
     if not text:
         raise SectionChangeError("no requirement was stated.")
+    # ONE REQUIREMENT, SAID ONCE. Stating again what is already recorded (in
+    # other words) must not mint another requirement beside it.
+    twin = next((r for r in _live(svc.doc.get("requirements")) if rr.same_meaning(str(r.get("description") or ""), text)), None)
+    if twin is not None:
+        return {"applied": True, "requirement": str(twin["id"]), "text": text, "unchanged": True, "edited_paths": [],
+                "traced": [a.get("id") for sec in ("workflows", "businessRules", "pages") for a in _live(svc.doc.get(sec))
+                           if twin["id"] in (a.get("requirements") or [])]}
     req = record_requirement(svc, text, owner="")
     if not req.get("owner"):
         req.pop("owner", None)
         svc.save()
     tell(reasoning, f"Recorded {req.get('id')}.", "step")
-    return {"applied": True, "requirement": str(req.get("id")), "text": text, "edited_paths": []}
+    reached = rr.reach(svc, req, app_root=app_root, executor=executor, reasoning=reasoning, changers=changers)
+    return {"applied": True, "requirement": str(req.get("id")), "text": text, "edited_paths": ["src"] if reached["changed"] else [],
+            **{k: reached[k] for k in ("traced", "changed", "failed", "proposal")}}
 
 
 def edit_requirement(svc: Any, ref: str, change: str, *, app_root: str | None = None, executor: Any = None,
@@ -85,6 +99,14 @@ def edit_requirement(svc: Any, ref: str, change: str, *, app_root: str | None = 
     if not change:
         raise SectionChangeError(f"what should {req.get('id')} say instead?")
     before = str(req.get("description") or "")
+    from services.smith import requirement_reach as rr
+    if rr.same_meaning(before, change):
+        # NOTHING CHANGED, NOTHING RE-AUTHORED: no decision, no evidence, no
+        # re-composition of what cites it.
+        return {"applied": True, "requirement": str(req["id"]), "before": before, "after": before, "unchanged": True,
+                "decision": "", "reauthored": [], "failed": [], "edited_paths": []}
+    delta = rr.clause_delta(before, change)
+    differs = f" (what differs: {delta})" if delta.strip() != change.strip() else ""
     req["description"] = change
     req.setdefault("evidence", []).append({"message": change, "type": "conversation"})
     req["status"] = "APPROVED"
@@ -103,7 +125,7 @@ def edit_requirement(svc: Any, ref: str, change: str, *, app_root: str | None = 
         try:
             tell(reasoning, f"Composing {p.get('route')} against the restated {req['id']}.", "step")
             compose_route(svc, str(p.get("route")), app_root=app_root, executor=executor, reasoning=reasoning,
-                          request=f"{req['id']} now says: {change}")
+                          request=f"{req['id']} now says: {change}{differs}")
             done.append(str(p.get("route")))
         except Exception as exc:  # noqa: BLE001 — one refused page is reported, not fatal to the rest
             failed.append(f"{p.get('route')}: {str(exc)[:160]}")
@@ -111,7 +133,7 @@ def edit_requirement(svc: Any, ref: str, change: str, *, app_root: str | None = 
         from services.smith.workflow_change import WorkflowChangeError, edit_workflow
         for w in cites["workflows"]:
             try:
-                edit_workflow(svc, str(w["id"]), f"{req['id']} now says: {change}", app_root=app_root,
+                edit_workflow(svc, str(w["id"]), f"{req['id']} now says: {change}{differs}", app_root=app_root,
                               executor=executor, reasoning=reasoning)
                 done.append(str(w.get("name")))
             except Exception as exc:  # noqa: BLE001
@@ -120,14 +142,21 @@ def edit_requirement(svc: Any, ref: str, change: str, *, app_root: str | None = 
         from services.smith.rule_change import edit_rule
         for r in cites["rules"]:
             try:
-                edit_rule(svc, str(r["id"]), f"{req['id']} now says: {change}", app_root=app_root,
+                edit_rule(svc, str(r["id"]), f"{req['id']} now says: {change}{differs}", app_root=app_root,
                           executor=executor, reasoning=reasoning)
                 done.append(str(r.get("name")))
             except Exception as exc:  # noqa: BLE001
                 failed.append(f"{r.get('name')}: {str(exc)[:160]}")
+    reached: dict = {}
+    if not any(cites.values()):
+        # Nothing cited it, so nothing was changed above: find what implements
+        # the restated rule and change that.
+        reached = rr.reach(svc, req, delta=delta, app_root=app_root, executor=executor, reasoning=reasoning)
+        done += reached["changed"]
+        failed += reached["failed"]
     return {"applied": True, "requirement": str(req["id"]), "before": before, "after": change,
-            "decision": decision.id, "reauthored": done, "failed": failed,
-            "edited_paths": ["src/schemas"] if cites["pages"] else []}
+            "decision": decision.id, "reauthored": done, "failed": failed, "proposal": reached.get("proposal", ""),
+            "edited_paths": ["src/schemas"] if cites["pages"] or reached.get("changed") else []}
 
 
 def remove_requirement(svc: Any, ref: str, *, reasoning: Any = None) -> dict:
@@ -361,16 +390,29 @@ def remove_integration(svc: Any, ref: str, *, reasoning: Any = None) -> dict:
 
 def summary_of(verb: str, out: dict) -> str:
     if verb == "add_requirement":
-        return (f"Recorded {out['requirement']}: \"{out['text']}\". Nothing implements it yet — say what screen or "
-                "process should, or run Verify & Fix and I will hold the app to it.")
+        if out.get("unchanged"):
+            return (f"{out['requirement']} already says this, so I left it as it is"
+                    + (f" (implemented by {', '.join(out['traced'])})." if out.get("traced") else "."))
+        head = f"Recorded {out['requirement']}: \"{out['text']}\"."
+        if out.get("changed"):
+            s = f"{head} It is now implemented: changed {', '.join(out['changed'])}, which now cites {out['requirement']}, so Verify & Fix holds the app to it."
+        else:
+            s = f"{head} Nothing implements it yet."
+            if out.get("proposal"):
+                s += " " + out["proposal"]
+        if out.get("failed"):
+            s += " I could not change: " + "; ".join(out["failed"]) + "."
+        return s
     if verb == "edit_requirement":
+        if out.get("unchanged"):
+            return f"{out['requirement']} already says this, so nothing was changed."
         s = f"Restated {out['requirement']}, recorded as {out['decision']}: \"{out['after']}\" (was: \"{out['before']}\")."
         if out.get("reauthored"):
             s += f" Re-authored against it: {', '.join(out['reauthored'])}."
         if out.get("failed"):
             s += " Refused: " + "; ".join(out["failed"]) + "."
         if not out.get("reauthored") and not out.get("failed"):
-            s += " Nothing cites it yet."
+            s += " Nothing implements it yet. " + (out.get("proposal") or "")
         return s
     if verb == "remove_requirement":
         return f"Retired {out['requirement']}" + (f" and took it off {len(out['uncited'])} artifact(s)" if out.get("uncited") else "") + "."
@@ -434,7 +476,7 @@ def run(output_dir: str, verb: str, *, text: str = "", change: str = "", reasoni
     app_root = str(Path(output_dir) / "app")
     try:
         if verb == "add_requirement":
-            out = add_requirement(svc, text, reasoning=reasoning)
+            out = add_requirement(svc, text, reasoning=reasoning, app_root=app_root)
         elif verb == "edit_requirement":
             out = edit_requirement(svc, text, change, app_root=app_root, reasoning=reasoning)
         elif verb == "remove_requirement":

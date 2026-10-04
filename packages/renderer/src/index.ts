@@ -43,6 +43,7 @@ export { renderToObject } from "./test-harness/renderToObject";
 export { Box } from "./nodes/primitive";
 export { Text } from "./nodes/primitive";
 export { Image } from "./nodes/primitive";
+export { splitCredit } from "./nodes/primitive/Image";
 // Client bundle — WorkflowDispatcher context + ClientIsland boundary:
 export {
   WorkflowDispatcherProvider,

@@ -757,7 +757,10 @@ def say_requirements(doc: Mapping[str, Any]) -> str:
             + (f" in {_count(len(areas), 'area')}" if areas else "") + ".")
     if assumed:
         lead += (f" I guessed at **{len(assumed)}** of them (marked *assumed*), so check those first.")
-    return lead + "\n\n" + ask_line(REQUIREMENTS)
+    # STATED UP FRONT, NOT ASKED: every app is the same responsive web app with
+    # a phone wrapper, so "which framework?" has no answer the build can honour.
+    from services.smith.clarify_brief import WEB_AND_PHONE
+    return lead + "\n\n" + WEB_AND_PHONE + "\n\n" + ask_line(REQUIREMENTS)
 
 
 def say_requirements_change(change: Mapping[str, Any], version: int) -> str:

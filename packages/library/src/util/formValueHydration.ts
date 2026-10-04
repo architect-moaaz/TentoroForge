@@ -185,6 +185,7 @@ export function hydrateFieldValue(rawValue: unknown, field: HydrationFieldSpec):
       return hydrateBoolean(rawValue);
     case "select":
     case "radio":
+    case "choice":
       return hydrateSelect(rawValue);
     case "file":
     case "fileupload":

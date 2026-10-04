@@ -613,6 +613,19 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
     except Exception as e:  # noqa: BLE001
         logger.warning("file_first_forms skipped: %s", e)
 
+    # An either/or choice (Dine-in | Delivery) drawn as inert buttons holds no
+    # value and shows no state (UAT F&B /order). Turn the group into a `choice`
+    # field of the page's Form and carry it into the form's workflow (input +
+    # saved column). Runs BEFORE the submit-authority guards and the input-map
+    # backfill below, so they see the finished form; a choice it cannot place is
+    # a named warning.
+    try:
+        from services.choice_control_guard import ensure_choices_are_controls
+        cc = ensure_choices_are_controls(str(root))
+        applied += len(cc["converted"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("choice_control_guard failed: %s", e)
+
     # Slice A T7 + T8 — SUBMIT-AUTHORITY guards. Run AFTER all wiring
     # passes so we only report gaps that survived every synthesis
     # attempt. v1 logs warnings; v2 will hard-fail the pipeline on any
@@ -661,6 +674,19 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
             )
     except Exception as e:  # noqa: BLE001 — never block generation on the guard
         logger.warning("workflow_trigger_button_guard failed: %s", e)
+
+    # A control must be able to supply what its process needs — a "Mark all
+    # read" button on a workflow that requires the acting user / one record is
+    # refused with HTTP 422 on every click (UAT F&B). Repairs the safe cases
+    # (acting user -> signed-in user, unread input -> not required); every
+    # other gap is a warning naming control + input, so it reaches the verdict.
+    try:
+        from services.control_inputs_guard import ensure_controls_supply_inputs
+        ci = ensure_controls_supply_inputs(str(root))
+        if ci.get("repaired"):
+            applied += len(ci["repaired"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("control_inputs_guard skipped: %s", e)
 
     # Form → workflow input map backfill — the fix for the "nothing
     # happens when I save" bug. action_contract_guard above populates
@@ -1099,6 +1125,17 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
                         tr["wired"], tr.get("files", 0), output_dir)
     except Exception as e:  # noqa: BLE001
         logger.warning("table_row_nav_guard failed: %s", e)
+
+    # Every link must reach a page — a row linked to /admin/categories/<id>
+    # with no [id] page rendered the 404 page under HTTP 200 (UAT F&B). Builds
+    # the missing record page, else repoints; a link it must remove is a
+    # warning naming page + link + target, so it reaches the verdict.
+    try:
+        from services.link_target_guard import ensure_links_resolve
+        lt = ensure_links_resolve(str(root))
+        applied += len(lt["created"]) + len(lt["repointed"]) + len(lt["removed"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("link_target_guard failed: %s", e)
 
     # Auth gate — the scaffold's (dashboard) layout unconditionally redirects to
     # /login. Honour the app's authGated decision: a public app (authGated=false)

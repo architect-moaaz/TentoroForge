@@ -31,6 +31,12 @@ describe("parseJsxToSchema", () => {
     expect(result.schema.root.props?.alt).toBe("Logo");
   });
 
+  it("an <img> with no asset is a design stand-in and keeps rendering nothing (no photo tile)", () => {
+    const result = parseJsxToSchema(`<img alt="Hero" />`);
+    expect(result.schema.root.props?.src).toBe("");
+    expect(result.schema.root.props?.placeholder).toBe(false);
+  });
+
   it("parses nested div with text", () => {
     const result = parseJsxToSchema(`<section><div>Title</div></section>`);
     expect(result.schema.root.type).toBe("Box");

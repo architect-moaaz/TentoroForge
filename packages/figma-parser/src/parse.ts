@@ -84,7 +84,8 @@ function walkJsxElement(el: unknown, unmapped: ParsedResult["unmappedNodes"]): S
   if (tag === "img") {
     const src = getAttr(el, "src") ?? "";
     const alt = getAttr(el, "alt") ?? "";
-    const node: SchemaNode = { id, type: "Image", props: { src, alt } };
+    // An <img> with no asset is a design stand-in, not a record's photo: it stays empty, as before.
+    const node: SchemaNode = { id, type: "Image", props: src ? { src, alt } : { src, alt, placeholder: false } };
     if (style) node.style = style;
     return node;
   }

@@ -61,8 +61,11 @@ def _write(output_dir: str | Path, steps: list[str], agreed: bool | None, asked:
         keep = is_agreed(output_dir) if agreed is None else bool(agreed)
         path.parent.mkdir(parents=True, exist_ok=True)
         asked = asked_of(output_dir) if asked is None else asked
-        path.write_text(json.dumps({"steps": steps, "agreed": keep, **({"asked": asked} if asked else {})},
-                                   indent=2), "utf-8")
+        # WHEN IT WAS PROPOSED (smith.ordering): a plan worked through keeps its number, a new plan gets one.
+        from services.smith.ordering import next_seq, seq_of
+        seq = seq_of(path) if agreed is None else None
+        path.write_text(json.dumps({"steps": steps, "agreed": keep, "seq": seq if seq is not None else next_seq(output_dir),
+                                    **({"asked": asked} if asked else {})}, indent=2), "utf-8")
     except Exception as exc:  # noqa: BLE001 — a plan that cannot be kept is asked again
         logger.warning("[smith] could not record the plan: %s", exc)
 

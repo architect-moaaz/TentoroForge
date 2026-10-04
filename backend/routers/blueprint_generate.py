@@ -2548,8 +2548,17 @@ def _smith_is_waiting(output_dir: Any, message: str) -> bool:
     from services.smith import confirm, pending_ask, plan
     if not confirm.is_yes(message):
         return False
-    return any((_P(output_dir) / p).exists()
-               for p in (confirm.PENDING_PATH, plan.PENDING_PATH, pending_ask.PENDING_PATH))
+    import time as _t
+
+    def _fresh(rel: Any, max_age: float) -> bool:
+        p = _P(output_dir) / rel
+        try:
+            return p.exists() and (_t.time() - p.stat().st_mtime) <= max_age
+        except OSError:
+            return False
+    return (confirm.waiting(output_dir)
+            or _fresh(plan.PENDING_PATH, float("inf"))
+            or _fresh(pending_ask.PENDING_PATH, pending_ask.MAX_AGE_S))
 
 
 #: The rebuild question's own buttons (see "It is already built from this

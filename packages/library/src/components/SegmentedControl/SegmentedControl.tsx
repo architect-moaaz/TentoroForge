@@ -22,8 +22,9 @@ export function SegmentedControl({ name, label, options = [], value, style, onCh
         {options.map((o) => {
           const active = o.value === current;
           return (
-            <button key={o.value} type="button" aria-pressed={active} onClick={() => select(o.value)}
-              className={`rounded px-3 py-1 text-sm transition-colors ${active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+            <button key={o.value} type="button" aria-pressed={active} data-selected={active ? "true" : "false"}
+              onClick={() => select(o.value)}
+              className={`rounded px-3 py-1 text-sm transition-colors ${active ? "bg-primary text-primary-foreground font-medium shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
               {o.label}
             </button>
           );

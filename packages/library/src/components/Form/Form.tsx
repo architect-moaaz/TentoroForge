@@ -4,6 +4,7 @@ import { useContext } from "react";
 import { useForm, Controller, useWatch, type SubmitHandler } from "react-hook-form";
 import { DatePicker } from "../DatePicker/DatePicker";
 import { RadioGroup } from "../RadioGroup/RadioGroup";
+import { SegmentedControl } from "../SegmentedControl/SegmentedControl";
 import { Switch } from "../Switch/Switch";
 import { FileUpload } from "../FileUpload/FileUpload";
 import { fileSrc } from "../FileUpload/fileSrc";
@@ -37,6 +38,9 @@ type FieldSpec =
   | { kind: "tags"; name: string; label: string; required?: boolean; placeholder?: string }
   | { kind: "select"; name: string; label: string; required?: boolean; options: { value: string; label: string }[] }
   | { kind: "checkbox"; name: string; label: string }
+  // An either/or choice as segmented buttons; the first option is selected
+  // until one is picked, so the form never loads with nothing chosen.
+  | { kind: "choice"; name: string; label: string; required?: boolean; options: { value: string; label: string }[] }
   | { kind: "date"; name: string; label: string; required?: boolean }
   | { kind: "radio"; name: string; label: string; required?: boolean; options: { value: string; label: string }[] }
   | { kind: "switch"; name: string; label: string }
@@ -243,13 +247,21 @@ function DeclarativeForm({
   // several fields blank because the value shape doesn't match the control.
   // Root-cause fix for B-021.6 (edit form not pre-filled) across every
   // generated app, every entity, every control type. Idempotent + additive.
-  const hydratedDefaults = React.useMemo(
-    () => hydrateFormValues(
+  const hydratedDefaults = React.useMemo(() => {
+    const hydrated = hydrateFormValues(
       defaultValues as Record<string, unknown> | undefined,
       fields as unknown as HydrationFieldSpec[],
-    ),
-    [defaultValues, fields],
-  );
+    ) as Record<string, unknown>;
+    // A choice is never left unchosen: its first option is the value the form
+    // holds (and submits, and its dependent fields react to) until one is picked.
+    const out = { ...hydrated };
+    for (const f of fields as Array<{ kind?: string; name: string; options?: { value: string }[] }>) {
+      if (f.kind === "choice" && (out[f.name] === undefined || out[f.name] === "" || out[f.name] === null)) {
+        if (f.options?.[0]) out[f.name] = f.options[0].value;
+      }
+    }
+    return out;
+  }, [defaultValues, fields]);
   const { register, handleSubmit, control, setValue, getValues, unregister, reset, formState: { errors } } = useForm({ defaultValues: hydratedDefaults });
   // When defaultValues arrive AFTER first render (the record fetch resolves),
   // re-hydrate and reset form state so every control picks up its pre-fill.
@@ -930,6 +942,13 @@ function FormFieldImpl({
               onChange={f.onChange}
             />
           )} />
+      );
+    case "choice":
+      return (
+        <Controller name={name} control={control} render={({ field: f }) => (
+          <SegmentedControl name={name} label={field.label} options={field.options}
+            value={f.value ?? field.options[0]?.value} onChange={f.onChange} />
+        )} />
       );
     case "radio":
       return (

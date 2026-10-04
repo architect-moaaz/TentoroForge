@@ -108,6 +108,17 @@ const Field = z.discriminatedUnion("kind", [
       options: z.array(z.object({ value: z.string(), label: z.string() })),
     })
     .strict(),
+  // An either/or choice drawn as segmented buttons (Dine-in | Delivery): one
+  // option is always selected (the first, unless a default is given), its
+  // value rides with the form, and `interaction.visibleIf` on other fields
+  // shows what depends on it.
+  z
+    .object({
+      kind: z.literal("choice"),
+      ...fieldBase,
+      options: z.array(z.object({ value: z.string(), label: z.string() })),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("switch"),

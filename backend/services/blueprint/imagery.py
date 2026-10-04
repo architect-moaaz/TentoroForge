@@ -52,19 +52,13 @@ def _unsplash(key: str) -> Fetcher:
     return get
 
 
-def find_photo(query: str, get: Fetcher) -> dict[str, Any] | None:
-    """The first landscape photo for `query`: its URLs and credit, or None."""
-    body = get("/search/photos", {"query": query, "per_page": "1", "orientation": "landscape",
-                                   "content_filter": "high"})
-    results = (body or {}).get("results") or []
-    if not results:
-        return None
-    photo = results[0]
+def _photo_of(photo: dict, get: Fetcher) -> dict[str, Any]:
+    """One search result as the platform keeps it: URLs and credit. The
+    licence's `download_location` is hit here, once, when the picture is chosen."""
     urls = photo.get("urls") or {}
     raw = str(urls.get("raw") or "")
     user = photo.get("user") or {}
     links = photo.get("links") or {}
-    # The licence: register the use, once, when the picture is chosen.
     if links.get("download_location"):
         try:
             get(str(links["download_location"]).replace("https://api.unsplash.com", ""), {})
@@ -76,6 +70,19 @@ def find_photo(query: str, get: Fetcher) -> dict[str, Any] | None:
         "credit": {"name": str(user.get("name") or "Unsplash"),
                    "link": str(user.get("links", {}).get("html") or "https://unsplash.com") + _UTM},
     }
+
+
+def find_photos(query: str, get: Fetcher, count: int = 1) -> list[dict[str, Any]]:
+    """Up to ``count`` landscape photos for `query`, best first (empty when none)."""
+    body = get("/search/photos", {"query": query, "per_page": str(max(1, min(count, 30))),
+                                   "orientation": "landscape", "content_filter": "high"})
+    return [_photo_of(r, get) for r in ((body or {}).get("results") or [])[:count] if isinstance(r, dict)]
+
+
+def find_photo(query: str, get: Fetcher) -> dict[str, Any] | None:
+    """The first landscape photo for `query`: its URLs and credit, or None."""
+    found = find_photos(query, get, 1)
+    return found[0] if found else None
 
 
 def access_key(output_dir: str | Path | None) -> str:
@@ -139,4 +146,4 @@ def imagery_brief(doc: dict) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["UNSPLASH_KEY_ENV", "access_key", "fill_imagery", "find_photo", "imagery_brief"]
+__all__ = ["UNSPLASH_KEY_ENV", "access_key", "fill_imagery", "find_photo", "find_photos", "imagery_brief"]

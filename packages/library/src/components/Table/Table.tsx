@@ -4,7 +4,7 @@ import { RADIUS_SURFACE_CLASS } from "../../style/radius";
 import { useRadiusScale } from "../../theme/tokens-context";
 import { useContext } from "react";
 import type { StyleSlotT } from "@tentoroforge/schema";
-import { WorkflowDispatcherContext, useNavigator } from "@tentoroforge/renderer";
+import { WorkflowDispatcherContext, useNavigator, splitCredit } from "@tentoroforge/renderer";
 import { resolveStyle } from "../../style/resolveStyle";
 import { ensureHumanLabel } from "../../utils/humanizeLabel";
 import { useMotion } from "../../style/useMotion";
@@ -291,8 +291,10 @@ function Cell({ value, fmt }: { value: unknown; fmt: NonNullable<ColumnDef["form
   if (fmt === "image") {
     // Small thumbnail. Same click-stopPropagation as URLs.
     return (
-      <img src={fileSrc(value)} alt=""
+      <img src={fileSrc(splitCredit(String(value ?? "")).url)} alt=""
+        title={(() => { const c = splitCredit(String(value ?? "")).credit; return c ? `Photo by ${c.name} on Unsplash` : undefined; })()}
         onClick={(e) => e.stopPropagation()}
+        onError={(e) => { e.currentTarget.style.visibility = "hidden"; }}
         className="h-10 w-10 rounded-md object-cover border border-border/60" />
     );
   }

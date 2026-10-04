@@ -203,7 +203,7 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
     case "Text":
       return <Text node={node} ctx={ctx} />;
     case "Image":
-      return <Image node={node} />;
+      return <Image node={node} user={ctx.user} />;
     case "Icon": {
       // Deterministic Figma mapper emits Icon nodes that may carry a `src`
       // (when the asset-export pipeline has resolved a Lucide / SVG export)
@@ -222,7 +222,7 @@ export function renderNode(node: any, ctx: DispatchContext): ReactNode {
       const sizedNode = hasSizing
         ? node
         : { ...node, props: { ...iconProps, className: `w-5 h-5 ${cn}`.trim() } };
-      return <Image node={sizedNode} />;
+      return <Image node={sizedNode} decorative />;
     }
     case "Slot":
       return <Slot node={node} />;
