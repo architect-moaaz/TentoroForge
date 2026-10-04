@@ -218,6 +218,15 @@ def remove_field(ctx: Ctx, u: dict) -> Outcome:
             takes.append("rules that check it are retired: " + ", ".join(said["rules"]))
         if said["workflows"]:
             takes.append("processes that use it are re-authored: " + ", ".join(said["workflows"]))
+        # EVERYTHING THAT READS IT, in plain words and what each becomes: step
+        # formulas, templates, widget settings (field_dependents).
+        try:
+            from services.smith import field_dependents as fd
+            from services.smith.field_change import find_field
+            e, f = find_field(ctx.doc(), ent, name)
+            takes += fd.describe([d for d in fd.scan(ctx.doc(), e, str(f["name"]), output_dir=ctx.out) if not d.get("handled")])
+        except Exception:  # noqa: BLE001 - the list is a courtesy; the removal scans again itself
+            pass
     gate = confirm_cascade(ctx, "remove_field", f"{ent}.{name}", takes)
     return gate if gate is not None else definition(ctx, u)
 

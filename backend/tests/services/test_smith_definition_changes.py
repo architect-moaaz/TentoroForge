@@ -86,15 +86,17 @@ def test_a_field_is_removed_with_its_uses_and_what_still_reads_it_is_named(svc):
     assert [f["name"] for f in fresh.doc["data"]["entities"][0]["fields"]] == ["id", "fullName", "location"]
     wf = next(w for w in fresh.doc["workflows"] if w["id"] == svc._t.wf["id"])
     assert [i["name"] for i in wf["inputs"]] == ["fullName"] and wf["steps"][2]["config"]["values"] == {"fullName": "{{fullName}}"}
-    assert any("check expression still names yearsOfExperience" in x for x in out["left"])
+    # what READS it is rewritten in the same turn (field_dependents), not left for a later repair
+    # a two-way decision is never made always-true: it stays and is named
+    assert wf["steps"][1]["config"]["expression"] == "yearsOfExperience > 60"
+    assert any("decides between" in x for x in out["left"])
     assert fresh.doc["widgets"][0]["dataSource"]["fields"] == []
     assert next(r for r in fresh.doc["businessRules"] if r["id"] == svc._t.rule["id"])["status"] == "DEPRECATED"
     layout = next(l for l in fresh.doc["pageLayouts"] if l["page"] == svc._t.lst["id"] and l.get("status") != "SUPERSEDED")
     kids = layout["root"]["children"]
     assert [c["key"] for c in kids[1]["props"]["columns"]] == ["fullName"] and [f["name"] for f in kids[2]["props"]["fields"]] == ["fullName"]
-    assert kids[3]["props"]["content"].endswith("{{nurses.0.yearsOfExperience}} years")            # left, and named
-    assert any("Text.content still reads" in x for x in out["left"])
-    assert "Still reading it" in fc.summary_of("remove_field", out)
+    assert "yearsOfExperience" not in kids[3]["props"]["content"]                                  # the template part is gone
+    assert "Still referring to it" in fc.summary_of("remove_field", out)
 
 
 def test_a_new_field_is_added_and_shown_where_the_entity_is_edited_or_listed(svc):

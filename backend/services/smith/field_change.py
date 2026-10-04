@@ -516,16 +516,46 @@ def consequences(doc: dict, entity_ref: str, field_ref: str) -> dict:
 
 
 def remove_field(svc: Any, entity_ref: str, field_ref: str, *, app_root: str | None = None,
-                 reasoning: Any = None) -> dict:
+                 reasoning: Any = None, replacement: str | None = None, confirmed: bool = True) -> dict:
+    """All or nothing in memory: if anything fails before the change is committed,
+    the Blueprint is put back exactly as it was, so a later ``svc.save()`` cannot
+    persist a half-edit. See :func:`_remove_field`."""
+    import copy
+    snapshot = copy.deepcopy(svc.doc)
+    state: dict = {"committed": False}
+    try:
+        return _remove_field(svc, entity_ref, field_ref, app_root=app_root, reasoning=reasoning,
+                             replacement=replacement, confirmed=confirmed, _state=state)
+    except Exception:
+        if not state["committed"]:
+            svc.doc.clear()
+            svc.doc.update(snapshot)
+        raise
+
+
+def _remove_field(svc: Any, entity_ref: str, field_ref: str, *, app_root: str | None = None,
+                  reasoning: Any = None, replacement: str | None = None, confirmed: bool = True,
+                  _state: dict | None = None) -> dict:
+    """Remove a field AND everything that reads it (field_dependents): step
+    expressions, templates, rules, widget settings -- not only where it is
+    listed. ``confirmed=False`` changes nothing when any dependent is not
+    plainly safe, and returns what would happen so it can be asked."""
     from services.blueprint.functional_completeness import _workflow_targets_entity
+    from services.smith import field_dependents as fd
     ent, fld = find_field(svc.doc, entity_ref, field_ref)
     old = str(fld["name"])
     eid, ename = str(ent["id"]), str(ent.get("name") or "")
+    deps = fd.scan(svc.doc, ent, old, replacement=replacement, output_dir=getattr(svc, "output_dir", None))
+    if not confirmed and fd.needs_confirmation(deps):
+        return {"applied": False, "needs_confirmation": True, "entity": eid, "name": ename, "field": old,
+                "would": fd.describe(deps), "removed": [], "left": [], "edited_paths": []}
     before = svc.snapshot()
     removed: list[str] = []
     left: list[str] = []
     ent["fields"] = [f for f in ent.get("fields") or [] if f is not fld]
     removed.append(f"{ename}.{old}")
+    if fd.apply(deps):
+        removed += [f"{d['what']} ({d['becomes']})".replace(":", " -") for d in deps if not d.get("handled")]
     if str(ent.get("labelField") or "") == old:
         ent.pop("labelField", None)
         removed.append(f"{ename}.labelField")
@@ -559,10 +589,6 @@ def remove_field(svc: Any, entity_ref: str, field_ref: str, *, app_root: str | N
                 if len(keep_items) != len(items):
                     props["items"] = keep_items
                     removed.append(f"{page_id}: DescriptionList item")
-        for node in _walk(layout.get("root")):
-            for k, v in (node.get("props") or {}).items():
-                if isinstance(v, str) and bind.search(v):
-                    left.append(f"{page_id}: {node.get('type')}.{k} still reads {{{{…{old}}}}}")
     for wf in _live(svc.doc.get("workflows")):
         if not _workflow_targets_entity(svc.doc, wf, eid):
             continue
@@ -576,16 +602,13 @@ def remove_field(svc: Any, entity_ref: str, field_ref: str, *, app_root: str | N
             cfg = st.get("config") if isinstance(st, dict) else None
             if not isinstance(cfg, dict):
                 continue
-            for key in ("values", "where"):
-                m = cfg.get(key)
-                if isinstance(m, dict) and old in m:
-                    m.pop(old)
-                    removed.append(f"{wid}: step {st.get('key')} {key}")
-            if bind.search(json.dumps(cfg)):
-                left.append(f"{wid}: step {st.get('key')} still reads {{{{…{old}}}}}")
-            for key in ("expression", "condition"):
-                if isinstance(cfg.get(key), str) and _word_re(old).search(cfg[key]):
-                    left.append(f"{wid}: step {st.get('key')} {key} still names {old}")
+            # `where` is NOT touched here: a filter left empty would change or delete EVERY
+            # record, so field_dependents decides (and refuses) it. `values` only where the
+            # step writes THIS record type - another record's same-named column stays.
+            m = cfg.get("values")
+            if isinstance(m, dict) and old in m and fd.step_is_ours(ent, wf, st, cfg, True):
+                m.pop(old)
+                removed.append(f"{wid}: step {st.get('key')} values")
     for w in _live(svc.doc.get("widgets")):
         src = w.get("dataSource") if isinstance(w.get("dataSource"), dict) else None
         if src and str(src.get("entity") or "") in (eid, ename):
@@ -593,21 +616,11 @@ def remove_field(svc: Any, entity_ref: str, field_ref: str, *, app_root: str | N
             if isinstance(fields, list) and old in fields:
                 src["fields"] = [f for f in fields if f != old]
                 removed.append(f"{w.get('id')}: widget field")
-            for key in ("groupBy", "sortBy", "valueField", "labelField", "field"):
-                if str(src.get(key) or "") == old:
-                    left.append(f"{w.get('id')}: widget {key} still names {old}")
-    word = _word_re(old)
-    for rule in _live(svc.doc.get("businessRules")):
-        if str(rule.get("entity") or "") != eid:
-            continue
-        mentions = any(isinstance(rule.get(k), str) and word.search(rule[k]) for k in ("when", "expression")) or \
-            any(isinstance(a, dict) and str(a.get("field") or "") == old for a in list(rule.get("then") or []) + list(rule.get("otherwise") or []))
-        if mentions:
-            rule["status"] = "DEPRECATED"
-            removed.append(f"rule {rule.get('name')} retired")
     svc.validate()
     svc.commit(user_request=f"remove {ename}.{old}", smith_interpretation=f"remove the field and {len(removed) - 1} reference(s)",
                before=before, affected=sorted({eid, *[h.split(':')[0] for h in removed if ':' in h]}))
+    if _state is not None:
+        _state["committed"] = True
     tell(reasoning, f"Removed {ename}.{old} and {len(removed) - 1} reference(s).", "step")
     edited = _project(svc, app_root)
     # THE CODED SCREENS THAT USE IT, rewritten without it: the SDK's type
@@ -622,7 +635,10 @@ def remove_field(svc: Any, entity_ref: str, field_ref: str, *, app_root: str | N
         f"shows, edits or filters by it. Keep everything else."))
     removed += [f"screen {r} rewritten without it" for r in done]
     left += notes
-    return {"applied": True, "entity": eid, "name": ename, "field": old, "removed": removed, "left": left,
+    # NOT ASSUMED, COMPUTED: scan again, so the reply can say nothing refers to it.
+    left += fd.references_left(svc.doc, ent, old, output_dir=getattr(svc, "output_dir", None))
+    left += [f"{d['where']}: a decision is left with no rows (every row tested {old})" for d in deps if d.get("empties")]
+    return {"applied": True, "entity": eid, "name": ename, "field": old, "removed": removed, "left": sorted(set(left)),
             "edited_paths": edited}
 
 
@@ -693,9 +709,11 @@ def summary_of(verb: str, out: dict) -> str:
         return s
     s = f"Removed {out['name']}.{out['field']} and took it out of {len(out['removed']) - 1} place(s): {'; '.join(out['removed'][1:8])}."
     if out.get("left"):
-        s += " Still reading it, for Verify & Fix to repair: " + "; ".join(out["left"][:6]) + "."
-    s += (" The column leaves the database with its data kept aside (retired records), so it can be "
-          "brought back.")
+        s += " Still referring to it, and I could not rewrite: " + "; ".join(out["left"][:6]) + "."
+    else:
+        s += " Nothing still refers to it."
+    s += (" It is removed from the definition now. The database column itself is not touched yet: it goes when the "
+          "app is next published or installed, and what was saved in it cannot be brought back.")
     return s
 
 
