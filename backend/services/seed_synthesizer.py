@@ -437,6 +437,12 @@ def synthesize_seed_rows(output_dir: str) -> dict:
                     if col["hasDefault"]:
                         continue  # let the DB fill its default
                     row[col["name"]] = _value_for(col, seed_key, const, label, i)
+                    # A PICTURE ADDRESS IS EMPTY OR REAL, NEVER "Image Url 1": the page
+                    # draws its own "No photo yet" tile for empty, and seed_photos fills
+                    # real ones (it only ever replaces an empty or placeholder value).
+                    from services.seed_photos import is_photo_column
+                    if col["family"] not in ("int", "num", "bool", "date", "timestamp", "json", "uuid")                             and is_photo_column(col["name"], row[col["name"]]):
+                        row[col["name"]] = ""
                 rows.append(row)
 
             rows_by_name[name] = rows
@@ -458,6 +464,11 @@ def synthesize_seed_rows(output_dir: str) -> dict:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(plan, fh, indent=2, ensure_ascii=False)
         os.replace(tmp, plan_path)
+
+        # A photo per row for the record types that have an image column
+        # (no key = nothing happens; the page draws its placeholder).
+        from services.seed_photos import fill_seed_photos
+        fill_seed_photos(output_dir)
 
         return {"tables": tables_done, "rows_total": rows_total}
     except Exception as e:  # noqa: BLE001 — never break the pipeline
