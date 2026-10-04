@@ -662,6 +662,19 @@ def apply_post_generate_fixes(output_dir: str, *, force: bool = False) -> int:
     except Exception as e:  # noqa: BLE001 — never block generation on the guard
         logger.warning("workflow_trigger_button_guard failed: %s", e)
 
+    # A control must be able to supply what its process needs — a "Mark all
+    # read" button on a workflow that requires the acting user / one record is
+    # refused with HTTP 422 on every click (UAT F&B). Repairs the safe cases
+    # (acting user -> signed-in user, unread input -> not required); every
+    # other gap is a warning naming control + input, so it reaches the verdict.
+    try:
+        from services.control_inputs_guard import ensure_controls_supply_inputs
+        ci = ensure_controls_supply_inputs(str(root))
+        if ci.get("repaired"):
+            applied += len(ci["repaired"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("control_inputs_guard skipped: %s", e)
+
     # Form → workflow input map backfill — the fix for the "nothing
     # happens when I save" bug. action_contract_guard above populates
     # ``unmapped_fields`` when a form has fields the workflow's mutation
