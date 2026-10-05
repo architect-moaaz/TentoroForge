@@ -2802,7 +2802,14 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
     for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
         if isinstance(rule, dict) and rule.get("status") != "DEPRECATED" and by_name.get(rule.get("entity")) in entities:
             readers[by_name[rule["entity"]]] |= {str(r) for r in (rule.get("unscopedRoles") or [])}
-    return {slug_of[eid]: {"read": sorted(readers[eid]), "write": sorted(writers[eid])} for eid in entities}
+    # NO PAGE DECLARES IT: NOT LISTED. An entry with two empty lists refused
+    # every role, the administrator's included, while the file and the data
+    # route both say an entity left out is open to any signed-in role. A page
+    # written as code reads through the server and never declares what it
+    # reads, so TCommerce's categories, variants, images, cart and order items
+    # came out empty and the data API answered 403 to the admin (2026-10-05).
+    return {slug_of[eid]: {"read": sorted(readers[eid]), "write": sorted(writers[eid])}
+            for eid in entities if readers[eid] or writers[eid]}
 
 
 def project_entity_access(doc: dict, app_root: str | Path) -> dict[str, Any]:
