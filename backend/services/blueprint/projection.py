@@ -2544,7 +2544,16 @@ def launch_roles(doc: dict) -> dict[str, list[str] | None]:
             if access != "role_restricted":
                 roles.add(SIGNED_IN)
                 continue
-            for u in pg.get("users") or []:
+            # A RESTRICTED PAGE THAT NAMES NOBODY is gated by the middleware on
+            # a session alone (`role_routes`), so its launches are too. Read
+            # as "no role may", TCommerce's admin pages — restored without
+            # their roles — put [] on every admin process, and the published
+            # app refused the administrator's every save with "This action is
+            # not available to your role" (ihf6pjga, 2026-10-05).
+            named = [u for u in pg.get("users") or [] if u]
+            if not named:
+                roles.add(SIGNED_IN)
+            for u in named:
                 nm = names.get(u, u)
                 roles.add("*" if nm == "Guest" else str(nm))
         out[w["id"]] = sorted(roles)
