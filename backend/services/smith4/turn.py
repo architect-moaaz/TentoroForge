@@ -105,20 +105,30 @@ def _trial_key(o: Observation) -> str:
                      str(a.get("method") or ""), str(a.get("as") or "").lower()])
 
 
+def _is_change(o: Observation) -> bool:
+    """A step that changed the app. A rewrite that reports no file is still a
+    change: Smith rewrote F&B's Orders page to fix what its try showed, and
+    every try after was refused as "nothing has changed since" — five steps
+    lost to not being allowed to look at its own fix (2026-10-02).
+
+    ONE MEANING FOR EVERY CHECK. `_changed_after` counted such a rewrite and
+    the checks after it counted only steps with files: a permissions rewrite
+    (no file) after a failing try, then `done`, asked for the latest change
+    with a file, found none, and the turn died on `max()` of nothing
+    (ihf6pjga, 2026-10-05 18:52)."""
+    return bool(o.touched) or (o.status == "resolved" and not tools.is_read(o.tool)
+                               and not tools.is_trial(o.tool))
+
+
 def _changed_after(observations: list[Observation], i: int) -> bool:
-    """Whether anything landed after step `i`. A rewrite that reports no file
-    is still a change: Smith rewrote F&B's Orders page to fix what its try
-    showed, and every try after was refused as "nothing has changed since" —
-    five steps lost to not being allowed to look at its own fix (2026-10-02)."""
-    return any(o.touched or (o.status == "resolved" and not tools.is_read(o.tool)
-                             and not tools.is_trial(o.tool))
-               for o in observations[i + 1:])
+    """Whether anything landed after step `i`."""
+    return any(_is_change(o) for o in observations[i + 1:])
 
 
 def _still_failing(observations: list[Observation]) -> list[str]:
     """Trials whose latest run came after a change and still failed — the
     change did not fix what it was for."""
-    changes = [j for j, x in enumerate(observations) if x.touched]
+    changes = [j for j, x in enumerate(observations) if _is_change(x)]
     if not changes:
         return []
     latest: dict[str, int] = {}
@@ -150,7 +160,7 @@ def _unproven(observations: list[Observation]) -> str:
             continue
         if not _changed_after(observations, i):
             continue
-        last_change = max(j for j, x in enumerate(observations) if x.touched)
+        last_change = max(j for j, x in enumerate(observations) if _is_change(x))
         key = _trial_key(o)
         if any(_trial_key(x) == key for x in observations[last_change + 1:] if tools.is_trial(x.tool)):
             continue

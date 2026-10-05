@@ -339,3 +339,26 @@ def test_rows_made_by_this_run_are_marked_new():
     assert pt._mark_new(records, {"f-1"}) == {"FoodItem": [{"id": "f-9", "label": "Beef Wellington", "new": True},
                                                            {"id": "f-1", "label": "Samosa"}]}
     assert "marked `new`" in pt.INPUTS_SYSTEM and "the run attaches a test file" in pt.INPUTS_SYSTEM
+
+
+def test_a_change_with_no_file_after_a_failing_try_ends_the_turn_cleanly():
+    """ihf6pjga, 2026-10-05 18:52: a workflow refused the admin (403), Smith
+    rewrote the permissions — a change with no file — read the rows, and said
+    `done`. The check before `done` counted the rewrite as a change, then asked
+    for the latest change WITH a file, found none, and the turn died on
+    `max()` of nothing: "Something went wrong on my side (ValueError)"."""
+    from services.smith.loop import Observation
+    from services.smith4.turn import UNPROVEN, _before_done
+
+    tried = Observation(tool="try_workflow", args={"workflow": "Create Product"}, status="read",
+                        said="Create Product: HTTP 403 — This action is not available to your role")
+    rewrote = Observation(tool="write_section", args={"section": "permissions"}, status="resolved",
+                          said="permissions rewritten")
+    read = Observation(tool="read_rows", args={"entity": "Product"}, status="read", said="0 rows")
+
+    said = _before_done([tried, rewrote, read], landed=[])
+    assert said.startswith(UNPROVEN), "the change is a guess until the refused action is tried again"
+
+    again = Observation(tool="try_workflow", args={"workflow": "Create Product"}, status="read",
+                        said="Create Product: HTTP 200 — created")
+    assert _before_done([tried, rewrote, read, again], landed=[]) == ""
