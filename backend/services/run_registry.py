@@ -24,6 +24,7 @@ which did, and survives to be audited afterwards. This answers one question —
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 
 #: project_id -> live snapshot. Written from the stream's `emit`, read by the
@@ -172,27 +173,65 @@ def active_projects() -> list[str]:
 LEDGER_STALE_S = 180
 
 
-def ledger_snapshot(output_dir: str | Path) -> dict[str, Any] | None:
-    """The run as the project's newest ledger on disk tells it — for a
-    client whose poll landed on a worker that never saw the run.
+def ledger_snapshot(output_dir: str | Path, *, turns: bool = True) -> dict[str, Any] | None:
+    """The run as the project's ledgers on disk tell it — for a client whose
+    poll landed on a worker that never saw the run.
 
     THE REGISTRY IS ONE PROCESS'S MEMORY AND THE BACKEND RUNS TWO. The
     worker running a build holds its entry; the other answers "idle" — so
     once the panel's stream was released (ten minutes into a long turn) a
     reload showed a build in flight as nothing at all (rafm22pm, 2026-09-25,
     17 of 28 steps done and "stuck"). The ledger is the durable record every
-    worker can read; this folds it the way `note` folds the stream."""
+    worker can read; this folds it the way `note` folds the stream.
+
+    A RUN STILL GOING OUTRANKS ONE THAT ENDED. A Smith turn writes its own
+    ledger, and a build it starts writes a newer one that ends first — the
+    turn goes on to say what was built. Reading only the newest reported
+    the turn over while it was still talking. `turns=False` reads builds
+    only: whether a build is in flight is not whether Smith is."""
     import glob
-    import json
     import os
 
     runs = sorted(glob.glob(os.path.join(str(output_dir), ".forge", "runs", "*.jsonl")))
+    if not turns:
+        runs = [p for p in runs if not _is_turn(p)]
     if not runs:
         return None
-    path = runs[-1]
+    newest = _fold(runs[-1])
+    if newest is None or newest.get("active"):
+        return newest
+    now = time.time()
+    for path in reversed(runs[:-1]):
+        try:
+            if now - os.path.getmtime(path) > LEDGER_STALE_S:
+                continue
+        except OSError:
+            continue
+        going = _fold(path)
+        if going and going.get("active"):
+            if not newest.get("nodesTotal"):
+                return going
+            # The build's steps, the turn's liveness.
+            out = {**newest, "active": True, "status": "running"}
+            out.pop("endedAt", None)
+            out["elapsedMs"] = going.get("elapsedMs", out.get("elapsedMs"))
+            return out
+    return newest
+
+
+def _is_turn(path: str | Path) -> bool:
+    from services.blueprint.run_ledger import TurnLedger
+    return Path(path).stem.endswith(TurnLedger.SUFFIX)
+
+
+def _fold(path: str) -> dict[str, Any] | None:
+    """One ledger folded into a snapshot."""
+    import json
+    import os
+
     run: dict[str, Any] = {"active": False, "status": "idle", "phase": "", "stage": None,
                            "nodesDone": 0, "nodesTotal": 0, "callsDone": 0, "nodes": [], "moments": [],
-                           "awaitingApproval": False, "source": "ledger"}
+                           "awaitingApproval": False, "source": "ledger", "runId": Path(path).stem}
     started: str | None = None
     last: dict[str, Any] | None = None
     seen_subjects: set[str] = set()
@@ -242,7 +281,13 @@ def ledger_snapshot(output_dir: str | Path) -> dict[str, Any] | None:
         run["endedAt"] = _epoch(last.get("at")) or os.path.getmtime(path)
         run["awaitingApproval"] = bool(last.get("awaitingApproval"))
     elif age > LEDGER_STALE_S:
-        run["status"] = "error"; run["error"] = "the run stopped without ending — its process is gone"
+        run["status"] = "error"
+        if _is_turn(path):
+            run["interrupted"] = True
+            run["error"] = ("Smith stopped partway through that request — the server process "
+                            "working on it went away. Send it again and Smith picks it up.")
+        else:
+            run["error"] = "the run stopped without ending — its process is gone"
     else:
         run["active"] = True; run["status"] = "running"
     run["elapsedMs"] = int(((run.get("endedAt") or time.time()) - (run.get("startedAt") or time.time())) * 1000)

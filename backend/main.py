@@ -309,9 +309,18 @@ async def _start_timer_scheduler():
     await app.state.timer_scheduler.start()
 
 
+@app.on_event("startup")
+async def _start_dev_server_reaper():
+    """Ends the app servers nobody is using — see `services.dev_servers`."""
+    from services import dev_servers
+    app.state.dev_server_reaper = asyncio.create_task(dev_servers.reaper())
+
+
 @app.on_event("shutdown")
 async def _shutdown():
     stop_all_previews()
+    if hasattr(app.state, "dev_server_reaper"):
+        app.state.dev_server_reaper.cancel()
     if hasattr(app.state, "timer_scheduler"):
         await app.state.timer_scheduler.stop()
 

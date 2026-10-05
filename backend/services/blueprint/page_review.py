@@ -260,6 +260,8 @@ class RunningApp:
                  # Also what the SDK's empty state answers to: only this server
                  # builds into `.next-review`.
                  "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2]})
+        from services import dev_servers
+        dev_servers.track(self.proc.pid, port=self.port, root=self.root, kind="review")
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             try:
@@ -272,6 +274,8 @@ class RunningApp:
 
     def __exit__(self, *exc: Any) -> None:
         if self.proc is not None:
+            from services import dev_servers
+            dev_servers.forget(self.proc.pid)
             for sig in (signal.SIGTERM, signal.SIGKILL):
                 try:
                     os.killpg(os.getpgid(self.proc.pid), sig)

@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import logging
 import re
 import time
@@ -1132,9 +1133,36 @@ async def read_run(
     # read. A run it shows as ended more than a couple of minutes ago is not
     # this visit's run — the same rule the registry keeps.
     ledger = run_registry.ledger_snapshot(_output_dir(project))
+    if ledger and ledger.get("interrupted"):
+        return _interrupted_turn(project, ledger)
     if ledger and (ledger.get("active") or (time.time() - float(ledger.get("endedAt") or 0)) < 120):
         return ledger
     return snap
+
+
+def _interrupted_turn(project: Any, ledger: dict) -> dict:
+    """A Smith turn whose process died: said once in the conversation, and
+    closed in its ledger so it is said once.
+
+    The person's message was left with no answer — the turn died with the
+    worker, and nothing that lived on knew it had been asked (ihf6pjga,
+    2026-10-05, two asks unanswered). Whichever poll finds the dead turn
+    first claims it; the claim is a file only one process can create."""
+    runs = _output_dir(project) / ".forge" / "runs"
+    run_id = str(ledger.get("runId") or "")
+    try:
+        os.close(os.open(runs / f"{run_id}.noted", os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except OSError:
+        return ledger
+    try:
+        with (runs / f"{run_id}.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"event": "run:crashed", "error": "its process went away",
+                                 "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}) + "\n")
+    except OSError:
+        pass
+    _remember(asyncio.get_running_loop(), project.id, "assistant", str(ledger.get("error") or ""),
+              {"status": "error"})
+    return ledger
 
 
 @router.get("/api/projects/{project_id}/looks/{page_id}/{attempt}/{name}")
@@ -1981,6 +2009,16 @@ async def smith_chat(
             # but the inner build keeps running, and it is the inner one we wait
             # on to emit the real completion afterwards.
             _inner = loop.run_in_executor(None, work)
+            # ON DISK, FOR EVERY WORKER. The registry above is this worker's
+            # memory; a panel whose stream dropped polls whichever worker
+            # answers, and only a ledger tells it the turn is still working —
+            # or that the process working on it is gone.
+            from services.blueprint.run_ledger import TurnLedger
+            _turn_ledger = TurnLedger(output_dir, phase="build" if req.approved else "define")
+
+            def _ledger_end(f: Any) -> None:
+                _turn_ledger.end(None if f.cancelled() else f.exception())
+            _inner.add_done_callback(_ledger_end)
             _fut = asyncio.shield(_inner)
             try:
                 emit("done", await asyncio.wait_for(_fut, timeout=_turn_timeout))
@@ -2177,7 +2215,8 @@ def build_in_flight(output_dir: str | Path) -> dict | None:
     """The run writing this application now, as its ledger tells it — read
     from disk because the backend runs two workers and either may hold it."""
     from services.run_registry import ledger_snapshot
-    snap = ledger_snapshot(output_dir)
+    # Builds only: the turn asking is itself in flight, and it is not a build.
+    snap = ledger_snapshot(output_dir, turns=False)
     return snap if snap and snap.get("active") else None
 
 

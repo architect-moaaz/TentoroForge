@@ -176,6 +176,8 @@ async def start_project_environment(
         preexec_fn=os.setsid,
     )
 
+    from services import dev_servers
+    dev_servers.track(proc.pid, port=port, root=output_dir, kind="environment", key=project_short_id)
     _environments[project_short_id] = {
         "proc": proc,
         "port": port,
@@ -243,6 +245,9 @@ async def stop_project_environment(project_short_id: str) -> bool:
 
     # Kill Next.js dev server
     proc = entry.get("proc")
+    if proc:
+        from services import dev_servers
+        dev_servers.forget(proc.pid)
     if proc and proc.returncode is None:
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -386,6 +391,10 @@ async def _restart_preview_server(project_short_id: str) -> bool:
         preexec_fn=os.setsid,
     )
 
+    from services import dev_servers
+    if proc:
+        dev_servers.forget(proc.pid)
+    dev_servers.track(new_proc.pid, port=port, root=output_dir, kind="environment", key=project_short_id)
     entry["proc"] = new_proc
     entry["restart_count"] = restart_count + 1
 

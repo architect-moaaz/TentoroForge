@@ -12,6 +12,8 @@ from pathlib import Path
 
 import httpx
 
+from services import dev_servers
+
 logger = logging.getLogger(__name__)
 
 # Port range reserved for preview servers (separate from screenshot range 3100-3199)
@@ -135,6 +137,10 @@ async def start_preview(project_id: str, output_dir: str) -> int:
 
     await _ensure_database(output_dir)
     await _stop_strays(output_dir)
+    # ROOM FIRST. Each Preview grows to three gigabytes or more, and four
+    # left open on forge-v3 starved the host until its workers died
+    # (2026-10-05). The stalest goes before another one starts.
+    await asyncio.to_thread(dev_servers.make_room, keep=dev_servers.MAX_PREVIEWS - 1)
 
     # basePath so Next generates page + asset URLs under the platform
     # proxy path. Reads next.config.ts (env-gated PREVIEW_BASE_PATH).
@@ -171,6 +177,7 @@ async def start_preview(project_id: str, output_dir: str) -> int:
         "output_dir": output_dir,
         "restart_count": 0,
     }
+    dev_servers.track(proc.pid, port=port, root=output_dir, kind="preview", key=project_id)
 
     # Poll until the server is ready (max 30s)
     url = f"http://localhost:{port}"
@@ -203,6 +210,7 @@ def stop_preview(project_id: str) -> bool:
         return False
 
     proc = entry["proc"]
+    dev_servers.forget(proc.pid)
     if proc.returncode is None:
         try:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -339,8 +347,11 @@ async def _restart_preview(project_id: str) -> bool:
         preexec_fn=os.setsid,
     )
 
+    if proc is not None:
+        dev_servers.forget(proc.pid)
     entry["proc"] = new_proc
     entry["restart_count"] = restart_count + 1
+    dev_servers.track(new_proc.pid, port=port, root=output_dir, kind="preview", key=project_id)
 
     # Poll until ready
     url = f"http://localhost:{port}"
@@ -380,6 +391,14 @@ async def _health_check_loop(project_id: str) -> None:
 
             status = await health_check(project_id)
 
+            entry = _previews.get(project_id)
+            if (status["status"] in ("crashed", "unhealthy") and entry
+                    and dev_servers.was_reaped(entry["proc"].pid)):
+                # ENDED ON PURPOSE, not crashed: nobody had opened it for a
+                # while, or a newer one needed the room. Restarting it here
+                # would undo the reaper; the next request for it starts it.
+                _previews.pop(project_id, None)
+                break
             if status["status"] in ("crashed", "unhealthy"):
                 logger.warning(
                     "Preview %s is %s, attempting auto-restart",

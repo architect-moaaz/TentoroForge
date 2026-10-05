@@ -80,6 +80,8 @@ def booted_app(
         stderr=subprocess.STDOUT,
         start_new_session=True,
     )
+    from services import dev_servers
+    dev_servers.track(proc.pid, port=port, root=output_dir, kind="journey")
 
     try:
         if not _wait_for_boot(base_url, boot_timeout_s):
@@ -96,6 +98,7 @@ def booted_app(
         }
     finally:
         _terminate_tree(proc)
+        dev_servers.forget(proc.pid)
         try:
             logf.close()
         except Exception:

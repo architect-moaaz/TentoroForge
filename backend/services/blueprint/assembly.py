@@ -1128,6 +1128,8 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
         text=True, env={**os.environ, "BROWSER": "none"},
         start_new_session=True,
     )
+    from services import dev_servers
+    dev_servers.track(proc.pid, port=port, root=root, kind="boot-check")
 
     def _kill_tree() -> None:
         for sig in (signal.SIGTERM, signal.SIGKILL):
@@ -1196,6 +1198,7 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
         # server it spawned running — on a port, holding the pipe, outliving
         # the build that started it.
         _kill_tree()
+        dev_servers.forget(proc.pid)
         if proc.stdout:
             proc.stdout.close()
 
