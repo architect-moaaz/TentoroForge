@@ -563,6 +563,21 @@ def test_a_repair_that_renames_retires_what_it_replaced(svc):
     assert "REPLACES what you wrote before" in calls[1].feedback
 
 
+def test_a_repair_that_answers_no_pages_retires_no_pages(svc):
+    """TCommerce (ihf6pjga, forge-v3, 2026-10-05): the page plan's repair came
+    back with no pages at all, and every page it had authored was retired as
+    "superseded" — 17 of 17. The product model showed 0 screens and the build
+    made two. A section the repair said nothing about is not one it replaced."""
+    def author(spec: TaskSpec) -> AgentResult:
+        if "observer" in spec.task_id:
+            return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9, proposals=[])
+        return page(spec, users=["ROLE-999"])
+
+    run(svc, author, plan=["page_contracts"], observer_agent=Observer())
+    live = [p for p in svc.doc["pages"] if p["status"] != "DEPRECATED"]
+    assert [p["route"] for p in live] == ["/candidates"], "the page the repair said nothing about stands"
+
+
 def test_a_repair_under_the_same_key_updates_in_place_and_retires_nothing(svc):
     author = Ghost()
     run(svc, author, plan=["page_contracts"], observer_agent=Observer())

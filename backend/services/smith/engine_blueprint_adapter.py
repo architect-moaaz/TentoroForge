@@ -43,9 +43,16 @@ def load_engine_doc(output_dir: str) -> dict[str, Any] | None:
     return doc if isinstance(doc, dict) else None
 
 
+#: Statuses that take an artifact out of the application. The engine retires
+#: with DEPRECATED; only SUPERSEDED was skipped here, so every retired page,
+#: process and record reached Smith as live — it told TCommerce's owner the
+#: app had 19 pages when 16 were retired and served 404 (ihf6pjga, 2026-10-05).
+RETIRED = ("DEPRECATED", "SUPERSEDED", "REMOVED")
+
+
 def _live(items: Any) -> list[dict]:
     return [i for i in (items or [])
-            if isinstance(i, dict) and i.get("status") != "SUPERSEDED"]
+            if isinstance(i, dict) and str(i.get("status") or "").upper() not in RETIRED]
 
 
 def _accounts(doc: dict[str, Any], role_names: dict[str, str]) -> dict[str, Any]:

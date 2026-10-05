@@ -1879,12 +1879,26 @@ def _execute(
                 # rightly flagged and could not repair. What the subject
                 # authored before and did not re-propose is retired here.
                 now = _proposed_identities(outcome, application)
-                stale = w.authored.get(spec.subject, set()) - now
+                # …BUT ONLY FOR WHAT IT ANSWERED. A repair whose reply held no
+                # pages at all — the edit touched a section the node does not
+                # write, and the rewrite came back without its own — retired
+                # all seventeen of TCommerce's pages as "superseded"; the
+                # product model then showed 0 screens and the build made two
+                # (ihf6pjga, forge-v3, 2026-10-05). A section the repair said
+                # nothing about is not one it replaced.
+                answered = {ident[1] for ident in now}
+                stale = {ident for ident in w.authored.get(spec.subject, set()) - now
+                         if ident[1] in answered}
+                kept = {ident[1] for ident in w.authored.get(spec.subject, set())} - answered
+                if kept:
+                    logger.warning("[%s] repair of %s returned nothing for %s — what was authored there stands",
+                                   key, spec.subject, ", ".join(sorted(kept)))
                 if stale:
                     _retire(svc, stale,
                             note=f"superseded by the observer's repair of "
                                  f"{spec.task_id}")
-                w.authored[spec.subject] = now
+                w.authored[spec.subject] = now | {ident for ident in w.authored.get(spec.subject, set())
+                                                  if ident[1] in kept}
                 if was_edited(outcome):
                     w.edited.add(spec.subject)
                 else:

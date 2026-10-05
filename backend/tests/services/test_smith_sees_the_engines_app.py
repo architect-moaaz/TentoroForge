@@ -45,12 +45,18 @@ _ids = lambda p: p.name
 def test_smith_sees_every_page_the_engine_wrote(project):
     """`understand_ask` returns a `target_file` and the move scopes against it.
     A page Smith cannot see is a page it cannot be asked to change."""
+    from services.smith.engine_blueprint_adapter import RETIRED
+
     doc = load_engine_doc(str(project))
-    engine_routes = {str(p.get("route")) for p in (doc.get("pages") or [])
-                     if p.get("route")}
+    live = {str(p.get("route")) for p in (doc.get("pages") or [])
+            if p.get("route") and str(p.get("status") or "").upper() not in RETIRED}
+    retired = {str(p.get("route")) for p in (doc.get("pages") or [])
+               if p.get("route") and str(p.get("status") or "").upper() in RETIRED} - live
     seen = {str(p.get("route")) for p in
             Blueprint.load(project_id="t", output_dir=str(project)).pages}
-    assert engine_routes <= seen, f"unseen: {sorted(engine_routes - seen)}"
+    assert live <= seen, f"unseen: {sorted(live - seen)}"
+    # …and nothing retired is shown as if it were there (TCommerce, 2026-10-05).
+    assert not (retired & seen), f"retired but shown: {sorted(retired & seen)}"
 
 
 @pytest.mark.parametrize("project", _APPS, ids=_ids)
