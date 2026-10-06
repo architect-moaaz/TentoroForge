@@ -639,6 +639,10 @@ view.tsx — "use client" on the first line.
     react, next/link, next/navigation (useRouter, useSearchParams, usePathname),
     lucide-react (icons), clsx, tailwind-merge, class-variance-authority, sonner (toast),
     the @radix-ui primitives the kit is built on, the UI kit and the library below (optional),
+    @dnd-kit/core + @dnd-kit/sortable (drag a card across a board, reorder a list — the move
+    itself still runs a workflow), motion/react (`motion.div`, `AnimatePresence`: a panel
+    sliding in, a row arriving), "@/sdk/map" (MapView: places as pins, a path as a line —
+    `<MapView points={[{ id, lat, lng, label }]} route={[{ lat, lng }, …]} onPointClick={…} />`),
     "@/sdk" (entity types, workflows, pages, widgets, href, fileUrl), "@/sdk/client" (useWorkflow,
     WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm),
     "@/sdk/camera" (CameraCapture, BarcodeScanner), "@/sdk/i18n" (useT, useLanguage, LanguageSwitch), and
@@ -1003,7 +1007,20 @@ def ensure_sdk(doc: dict, app_root: Path) -> None:
 
 #: SDK modules built on a package the scaffold did not always carry: a page
 #: that imports one needs it in the tree it compiles and runs in.
-SDK_PACKAGES: dict[str, tuple[str, ...]] = {"@/sdk/camera": ("@zxing/browser", "@zxing/library")}
+SDK_PACKAGES: dict[str, tuple[str, ...]] = {
+    "@/sdk/camera": ("@zxing/browser", "@zxing/library"),
+    # SCREENS THAT MOVE (2026-10-07): a map, a calendar, a command palette,
+    # dragging a card across a board, motion. An app built before them has
+    # the kit file or SDK module (filled in by `fill_scaffold_defaults` /
+    # `ensure_sdk`) but not the package, until a page imports it — then here.
+    "@/sdk/map": ("maplibre-gl",),
+    "@/components/ui/calendar": ("react-day-picker",),
+    "@/components/ui/command": ("cmdk",),
+    "@dnd-kit/core": ("@dnd-kit/core",),
+    "@dnd-kit/sortable": ("@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities"),
+    "@dnd-kit/utilities": ("@dnd-kit/utilities",),
+    "motion/react": ("motion",),
+}
 
 
 def ensure_sdk_packages(app_root: Path, view: str) -> list[str]:

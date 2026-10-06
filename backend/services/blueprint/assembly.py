@@ -147,6 +147,13 @@ SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     # `null` body when no logo was given; this stands in when that projection
     # did not run at all.
     "src/contracts/brand.ts",
+    # THE KIT PARTS A SCREEN IS BUILT FROM (2026-10-07): a page that imports
+    # one must find it, in an application built before it existed. Their
+    # packages arrive when a page first imports them (`ui_engineer.SDK_PACKAGES`).
+    "src/components/ui/sheet.tsx", "src/components/ui/popover.tsx",
+    "src/components/ui/dropdown-menu.tsx", "src/components/ui/tooltip.tsx",
+    "src/components/ui/switch.tsx", "src/components/ui/scroll-area.tsx",
+    "src/components/ui/calendar.tsx", "src/components/ui/command.tsx",
     # THE PLATFORM'S USERS TABLE IS A DEFAULT THE BLUEPRINT MAY EXTEND. The
     # projection emits `user.ts` for a Blueprint entity that maps to `users`
     # — the platform's columns as the platform declares them, then whatever
