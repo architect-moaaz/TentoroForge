@@ -2770,6 +2770,11 @@ _DECLARED_FIELDS: tuple[str, ...] = (
 )
 
 
+#: What a subject naming no requirements is told in its own part: the whole
+#: section, which now rides in the cached half beside the rest of the slice.
+ALL_REQUIREMENTS_ABOVE = "every requirement in the `requirements` section above; this one names none of its own"
+
+
 def _workflow_steps_prompt(doc: dict, system: str, subject: str,
                            feedback: str, *, output_dir: Any = None,
                            brief: str = "") -> tuple[str, str]:
@@ -2793,6 +2798,10 @@ def _workflow_steps_prompt(doc: dict, system: str, subject: str,
     if wanted:
         requirements = [r for r in requirements
                         if isinstance(r, dict) and r.get("id") in wanted]
+    else:
+        # The whole section, shared with every workflow that names none —
+        # cached with the rest, not re-sent in each call's own part.
+        context["requirements"], requirements = requirements, ALL_REQUIREMENTS_ABOVE
     natural_key = _declared_key(output_dir, subject) or str(row.get("name") or subject)
     user = (
         "The Blueprint slice a workflow's steps may name.\n\n```json\n"
@@ -2872,6 +2881,12 @@ def _entity_fields_prompt(doc: dict, system: str, subject: str,
     if wanted:
         requirements = [r for r in requirements
                         if isinstance(r, dict) and r.get("id") in wanted]
+    else:
+        # NAMING NONE, IT ANSWERS THEM ALL — and so does every sibling that
+        # names none: the same section, so it is cached with the rest. In each
+        # call's own part it was ~8k uncached tokens a call, on every one of
+        # Mozato's 128 entity calls (none of its 54 entities named any).
+        context["requirements"], requirements = requirements, ALL_REQUIREMENTS_ABOVE
     # Shared by every entity first; this entity's own part after the break.
     context["data"] = {"entities": others}
     own = {"data": {"relationships": touching, "constraints": []},
@@ -3516,6 +3531,15 @@ EFFORT_BY_NODE: dict[str, str] = {
     # finding and has something concrete to do. It fans out per entity, so
     # the ceiling is paid once per record rather than once per build.
     "entity_fields": "medium",
+    # ONE SUBJECT AGAINST A CONTRACT THAT IS ALREADY DECIDED. A feature's page
+    # contracts and a workflow's steps fill in a declaration `page_contracts`
+    # and `workflows` made at `high`; the shape is the schema's. They were the
+    # two biggest output lines of Mozato's build (2026-10-06: 760k output
+    # tokens over 91 calls, $7.6 of thinking and answer). A reply the contract
+    # REFUSES is retried at `high` (`after_refusal`), so the saving never
+    # costs a subject its correctness.
+    "page_details": "medium",
+    "workflow_steps": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     # A short list of named third parties.
     "integrations": "low",
@@ -3551,13 +3575,21 @@ EFFORT_BY_NODE: dict[str, str] = {
 #: the same score and the same five issues.
 EFFORT_BY_AGENT: dict[str, str] = {
     "page_reviewer": "medium",
+    # The observer judges an output against a list; `anthropic_observer` says
+    # `medium`, but handed the build's router it took the router's default
+    # (`high`) — Mozato's 255 checks wrote 850k output tokens (2026-10-06).
+    "observer": "medium",
 }
 
 MAX_TOKENS_BY_NODE: dict[str, int] = {
     # Names the entities and their relationships without a field; the 64k
     # the single call needed went on fields, which `entity_fields` writes one
     # entity at a time inside the default.
-    "data_model": 32000,
+    #
+    # 64k AGAIN FOR A LARGE APPLICATION. Mozato (54 entities, 2026-10-06) was
+    # cut off at 32,000 after 290s, and the retry paid for it all again.
+    # Unused headroom is free; a cut-off answer is not.
+    "data_model": 64000,
     # Declares the page set without the contracts; the 64k the single call
     # needed went on contracts, which `page_details` writes per feature.
     #
@@ -3572,7 +3604,16 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     # Declares thirty-odd workflows without their steps; the 64k the single
     # call needed went on step graphs, which `workflow_steps` now writes one
     # workflow at a time inside the default.
-    "workflows": 32000,
+    # Mozato's 31 declarations were cut off at 32,000 after 239s (2026-10-06).
+    "workflows": 64000,
+    # THE REST MEASURED AT THE CEILING ON MOZATO (2026-10-06): a 78k-character
+    # request's requirements (267s), its business rules (31,622), its
+    # analytics (295s), and three workflows' step graphs (one on TCommerce),
+    # each thrown away whole and asked again.
+    "requirements": 64000,
+    "business_rules": 64000,
+    "analytics": 64000,
+    "workflow_steps": 64000,
     # One page's thinking plus two whole files — a record workspace's view
     # runs to several hundred lines — and a compile round re-sends the code.
     # 48k ran out on a fifteen-fact record page (0l133sp2); headroom is free.
@@ -3607,6 +3648,30 @@ def after_no_answer(client: Any, feedback: str) -> Any:
     lower = "low"
     return dataclasses.replace(client, effort=lower,
                                max_tokens=max(int(getattr(client, "max_tokens", 0) or 0), NO_ANSWER_RETRY_TOKENS))
+
+
+#: Nodes whose first pass runs below `high` to save thinking, and whose retry
+#: after a refusal goes back to `high`.
+RETRY_AT_HIGH: frozenset[str] = frozenset({"page_details", "workflow_steps"})
+
+
+def after_refusal(client: Any, spec: Any) -> Any:
+    """The client for a retry after the CONTRACT refused a subject's answer:
+    the node's effort, unless the node runs its first pass below `high` to
+    save thinking — then `high`. The cheap first pass is a bet that the
+    shape is easy; a refusal says it was not. A repair, a reply that never
+    started or was cut off (`after_no_answer`), and a first pass are left
+    as they are."""
+    import dataclasses
+
+    feedback = str(getattr(spec, "feedback", "") or "")
+    if (not feedback or getattr(spec, "repair", False)
+            or feedback.startswith(("NoAnswer", "Truncated"))
+            or getattr(spec, "node", "") not in RETRY_AT_HIGH
+            or not dataclasses.is_dataclass(client) or not hasattr(client, "effort")
+            or str(client.effort) not in ("low", "medium")):
+        return client
+    return dataclasses.replace(client, effort="high")
 
 
 #: One notch down, never below `low`.
@@ -4173,12 +4238,12 @@ def make_executor(
             composed = _compose_via_a2ui(spec)
             if composed is not None:
                 return composed
-        client = for_repair(after_no_answer(
+        client = for_repair(after_refusal(after_no_answer(
             model.for_task(spec.node, spec.agent)
             if isinstance(model, ModelRouter)
             else model,
             spec.feedback,
-        ), spec)
+        ), spec), spec)
         # §5 — an application can be described by showing as well as by
         # telling. Resolved per call rather than threaded through `run`,
         # because the references belong to the application and `svc` is the

@@ -1590,20 +1590,22 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
     r = tiered_router()
     for node in ("page_contracts", "security"):
         assert r.for_task(node, "x").max_tokens == 64000, node
-    # The declarations are what remain of the calls that hit 32k writing
-    # every field, every step and every contract; those are authored one
-    # entity, one workflow and one feature per call inside the default.
-    for node in ("data_model", "workflows"):
-        assert r.for_task(node, "x").max_tokens == 32000, node
+    # 64k AGAIN, MEASURED ON A LARGE APPLICATION. Mozato (forge-v3,
+    # 2026-10-06: a 78k-character request, 54 entities, 31 workflows) was cut
+    # off at exactly 32,000 on each of these, and each answer was thrown away
+    # whole and asked again.
+    for node in ("data_model", "workflows", "requirements", "business_rules",
+                 "analytics", "workflow_steps"):
+        assert r.for_task(node, "x").max_tokens == 64000, node
     # The page set grows with the application: on UAT a 23-entity app spent
     # the whole 32,000 reasoning over 24 slots and wrote no page at all.
     assert r.for_task("page_contracts", "x").max_tokens == 64000
-    for node in ("requirements", "ux_architecture", "integrations",
-                 "page_layouts", "design_system", "workflow_steps",
-                 "page_details", "entity_fields"):
+    for node in ("ux_architecture", "integrations", "page_layouts",
+                 "design_system", "page_details", "entity_fields"):
         assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
     assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
-                                       "security", "workflows",
+                                       "security", "workflows", "requirements",
+                                       "business_rules", "analytics", "workflow_steps",
                                        "page_code"}   # a page's two whole files
 
 

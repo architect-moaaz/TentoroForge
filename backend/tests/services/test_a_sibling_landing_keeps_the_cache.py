@@ -53,3 +53,42 @@ def test_every_check_of_a_build_shares_the_observers_cached_half():
     (s1, u1), (s2, u2) = check("FLOW-001"), check("FLOW-002")
     assert s1 == s2 and request.strip() in s1 and isinstance(_cacheable(s1), list)
     assert "userRequest" not in json.loads(u1) and json.loads(u2)["subject"] == "FLOW-002"
+
+
+def test_a_subject_naming_no_requirements_reads_them_from_the_cached_half(tmp_path):
+    """None of Mozato's 54 entities named a requirement, so every entity call
+    re-sent the whole section (~8k tokens) in its own, uncached part."""
+    doc = _doc(tmp_path)
+    doc["requirements"] = [{"id": "REQ-001", "statement": "Customers order food"},
+                           {"id": "REQ-002", "statement": "Riders deliver it"}]
+    doc.setdefault("data", {})["entities"] = [{"id": "ENTITY-001", "name": "Order", "table": "orders"},
+                                              {"id": "ENTITY-002", "name": "Rider", "table": "riders",
+                                               "requirements": ["REQ-002"]}]
+    head, _, own = ex._entity_fields_prompt(doc, "S", "ENTITY-001", "")[1].partition(ex.CACHE_BREAK)
+    assert "Customers order food" in head and "Customers order food" not in own
+    assert ex.ALL_REQUIREMENTS_ABOVE in own
+    head2, _, own2 = ex._entity_fields_prompt(doc, "S", "ENTITY-002", "")[1].partition(ex.CACHE_BREAK)
+    assert "Riders deliver it" in own2 and "Customers order food" not in own2   # names its own: those only
+
+
+def test_the_cheap_first_pass_goes_back_to_high_after_a_refusal():
+    """page_details and workflow_steps author at `medium`; a reply the contract
+    refused is retried at `high`. Repairs and cut-off replies keep their own rules."""
+    from types import SimpleNamespace as S
+
+    r = ex.tiered_router()
+    for node in ("page_details", "workflow_steps"):
+        first = r.for_task(node, "x")
+        assert first.effort == "medium"
+        assert ex.after_refusal(first, S(node=node, feedback="refused: no FK", repair=False)).effort == "high"
+        assert ex.after_refusal(first, S(node=node, feedback="", repair=False)).effort == "medium"
+        assert ex.after_refusal(first, S(node=node, feedback="findings", repair=True)).effort == "medium"
+        assert ex.after_refusal(first, S(node=node, feedback="Truncated: cut", repair=False)).effort == "medium"
+    assert ex.after_refusal(r.for_task("entity_fields", "x"),
+                            S(node="entity_fields", feedback="refused", repair=False)).effort == "medium"
+    assert r.for_task("anything", "observer").effort == "medium"
+
+
+def test_the_nodes_cut_off_on_mozato_have_room():
+    for node in ("requirements", "data_model", "workflows", "business_rules", "analytics", "workflow_steps"):
+        assert ex.tiered_router().for_task(node, "x").max_tokens == 64000, node
