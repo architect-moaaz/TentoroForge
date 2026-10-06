@@ -35,3 +35,21 @@ def test_the_cached_head_survives_a_sibling_landing(tmp_path):
         return ex._workflow_steps_prompt(d, "SYSTEM", subject, "")[1].partition(ex.CACHE_BREAK)[0]
 
     assert head(doc, "FLOW-001") == head(later, "FLOW-001") == head(later, "FLOW-002")
+
+
+def test_every_check_of_a_build_shares_the_observers_cached_half():
+    """Mozato's 78k-character request rode in each of 255 observer checks,
+    uncached. It belongs to the system prompt every check of the build shares."""
+    import json
+
+    from services.blueprint.executors import _cacheable
+    from services.blueprint.observer import critic_prompt
+
+    request = "Build a food delivery marketplace. " * 400
+    def check(subject):
+        return critic_prompt({"scope": "subject", "userRequest": request, "agent": "workflow",
+                              "application": {"name": "Mozato"}, "subject": subject,
+                              "output": {"workflows": [{"id": subject}]}, "requirements": []})
+    (s1, u1), (s2, u2) = check("FLOW-001"), check("FLOW-002")
+    assert s1 == s2 and request.strip() in s1 and isinstance(_cacheable(s1), list)
+    assert "userRequest" not in json.loads(u1) and json.loads(u2)["subject"] == "FLOW-002"
