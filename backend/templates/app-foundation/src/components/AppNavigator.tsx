@@ -172,6 +172,29 @@ export function AppNavigator({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  // PLAIN ANCHORS NAVIGATE SOFTLY TOO. The shell's rail, top bar and tab bar are
+  // server-rendered `<a href>`, and nothing turned their clicks into router
+  // navigations (the comments above said AppNavigator did; it only handled the
+  // engine's own navigations). Every click was a full document load: the signed-in
+  // layout had to resolve again before anything showed, and the root `loading.tsx`
+  // covered the whole window until it did. `next/link` handles its own clicks and
+  // calls preventDefault first, so only the plain anchors reach this.
+  React.useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a || (a.target && a.target !== "_self") || a.hasAttribute("download") || a.hasAttribute("data-hard-nav")) return;
+      const href = a.getAttribute("href") || "";
+      // Same-site paths only: not external, a hash, mailto:, an API route or an asset.
+      if (!href.startsWith("/") || href.startsWith("//") || /^\/(api|_next)(\/|$)/.test(href)) return;
+      e.preventDefault();
+      setOverlay(null);
+      router.push(href);
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, [router]);
+
   const value = React.useMemo(
     () => ({
       push: (url: string) => open(url),

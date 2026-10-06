@@ -71,3 +71,14 @@ def test_the_scaffold_has_a_shell_level_loading_state():
     import re
 
     assert not re.search(r"#[0-9a-fA-F]{3,6}\b", skeleton), "token classes only: a hex colour here would be the design's"
+
+
+def test_plain_anchors_in_the_shell_navigate_softly():
+    """The rail and top bar are server-rendered `<a href>`. Unless the shell turns their clicks
+    into router navigations every click is a full document load, and the root loading card
+    covers the window until the signed-in layout has resolved again."""
+    source = (TEMPLATES / "components" / "AppNavigator.tsx").read_text("utf-8")
+    assert 'document.addEventListener("click"' in source
+    assert "router.push(href)" in source
+    assert "e.defaultPrevented" in source, "next/link already handles its own clicks"
+    assert "(api|_next)" in source, "an API route or an asset is never a page"
