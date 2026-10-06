@@ -19,6 +19,31 @@ export { distanceKm, formatDistance, parseNear, type GeoPoint } from "./geo";
 
 type Json = Record<string, unknown>;
 
+/**
+ * A SCREEN THAT CHANGES WHILE SOMEONE WATCHES — an orders board, a rider's
+ * live trip, live operations: the page's own `load` runs again every
+ * `seconds` while the tab is visible, at once when the person comes back to
+ * it, and not at all while it is hidden. What the person is typing stays: a
+ * refresh re-reads the data, it does not remount the screen.
+ *
+ *   export default function View(props: Props) { useLive(10); … }
+ */
+export function useLive(seconds = 10): void {
+  const router = useRouter();
+  React.useEffect(() => {
+    if (typeof document === "undefined") return;
+    const every = Math.max(3, seconds) * 1000;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const tick = () => { if (document.visibilityState === "visible") router.refresh(); };
+    const start = () => { if (!timer) timer = setInterval(tick, every); };
+    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+    const seen = () => { if (document.visibilityState === "visible") { tick(); start(); } else stop(); };
+    start();
+    document.addEventListener("visibilitychange", seen);
+    return () => { stop(); document.removeEventListener("visibilitychange", seen); };
+  }, [router, seconds]);
+}
+
 export interface RunResult {
   ok: boolean;
   /** What the workflow returned — its log, and the record it wrote if any. */

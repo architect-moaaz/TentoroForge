@@ -644,7 +644,9 @@ view.tsx — "use client" on the first line.
     sliding in, a row arriving), "@/sdk/map" (MapView: places as pins, a path as a line —
     `<MapView points={[{ id, lat, lng, label }]} route={[{ lat, lng }, …]} onPointClick={…} />`),
     "@/sdk" (entity types, workflows, pages, widgets, href, fileUrl), "@/sdk/client" (useWorkflow,
-    WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm),
+    WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm,
+    useLive — `useLive(10)` in a view whose records change while someone watches: it re-reads
+    the page every 10 seconds while the tab is open; a section marked `live` calls it),
     "@/sdk/camera" (CameraCapture, BarcodeScanner), "@/sdk/i18n" (useT, useLanguage, LanguageSwitch), and
     `import type { Page, SeriesPoint, QueryRow, WidgetData } from "@/sdk/server"`.
   Nothing else is installed; an import of any other package fails to compile.
@@ -863,7 +865,8 @@ def _page_brief(doc: dict, page: dict) -> dict:
                       "link lands on the record); a `tab` is a tab of the screen, chosen by "
                       "`?tab=<section key>` so the menu can open it; a `dialog` opens "
                       "from a control. Each section's `actions` are done by the workflows launched "
-                      "here; a section that `addsHere` carries the form that adds its records."),
+                      "here; a section that `addsHere` carries the form that adds its records; a section "
+                      "marked `live` changes while someone watches, so the view calls `useLive()`."),
             "sections": [{**{k: v for k, v in sec.items() if k != "entity" and v not in (None, [], "")},
                           **({"entity": (ents.get(str(sec.get("entity"))) or {}).get("name")
                               or sec.get("entity")} if sec.get("entity") else {})}

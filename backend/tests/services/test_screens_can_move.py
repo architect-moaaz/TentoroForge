@@ -50,3 +50,21 @@ def test_a_page_importing_a_part_gets_its_package_listed(tmp_path):
     deps = json.loads((tmp_path / "package.json").read_text())["dependencies"]
     assert set(added) == {"react-day-picker", "maplibre-gl"}
     assert deps["maplibre-gl"] == _deps()["maplibre-gl"]
+
+
+def test_a_live_section_reads_again_by_itself():
+    """An orders board where new orders appear only after the cook does
+    something is not an orders board (Mozato's sketch, 2026-10-07)."""
+    client = (FOUNDATION / "src/sdk/client.tsx").read_text()
+    assert "export function useLive(seconds = 10)" in client
+    assert 'document.visibilityState === "visible"' in client and "router.refresh()" in client
+    assert "useLive" in TECH_RULES
+    from services.blueprint.page_planner import page_slot_prompt
+    assert "`live: true`" in page_slot_prompt({"application": {"description": "x"}, "data": {"entities": []}})
+    import copy
+    from services.blueprint.ui_engineer import _page_brief
+    from tests.services.test_a_screen_holds_its_records import _screen_doc
+    doc = _screen_doc()
+    doc["pages"][0]["sections"][0]["live"] = True
+    screen = _page_brief(doc, doc["pages"][0])["screen"]
+    assert screen["sections"][0]["live"] is True and "useLive()" in screen["write"]

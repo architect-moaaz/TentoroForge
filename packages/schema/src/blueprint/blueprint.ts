@@ -375,6 +375,12 @@ export const PageSection = z.object({
   /** Records of `entity` are added in this section, in a form on the screen. */
   addsHere: z.boolean().optional(),
   /**
+   * Its records change while someone watches — orders arriving on a board, a
+   * rider moving, a queue filling — so the screen reads them again by itself
+   * (`useLive`) instead of only when the person does something.
+   */
+  live: z.boolean().optional(),
+  /**
    * The menu entry this section answers, by its label path in
    * `navigation.tree` ("Admin Console > Offers & Campaigns"), when a tab of
    * the screen is its own menu destination.

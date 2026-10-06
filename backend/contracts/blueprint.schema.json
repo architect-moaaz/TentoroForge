@@ -528,6 +528,9 @@
                 "addsHere": {
                   "type": "boolean"
                 },
+                "live": {
+                  "type": "boolean"
+                },
                 "menuEntry": {
                   "type": "string"
                 },
