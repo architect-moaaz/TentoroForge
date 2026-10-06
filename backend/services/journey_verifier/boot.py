@@ -11,6 +11,7 @@ raise.
 """
 from __future__ import annotations
 
+from services.proc_compat import group_kwargs, kill_group, tool
 import os
 import signal
 import subprocess
@@ -73,12 +74,12 @@ def booted_app(
     # start_new_session so we can SIGTERM the whole tree (next dev
     # spawns child workers).
     proc = subprocess.Popen(
-        ["npm", "run", "dev"],
+        [tool("npm"), "run", "dev"],
         cwd=str(output_dir),
         env=env,
         stdout=logf,
         stderr=subprocess.STDOUT,
-        start_new_session=True,
+        **group_kwargs(),
     )
 
     try:
@@ -147,26 +148,12 @@ def _tail(path: Path, n_bytes: int) -> str:
 
 
 def _terminate_tree(proc: subprocess.Popen) -> None:
-    """Kill the process group we launched. next dev spawns workers, so
-    signalling only the direct child leaves orphaned node processes."""
+    """End the process tree we launched. next dev spawns workers, so ending only
+    the direct child leaves orphaned node processes."""
     if proc.poll() is not None:
         return
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-    except Exception:
-        # Fallback: direct signal to the child. Not perfect on macOS if
-        # the workers detach, but better than nothing.
-        try:
-            proc.terminate()
-        except Exception:
-            pass
+    kill_group(proc)
     try:
         proc.wait(timeout=8)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+        kill_group(proc, force=True)

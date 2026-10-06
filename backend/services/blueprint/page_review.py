@@ -27,6 +27,7 @@ browser) is checked first — without it the review is skipped and says why.
 """
 from __future__ import annotations
 
+from services.proc_compat import group_kwargs, kill_group, tool
 import concurrent.futures as cf
 import json
 import logging
@@ -114,8 +115,8 @@ def _database_url(app_root: Path) -> str | None:
     import re as _re
     for name in (".env.local", ".env"):
         try:
-            text = (app_root / name).read_text()
-        except OSError:
+            text = (app_root / name).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
             continue
         m = _re.search(r"^DATABASE_URL=(\S+)", text, _re.M)
         if m:
@@ -231,9 +232,9 @@ class RunningApp:
             self.log.parent.mkdir(parents=True, exist_ok=True)
             sink = self._sink = open(self.log, "ab")  # noqa: SIM115 — closed in __exit__
         self.proc = subprocess.Popen(
-            ["npx", "next", "dev", "--port", str(self.port)], cwd=self.root,
+            [tool("npx"), "next", "dev", "--port", str(self.port)], cwd=self.root,
             stdout=sink, stderr=subprocess.STDOUT if self.log is not None else subprocess.DEVNULL,
-            start_new_session=True,
+            **group_kwargs(),
             env={**os.environ, "BROWSER": "none",
                  # The preview secret, so a session minted for a role the
                  # administrator does not hold is a session this server accepts.
@@ -253,9 +254,9 @@ class RunningApp:
 
     def __exit__(self, *exc: Any) -> None:
         if self.proc is not None:
-            for sig in (signal.SIGTERM, signal.SIGKILL):
+            for force in (False, True):
                 try:
-                    os.killpg(os.getpgid(self.proc.pid), sig)
+                    kill_group(self.proc, force=force)
                     self.proc.wait(timeout=10)
                     break
                 except Exception:  # noqa: BLE001

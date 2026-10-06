@@ -14,6 +14,7 @@ inventing a verdict.
 """
 from __future__ import annotations
 
+from services.proc_compat import tool
 import json
 import logging
 import shutil
@@ -34,7 +35,7 @@ def _ensure_bundle() -> Path | None:
             (p.stat().st_mtime for p in _FEEL_SRC.glob("*.ts")), default=0):
         return _BUNDLE
     esbuild = _BACKEND.parent / "node_modules" / ".bin" / "esbuild"
-    cmd = [str(esbuild)] if esbuild.exists() else ["npx", "esbuild"]
+    cmd = [str(esbuild)] if esbuild.exists() else [tool("npx"), "esbuild"]
     try:
         subprocess.run(cmd + [str(_ENTRY), "--bundle", "--platform=node", "--format=cjs",
                               f"--outfile={_BUNDLE}", "--log-level=error"],

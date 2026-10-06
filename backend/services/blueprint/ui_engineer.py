@@ -25,6 +25,7 @@ has one — so a refused page is plainer, never missing.
 """
 from __future__ import annotations
 
+from services.proc_compat import tool
 import json
 import logging
 import os
@@ -1115,7 +1116,7 @@ def _install_beside(modules: Path, specs: list[str]) -> None:
     import tempfile
     with tempfile.TemporaryDirectory(prefix="forge-sdk-pkg-") as tmp:
         (Path(tmp) / "package.json").write_text('{"name": "sdk-packages", "private": true}', encoding="utf-8")
-        proc = subprocess.run(["npm", "install", "--no-audit", "--no-fund", "--no-package-lock", *specs],
+        proc = subprocess.run([tool("npm"), "install", "--no-audit", "--no-fund", "--no-package-lock", *specs],
                               cwd=tmp, capture_output=True, text=True, timeout=300)
         if proc.returncode:
             logger.warning("installing %s failed: %s", specs, proc.stderr[-500:])

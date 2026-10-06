@@ -288,23 +288,30 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
                 continue
             rel = src.relative_to(layer)
             dst_rel = rel.with_suffix("") if rel.suffix == _TMPL_SUFFIX else rel
-            if (any(str(dst_rel).startswith(p) for p in PROJECTED_PATHS)
-                    and str(dst_rel) not in SCAFFOLD_OWNED
-                    and str(dst_rel) not in SCAFFOLD_DEFAULTS):
+            # FORWARD SLASHES, ON EVERY PLATFORM. `PROJECTED_PATHS` and
+            # `SCAFFOLD_DEFAULTS` are written with "/"; `str(Path)` is "\\" on
+            # Windows, so not one of them matched and the scaffold's neutral
+            # tokens, its gate-everything middleware, its login page and its
+            # empty page registry were copied over the application's own.
+            key = dst_rel.as_posix()
+            if (any(key.startswith(p) for p in PROJECTED_PATHS)
+                    and key not in SCAFFOLD_OWNED
+                    and key not in SCAFFOLD_DEFAULTS):
                 continue
             dst = out / dst_rel
             # A default only fills a hole. The projection ran first and its
             # output is the application's; this is what stands in when it did
             # not run at all.
-            if str(dst_rel) in SCAFFOLD_DEFAULTS and dst.exists():
+            if key in SCAFFOLD_DEFAULTS and dst.exists():
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             if rel.suffix == _TMPL_SUFFIX:
-                dst.write_text(_interpolate(src.read_text(),
-                                            project_short_id=project_short_id))
+                dst.write_text(_interpolate(src.read_text(encoding="utf-8"),
+                                            project_short_id=project_short_id),
+                              encoding="utf-8")
             else:
                 shutil.copyfile(src, dst)
-            written.append(str(dst_rel))
+            written.append(key)
     # WHAT THE SCAFFOLD NO LONGER SHIPS IS REMOVED. Copying only adds, so a
     # file a template retired stayed in every application built before: the
     # root page that redirected to a hard-coded /home sat beside the group's
@@ -1062,6 +1069,16 @@ def prepare_app_root(app_root: str | Path, *, project_short_id: str = "forge",
     return written
 
 
+#: Bare "npm"/"npx" never resolve under `subprocess.run`/`Popen` on Windows
+#: without `shell=True` — there is no `.CMD` PATH-shim lookup, so every call
+#: below raised `FileNotFoundError: [WinError 2]` on a Windows host. Resolved
+#: once, at import time, rather than per call.
+from services.proc_compat import group_kwargs, kill_group, tool  # noqa: E402
+
+_NPM = tool("npm")
+_NPX = tool("npx")
+
+
 def install_dependencies(app_root: str | Path, *, timeout: int = 900) -> int:
     """`npm install`, on its own, so it can run from second zero of a build
     rather than at the end of one. Raises :class:`BuildFailed` on a non-zero
@@ -1123,18 +1140,15 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
     # run went silent after a clean build. Killing the group ends the whole
     # tree and closes the pipe with it.
     proc = subprocess.Popen(
-        ["npm", "run", "dev", "--", "--port", str(port)],
+        [_NPM, "run", "dev", "--", "--port", str(port)],
         cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, env={**os.environ, "BROWSER": "none"},
-        start_new_session=True,
+        **group_kwargs(),
     )
 
     def _kill_tree() -> None:
-        for sig in (signal.SIGTERM, signal.SIGKILL):
-            try:
-                os.killpg(os.getpgid(proc.pid), sig)
-            except (ProcessLookupError, PermissionError):
-                return
+        for force in (False, True):
+            kill_group(proc, force=force)
             try:
                 proc.wait(timeout=10)
                 return
@@ -1279,8 +1293,8 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
     root = Path(app_root)
     steps = tuple(
         step for step, wanted in (
-            (("install", ["npm", "install", "--no-audit", "--no-fund"]), install),
-            (("build", ["npm", "run", "build"]), build),
+            (("install", [_NPM, "install", "--no-audit", "--no-fund"]), install),
+            (("build", [_NPM, "run", "build"]), build),
         ) if wanted
     )
     # THE CHECK MUST NOT BREAK THE THING IT CHECKS. `next build` and `next dev`
@@ -1360,7 +1374,7 @@ def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
         return 0
     env = {**os.environ, **_env_file(root)}
     env.setdefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/dry_run")
-    proc = subprocess.run(["npx", "tsx", DISPATCH_VERIFIER], cwd=root, capture_output=True,
+    proc = subprocess.run([_NPX, "tsx", DISPATCH_VERIFIER], cwd=root, capture_output=True,
                           text=True, timeout=timeout, env=env)
     report: dict[str, Any] = {}
     for line in reversed((proc.stdout or "").splitlines()):

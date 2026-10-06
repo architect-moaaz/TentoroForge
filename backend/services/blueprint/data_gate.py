@@ -17,6 +17,7 @@ skipped and why. It never fails a build by being unable to look.
 """
 from __future__ import annotations
 
+from services.proc_compat import tool
 import logging
 import re
 import shutil
@@ -138,7 +139,7 @@ def run(app_root: str | Path, *, seed: bool, timeout: int = 300) -> dict[str, An
             if url is None:
                 return {"ok": True, "skipped": why}
             env = {**os.environ, "DATABASE_URL": url, "FORCE_SEED": "1"}
-            push = subprocess.run(["npx", "drizzle-kit", "push", "--force", f"--config={config.name}"],
+            push = subprocess.run([tool("npx"), "drizzle-kit", "push", "--force", f"--config={config.name}"],
                                   cwd=root, capture_output=True, text=True, timeout=timeout, env=env,
                                   stdin=subprocess.DEVNULL)
             text = (push.stdout or "") + (push.stderr or "")
@@ -147,7 +148,7 @@ def run(app_root: str | Path, *, seed: bool, timeout: int = 300) -> dict[str, An
             if not out["push"]["ok"] or not seed or not (root / "src" / "db" / "seed.ts").exists():
                 out["ok"] = out["push"]["ok"]
                 return out
-            run_seed = subprocess.run(["npx", "tsx", "src/db/seed.ts"], cwd=root, capture_output=True,
+            run_seed = subprocess.run([tool("npx"), "tsx", "src/db/seed.ts"], cwd=root, capture_output=True,
                                       text=True, timeout=timeout, env=env, stdin=subprocess.DEVNULL)
             stext = (run_seed.stdout or "") + (run_seed.stderr or "")
             failed = []

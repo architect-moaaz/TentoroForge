@@ -15,6 +15,7 @@ Unset, nothing here applies and every caller keeps its Docker path.
 
 from __future__ import annotations
 
+from services.proc_compat import tool
 import logging
 import os
 import re
@@ -123,7 +124,7 @@ def _extensions(root: Path, url: str) -> None:
     if not script.is_file():
         return
     import subprocess
-    subprocess.run(["npx", "tsx", "src/db/extensions.ts"], cwd=str(root), stdin=subprocess.DEVNULL,
+    subprocess.run([tool("npx"), "tsx", "src/db/extensions.ts"], cwd=str(root), stdin=subprocess.DEVNULL,
                    env={**os.environ, "DATABASE_URL": url}, capture_output=True, timeout=180)
 
 
