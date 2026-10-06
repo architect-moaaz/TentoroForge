@@ -932,6 +932,44 @@ def reference_digest(html: str, limit: int = REFERENCE_CHARS) -> str:
     return text[: cut + 1 if cut > limit // 2 else limit] + " <!-- …the rest is the same kind of markup -->"
 
 
+#: A designer draws icons with an icon FONT (Font Awesome, Phosphor), loaded from
+#: a CDN the app never loads; the app's icons are `lucide-react`. The names that
+#: differ between the two, for the icons a page is most likely to use.
+_LUCIDE_NAMES = {
+    "plus": "Plus", "circle-plus": "CirclePlus", "xmark": "X", "times": "X", "x": "X", "close": "X",
+    "check": "Check", "circle-check": "CircleCheck", "check-circle": "CircleCheck",
+    "trash": "Trash2", "trash-can": "Trash2", "trash-alt": "Trash2", "pen": "Pencil", "pencil": "Pencil",
+    "pen-to-square": "SquarePen", "edit": "SquarePen", "magnifying-glass": "Search", "search": "Search",
+    "calendar": "Calendar", "calendar-days": "CalendarDays", "calendar-check": "CalendarCheck", "clock": "Clock",
+    "arrow-left": "ArrowLeft", "arrow-right": "ArrowRight", "chevron-right": "ChevronRight",
+    "chevron-left": "ChevronLeft", "chevron-down": "ChevronDown", "angle-down": "ChevronDown",
+    "star": "Star", "heart": "Heart", "bookmark": "Bookmark", "book": "Book", "book-open": "BookOpen",
+    "user": "User", "users": "Users", "gear": "Settings", "cog": "Settings", "bell": "Bell",
+    "house": "Home", "home": "Home", "list": "List", "list-check": "ListChecks", "filter": "Filter",
+    "sort": "ArrowUpDown", "ellipsis": "MoreHorizontal", "ellipsis-vertical": "MoreVertical",
+    "eye": "Eye", "link": "Link", "tag": "Tag", "flag": "Flag", "circle": "Circle", "folder": "Folder",
+    "file": "File", "download": "Download", "upload": "Upload", "envelope": "Mail", "lock": "Lock",
+    "right-from-bracket": "LogOut", "sign-out": "LogOut", "arrow-up-right-from-square": "ExternalLink",
+    "circle-info": "Info", "triangle-exclamation": "TriangleAlert", "chart-simple": "BarChart3",
+    "chart-line": "LineChart", "bolt": "Zap", "fire": "Flame", "sparkles": "Sparkles", "image": "Image",
+}
+_ICON_CLASS = re.compile(r"""\b(?:fa(?:-(?:solid|regular|light|thin|brands|duotone))?|ph(?:-(?:bold|fill|light|thin|duotone))?)\b[^"']*?\b(?:fa|ph)-([a-z0-9-]+)""")
+
+
+def icon_hints(html: str) -> list[tuple[str, str]]:
+    """``[(font icon, lucide icon)]`` for every icon a design draws with a font,
+    in the order it first draws them. The lucide name is the usual one; an icon
+    not in the table is shown as its own name in PascalCase, which the writer
+    checks exists in `lucide-react` before it imports it."""
+    out: dict[str, str] = {}
+    for m in _ICON_CLASS.finditer(str(html or "")):
+        name = m.group(1)
+        if name in ("solid", "regular", "light", "thin", "brands", "duotone", "bold", "fill", "fw", "lg", "xs", "sm"):
+            continue
+        out.setdefault(name, _LUCIDE_NAMES.get(name) or "".join(w.capitalize() for w in name.split("-")))
+    return list(out.items())[:24]
+
+
 def reference_block(reference: dict) -> str:
     """The designer's page, and what the writer is told to do with it."""
     preview = str(reference.get("previewUrl") or "").strip()
@@ -951,7 +989,22 @@ def reference_block(reference: dict) -> str:
         "provides them around every page.\n"
         "- What the brief requires and the design lacks — a widget, an empty state, a filter — is "
         "added, in the design's own style.\n"
+        + _icon_rule(str(reference.get("html") or ""))
+        + "- Keep the design's small touches that make it feel finished: icons beside buttons and "
+        "dates, a status told as a tinted pill with a dot (`Badge variant=\"success\"` / `\"warning\"` "
+        "/ `\"destructive\"`, plus a `<span className=\"h-1.5 w-1.5 rounded-full bg-current\" />`), "
+        "hover and focus states, a clear empty state. Drop one only when the brief has no data behind "
+        "it — a callout whose text the design made up is left out, and said in `needs` if it matters.\n"
     )
+
+
+def _icon_rule(html: str) -> str:
+    icons = icon_hints(html)
+    if not icons:
+        return ""
+    return ("- ICONS ARE `lucide-react`, NEVER THE DESIGN'S ICON FONT (it is not loaded here). The "
+            "design draws: " + ", ".join(f"`{f}` → `{l}`" for f, l in icons)
+            + ". Import each from `lucide-react` (`h-4 w-4`, `currentColor`) where the design has it.\n")
 
 
 def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "",

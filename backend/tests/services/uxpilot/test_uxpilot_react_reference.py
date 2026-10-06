@@ -476,3 +476,42 @@ def test_a_record_page_is_drawn_as_one_record_not_a_table_of_them():
     assert "A table of" not in record
     listing = g.prompt_for(doc, doc["pages"][0])         # /cases, entity_list
     assert "A table of Cases with exactly these column headers" in listing
+
+
+# --------------------------------------------------------------------------- #
+# What a designer's icons and status pills become
+# --------------------------------------------------------------------------- #
+
+ICON_HTML = (
+    '<button><i class="fa-solid fa-plus"></i> Add</button>'
+    '<span><i class="fa-regular fa-calendar-days"></i></span>'
+    '<i class="ph-bold ph-trash"></i><i class="fa-solid fa-trash-can"></i><i class="fa-solid fa-flux-capacitor"></i>'
+)
+
+
+def test_font_icons_are_named_with_their_lucide_equivalents():
+    from services.blueprint import ui_engineer as ui
+
+    hints = dict(ui.icon_hints(ICON_HTML))
+    assert hints["plus"] == "Plus" and hints["calendar-days"] == "CalendarDays"
+    assert hints["trash-can"] == "Trash2" and hints["trash"] == "Trash2"
+    assert hints["flux-capacitor"] == "FluxCapacitor", "unknown icons are named, for the writer to check"
+    assert "solid" not in hints and "fa" not in hints
+
+
+def test_the_reference_tells_the_writer_which_icons_to_import():
+    from services.blueprint import ui_engineer as ui
+
+    block = ui.reference_block({"html": ICON_HTML})
+    assert "lucide-react" in block and "`calendar-days` → `CalendarDays`" in block
+    assert "tinted pill" in block, "the design's status pills are kept"
+    assert "lucide-react" not in ui.reference_block({"html": "<p>no icons</p>"}).split("# A design")[1].split("Keep the design's small touches")[0]
+
+
+def test_the_standalone_scaffold_maps_the_status_colours_a_badge_reads():
+    from pathlib import Path
+
+    config = (Path(__file__).resolve().parents[3] / "templates" / "standalone-app" / "tailwind.config.ts").read_text("utf-8")
+    for token in ("success", "warning", "info", "destructive", "accent"):
+        assert f'--{token}-subtle' in config, f"bg-{token}-subtle would render with no colour"
+    assert "heading:" in config
