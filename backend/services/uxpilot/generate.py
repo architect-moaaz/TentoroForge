@@ -85,7 +85,15 @@ def designer_for(doc: dict, page: dict) -> str:
     if own in ("forge", "uxpilot"):
         return own
     app = str(((doc or {}).get("application") or {}).get("uiDesigner") or "").strip()
-    return app if app in ("forge", "uxpilot") else "forge"
+    if app in ("forge", "uxpilot"):
+        return app
+    # NOBODY HAS CHOSEN FOR THIS APPLICATION: the platform's default, if one is
+    # set. This is how UX Pilot is turned on until Smith asks the question
+    # itself (the approval-gate chooser was removed with the schema pages, and
+    # its replacement is a Smith verb, not yet written). A choice recorded on
+    # the application or the page always outranks it, `forge` included.
+    default = os.environ.get("FORGE_UI_DESIGNER", "").strip().lower()
+    return default if default in ("forge", "uxpilot") else "forge"
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +205,14 @@ def _metric_widgets(brief: dict) -> list[dict]:
     out = []
     for w in brief.get("widgets") or []:
         src = w.get("dataSource") or {}
-        if src.get("op") == "aggregate" and w.get("label"):
+        # BOTH SHAPES A WIDGET'S SOURCE HAS HAD: the original `aggregate`, and
+        # the `query` the analytics agent writes now (one measure, nothing to
+        # group by). Reading only the first dropped every metric of every
+        # current application from the brief, so the design was drawn without
+        # its numbers.
+        one_number = src.get("op") == "aggregate" or (
+            src.get("op") == "query" and len(src.get("measures") or []) == 1 and not src.get("dimensions"))
+        if (one_number or w.get("kind") == "metric") and w.get("label"):
             out.append(w)
     return out
 
@@ -260,7 +275,17 @@ def prompt_for(doc: dict, page: dict, *, feedback: str = "") -> str:
         parts.append("Metric tiles, each with its label and one number: "
                      + "; ".join(f"\"{w['label']}\"" for w in metrics) + ".")
     cols = _column_defs(brief)[:_MAX_LABELS]
-    if cols and entity_name:
+    # A PAGE ABOUT ONE RECORD IS NOT A TABLE OF THEM: a record page (`[id]` in
+    # its route, or the pattern) was drawn as a list of rows, which the writer
+    # then had to undo. It shows the one record's fields, each labelled.
+    one_record = (str(page.get("pattern") or "") in ("record_workspace", "master_detail")
+                  or "[" in str(page.get("route") or ""))
+    if cols and entity_name and one_record:
+        parts.append(
+            f"One {entity_name} shown in full, as a record rather than a list, with each of its "
+            "fields labelled exactly: " + ", ".join(f"\"{c['label']}\"" for c in cols) + "."
+        )
+    elif cols and entity_name:
         parts.append(
             f"A table of {_plural(entity_name)} with exactly these column headers, "
             "in this order, and three or four example rows: "
@@ -272,9 +297,38 @@ def prompt_for(doc: dict, page: dict, *, feedback: str = "") -> str:
                      + ", ".join(f"\"{f['label']}\"" for f in fields) + ".")
     buttons = [w["name"] for w in _launched_here(doc, page_id)][:_MAX_LABELS]
     buttons += [str(a) for a in (page.get("actions") or []) if str(a).strip()][:_MAX_LABELS]
+    # "Add Task" (a workflow's name) and "Add task" (the page's own word for it)
+    # are one button; drawn twice they are two, and the page keeps both.
+    seen: dict[str, str] = {}
+    for b in buttons:
+        seen.setdefault(re.sub(r"\s+", " ", b).strip().lower(), b)
+    buttons = list(seen.values())
     if buttons:
-        parts.append("Buttons, labelled exactly: "
-                     + ", ".join(f"\"{b}\"" for b in dict.fromkeys(buttons)) + ".")
+        parts.append("Buttons, labelled exactly: " + ", ".join(f"\"{b}\"" for b in buttons) + ".")
+    # WHAT A DESIGNER CANNOT KNOW, SAID PLAINLY: the values a status takes
+    # (so a badge is drawn for each, not invented), where the page leads
+    # (so its links are drawn), and what an action asks for (so its dialog
+    # has the right fields). All three come from the Blueprint, and all three
+    # are the difference between a screen and this application's screen.
+    primary = _entities_by_id(doc).get(str((page.get("data") or {}).get("primaryEntity") or ""))
+    for fld in [f for f in ((primary or {}).get("fields") or []) if isinstance(f, dict)]:
+        values = [str(v) for v in (fld.get("enumValues") or []) if str(v).strip()][:8]
+        if values and fld.get("name"):
+            parts.append(f"The {_label_of(fld['name']).lower()} of a {entity_name or 'record'} is one of "
+                         + ", ".join(f"\"{v}\"" for v in values)
+                         + "; show each as its own small coloured badge.")
+    pages_by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    leads = [str(pages_by_id[t].get("name")) for t in (str(x) for x in (page.get("navigatesTo") or []))
+             if t in pages_by_id and pages_by_id[t].get("name")][:_MAX_LABELS]
+    if leads:
+        parts.append("Links or buttons that open other pages, labelled exactly: "
+                     + ", ".join(f"\"{n}\"" for n in dict.fromkeys(leads)) + ".")
+    for wf in _launched_here(doc, page_id)[:4]:
+        asks = [_label_of(str(i.get("name"))) for i in (wf.get("inputs") or [])
+                if isinstance(i, dict) and i.get("name") and i.get("kind") != "record"][:6]
+        if asks:
+            parts.append(f"The \"{wf['name']}\" action opens a short form asking for: "
+                         + ", ".join(f"\"{a}\"" for a in asks) + ".")
     states = [s for s in (page.get("states") or []) if s in ("empty", "error")]
     if "empty" in states and entity_name:
         parts.append(f"Include, visually secondary, an empty state reading "
@@ -391,19 +445,59 @@ def _preview_of(payload: Any) -> str:
     return ""
 
 
+#: How long a design agent run may take before the page is written without it.
+#: A one-screen run finishes in about a minute.
+JOB_TIMEOUT_S = 420.0
+JOB_POLL_S = 8.0
+
+
+def _first_key(payload: Any, key: str) -> Any:
+    from services.uxpilot.reference import _find_key
+
+    return _find_key(payload, key)
+
+
 async def _generate_async(gateway: Any, prompt: str) -> tuple[str, str, str]:
-    """``(design_id, html, preview_url)`` from one generation."""
+    """``(design_id, html, preview_url)`` from one design-agent run.
+
+    UX Pilot has no one-shot generate: ``start_design_agent`` queues a job,
+    ``get_agent_job`` reports it until it is terminal, and the finished job
+    names the screen it drew, whose markup ``get_design`` returns."""
+    import asyncio
+    import time
+
+    from services.uxpilot.gateway import UxPilotGatewayError
     from services.uxpilot.reference import _find_html, payload_of
 
-    payload = payload_of(await gateway.call("generate_design", prompt=prompt))
-    design_id = _design_id_of(payload)
-    html = _find_html(payload)
-    preview = _preview_of(payload)
+    started = payload_of(await gateway.call(
+        "start_design_agent", prompt=prompt, confirmed=True,
+        selectedType="desktop", generateImage=False))
+    job = _first_key(started, "agentJobId")
+    if not isinstance(job, str) or not job:
+        raise UxPilotGatewayError("protocol", "start_design_agent returned no agentJobId")
+
+    deadline = time.monotonic() + JOB_TIMEOUT_S
+    while True:
+        state = payload_of(await gateway.call("get_agent_job", agentJobId=job))
+        status = str(_first_key(state, "status") or "").lower()
+        if status == "completed":
+            break
+        if status in ("failed", "cancelled"):
+            raise UxPilotGatewayError(
+                "tool_error", f"the design agent {status}: {str(_first_key(state, 'error') or '')[:200]}")
+        if time.monotonic() > deadline:
+            raise UxPilotGatewayError("timeout", f"the design agent did not finish in {int(JOB_TIMEOUT_S)}s")
+        await asyncio.sleep(JOB_POLL_S)
+
+    screens = state.get("screens") if isinstance(state, dict) else None
+    first = screens[0] if isinstance(screens, list) and screens and isinstance(screens[0], dict) else {}
+    design_id = str(first.get("designId") or _design_id_of(state) or "")
+    preview = str(first.get("previewUrl") or _preview_of(state) or "")
+    html = _find_html(state) or ""
     if not html and design_id:
-        # The generation acknowledged with an id and no markup; the reader
-        # tool has the HTML the same way it does for a page a person drew.
-        detail = payload_of(await gateway.call("get_design", design=design_id, include_html=True))
-        html = _find_html(detail)
+        detail = payload_of(await gateway.call(
+            "get_design", design=design_id, include_html=True, htmlLimit=100000))
+        html = _find_html(detail) or ""
         preview = preview or _preview_of(detail)
     return design_id, html, preview
 
@@ -814,3 +908,40 @@ def compose(svc: Any, page: dict, *, app_root: str | Path, gateway: Any = None,
     return Outcome(root=root, data_sources=list(schema.get("dataSources") or []) + sources,
                    design_id=design.design_id, preview_url=design.preview_url,
                    warnings=warnings, reused=design.reused)
+
+
+# ---------------------------------------------------------------------------
+# The design as a reference for a React page
+# ---------------------------------------------------------------------------
+
+def reference_for(doc: dict, page: dict, output_dir: str | Path, *,
+                  gateway: Any = None) -> tuple[dict | None, str]:
+    """``(reference, said)`` for the UI engineer: the page's UX Pilot design as
+    ``{"html", "previewUrl", "designId", "reused"}``, and one line for whoever
+    watches the run.
+
+    The React writer adapts the design instead of deciding the page, so what it
+    needs is the drawing, not a bound layout tree (that is what `compose` is
+    for, and is the fallback path's business). Nothing here raises and nothing
+    here costs a page: a page that is not UX Pilot's, has no key to ask with, or
+    whose design cannot be had is written without one, and ``said`` names why
+    when the person chose UX Pilot and did not get it.
+    """
+    from types import SimpleNamespace
+
+    if str(page.get("pattern") or "") == "auth" or designer_for(doc, page) != "uxpilot":
+        return None, ""
+    route = page.get("route") or page.get("name") or page.get("id")
+    if gateway is None and not configured(output_dir):
+        return None, (f"UX Pilot is chosen but has no API key (Settings → Integrations → UX Pilot, "
+                      f"or UXPILOT_API_KEY) — writing {route} without a design.")
+    try:
+        design = generate(SimpleNamespace(doc=doc, output_dir=str(output_dir)), page, gateway=gateway)
+    except GenerationFailed as exc:
+        return None, f"UX Pilot could not design {route} ({exc}) — writing it without a design."
+    except Exception as exc:  # noqa: BLE001 — a design is a help, never a gate
+        return None, f"UX Pilot failed for {route} ({type(exc).__name__}) — writing it without a design."
+    ref = {"html": design.html, "previewUrl": design.preview_url,
+           "designId": design.design_id, "reused": design.reused}
+    return ref, (f"Adapting UX Pilot design {design.design_id or '(unnamed)'} for {route}"
+                 + (" (reused; brief unchanged)." if design.reused else "."))

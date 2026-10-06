@@ -64,14 +64,14 @@ def test_a_raw_key_is_refused_as_a_reference():
 
 
 def test_only_read_tools_are_allowed():
-    for spender in ("generate_design", "import_html_design", "run_ux_review", "publish_prototype"):
+    for spender in ("start_design_agent", "import_html_design", "run_ux_review", "publish_prototype"):
         assert spender not in ALLOWED_TOOLS
 
 
 @pytest.mark.asyncio
 async def test_a_credit_spending_tool_is_refused_before_any_call(gateway):
     with pytest.raises(UxPilotGatewayError) as exc:
-        await gateway.call("generate_design", page="p")
+        await gateway.call("start_design_agent", page="p")
     assert exc.value.kind == "not_allowed" and _Session.calls == []
 
 

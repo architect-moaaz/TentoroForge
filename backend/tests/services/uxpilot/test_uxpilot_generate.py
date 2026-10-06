@@ -59,7 +59,7 @@ def svc(tmp_path):
 
 
 class FakeGateway:
-    """Answers `generate_design` with one fixed screen and counts the calls."""
+    """Plays UX Pilot's design agent: one job, one fixed screen, every call counted."""
 
     may_generate = True
 
@@ -70,8 +70,14 @@ class FakeGateway:
         self.calls.append((tool, kw))
         if self.fail:
             raise self.fail
-        return [{"type": "text", "text": json.dumps(
-            {"design": {"id": "dsg_1", "html": self.html, "previewUrl": "https://ux/p.png"}})}]
+        if tool == "start_design_agent":
+            body = {"success": True, "agentJobId": "job_1", "status": "queued", "pageId": "pg_1"}
+        elif tool == "get_agent_job":
+            body = {"status": "completed", "pageId": "pg_1", "screens": [
+                {"designId": "dsg_1", "previewUrl": "https://ux/p.png"}]}
+        else:
+            body = {"design": {"id": "dsg_1", "html": self.html}}
+        return [{"type": "text", "text": json.dumps(body)}]
 
 
 def _types(node, out=None):
@@ -106,14 +112,14 @@ def test_the_page_overrides_the_application_and_forge_is_the_default():
 
 def test_generation_is_refused_unless_the_gateway_was_opened_for_it():
     gw = UxPilotGateway(credential=UxPilotCredential(ref="UXPILOT_API_KEY"), resolver=EnvKeyResolver())
-    assert "generate_design" not in gw.allowed_tools()
+    assert "start_design_agent" not in gw.allowed_tools()
     assert GENERATION_TOOLS.isdisjoint(ALLOWED_TOOLS)
     import asyncio
     with pytest.raises(UxPilotGatewayError, match="spends UX Pilot credits"):
-        asyncio.run(gw.call("generate_design", prompt="x"))
+        asyncio.run(gw.call("start_design_agent", prompt="x"))
     consenting = UxPilotGateway(credential=UxPilotCredential(ref="UXPILOT_API_KEY"),
                                 resolver=EnvKeyResolver(), may_generate=True)
-    assert consenting.allowed_tools() == ALLOWED_TOOLS | {"generate_design"}
+    assert consenting.allowed_tools() == ALLOWED_TOOLS | {"start_design_agent"}
     # Only one screen from one prompt; the other credit-spending tools stay out.
     assert "import_html_design" not in consenting.allowed_tools()
     assert "publish_design_preview" not in consenting.allowed_tools()
@@ -144,7 +150,7 @@ def test_a_generated_page_is_bound_by_the_labels_forge_chose(svc, tmp_path):
     out = g.compose(svc, svc.doc["pages"][0], app_root=tmp_path / "app", gateway=gw)
     assert out.root is not None, out.reason
     assert out.design_id == "dsg_1" and out.preview_url == "https://ux/p.png"
-    assert [c[0] for c in gw.calls] == ["generate_design"]
+    assert [c[0] for c in gw.calls] == ["start_design_agent", "get_agent_job", "get_design"]
     assert "Open tasks" in gw.calls[0][1]["prompt"]
 
     # Metric tiles keep their drawing and take a live number.
@@ -194,7 +200,7 @@ def test_the_ledger_means_a_rebuild_spends_nothing(svc, tmp_path):
     first = g.compose(svc, svc.doc["pages"][0], app_root=tmp_path / "app", gateway=gw)
     second = g.compose(svc, svc.doc["pages"][0], app_root=tmp_path / "app", gateway=gw)
     assert first.reused is False and second.reused is True
-    assert len(gw.calls) == 1
+    assert [c[0] for c in gw.calls].count("start_design_agent") == 1
     entry = g.ledger_entry(tmp_path, "PAGE-001")
     assert entry["designId"] == "dsg_1" and entry["briefHash"] == g.brief_hash(first_prompt(svc))
 
@@ -204,10 +210,10 @@ def test_the_ledger_means_a_rebuild_spends_nothing(svc, tmp_path):
                                "dataSource": {"op": "aggregate", "entity": "ENTITY-001",
                                               "aggregation": "count", "filter": {"status": "done"}}})
     third = g.compose(svc, svc.doc["pages"][0], app_root=tmp_path / "app", gateway=gw)
-    assert third.reused is False and len(gw.calls) == 2
+    assert third.reused is False and [c[0] for c in gw.calls].count("start_design_agent") == 2
     # Feedback always regenerates: the refused design is not the one to reuse.
     g.compose(svc, svc.doc["pages"][0], app_root=tmp_path / "app", gateway=gw, feedback="fix it")
-    assert len(gw.calls) == 3
+    assert [c[0] for c in gw.calls].count("start_design_agent") == 3
 
 
 def first_prompt(svc):
@@ -229,19 +235,24 @@ def test_a_failure_is_a_reason_the_executor_can_record(svc, tmp_path):
     assert out.root is None and "no HTML" in out.reason
 
 
-def test_a_design_acknowledged_without_markup_is_read_back(svc, tmp_path):
-    class TwoStep(FakeGateway):
-        async def call(self, tool, **kw):
-            self.calls.append((tool, kw))
-            if tool == "generate_design":
-                return [{"type": "text", "text": json.dumps({"designId": "dsg_9"})}]
-            assert tool == "get_design" and kw["design"] == "dsg_9" and kw["include_html"]
-            return [{"type": "text", "text": json.dumps({"design": {"id": "dsg_9", "html": HTML}})}]
-
-    gw = TwoStep()
+def test_a_finished_job_is_read_back_for_its_markup(svc, tmp_path):
+    gw = FakeGateway()
     out = g.compose(svc, svc.doc["pages"][0], app_root=tmp_path / "app", gateway=gw)
-    assert out.root is not None and out.design_id == "dsg_9"
-    assert [c[0] for c in gw.calls] == ["generate_design", "get_design"]
+    assert out.root is not None and out.design_id == "dsg_1"
+    assert [c[0] for c in gw.calls] == ["start_design_agent", "get_agent_job", "get_design"]
+    started = gw.calls[0][1]
+    assert started["confirmed"] is True, "the server refuses a spend that was not confirmed"
+
+
+def test_a_failed_job_says_so(svc, tmp_path):
+    class Failing(FakeGateway):
+        async def call(self, tool, **kw):
+            if tool == "get_agent_job":
+                return [{"type": "text", "text": json.dumps({"status": "failed", "error": "out of credits"})}]
+            return await super().call(tool, **kw)
+
+    out = g.compose(svc, svc.doc["pages"][0], app_root=tmp_path / "app", gateway=Failing())
+    assert out.root is None and "failed" in out.reason
 
 
 def test_configuration_is_read_by_name_never_by_value(monkeypatch, tmp_path):
