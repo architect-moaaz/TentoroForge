@@ -277,7 +277,10 @@ const STUBS: Record<string, string> = {
     "export const FK_ROLES = {};\n" +
     "export const fkRole = () => undefined;\n" +
     "export const isDomainFk = () => false;\n",
-  "./sensitive-columns": "export const sensitiveColumnsFor = () => ({});\n",
+  // Cart's guest token is marked sensitive, as TCommerce's is: the guest
+  // tests below prove it is still stored as it is, or no visitor matches it.
+  "./sensitive-columns":
+    "export const sensitiveColumnsFor = (e) => /^carts?$/i.test(e) ? { guestToken: { mask: 'full', readers: [] } } : {};\n",
   "./searchable-columns": "export const searchableColumnsFor = () => [];\n",
   "./sensitive-crypto":
     "export const encryptSensitive = async (v) => v;\n" +
@@ -617,7 +620,9 @@ console.log("guest: a cart a guest makes carries their token, whatever the body 
 {
   const made: any = await engine.create(carts.__name, { status: "open", guestToken: GUEST_TWO }, asGuestOne);
   const row = made?.data ?? made;
-  eqJson(row.guestToken, GUEST_ONE, "stamped with the visitor's own token, not the one sent");
+  const stored = ROWS[carts.__name].find((r) => r.id === row.id);
+  eqJson(stored.guestToken, GUEST_ONE, "stored with the visitor's own token, not the one sent — and in the clear, though marked sensitive");
+  ok(row.guestToken !== GUEST_ONE, "while what is answered masks it, as a sensitive column is");
   ok(ids((await engine.query("Cart", {}, asGuestOne)).data).includes(row.id), "and they read it back");
   ok(!ids((await engine.query("Cart", {}, asGuestTwo)).data).includes(row.id), "the token they named does not");
 }

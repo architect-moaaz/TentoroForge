@@ -181,8 +181,12 @@ async function _encryptSensitiveOnWrite(
   const specs = sensitiveColumnsFor(entityName);
   const keys = Object.keys(specs);
   if (keys.length === 0) return;   // no sensitive columns — fast path.
+  // A GUEST COLUMN IS A KEY, NOT A SECRET TO HIDE IN THE TABLE: rows are found
+  // by it, so it is stored as it is. TCommerce marked its cart's guestToken
+  // sensitive; encrypted, it would match no visitor ever again.
+  const guestCols = new Set(ownershipRulesFor(entityName).map((r) => r.guestColumn).filter(Boolean));
   for (const col of keys) {
-    if (!(col in data)) continue;
+    if (!(col in data) || guestCols.has(col)) continue;
     const raw = data[col];
     // Empty / undefined = "keep existing" on update, "no value" on create.
     // Either way, we must not overwrite _encrypted / _mask with an empty
