@@ -484,7 +484,7 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
     # `__figma__`: the key is per-organisation and write-only, and the
     # extraction resolves it by NAME at the moment of the call (§42).
     # Reading a UX Pilot page spends no credits; the gateway exposes the
-    # read tools by default and admits `generate_design` only for a run
+    # read tools by default and admits `start_design_agent` only for a run
     # whose application chose UX Pilot as its UI designer at the approval
     # gate (services/smith/ui_designer.py) — the click is the consent.
     "__uxpilot__": [
