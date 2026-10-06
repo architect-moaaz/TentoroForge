@@ -77,7 +77,10 @@ def _default_provider(prompt: str, reasoning: Callable[[str], None] | None = Non
                 logger.info("[smith] attachment not shown to the model (%s)", exc)
         if blocks:
             content = [*blocks, {"type": "text", "text": prompt}]
-    return complete(content=content, max_tokens=4000,
+    # ROOM TO THINK AND THEN ANSWER. The cap covers thinking and the reply
+    # together; at 4000 a turn deep in its reads thought until the cap and
+    # answered nothing (TCommerce, 2026-10-06). Only what is used is billed.
+    return complete(content=content, max_tokens=12000,
                     reasoning_callback=reasoning)
 
 

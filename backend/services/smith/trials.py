@@ -330,6 +330,8 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
                         "order by created_at, step_index limit 40")
     out = [f"{flow.get('name')} ({flow.get('id')}) run as {who}: HTTP {status}",
            f"answer: {_body(text)}"]
+    if status == 403:
+        out += launch_rights(bench.output_dir, doc, flow)
     if steps:
         out.append("steps:")
         # WHAT EACH STEP HANDED ON. F&B's duplicate check read
@@ -348,6 +350,46 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
         out.append("the server printed:")
         out += [f"  {l}" for l in said]
     return scrub("\n".join(out))
+
+
+def launch_rights(output_dir: str, doc: dict, flow: dict) -> list[str]:
+    """Why a run was refused for the role: who the APP lets launch the process
+    — its own `launch-roles.ts`, the file the execute route reads — and where
+    that comes from in the definition.
+
+    TCommerce's published app refused the administrator's every save with
+    "This action is not available to your role"; the file said `[]` for every
+    admin process, and Smith, never shown it, read code around it for two
+    turns and asked the owner which screen it was on (2026-10-05)."""
+    import re as _re
+
+    file = Path(output_dir) / "app" / "src" / "lib" / "workflows" / "launch-roles.ts"
+    try:
+        text = file.read_text("utf-8")
+    except OSError:
+        return [f"who may launch it: {file.relative_to(Path(output_dir))} is missing — every launch is refused "
+                "or admitted by default; `sync_app` writes it from the definition"]
+    from services.blueprint.projection import _workflow_slug
+    keys = [str(flow.get("id") or ""), _workflow_slug(flow)]
+    m = next((_re.search(r'"%s"\s*:\s*(\[[^\]]*\]|null)' % _re.escape(k), text) for k in keys
+              if _re.search(r'"%s"\s*:' % _re.escape(k), text)), None)
+    said = m.group(1) if m else "(no entry: anyone may launch it)"
+    pages = {str(pg.get("id")): pg for pg in doc.get("pages") or [] if isinstance(pg, dict)}
+    froms = []
+    for pid in flow.get("launchedFrom") or []:
+        pg = pages.get(str(pid)) or {}
+        froms.append(f"{pid} {pg.get('route', '?')} (access {pg.get('access') or 'authenticated'}, "
+                     f"users {pg.get('users') or 'none named'}{', ' + pg['status'] if pg.get('status') == 'DEPRECATED' else ''})")
+    return [
+        f"who may launch it, as the app reads it: app/src/lib/workflows/launch-roles.ts says {flow.get('id')}: {said}"
+        + (" — [] admits nobody" if said.replace(" ", "") == "[]" else ""),
+        "  that file is written from the definition: the roles of the pages the process is launched from "
+        "(a public page admits everyone, a signed-in page any signed-in role, a role-restricted page the "
+        "roles it names) — " + ("; ".join(froms) if froms else "it names no launching page"),
+        "  fix it where it comes from — who may open those pages (`edit_access`), or the pages the process "
+        "is launched from — never by editing the file, which the next sync rewrites; `sync_app` rewrites it "
+        "now if the definition is already right",
+    ]
 
 
 def try_request(bench: Bench, doc: dict, method: str, path: str, body: Any, as_: str) -> str:

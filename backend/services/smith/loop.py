@@ -385,6 +385,21 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
         except Exception:  # noqa: BLE001
             raw = ""
         data = _parse(raw)
+    if data is None and not (raw or "").strip():
+        # AN EMPTY REPLY IS A REPLY THAT RAN OUT OF ROOM THINKING. With the
+        # turn's reads piled up (40–50k characters), the model deliberated for
+        # 130–140 seconds, spent the call's whole budget on thinking and wrote
+        # nothing; four of TCommerce's turns ended on "I could not turn that
+        # into a change I am sure of" — the owner's cart report, never looked
+        # at (ihf6pjga, 2026-10-06). Asked again without the long think.
+        logger.warning("smith loop: empty reply — asking once more, without extended thinking")
+        quick = provider or (lambda prompt: _default_provider(prompt, None, images=images))
+        try:
+            raw = quick(prompt + "\n\nYour last reply was empty. Decide the next step now and reply with "
+                                 "the JSON object only — {\"tool\": …, \"args\": …, \"why\": …}.")
+        except Exception:  # noqa: BLE001
+            raw = ""
+        data = _parse(raw)
     if data is None:
         # NOT A SILENT END. A reply nobody could read is not "done"; it is a
         # turn that must ask, in the person's own words, for one thing.

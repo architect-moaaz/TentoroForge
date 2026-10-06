@@ -75,13 +75,25 @@ async function contextsFor(p) {
 const MISSING_ID = "00000000-0000-4000-8000-000000000000";
 const MAX_CONTROLS = 24;
 
-async function firstId(context, entity) {
+async function firstRow(context, entity) {
   if (!entity) return null;
   try {
     const res = await context.request.get(`${cfg.baseUrl}/api/data/${encodeURIComponent(entity)}?limit=1`);
     const body = await res.json();
-    return body?.data?.[0]?.id ?? null;
+    return body?.data?.[0] ?? null;
   } catch { return null; }
+}
+
+// EACH [param] BY ITS NAME. `/shop/[slug]` opened on a product's id answered
+// "not found", and every look at TCommerce's product page — the one with Add
+// to Bag — was a look at the not-found screen (2026-10-06). A param the row
+// carries as a field (slug, code) takes that value; any other takes the id.
+function fillRoute(url, row) {
+  const camel = (s) => s.replace(/[-_]([a-z])/g, (_, c) => c.toUpperCase());
+  return url.replace(/\[([^\]]+)\]/g, (_, name) => {
+    const v = name === "id" ? row.id : (row[name] ?? row[camel(name)] ?? row.id);
+    return encodeURIComponent(String(v));
+  });
 }
 
 // The shell scrolls its main column, so a full-page screenshot would stop at
@@ -324,9 +336,9 @@ for (const p of cfg.pages) {
   const who = await contextsFor(p);
   const isRecord = /\[[^\]]+\]/.test(url);
   if (isRecord) {
-    const id = await firstId(who.ctx, p.entity);
-    if (!id) { out.push({ id: p.id, route: p.route, skipped: "no record to open" }); continue; }
-    url = url.replace(/\[[^\]]+\]/g, id);
+    const row = await firstRow(who.ctx, p.entity);
+    if (!row?.id) { out.push({ id: p.id, route: p.route, skipped: "no record to open" }); continue; }
+    url = fillRoute(url, row);
   }
   const t0 = Date.now();
   const file = path.join(cfg.outDir, `${p.id}.png`);
