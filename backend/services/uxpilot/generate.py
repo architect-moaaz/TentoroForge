@@ -181,6 +181,26 @@ def _launched_here(doc: dict, page_id: str) -> list[dict]:
             if page_id in (w.get("launchedFrom") or []) and w.get("name")]
 
 
+#: Pages that are not a list of records: a table of them there is clutter.
+_NO_TABLE_PATTERNS = ("form", "wizard", "dashboard", "record_workspace", "master_detail", "auth", "settings")
+_BOOKKEEPING = ("id", "createdat", "updatedat", "created_at", "updated_at")
+
+
+def _hidden_fields(doc: dict, entity_name: str) -> set[str]:
+    """Columns of an entity a person is never shown: its id, its bookkeeping
+    timestamps, and the column that says whose it is (a design with a "User Id"
+    column or field is a design of the database, not of the application)."""
+    hidden = set(_BOOKKEEPING)
+    for rule in (doc.get("security") or {}).get("ownershipRules") or []:
+        if isinstance(rule, dict) and str(rule.get("entity") or "").lower() == entity_name.lower() and rule.get("column"):
+            hidden.add(str(rule["column"]).lower())
+    return hidden
+
+
+def _visible(items: list[dict], hidden: set[str], key: str) -> list[dict]:
+    return [i for i in items if str(i.get(key) or "").replace("_", "").lower() not in {h.replace("_", "") for h in hidden}]
+
+
 def _column_defs(brief: dict) -> list[dict]:
     derived = brief.get("derived") or {}
     cols = [c for c in (derived.get("columns") or []) if isinstance(c, dict) and c.get("key")]
@@ -230,6 +250,14 @@ def _design_language(doc: dict) -> str:
         lines.append("Typography: " + ", ".join(f"{k} {v}" for k, v in list(typo.items())[:6]) + ".")
     if ds.get("informationDensity"):
         lines.append(f"Information density: {ds['informationDensity']}.")
+    # THE APPLICATION'S OWN DIRECTION: the composition the UI director wrote is
+    # what every screen is meant to feel like, and it is written down already.
+    composition = doc.get("composition") or {}
+    if composition.get("vision"):
+        lines.append(f"Direction: {composition['vision']}")
+    for conv in [c for c in (composition.get("conventions") or []) if isinstance(c, dict)][:6]:
+        if conv.get("topic") and conv.get("rule"):
+            lines.append(f"- {conv['topic']}: {conv['rule']}")
     return "\n".join(lines)
 
 
@@ -277,11 +305,12 @@ def prompt_for(doc: dict, page: dict, *, feedback: str = "", section: bool = Fal
         "bound to live data after generation, so a label that differs is a "
         "widget that shows nothing."
     )
+    hidden = _hidden_fields(doc, entity_name)
     metrics = _metric_widgets(brief)[:_MAX_LABELS]
     if metrics:
         parts.append("Metric tiles, each with its label and one number: "
                      + "; ".join(f"\"{w['label']}\"" for w in metrics) + ".")
-    cols = _column_defs(brief)[:_MAX_LABELS]
+    cols = _visible(_column_defs(brief), hidden, "key")[:_MAX_LABELS]
     # A PAGE ABOUT ONE RECORD IS NOT A TABLE OF THEM: a record page (`[id]` in
     # its route, or the pattern) was drawn as a list of rows, which the writer
     # then had to undo. It shows the one record's fields, each labelled.
@@ -292,13 +321,13 @@ def prompt_for(doc: dict, page: dict, *, feedback: str = "", section: bool = Fal
             f"One {entity_name} shown in full, as a record rather than a list, with each of its "
             "fields labelled exactly: " + ", ".join(f"\"{c['label']}\"" for c in cols) + "."
         )
-    elif cols and entity_name:
+    elif cols and entity_name and str(page.get("pattern") or "") not in _NO_TABLE_PATTERNS:
         parts.append(
             f"A table of {_plural(entity_name)} with exactly these column headers, "
             "in this order, and three or four example rows: "
             + ", ".join(f"\"{c['label']}\"" for c in cols) + "."
         )
-    fields = _form_fields(brief)[:_MAX_LABELS]
+    fields = _visible(_form_fields(brief), hidden, "name")[:_MAX_LABELS]
     if fields and str(page.get("pattern") or "") in ("form", "wizard"):
         parts.append("A form with exactly these fields, labelled: "
                      + ", ".join(f"\"{f['label']}\"" for f in fields) + ".")
@@ -346,7 +375,8 @@ def prompt_for(doc: dict, page: dict, *, feedback: str = "", section: bool = Fal
     if reqs:
         parts.append("What people come here to do:\n" + "\n".join(f"- {r}" for r in reqs))
     if section:
-        return "\n\n".join(b for b in parts[1:] if b not in shared and b != shell_rule)
+        return "\n\n".join(b for b in parts[1:] if b not in shared and b != shell_rule
+                            and not b.startswith(("Page:", "Page pattern:", "Use exactly the labels")))
     if feedback.strip():
         parts.append("The previous attempt was refused. Fix exactly this:\n" + feedback.strip())
     return "\n\n".join(parts)
@@ -558,6 +588,12 @@ def app_prompt_for(doc: dict, pages: list[dict]) -> str:
     language = _design_language(doc)
     if language:
         parts.append("Design language, shared by every screen:\n" + language)
+    parts.append(
+        "Use exactly the labels given for each screen, spelled exactly as written: they are bound to live "
+        "data after generation, so a label that differs is a widget that shows nothing. Never draw an id, "
+        "an owner or a created/updated timestamp. Make every screen feel finished and considered: a clear "
+        "visual hierarchy, icons beside actions and dates, status told as a small tinted pill, hover and "
+        "focus states, generous spacing, a thoughtful empty state.")
     parts.append(
         "Render each PAGE BODY ONLY. Do not draw a sidebar, a top navigation bar or any "
         "application shell: the application provides those around every page. Start each "
