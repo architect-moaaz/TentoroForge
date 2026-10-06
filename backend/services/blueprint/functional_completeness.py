@@ -421,6 +421,10 @@ def _somewhere_to_go(doc: dict, page: dict, entity: str, by_name: dict,
     wanted = {entity, by_name.get(entity, "")} - {""}
     if page_family(page) in families:
         return True
+    # A page where its records are added (`addsHere`) collects the fields
+    # itself: its own form is where `create` goes.
+    if "form" in families and page.get("addsHere"):
+        return True
     return any(page_family(p) in families
                and str((p.get("data") or {}).get("primaryEntity") or "") in wanted
                for p in _live(doc.get("pages")))

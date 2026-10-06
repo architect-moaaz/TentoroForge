@@ -474,6 +474,31 @@ export const PageContract = z.object({
     .describe("page = its own route; drawer/modal = opened over the caller"),
 
   /**
+   * Records of this page's primary entity are added HERE — a panel over the
+   * list, or the workspace opening empty — not on a page of their own.
+   *
+   * The planner offered every entity a list, a detail and an "Add a {name}"
+   * page, filled whole, so a brief that named everything got a `/new` route
+   * for every record: Mozato (forge-v3, 2026-10-06) planned 106 pages, 21 of
+   * them a create form beside a list of the same record, and 46 for the back
+   * office alone. A create form is one task on the list it fills, not a page;
+   * it earns a route only when adding is a job of its own (several steps, or
+   * a form someone outside fills in to ask for something).
+   *
+   * Set by the page-set decision; the workflow that creates the record
+   * launches from this page, the contract lists adding among its tasks, and
+   * the page's code carries the form.
+   */
+  addsHere: z
+    .boolean()
+    .optional()
+    .describe(
+      "Records of this page's primary entity are added on this page (a panel " +
+        "over the list, or this workspace opening empty) instead of on a page " +
+        "of their own",
+    ),
+
+  /**
    * Saved views over this page's data — the same list, filtered differently.
    *
    * Without this a filtered variant has nowhere to live, so the only way to

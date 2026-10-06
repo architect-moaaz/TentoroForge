@@ -18,7 +18,7 @@ def test_a_feature_is_one_entity_and_all_of_its_pages():
     features = {f["feature"]: f for f in page_slots(DOC)}
     assert set(features) == {"home", "ENTITY-001", "ENTITY-002"}
     assert {p["slot"] for p in features["ENTITY-001"]["pages"]} == {
-        "ENTITY-001.list", "ENTITY-001.detail", "ENTITY-001.create"}
+        "ENTITY-001.list", "ENTITY-001.detail", "ENTITY-001.add"}
 
 
 def test_completeness_is_asked_for_over_coverage():
@@ -108,3 +108,47 @@ def test_relations_are_named_not_ided():
     has to do itself."""
     by = {f["feature"]: f for f in page_slots(REL_DOC) if f.get("entity")}
     assert by["E2"]["reachedThrough"] == ["Job"]
+
+
+# --- Mozato (forge-v3, 2026-10-06): 106 pages, 21 of them a create form ------
+# beside a list of the same record, 46 for the back office, and no page where a
+# customer could open a restaurant. Adding moved onto the list, and the people
+# the product is for are asked about before the tables are.
+
+PERSONAS = {**DOC, "product": {"personas": [
+    {"name": "Customer", "description": "Drops a bike off and collects it",
+     "goals": ["Know when the bike is ready"]},
+    {"name": "Mechanic", "goals": ["Work through today's repairs"]},
+]}}
+
+
+def test_adding_is_a_task_on_the_list_not_a_page():
+    feature = next(f for f in page_slots(DOC) if f["feature"] == "ENTITY-001")
+    by_slot = {p["slot"].split(".")[1]: p for p in feature["pages"]}
+    assert by_slot["list"]["pattern"] == "entity_list" and "addsHere" in by_slot["list"]["prompt"]
+    assert "Decline it when every field fits a row" in by_slot["detail"]["prompt"]
+    assert "Otherwise decline it" in by_slot["add"]["prompt"]
+    text = page_slot_prompt(DOC)
+    assert "`addsHere: true`" in text and "declined by default" in text
+    assert "never one" in text
+
+
+def test_the_people_are_asked_about_before_the_tables():
+    slots = page_slots(PERSONAS)
+    order = [f["feature"] for f in slots]
+    assert order[:3] == ["home", "journey:Customer", "journey:Mechanic"]
+    customer = slots[1]
+    assert customer["goals"] == ["Know when the bike is ready"] and customer["entity"] is None
+    assert "sees a record differently" in customer["pages"][0]["prompt"]
+    assert "PEOPLE FIRST" in page_slot_prompt(PERSONAS)
+
+
+def test_no_personas_no_journeys():
+    assert not [f for f in page_slots(DOC) if f["feature"].startswith("journey:")]
+
+
+def test_the_page_set_may_say_where_records_are_added():
+    """Declared by the page-set call, kept through the contract author."""
+    from services.blueprint.executors import _DECLARED_PAGE_FIELDS, _PINNED_PAGE_FIELDS, NODE_TASKS
+    assert "addsHere" in _DECLARED_PAGE_FIELDS and "addsHere" in _PINNED_PAGE_FIELDS
+    assert "addsHere" in NODE_TASKS["page_contracts"]

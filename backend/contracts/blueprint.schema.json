@@ -474,6 +474,10 @@
             "default": "page",
             "description": "page = its own route; drawer/modal = opened over the caller"
           },
+          "addsHere": {
+            "type": "boolean",
+            "description": "Records of this page's primary entity are added on this page (a panel over the list, or this workspace opening empty) instead of on a page of their own"
+          },
           "views": {
             "type": "array",
             "items": {

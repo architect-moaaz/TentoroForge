@@ -842,6 +842,13 @@ def _page_brief(doc: dict, page: dict) -> dict:
         "page": {k: page.get(k) for k in ("id", "name", "route", "pattern", "purpose", "primaryTasks",
                                           "actions", "states", "users", "access", "responsive")
                  if page.get(k) not in (None, [], "")},
+        # ADDING HAPPENS HERE (`addsHere`): no page of its own exists for a new
+        # record, so this page carries the form — a panel over the list, or
+        # the workspace opening empty — and runs the workflow that creates it.
+        **({"addsHere": "New " + str((ents.get(str(data.get("primaryEntity"))) or {}).get("name") or "records")
+            + " are added on this page: give it the form for one (a panel or drawer over the list, or "
+            "this workspace opening empty) that runs the workflow below which creates it. There is "
+            "no separate page to send anyone to."} if page.get("addsHere") else {}),
         "sdkKey": pkeys.get(str(page.get("id"))),
         "primaryEntity": (ents.get(str(data.get("primaryEntity"))) or {}).get("name"),
         "supportingEntities": [(ents.get(str(x)) or {}).get("name") for x in data.get("supportingEntities") or []],

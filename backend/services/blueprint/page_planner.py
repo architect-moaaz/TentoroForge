@@ -2000,6 +2000,9 @@ def page_brief(doc: dict, page_id: str) -> dict:
             "formFields": form_fields_for(
                 entity, creating=str(page.get("route") or "").endswith("/new")),
             "summaryFields": summary_fields(entity),
+            # A list that adds its records carries the create form itself.
+            **({"addFields": form_fields_for(entity, creating=True)}
+               if page.get("addsHere") else {}),
         }
         brief["relatedCollections"] = [
             {**rel, "columns": rel.get("columns")}
@@ -2022,11 +2025,33 @@ def page_brief(doc: dict, page_id: str) -> dict:
 #:
 #: Asking slot by slot removes the room rather than policing it. There is no
 #: sixth jobs slot to put "overdue" in, so it goes where it fits: `views`.
+#:
+#: ADDING IS A TASK ON THE LIST, NOT A PAGE. The third slot used to be
+#: ("create", "form", "Add a {name}.") — filled with the feature, whole — so
+#: every record a brief named got a `/new` route beside its list. Mozato
+#: (forge-v3, 2026-10-06) planned 106 pages: 21 were a create form next to a
+#: list of the same record, and simple lookups (cities, zones, brands,
+#: templates) each took a list, a workspace and a form. A list now says it
+#: adds (`addsHere`), the detail may be declined where the list shows and
+#: changes everything, and a page of its own for adding is asked for only
+#: where adding is a job of its own.
 ENTITY_SLOTS = (
-    ("list", "entity_list", "Every {name}, in one place."),
-    ("detail", "record_workspace", "One {name}, with everything about it."),
-    ("create", "form", "Add a {name}."),
+    ("list", "entity_list",
+     "Every {name}, in one place, and where a new one is added: set `addsHere` "
+     "and the list carries the form."),
+    ("detail", "record_workspace",
+     "One {name}, with everything about it: its related records and what "
+     "happens to it. Decline it when every field fits a row of the list; then "
+     "the list shows and changes it."),
+    ("add", "wizard",
+     "A page of its own for adding a {name} — only when adding one is a job "
+     "of its own: several steps (`wizard`), or a form somebody fills in to ask "
+     "for one (an application, a booking — `form`). Otherwise decline it."),
 )
+
+#: The slots a feature is answered by, together or not at all. `add` is not
+#: one of them: it is the exception, asked for separately.
+CORE_SLOTS = ("list", "detail")
 
 
 def _screen_frames(doc: dict, *, specification: bool) -> list[dict]:
@@ -2163,6 +2188,15 @@ def frame_slots(frames: list[dict], *, sole: bool = True) -> list[dict]:
     return slots
 
 
+JOURNEY_PROMPT = (
+    "The pages a {name} passes through, in order, to reach each of their goals. "
+    "Most steps are pages of the features below: name the same page, never a "
+    "second one. A step earns a page of its own only when this person sees a "
+    "record differently from the people who manage it — a customer browsing a "
+    "shop's catalogue is not the owner editing it."
+)
+
+
 def page_slots(doc: dict) -> list[dict]:
     """The features this application's page set may fill, one per entity.
 
@@ -2225,6 +2259,26 @@ def page_slots(doc: dict) -> list[dict]:
                     "prompt": home_prompt}],
          "prompt": "Omit if the app opens on a list."},
     ]
+    # JOURNEYS BEFORE TABLES. Every other slot is a record type, so the page
+    # set followed the data model: Mozato's back office got 46 pages while a
+    # customer had no page to open a restaurant and read its menu — the
+    # restaurant's pages were its partner's, and nothing asked what a
+    # customer passes through. One slot per person the product names, first,
+    # so their path is answered before the tables are.
+    for persona in (doc.get("product") or {}).get("personas") or []:
+        if not isinstance(persona, dict) or not persona.get("name"):
+            continue
+        slots.append({
+            "feature": f"journey:{persona['name']}",
+            "entity": None,
+            "persona": persona["name"],
+            "description": persona.get("description") or "",
+            "goals": list(persona.get("goals") or []),
+            "requirements": [],
+            "pages": [{"slot": f"journey:{persona['name']}", "pattern": None,
+                       "prompt": JOURNEY_PROMPT.format(name=persona["name"])}],
+        })
+
     names = {e.get("id"): e.get("name") or e.get("id") for e in entities}
     for entity in entities:
         eid = entity.get("id")
@@ -2314,12 +2368,30 @@ def page_slot_prompt(doc: dict) -> str:
     return (
         _DRAWN_PREAMBLE if reference_frames(doc) else ""
     ) + (
-        "Fill in this application's page set feature by feature. A feature is "
-        "one entity's pages: fill it completely or decline it completely.\n\n"
+        "Fill in this application's page set, people first, then feature by "
+        "feature.\n\n"
+        "PEOPLE FIRST. The `journey:` slots at the top are the people this "
+        "product is for, with their goals. Walk each one through their goals "
+        "and name the pages they pass through, in order. Most steps are pages "
+        "the features below give anyway; where this person sees a record "
+        "differently from those who manage it, the step is a page of its own "
+        "for them. A goal nobody can walk through is a page set that is "
+        "missing a page, however many pages it has.\n\n"
+        "THEN THE FEATURES. A feature is one entity's pages — its list and its "
+        "detail: fill it completely or decline it completely. Its list is "
+        "where its records are found AND added: set `addsHere: true` on it and "
+        "adding is a panel on that list, not a page. Decline the detail when "
+        "every field fits a row of the list — a city, a tag, a template is "
+        "added and changed right there, one page for the whole feature.\n\n"
         "Filling it completely matters more than filling many. A list with no "
         "way to add a record, or a record with nowhere to open it, is not a "
         "smaller feature — it is one a user cannot finish a job with. Prefer "
         "few features a user can complete over many they cannot.\n\n"
+        "A PAGE FOR ADDING is the exception, its own slot, declined by "
+        "default: answer it only when adding is a job of its own — several "
+        "steps (`wizard`), or a form somebody fills in to ask for something "
+        "(an application, a booking; `form`). An \u201cAdd a \u2026\u201d "
+        "form with a list of the same records beside it is never one.\n\n"
         "Decline a feature when the entity is a join table, a lookup, or "
         "something only ever edited inside another record — a line item is "
         "edited on its invoice, not on a page of its own.\n\n"

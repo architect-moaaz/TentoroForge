@@ -1452,7 +1452,8 @@ NODE_TASKS: dict[str, str] = {
         "a feature completely or decline it completely, and for every page "
         "you keep give its `name`, `route`, a one-sentence `purpose`, its "
         "`pattern`, its `module`, `data.primaryEntity` (the entity the page is "
-        "about; omit for a dashboard or a sign-in), `access`, and `figmaFrame` "
+        "about; omit for a dashboard or a sign-in), `access`, `addsHere: true` "
+        "on a page where its entity's records are added, and `figmaFrame` "
         "where a slot carries one. NOTHING ELSE: no tasks, states, views, "
         "actions, users or widgets — the contracts are written afterwards, "
         "one feature per call, against the set you decide here, and anything "
@@ -1495,6 +1496,10 @@ NODE_TASKS: dict[str, str] = {
         "it serves, the tasks users come to it for, its pattern, its primary "
         "entity, and the states it must handle. Declare empty and error states up "
         "front — a page that discovers them later ships broken.\n\n"
+        "A page carrying `addsHere: true` is where its entity's records are "
+        "added: adding one is among its `primaryTasks` and `create` among its "
+        "`actions`, and the form for it lives on that page. No other page adds "
+        "them, so nothing navigates anywhere to add one.\n\n"
         "When a page only means something once something has happened, say so "
         "in `requires`. An approval screen is not a page you can look at; it "
         "is a page you can look at once something has been submitted, and "
@@ -2990,10 +2995,11 @@ def pin_entity_identity(svc: Any, entity_id: str, result: AgentResult) -> None:
 _DECLARED_PAGE_FIELDS: frozenset[str] = frozenset({
     "name", "route", "purpose", "pattern", "module", "data", "access", "entry",
     "presentation", "figmaFrame", "requirements", "confidence", "status",
+    "addsHere",
 })
 
 #: What the declaration decided and the contract author may not move.
-_PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module")
+_PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module", "addsHere")
 
 
 def pin_page_set(result: AgentResult) -> None:

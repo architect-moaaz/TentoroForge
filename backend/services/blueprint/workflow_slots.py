@@ -52,6 +52,10 @@ def _submits(page: dict) -> bool:
     route = str(page.get("route") or "")
     if route.endswith("/new") or route.endswith("/create"):
         return True
+    # A LIST THAT ADDS ITS RECORDS is the create page now (`addsHere`): the
+    # form is a panel on it, and it has as much need of a workflow to call.
+    if page.get("addsHere"):
+        return True
     return str(page.get("pattern") or "").strip().lower() in _SUBMITTING_PATTERNS
 
 
@@ -87,7 +91,9 @@ def workflow_slots(doc: dict) -> list[dict]:
             "purpose": page.get("purpose") or "",
             # What it writes, so the workflow's steps have a real entity to
             # name rather than one inferred from the route's spelling.
-            "entity": page.get("entity") or page.get("primaryEntity") or "",
+            "entity": page.get("entity") or page.get("primaryEntity")
+                      or (page.get("data") or {}).get("primaryEntity") or "",
+            **({"addsHere": True} if page.get("addsHere") else {}),
         })
     return out
 
@@ -99,7 +105,8 @@ def workflow_slot_prompt(doc: dict) -> str:
         return ""
     return (
         f"{len(slots)} page(s) in this application exist in order to submit "
-        "something, and none of them has a workflow to submit to. They are "
+        "something — a create page, or a list where its records are added "
+        "(`addsHere`) — and none of them has a workflow to submit to. They are "
         "listed below.\n\n"
         "A create page whose workflow you do not author is a form with a dead "
         "button: the page composer is told which workflows each page launches "

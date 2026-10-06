@@ -221,7 +221,28 @@ def _family_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict | No
 
     if family == "collection":
         header = [heading(name)]
-        if form_page:
+        add_dialog: dict | None = None
+        if page.get("addsHere") and create:
+            # ADDED HERE, NOT ON A PAGE OF ITS OWN (`addsHere`): the create
+            # form is a dialog over the list, and it stays on the list when it
+            # has saved — the default "back to the parent" would leave the very
+            # list the record was added to.
+            dialog_sources: list[dict] = []
+            form = _workflow_form(doc, page, create, entity, None, dialog_sources) \
+                if create.get("inputs") else _node("Form", {
+                    "workflow": str(create.get("id")), "entity": ename,
+                    "fields": [_field_kind(f) for f in fields]})
+            if form is not None and (form.get("props") or {}).get("fields"):
+                dialog_id = f"add-{src}"
+                form["props"]["submitLabel"] = f"Add {ename}"
+                form["props"]["onSuccess"] = {"toast": f"{ename} added",
+                                              "navigate": str(page.get("route") or "/")}
+                header.append({"type": "Button", "props": {
+                    "label": f"Add {ename}", "variant": "primary",
+                    "opensDialog": dialog_id}, "children": []})
+                add_dialog = {"type": "Dialog", "props": {"id": dialog_id, "title": f"Add {ename}"},
+                              "children": [form]}
+        if form_page and add_dialog is None:
             header.append({"type": "Button", "props": {
                 "label": f"Add {ename}", "variant": "primary",
                 "navigate": str(form_page.get("route"))}, "children": []})
@@ -235,6 +256,11 @@ def _family_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict | No
         elif form_page and update:
             row_actions.append({"label": "Edit",
                                 "navigate": f"{form_page.get('route')}?id={{{{id}}}}"})
+        elif record_page and update:
+            # No form page to edit on: the record's own page edits it in place
+            # (see the record branch), so Edit opens it there.
+            row_actions.append({"label": "Edit",
+                                "navigate": _ROUTE_ID.sub("{{id}}", str(record_page.get("route")))})
         if delete:
             row_actions.append({"label": "Delete", "workflow": str(delete.get("id")), "variant": "danger"})
         table: dict[str, Any] = {"data": f"{{{{{src}}}}}",
@@ -244,12 +270,15 @@ def _family_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict | No
         if row_actions:
             table["rowActions"] = row_actions
         sources = [{"name": src, "entity": ename, "op": "list"}]
+        if add_dialog is not None:
+            sources += [d for d in dialog_sources if d not in sources]
         similar = _similar_section(entity, ename, src, table, sources)
         root = {"type": "Stack", "props": {"direction": "vertical", "gap": "lg"}, "children": [
             {"type": "Row", "props": {"justify": "between", "align": "center"}, "children": header},
             *([para(purpose)] if purpose else []),
             *([similar] if similar else []),
             {"type": "Table", "props": table, "children": []},
+            *([add_dialog] if add_dialog is not None else []),
         ]}
 
     elif family == "form":
