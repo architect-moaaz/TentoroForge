@@ -856,7 +856,8 @@ def _page_brief(doc: dict, page: dict) -> dict:
             "write": ("This page is a SCREEN: build every section below in it. A `panel` opens when "
                       "a record is chosen in the section it `opensFrom` and when the page is opened "
                       "with `?<param>=<id>` (read it from the page's searchParams in load.ts, so a "
-                      "link lands on the record); a `tab` is a tab of the screen; a `dialog` opens "
+                      "link lands on the record); a `tab` is a tab of the screen, chosen by "
+                      "`?tab=<section key>` so the menu can open it; a `dialog` opens "
                       "from a control. Each section's `actions` are done by the workflows launched "
                       "here; a section that `addsHere` carries the form that adds its records."),
             "sections": [{**{k: v for k, v in sec.items() if k != "entity" and v not in (None, [], "")},

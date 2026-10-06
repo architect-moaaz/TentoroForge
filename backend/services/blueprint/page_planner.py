@@ -2322,6 +2322,21 @@ _DRAWN_PREAMBLE = (
 )
 
 
+def _menu_paragraph(doc: dict) -> str:
+    """The menu the application already has, for the screens to answer."""
+    from services.blueprint.menu_binding import menu_paths
+    paths = menu_paths(doc)
+    if not paths:
+        return ""
+    return (
+        "THE MENU IS ALREADY DESIGNED. Set each screen's `menuEntry` to the entry "
+        "below it answers, exactly as written; a tab that is a menu destination "
+        "of its own sets its section's `menuEntry`. An entry no screen answers "
+        "is a screen still missing, or a tab of one. The entries:\n"
+        + "".join(f"  - {p}\n" for p in paths) + "\n"
+    )
+
+
 def page_slot_prompt(doc: dict) -> str:
     """The slot question, with the user's own words attached (§115)."""
     described = (doc.get("application") or {}).get("description") or ""
@@ -2392,6 +2407,7 @@ def page_slot_prompt(doc: dict) -> str:
         "A PAGE FOR ADDING is the exception: only when adding is a job of its "
         "own — several steps (`wizard`), or a form somebody fills in to ask for "
         "something (an application, a booking; `form`).\n\n"
+        + _menu_paragraph(doc) +
         "`reachedThrough` names the records one hangs off, taken from its "
         "required references: it is usually a section of that one's panel.\n\n"
         "Except: anything the user asked for is not declinable, however "

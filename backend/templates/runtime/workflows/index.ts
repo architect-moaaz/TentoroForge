@@ -1644,6 +1644,12 @@ export function registerDefaultActions(): void {
     const role = (config as any).toRole ?? (config as any).assigneeRole ?? (config as any).recipientRole ?? null;
     const type = String((config as any).notificationType ?? (config as any).type ?? "info");
     const entityId = _resolveRef((config as any).entityId ?? null, ctx);
+    // WHERE IT OPENS: the address of the record it is about, filled when the
+    // definition was written (`record_links.notification_link`). Stored only
+    // where the table has the column — an app not yet brought up to date
+    // keeps its notifications rather than failing the insert.
+    const linkRaw = (config as any).link ? _resolveRef((config as any).link, ctx) : null;
+    const link = typeof linkRaw === "string" && linkRaw.startsWith("/") && !linkRaw.includes("{{") ? linkRaw : null;
     const table = (schema as any).forgeNotifications;
     let notificationId: string | null = null;
     if (table) {
@@ -1651,6 +1657,7 @@ export function registerDefaultActions(): void {
         const inserted: any = await (db as any).insert(table).values({
           title, message, userId: userId ? String(userId) : null,
           role: role ? String(role) : null, type, entityId: entityId ? String(entityId) : null, read: false,
+          ...(link && "link" in table ? { link } : {}),
         }).returning();
         const row = Array.isArray(inserted) ? inserted[0] : inserted;
         notificationId = row?.id ?? null;

@@ -528,6 +528,9 @@
                 "addsHere": {
                   "type": "boolean"
                 },
+                "menuEntry": {
+                  "type": "string"
+                },
                 "actions": {
                   "type": "array",
                   "items": {
@@ -543,6 +546,9 @@
               "additionalProperties": false
             },
             "default": []
+          },
+          "menuEntry": {
+            "type": "string"
           },
           "views": {
             "type": "array",
@@ -878,6 +884,9 @@
                 "type": "string"
               },
               "view": {
+                "type": "string"
+              },
+              "section": {
                 "type": "string"
               },
               "tab": {

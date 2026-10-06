@@ -1454,8 +1454,9 @@ NODE_TASKS: dict[str, str] = {
         "`pattern`, its `module`, `data.primaryEntity` (the entity the page is "
         "about; omit for a dashboard or a sign-in), `access`, `sections` (the "
         "records the screen holds and where they sit), `addsHere: true` on a "
-        "page whose main records are added on it, and `figmaFrame` where a "
-        "slot carries one. NOTHING ELSE: no tasks, states, views, "
+        "page whose main records are added on it, `menuEntry` (the menu entry "
+        "the screen answers), and `figmaFrame` where a slot carries one. "
+        "NOTHING ELSE: no tasks, states, views, "
         "actions, users or widgets — the contracts are written afterwards, "
         "one feature per call, against the set you decide here, and anything "
         "beyond the set is dropped. A page earns its route when it has a "
@@ -1813,8 +1814,10 @@ NODE_TASKS: dict[str, str] = {
         "must act on or would want to know — a request arrives for them, their "
         "request is approved or declined, a case is opened against them, a job "
         "they asked for is done — add an `action` step with `actionType: "
-        "send_notification`, a short `title`, a `message` in the domain's words "
-        "and `recipient`: that person's user id. Find it with a `db_query` "
+        "send_notification`, a short `title`, a `message` in the domain's words, "
+        "`recipient`: that person's user id, and `entityId`: the id of the record "
+        "it is about (on a step whose `entity` is that record's), so the "
+        "notification opens it. Find a recipient with a `db_query` "
         "first when it lives on another record (`{{find_order.customerId}}` — a "
         "query's fields are read from its first row); never `$user.id`, which "
         "is the person acting. A whole team is `recipientRole`. Where the "
@@ -3003,11 +3006,12 @@ def pin_entity_identity(svc: Any, entity_id: str, result: AgentResult) -> None:
 _DECLARED_PAGE_FIELDS: frozenset[str] = frozenset({
     "name", "route", "purpose", "pattern", "module", "data", "access", "entry",
     "presentation", "figmaFrame", "requirements", "confidence", "status",
-    "addsHere", "sections",
+    "addsHere", "sections", "menuEntry",
 })
 
 #: What the declaration decided and the contract author may not move.
-_PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module", "addsHere", "sections")
+_PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module", "addsHere", "sections",
+                                        "menuEntry")
 
 
 def pin_page_set(result: AgentResult) -> None:

@@ -1411,6 +1411,13 @@ def apply_agent_result(
                 ids.append(art["id"])
         result.artifacts = ids
 
+        # THE MENU FOLLOWS THE SCREENS. Pages name the menu entry they answer
+        # (`menuEntry`); the entry is linked here, when they land, so the
+        # rail never holds labels that go nowhere (`menu_binding`).
+        if any(p.section == "pages" for p in result.proposals):
+            from services.blueprint.menu_binding import bind_menu
+            bind_menu(svc.doc)
+
         # §17 middle band: proceed, but the assumption must be on the record.
         recorded: list[str] = []
         if result.confidence < AUTO_DECIDE and result.assumptions:

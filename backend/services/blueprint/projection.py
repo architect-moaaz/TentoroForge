@@ -1117,7 +1117,10 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
         out: dict[str, Any] = {"label": str(node.get("label") or "")}
         if _navigable(route):
             view = str(node.get("view") or "").strip()
-            out["route"] = f"{route}?view={view}" if view else route
+            section = str(node.get("section") or "").strip()
+            # A tab of a screen is its own destination: `?tab=<section key>`.
+            out["route"] = (f"{route}?view={view}" if view
+                            else f"{route}?tab={section}" if section else route)
         if node.get("icon"):
             out["icon"] = str(node["icon"])
         if node.get("tab"):
@@ -1308,11 +1311,27 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
     from services.blueprint.account_model import landing_by_role
     initial_for = landing_by_role(doc)
 
+    # WHERE YOU ARE INSIDE A SCREEN, for the breadcrumb: a screen's tabs
+    # (`?tab=<key>`) and the panels that open one record (`?<param>=<id>`).
+    screens = {
+        str(p.get("route")).split("?")[0]: {
+            "title": str(p.get("name") or p.get("route")),
+            "tabs": {str(sec["key"]): str(sec.get("label") or sec["key"])
+                     for sec in p.get("sections") or []
+                     if isinstance(sec, dict) and sec.get("key") and sec.get("placement") == "tab"},
+            "panels": {str(sec["param"]): str(sec.get("label") or sec["param"])
+                       for sec in p.get("sections") or []
+                       if isinstance(sec, dict) and sec.get("param") and sec.get("placement") == "panel"},
+        }
+        for p in pages if p.get("route") and p.get("sections")
+    }
+
     out = Path(app_root) / "src" / "contracts"
     out.mkdir(parents=True, exist_ok=True)
     (out / "nav-flow.json").write_text(json.dumps({
         "version": "1.0",
         "pages": entries,
+        **({"screens": screens} if screens else {}),
         # Per role, by the role's name. Absent when the Blueprint names none.
         **({"initialFor": initial_for} if initial_for else {}),
         # The guards read this as "reachable without a session".
@@ -2438,10 +2457,15 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
         chain = ["trigger"]
         for s in steps:
             entity = entities.get(s.get("entity")) or {}
+            config = _roles_by_name(_step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
+                                    role_names)
+            # A NOTIFICATION OPENS WHAT IT IS ABOUT: the record's address
+            # (its screen's panel, or its record page) with its id.
+            from services.blueprint.record_links import notification_link
+            if isinstance(config, dict) and (link := notification_link(doc, s, config)):
+                config = {**config, "link": link}
             nodes.append(_wf_node(
-                s["key"], s.get("type"), len(chain),
-                _roles_by_name(_step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
-                               role_names),
+                s["key"], s.get("type"), len(chain), config,
                 s.get("name") or s["key"],
             ))
             chain.append(s["key"])

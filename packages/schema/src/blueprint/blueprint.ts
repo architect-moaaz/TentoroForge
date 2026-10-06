@@ -375,6 +375,12 @@ export const PageSection = z.object({
   /** Records of `entity` are added in this section, in a form on the screen. */
   addsHere: z.boolean().optional(),
   /**
+   * The menu entry this section answers, by its label path in
+   * `navigation.tree` ("Admin Console > Offers & Campaigns"), when a tab of
+   * the screen is its own menu destination.
+   */
+  menuEntry: z.string().optional(),
+  /**
    * What a person does here, in their own words: "Accept order", "Mark
    * ready", "Approve refund". Each is something a workflow does; naming them
    * is how the screen asks for the workflows its job needs, not only the ones
@@ -553,6 +559,18 @@ export const PageContract = z.object({
   sections: z.array(PageSection).default([]),
 
   /**
+   * The menu entry this screen answers, by its label path in
+   * `navigation.tree` ("Restaurant Partner > Menu & Catalog").
+   *
+   * THE MENU IS DESIGNED BEFORE THE PAGES, and linked to them by page id —
+   * which nothing wrote: Mozato's 56 menu entries (forge-v3, 2026-10-06)
+   * pointed at no page, so its rail would have been labels going nowhere.
+   * The planner names the entry each screen answers as it plans the screen,
+   * and the entry is linked when the page lands.
+   */
+  menuEntry: z.string().optional(),
+
+  /**
    * Saved views over this page's data — the same list, filtered differently.
    *
    * Without this a filtered variant has nowhere to live, so the only way to
@@ -692,6 +710,7 @@ export type NavNodeT = {
   page?: string;
   icon?: string;
   view?: string;
+  section?: string;
   tab?: boolean;
   roles?: string[];
   children?: NavNodeT[];
@@ -708,6 +727,11 @@ export const NavNode: z.ZodType<NavNodeT> = z.lazy(() =>
      * again. Two entries naming one route lit together and collided.
      */
     view: z.string().optional(),
+    /**
+     * A section of the page (a key of its `sections`), when the destination is
+     * one tab of a screen — "Coupons" is `/ops/marketing?tab=coupons`.
+     */
+    section: z.string().optional(),
     /** One of the bottom tab bar's destinations, when `navigation.mobile` is `tabs`. */
     tab: z.boolean().optional(),
     /** Visible only to these roles; empty means all authenticated roles. */

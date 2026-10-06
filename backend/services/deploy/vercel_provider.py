@@ -132,6 +132,8 @@ _PLATFORM_REFRESH_RUNTIME_MAP = (
     # store; an app built before that kept failing every upload on Vercel.
     ("storage.ts", "src/lib/storage.ts"),
     ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts"),
+    # Notifications carry the link to the record they are about.
+    ("db/forge-notifications.schema.ts", "src/db/schema/_forge_notifications.ts"),
     # The engine: foreign keys and yes/no groups shown by name on charts.
     ("data-engine.ts", "src/lib/data-engine.ts"),
 )

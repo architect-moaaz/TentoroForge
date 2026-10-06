@@ -65,6 +65,8 @@ ENGINE_DIRS: dict[str, str] = {
 RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     ("storage.ts", "src/lib/storage.ts"),
     ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts"),
+    # The notification's `link` column (where the record it is about lives).
+    ("db/forge-notifications.schema.ts", "src/db/schema/_forge_notifications.ts"),
     # The engine's reads (labels on a chart's groups) and the seed (a login
     # per role) are the platform's logic, copied verbatim into every app.
     ("data-engine.ts", "src/lib/data-engine.ts"),

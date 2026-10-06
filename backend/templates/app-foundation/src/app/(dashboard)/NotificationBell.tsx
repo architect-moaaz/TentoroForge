@@ -8,7 +8,7 @@
 import * as React from "react";
 import { Bell, Check } from "lucide-react";
 
-type Note = { id: string; title: string; message: string; type: string; read: boolean; createdAt: string | null };
+type Note = { id: string; title: string; message: string; type: string; read: boolean; createdAt: string | null; link?: string | null };
 
 function ago(iso: string | null): string {
   if (!iso) return "";
@@ -86,7 +86,11 @@ export function NotificationBell() {
             )}
             {notes.map((n) => (
               <li key={n.id}>
-                <button type="button" onClick={() => !n.read && void mark({ id: n.id })}
+                <button type="button" onClick={() => {
+                    if (!n.read) void mark({ id: n.id });
+                    // A notification opens what it is about, where it lives.
+                    if (n.link && n.link.startsWith("/")) { setOpen(false); window.location.assign(n.link); }
+                  }}
                   className={"flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-muted " + (n.read ? "" : "bg-accent-subtle/60")}>
                   <span aria-hidden="true" className={"mt-1.5 h-2 w-2 shrink-0 rounded-full " + (n.read ? "bg-transparent" : "bg-accent")} />
                   <span className="min-w-0 flex-1">
