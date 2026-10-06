@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 
 import pytest
 
@@ -207,23 +208,53 @@ def test_a_designed_page_that_is_broken_still_goes_back(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------- #
 
 class _Gateway:
+    """Plays UX Pilot's design agent: one job draws one screen for every
+    `=== Screen "Name"` the prompt asks for, titled with that name."""
     may_generate = True
 
     def __init__(self, fail=None):
-        self.calls, self.fail = [], fail
+        self.calls, self.fail, self.prompts, self._titles = [], fail, [], []
 
     async def call(self, tool, **kw):
         if tool == "start_design_agent":
             self.calls.append(tool)      # the one call that spends credits
+            self.prompts.append(kw["prompt"])
+            self._titles = re.findall(r'=== Screen "([^"]+)"', kw["prompt"])
         if self.fail:
             raise self.fail
         if tool == "start_design_agent":
             body = {"agentJobId": "job_1", "status": "queued"}
         elif tool == "get_agent_job":
-            body = {"status": "completed", "screens": [{"designId": "dsg_1", "previewUrl": "https://ux/p.png"}]}
+            body = {"status": "completed", "screens": [
+                {"designId": f"dsg_{i}", "title": f"App - {t}", "previewUrl": "https://ux/p.png"}
+                for i, t in enumerate(self._titles, 1)]}
         else:
-            body = {"design": {"id": "dsg_1", "html": HTML}}
+            body = {"design": {"id": kw.get("design"), "html": HTML}}
         return [{"type": "text", "text": json.dumps(body)}]
+
+
+def test_one_run_draws_every_page_of_the_application(tmp_path):
+    doc = _doc()
+    doc["designSystem"] = {"visualPersonality": "Calm and uncluttered", "colors": {"primary": "#1f6f5c"}}
+    gw = _Gateway()
+    first, _ = g.reference_for(doc, doc["pages"][0], tmp_path, gateway=gw)
+    second, _ = g.reference_for(doc, doc["pages"][1], tmp_path, gateway=gw)
+    assert gw.calls == ["start_design_agent"], "one credit-spending run for the whole application"
+    assert first["designId"] == "dsg_1" and second["designId"] == "dsg_2"
+    for page in doc["pages"]:
+        assert f'=== Screen "{page["name"]}"' in gw.prompts[0]
+    assert gw.prompts[0].count("Design language") == 1, "the shared style is said once, not per page"
+
+
+def test_parallel_page_writers_share_one_run(tmp_path):
+    import concurrent.futures
+
+    doc = _doc()
+    gw = _Gateway()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda p: g.reference_for(doc, p, tmp_path, gateway=gw)[0], doc["pages"] * 2))
+    assert all(r and r["html"] for r in results)
+    assert gw.calls == ["start_design_agent"]
 
 
 def test_a_page_the_forge_designs_is_not_asked_about(tmp_path):
