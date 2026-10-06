@@ -629,6 +629,31 @@ function _walkPath(root: unknown, path: string): unknown {
   return cur;
 }
 
+/** The visitor's guest token for this run, when they are signed out. */
+export function guestOf(ctx: WorkflowExecutionContext): string | null {
+  const g = (ctx as any)?.guest ?? ctx.variables?.__guest;
+  return typeof g === "string" && g ? g : null;
+}
+
+/** A guest's row carries their token, as the data engine stamps it on its own
+ *  creates: a workflow's insert writes directly, so it is stamped here. Only
+ *  for a table whose ownership rule names a `guestColumn`, only when nobody is
+ *  signed in. */
+async function stampGuest(tableName: string, values: Record<string, unknown>,
+                          ctx: WorkflowExecutionContext): Promise<void> {
+  const guest = guestOf(ctx);
+  if (!guest || (ctx as any)?.user?.id) return;
+  let rulesFor: ((e: string) => Array<{ guestColumn?: string }>) | undefined;
+  try {
+    rulesFor = (await import("../ownership-rules")).ownershipRulesFor;
+  } catch {
+    return;
+  }
+  for (const rule of rulesFor?.(tableName) ?? []) {
+    if (rule.guestColumn) values[rule.guestColumn] = guest;
+  }
+}
+
 // A config value is either a process-variable name, a special token, or a
 // literal. `{{var}}` templates interpolate from the workflow variables.
 export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknown {
@@ -646,6 +671,9 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
     return d;
   }
   if (ref === "$user.id") return (ctx as any)?.user?.id ?? ctx.variables?.__user?.id ?? ctx.variables?.user?.id ?? null;
+  // A signed-out visitor's guest token (the `forge-guest` cookie the execute
+  // route hands over): what finds the cart a guest already started.
+  if (ref === "$guest") return guestOf(ctx);
   if (ref === "true") return true;
   if (ref === "false") return false;
   if (ref.includes("{{")) {
@@ -1147,6 +1175,7 @@ export function registerDefaultActions(): void {
     if (!table) { console.warn("[workflow] db_insert: unknown table", (config as any).table); return { error: "unknown table" }; }
     try {
       const raw = _resolveValueMap((config as any).values, ctx, table);
+      await stampGuest(getTableName(table), raw, ctx);
       // Array-fanout: if ANY value resolved to an array of objects, treat that
       // as "insert one row per element" and merge the other (static) values
       // into each row. This is what LLM-authored workflows write when they

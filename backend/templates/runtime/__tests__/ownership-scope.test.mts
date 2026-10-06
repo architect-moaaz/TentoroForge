@@ -101,6 +101,10 @@ const tickets = makeTable(tableOf("Ticket"), fieldsOf("Ticket"));
 const refundCases = makeTable(tableOf("RefundCase"), fieldsOf("RefundCase"));
 const children = makeTable(tableOf("Child"), fieldsOf("Child"));
 const appointments = makeTable(tableOf("Appointment"), fieldsOf("Appointment"));
+const carts = makeTable(tableOf("Cart"), fieldsOf("Cart"));
+const cartItems = makeTable(tableOf("CartItem"), fieldsOf("CartItem"));
+const GUEST_ONE = "6f1c2b8e-0000-4000-8000-000000000001";
+const GUEST_TWO = "6f1c2b8e-0000-4000-8000-000000000002";
 const ST_GILES = "prop-st-giles";
 const ROYAL = "prop-royal";
 
@@ -127,6 +131,16 @@ const ROWS: Record<string, any[]> = {
     { id: "ap1", childId: "c-ava", status: "booked", createdAt: d(1) },
     { id: "ap2", childId: "c-eli", status: "done", createdAt: d(2) },
     { id: "ap3", childId: "c-max", status: "booked", createdAt: d(3) },
+  ],
+  [carts.__name]: [
+    { id: "cart-g1", customerId: null, guestToken: GUEST_ONE, status: "open", createdAt: d(1) },
+    { id: "cart-g2", customerId: null, guestToken: GUEST_TWO, status: "open", createdAt: d(2) },
+    { id: "cart-bob", customerId: BOB, guestToken: null, status: "open", createdAt: d(3) },
+  ],
+  [cartItems.__name]: [
+    { id: "ci1", cartId: "cart-g1", quantity: 1, createdAt: d(1) },
+    { id: "ci2", cartId: "cart-g2", quantity: 2, createdAt: d(2) },
+    { id: "ci3", cartId: "cart-bob", quantity: 3, createdAt: d(3) },
   ],
   [refundCases.__name]: [
     { id: "r1", propertyId: ST_GILES, guestName: "Patel", createdAt: d(1) },
@@ -309,6 +323,8 @@ engine.registerEntity(tickets.__name, tickets, { slug: tickets.__name });
 engine.registerEntity(refundCases.__name, refundCases, { slug: refundCases.__name });
 engine.registerEntity(children.__name, children, { slug: children.__name });
 engine.registerEntity(appointments.__name, appointments, { slug: appointments.__name });
+engine.registerEntity(carts.__name, carts, { slug: carts.__name });
+engine.registerEntity(cartItems.__name, cartItems, { slug: cartItems.__name });
 
 // ── Assertions ─────────────────────────────────────────────────────────────
 
@@ -565,6 +581,53 @@ console.log("through: a parent books for their own child, not anyone's");
     "ValidationError", "nor can an appointment be moved onto their child");
   const onBehalf = await engine.create(appointments.__name, { childId: "c-max", status: "booked" }, asAdmin);
   ok(!!onBehalf, "an administrator books for any child");
+}
+
+// ── A guest's own rows ─────────────────────────────────────────────────────
+// TCommerce, 2026-10-06: a signed-out shopper added to a cart the cart page
+// could never read back — the rule scoped carts to a customer, and a guest has
+// none, so the read failed closed. `guestColumn` names the column their guest
+// token is in.
+
+const asGuestOne = { guest: GUEST_ONE };
+const asGuestTwo = { guest: GUEST_TWO };
+const asNobody = {};
+
+console.log("guest: a visitor reads the cart they filled, and nobody else's");
+{
+  eqJson(ids((await engine.query("Cart", {}, asGuestOne)).data), ["cart-g1"], "guest one reads their cart");
+  eqJson(ids((await engine.query("Cart", {}, asGuestTwo)).data), ["cart-g2"], "guest two reads theirs");
+  eqJson(ids((await engine.query("Cart", {}, asNobody)).data), [], "no token, no cart — still closed");
+  await throwsNamed(() => engine.findById(carts.__name, "cart-g2", asGuestOne),
+    "NotFoundError", "another guest's cart is Not Found");
+  ok(!!(await engine.findById(carts.__name, "cart-g1", asGuestOne)), "their own by id");
+  eqJson(ids((await engine.query("Cart", {}, asBob)).data), ["cart-bob"],
+    "a signed-in customer with no guest token reads only their own");
+}
+
+console.log("guest: the lines of a guest's cart are reachable through it");
+{
+  eqJson(ids((await engine.query("CartItem", {}, asGuestOne)).data), ["ci1"], "guest one's lines");
+  eqJson(ids((await engine.query("CartItem", {}, asNobody)).data), [], "nobody's lines without a token");
+  await throwsNamed(() => engine.create(cartItems.__name, { cartId: "cart-g2", quantity: 1 }, asGuestOne),
+    "ValidationError", "a guest cannot add to another guest's cart");
+}
+
+console.log("guest: a cart a guest makes carries their token, whatever the body says");
+{
+  const made: any = await engine.create(carts.__name, { status: "open", guestToken: GUEST_TWO }, asGuestOne);
+  const row = made?.data ?? made;
+  eqJson(row.guestToken, GUEST_ONE, "stamped with the visitor's own token, not the one sent");
+  ok(ids((await engine.query("Cart", {}, asGuestOne)).data).includes(row.id), "and they read it back");
+  ok(!ids((await engine.query("Cart", {}, asGuestTwo)).data).includes(row.id), "the token they named does not");
+}
+
+console.log("guest: after signing in, the guest cart is still theirs");
+{
+  const signedIn = { user: { id: ALICE, role: "member" }, guest: GUEST_ONE };
+  const mine = ids((await engine.query("Cart", {}, signedIn)).data);
+  ok(mine.includes("cart-g1"), "the cart filled as a guest");
+  ok(!mine.includes("cart-g2") && !mine.includes("cart-bob"), "and nobody else's");
 }
 
 // ── row_access rules — the configurable half ───────────────────────────────

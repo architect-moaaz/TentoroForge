@@ -2159,6 +2159,10 @@
                     "type": "string",
                     "description": "When the row belongs to the actor through another record: the entity `column` references (an Appointment's childId -> \"Child\"). The row is reachable when that record is reachable under its own scope rule, which it must have. Omit when `column` holds the actor's value itself."
                   },
+                  "guestColumn": {
+                    "type": "string",
+                    "description": "For records a visitor may make before signing in (a guest's cart): the column of this entity holding the visitor's guest token. A signed-out visitor reaches the rows carrying their own token, the platform fills it on create, and the same person keeps reaching them after signing in. Omit for records only signed-in people make."
+                  },
                   "note": {
                     "type": "string",
                     "description": "Why this rule exists, in one sentence.",

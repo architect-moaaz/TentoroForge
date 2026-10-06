@@ -162,6 +162,56 @@
             "type": "timestamp"
           }
         ]
+      },
+      {
+        "name": "Cart",
+        "table": "carts",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "customerId",
+            "type": "uuid"
+          },
+          {
+            "name": "guestToken",
+            "type": "text"
+          },
+          {
+            "name": "status",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          }
+        ]
+      },
+      {
+        "name": "CartItem",
+        "table": "cart_items",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "cartId",
+            "type": "uuid"
+          },
+          {
+            "name": "quantity",
+            "type": "integer"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          }
+        ]
       }
     ]
   },
@@ -215,6 +265,26 @@
         "column": "childId",
         "kind": "scope",
         "through": "Child",
+        "unscopedRoles": [
+          "admin"
+        ]
+      },
+      {
+        "entity": "Cart",
+        "column": "customerId",
+        "kind": "scope",
+        "scope": "user",
+        "guestColumn": "guestToken",
+        "unscopedRoles": [
+          "admin"
+        ],
+        "note": "A cart is its customer's \u2014 or, before they sign in, the guest's who filled it."
+      },
+      {
+        "entity": "CartItem",
+        "column": "cartId",
+        "kind": "scope",
+        "through": "Cart",
         "unscopedRoles": [
           "admin"
         ]

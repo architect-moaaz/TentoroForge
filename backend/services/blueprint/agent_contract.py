@@ -944,6 +944,11 @@ def ownership_findings(security: dict, doc: dict) -> list[str]:
                 f"record it references, name that reference as `column` and the referenced entity as "
                 f"`through`")
             continue
+        guest = str(r.get("guestColumn") or "")
+        if guest and guest not in _field_names(entity):
+            problems.append(f"ownership rule for {entity.get('name')}: guestColumn {guest!r} is not a field of "
+                            f"{entity.get('name')} — name the field that holds the visitor's guest token, or "
+                            f"ask for one in the data model")
         if r.get("through"):
             target = find(str(r["through"]))
             if target is None:

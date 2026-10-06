@@ -11,7 +11,8 @@ installHarness({
   stubs: {
     "@/db": "export const db = { insert: () => ({ values: (v) => ({ returning: async () => [{ id: 'row-1', ...v }] }) }) };",
     "./embedding-columns": "export const EMBEDDING_DIMENSIONS = 512;\nexport const embeddingColumnsFor = () => [];\n",
-    "@/db/schema": "export const cases = { __name: 'cases', id: { columnType: 'PgUUID', dataType: 'string' }, title: { columnType: 'PgText', dataType: 'string' }, caseNumber: { columnType: 'PgText', dataType: 'string' } };",
+    "@/db/schema": "export const cases = { __name: 'cases', id: { columnType: 'PgUUID', dataType: 'string' }, title: { columnType: 'PgText', dataType: 'string' }, caseNumber: { columnType: 'PgText', dataType: 'string' } };\nexport const carts = { __name: 'carts', id: { columnType: 'PgUUID', dataType: 'string' }, status: { columnType: 'PgText', dataType: 'string' }, guestToken: { columnType: 'PgText', dataType: 'string' } };",
+    "../ownership-rules": "export const ownershipRulesFor = (e) => /^carts?$/.test(e) ? [{ entity: 'Cart', column: 'customerId', scope: 'user', guestColumn: 'guestToken' }] : [];",
     "drizzle-orm": "export const getTableName = (t) => t.__name || 'cases'; export const is = (v) => !!(v && v.__name); export class Table {}; export const eq = () => ({}); export const and = () => ({}); export const sql = () => ({});",
     "@/lib/error_reporter": "export const reportFromError = () => {};",
     "../fk-roles": "export const FK_ROLES = {}; export const fkRole = () => null; export const isDomainFk = () => false;",
@@ -97,4 +98,26 @@ const result = await handlers.db_insert(
 eqJson(result.id, "row-1", "the step's output carries the row's id at the top");
 eqJson(result.inserted.id, "row-1", "`inserted` still carries the row");
 eqJson(resolve("{{insert_case.id}}", { variables: { insert_case: result } }), "row-1", "{{insert_case.id}} walks into it");
+
+// A GUEST'S CART CARRIES THEIR TOKEN (TCommerce, 2026-10-06). The execute
+// route puts the visitor's `forge-guest` token in `__guest`; an insert into a
+// table whose ownership rule names a guestColumn stamps it — over anything the
+// step said — so the data engine can hand the cart back to that visitor.
+const GUEST = "6f1c2b8e-0000-4000-8000-000000000001";
+const asGuest = await handlers.db_insert(
+  { table: "carts", values: { status: "open", guestToken: "someone-else" } },
+  { variables: { __guest: GUEST } } as any,
+);
+eqJson(asGuest.inserted.guestToken, GUEST, "a guest's insert is stamped with their own token");
+const signedIn = await handlers.db_insert(
+  { table: "carts", values: { status: "open" } },
+  { variables: { __guest: GUEST }, user: { id: "user-1" } } as any,
+);
+ok(signedIn.inserted.guestToken === undefined, "a signed-in person's cart is theirs by customer, not stamped");
+const other = await handlers.db_insert(
+  { table: "cases", values: { title: "x" } }, { variables: { __guest: GUEST } } as any,
+);
+ok(!("guestToken" in other.inserted), "a table with no guestColumn is left alone");
+eqJson(resolve("$guest", { variables: { __guest: GUEST } } as any), GUEST, "$guest names the visitor's token");
+eqJson(resolve("$guest", { variables: {} } as any), null, "and nothing when there is none");
 done("insert-binding");

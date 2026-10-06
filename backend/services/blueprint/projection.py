@@ -3502,6 +3502,10 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
         # it. Without one, `scope: "workspace"` compared every row to nothing.
         if item.get("actorColumn"):
             rule["actorColumn"] = str(item["actorColumn"])
+        # A RECORD A VISITOR MAKES BEFORE SIGNING IN: the column holding their
+        # guest token, which the engine reads from the `forge-guest` cookie.
+        if item.get("guestColumn"):
+            rule["guestColumn"] = str(item["guestColumn"])
         # OWNED THROUGH ANOTHER RECORD: `column` references a record of
         # `through`, and the row is reachable when that one is. Written as
         # the target's TABLE, which the engine's registry always resolves —
@@ -3562,6 +3566,9 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         "  /** The entity `column` references when the row is owned through it: reachable\n"
         "   *  when that record is reachable under its own rule. */\n"
         "  through?: string;\n"
+        "  /** For records a visitor makes before signing in: the column holding their\n"
+        "   *  guest token — a signed-out visitor reaches the rows carrying theirs. */\n"
+        "  guestColumn?: string;\n"
         "}\n\n"
         "export const OWNERSHIP_RULES: Record<string, OwnershipRule[]> = "
         f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"

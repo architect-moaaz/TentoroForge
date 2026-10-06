@@ -64,7 +64,7 @@ _SQL_LITERAL_BUGS = {
 }
 
 # Recognized runtime sentinels (the correct alternative to literal SQL strings).
-_KNOWN_SENTINELS = {"$now", "$today", "$user", "$user.id"}
+_KNOWN_SENTINELS = {"$now", "$today", "$user", "$user.id", "$guest"}
 
 # Exact-case spellings the runtime keeps as backwards-compat aliases for
 # `$now` (_resolveRef in templates/runtime/workflows/index.ts). These WORK at

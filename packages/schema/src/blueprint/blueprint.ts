@@ -1861,6 +1861,24 @@ export const RecordScopeRule = z.object({
       "which it must have. Omit when `column` holds the actor's value itself.",
     )
     .optional(),
+  /**
+   * RECORDS A VISITOR MAKES BEFORE SIGNING IN. A guest's cart has no
+   * customer; scoped by `customerId` alone it was unreadable to the guest who
+   * made it, and TCommerce's bag was empty after every "Added to bag"
+   * (2026-10-06). The column holding the visitor's guest token: a signed-out
+   * visitor reaches the rows carrying theirs, the platform fills it when they
+   * create one, and once they sign in they still reach them.
+   */
+  guestColumn: z
+    .string()
+    .describe(
+      "For records a visitor may make before signing in (a guest's cart): the " +
+      "column of this entity holding the visitor's guest token. A signed-out " +
+      "visitor reaches the rows carrying their own token, the platform fills " +
+      "it on create, and the same person keeps reaching them after signing in. " +
+      "Omit for records only signed-in people make.",
+    )
+    .optional(),
   note: z.string().describe("Why this rule exists, in one sentence.").default(""),
 }).describe(
   "An enforceable rule about one column and the acting user. A `scope` rule " +

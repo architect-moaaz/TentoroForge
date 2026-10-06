@@ -118,6 +118,9 @@ export interface DataEngineContext {
    *  the caller's role is in the column's `readers` list — otherwise the
    *  request is silently ignored (mask stays), never a 403. */
   unmaskColumns?: string[];
+  /** A signed-out visitor's guest token (the `forge-guest` cookie): the rows
+   *  a rule's `guestColumn` marks as theirs are reachable with it. */
+  guest?: string;
 }
 
 // ─── Slice-4 encrypt-at-rest helpers ─────────────────────────────────────
@@ -372,11 +375,18 @@ function scopeConditions(
       continue;
     }
     const actor = actorValue(rule, ctx);
+    // A VISITOR'S OWN GUEST ROWS. A rule with a `guestColumn` also admits the
+    // rows carrying this visitor's guest token — before they sign in (a
+    // guest's cart has no customer yet) and after (the cart they filled as a
+    // guest is still theirs). TCommerce's guests added to a bag they could
+    // never read back (2026-10-06).
+    const guestCol = rule.guestColumn ? cols[rule.guestColumn] : undefined;
+    const guest = guestCol !== undefined && ctx.guest ? eq(guestCol, ctx.guest as any) : undefined;
     if (actor === undefined) {
-      conds.push(sql`false`);
+      conds.push(guest ?? sql`false`);
       continue;
     }
-    conds.push(eq(col, actor as any));
+    conds.push(guest ? (or(eq(col, actor as any), guest) as SQL) : eq(col, actor as any));
   }
   return conds;
 }
@@ -871,6 +881,12 @@ export async function create(
     if (!(rule.column in entity.table)) continue;
     // A `through` column holds another record's id, never the actor's.
     if (rule.through) continue;
+    // A GUEST'S ROW CARRIES THEIR TOKEN, whatever the request said: it is
+    // what lets them read it back, and a body value would let anyone claim
+    // another visitor's row.
+    if (rule.guestColumn && rule.guestColumn in entity.table && !ctx.user?.id && ctx.guest) {
+      cleanData[rule.guestColumn] = ctx.guest;
+    }
     const actor = actorValue(rule, ctx);
     // No actor value to write: leave what the tenancy fill above put there
     // rather than nulling a NOT NULL column. A scope column's read path

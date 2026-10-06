@@ -91,12 +91,27 @@ async function reviewingEmpty(): Promise<boolean> {
   }
 }
 
+/** The signed-out visitor's guest token — the `forge-guest` cookie the
+ *  workflow route gave them on the first thing they did. A record a guest
+ *  made (their cart) is theirs by it, read here as it was written there. */
+async function guestToken(): Promise<string | undefined> {
+  try {
+    const { cookies } = await import("next/headers");
+    const v = (await cookies()).get("forge-guest")?.value;
+    return v && /^[0-9a-f-]{36}$/.test(v) ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function actor() {
+  const guest = await guestToken();
   try {
     const session = await auth();
-    return actorCtx(session?.user as Record<string, unknown> | undefined) ?? {};
+    const ctx = actorCtx(session?.user as Record<string, unknown> | undefined) ?? {};
+    return guest ? { ...ctx, guest } : ctx;
   } catch {
-    return {};
+    return guest ? { guest } : {};
   }
 }
 
