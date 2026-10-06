@@ -1043,7 +1043,12 @@ def context_for(doc: dict, agent: str) -> dict:
     removes a class of defect rather than detecting it later.
     """
     cap = capability_for(agent)
-    always = {"application", "product", "schemaVersion", "version", "state"}
+    # NOT `version` OR `state`. The version ticks every time a sibling's answer
+    # lands, and this slice is the cached head of every fan-out call and every
+    # repair edit: one changed number at its end made the whole ~250k-token
+    # block a cache miss, so each call wrote it again. Mozato paid ~$60 of a
+    # $95 build rewriting it (2026-10-06). No agent authors from either.
+    always = {"application", "product", "schemaVersion"}
     readable = set(always)
 
     if "*" in cap.reads:
