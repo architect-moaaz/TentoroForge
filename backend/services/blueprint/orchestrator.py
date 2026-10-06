@@ -517,6 +517,10 @@ PAGES_PER_SUBJECT = 3
 #: Separates a feature from its part: ``ENTITY-003~2``.
 PART = "~"
 
+#: Optional nodes that still wait for credit rather than ship their floor —
+#: the pages, whose floor is a visibly older application (see `settle`).
+PAUSE_ON_CREDIT: frozenset[str] = frozenset({"page_code"})
+
 
 def _feature_groups(doc: Mapping[str, Any]) -> dict[str, list[dict]]:
     """Each feature's pages, in first-seen order: an entity's pages together,
@@ -2639,8 +2643,16 @@ def _apply_subject(
         # An OPTIONAL node never holds the application, and that includes
         # for an account that cannot pay: what is required has landed, and
         # the app ships without the extra, recorded as degraded — the policy
-        # `settle_optional` already states. Only a required node pauses.
-        if kind == "credit" and not DAG[key].optional:
+        # `settle_optional` already states. Only a required node pauses…
+        #
+        # …AND THE PAGES. `page_code` is optional because a page that cannot
+        # be written has a floor to stand on, not because the floor is as
+        # good: Ferry Booking shipped twelve of its pages on it when the
+        # account ran dry mid-build (2026-09-28), and nothing wrote them
+        # afterwards. An outage says nothing about the page, so the build
+        # waits for credit and writes it then — a resume codes exactly the
+        # pages still without code.
+        if kind == "credit" and (not DAG[key].optional or key in PAUSE_ON_CREDIT):
             return "paused"
         if kind == "transient":
             _note(ledger, "node_stalled", key, subject, _reason(outcome))

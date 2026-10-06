@@ -59,6 +59,19 @@ def unfinished_pages(doc: dict, report: Any, missing_routes: list[str] | None = 
         pid = by_route.get(str(route))
         if pid:
             reasons.setdefault(pid, "nothing composed it, so its address is not served")
+    # A PAGE LEFT ON THE FALLBACK BY AN EARLIER RUN. Ferry Booking's build ran
+    # out of API credit while its pages were being written (2026-09-28): twelve
+    # of twenty-one shipped on the plain layout the build falls back to, and no
+    # later run looked at them again — the report only names what failed in
+    # THIS run. In an application whose pages are written as code, a page
+    # without code is unfinished whenever it is found.
+    coded = {str(r.get("page")) for r in doc.get("pageCode") or [] if isinstance(r, dict) and r.get("page")}
+    if coded:
+        for pid, page in pages.items():
+            if pid not in coded and page.get("pattern") != "auth" \
+                    and str(page.get("status") or "").upper() != "DEPRECATED":
+                reasons.setdefault(pid, "it has no code of its own: it is still the plain layout the build "
+                                        "falls back to, left by an earlier run that could not write it")
     return [{"page": pid, "route": str(pages[pid].get("route") or ""),
              "name": str(pages[pid].get("name") or pages[pid].get("route") or pid),
              "reason": why} for pid, why in reasons.items()]
