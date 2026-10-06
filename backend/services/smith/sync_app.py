@@ -75,6 +75,10 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
 DB_SCRIPTS: tuple[str, ...] = ("src/db/prepare-schema.ts", "src/db/verify-schema.ts",
                                "src/db/reset-schema.ts", "src/db/extensions.ts")
 
+#: The workflow routes, the platform's: written by `_generate_workflow_api_route`.
+WORKFLOW_ROUTES: tuple[str, ...] = ("src/app/api/workflows/[id]/execute/route.ts",
+                                    "src/app/api/workflows/event/[event]/route.ts")
+
 #: The engine's typed doorway for pages, the platform's too — it carries the
 #: row type the engine returns, so the two move together.
 ENGINE_FOUNDATION_FILES: tuple[str, ...] = ("src/lib/data-engine-bridge.ts",)
@@ -150,6 +154,21 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
             continue
         shutil.copyfile(src, dst)
         changed.append(rel)
+    # THE WORKFLOW ROUTES ARE WRITTEN BY CODE, not copied from a file, so the
+    # lists above never carried them: an app kept the route it was built with.
+    # TCommerce's kept one that gave a signed-out shopper no guest token, so the
+    # bag they filled was never theirs to read (2026-10-06). Written out fresh
+    # in a scratch folder; copied in where the app has the route and it moved.
+    import tempfile
+    from services.runtime_injector import _generate_workflow_api_route
+    with tempfile.TemporaryDirectory() as scratch:
+        _generate_workflow_api_route(Path(scratch))
+        for rel in WORKFLOW_ROUTES:
+            src, dst = Path(scratch) / rel, root / rel
+            if not src.is_file() or not dst.is_file() or dst.read_bytes() == src.read_bytes():
+                continue
+            shutil.copyfile(src, dst)
+            changed.append(rel)
     if doc is not None:
         from services.blueprint.ui_engineer import ensure_sdk
         before = _fingerprint(root)

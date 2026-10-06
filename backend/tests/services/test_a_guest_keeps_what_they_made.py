@@ -60,3 +60,38 @@ def test_every_reader_carries_the_token():
     assert 'get("forge-guest")' in sdk and "{ ...ctx, guest }" in sdk
     data = (TEMPLATES / "data-api-route.ts").read_text()
     assert data.count("guest: guestOf(request)") == 4
+
+
+ROUTE = "src/app/api/workflows/[id]/execute/route.ts"
+
+
+def test_an_app_built_before_it_is_given_the_current_route(tmp_path):
+    """TCommerce was built before the route minted a token: the route is code
+    the platform writes, so it is brought up to the platform's like the engine."""
+    from services.smith.sync_app import refresh_engine
+
+    app = tmp_path / "app"
+    stale = app / ROUTE
+    stale.parent.mkdir(parents=True)
+    stale.write_text("// the route TCommerce was built with")
+    assert ROUTE in refresh_engine(app)
+    assert "forge-guest" in stale.read_text()
+    assert not (app / "src/app/api/workflows/event/[event]/route.ts").exists(), "only a route the app has"
+    assert ROUTE not in refresh_engine(app), "current: not written again"
+
+
+def test_a_republish_carries_the_current_engine_without_a_smith_turn(tmp_path):
+    from services.blueprint.service import BlueprintService
+    from services.deploy.vercel_provider import _refresh_platform_files
+
+    BlueprintService.create(output_dir=tmp_path, app_id="t", name="Shop", domain="retail").save()
+    app = tmp_path / "app"
+    (app / ROUTE).parent.mkdir(parents=True)
+    (app / ROUTE).write_text("// stale")
+    index = app / "src/lib/workflows/index.ts"
+    index.parent.mkdir(parents=True)
+    index.write_text("// stale")
+    _refresh_platform_files(app)
+    assert "forge-guest" in (app / ROUTE).read_text()
+    assert "stampGuest" in index.read_text()
+    assert 'get("forge-guest")' in (app / "src/sdk/server.ts").read_text()
