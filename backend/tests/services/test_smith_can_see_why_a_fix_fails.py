@@ -63,3 +63,25 @@ def test_a_role_refusal_shows_the_apps_launch_rights_and_where_they_come_from(tm
 def test_a_missing_launch_rights_file_is_said(tmp_path):
     said = trials.launch_rights(str(tmp_path), {}, {"id": "FLOW-001", "name": "X"})
     assert "launch-roles.ts is missing" in said[0]
+
+
+def test_every_signed_out_trial_in_a_turn_is_the_same_visitor(monkeypatch, tmp_path):
+    """TCommerce, 2026-10-06: Smith added to the bag signed out, opened the bag
+    signed out, and saw it empty — two strangers, because no trial carried the
+    guest cookie a browser keeps. It then blamed a cart page that worked."""
+    from services.smith import trials
+
+    class _App:
+        base = "http://127.0.0.1:1"
+
+    sent = []
+    monkeypatch.setattr(trials, "_http", lambda app, m, path, body, jar: sent.append(jar) or (200, "", "{}"))
+    monkeypatch.setattr(trials, "_tables", lambda app: [])
+    monkeypatch.setattr(trials, "_snapshot", lambda app, tables: {})
+    bench = trials.Bench(str(tmp_path))
+    monkeypatch.setattr(bench, "app", lambda: _App())
+    doc = {"roles": [{"id": "ROLE-001", "name": "Admin"}]}
+    trials.try_request(bench, doc, "POST", "/api/workflows/FLOW-001/execute", {}, "signed out")
+    trials.try_request(bench, doc, "GET", "/cart", None, "signed out")
+    assert sent[0] == sent[1] == [{"name": "forge-guest", "value": bench.guest, "url": _App.base}]
+    assert trials.Bench(str(tmp_path)).guest != bench.guest, "a new turn is a new visitor"

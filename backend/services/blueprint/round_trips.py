@@ -177,7 +177,7 @@ def read_back(bench: Any, doc: dict, as_: str) -> list[str]:
     snapshots = getattr(bench, "last_written", None)
     if not snapshots:
         return []
-    who, jar = _session(bench.app(), doc, as_)
+    who, jar = _session(bench.app(), doc, as_, getattr(bench, "guest", None))
     bench.server_said()
     for table, rows in written(*snapshots).items():
         if table.startswith(_PLATFORM):

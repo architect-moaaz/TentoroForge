@@ -56,7 +56,7 @@ def pages(monkeypatch):
         status, body_html = served.get(path, (404, "<h1>Not found</h1>"))
         return status, "", body_html
     monkeypatch.setattr(trials, "_http", http)
-    monkeypatch.setattr(trials, "_session", lambda app, doc, ref: (f"{ref} (preview)", []))
+    monkeypatch.setattr(trials, "_session", lambda app, doc, ref, guest=None: (f"{ref} (preview)", []))
     monkeypatch.setattr("services.blueprint.page_review._query", lambda app, sql: [["3"]])
     monkeypatch.setattr("services.blueprint.page_review.run_shots",
                         lambda app, entries, out, **k: [{"text": "", "status": 200}])

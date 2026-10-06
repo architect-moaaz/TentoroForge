@@ -121,6 +121,13 @@ class Bench:
         self.log = Path(output_dir) / ".forge" / "trials" / "server.log"
         #: The last `try_workflow`'s tables before and after it ran.
         self.last_written: tuple[dict[str, Any], dict[str, Any]] | None = None
+        #: ONE SIGNED-OUT VISITOR FOR THE TURN. A shopper's browser keeps the
+        #: `forge-guest` cookie between adding to the bag and opening it; each
+        #: trial used to arrive as a stranger, so TCommerce's guest bag read
+        #: empty on the bench and Smith blamed a cart page that worked
+        #: (2026-10-06). Every signed-out trial carries this token.
+        import uuid as _uuid
+        self.guest = str(_uuid.uuid4())
 
     def app(self) -> Any:
         if self._app is None:
@@ -187,16 +194,20 @@ def _role(doc: dict, ref: str) -> tuple[str, bool]:
     raise ValueError(f"no role called {want!r}; the app's roles are {known or 'none'}, or `signed out`")
 
 
-def _session(app: Any, doc: dict, ref: str) -> tuple[str, list[dict]]:
+def _session(app: Any, doc: dict, ref: str, guest: str | None = None) -> tuple[str, list[dict]]:
     """`(who, cookies)` — the administrator's seeded login, a login of the
-    role on the copy, or a preview session for the role; no cookies signed out."""
+    role on the copy, or a preview session for the role; signed out, only the
+    turn's guest token (`Bench.guest`), so it is the same visitor each time."""
     from services.blueprint.page_review import ADMIN_EMAIL, login_of_role
     from services.preview_session import Session, cookies
     from services.seed_backstop import _ADMIN_UUID
 
     role, is_admin = _role(doc, ref)
     if not role:
-        return "signed out", []
+        if not guest:
+            return "signed out", []
+        return ("signed out (the same visitor in every signed-out trial this turn)",
+                [{"name": "forge-guest", "value": guest, "url": app.base}])
     if is_admin:
         who = Session(sub=_ADMIN_UUID, name="Admin", email=ADMIN_EMAIL, role=role)
     else:
@@ -310,7 +321,7 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     if flow is None:
         return f"No process called {ref!r}. The app has: {names(flows)}."
     app = bench.app()
-    who, jar = _session(app, doc, as_)
+    who, jar = _session(app, doc, as_, bench.guest)
     tables = _tables(app)
     before = _snapshot(app, tables)
     bench.server_said()
@@ -400,7 +411,7 @@ def try_request(bench: Bench, doc: dict, method: str, path: str, body: Any, as_:
     if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         return f"`method` is GET, POST, PUT, PATCH or DELETE, not {method!r}."
     app = bench.app()
-    who, jar = _session(app, doc, as_)
+    who, jar = _session(app, doc, as_, bench.guest)
     tables = _tables(app) if method != "GET" else []
     before = _snapshot(app, tables) if tables else {}
     bench.server_said()
@@ -430,12 +441,16 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     ent = ents.get(str(((page or {}).get("data") or {}).get("primaryEntity") or ""))
     app = bench.app()
-    who, jar = _session(app, doc, as_)
+    who, jar = _session(app, doc, as_, bench.guest)
     role, is_admin = _role(doc, as_)
     entry: dict[str, Any] = {"id": str((page or {}).get("id") or "trial"), "route": route,
                              "entity": (ent or {}).get("name"), "as": who}
     if not role:
-        entry["anonymous"] = True
+        # Signed out, but the same visitor: the guest cookie and nothing else.
+        if jar:
+            entry["cookies"] = jar
+        else:
+            entry["anonymous"] = True
     elif not is_admin:
         entry["cookies"] = jar
     bench.server_said()
@@ -505,7 +520,7 @@ def _upload(bench: Bench, doc: dict, kind: str, as_: str) -> tuple[str, str, int
     pdf = (kind or "").strip().lower() in ("file", "pdf", "document")
     data, name, ctype = (_PDF, "trial.pdf", "application/pdf") if pdf else (_PNG, "trial.png", "image/png")
     app = bench.app()
-    who, jar = _session(app, doc, as_)
+    who, jar = _session(app, doc, as_, bench.guest)
     boundary = _uuid.uuid4().hex
     body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\n"
             f"Content-Type: {ctype}\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
