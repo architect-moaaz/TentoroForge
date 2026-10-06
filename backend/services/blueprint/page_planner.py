@@ -2026,32 +2026,27 @@ def page_brief(doc: dict, page_id: str) -> dict:
 #: Asking slot by slot removes the room rather than policing it. There is no
 #: sixth jobs slot to put "overdue" in, so it goes where it fits: `views`.
 #:
-#: ADDING IS A TASK ON THE LIST, NOT A PAGE. The third slot used to be
-#: ("create", "form", "Add a {name}.") — filled with the feature, whole — so
-#: every record a brief named got a `/new` route beside its list. Mozato
-#: (forge-v3, 2026-10-06) planned 106 pages: 21 were a create form next to a
-#: list of the same record, and simple lookups (cities, zones, brands,
-#: templates) each took a list, a workspace and a form. A list now says it
-#: adds (`addsHere`), the detail may be declined where the list shows and
-#: changes everything, and a page of its own for adding is asked for only
-#: where adding is a job of its own.
-ENTITY_SLOTS = (
-    ("list", "entity_list",
-     "Every {name}, in one place, and where a new one is added: set `addsHere` "
-     "and the list carries the form."),
-    ("detail", "record_workspace",
-     "One {name}, with everything about it: its related records and what "
-     "happens to it. Decline it when every field fits a row of the list; then "
-     "the list shows and changes it."),
-    ("add", "wizard",
-     "A page of its own for adding a {name} — only when adding one is a job "
-     "of its own: several steps (`wizard`), or a form somebody fills in to ask "
-     "for one (an application, a booking — `form`). Otherwise decline it."),
-)
+#: A SCREEN IS A JOB, NOT A TABLE. The slots used to be pages per entity — a
+#: list, a detail and an "Add a {name}" form, filled whole — so the page set
+#: followed the data model: Mozato (forge-v3, 2026-10-06) planned 106 routes,
+#: 46 of them the back office, while its pages are written in React, where a
+#: list with a record opening beside it, tabs of related records and a dialog
+#: for adding are one screen. The people the product is for are asked for the
+#: screens of their work, each holding records as `sections`; a record is then
+#: asked only where it goes.
 
-#: The slots a feature is answered by, together or not at all. `add` is not
-#: one of them: it is the exception, asked for separately.
-CORE_SLOTS = ("list", "detail")
+#: How a section shows its records, and where it sits on its screen — the
+#: contract's own vocabulary (`PageSection.shows`, `PageSection.placement`).
+SECTION_SHOWS = ("list", "board", "calendar", "map", "record", "summary", "form")
+SECTION_PLACEMENTS = ("main", "tab", "panel", "dialog")
+
+RECORD_PROMPT = (
+    "Where people work with {name}: a section of one of the screens above — a "
+    "list, a board or a calendar of them, the panel that opens one, a tab, or "
+    "the dialog that adds one. A {name} only ever written inside another record "
+    "is a section of that record's panel. Name the screen and section; a page "
+    "of its own only if working with it is a job none of those screens is."
+)
 
 
 def _screen_frames(doc: dict, *, specification: bool) -> list[dict]:
@@ -2189,11 +2184,11 @@ def frame_slots(frames: list[dict], *, sole: bool = True) -> list[dict]:
 
 
 JOURNEY_PROMPT = (
-    "The pages a {name} passes through, in order, to reach each of their goals. "
-    "Most steps are pages of the features below: name the same page, never a "
-    "second one. A step earns a page of its own only when this person sees a "
-    "record differently from the people who manage it — a customer browsing a "
-    "shop's catalogue is not the owner editing it."
+    "The screens a {name} works in: one per job they come to do, each holding "
+    "the records that job needs as `sections`. Walk them through their goals; a "
+    "goal they cannot reach on some screen is a screen still missing. Where they "
+    "see a record differently from the people who manage it, it is a section of "
+    "their own screen, not of the manager's."
 )
 
 
@@ -2297,11 +2292,8 @@ def page_slots(doc: dict) -> list[dict]:
             "name": name,
             "reachedThrough": [names.get(p, p) for p in parents],
             "requirements": list(entity.get("requirements") or []),
-            "pages": [
-                {"slot": f"{eid}.{slot}", "pattern": pattern,
-                 "prompt": why.format(name=name)}
-                for slot, pattern, why in ENTITY_SLOTS
-            ],
+            "pages": [{"slot": f"{eid}.place", "pattern": None,
+                       "prompt": RECORD_PROMPT.format(name=name)}],
         })
 
     # THE DRAWN SCREENS LEAD, AND THEY ARE NOT ENTITY FEATURES.
@@ -2368,42 +2360,45 @@ def page_slot_prompt(doc: dict) -> str:
     return (
         _DRAWN_PREAMBLE if reference_frames(doc) else ""
     ) + (
-        "Fill in this application's page set, people first, then feature by "
-        "feature.\n\n"
+        "Fill in this application's screens: people first, then the records.\n\n"
+        "A SCREEN IS A JOB. These pages are written in React, so a screen holds "
+        "as much as the job needs: a list with the chosen record opening in a "
+        "panel beside it, related records as tabs, adding and editing in a "
+        "dialog. Give each screen `sections` — one per part of it: `key`, "
+        "`label`, the `entity` it shows, `shows` (list, board, calendar, map, "
+        "record, summary or form), `placement` (main, tab, panel or dialog), "
+        "`opensFrom` (for a panel, the section whose record it opens), `param` "
+        "(for a panel on one record, the link parameter that opens it: "
+        "`ticket` for `/support?ticket=<id>`), `addsHere: true` where records "
+        "are added in that section, and `actions` — what a person does there, "
+        "in their words (\u201cAccept order\u201d, \u201cMark ready\u201d, "
+        "\u201cApprove refund\u201d). The screen's `data.primaryEntity` is its "
+        "main section's entity.\n\n"
+        "A screen earns its route when it is a different job or a different "
+        "person's; records of one job are sections of one screen, and a record "
+        "opened from a list is a panel with a `param`, not a route of its own. "
+        "A screen that serves its person fully beats three that each serve them "
+        "partly.\n\n"
         "PEOPLE FIRST. The `journey:` slots at the top are the people this "
-        "product is for, with their goals. Walk each one through their goals "
-        "and name the pages they pass through, in order. Most steps are pages "
-        "the features below give anyway; where this person sees a record "
-        "differently from those who manage it, the step is a page of its own "
-        "for them. A goal nobody can walk through is a page set that is "
-        "missing a page, however many pages it has.\n\n"
-        "THEN THE FEATURES. A feature is one entity's pages — its list and its "
-        "detail: fill it completely or decline it completely. Its list is "
-        "where its records are found AND added: set `addsHere: true` on it and "
-        "adding is a panel on that list, not a page. Decline the detail when "
-        "every field fits a row of the list — a city, a tag, a template is "
-        "added and changed right there, one page for the whole feature.\n\n"
-        "Filling it completely matters more than filling many. A list with no "
-        "way to add a record, or a record with nowhere to open it, is not a "
-        "smaller feature — it is one a user cannot finish a job with. Prefer "
-        "few features a user can complete over many they cannot.\n\n"
-        "A PAGE FOR ADDING is the exception, its own slot, declined by "
-        "default: answer it only when adding is a job of its own — several "
-        "steps (`wizard`), or a form somebody fills in to ask for something "
-        "(an application, a booking; `form`). An \u201cAdd a \u2026\u201d "
-        "form with a list of the same records beside it is never one.\n\n"
-        "Decline a feature when the entity is a join table, a lookup, or "
-        "something only ever edited inside another record — a line item is "
-        "edited on its invoice, not on a page of its own.\n\n"
-        "`reachedThrough` names the entities a feature hangs off, taken from "
-        "its required references. A feature that is reached through another is "
-        "usually written while looking at that one, not visited: default to "
-        "declining it and giving the parent the means to edit it.\n\n"
+        "product is for, with their goals. Give each the screens of their work. "
+        "A goal nobody can reach on any screen is a missing screen, however "
+        "many screens there are — and a job is its actions: a screen where "
+        "orders arrive and nothing accepts them is not finished.\n\n"
+        "THEN THE RECORDS. Every record below goes somewhere: a section of a "
+        "screen, or a section of another record's panel when it is only ever "
+        "written inside that one (a line item lives on its order). A record "
+        "with a list nobody can add to, or no way to open one, is a job a person "
+        "cannot finish.\n\n"
+        "A PAGE FOR ADDING is the exception: only when adding is a job of its "
+        "own — several steps (`wizard`), or a form somebody fills in to ask for "
+        "something (an application, a booking; `form`).\n\n"
+        "`reachedThrough` names the records one hangs off, taken from its "
+        "required references: it is usually a section of that one's panel.\n\n"
         "Except: anything the user asked for is not declinable, however "
         "lookup-shaped it shows up here. These are their words:\n\n"
         f"  \u201c{described}\u201d\n\n"
-        "If they named it for NOW, it gets its feature, and it gets it "
-        "complete.\n\n"
+        "If they named it for NOW, it gets its place on a screen, and the "
+        "actions that make it work.\n\n"
         # NAMED AND DEFERRED ARE NOT THE SAME THING. This said "if they named "
         # it, it gets its feature" — so a brief that names ten modules and then
         # says which six to begin with got all ten. The Palestinian Legislative
@@ -2425,8 +2420,7 @@ def page_slot_prompt(doc: dict) -> str:
         "the way to the ones they wanted, and it buries the first release in "
         "work they explicitly postponed. When the brief names no phases, this "
         "does not apply and everything they named is in scope.\n\n"
-        "There is no slot for a filtered list, because a filter is not a page. "
-        "Every \u2018only mine\u2019, \u2018overdue\u2019, \u2018unassigned\u2019 or "
-        "\u2018awaiting X\u2019 belongs in that list page\u2019s `views` as "
-        "{key, label, filter}."
+        "A filter is not a section or a page. Every \u2018only mine\u2019, "
+        "\u2018overdue\u2019, \u2018unassigned\u2019 or \u2018awaiting X\u2019 "
+        "belongs in that screen\u2019s `views` as {key, label, filter}."
     )

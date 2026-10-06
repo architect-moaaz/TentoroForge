@@ -425,6 +425,10 @@ def _somewhere_to_go(doc: dict, page: dict, entity: str, by_name: dict,
     # itself: its own form is where `create` goes.
     if "form" in families and page.get("addsHere"):
         return True
+    if "form" in families and any(
+            isinstance(sec, dict) and sec.get("addsHere") and str(sec.get("entity") or "") in wanted
+            for sec in page.get("sections") or []):
+        return True
     return any(page_family(p) in families
                and str((p.get("data") or {}).get("primaryEntity") or "") in wanted
                for p in _live(doc.get("pages")))

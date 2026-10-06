@@ -1452,9 +1452,10 @@ NODE_TASKS: dict[str, str] = {
         "a feature completely or decline it completely, and for every page "
         "you keep give its `name`, `route`, a one-sentence `purpose`, its "
         "`pattern`, its `module`, `data.primaryEntity` (the entity the page is "
-        "about; omit for a dashboard or a sign-in), `access`, `addsHere: true` "
-        "on a page where its entity's records are added, and `figmaFrame` "
-        "where a slot carries one. NOTHING ELSE: no tasks, states, views, "
+        "about; omit for a dashboard or a sign-in), `access`, `sections` (the "
+        "records the screen holds and where they sit), `addsHere: true` on a "
+        "page whose main records are added on it, and `figmaFrame` where a "
+        "slot carries one. NOTHING ELSE: no tasks, states, views, "
         "actions, users or widgets — the contracts are written afterwards, "
         "one feature per call, against the set you decide here, and anything "
         "beyond the set is dropped. A page earns its route when it has a "
@@ -1500,6 +1501,13 @@ NODE_TASKS: dict[str, str] = {
         "added: adding one is among its `primaryTasks` and `create` among its "
         "`actions`, and the form for it lives on that page. No other page adds "
         "them, so nothing navigates anywhere to add one.\n\n"
+        "A page with `sections` is a SCREEN holding several records — a list, "
+        "the panel that opens a record from it, tabs, dialogs. Write ONE "
+        "contract for the whole screen: its `primaryTasks` include every "
+        "section's `actions` and every section that adds; "
+        "`data.supportingEntities` names every section's entity besides the "
+        "main one; its states cover the screen with no record chosen. The "
+        "sections themselves are decided; keep them exactly as given.\n\n"
         "When a page only means something once something has happened, say so "
         "in `requires`. An approval screen is not a page you can look at; it "
         "is a page you can look at once something has been submitted, and "
@@ -2316,11 +2324,11 @@ def build_prompt(
             + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
             + "\n```"
         )
+        said = workflow_slot_prompt(doc)    # the screens' actions, then the pages
+        if said:
+            user += "\n\n" + said
         if slots:
-            user += (
-                "\n\n" + workflow_slot_prompt(doc) + "\n\n```json\n"
-                + json.dumps(slots, indent=2, ensure_ascii=False) + "\n```"
-            )
+            user += "\n\n```json\n" + json.dumps(slots, indent=2, ensure_ascii=False) + "\n```"
         if brief:
             user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
         if feedback:
@@ -2995,11 +3003,11 @@ def pin_entity_identity(svc: Any, entity_id: str, result: AgentResult) -> None:
 _DECLARED_PAGE_FIELDS: frozenset[str] = frozenset({
     "name", "route", "purpose", "pattern", "module", "data", "access", "entry",
     "presentation", "figmaFrame", "requirements", "confidence", "status",
-    "addsHere",
+    "addsHere", "sections",
 })
 
 #: What the declaration decided and the contract author may not move.
-_PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module", "addsHere")
+_PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module", "addsHere", "sections")
 
 
 def pin_page_set(result: AgentResult) -> None:

@@ -74,6 +74,56 @@ def _served(page_id: str, route: str, workflows: list) -> bool:
     return False
 
 
+def _norm(text: Any) -> str:
+    return " ".join("".join(ch.lower() if ch.isalnum() else " " for ch in str(text or "")).split())
+
+
+def _named(action: str, page_id: str, route: str, workflows: list) -> bool:
+    """Whether a manual workflow launched from this page is the one this
+    action names — "Accept order" and a workflow called "Accept Order"."""
+    want = _norm(action)
+    for w in workflows:
+        if not isinstance(w, dict):
+            continue
+        launched = {str(x) for x in (w.get("launchedFrom") or [])}
+        if (page_id in launched or route in launched) and _norm(w.get("name")) == want:
+            return True
+    return False
+
+
+def section_slots(doc: dict) -> list[dict]:
+    """The things a screen's sections say a person does there and that no
+    workflow launched from the screen does yet: adding (`addsHere`) and each
+    named action ("Accept order", "Approve refund").
+
+    A SCREEN IS ITS ACTIONS. Every workflow Mozato had (forge-v3, 2026-10-06)
+    created or submitted something, one per create page, because create pages
+    were the only screens this agent was asked about: nothing accepted an
+    order, marked it ready or delivered it. A section names its actions, so the
+    question carries them."""
+    workflows = list(doc.get("workflows") or [])
+    ents = {str(e.get("id")): e.get("name") for e in (doc.get("data") or {}).get("entities") or []
+            if isinstance(e, dict)}
+    out: list[dict] = []
+    for page in doc.get("pages") or []:
+        if not isinstance(page, dict) or page.get("status") == "DEPRECATED":
+            continue
+        pid, route = str(page.get("id") or ""), str(page.get("route") or "")
+        for sec in page.get("sections") or []:
+            if not isinstance(sec, dict):
+                continue
+            entity = str(sec.get("entity") or "")
+            wanted = list(sec.get("actions") or [])
+            if sec.get("addsHere") and entity:
+                wanted.insert(0, f"Add {ents.get(entity) or entity}")
+            for action in dict.fromkeys(a for a in wanted if str(a).strip()):
+                if _named(action, pid, route, workflows):
+                    continue
+                out.append({"page": pid, "route": route, "section": sec.get("key"),
+                            "entity": entity, "action": action})
+    return out
+
+
 def workflow_slots(doc: dict) -> list[dict]:
     """One slot per page that submits and has nothing to submit to."""
     workflows = list(doc.get("workflows") or [])
@@ -101,9 +151,22 @@ def workflow_slots(doc: dict) -> list[dict]:
 def workflow_slot_prompt(doc: dict) -> str:
     """The question these slots are the answer space for."""
     slots = workflow_slots(doc)
-    if not slots:
+    actions = section_slots(doc)
+    if not slots and not actions:
         return ""
-    return (
+    said = ""
+    if actions:
+        said = (
+            "\n\nTHE SCREENS' ACTIONS. Each screen's sections name what a person "
+            "does there; these have no workflow launched from that screen yet. "
+            "For each, author the workflow that does it — named as the action is, "
+            "and with that screen's page id in `launchedFrom` — or leave it "
+            "deliberately. They are the application's work: an order nobody can "
+            "accept is not an order system.\n\n```json\n"
+            + __import__("json").dumps(actions, indent=1) + "\n```")
+    if not slots:
+        return said.lstrip()
+    return said.lstrip() + ("\n\n" if said else "") + (
         f"{len(slots)} page(s) in this application exist in order to submit "
         "something — a create page, or a list where its records are added "
         "(`addsHere`) — and none of them has a workflow to submit to. They are "

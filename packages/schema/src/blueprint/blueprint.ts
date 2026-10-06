@@ -335,6 +335,54 @@ export const PageContentItem = z.object({
   source: PageContentSource,
 });
 
+/**
+ * One part of a screen: the records it holds and where they sit on it.
+ *
+ * A SCREEN IS A JOB, NOT A TABLE. Pages were planned one per list, record and
+ * "new" form, so Mozato (forge-v3, 2026-10-06) came to 106 routes — 46 of them
+ * the back office — while the pages are written in React, where a list with a
+ * record opening beside it, tabs of related records and a dialog for adding
+ * are one screen. A section says which records a screen holds and how: the
+ * page stays the unit everything else works by (its contract, its code, who
+ * may open it, the workflows launched from it), and a record opened inside it
+ * keeps a link of its own through `param` (`/ops/support?ticket=<id>`).
+ */
+export const PageSection = z.object({
+  /** Stable within the page: `tickets`, `ticket`, `refunds`. */
+  key: z.string().min(1),
+  /** What a person calls this part: "Open tickets", "Refunds". */
+  label: z.string().min(1),
+  /** The records this section shows. Omit for a summary of several. */
+  entity: EntityId.optional(),
+  /** How it shows them. */
+  shows: z
+    .enum(["list", "board", "calendar", "map", "record", "summary", "form"])
+    .default("list"),
+  /**
+   * Where it sits: the screen's main area, a tab beside it, a panel that opens
+   * over or beside the main area when a record is chosen, or a dialog a
+   * control opens.
+   */
+  placement: z.enum(["main", "tab", "panel", "dialog"]).default("main"),
+  /** For a panel: the section whose chosen record it opens. */
+  opensFrom: z.string().optional(),
+  /**
+   * For a panel showing one record: the query parameter that opens it from a
+   * link (`ticket` -> `?ticket=<id>`), so a notification or a shared link
+   * lands on the record inside its screen.
+   */
+  param: z.string().optional(),
+  /** Records of `entity` are added in this section, in a form on the screen. */
+  addsHere: z.boolean().optional(),
+  /**
+   * What a person does here, in their own words: "Accept order", "Mark
+   * ready", "Approve refund". Each is something a workflow does; naming them
+   * is how the screen asks for the workflows its job needs, not only the ones
+   * that create a record.
+   */
+  actions: z.array(z.string()).default([]),
+});
+
 export const PageContract = z.object({
   id: PageId,
   name: z.string(),
@@ -497,6 +545,12 @@ export const PageContract = z.object({
         "over the list, or this workspace opening empty) instead of on a page " +
         "of their own",
     ),
+
+  /**
+   * The parts of this screen — records as lists, panels, tabs and dialogs
+   * (see `PageSection`). Empty for a page that shows one thing.
+   */
+  sections: z.array(PageSection).default([]),
 
   /**
    * Saved views over this page's data — the same list, filtered differently.

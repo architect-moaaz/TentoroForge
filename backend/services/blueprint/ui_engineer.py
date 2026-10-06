@@ -849,6 +849,21 @@ def _page_brief(doc: dict, page: dict) -> dict:
             + " are added on this page: give it the form for one (a panel or drawer over the list, or "
             "this workspace opening empty) that runs the workflow below which creates it. There is "
             "no separate page to send anyone to."} if page.get("addsHere") else {}),
+        # A SCREEN, NOT A PAGE (`sections`): every part of it is written here —
+        # the list, the panel a chosen record opens in (and its link `param`,
+        # read from the page's search params), the tabs, the dialogs.
+        **({"screen": {
+            "write": ("This page is a SCREEN: build every section below in it. A `panel` opens when "
+                      "a record is chosen in the section it `opensFrom` and when the page is opened "
+                      "with `?<param>=<id>` (read it from the page's searchParams in load.ts, so a "
+                      "link lands on the record); a `tab` is a tab of the screen; a `dialog` opens "
+                      "from a control. Each section's `actions` are done by the workflows launched "
+                      "here; a section that `addsHere` carries the form that adds its records."),
+            "sections": [{**{k: v for k, v in sec.items() if k != "entity" and v not in (None, [], "")},
+                          **({"entity": (ents.get(str(sec.get("entity"))) or {}).get("name")
+                              or sec.get("entity")} if sec.get("entity") else {})}
+                         for sec in page.get("sections") or [] if isinstance(sec, dict)]}}
+           if page.get("sections") else {}),
         "sdkKey": pkeys.get(str(page.get("id"))),
         "primaryEntity": (ents.get(str(data.get("primaryEntity"))) or {}).get("name"),
         "supportingEntities": [(ents.get(str(x)) or {}).get("name") for x in data.get("supportingEntities") or []],

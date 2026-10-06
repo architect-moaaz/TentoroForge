@@ -478,6 +478,72 @@
             "type": "boolean",
             "description": "Records of this page's primary entity are added on this page (a panel over the list, or this workspace opening empty) instead of on a page of their own"
           },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "entity": {
+                  "type": "string",
+                  "pattern": "^ENTITY-\\d{3,}$",
+                  "description": "Stable ENTITY identifier (§12)"
+                },
+                "shows": {
+                  "type": "string",
+                  "enum": [
+                    "list",
+                    "board",
+                    "calendar",
+                    "map",
+                    "record",
+                    "summary",
+                    "form"
+                  ],
+                  "default": "list"
+                },
+                "placement": {
+                  "type": "string",
+                  "enum": [
+                    "main",
+                    "tab",
+                    "panel",
+                    "dialog"
+                  ],
+                  "default": "main"
+                },
+                "opensFrom": {
+                  "type": "string"
+                },
+                "param": {
+                  "type": "string"
+                },
+                "addsHere": {
+                  "type": "boolean"
+                },
+                "actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": []
+                }
+              },
+              "required": [
+                "key",
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
           "views": {
             "type": "array",
             "items": {
@@ -559,8 +625,7 @@
                       ]
                     },
                     "entity": {
-                      "type": "string",
-                      "pattern": "^ENTITY-\\d{3,}$",
+                      "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
                       "description": "Stable ENTITY identifier (§12)"
                     },
                     "field": {
@@ -601,7 +666,7 @@
                           "type": "string"
                         },
                         "entity": {
-                          "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                          "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                         },
                         "field": {
                           "type": "string"
@@ -661,13 +726,13 @@
             "type": "object",
             "properties": {
               "primaryEntity": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
                 "description": "Stable ENTITY identifier (§12)"
               },
               "supportingEntities": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                 },
                 "default": []
               }
@@ -945,7 +1010,7 @@
                     "const": "list"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                   },
                   "fields": {
                     "type": "array",
@@ -981,7 +1046,7 @@
                     "const": "single"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                   },
                   "filter": {
                     "type": "object",
@@ -1003,7 +1068,7 @@
                     "const": "aggregate"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                   },
                   "aggregation": {
                     "type": "string",
@@ -1040,7 +1105,7 @@
                     "const": "series"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                   },
                   "aggregation": {
                     "$ref": "#/properties/widgets/items/properties/dataSource/anyOf/2/properties/aggregation"
@@ -1073,7 +1138,7 @@
                     "const": "query"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                   },
                   "measures": {
                     "type": "array",
@@ -1296,7 +1361,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "name": {
                 "type": "string"
@@ -1342,7 +1407,7 @@
                       "default": false
                     },
                     "references": {
-                      "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+                      "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
                       "description": "Stable ENTITY identifier (§12)"
                     },
                     "min": {
@@ -1421,10 +1486,10 @@
             "type": "object",
             "properties": {
               "from": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "to": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "kind": {
                 "type": "string",
@@ -1465,7 +1530,7 @@
             "type": "object",
             "properties": {
               "entity": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "kind": {
                 "type": "string",
@@ -1502,7 +1567,7 @@
                 "type": "string"
               },
               "entity": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "table": {
                 "type": "string"
@@ -1641,7 +1706,7 @@
                   ]
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "next": {
@@ -1709,7 +1774,7 @@
                   ]
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "type": {
@@ -1803,7 +1868,7 @@
             "type": "object",
             "properties": {
               "entity": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "account": {
                 "type": "string"
@@ -1834,7 +1899,7 @@
             "description": "Stable PAGE identifier (§12)"
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+            "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           },
           "when": {
@@ -1991,7 +2056,7 @@
             "default": ""
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+            "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           },
           "permission": {
@@ -3817,7 +3882,7 @@
             "default": []
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+            "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           }
         },
