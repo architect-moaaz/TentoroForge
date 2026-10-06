@@ -95,3 +95,20 @@ def test_a_republish_carries_the_current_engine_without_a_smith_turn(tmp_path):
     assert "forge-guest" in (app / ROUTE).read_text()
     assert "stampGuest" in index.read_text()
     assert 'get("forge-guest")' in (app / "src/sdk/server.ts").read_text()
+
+
+def test_a_changed_ownership_rule_reaches_the_built_app(tmp_path):
+    """TCommerce's Cart rule gained its guest column in the document and the
+    app kept the manifest it was built with: nothing after the build wrote it."""
+    from services.blueprint.service import BlueprintService
+    from services.smith.reproject import everything
+
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Shop", domain="retail")
+    svc.doc.setdefault("data", {})["entities"] = [dict(e) for e in DOC["data"]["entities"]]
+    svc.doc.setdefault("security", {})["ownershipRules"] = [
+        {"entity": "Cart", "column": "customerId", "kind": "scope", "guestColumn": "guestToken"}]
+    app = tmp_path / "app"
+    (app / "src/lib").mkdir(parents=True)
+    (app / "src/lib/ownership-rules.ts").write_text("// as built")
+    everything(svc, str(app))
+    assert '"guestColumn": "guestToken"' in (app / "src/lib/ownership-rules.ts").read_text()

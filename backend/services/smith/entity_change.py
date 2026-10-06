@@ -47,7 +47,9 @@ def _project_data(svc: Any, app_root: str | None) -> list[str]:
         return []
     from services.blueprint.projection import project_data_layer, project_entity_access, project_seed
     files = list(project_data_layer(svc.doc, app_root).get("files") or [])
-    for fn in (project_entity_access, project_seed):
+    from services.smith.reproject import _data_manifests
+    # The rows a record's rules reach, and its hidden columns, follow its fields.
+    for fn in (project_entity_access, project_seed, *(f for _, f in _data_manifests())):
         try:
             files += list((fn(svc.doc, app_root) or {}).get("files") or [])
         except Exception as exc:  # noqa: BLE001
