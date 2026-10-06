@@ -660,6 +660,11 @@ view.tsx — "use client" on the first line.
     <WorkflowButton workflow={workflows.x} input={{ … }} />, or useWorkflow(workflows.x).run(input).
     `fields` has one entry per workflow input, keyed by the input's name; an input the page
     already knows (the record's id, a fixed decision) is { value: … } and renders nothing.
+    The form's shape is yours too: `groups={[{ title, description?, fields: [...] }]}` puts
+    fields under headings, `steps` shows the groups one at a time with Back and Next (a long
+    application), `submitPlacement="full" | "sticky"`; and a field's `render: ({ id, value,
+    onChange, required }) => …` draws its control yourself — chips, a stepper, a calendar in a
+    popover, a map — while the form still holds, checks and sends the value.
     A CHANGE NO WORKFLOW MAKES IS NEVER SIMULATED. There is no delete, save or update
     function besides the workflows listed for this application; do not invent one, and do
     not fake one — removing a row from React state, a timer that "saves", a success toast

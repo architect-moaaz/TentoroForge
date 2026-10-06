@@ -68,3 +68,17 @@ def test_a_live_section_reads_again_by_itself():
     doc["pages"][0]["sections"][0]["live"] = True
     screen = _page_brief(doc, doc["pages"][0])["screen"]
     assert screen["sections"][0]["live"] is True and "useLive()" in screen["write"]
+
+
+def test_a_form_has_a_shape_of_its_own_and_keeps_its_wiring():
+    """Every app's forms were the same stack of labels with buttons bottom
+    right; WorkflowForm now takes groups, steps, where its submit sits, and a
+    control a field draws itself — while it still holds, checks and sends the
+    values (typechecked in a generated app, 2026-10-07, misuse refused)."""
+    client = (FOUNDATION / "src/sdk/client.tsx").read_text()
+    for word in ("export interface FieldControl<V>", "export interface FieldGroup<I>",
+                 "render?: (control: FieldControl<V>) => React.ReactNode",
+                 'submitPlacement = "end"', "steps = false", "form.reportValidity()"):
+        assert word in client, word
+    assert 'if ((kind === "checkbox" || kind === "switch") && !render)' in client
+    assert "`steps` shows the groups one at a time" in TECH_RULES and "render: ({ id, value," in TECH_RULES
