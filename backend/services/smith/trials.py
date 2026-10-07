@@ -194,6 +194,37 @@ def _role(doc: dict, ref: str) -> tuple[str, bool]:
     raise ValueError(f"no role called {want!r}; the app's roles are {known or 'none'}, or `signed out`")
 
 
+def default_person(doc: dict, *, route: str = "", flow: dict | None = None) -> str:
+    """Who a trial is when the call names nobody: the person the screen or the
+    process is FOR. It was always the administrator, and an administrator
+    cannot change a customer's cart: ToroCommerce's fixed minus button was
+    tried as Admin, refused with 422, and reported "still does not work"
+    (measured on a copy, 2026-10-07). A screen only some roles may open is
+    theirs; a process only some roles may start is theirs; anything else is
+    the application's own audience — the role people sign up as — and the
+    administrator only when there is none."""
+    from services.blueprint.account_model import admin_role, signup_role
+    from services.blueprint.projection import launch_roles, restricted_roles
+
+    admin = admin_role(doc) or "Admin"
+    audience = signup_role(doc) or admin
+    if flow is not None:
+        runs = launch_roles(doc).get(str(flow.get("id"))) or []
+        named = [r for r in runs if r not in ("*", "@signed-in")]
+        if runs and len(named) == len(runs):
+            return audience if audience in named else named[0]
+        return audience
+    path = route.split("?", 1)[0]
+    page = next((p for p in doc.get("pages") or [] if isinstance(p, dict) and str(p.get("route")) == path), None)
+    if page is not None:
+        if str(page.get("access") or "") == "public" and not page.get("users"):
+            return audience
+        mine = restricted_roles(doc, page)
+        if mine:
+            return audience if audience in mine else mine[0]
+    return audience
+
+
 def _session(app: Any, doc: dict, ref: str, guest: str | None = None) -> tuple[str, list[dict]]:
     """`(who, cookies)` — the administrator's seeded login, a login of the
     role on the copy, or a preview session for the role; signed out, only the
@@ -321,6 +352,7 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     if flow is None:
         return f"No process called {ref!r}. The app has: {names(flows)}."
     app = bench.app()
+    as_ = as_ or default_person(doc, flow=flow)
     who, jar = _session(app, doc, as_, bench.guest)
     tables = _tables(app)
     before = _snapshot(app, tables)
@@ -411,6 +443,12 @@ def try_request(bench: Bench, doc: dict, method: str, path: str, body: Any, as_:
     if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         return f"`method` is GET, POST, PUT, PATCH or DELETE, not {method!r}."
     app = bench.app()
+    if not as_:
+        from services.blueprint.projection import _workflow_slug
+        m = re.match(r"^/api/workflows/([^/]+)/execute", path)
+        flow = next((w for w in doc.get("workflows") or [] if isinstance(w, dict) and m
+                     and m.group(1) in (str(w.get("id")), _workflow_slug(w))), None) if m else None
+        as_ = default_person(doc, flow=flow) if flow else default_person(doc, route=path)
     who, jar = _session(app, doc, as_, bench.guest)
     tables = _tables(app) if method != "GET" else []
     before = _snapshot(app, tables) if tables else {}
@@ -441,6 +479,7 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     ent = ents.get(str(((page or {}).get("data") or {}).get("primaryEntity") or ""))
     app = bench.app()
+    as_ = as_ or default_person(doc, route=route)
     who, jar = _session(app, doc, as_, bench.guest)
     role, is_admin = _role(doc, as_)
     entry: dict[str, Any] = {"id": str((page or {}).get("id") or "trial"), "route": route,

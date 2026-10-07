@@ -47,8 +47,9 @@ def test_a_page_that_does_not_compile_is_a_finding_not_a_dead_end(tmp_path, monk
     monkeypatch.setattr("services.blueprint.service.BlueprintService.load",
                         classmethod(lambda cls, output_dir: type("S", (), {"doc": {"pages": []}})()))
 
-    chooser = _Chooser({"tool": "write_page_code",
-                        "args": {"route": "/rentals", "brief": "add accepted to ATTENTION_STATUSES"}, "why": ""},
+    first = {"tool": "write_page_code",
+             "args": {"route": "/rentals", "brief": "add accepted to ATTENTION_STATUSES"}, "why": ""}
+    chooser = _Chooser(first, dict(first),                       # the first is asked to reproduce
                        {"tool": "write_page_code",
                         "args": {"route": "/rentals", "brief": "widen the Rental status union, then add accepted"}, "why": ""})
     session = _session(tmp_path,
@@ -57,7 +58,7 @@ def test_a_page_that_does_not_compile_is_a_finding_not_a_dead_end(tmp_path, monk
 
     result = session.run_iteration("accepted rentals should need attention too")
 
-    heard = chooser.seen[1][-1]
+    heard = chooser.seen[2][-1]
     assert heard.status == "finding" and "TS2322" in heard.said
     assert len(briefs) == 2
     assert result.status == "resolved"
@@ -113,8 +114,8 @@ def test_a_verb_whose_composer_refused_is_a_finding_the_loop_hears(tmp_path, mon
     monkeypatch.setattr(compose_mod, "prepare_capabilities",
                         lambda *a, **k: {"declared": [], "created": []})
 
-    chooser = _Chooser({"tool": "write_page_code",
-                        "args": {"route": "/rentals", "brief": "sharper"}, "why": ""})
+    sharper = {"tool": "write_page_code", "args": {"route": "/rentals", "brief": "sharper"}, "why": ""}
+    chooser = _Chooser(sharper, dict(sharper))                    # the first is asked to reproduce
     session = _session(tmp_path,
                        understanding=_understanding(verb="compose_route", route="/rentals",
                                                     target_file="/rentals"),

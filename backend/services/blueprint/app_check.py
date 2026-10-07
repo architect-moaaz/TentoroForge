@@ -141,7 +141,14 @@ def visits(doc: dict) -> list[dict]:
             continue
         users = [roles.get(str(u), str(u)) for u in p.get("users") or []]
         sections = [sec for sec in p.get("sections") or [] if isinstance(sec, dict) and sec.get("key")]
-        for role in (users or [admin]):
+        # A PAGE FOR NOBODY IN PARTICULAR IS ITS AUDIENCE'S: the person it is
+        # for (`trials.default_person`), not the administrator, who cannot use
+        # a customer's cart — ToroCommerce's /cart was checked as Admin and its
+        # working minus button reported broken (2026-10-07).
+        if not users:
+            from services.smith.trials import default_person
+            users = [default_person(view, route=str(p["route"]))]
+        for role in users:
             mine = [sec for sec in sections
                     if not section_audience(view, sec) or role in section_audience(view, sec)]
             hidden = [str(sec.get("label") or sec["key"]) for sec in sections

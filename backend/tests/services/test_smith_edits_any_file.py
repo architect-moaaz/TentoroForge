@@ -225,3 +225,37 @@ def test_a_platform_patch_stays_only_when_a_try_after_it_passed(tmp_path, tries,
     assert patch["status"] == ("active" if kept else "reverted")
     assert ("evaluate(path)" in engine.read_text()) is kept
     assert ("Kept the platform patch" if kept else "Took back") in out.said
+
+
+def test_a_page_rewrite_in_a_turn_that_tried_nothing_is_asked_to_reproduce_too(tmp_path, tries, monkeypatch):
+    """TCommerce's empty bag went straight to rewriting /cart, then tried."""
+    calls = []
+    monkeypatch.setattr("services.smith.writes.run", lambda name, args, **k: calls.append(name) or
+                        {"applied": True, "said": "Rewrote /cart.", "touched": ["app/src/app/cart/view.tsx"]})
+    _repo(tmp_path)
+    rewrite = {"tool": "write_page_code", "args": {"route": "/cart", "brief": "show the items"}}
+    chooser = _Chooser(rewrite, _TRY, dict(rewrite), _TRY, {"tool": "done", "args": {}})
+    _turn(tmp_path, chooser, "the bag is empty after adding")
+    assert chooser.seen[1][-1].said == REPRODUCE_FIRST
+    assert calls == ["write_page_code"]
+
+
+def test_a_trial_that_names_nobody_is_the_person_the_screen_is_for():
+    """ToroCommerce's fixed minus button was tried as Admin, refused with 422,
+    and reported "still does not work" (measured on a copy, 2026-10-07)."""
+    from services.smith.trials import default_person
+    doc = {"roles": [{"id": "ROLE-001", "name": "Customer"}, {"id": "ROLE-002", "name": "Admin"}],
+           "security": {"signupRole": "ROLE-001"},
+           "pages": [{"id": "PAGE-003", "route": "/cart", "access": "authenticated"},
+                     {"id": "PAGE-006", "route": "/admin/products", "access": "role_restricted", "users": ["ROLE-002"]},
+                     {"id": "PAGE-001", "route": "/", "access": "public"}],
+           "workflows": [{"id": "FLOW-002", "name": "Update Cart Item Quantity", "launchedFrom": ["PAGE-003"]},
+                         {"id": "FLOW-006", "name": "Create Product", "launchedFrom": ["PAGE-006"]}]}
+    assert default_person(doc, route="/cart?x=1") == "Customer"
+    assert default_person(doc, route="/admin/products") == "Admin"
+    assert default_person(doc, route="/") == "Customer"
+    assert default_person(doc, flow=doc["workflows"][0]) == "Customer"
+    assert default_person(doc, flow=doc["workflows"][1]) == "Admin"
+    from services.blueprint.app_check import visits
+    by_route = {v["route"]: v["as"] for v in visits(doc) if not v.get("section")}
+    assert by_route["/cart"] == "Customer" and by_route["/admin/products"] == "Admin"
