@@ -305,7 +305,35 @@ def landing_by_role(doc: dict) -> dict[str, str]:
         name = by_key.get(str(key).strip().lower())
         if name and isinstance(route, str) and route.startswith("/") and "[" not in route:
             out[name] = route
+    # A ROLE THE NAVIGATION NAMES NO LANDING FOR ARRIVES AT ITS OWN DOOR: the
+    # page its author marked `entry` among the pages only that audience may
+    # open. The navigation is authored before any page exists, so it could not
+    # name one; ToroCommerce's never did, its landing map was empty, and the
+    # administrator signed in to the shop front every time — while
+    # /admin/products said `entry: true` (forge-v3, 2026-10-07).
+    from services.blueprint.projection import restricted_roles
+    for page in _live(doc.get("pages")):
+        route = str(page.get("route") or "")
+        if not page.get("entry") or str(page.get("access") or "") != "role_restricted" \
+                or not route.startswith("/") or "[" in route:
+            continue
+        for name in restricted_roles(doc, page):
+            out.setdefault(str(name), route)
     return out
+
+
+def roles_without_a_door(doc: dict) -> list[str]:
+    """Roles that have pages only they may open and nowhere to land: no
+    navigation landing and no `entry` page among their own. Such a role signs
+    in to whatever the default is — another audience's screens."""
+    from services.blueprint.projection import restricted_roles
+    landed = landing_by_role(doc)
+    own: dict[str, list[str]] = {}
+    for page in _live(doc.get("pages")):
+        if str(page.get("access") or "") == "role_restricted":
+            for name in restricted_roles(doc, page):
+                own.setdefault(str(name), []).append(str(page.get("route") or page.get("id")))
+    return sorted(name for name in own if name not in landed)
 
 
 def home_route(doc: dict) -> str:
@@ -397,6 +425,10 @@ def project_account(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # Projection: every gated workflow starts with its prerequisite
 # ---------------------------------------------------------------------------
 
+#: What a visitor who is not signed in hears from a workflow that needs an account.
+SIGN_IN_FIRST = "Please sign in first — you need an account to do this."
+
+
 def guard_nodes(doc: dict, workflow: dict) -> list[tuple[dict, dict]]:
     """``[(query config, rule)]`` for each prerequisite gating `workflow`."""
     ents = {str(e.get("id")): e for e in _live((doc.get("data") or {}).get("entities"))}
@@ -432,7 +464,18 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
             e["sourceHandle"] = "else"
         edges.append(e)
 
-    prev = "trigger"
+    # A GUEST IS ASKED TO SIGN IN, NOT TOLD THEIR ACCOUNT IS DEACTIVATED. Every
+    # prerequisite looks for the signed-in person's own record; a visitor who
+    # is not signed in has none, and got the rule's message — ToroCommerce's
+    # guests pressing Add to Cart were told "Your account has been
+    # deactivated" (forge-v3, 2026-10-07). Asked first, once, in plain words.
+    nodes.append(make_node("prereq_signed_in", "condition", {"expression": "user.id != null"},
+                           "Signed in?"))
+    nodes.append(make_node("prereq_signed_in_refused", "end", {
+        "refused": True, "message": SIGN_IN_FIRST}, "Refused: not signed in"))
+    edge("trigger", "prereq_signed_in")
+    edge("prereq_signed_in", "prereq_signed_in_refused", "else")
+    prev = "prereq_signed_in"
     for i, (query, rule) in enumerate(guards):
         rid = re.sub(r"[^a-z0-9]+", "_", str(rule.get("id") or f"rule_{i}").lower())
         q, c, stop = f"prereq_{rid}", f"prereq_{rid}_met", f"prereq_{rid}_refused"
@@ -442,7 +485,7 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
         nodes.append(make_node(stop, "end", {"refused": True,
                                              "message": rule.get("message") or rule.get("statement") or
                                              "This cannot be done yet."}, "Refused: prerequisite not met"))
-        edge(prev, q, "then" if prev != "trigger" else "default")
+        edge(prev, q, "then")
         edge(q, c)
         edge(c, stop, "else")
         prev = c
@@ -451,5 +494,5 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
 
 
 __all__ = ["AUTH_PAGES", "account_entity", "admin_role", "account_fields", "account_initial", "after_signup_route", "auth_page_bodies",
-           "guard_workflow", "has_sign_in", "home_route", "is_auth_page", "prerequisites",
+           "guard_workflow", "has_sign_in", "home_route", "roles_without_a_door", "is_auth_page", "prerequisites",
            "project_account", "signup_role"]

@@ -288,12 +288,36 @@ const NO_READER = "00000000-0000-0000-0000-000000000000";
 export function withReader(
   filter: Record<string, any> | undefined | null,
   ctx: DataEngineContext,
+  table?: Record<string, any>,
 ): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(filter || {})) {
-    out[k] = v === "$user.id" ? (ctx?.user?.id ?? NO_READER) : v;
+    const value = v === "$user.id" ? (ctx?.user?.id ?? NO_READER) : v;
+    out[k] = table ? asColumnValue(table[k], value) : value;
   }
   return out;
+}
+
+/**
+ * A FILTER VALUE IN THE COLUMN'S OWN TYPE. A filter arrives as text — the
+ * SDK's `where` is stringified on its way here and a query string is text —
+ * and the Postgres driver writes a yes/no parameter as `x === true ? 't' :
+ * 'f'`, so the TEXT "true" became false. `where: { isActive: true }` listed
+ * exactly the inactive products on both live shops, TCommerce and ToroCommerce
+ * (forge-v3, 2026-10-07). Yes/no and number columns take their own type;
+ * anything else is left as it came.
+ */
+export function asColumnValue(col: any, value: unknown): unknown {
+  if (typeof value !== "string" || !col) return value;
+  const kind = String(col.columnType || col.dataType || "").toLowerCase();
+  if (kind.includes("boolean")) {
+    const v = value.trim().toLowerCase();
+    if (v === "true" || v === "1" || v === "t" || v === "yes") return true;
+    if (v === "false" || v === "0" || v === "f" || v === "no") return false;
+    return value;
+  }
+  if (col.dataType === "number" && /^\s*-?\d+(\.\d+)?\s*$/.test(value)) return Number(value);
+  return value;
 }
 
 
@@ -1113,8 +1137,8 @@ export async function query(
 
   // Filters
   if (filters) {
-    for (const [key, value] of Object.entries(withReader(filters, ctx))) {
-      if (value && value !== "undefined" && entity.table[key]) {
+    for (const [key, value] of Object.entries(withReader(filters, ctx, entity.table))) {
+      if (value !== undefined && value !== "" && value !== "undefined" && entity.table[key]) {
         conditions.push(eq(entity.table[key], value));
       }
     }
@@ -1296,7 +1320,7 @@ async function computeSimple(
   const start = range ? range.start : windowStart(m.window);
   if (start && dateCol) conds.push(gte(dateCol, start));
   if (range?.end && dateCol) conds.push(lt(dateCol, range.end));
-  for (const [k, v] of Object.entries(withReader(m.filter, ctx))) {
+  for (const [k, v] of Object.entries(withReader(m.filter, ctx, cols))) {
     if (cols[k] !== undefined && (v === null || typeof v !== "object")) { conds.push(eq(cols[k], v as any)); continue; }
     const joined = cols[k] !== undefined ? await joinedCondition(cols[k], v, ctx) : null;
     if (joined) { conds.push(joined); continue; }
@@ -1458,7 +1482,7 @@ export async function resolveSeries(
     const orderCol = cols[orderName];
     if (orderCol === undefined) return [];
     const conds: SQL[] = [...scope];
-    for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
+    for (const [k, v] of Object.entries(withReader(source.filter, ctx, cols))) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
     }
     try {
@@ -1501,7 +1525,7 @@ export async function resolveSeries(
   const labelExpr: any = bucket ? sql`date_trunc(${bucket}, ${groupCol})` : groupCol;
 
   const conds: SQL[] = [...scope];
-  for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
+  for (const [k, v] of Object.entries(withReader(source.filter, ctx, cols))) {
     if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
   }
 
@@ -1688,7 +1712,7 @@ export async function resolveQuery(
                                 max(c);
   });
 
-  for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
+  for (const [k, v] of Object.entries(withReader(source.filter, ctx, cols))) {
     if (cols[k] === undefined || v === undefined) continue;
     if (Array.isArray(v)) { if (v.length) conds.push(inArray(cols[k], v as any[])); }
     else conds.push(eq(cols[k], v as any));
@@ -1911,7 +1935,7 @@ export async function resolveSearch(
       sql`${vectorExpr} @@ ${tsq}`,
       ...await accessConditions(entityName, entity, ctx),
     ];
-    for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
+    for (const [k, v] of Object.entries(withReader(source.filter, ctx, cols))) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
     }
 
