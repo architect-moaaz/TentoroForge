@@ -112,25 +112,15 @@ def already_done(tool: str, args: dict, observations: list[Observation]) -> bool
     return any(_identity(o.tool, o.args) == want for o in observations)
 
 
-_PROMPT = """You are changing an application someone owns. Decide the NEXT \
-step, or end the turn. The steps already taken this turn, if any, are below.
-
-THE CONVERSATION SO FAR:
-{history}
-
-WHAT THEY ASKED, in their words:
-{ask}
-
-The ask is often a word — "yes please", "go ahead" — and means nothing without
-the exchange above it. Read what it is answering before deciding anything. If
-the two together still do not say what is wanted, `ask_user`; do not pick a
-subject out of the application below and act as though they raised it.
-
-WHAT THE APPLICATION IS, as much of it as is relevant:
-{ctx}
-
-WHAT HAS HAPPENED SO FAR THIS TURN:
-{observations}
+#: THE STEP PROMPT, STABLE PART FIRST. Every step of every turn re-sent the
+#: rules, the tools and the application at full price — ToroCommerce's repair
+#: turns read 5.0M tokens with no cache hit at all, $15.93 of a $24.91 build
+#: (forge-v3, 2026-10-07). The rules and tools never change, the application
+#: rarely does within a turn; they lead, each marked for the cache, and what
+#: changes every step — the exchange, the ask, the steps so far — follows.
+_RULES = """You are changing an application someone owns. Decide the NEXT \
+step, or end the turn. The application, what they asked and the steps already \
+taken this turn come after these rules and the tools.
 
 Return ONLY a JSON object with exactly these keys:
 
@@ -149,7 +139,7 @@ it first. Those names are for tool calls, not replies. "The Blueprint does not
 cover that" is a sentence they cannot act on; "that is not something your
 application handles" is.
 
-LOOK BEFORE YOU ACT when the application above does not show you what you
+LOOK BEFORE YOU ACT when the application shown does not show you what you
 need. The context is a slice, not the whole; `read_page_code` shows what a
 screen actually runs, `grep` finds where a word appears in the code,
 `read_section` opens any part of the Blueprint, `find` turns a name into an
@@ -311,6 +301,31 @@ THE TOOLS
 {catalogue}
 """
 
+_APP = """WHAT THE APPLICATION IS, as much of it as is relevant:
+{ctx}
+
+"""
+
+_TURN = """THE CONVERSATION SO FAR:
+{history}
+
+WHAT THEY ASKED, in their words:
+{ask}
+
+The ask is often a word — "yes please", "go ahead" — and means nothing without
+the exchange above it. Read what it is answering before deciding anything. If
+the two together still do not say what is wanted, `ask_user`; do not pick a
+subject out of the application below and act as though they raised it.
+
+WHAT HAS HAPPENED SO FAR THIS TURN:
+{observations}
+
+Decide the next step now: return ONLY the JSON object the rules above describe.
+"""
+
+#: The three, as one text — what a provider that takes a string is given.
+_PROMPT = _RULES + _APP + _TURN
+
 
 def _render(observations: list[Observation]) -> str:
     if not observations:
@@ -339,12 +354,23 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
     from services.smith.understand_ask import (_default_provider, _did_not_follow,
                                                 _looks_cut_off, _parse, _render_history)
 
-    call = provider or (lambda prompt: _default_provider(prompt, reasoning, images=images))
     shown = (f"\n\n[{len(images)} screenshot{'s' if len(images) != 1 else ''} attached by the person, shown above "
              "the text: what they see on screen. Read it as their evidence.]" if images else "")
-    prompt = _PROMPT.format(ask=(ask or "").strip() + shown, history=_render_history(history),
-                            ctx=ctx or "(nothing yet)", observations=_render(observations),
-                            catalogue=tools.render())
+    parts = [_RULES.format(catalogue=tools.render()), _APP.format(ctx=ctx or "(nothing yet)"),
+             _TURN.format(ask=(ask or "").strip() + shown, history=_render_history(history),
+                          observations=_render(observations))]
+    prompt = "".join(parts)
+    if provider is not None:
+        call = provider
+    else:
+        def call(text: str) -> str:
+            # The rules and tools, then the application, each a cache
+            # breakpoint; anything appended to the prompt (a retry's note)
+            # rides on the last, uncached part.
+            blocks = [{"type": "text", "text": parts[0], "cache_control": {"type": "ephemeral"}},
+                      {"type": "text", "text": parts[1], "cache_control": {"type": "ephemeral"}},
+                      {"type": "text", "text": parts[2] + text[len(prompt):]}]
+            return _default_provider(blocks, reasoning, images=images)
     try:
         raw = call(prompt)
     except Exception as exc:  # noqa: BLE001 — a turn degrades, it does not crash
@@ -393,7 +419,10 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
         # into a change I am sure of" — the owner's cart report, never looked
         # at (ihf6pjga, 2026-10-06). Asked again without the long think.
         logger.warning("smith loop: empty reply — asking once more, without extended thinking")
-        quick = provider or (lambda prompt: _default_provider(prompt, None, images=images))
+        quick = provider or (lambda text: _default_provider(
+            [{"type": "text", "text": parts[0], "cache_control": {"type": "ephemeral"}},
+             {"type": "text", "text": parts[1], "cache_control": {"type": "ephemeral"}},
+             {"type": "text", "text": parts[2] + text[len(prompt):]}], None, images=images))
         try:
             raw = quick(prompt + "\n\nYour last reply was empty. Decide the next step now and reply with "
                                  "the JSON object only — {\"tool\": …, \"args\": …, \"why\": …}.")

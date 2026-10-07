@@ -80,7 +80,9 @@ def test_the_langchain_client_reports_its_calls(ledger, tmp_path):
     with build_usage.usage_scope(agent="look_at_site", output_dir=_app(tmp_path)):
         llm_client._to_message(ai, "claude-sonnet-5")
     (row,) = ledger()
-    assert row["input_tokens"] == 70 and row["output_tokens"] == 30 and row["cache_read_tokens"] == 5
+    # LangChain's 70 includes the 5 read from the cache; the ledger keeps
+    # Anthropic's split, so the cached five are priced as cached.
+    assert row["input_tokens"] == 65 and row["output_tokens"] == 30 and row["cache_read_tokens"] == 5
 
 
 def test_a_smith_turn_and_the_builds_checks_open_a_scope(ledger, tmp_path, monkeypatch):

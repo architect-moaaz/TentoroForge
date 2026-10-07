@@ -362,3 +362,62 @@ def test_a_change_with_no_file_after_a_failing_try_ends_the_turn_cleanly():
     again = Observation(tool="try_workflow", args={"workflow": "Create Product"}, status="read",
                         said="Create Product: HTTP 200 — created")
     assert _before_done([tried, rewrote, read, again], landed=[]) == ""
+
+
+# --- a refusal is the app's own rule more often than a fault (ToroCommerce, 2026-10-07) ---
+
+TURNED_DOWN = ('Mark Order Fulfilled (FLOW-005) run as Admin: HTTP 422\nanswer: {"status": "failed", '
+               '"refused": true, "error": "That order is already fulfilled."}')
+
+
+def _judging_client(seen, verdict):
+    runs = _client(seen)
+
+    def call(*, system, user, schema):
+        if schema is pt.JUDGE_SCHEMA:
+            seen.append(("judge", json.loads(user)))
+            return json.dumps({"verdicts": [{"workflow": "FLOW-005", "refusal": verdict, "why": "x"}]})
+        return runs(system=system, user=user, schema=schema)
+    return call
+
+
+def test_a_rightly_refused_run_is_tried_again_with_a_new_input_not_sent_to_smith(tmp_path, monkeypatch):
+    runs = _setup(tmp_path, monkeypatch, {"FLOW-001": [OK] * 3, "FLOW-005": [TURNED_DOWN, OK]})
+    seen, asks = [], []
+    out = pt.prove_processes(_Svc(tmp_path, DOC), str(tmp_path), client=_judging_client(seen, "right"),
+                             bench_factory=_Bench, run_turn=lambda *a, **k: asks.append(a) or {})
+    assert asks == [], "no Smith turn for the app keeping its own rule"
+    assert out["passed"] == ["Create Category", "Mark Order Fulfilled"] and not out["left"]
+    judged = [s for s in seen if isinstance(s, tuple)]
+    assert judged and judged[0][1]["runs"][0]["refused"] == "That order is already fulfilled."
+    replanned = [s for s in seen if isinstance(s, dict) and any(p.get("lastRun") for p in s["processes"])]
+    assert "rightly refused" in replanned[0]["processes"][0]["lastRun"], "the new input is chosen knowing why"
+    assert [r["workflow"] for r in runs].count("FLOW-005") == 2
+
+
+def test_a_wrong_refusal_is_a_fault_and_goes_to_smith(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch, {"FLOW-001": [OK] * 3, "FLOW-005": [TURNED_DOWN, OK]})
+    asks = []
+    out = pt.prove_processes(_Svc(tmp_path, DOC), str(tmp_path), client=_judging_client([], "wrong"),
+                             bench_factory=_Bench,
+                             run_turn=lambda pid, od, message, **k: asks.append(message) or {"edited_paths": ["x"]})
+    assert len(asks) == 1 and "already fulfilled" in asks[0]
+    assert out["fixed"] == ["Mark Order Fulfilled"]
+
+
+def test_refused_again_with_an_input_meant_to_pass_goes_to_smith_saying_so(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch, {"FLOW-001": [OK] * 3, "FLOW-005": [TURNED_DOWN, TURNED_DOWN, OK]})
+    asks = []
+    pt.prove_processes(_Svc(tmp_path, DOC), str(tmp_path), client=_judging_client([], "right"),
+                       bench_factory=_Bench,
+                       run_turn=lambda pid, od, message, **k: asks.append(message) or {"edited_paths": ["x"]})
+    assert len(asks) == 1 and "Refused twice" in asks[0] and "the data or a rule is what is wrong" in asks[0]
+
+
+def test_a_process_is_run_as_the_people_it_is_for():
+    doc = {**DOC, "roles": [{"id": "ROLE-001", "name": "Admin"}, {"id": "ROLE-002", "name": "Customer"}],
+           "pages": [{"id": "PAGE-002", "route": "/cart", "users": ["ROLE-002"]}],
+           "workflows": [{**FLOWS[0], "launchedFrom": ["PAGE-002"]}]}
+    brief = json.loads(pt._brief(doc, doc["workflows"], {}))
+    assert brief["processes"][0]["for"] == ["Customer"]
+    assert "never as the administrator unless it is theirs" in pt.INPUTS_SYSTEM

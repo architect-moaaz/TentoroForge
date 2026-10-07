@@ -63,7 +63,35 @@ INPUTS_SYSTEM = (
     "record, take a `new` one of the right kind when there is one, as nothing depends on it yet. Do not try to make "
     "a process refuse: the run proves it works. When a process shows `lastRun`, its last input "
     "was refused or failed for the reason given there: choose one that the rule accepts — a name "
-    "not already taken, a record nothing else depends on."
+    "not already taken, a record nothing else depends on. Run each as a role in its `runBy`, and as the "
+    "people it is for (`for`) — a process for one kind of person is run as that person, never as the "
+    "administrator unless it is theirs."
+)
+
+#: The answer to "was each refusal right?" — one small call for all of them.
+JUDGE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["verdicts"],
+    "properties": {"verdicts": {"type": "array", "items": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["workflow", "refusal", "why"],
+        "properties": {
+            "workflow": {"type": "string"},
+            "refusal": {"type": "string", "enum": ["right", "wrong"]},
+            "why": {"type": "string", "description": "One sentence."},
+        }}}},
+}
+
+JUDGE_SYSTEM = (
+    "Each process below was run with an input, and the application refused it with its own message. "
+    "Say for each whether the refusal is RIGHT — the input broke a rule the application should keep: a "
+    "name already taken, more than is in stock, an account not allowed to act, a record in the wrong "
+    "state for this — or WRONG: a real person giving that input would expect it to work, and the "
+    "application is mistaken (their own unchanged email reported as taken by someone else, a valid "
+    "quantity refused, a rule refusing what it was written to allow). Judge from the input, the "
+    "message, the process's purpose, the rules and the records shown; when unsure, say wrong."
 )
 
 
@@ -109,6 +137,8 @@ def _brief(doc: dict, flows: list[dict], records: dict[str, list[dict]],
 
     entities = {str(e.get("id")): e for e in ((doc.get("data") or {}).get("entities") or [])}
     roles = launch_roles(doc)
+    role_names = {str(r.get("id")): str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    pages = {str(p.get("id")): p for p in doc.get("pages") or [] if isinstance(p, dict)}
     shown = []
     for w in flows:
         inputs = []
@@ -118,7 +148,12 @@ def _brief(doc: dict, flows: list[dict], records: dict[str, list[dict]],
                 row["entity"] = str((entities.get(str(i["entity"])) or {}).get("name") or i["entity"])
             inputs.append(row)
         row = {"workflow": w.get("id"), "name": w.get("name"), "purpose": w.get("description") or "",
-               "inputs": inputs, "runBy": roles.get(str(w.get("id"))) or []}
+               "inputs": inputs, "runBy": roles.get(str(w.get("id"))) or [],
+               # WHO IT IS FOR: the people of the screens it starts from.
+               # Add to Cart, started from a screen anyone may open, was run
+               # as the administrator and refused (ToroCommerce, 2026-10-07).
+               "for": sorted({role_names.get(str(u), str(u)) for pid in w.get("launchedFrom") or []
+                              for u in (pages.get(str(pid)) or {}).get("users") or []})}
         # WHAT THE LAST RUN WAS TOLD. F&B's first round picked "Soups", which
         # the seed already had, a category that still held food items and a
         # dish already ordered — each refused, correctly, by the app's own
@@ -226,6 +261,38 @@ def run_failed(said: str) -> bool:
     reads as a missing header rather than a failure."""
     from services.smith import trials
     return trials.failed(said) or said.startswith("`try_workflow` failed")
+
+
+def refused(said: str) -> bool:
+    """A run the application itself turned down, with its own message — as
+    opposed to one that broke (an error, a failed step, no answer)."""
+    return '"refused": true' in said
+
+
+def judge_refusals(doc: dict, items: list[tuple[dict, dict, str]], client: Any) -> dict[str, str]:
+    """`{FLOW-id: "right" | "wrong"}` for each refused run — one small call.
+
+    A REFUSAL IS OFTEN THE APP WORKING. ToroCommerce's trials were refused
+    "only 1 of this item in stock" and "that email is already in use" — the
+    app's own rules, given inputs a person would not give — and each sent an
+    unattended Smith turn after a fault that was not there: $9.64 of a $24.91
+    build (forge-v3, 2026-10-07). But one refusal was a fault — a person's own
+    unchanged email reported as taken — so refusals are judged, not waved
+    through. A call that fails judges none: they go to Smith as before."""
+    shown = [{"workflow": f.get("id"), "name": f.get("name"), "purpose": f.get("description") or "",
+              "as": run.get("as") or "the administrator", "input": run.get("input") or {},
+              "refused": _why(said)} for f, run, said in items]
+    rules = [{"name": r.get("name"), "statement": r.get("statement")}
+             for r in doc.get("businessRules") or [] if isinstance(r, dict)]
+    try:
+        reply = client(system=JUDGE_SYSTEM, user=json.dumps({"runs": shown, "rules": rules}, default=str)[:40000],
+                       schema=JUDGE_SCHEMA)
+        body = json.loads(getattr(reply, "text", reply))
+    except Exception:  # noqa: BLE001
+        logger.warning("[process-trials] refusals not judged", exc_info=True)
+        return {}
+    return {str(v.get("workflow")): str(v.get("refusal")) for v in (body or {}).get("verdicts") or []
+            if isinstance(v, dict) and v.get("refusal") in ("right", "wrong")}
 
 
 def _why(said: str) -> str:
@@ -355,6 +422,36 @@ def _prove_processes(svc: Any, output_dir: str, *,
                         else:
                             proven.append(pid)
                             (fixed if round_ > 1 and pid in changed else passed).append(str(by_id[pid].get("name") or pid))
+                            ledger.node_subject("process_trials", pid, len(passed) + len(fixed), len(flows), True)
+                # A RIGHT REFUSAL IS TRIED AGAIN, NOT REPAIRED: new inputs,
+                # chosen knowing the reason, before anyone is sent to fix it.
+                turned_down = [item for item in failing if refused(item[2])]
+                verdicts = judge_refusals(svc.doc, turned_down, client) if turned_down else {}
+                again = [item for item in turned_down if verdicts.get(str(item[0].get("id"))) == "right"]
+                if again:
+                    for flow, run, said in again:
+                        lessons[str(flow.get("id"))] = (f"input {json.dumps(run.get('input') or {}, default=str)[:400]} "
+                                                        f"as {run.get('as') or 'the administrator'} -> {_why(said)} "
+                                                        "(rightly refused: choose an input and a person the rule accepts)")
+                    records = _mark_new(_records(app, svc.doc), seeded or set())
+                    replan = compose_inputs(svc.doc, [f for f, _r, _s in again], records, client, before=lessons)
+                    for flow, first, first_said in again:
+                        pid = str(flow.get("id"))
+                        run = replan.get(pid) or first
+                        attach_files(bench, svc.doc, flow, run)
+                        said = trials.run("try_workflow", {"workflow": pid, "input": run["input"], "as": run["as"]},
+                                          bench=bench, doc=svc.doc)
+                        failing = [x for x in failing if x[0] is not flow]
+                        if run_failed(said):
+                            failing.append((flow, run, (
+                                f"Refused twice, each time with an input chosen to satisfy its rules — first "
+                                f"{json.dumps(first.get('input') or {}, default=str)[:300]} as "
+                                f"{first.get('as') or 'the administrator'}: {_why(first_said)}; then:\n{said}\n"
+                                "If no input can pass, the data or a rule is what is wrong (records in a state "
+                                "nothing can act on, a rule that refuses everyone).")))
+                        else:
+                            proven.append(pid)
+                            passed.append(str(flow.get("name") or pid))
                             ledger.node_subject("process_trials", pid, len(passed) + len(fixed), len(flows), True)
             except trials.TrialUnavailable as exc:
                 logger.warning("[process-trials] the app could not be run: %s", exc)

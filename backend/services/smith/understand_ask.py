@@ -53,7 +53,7 @@ def _env_name_only(raw: object) -> str:
     return text if all(c.isalnum() or c == "_" for c in text) else ""
 
 
-def _default_provider(prompt: str, reasoning: Callable[[str], None] | None = None,
+def _default_provider(prompt: str | list, reasoning: Callable[[str], None] | None = None,
                       images: Sequence[str | Path] = ()) -> str:
     from services.llm_client import complete
 
@@ -66,6 +66,9 @@ def _default_provider(prompt: str, reasoning: Callable[[str], None] | None = Non
     # attached image" was stored, designated a reference, and never put in
     # front of the model, which answered "I cannot see the attached image"
     # (rafm22pm, 2026-09-26). The images lead the text, as everywhere else.
+    # A PROMPT IN PARTS (a list of text blocks, the stable ones marked for
+    # the cache) is sent as it is; a string is one block.
+    text_blocks: list[dict] = prompt if isinstance(prompt, list) else [{"type": "text", "text": prompt}]
     content: Any = prompt
     if images:
         from services.blueprint.executors import image_block
@@ -76,7 +79,7 @@ def _default_provider(prompt: str, reasoning: Callable[[str], None] | None = Non
             except Exception as exc:  # noqa: BLE001 — a picture that will not load is left out, said
                 logger.info("[smith] attachment not shown to the model (%s)", exc)
         if blocks:
-            content = [*blocks, {"type": "text", "text": prompt}]
+            content = [*blocks, *text_blocks]
     # ROOM TO THINK AND THEN ANSWER. The cap covers thinking and the reply
     # together; at 4000 a turn deep in its reads thought until the cap and
     # answered nothing (TCommerce, 2026-10-06). Only what is used is billed.
