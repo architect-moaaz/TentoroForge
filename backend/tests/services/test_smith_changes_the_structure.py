@@ -166,8 +166,8 @@ def test_the_catalogue_offers_every_size_of_structural_change():
     for name in ("write_frame", "rewrite_pages", "write_page_code", "write_section"):
         assert tools.is_tool(name) and tools.is_write(name), name
     shown = tools.render()
-    assert "`write_frame` (file: string, brief: string)" in shown
-    assert "`write_page_code` (route: string, brief: string, whole: boolean)" in shown
+    assert "`write_frame` (file: string, brief: string, requested: boolean)" in shown
+    assert "`write_page_code` (route: string, brief: string, whole: boolean, requested: boolean)" in shown
     assert "src/app/(dashboard)/MobileTabBar.tsx" in shown
 
 
@@ -205,8 +205,8 @@ def test_a_control_found_unwired_is_tried_once_wired(tmp_path, monkeypatch):
     monkeypatch.setattr(trials, "run", lambda name, args, **k: calls.append(name) or "/?q=tea as Admin: HTTP 200")
     _repo(tmp_path)
     chooser = _Chooser({"tool": "write_frame", "args": {"file": "f", "brief": "search"}},
-                       {"tool": "write_frame", "args": {"file": "f", "brief": "search"}},   # after reproduce-first
-                       {"tool": "write_page_code", "args": {"route": "/", "brief": "read q"}},
+                       {"tool": "write_frame", "args": {"file": "f", "brief": "search", "requested": True}},
+                       {"tool": "write_page_code", "args": {"route": "/", "brief": "read q", "requested": True}},
                        {"tool": "done", "args": {}},
                        {"tool": "open_page", "args": {"route": "/?q=tea"}},
                        {"tool": "done", "args": {}})
@@ -318,7 +318,7 @@ def test_what_was_not_done_is_said_beside_what_was(tmp_path, monkeypatch):
     out = handle(project_id="p1", output_dir=str(tmp_path), message="rebuild every screen",
                  # The first write of a turn that tried nothing is asked to reproduce; sent again, it runs.
                  choose=_Chooser({"tool": "rewrite_pages", "args": {"routes": ["all"], "brief": "x"}},
-                                 {"tool": "rewrite_pages", "args": {"routes": ["all"], "brief": "x"}},
+                                 {"tool": "rewrite_pages", "args": {"routes": ["all"], "brief": "x", "requested": True}},
                                  {"tool": "done", "args": {}}), move=_Writes(tmp_path))
     assert "Laid out 10 screen(s) again." in out.said and "Not done: /profile was not laid out again" in out.said
 

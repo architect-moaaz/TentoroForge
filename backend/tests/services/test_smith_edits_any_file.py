@@ -190,8 +190,11 @@ _FAILS = "Add to Cart (FLOW-001) run as Customer: HTTP 422\nanswer: not enough s
 def test_the_first_edit_of_a_turn_that_tried_nothing_is_asked_to_reproduce(tmp_path, tries):
     _repo(tmp_path)
     _app(tmp_path, "src/components/A.tsx", "a\n")
-    chooser = _Chooser(_edit("src/components/A.tsx", "a", "b"), _edit("src/components/A.tsx", "a", "b"), _TRY)
+    again = _edit("src/components/A.tsx", "a", "b")
+    again["args"]["requested"] = True                              # the change they asked for
+    chooser = _Chooser(_edit("src/components/A.tsx", "a", "b"), _edit("src/components/A.tsx", "a", "b"), again, _TRY)
     _turn(tmp_path, chooser, "rename a to b")
+    assert chooser.seen[2][-1].said == REPRODUCE_FIRST           # asking twice is not a way past it
     assert chooser.seen[1][-1].said == REPRODUCE_FIRST
     assert (tmp_path / "app/src/components/A.tsx").read_text() == "b\n"
 
@@ -303,3 +306,48 @@ def test_a_workflow_edit_the_app_cannot_be_written_from_is_refused(tmp_path, mon
     out = file_edit.edit_definition(str(tmp_path), "workflows.FLOW-001", '"Done"', '"Finished"')
     assert not out["applied"] and "used twice" in out["finding"]
     assert BlueprintService.load(output_dir=tmp_path).doc["workflows"][0]["steps"][0]["name"] == "Done"
+
+
+def test_a_filled_record_is_one_the_person_can_reach(monkeypatch):
+    """The newest cart line was another customer's; the app refused it,
+    correctly, and the turn read the refusal as the fault (ToroCommerce copy)."""
+    from services.smith.trials import fill_records
+    mine = "8426eda8-a93a-4b9a-8299-e7b9128a3888"
+    seen: list[str] = []
+
+    def query(app, sql):
+        seen.append(sql)
+        if "information_schema" in sql:
+            return [["id"], ["created_at"]]
+        return [[mine]] if mine in sql else [["not-mine"]]
+
+    monkeypatch.setattr("services.blueprint.page_review._query", query)
+    doc = {"data": {"entities": [{"id": "ENTITY-005", "name": "CartItem", "table": "cart_items"}]}}
+    flow = {"id": "FLOW-002", "inputs": [{"entity": "ENTITY-005", "kind": "record", "name": "cartItem", "required": True}]}
+    payload = {"cartItem": "any"}
+    fill_records(None, doc, flow, payload, reach=lambda table: [mine])
+    assert payload["cartItem"] == mine and f"'{mine}'" in seen[-1]
+    none = {"cartItem": "any"}
+    said = fill_records(None, doc, flow, none, reach=lambda table: [])
+    assert none == {"cartItem": "any"} and "has no CartItem" in said[0]
+
+
+def test_a_different_control_failing_after_a_fix_is_not_the_same_failure():
+    """The minus button was fixed and worked; the plus button answered 422;
+    the turn said "failed the same way" (ToroCommerce copy, 2026-10-07)."""
+    from services.smith.loop import Observation
+    from services.smith4.turn import _failing_note, _still_failing
+    before = Observation(tool="open_page", args={"route": "/cart", "as": "Customer"}, status="read",
+                         said='/cart as Customer: HTTP 200\ncontrols, each pressed from a fresh load:\n'
+                              '  button "Decrease quantity": errors (422)\n  button "Increase quantity": workflow (ran (1))')
+    change = Observation(tool="edit_file", args={"path": "src/app/cart/view.tsx"}, status="resolved",
+                         said="Changed `src/app/cart/view.tsx`.", touched=["app/src/app/cart/view.tsx"])
+    after = Observation(tool="open_page", args={"route": "/cart", "as": "Customer"}, status="read",
+                        said='/cart as Customer: HTTP 200\ncontrols, each pressed from a fresh load:\n'
+                             '  button "Decrease quantity": workflow (ran (1))\n  button "Increase quantity": errors (422)')
+    assert _still_failing([before, change, after]) == []
+    note = _failing_note([before, change, after])
+    assert "same way" not in note and 'button "Increase quantity"' in note
+    still = Observation(tool="open_page", args={"route": "/cart", "as": "Customer"}, status="read",
+                        said=before.said)
+    assert _still_failing([before, change, still]) and "same way" in _failing_note([before, change, still])

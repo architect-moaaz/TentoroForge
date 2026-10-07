@@ -49,9 +49,10 @@ def test_a_page_that_does_not_compile_is_a_finding_not_a_dead_end(tmp_path, monk
 
     first = {"tool": "write_page_code",
              "args": {"route": "/rentals", "brief": "add accepted to ATTENTION_STATUSES"}, "why": ""}
-    chooser = _Chooser(first, dict(first),                       # the first is asked to reproduce
+    chooser = _Chooser(first, {**first, "args": {**first["args"], "requested": True}},   # asked to reproduce first
                        {"tool": "write_page_code",
-                        "args": {"route": "/rentals", "brief": "widen the Rental status union, then add accepted"}, "why": ""})
+                        "args": {"route": "/rentals", "brief": "widen the Rental status union, then add accepted",
+                                 "requested": True}, "why": ""})
     session = _session(tmp_path,
                        understanding=_understanding(target_file="src/a.json", element_label="A", new_value="A"),
                        move=_Writes(tmp_path), chooser=chooser)
@@ -115,7 +116,7 @@ def test_a_verb_whose_composer_refused_is_a_finding_the_loop_hears(tmp_path, mon
                         lambda *a, **k: {"declared": [], "created": []})
 
     sharper = {"tool": "write_page_code", "args": {"route": "/rentals", "brief": "sharper"}, "why": ""}
-    chooser = _Chooser(sharper, dict(sharper))                    # the first is asked to reproduce
+    chooser = _Chooser(sharper, {**sharper, "args": {**sharper["args"], "requested": True}})
     session = _session(tmp_path,
                        understanding=_understanding(verb="compose_route", route="/rentals",
                                                     target_file="/rentals"),

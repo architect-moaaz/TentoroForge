@@ -362,7 +362,19 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     mark = _query(app, "select coalesce(max(created_at), 'epoch')::text from workflow_execution_log")
     started = mark[0][0] if mark and mark[0] else "epoch"
     payload = dict(payload) if isinstance(payload, dict) else {}
-    filled = fill_records(app, doc, flow, payload)
+    def reach(table: str) -> list[str] | None:
+        """The ids this person reaches in `table`, through the app's own data
+        access as them (ownership rules apply); None when it would not say."""
+        code, _w, body = _http(app, "GET", f"/api/data/{table}?limit=5", None, jar)
+        if code != 200:
+            return None
+        try:
+            rows = json.loads(body).get("data")
+        except (ValueError, AttributeError):
+            return None
+        return [str(r.get("id")) for r in rows or [] if isinstance(r, dict) and r.get("id")]
+
+    filled = fill_records(app, doc, flow, payload, reach=reach)
     status, _where, text = _http(app, "POST", f"/api/workflows/{flow.get('id')}/execute",
                                  {"input": payload}, jar)
     after = _snapshot(app, tables)
@@ -408,7 +420,8 @@ def _an_id(value: Any) -> bool:
     return isinstance(value, (str, int)) and bool(_UUID.match(str(value)) or str(value).isdigit())
 
 
-def fill_records(app: Any, doc: dict, flow: dict, payload: dict) -> list[str]:
+def fill_records(app: Any, doc: dict, flow: dict, payload: dict,
+                 reach: Callable[[str], list[str] | None] | None = None) -> list[str]:
     """A required record input given nothing, or something that is not an id
     ("first"), takes a real record of its kind from the copy — the newest —
     and a declared `<name>Id` beside it takes the same id. TCommerce's empty
@@ -435,7 +448,17 @@ def fill_records(app: Any, doc: dict, flow: dict, payload: dict) -> list[str]:
         label = "".join("_" + c.lower() if c.isupper() else c for c in str(ent.get("labelField") or ""))
         shown = f', "{label}"::text' if label and label in cols else ""
         order = " order by created_at desc nulls last" if "created_at" in cols else ""
-        rows = _query(app, f'select id::text{shown} from "{table}"{order} limit 1')
+        # ONE OF THEIRS. The newest row was another customer's cart line, the
+        # app refused it correctly, and the turn read the refusal as the
+        # fault (ToroCommerce copy, 2026-10-07). Read as the person when the
+        # app will say; the newest row only when it will not.
+        theirs = reach(table) if reach else None
+        if theirs is not None and not theirs:
+            said.append(f"{name}: this person has no {ent.get('name')} — make one first (as them) to try this")
+            continue
+        where = (" where id::text in (" + ", ".join("'" + t.replace("'", "") + "'" for t in theirs) + ")"
+                 if theirs else "")
+        rows = _query(app, f'select id::text{shown} from "{table}"{where}{order} limit 1')
         if not rows or not rows[0]:
             said.append(f"{name}: no {ent.get('name')} exists to use")
             continue
