@@ -14,6 +14,13 @@ from services.smith.verbs import REQUIRED_BY_VERB
 from tests.services._loop_fixtures import _Chooser, _Writes, _repo, _session, _understanding
 
 
+@pytest.fixture(autouse=True)
+def _their_words_ask_for_it(monkeypatch):
+    """A scripted `requested: true` is a change the person asked for; the
+    independent check (`turn.asked_for`) is a model call, not run here."""
+    monkeypatch.setattr("services.smith4.turn.asked_for", lambda words, change: True)
+
+
 def test_write_page_code_is_a_tool_and_not_a_verb():
     assert tools.is_tool("write_page_code") and tools.is_write("write_page_code")
     assert "write_page_code" not in REQUIRED_BY_VERB

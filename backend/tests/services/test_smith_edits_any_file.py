@@ -21,6 +21,13 @@ from tests.services._loop_fixtures import _Chooser, _repo, _Writes
 ENGINE = "src/lib/workflows/engine.ts"
 
 
+@pytest.fixture(autouse=True)
+def _their_words_ask_for_it(monkeypatch):
+    """A scripted `requested: true` is a change the person asked for; the
+    independent check (`turn.asked_for`) is a model call, not run here."""
+    monkeypatch.setattr("services.smith4.turn.asked_for", lambda words, change: True)
+
+
 def _app(tmp_path: Path, rel: str, text: str) -> Path:
     path = tmp_path / "app" / rel
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -403,3 +410,47 @@ def test_a_steps_block_is_the_same_text_when_a_newer_step_follows(monkeypatch):
     loop.next_step("fix it", "the app", obs)
     first, second = sent
     assert [b["text"] for b in first[:-1]] == [b["text"] for b in second[:len(first) - 1]]
+
+
+def test_requested_is_checked_against_their_words_not_taken_from_smith(tmp_path, tries, monkeypatch):
+    """TCommerce's "bag is empty" was rewritten as a requested change."""
+    from services.smith4.turn import NOT_ASKED_FOR
+    judged = []
+    monkeypatch.setattr("services.smith4.turn.asked_for", lambda words, change: judged.append(words) or False)
+    _repo(tmp_path)
+    _app(tmp_path, "src/components/A.tsx", "a\n")
+    claim = _edit("src/components/A.tsx", "a", "b")
+    claim["args"]["requested"] = True
+    chooser = _Chooser(claim, _TRY, {"tool": "done", "args": {}})
+    _turn(tmp_path, chooser, "the bag is empty after adding")
+    assert chooser.seen[1][-1].said == NOT_ASKED_FOR and judged == ["the bag is empty after adding"]
+    assert (tmp_path / "app/src/components/A.tsx").read_text() == "a\n"
+
+
+def test_a_turn_a_check_started_changes_nothing_for_a_fault_it_has_not_seen(tmp_path, tries):
+    from services.smith4 import handle
+    from services.smith4.turn import FAULT_NOT_SEEN
+    _repo(tmp_path)
+    _app(tmp_path, "src/components/A.tsx", "a\n")
+    claim = _edit("src/components/A.tsx", "a", "b")
+    claim["args"]["requested"] = True                    # means nothing when nobody asked
+    chooser = _Chooser(_TRY, claim, {"tool": "done", "args": {}})   # the try passes: no fault
+    handle(project_id="p1", output_dir=str(tmp_path), message="/cart: plus button errors (422)",
+           choose=chooser, move=_Writes(tmp_path), unattended=True)
+    assert chooser.seen[2][-1].said == FAULT_NOT_SEEN
+    assert (tmp_path / "app/src/components/A.tsx").read_text() == "a\n"
+    tries.append(_FAILS)                                  # now the try shows the fault
+    chooser = _Chooser(_TRY, _edit("src/components/A.tsx", "a", "b"), _TRY, {"tool": "done", "args": {}})
+    handle(project_id="p1", output_dir=str(tmp_path), message="/cart: plus button errors (422)",
+           choose=chooser, move=_Writes(tmp_path), unattended=True)
+    assert (tmp_path / "app/src/components/A.tsx").read_text() == "b\n"
+
+
+def test_a_workflows_own_refusal_is_an_answer_in_the_page_check():
+    """The plus button at the stock limit was reported broken, and the repair
+    it started rewrote a working workflow (ToroCommerce copy, 2026-10-08)."""
+    src = (Path(__file__).resolve().parents[2] / "scripts/page_shots.mjs").read_text()
+    assert "refused: body?.refused === true" in src and '"refused"' in src
+    assert "status of 422/.test(errors[i])" in src
+    from services.blueprint.page_review import BROKEN_OUTCOMES
+    assert "refused" not in BROKEN_OUTCOMES

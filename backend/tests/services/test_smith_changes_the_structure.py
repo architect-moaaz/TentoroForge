@@ -22,6 +22,13 @@ from services.smith.frame_change import FrameChangeError, change_frame
 LAYOUT = "src/app/(dashboard)/layout.tsx"
 
 
+@pytest.fixture(autouse=True)
+def _their_words_ask_for_it(monkeypatch):
+    """A scripted `requested: true` is a change the person asked for; the
+    independent check (`turn.asked_for`) is a model call, not run here."""
+    monkeypatch.setattr("services.smith4.turn.asked_for", lambda words, change: True)
+
+
 def _svc(tmp_path: Path) -> BlueprintService:
     svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="SnapIT", domain="shopping")
     svc.save()

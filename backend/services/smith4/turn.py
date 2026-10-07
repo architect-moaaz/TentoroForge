@@ -101,8 +101,49 @@ PATCH_NEEDS_PROOF = (
     "That file is the platform's — the engine every application runs on. It is patched for this "
     "application only once a try in this turn has shown the fault it fixes, and the patch is kept only "
     "if a try after it passes. Try it first; if the try passes, the fault is not there.")
+#: What `requested: true` hears when the person's words report a fault.
+NOT_ASKED_FOR = (
+    "Their words report that something does not work; they do not ask for this change. Use it first, as "
+    "them, on the screen they used (`open_page`, `try_workflow`) and fix what the try shows.")
+#: What a change hears in a turn a check started, before a try has shown the fault.
+FAULT_NOT_SEEN = (
+    "This turn was started by a check that saw a fault, and no try in it has shown that fault yet. Use "
+    "what the check reported, as the person it names; if the try works, the fault is not there — end "
+    "with `done` and say what the try showed. Change nothing for a fault you have not seen.")
 #: A step these answered never ran: asking for it again is not a repeat.
-_NOT_RUN = frozenset({REPRODUCE_FIRST, PATCH_NEEDS_PROOF})
+_NOT_RUN = frozenset({REPRODUCE_FIRST, PATCH_NEEDS_PROOF, NOT_ASKED_FOR, FAULT_NOT_SEEN})
+
+
+def _change_said(tool: str, args: dict) -> str:
+    what = args.get("why") or args.get("brief") or args.get("replace") or ""
+    where = args.get("path") or args.get("route") or args.get("section") or args.get("file") or ""
+    return " ".join(f"{tool} {where}: {what}".split())[:400]
+
+
+#: The question behind `requested: true`, asked of a small model on its own.
+#: The acting model labelling its own change was no guard: TCommerce's "bag is
+#: empty" was rewritten as a requested change (measured, 2026-10-08).
+ASKED_FOR_MODEL = "claude-haiku-4-5-20251001"
+
+
+def asked_for(words: str, change: str) -> bool:
+    """Whether the person's words ask for `change` itself, rather than report
+    that something does not work. False when it cannot be told — the safe side
+    is to try first."""
+    words = " ".join(str(words).split())[:1500]
+    if not words or not change:
+        return False
+    try:
+        from services.llm_client import complete
+        verdict = complete(model=ASKED_FOR_MODEL, max_tokens=5, temperature=0, content=(
+            f"A person wrote to the builder of their application:\n\"{words}\"\n\n"
+            f"The builder wants to make this change: \"{change}\"\n\n"
+            "Reply with one word. REQUEST if the person's words ask for this change itself. REPORT if "
+            "they say something does not work as it should — a fault to find. OTHER otherwise."))
+    except Exception:  # noqa: BLE001 — not knowing is not a yes
+        logger.warning("smith4: the asked-for check could not run", exc_info=True)
+        return False
+    return str(verdict or "").strip().upper().startswith("REQUEST")
 #: What `done` hears when the last change has not been used since.
 TRY_AFTER = (
     "Changed, not yet tried. Use what you changed — as the person who asked, on the screen they use — "
@@ -525,10 +566,24 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             # sent to the cart — a change nobody asked for, the bag never tried
             # (measured on a copy, 2026-10-07). Until a try has run, a change
             # runs only when the call says it is the change they asked for.
-            requested = str(args.get("requested") or "").strip().lower() in ("true", "1", "yes")
-            if not requested and not any(tools.is_trial(o.tool) for o in observations):
-                observations.append(Observation(tool=tool, args=args, status="error", said=REPRODUCE_FIRST))
-                continue
+            tried = [o for o in observations if tools.is_trial(o.tool)]
+            if ctx.unattended:
+                # A TURN A CHECK STARTED IS A FAULT TO SEE, NOT A REQUEST. Nobody
+                # asked for anything, so `requested` means nothing here, and a
+                # change needs a try in this turn that fails: ToroCommerce's
+                # after-change check flagged the plus button's refusal and its
+                # repair rewrote a working workflow (measured, 2026-10-08).
+                if not any(trials.failed(o.said or "") for o in tried):
+                    observations.append(Observation(tool=tool, args=args, status="error", said=FAULT_NOT_SEEN))
+                    continue
+            elif not tried:
+                claimed = str(args.get("requested") or "").strip().lower() in ("true", "1", "yes")
+                if not claimed:
+                    observations.append(Observation(tool=tool, args=args, status="error", said=REPRODUCE_FIRST))
+                    continue
+                if not asked_for(ctx.message or ctx.ask or "", _change_said(tool, args)):
+                    observations.append(Observation(tool=tool, args=args, status="error", said=NOT_ASKED_FOR))
+                    continue
             if tool == "edit_file":
                 from services.smith import file_edit
                 rel, _why = file_edit._app_rel(ctx.out, str(args.get("path") or ""))
