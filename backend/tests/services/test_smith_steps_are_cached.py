@@ -24,11 +24,15 @@ def test_a_step_sends_the_rules_and_the_app_as_cached_parts_and_the_turn_after(m
     obs = [Observation(tool="read_rows", args={"entity": "Order"}, status="read", said="3 rows")]
     out = loop.next_step("rename the zebra crossing widget", "APP CONTEXT HERE", obs, [("user", "hi")])
     assert out["tool"] == "done"
-    rules, app, turn = sent[0]
+    rules, app, head, step, tail = sent[0]
     assert rules["cache_control"] == {"type": "ephemeral"} and "THE TOOLS" in rules["text"]
     assert app["cache_control"] == {"type": "ephemeral"} and "APP CONTEXT HERE" in app["text"]
-    assert "cache_control" not in turn and "rename the zebra crossing widget" in turn["text"] and "3 rows" in turn["text"]
-    assert "rename the zebra crossing widget" not in rules["text"] + app["text"], "nothing that changes each step is cached"
+    assert "cache_control" not in head and "rename the zebra crossing widget" in head["text"]
+    # The turn's latest step is cached too: the next step reads it back (each
+    # step's text is fixed once written); what comes after it is not.
+    assert step["cache_control"] == {"type": "ephemeral"} and "3 rows" in step["text"]
+    assert "cache_control" not in tail and "Decide the next step" in tail["text"]
+    assert "rename the zebra crossing widget" not in rules["text"] + app["text"], "the ask is never in the shared parts"
 
 
 def test_two_steps_of_a_turn_share_their_cached_parts(monkeypatch):
