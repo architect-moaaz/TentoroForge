@@ -131,6 +131,8 @@ SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     # pages, which an `auth` page's code replaces — the template only fills
     # the hole, never overwrites the designed page (`app_sdk._AUTH_FLOORS`).
     "src/lib/account.ts", "src/lib/account-table.ts",
+    # Where a person lands once signed in; the SDK's sign-in imports it.
+    "src/lib/landing.ts",
     # The interface's languages (`languages.project_languages`).
     "src/lib/languages.ts",
     "src/app/login/page.tsx", "src/app/signup/page.tsx",

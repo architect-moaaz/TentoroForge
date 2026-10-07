@@ -165,3 +165,40 @@ def test_the_work_done_where_a_flow_ends_is_drawn_in_its_box():
     last = af.graph(doc)["flows"][0]["nodes"][-1]
     assert last["last"] and last["does"] == "Cancel the order" and last["process"] == "Add to Cart"
     assert "does" not in af.graph(_doc())["flows"][0]["nodes"][-1]
+
+
+# --- the build walks the flows -----------------------------------------------------------
+
+def test_a_move_nothing_on_the_screen_makes_is_found_from_the_presses():
+    from services.blueprint.app_check import flow_move_findings
+    doc = _doc()
+    home = {"page": "PAGE-001", "as": "Customer"}
+    went_elsewhere = {"controls": [{"label": "About", "outcome": "navigated", "detail": "/about (HTTP 200)"}]}
+    found = flow_move_findings(doc, home, went_elsewhere)
+    assert len(found) == 1 and "Open a featured product" in found[0] and "/search" in found[0]
+    went_there = {"controls": [{"label": "Oxford", "outcome": "navigated", "detail": "/search (HTTP 200)"}]}
+    assert flow_move_findings(doc, home, went_there) == []
+    assert flow_move_findings(doc, {"page": "PAGE-001", "as": "Admin"}, went_elsewhere) == [], \
+        "a flow is walked as the person who takes it"
+    assert flow_move_findings(doc, {"page": "PAGE-003", "as": "Customer"}, went_elsewhere) == [], \
+        "a move a process makes is the page writer's to follow (`_unfollowed_flows`), not a press"
+
+
+def test_the_administrator_signing_in_is_seen_to_arrive_where_they_start(monkeypatch, tmp_path):
+    from services.blueprint import app_check as ac
+    doc = _doc()
+    doc["pages"].append({"id": "PAGE-010", "name": "Sign in", "route": "/login", "pattern": "auth", "auth": "login"})
+    doc["pages"].append({"id": "PAGE-006", "name": "Admin Products", "route": "/admin/products",
+                         "access": "role_restricted", "users": ["ROLE-002"], "entry": True})
+    doc["navigation"] = {"initialRoute": {"ROLE-001": "/", "ROLE-002": "/admin/products"}}
+    monkeypatch.setattr("services.blueprint.account_model.admin_role", lambda d: "Admin")
+    asked = []
+
+    def run_shots(app, entries, out, **k):
+        asked.extend(entries)
+        return [{"id": e["id"], "landed": "/admin/products" if e["id"] == "arrive" else "/"} for e in entries]
+    monkeypatch.setattr("services.blueprint.page_review.run_shots", run_shots)
+    found = ac.arrival_findings(object(), doc, tmp_path)
+    assert [e["route"] for e in asked] == ["/login", "/login?callbackUrl=%2F"] and all(e["signIn"] for e in asked)
+    assert found == ["the Admin, signing in from a link that names the home page, lands on / — they start on "
+                     "/admin/products"]

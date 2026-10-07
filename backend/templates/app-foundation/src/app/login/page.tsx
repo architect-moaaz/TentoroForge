@@ -28,7 +28,7 @@ const FORM_SUB = "__AUTH_FORM_SUB__";
 function LoginForm() {
   // Honour ?callbackUrl=… and fall back to "/" — a REAL route. (The hook's own
   // default points at a route GROUP, which has no URL, so always pass one.)
-  const callbackUrl = useSearchParams().get("callbackUrl") || "/";
+  const callbackUrl = useSearchParams().get("callbackUrl") || "";
   // NOTE: the hook's contract is `isLoading` / `handleSubmit` — destructuring
   // `loading` / `onSubmit` yields undefined, the form loses its handler and
   // does a NATIVE GET submit (URL becomes "/login?" and nothing happens).

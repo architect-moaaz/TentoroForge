@@ -33,10 +33,17 @@ def test_the_app_is_told_each_roles_landing(tmp_path):
 
 def test_signing_in_goes_to_the_roles_page_and_old_apps_still_compile():
     auth = (SDK / "auth.tsx").read_text()
-    assert 'import * as accountModule from "@/lib/account";' in auth
-    assert "to = (role && LANDING_FOR[role]) || HOME;" in auth
-    # An explicit return address still wins.
-    assert 'let to = search?.get("callbackUrl") || "";' in auth
+    landing = (SDK.parent / "lib" / "landing.ts").read_text()
+    # One rule for every sign-in form (`lib/landing.ts`), since 2026-10-07.
+    assert 'import { afterSignIn, roleAfterSignIn } from "@/lib/landing";' in auth
+    assert 'afterSignIn(search?.get("callbackUrl"), await roleAfterSignIn(getSession))' in auth
+    # An app projected before the map existed still compiles: read off the module.
+    assert 'import * as accountModule from "@/lib/account";' in landing
+    assert "return (role && LANDING_FOR[role]) || HOME;" in landing
+    # The SDK's new import exists in every tree, old ones included.
+    from services.blueprint.assembly import SCAFFOLD_DEFAULTS
+    from services.smith.sync_app import SIGN_IN_FILES
+    assert "src/lib/landing.ts" in SCAFFOLD_DEFAULTS and ("src/lib/landing.ts", True) in SIGN_IN_FILES
 
 
 def test_the_nav_flow_map_comes_from_the_same_place():

@@ -7,14 +7,9 @@
 import * as React from "react";
 import { getSession, signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ACCOUNT, AFTER_SIGNUP, HOME, type AccountField } from "@/lib/account";
-import * as accountModule from "@/lib/account";
-
-/** Where each role lands once signed in. Read off the module rather than
- *  imported by name: an app projected before the map existed still compiles,
- *  and everyone there goes HOME as before. */
-const LANDING_FOR: Record<string, string> =
-  ((accountModule as unknown as { LANDING_FOR?: Record<string, string> }).LANDING_FOR) ?? {};
+import { ACCOUNT, AFTER_SIGNUP, type AccountField } from "@/lib/account";
+// Where a signed-in person lands: one rule for every sign-in form.
+import { afterSignIn, roleAfterSignIn } from "@/lib/landing";
 
 export type { AccountField };
 
@@ -45,11 +40,9 @@ export function useSignIn() {
     try {
       const r = await signIn("credentials", { email, password, redirect: false });
       if (!r || r.error) { setError("That email and password do not match an account."); return false; }
-      let to = search?.get("callbackUrl") || "";
-      if (!to) {
-        const role = String(((await getSession())?.user as { role?: unknown } | undefined)?.role ?? "");
-        to = (role && LANDING_FOR[role]) || HOME;
-      }
+      // The page they were sent away from, else their role's own page
+      // (`lib/landing.ts`): "/" in the address is not a destination.
+      const to = afterSignIn(search?.get("callbackUrl"), await roleAfterSignIn(getSession));
       router.push(to);
       router.refresh();
       return true;
