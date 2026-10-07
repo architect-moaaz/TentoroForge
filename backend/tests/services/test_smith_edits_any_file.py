@@ -259,3 +259,31 @@ def test_a_trial_that_names_nobody_is_the_person_the_screen_is_for():
     from services.blueprint.app_check import visits
     by_route = {v["route"]: v["as"] for v in visits(doc) if not v.get("section")}
     assert by_route["/cart"] == "Customer" and by_route["/admin/products"] == "Admin"
+
+
+def test_a_trial_fills_a_missing_record_with_a_real_one(monkeypatch):
+    """TCommerce's empty bag was never reproduced: Smith sent
+    `productVariant: "first"`, then `productVariantId: "first"`, and each run
+    was refused for the other (measured on a copy, 2026-10-07)."""
+    from services.smith.trials import fill_records
+    vid = "1d6f02a5-a1dd-4918-9682-e86440f2d964"
+
+    def query(app, sql):
+        if "information_schema" in sql:
+            return [["id"], ["sku"], ["created_at"]]
+        assert 'from "product_variants"' in sql and "order by created_at desc" in sql
+        return [[vid, "OCS-S-007"]]
+
+    monkeypatch.setattr("services.blueprint.page_review._query", query)
+    doc = {"data": {"entities": [{"id": "ENTITY-004", "name": "ProductVariant", "table": "product_variants",
+                                  "labelField": "sku"}]}}
+    flow = {"id": "FLOW-001", "inputs": [
+        {"entity": "ENTITY-004", "kind": "record", "name": "productVariant", "required": True},
+        {"kind": "field", "name": "quantity", "required": True, "type": "integer"},
+        {"kind": "field", "name": "productVariantId", "required": True, "type": "string"}]}
+    payload = {"productVariant": "first", "quantity": 1}
+    said = fill_records(None, doc, flow, payload)
+    assert payload == {"productVariant": vid, "quantity": 1, "productVariantId": vid}
+    assert said[0] == f"productVariant = ProductVariant OCS-S-007 ({vid})"
+    given = {"productVariant": vid, "quantity": 1, "productVariantId": vid}
+    assert fill_records(None, doc, flow, dict(given)) == []      # an id given is never replaced
