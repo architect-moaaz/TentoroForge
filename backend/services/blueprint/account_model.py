@@ -432,6 +432,18 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
             e["sourceHandle"] = "else"
         edges.append(e)
 
+    # A GUARD ALREADY THERE IS NOT ADDED TWICE. A workflow whose steps were
+    # written back from its projected file carries the guard's nodes; added
+    # again, every id was "used twice" and the whole workflow projection
+    # stopped — ToroCommerce's notification links were never rewritten
+    # (forge-v3, 2026-10-07).
+    have = {str(n.get("id")) for n in nodes if isinstance(n, dict)}
+    guards = [(q, r) for i, (q, r) in enumerate(guards)
+              if "prereq_" + re.sub(r"[^a-z0-9]+", "_", str(r.get("id") or f"rule_{i}").lower()) not in have]
+    if not guards:
+        for e in first:
+            edges.append(e)
+        return
     prev = "trigger"
     for i, (query, rule) in enumerate(guards):
         rid = re.sub(r"[^a-z0-9]+", "_", str(rule.get("id") or f"rule_{i}").lower())

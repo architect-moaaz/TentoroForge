@@ -1025,6 +1025,12 @@ export function _finalizeInsert(
 /** A lookup whose key is missing: it matches no row (see `_buildWhere`). */
 export const MATCHES_NOTHING = Symbol("matches-nothing");
 
+/** The comparisons a WHERE value may make, by the names authors write. */
+const _WHERE_OPS: Record<string, string> = {
+  eq: "eq", equals: "eq", ne: "!=", neq: "!=", not_equals: "!=", not: "!=",
+  gt: ">", gte: ">=", lt: "<", lte: "<=",
+};
+
 export function _buildWhere(
   table: any, where: unknown, ctx: WorkflowExecutionContext,
   opts: { strict?: boolean } = { strict: true },
@@ -1037,8 +1043,27 @@ export function _buildWhere(
   const dropped: string[] = [];
   const emptyRefs: string[] = [];
   const conds = entries
-    .map(([field, ref]) => {
+    .map(([field, given]) => {
       if (!table[field]) { dropped.push(field); return undefined; }
+      // A COMPARISON, NOT ONLY AN EQUALITY: `{ne: "{{customer.id}}"}`,
+      // `{gte: 10}`. "Is this email someone ELSE's?" needs `id != me`, and
+      // written that way it reached Postgres as the text "[object Object]"
+      // — ToroCommerce's Edit Profile then failed on every save (forge-v3,
+      // 2026-10-07). One operator per field; equality stays the plain form.
+      let op = "eq";
+      let ref: unknown = given;
+      if (given && typeof given === "object" && !Array.isArray(given)) {
+        const pairs = Object.entries(given as Record<string, unknown>);
+        const sym = pairs.length === 1 ? _WHERE_OPS[pairs[0][0]] : undefined;
+        if (!sym) {
+          throw new Error(
+            `WHERE ${field} is ${JSON.stringify(given)} — a value, or one comparison of ` +
+            `${Object.keys(_WHERE_OPS).join(", ")}`,
+          );
+        }
+        op = sym;
+        ref = pairs[0][1];
+      }
       // An unresolved variable reference must never become a literal in a
       // WHERE. `_resolveRef` returns the ref STRING when it names nothing,
       // so `where: {id: "applicationId"}` with no applicationId supplied
@@ -1069,7 +1094,11 @@ export function _buildWhere(
         emptyRefs.push(field);
         return undefined;
       }
-      return eq(table[field], _coerceValue(v, table[field]));
+      const value = _coerceValue(v, table[field]);
+      if (op === "eq") return eq(table[field], value);
+      return op === "!=" ? sql`${table[field]} <> ${value}` : op === ">" ? sql`${table[field]} > ${value}`
+        : op === ">=" ? sql`${table[field]} >= ${value}` : op === "<" ? sql`${table[field]} < ${value}`
+        : sql`${table[field]} <= ${value}`;
     })
     .filter(Boolean) as any[];
   // A LOOKUP WITH A MISSING KEY FINDS NOTHING. Dropping the empty condition

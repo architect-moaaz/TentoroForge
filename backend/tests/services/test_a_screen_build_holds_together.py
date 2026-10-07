@@ -122,3 +122,31 @@ def test_a_yes_or_no_is_seeded_as_one_whatever_its_examples_spell():
     seeded = [_seed_value(active, "Customer", r) for r in range(1, 5)]
     assert seeded == [True, True, True, False], "not the strings — every customer landed deactivated"
     assert all(isinstance(v, bool) for v in seeded)
+
+
+def test_a_required_yes_or_no_defaults_to_what_its_examples_mostly_say():
+    from services.blueprint.projection import drizzle_column
+    active, _ = drizzle_column({"name": "isActive", "type": "boolean", "required": True,
+                                "examples": ["true", "true", "false"]})
+    archived, _ = drizzle_column({"name": "isArchived", "type": "boolean", "required": True,
+                                  "examples": ["false", "false", "true"]})
+    assert ".default(true)" in active, "an account made without naming it is not created deactivated"
+    assert ".default(false)" in archived
+    assert ".default(" not in drizzle_column({"name": "x", "type": "boolean", "required": True})[0]
+
+
+def test_a_guard_the_workflow_already_carries_is_not_added_twice():
+    from services.blueprint.account_model import guard_workflow
+    doc = {"data": {"entities": [{"id": "ENTITY-001", "name": "Customer", "table": "customers"}]},
+           "businessRules": [{"id": "RULE-011", "name": "Active account", "kind": "prerequisite",
+                              "gates": ["FLOW-001"],
+                              "requires": {"entity": "ENTITY-001", "account": "id", "where": {"isActive": True}}}]}
+    wf = {"id": "FLOW-001"}
+    make = lambda i, t, cfg, label: {"id": i, "type": t, "data": cfg}
+    nodes = [{"id": "trigger"}, {"id": "prereq_rule_011"}, {"id": "prereq_rule_011_met"},
+             {"id": "prereq_rule_011_refused"}, {"id": "add"}]
+    edges = [{"id": "e1", "source": "trigger", "target": "prereq_rule_011"}]
+    guard_workflow(doc, wf, nodes, edges, make)
+    ids = [n["id"] for n in nodes]
+    assert len(ids) == len(set(ids)), "no id used twice"
+    assert edges == [{"id": "e1", "source": "trigger", "target": "prereq_rule_011"}]

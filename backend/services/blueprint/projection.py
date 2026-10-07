@@ -169,6 +169,16 @@ def drizzle_column(field: dict) -> tuple[str, str]:
     if field.get("defaultNow") or derived_now:
         line += ".defaultNow()"
     default = field.get("default")
+    if default is None and builder == "boolean" and field.get("required"):
+        # A REQUIRED YES OR NO THAT SAYS NO DEFAULT TAKES ITS EXAMPLES' OWN.
+        # Left to the seeder it was `false`, and ToroCommerce's demo customer —
+        # and every account made without naming it — was created deactivated:
+        # no one could shop (forge-v3, 2026-10-07). Most examples say what a
+        # new record is.
+        said = [str(x).strip().lower() for x in field.get("examples") or [] if str(x).strip()]
+        yes = sum(1 for x in said if x in ("true", "yes", "1", "on", "y"))
+        if said:
+            default = yes * 2 > len(said)
     if default is not None:
         # A platform column's default is part of its contract, not decoration.
         # Dropping `isActive.default(true)` made every signup write NULL, and
