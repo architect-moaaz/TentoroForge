@@ -287,3 +287,19 @@ def test_a_trial_fills_a_missing_record_with_a_real_one(monkeypatch):
     assert said[0] == f"productVariant = ProductVariant OCS-S-007 ({vid})"
     given = {"productVariant": vid, "quantity": 1, "productVariantId": vid}
     assert fill_records(None, doc, flow, dict(given)) == []      # an id given is never replaced
+
+
+def test_a_workflow_edit_the_app_cannot_be_written_from_is_refused(tmp_path, monkeypatch):
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Shop", domain="retail")
+    svc.doc["workflows"] = [{"id": "FLOW-001", "name": "Ping", "trigger": {"kind": "manual"}, "steps": [
+        {"key": "done", "name": "Done", "type": "end", "config": {}}]}]
+    svc.save()
+    monkeypatch.setattr("services.smith.sync_app.sync", lambda s, root: {"changed": [], "added": [], "removed": [],
+                                                                       "database": "in step"})
+    def refuse(doc, root):
+        raise ValueError("workflow Ping: node id 'trigger' is used twice")
+    monkeypatch.setattr("services.blueprint.projection.project_workflows", refuse)
+    out = file_edit.edit_definition(str(tmp_path), "workflows.FLOW-001", '"Done"', '"Finished"')
+    assert not out["applied"] and "used twice" in out["finding"]
+    assert BlueprintService.load(output_dir=tmp_path).doc["workflows"][0]["steps"][0]["name"] == "Done"
