@@ -29,20 +29,15 @@ import { cn } from "@/lib/utils";
 // The shape `app_flows.graph` returns
 // --------------------------------------------------------------------------
 
-type FlowNode = {
-  id: string; page: string; screen: string; route: string; part: string; placement: string; last: boolean;
-  does?: string; process?: string;
-};
-type FlowEdge = { from: string; to: string; does: string; process: string; then: "go" | "offer" | "menu" };
-type Flow = { id: string; name: string; role: string; goal: string; ends: string; nodes: FlowNode[]; edges: FlowEdge[] };
-type FlowsResponse = { flows: Flow[]; findings: string[] };
+import type { Flow, FlowNode, FlowsResponse } from "@/lib/appFlows";
+import { useAppFlowStore } from "@/stores/appFlow";
 
 // --------------------------------------------------------------------------
 // A colour per person
 // --------------------------------------------------------------------------
 
-type Hue = { stroke: string; soft: string; badge: string; ring: string; text: string; bar: string };
-const HUES: Hue[] = [
+export type Hue = { stroke: string; soft: string; badge: string; ring: string; text: string; bar: string };
+export const HUES: Hue[] = [
   { stroke: "#f97316", soft: "bg-orange-50 dark:bg-orange-950/40", badge: "bg-gradient-to-br from-orange-400 to-rose-500",
     ring: "ring-orange-400/70", text: "text-orange-600 dark:text-orange-400", bar: "from-orange-400 to-rose-500" },
   { stroke: "#6366f1", soft: "bg-indigo-50 dark:bg-indigo-950/40", badge: "bg-gradient-to-br from-indigo-400 to-violet-600",
@@ -210,24 +205,27 @@ async function layout(nodes: Node<PlaceData>[], edges: Edge[]): Promise<Node<Pla
 }
 
 // --------------------------------------------------------------------------
-// The panel
+// The drawing
 // --------------------------------------------------------------------------
 
-export function AppFlowPanel({ projectId }: { projectId: string }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["project", projectId, "flows"],
-    queryFn: () => api.get<FlowsResponse>(`/api/projects/${projectId}/flows`),
-    retry: false,
-  });
-  const [chosen, setChosen] = useState<string | null>(null);
+/** The people a set of flows is for, in order: each person's colour is their place here. */
+export function rolesOf(flows: Flow[]): string[] {
+  return [...new Set(flows.map((f) => f.role || "Everyone"))];
+}
+
+export function hueFor(roles: string[], role: string): Hue {
+  return HUES[Math.max(0, roles.indexOf(role || "Everyone")) % HUES.length];
+}
+
+/**
+ * The drawing itself: every flow on one map, or one flow alone when `chosen`
+ * names it — shared by the App Flow tab and Smith's side panel. `compact`
+ * leaves out the zoom controls, for a panel a third of the screen wide.
+ */
+export function FlowCanvas({ flows: allFlows, chosen, compact = false }:
+  { flows: Flow[]; chosen: string | null; compact?: boolean }) {
+  const roles = useMemo(() => rolesOf(allFlows), [allFlows]);
   const [placed, setPlaced] = useState<Node<PlaceData>[]>([]);
-  const [showFindings, setShowFindings] = useState(true);
-
-  const allFlows = useMemo(() => data?.flows ?? [], [data]);
-  const roles = useMemo(() => [...new Set(allFlows.map((f) => f.role || "Everyone"))], [allFlows]);
-  const hueOf = (role: string) => HUES[Math.max(0, roles.indexOf(role || "Everyone")) % HUES.length];
-  const current = allFlows.find((f) => f.id === chosen) ?? null;
-
   const { rawNodes, rawEdges } = useMemo(() => {
     const flows = allFlows.filter((f) => chosen === null || f.id === chosen);
     const places = new Map<string, Node<PlaceData>>();
@@ -270,6 +268,48 @@ export function AppFlowPanel({ projectId }: { projectId: string }) {
     return () => { live = false; };
   }, [rawNodes, rawEdges]);
 
+  return (
+    <>
+      <style>{`@keyframes appflow-dash { to { stroke-dashoffset: -28; } }`}</style>
+      {placed.length > 0 && (
+        <ReactFlow key={`${chosen ?? "all"}-${placed.length}`} nodes={placed} edges={rawEdges}
+          nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+          fitView fitViewOptions={{ padding: compact ? 0.1 : 0.18, duration: 400 }} minZoom={0.1} maxZoom={1.6}
+          nodesDraggable={false} nodesConnectable={false} proOptions={{ hideAttribution: true }}
+          zoomOnScroll={!compact} panOnScroll={compact}>
+          <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="#cbd5e1" />
+          {!compact && (
+            <Controls showInteractive={false}
+              className="!overflow-hidden !rounded-xl !border !border-slate-200 !shadow-sm dark:!border-slate-700" />
+          )}
+        </ReactFlow>
+      )}
+    </>
+  );
+}
+
+// --------------------------------------------------------------------------
+// The panel
+// --------------------------------------------------------------------------
+
+export function AppFlowPanel({ projectId }: { projectId: string }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["project", projectId, "flows"],
+    queryFn: () => api.get<FlowsResponse>(`/api/projects/${projectId}/flows`),
+    retry: false,
+  });
+  const focus = useAppFlowStore((st) => st.focus);
+  const requested = useAppFlowStore((st) => st.requested);
+  const [chosen, setChosen] = useState<string | null>(focus);
+  // "Show me this path" from Smith's side panel.
+  useEffect(() => { if (requested) setChosen(focus); }, [requested, focus]);
+  const [showFindings, setShowFindings] = useState(true);
+
+  const allFlows = useMemo(() => data?.flows ?? [], [data]);
+  const roles = useMemo(() => rolesOf(allFlows), [allFlows]);
+  const hueOf = (role: string) => hueFor(roles, role);
+  const current = allFlows.find((f) => f.id === chosen) ?? null;
+
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -299,7 +339,6 @@ export function AppFlowPanel({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex h-full min-h-0 bg-slate-50/60 dark:bg-slate-950">
-      <style>{`@keyframes appflow-dash { to { stroke-dashoffset: -28; } }`}</style>
 
       {/* The flows, by person */}
       <aside className="hidden w-72 shrink-0 flex-col border-r border-slate-200/80 bg-white/80 backdrop-blur md:flex dark:border-slate-800 dark:bg-slate-900/70">
@@ -435,16 +474,7 @@ export function AppFlowPanel({ projectId }: { projectId: string }) {
         )}
 
         <div className="relative min-h-0 flex-1 bg-[radial-gradient(ellipse_at_top,rgba(251,146,60,0.09),transparent_60%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(251,146,60,0.06),transparent_60%)]">
-          {placed.length > 0 && (
-            <ReactFlow key={`${chosen ?? "all"}-${placed.length}`} nodes={placed} edges={rawEdges}
-              nodeTypes={nodeTypes} edgeTypes={edgeTypes}
-              fitView fitViewOptions={{ padding: 0.18, duration: 400 }} minZoom={0.15} maxZoom={1.6}
-              nodesDraggable={false} nodesConnectable={false} proOptions={{ hideAttribution: true }}>
-              <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="#cbd5e1" />
-              <Controls showInteractive={false}
-                className="!overflow-hidden !rounded-xl !border !border-slate-200 !shadow-sm dark:!border-slate-700" />
-            </ReactFlow>
-          )}
+          <FlowCanvas flows={allFlows} chosen={chosen} />
         </div>
 
         {!!data?.findings?.length && (

@@ -58,6 +58,7 @@ import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useChatStore } from "@/stores/chat";
+import { useAppFlowStore } from "@/stores/appFlow";
 import { VirtualOffice } from "@/components/virtual-office";
 import type { Project, ChatMessage } from "@/types/project";
 import type { CommandItem } from "@/types/portal";
@@ -87,6 +88,9 @@ function ProjectWorkspace({
   projectId: string;
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("chat");
+  // "Show me this path" from Smith's side panel opens the App Flow tab on it.
+  const flowRequested = useAppFlowStore((st) => st.requested);
+  useEffect(() => { if (flowRequested) setActiveTab("app-flow"); }, [flowRequested]);
   const [showExport, setShowExport] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
