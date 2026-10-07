@@ -54,6 +54,18 @@ NOTHING_TRIED = ("Nothing has changed this turn and nothing was tried. If they s
                  "something does not work, try it (`try_workflow`, `try_request`, "
                  "`open_page`) and see what it does before deciding nothing needs "
                  "doing. If nothing does need doing, end with `answer` and say why.")
+#: What an `answer` hears, once, on a turn that has changed nothing. ToroCommerce
+#: (forge-v3, 2026-10-07): asked why the admin could not add a variant, Smith
+#: answered "I'll fix the page so the form sends the full product record — let
+#: me rewrite that part of the view now", and that answer ended the turn: the
+#: person waited for a change no step made. `answer` is how a turn speaks, not
+#: how it acts; one look at what it is about to say decides which.
+ANSWER_CHANGES_NOTHING = (
+    "Nothing has been changed this turn, and `answer` changes nothing — it ends the turn. "
+    "If what you are about to say is that something should be changed, make that change now "
+    "and try it. If you have not seen the fault happen through the screen they used, open "
+    "that screen (`open_page`) and use it first. If this is an answer — how to do something, "
+    "why it already works, why it cannot be changed — send the same `answer` again.")
 #: The start of the message when a trial that failed has not been tried
 #: again since the change meant to fix it.
 UNPROVEN = "Not shown to work yet:"
@@ -311,6 +323,11 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 "I could not reach my reasoning service just now, so I stopped here"
                 + (" — what is above is done and kept." if landed else " and nothing was changed.")
                 + " Please try again in a few minutes.")))
+        if tool == "answer" and not landed and not any(
+                o.tool == "answer" and o.said == ANSWER_CHANGES_NOTHING for o in observations):
+            observations.append(Observation(tool=tool, args=args, status="error",
+                                            said=ANSWER_CHANGES_NOTHING))
+            continue
         if tool == "done":
             first = _before_done(observations, landed)
             if first:

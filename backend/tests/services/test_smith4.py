@@ -133,9 +133,26 @@ def test_a_question_with_nothing_read_is_sent_to_look_first_once(tmp_path):
 
 def test_an_answer_is_for_a_turn_that_changed_nothing(tmp_path):
     _repo(tmp_path)
-    chooser = _Chooser({"tool": "answer", "args": {"text": "It stores them in a database."}, "why": ""})
+    said = {"tool": "answer", "args": {"text": "It stores them in a database."}, "why": ""}
+    chooser = _Chooser(said, said)
     result = _turn(tmp_path, chooser, "does it store data?")
     assert result.status == "no_op" and result.said == "It stores them in a database."
+    # Asked once whether the answer is one, or a change it meant to make.
+    from services.smith4.turn import ANSWER_CHANGES_NOTHING
+    assert chooser.seen[1][-1].said == ANSWER_CHANGES_NOTHING
+
+
+def test_an_answer_that_promises_a_change_is_sent_to_make_it(tmp_path):
+    """ToroCommerce (forge-v3, 2026-10-07): "let me rewrite that part of the
+    view now" was the whole turn, and nothing was rewritten."""
+    _repo(tmp_path)
+    writes = _Writes(tmp_path)
+    chooser = _Chooser({"tool": "answer", "args": {"text": "I'll fix the page — let me rewrite it now."}, "why": ""},
+                       _rename("src/a.json", "A"), {"tool": "done", "args": {}, "why": ""})
+    result = _turn(tmp_path, chooser, "rename A", move=writes)
+    from services.smith4.turn import ANSWER_CHANGES_NOTHING
+    assert chooser.seen[1][-1].said == ANSWER_CHANGES_NOTHING
+    assert result.status == "resolved" and "rewrite it now" not in result.said
 
 
 def test_an_answer_never_adds_prose_to_a_change(tmp_path):
@@ -314,6 +331,7 @@ def test_a_question_with_no_words_is_an_error_not_a_silent_end(tmp_path):
 def test_an_answer_with_no_words_is_an_error_too(tmp_path):
     _repo(tmp_path)
     chooser = _Chooser({"tool": "answer", "args": {}, "why": ""},
+                       {"tool": "answer", "args": {"text": "It does."}, "why": ""},
                        {"tool": "answer", "args": {"text": "It does."}, "why": ""})
     result = _turn(tmp_path, chooser, "does it?")
     assert chooser.seen[1][-1].status == "error" and result.said == "It does."
