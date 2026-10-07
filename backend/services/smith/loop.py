@@ -334,10 +334,29 @@ Decide the next step now: return ONLY the JSON object the rules above describe.
 _PROMPT = _RULES + _APP + _TURN
 
 
+#: The window moves in jumps of this many steps, not one at a time: its start
+#: stays put for several steps, so what a step shows of the steps before it is
+#: the same text the last step cached (`next_step`).
+WINDOW_JUMP = 6
+
+
+def _shown(observations: list[Observation]) -> list[Observation]:
+    """The steps a prompt shows: at least the last WINDOW, from a start that
+    moves in jumps of WINDOW_JUMP. Sliding by one, the shown text changed at
+    its start every step past the twelfth, and nothing of it could be read
+    from the cache (measured on UAT copies, 2026-10-07: 2.5M input tokens over
+    127 steps, most of them the turn's own steps re-sent in full)."""
+    n = len(observations)
+    if n <= WINDOW:
+        return list(observations)
+    start = ((n - WINDOW) // WINDOW_JUMP) * WINDOW_JUMP
+    return list(observations[start:])
+
+
 def _render(observations: list[Observation]) -> str:
     if not observations:
         return "(nothing yet — this is the first step)"
-    return "\n".join(o.line() for o in observations[-WINDOW:])
+    return "\n".join(o.line() for o in _shown(observations))
 
 
 def next_step(ask: str, ctx: str, observations: list[Observation],
@@ -367,6 +386,11 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
              _TURN.format(ask=(ask or "").strip() + shown, history=_render_history(history),
                           observations=_render(observations))]
     prompt = "".join(parts)
+    # THE TURN'S OWN STEPS, EACH A BLOCK, THE LAST ONE CACHED. Step N writes
+    # the cache up to its last step; step N+1 reads all of it back and pays in
+    # full only for the step that is new. The text is the same as `prompt`.
+    head, marker, rest = parts[2].partition(_render(observations))
+    lines = [o.line() for o in _shown(observations)] if observations else []
     if provider is not None:
         call = provider
     else:
@@ -375,8 +399,15 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
             # breakpoint; anything appended to the prompt (a retry's note)
             # rides on the last, uncached part.
             blocks = [{"type": "text", "text": parts[0], "cache_control": {"type": "ephemeral"}},
-                      {"type": "text", "text": parts[1], "cache_control": {"type": "ephemeral"}},
-                      {"type": "text", "text": parts[2] + text[len(prompt):]}]
+                      {"type": "text", "text": parts[1], "cache_control": {"type": "ephemeral"}}]
+            if lines and marker:
+                blocks.append({"type": "text", "text": head})
+                blocks += [{"type": "text", "text": line + ("\n" if i < len(lines) - 1 else "")}
+                           for i, line in enumerate(lines)]
+                blocks[-1]["cache_control"] = {"type": "ephemeral"}
+                blocks.append({"type": "text", "text": rest + text[len(prompt):]})
+            else:
+                blocks.append({"type": "text", "text": parts[2] + text[len(prompt):]})
             return _default_provider(blocks, reasoning, images=images)
     try:
         raw = call(prompt)

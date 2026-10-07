@@ -351,3 +351,40 @@ def test_a_different_control_failing_after_a_fix_is_not_the_same_failure():
     still = Observation(tool="open_page", args={"route": "/cart", "as": "Customer"}, status="read",
                         said=before.said)
     assert _still_failing([before, change, still]) and "same way" in _failing_note([before, change, still])
+
+
+def test_a_turns_own_steps_are_read_from_the_cache_by_the_next_step(monkeypatch):
+    """On UAT copies Smith's 127 steps sent 2.5M tokens uncached, nearly all of
+    it the turn's own steps re-sent in full (2026-10-07). Each step is a block
+    and the latest carries the cache mark; the text is unchanged."""
+    from services.smith import loop
+    from services.smith.loop import Observation, _shown
+    sent: list[list[dict]] = []
+    monkeypatch.setattr("services.smith.understand_ask._default_provider",
+                        lambda blocks, reasoning=None, images=(): sent.append(blocks) or
+                        '{"tool": "done", "args": {}, "why": ""}')
+    obs = [Observation(tool="read_file", args={"path": f"f{i}"}, status="read", said=f"line {i}") for i in range(3)]
+    loop.next_step("fix it", "the app", obs)
+    blocks = sent[-1]
+    marked = [i for i, b in enumerate(blocks) if b.get("cache_control")]
+    assert marked == [0, 1, len(blocks) - 2], marked            # rules, app, the latest step
+    assert "f2" in blocks[-2]["text"] and "Decide the next step" in blocks[-1]["text"]
+    # Twenty steps in, the shown window starts at a jump, not one step later each time.
+    many = [Observation(tool="grep", args={"pattern": str(i)}, status="read", said="x") for i in range(20)]
+    assert _shown(many[:19])[0] is _shown(many[:20])[0]
+
+
+def test_the_blocks_say_exactly_what_the_string_prompt_says(monkeypatch):
+    from services.smith import loop
+    from services.smith.loop import Observation
+    sent: list = []
+    monkeypatch.setattr("services.smith.understand_ask._default_provider",
+                        lambda blocks, reasoning=None, images=(): sent.append(blocks) or
+                        '{"tool": "done", "args": {}, "why": ""}')
+    said: list[str] = []
+    obs = [Observation(tool="read_file", args={"path": "a"}, status="read", said="one"),
+           Observation(tool="grep", args={"pattern": "b"}, status="read", said="two")]
+    loop.next_step("fix it", "the app", obs, provider=lambda text: said.append(text) or
+                   '{"tool": "done", "args": {}, "why": ""}')
+    loop.next_step("fix it", "the app", obs)
+    assert "".join(b["text"] for b in sent[-1]) == said[-1]
