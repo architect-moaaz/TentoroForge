@@ -402,7 +402,12 @@ def next_step(ask: str, ctx: str, observations: list[Observation],
                       {"type": "text", "text": parts[1], "cache_control": {"type": "ephemeral"}}]
             if lines and marker:
                 blocks.append({"type": "text", "text": head})
-                blocks += [{"type": "text", "text": line + ("\n" if i < len(lines) - 1 else "")}
+                # The separator LEADS each step after the first, so a step's
+                # block never changes once written: trailing it, the step that
+                # was last gained a "\n" when the next arrived, no block
+                # matched its cached copy, and every step re-wrote the turn at
+                # 1.25x instead of reading it at 0.1x (measured, 2026-10-08).
+                blocks += [{"type": "text", "text": ("\n" if i else "") + line}
                            for i, line in enumerate(lines)]
                 blocks[-1]["cache_control"] = {"type": "ephemeral"}
                 blocks.append({"type": "text", "text": rest + text[len(prompt):]})

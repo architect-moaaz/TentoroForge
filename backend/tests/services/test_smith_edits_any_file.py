@@ -388,3 +388,18 @@ def test_the_blocks_say_exactly_what_the_string_prompt_says(monkeypatch):
                    '{"tool": "done", "args": {}, "why": ""}')
     loop.next_step("fix it", "the app", obs)
     assert "".join(b["text"] for b in sent[-1]) == said[-1]
+
+
+def test_a_steps_block_is_the_same_text_when_a_newer_step_follows(monkeypatch):
+    """A block that changes after it is cached is never read back."""
+    from services.smith import loop
+    from services.smith.loop import Observation
+    sent: list = []
+    monkeypatch.setattr("services.smith.understand_ask._default_provider",
+                        lambda blocks, reasoning=None, images=(): sent.append(blocks) or
+                        '{"tool": "done", "args": {}, "why": ""}')
+    obs = [Observation(tool="read_file", args={"path": f"f{i}"}, status="read", said=f"line {i}") for i in range(4)]
+    loop.next_step("fix it", "the app", obs[:3])
+    loop.next_step("fix it", "the app", obs)
+    first, second = sent
+    assert [b["text"] for b in first[:-1]] == [b["text"] for b in second[:len(first) - 1]]
