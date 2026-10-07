@@ -540,6 +540,13 @@
                     "type": "string"
                   },
                   "default": []
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/properties/roles/items/properties/id"
+                  },
+                  "default": []
                 }
               },
               "required": [

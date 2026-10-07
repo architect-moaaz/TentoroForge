@@ -1095,6 +1095,10 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     routes = {str(p.get("id")): str(p.get("route") or "")
               for p in (doc.get("pages") or []) if p.get("id")}
     page_roles, page_audience = menu_scopes(doc, nav)
+    from services.blueprint.screen_parts import section_audience
+    section_of = {(str(p.get("id")), str(sec.get("key"))): sec
+                  for p in (doc.get("pages") or []) if isinstance(p, dict)
+                  for sec in p.get("sections") or [] if isinstance(sec, dict) and sec.get("key")}
 
     # A DYNAMIC ROUTE IS NOT A RAIL DESTINATION. `/rentals/[id]/return` is
     # reached through a row or an action that fills a concrete id, never from the
@@ -1129,6 +1133,11 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             out["roles"] = page_roles[page_id]
         if page_audience.get(page_id):
             out["audience"] = page_audience[page_id]
+        # A TAB ONLY SOME ROLES SEE is offered only to them: the rail would
+        # otherwise open the screen on a tab its viewer is not shown.
+        sec = section_of.get((page_id, str(node.get("section") or "").strip()))
+        if sec is not None and section_audience(doc, sec):
+            out["audience"] = section_audience(doc, sec)
         return out
 
     groups: list[dict[str, Any]] = []

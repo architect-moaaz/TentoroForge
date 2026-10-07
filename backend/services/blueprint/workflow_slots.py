@@ -101,6 +101,8 @@ def section_slots(doc: dict) -> list[dict]:
     were the only screens this agent was asked about: nothing accepted an
     order, marked it ready or delivered it. A section names its actions, so the
     question carries them."""
+    from services.blueprint.screen_parts import section_audience
+
     workflows = list(doc.get("workflows") or [])
     ents = {str(e.get("id")): e.get("name") for e in (doc.get("data") or {}).get("entities") or []
             if isinstance(e, dict)}
@@ -120,7 +122,10 @@ def section_slots(doc: dict) -> list[dict]:
                 if _named(action, pid, route, workflows):
                     continue
                 out.append({"page": pid, "route": route, "section": sec.get("key"),
-                            "entity": entity, "action": action})
+                            "entity": entity, "action": action,
+                            # Who does it, when the section is only some roles'
+                            # — the lead approves the refund, not the agent.
+                            **({"by": section_audience(doc, sec)} if section_audience(doc, sec) else {})})
     return out
 
 
@@ -162,7 +167,9 @@ def workflow_slot_prompt(doc: dict) -> str:
             "For each, author the workflow that does it — named as the action is, "
             "and with that screen's page id in `launchedFrom` — or leave it "
             "deliberately. They are the application's work: an order nobody can "
-            "accept is not an order system.\n\n```json\n"
+            "accept is not an order system. An action with `by` is done only by "
+            "people of those roles, on a section only they see: the workflow is "
+            "theirs to run, not everyone's who opens the screen.\n\n```json\n"
             + __import__("json").dumps(actions, indent=1) + "\n```")
     if not slots:
         return said.lstrip()

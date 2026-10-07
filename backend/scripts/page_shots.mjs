@@ -3,7 +3,7 @@
 //
 //   node page_shots.mjs <config.json>
 //   config = { baseUrl, email, password, outDir, width?, height?, probe?,
-//              states?, pages: [{ id, route, entity?, cookies?, anonymous? }] }
+//              states?, pages: [{ id, route, entity?, cookies?, anonymous?, group? }] }
 //
 // `states: false` skips the empty and missing-record openings (Smith's
 // `open_page` asks how ONE page behaves, not how it degrades). A page with
@@ -17,9 +17,14 @@
 //   * with `probe`, every control clicked from a fresh load: what happened.
 //
 // A route with a `[param]` is opened on a real record: the first row of the
-// page's entity, read through the app's own data API as the signed-in user.
+// page's entity, read through the app's own data API as the signed-in user —
+// in the path (`/orders/[id]`) or in the query, where a screen opens a record
+// in its panel (`/support?ticket=[ticket]`). Pages of one `group` are one
+// screen opened at different places (a tab, a panel): a control already
+// pressed in the group is not pressed again.
 // Prints one JSON line: [{ id, route, url, landed, text, status, file, errors[], ms,
-//                          states: { empty?, missing? }, controls? }].
+//                          tabs[], states: { empty?, missing? }, controls? }];
+// a control that opened a dialog carries what it showed (`opened`).
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
@@ -90,10 +95,14 @@ async function firstRow(context, entity) {
 // carries as a field (slug, code) takes that value; any other takes the id.
 function fillRoute(url, row) {
   const camel = (s) => s.replace(/[-_]([a-z])/g, (_, c) => c.toUpperCase());
-  return url.replace(/\[([^\]]+)\]/g, (_, name) => {
+  const [pathPart, query] = url.split("?");
+  const filled = pathPart.replace(/\[([^\]]+)\]/g, (_, name) => {
     const v = name === "id" ? row.id : (row[name] ?? row[camel(name)] ?? row.id);
     return encodeURIComponent(String(v));
   });
+  // A panel's link names the record by its id, whatever the parameter is called.
+  return query === undefined ? filled
+    : `${filled}?${query.replace(/\[([^\]]+)\]/g, () => encodeURIComponent(String(row.id)))}`;
 }
 
 // The shell scrolls its main column, so a full-page screenshot would stop at
@@ -158,7 +167,11 @@ async function open(context, url, { shot } = {}) {
   // wrong screen, or a list that is empty, is only visible here.
   const landed = new URL(page.url()).pathname;
   const text = (await page.locator("body").innerText({ timeout: 5000 }).catch(() => "")).slice(0, 6000);
-  return { page, status, errors, state, landed, text };
+  // The screen's tabs, by what they say — who is shown which is a fact here.
+  const tabs = await page.evaluate(() => [...(document.querySelector("main") || document.body)
+    .querySelectorAll("[role='tab']")].map((t) => (t.textContent || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)).catch(() => []);
+  return { page, status, errors, state, landed, text, tabs };
 }
 
 // ---------------------------------------------------------------------------
@@ -281,7 +294,20 @@ async function press(context, url, control, firstIndex = null) {
       outcome = "changed";
       detail = dialog ? `asked "${dialog}"` : "the page changed";
     }
-    return { label: control.label, kind: control.kind, outcome, detail };
+    // WHAT A DIALOG SHOWS. A dialog that opened counted as working, and what
+    // was in it — an add form reading its choices, a record's panel — was
+    // never looked at. Read once it has settled; a crash inside it after it
+    // opened is still this press's error.
+    let opened = null;
+    if (outcome === "changed" && after.dialogs > before.dialogs) {
+      await page.waitForTimeout(800);
+      opened = await page.evaluate(() => {
+        const all = document.querySelectorAll("[role='dialog'], [role='alertdialog'], dialog[open]");
+        return all.length ? (all[all.length - 1].innerText || "").slice(0, 3000) : null;
+      }).catch(() => null);
+      if (errors.length) { outcome = "error"; detail = `inside the dialog it opened: ${errors[0]}`; }
+    }
+    return { label: control.label, kind: control.kind, outcome, detail, ...(opened !== null ? { opened } : {}) };
   } catch (e) {
     return { label: control.label, kind: control.kind, outcome: "error",
              detail: `could not be pressed: ${e.message.split("\n")[0].slice(0, 200)}` };
@@ -293,6 +319,7 @@ async function press(context, url, control, firstIndex = null) {
 // ---------------------------------------------------------------------------
 
 const out = [];
+const pressedIn = new Set();          // `${group}|${control}` — a screen's control is pressed once
 for (const p of cfg.pages) {
   if (p.signIn) {
     // SIGNING IN, THROUGH THE FORM, as a person does: where it lands is the
@@ -344,7 +371,7 @@ for (const p of cfg.pages) {
   const file = path.join(cfg.outDir, `${p.id}.png`);
   const main = await open(who.ctx, url, { shot: file });
   const result = { id: p.id, route: p.route, url, as: p.as ?? null, status: main.status, state: main.state,
-                   landed: main.landed, text: main.text,
+                   landed: main.landed, text: main.text, tabs: main.tabs,
                    file, errors: [...new Set(main.errors)].slice(0, 12), states: {} };
   let found = [];
   if (cfg.probe) found = await controls(main.page).catch(() => []);
@@ -366,7 +393,14 @@ for (const p of cfg.pages) {
 
   if (cfg.probe) {
     result.controls = [];
-    for (const c of found.slice(0, MAX_CONTROLS)) {
+    const fresh = found.filter((c) => {
+      if (!p.group) return true;
+      const key = `${p.group}|${c.kind}|${c.label}|${(c.href || "").replace(/[0-9a-f-]{8,}/gi, ":id")}`;
+      if (pressedIn.has(key)) return false;
+      pressedIn.add(key);
+      return true;
+    });
+    for (const c of fresh.slice(0, MAX_CONTROLS)) {
       // A DEAD CONTROL IS DEAD TWICE. The first press of a link on a cold dev
       // server compiles the page it opens, and F&B's working Edit link read
       // as "does nothing when pressed" (2026-10-01) — a false finding that

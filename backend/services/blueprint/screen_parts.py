@@ -105,3 +105,13 @@ def stub_part(component: str) -> str:
     """A part not written yet, so the frame compiles before its parts exist."""
     return ('"use client";\n\n'
             f"export default function {component}(_props: {{ data: unknown }}) {{\n  return null;\n}}\n")
+
+
+def section_audience(doc: dict, section: dict) -> list[str]:
+    """The role names a section is shown to (`PageSection.roles`), or `[]` for
+    everyone its screen is for — what the app compares the signed-in role
+    with. An id that names no role is no one's, so it narrows nothing: a
+    section whose every role is unknown is shown rather than hidden from all."""
+    names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or []
+             if isinstance(r, dict) and r.get("id") and r.get("status") != "DEPRECATED"}
+    return sorted({names[str(r)] for r in section.get("roles") or [] if names.get(str(r))})

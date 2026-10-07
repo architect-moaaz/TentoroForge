@@ -891,10 +891,9 @@ def _page_brief(doc: dict, page: dict) -> dict:
                       "from a control. Each section's `actions` are done by the workflows launched "
                       "here; a section that `addsHere` carries the form that adds its records; a section "
                       "marked `live` changes while someone watches, so the view calls `useLive()`."),
-            "sections": [{**{k: v for k, v in sec.items() if k != "entity" and v not in (None, [], "")},
-                          **({"entity": (ents.get(str(sec.get("entity"))) or {}).get("name")
-                              or sec.get("entity")} if sec.get("entity") else {})}
-                         for sec in page.get("sections") or [] if isinstance(sec, dict)]}}
+            "sections": brief_sections(doc, [sec for sec in page.get("sections") or [] if isinstance(sec, dict)]),
+            **({"roles": SECTION_ROLES_RULE} if any(isinstance(sec, dict) and sec.get("roles")
+                                                    for sec in page.get("sections") or []) else {})}}
            if page.get("sections") else {}),
         "sdkKey": pkeys.get(str(page.get("id"))),
         "primaryEntity": (ents.get(str(data.get("primaryEntity"))) or {}).get("name"),
@@ -1617,6 +1616,32 @@ def _part_names(parts: list[dict]) -> str:
                      for p in parts)
 
 
+#: How a page's code honours `PageSection.roles` — the brief carries them as
+#: role names, the names the signed-in user's `role` holds.
+SECTION_ROLES_RULE = (
+    "A section that names `roles` is only for people of those roles: load.ts returns the viewer's "
+    "role (`role: ctx.user?.role ?? null`) and does not read that section's records for anyone "
+    "else; the view draws the section — and its tab, its control, its menu of actions — only when "
+    "the role is one of them. Everyone else sees the screen without it, as if it were never there."
+)
+
+
+def brief_sections(doc: dict, sections: list[dict]) -> list[dict]:
+    """The sections as the page writer reads them: entities and roles by name."""
+    from services.blueprint.screen_parts import section_audience
+
+    ents = {str(e.get("id")): e.get("name") for e in (doc.get("data") or {}).get("entities") or []}
+    out = []
+    for sec in sections:
+        row = {k: v for k, v in sec.items() if k not in ("entity", "roles") and v not in (None, [], "")}
+        if sec.get("entity"):
+            row["entity"] = ents.get(str(sec.get("entity"))) or sec.get("entity")
+        if section_audience(doc, sec):
+            row["roles"] = section_audience(doc, sec)
+        out.append(row)
+    return out
+
+
 def frame_prompt(doc: dict, page: dict, parts: list[dict], *, plan: dict | None = None,
                  feedback: str = "", brief: str = "", current: dict | None = None) -> str:
     """Ask for the screen's data and its frame — not its parts."""
@@ -1633,7 +1658,10 @@ def frame_prompt(doc: dict, page: dict, parts: list[dict], *, plan: dict | None 
            "included: each part reads its data from what load returns. view.tsx — the frame only: the "
            "screen's header and its own actions, the tabs (`?tab=<part key>` chooses the open one; the "
            "first when none), and each part where it goes as `<CouponsPart data={props} />` — `data` is "
-           "exactly what load returns. Do NOT write the parts' contents; they are written next.",
+           "exactly what load returns. Do NOT write the parts' contents; they are written next."
+           + ("\n\nA part whose section names `roles` is the frame's to show or not: its tab and the part "
+              "itself only for those roles. " + SECTION_ROLES_RULE
+              if any(sec.get("roles") for p in parts for sec in p["sections"]) else ""),
            ("\nThe frame itself runs: " + ", ".join(mine) + "." if mine else
             "\nEvery workflow launched here is run by a part; the frame runs none.")]
     if plan:
@@ -1654,10 +1682,7 @@ def part_prompt(doc: dict, page: dict, part: dict, load: str, *, feedback: str =
     from services.blueprint.app_sdk import workflow_keys
 
     keys = workflow_keys(doc)
-    ents = {str(e.get("id")): e.get("name") for e in (doc.get("data") or {}).get("entities") or []}
-    sections = [{**{k: v for k, v in sec.items() if k != "entity" and v not in (None, [], "")},
-                 **({"entity": ents.get(str(sec.get("entity"))) or sec.get("entity")} if sec.get("entity") else {})}
-                for sec in part["sections"]]
+    sections = brief_sections(doc, part["sections"])
     runs = [f"workflows.{keys.get(w)}" for w in part["workflows"] if keys.get(w)]
     screen = {k: v for k, v in _page_brief(doc, page).items() if k in ("page", "primaryEntity", "roles", "content")}
     out = [f"Write ONE PART of a screen: parts/{part['key']}.tsx — {part['label']}.",
@@ -1674,6 +1699,8 @@ def part_prompt(doc: dict, page: dict, part: dict, load: str, *, feedback: str =
            "record opened in a panel is read from and written to the address (`?<param>=<id>` with "
            "useSearchParams and useRouter), so a link lands on it. Imports as for a page; the only "
            "sibling file you import is ../load, for its type."]
+    if any(sec.get("roles") for sec in sections):
+        out.append("\n" + SECTION_ROLES_RULE)
     if brief:
         out.append(f"\nWhat is wanted of the screen now:\n{brief}")
     if current:

@@ -393,6 +393,18 @@ export const PageSection = z.object({
    * that create a record.
    */
   actions: z.array(z.string()).default([]),
+  /**
+   * Shown only to these roles; empty means everyone the screen is for.
+   *
+   * ONE SCREEN, SEVERAL PEOPLE. A screen is a job, and some jobs are shared
+   * with a part only one of the people needs: the support screen an agent
+   * and a lead both work in, where only the lead approves refunds. Without
+   * this the part is either shown to everyone or given a screen of its own,
+   * which is the page-per-record plan this field set out to replace. Hiding
+   * a section is what a person sees, not what they may read — the entity's
+   * own rules still decide which records reach them.
+   */
+  roles: z.array(RoleId).default([]),
 });
 
 export const PageContract = z.object({

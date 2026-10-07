@@ -113,9 +113,17 @@ def _roles(doc: dict) -> dict[str, str]:
 def visits(doc: dict) -> list[dict]:
     """`{page, route, name, entity, as}` — every live page, once per role it is
     for; a page for nobody in particular as the administrator; sign-in pages
-    signed out."""
+    signed out.
+
+    INSIDE A SCREEN TOO. A screen's tabs and the panels that open one record
+    are places of their own (`?tab=<key>`, `?<param>=<id>`) the plain address
+    never shows: each is opened by its link, as each role it is shown to
+    (`open`, `inside`). The plain visit names the tabs its role is not shown
+    (`hidden_tabs`), so a tab that is only some people's is checked to be
+    theirs alone."""
     from services.blueprint.account_model import admin_role
     from services.blueprint.scope import built_view
+    from services.blueprint.screen_parts import section_audience
 
     view = built_view(doc)
     roles = _roles(view)
@@ -132,9 +140,39 @@ def visits(doc: dict) -> list[dict]:
             out.append({**base, "as": "signed out"})
             continue
         users = [roles.get(str(u), str(u)) for u in p.get("users") or []]
+        sections = [sec for sec in p.get("sections") or [] if isinstance(sec, dict) and sec.get("key")]
         for role in (users or [admin]):
-            out.append({**base, "as": role})
+            mine = [sec for sec in sections
+                    if not section_audience(view, sec) or role in section_audience(view, sec)]
+            hidden = [str(sec.get("label") or sec["key"]) for sec in sections
+                      if sec not in mine and sec.get("placement") == "tab"]
+            out.append({**base, "as": role, **({"hidden_tabs": hidden} if hidden else {})})
+            for sec in mine:
+                inside = _inside(sec, base["route"], ents)
+                if inside:
+                    out.append({**base, "as": role, **inside})
     return out
+
+
+def _inside(sec: dict, route: str, ents: dict[str, str]) -> dict | None:
+    """Where a section is opened by its own link: a tab by `?tab=<key>`, a
+    panel on one record by `?<param>=[<param>]` (filled with a real record's
+    id when the page is opened). Main sections and dialogs are the plain
+    visit's: one is on the screen, the other is opened by pressing."""
+    key, label = str(sec["key"]), str(sec.get("label") or sec["key"])
+    joiner = "&" if "?" in route else "?"
+    if sec.get("placement") == "tab":
+        return {"open": f"{route}{joiner}tab={key}", "inside": f"in its {label} tab", "section": key}
+    entity = ents.get(str(sec.get("entity") or ""))
+    if sec.get("placement") == "panel" and sec.get("param") and entity and "[" not in route:
+        return {"open": f"{route}{joiner}{sec['param']}=[{sec['param']}]", "entity": entity,
+                "inside": f"with a {entity} open in its {label} panel", "section": key}
+    return None
+
+
+def visit_id(v: dict) -> str:
+    """The shot a visit is read from: one per page, role and place inside it."""
+    return f"{v['page']}::{v['as']}" + (f"::{v['section']}" if v.get("section") else "")
 
 
 # --------------------------------------------------------------------------- #
@@ -173,7 +211,17 @@ def shot_findings(shot: dict, visit: dict, doc: dict) -> list[str]:
         if verdict:
             out.append(f"{c.get('kind') or 'control'} \"{c.get('label')}\" {verdict}"
                        + (f" ({str(c.get('detail'))[:200]})" if c.get("detail") else ""))
+    for c in shot.get("controls") or []:
+        if c.get("opened"):
+            out += [f"{c.get('kind') or 'control'} \"{c.get('label')}\" opens a dialog where {f}"
+                    for f in screen_findings(str(c["opened"]), doc)]
     out += screen_findings(str(shot.get("text") or ""), doc)
+    # A TAB THAT IS SOME PEOPLE'S, shown to someone else.
+    for label in visit.get("hidden_tabs") or []:
+        if any(str(t).strip().lower() == label.strip().lower() for t in shot.get("tabs") or []):
+            out.append(f"it shows the \"{label}\" tab to someone signed in as {visit['as']}, who it is not for")
+    if visit.get("inside"):
+        out = [f"{visit['inside']}, {f}" for f in out]
     return out
 
 
@@ -194,7 +242,8 @@ def _entries(app: Any, doc: dict, batch: list[dict]) -> list[dict]:
     from services.smith.trials import _role, _session
     out = []
     for v in batch:
-        entry: dict[str, Any] = {"id": f"{v['page']}::{v['as']}", "route": v["route"], "entity": v["entity"]}
+        entry: dict[str, Any] = {"id": visit_id(v), "route": v.get("open") or v["route"], "entity": v["entity"],
+                                 "group": v["page"]}
         if v["as"] == "signed out":
             entry["anonymous"] = True
         else:
@@ -227,7 +276,7 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
             shots = run_shots(app, _entries(app, doc, batch), out_dir / safe,
                               probe=role != "signed out", states=role != "signed out")
         except ReviewUnavailable as exc:
-            shots = [{"id": f"{v['page']}::{role}", "errors": [f"the page could not be opened: {exc}"]}
+            shots = [{"id": visit_id(v), "errors": [f"the page could not be opened: {exc}"]}
                      for v in batch]
         return role, shots
 
@@ -236,15 +285,26 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
     swallowed = _swallowed_by_entity(server_said())
 
     report: dict[str, dict] = {}
+    seen: dict[tuple[str, str], set[str]] = {}
     for role, shots in results:
         by_id = {str(s.get("id")): s for s in shots if isinstance(s, dict)}
         for v in by_role[role]:
             page = report.setdefault(v["page"], {"name": v["name"], "route": v["route"], "findings": []})
-            shot = by_id.get(f"{v['page']}::{role}")
+            shot = by_id.get(visit_id(v))
             if shot is None:
-                page["findings"].append((role, "it could not be opened at all — the browser reported nothing for it"))
+                page["findings"].append((role, (f"{v['inside']}, " if v.get("inside") else "")
+                                         + "it could not be opened at all — the browser reported nothing for it"))
                 continue
-            page["findings"] += [(role, f) for f in shot_findings(shot, v, doc)]
+            if v.get("inside"):
+                # What the plain page already said is not said again from
+                # inside it; what is new is said with where it was.
+                plain = seen.get((v["page"], role), set())
+                page["findings"] += [(role, f"{v['inside']}, {f}")
+                                     for f in shot_findings(shot, {**v, "inside": None}, doc) if f not in plain]
+                continue                    # the server's log is read once per page and role
+            found = shot_findings(shot, v, doc)
+            seen[(v["page"], role)] = set(found)
+            page["findings"] += [(role, f) for f in found]
             for line in swallowed.get(str(v["entity"]), []):
                 page["findings"].append((role, f"the server could not read its {v['entity']} records: {line}"))
     return report

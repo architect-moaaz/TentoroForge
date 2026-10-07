@@ -26,6 +26,7 @@ and keeps the honest placeholder.
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Mapping
 
@@ -538,12 +539,25 @@ def _section_cards(doc: Mapping[str, Any], page: Mapping[str, Any], sources: lis
             continue
         seen.add(ssrc)
         sources.append({"name": ssrc, "entity": sname, "op": "list", "limit": 25})
-        cards.append(_node("Card", {"title": str(sec.get("label") or _humanise(sname))}, [
+        card = _node("Card", {"title": str(sec.get("label") or _humanise(sname))}, [
             _node("Table", {"data": f"{{{{{ssrc}}}}}",
                             "columns": [_column(f) for f in _fields(sent)] or [{"key": "id", "label": "Id"}],
                             "searchable": True, "striped": True,
-                            "emptyText": f"No {sname.lower()} records yet."})]))
+                            "emptyText": f"No {sname.lower()} records yet."})])
+        shown_to = _shown_to(doc, sec)
+        if shown_to:
+            card["visibleIf"] = shown_to
+        cards.append(card)
     return cards
+
+
+def _shown_to(doc: Mapping[str, Any], sec: Mapping[str, Any]) -> str | None:
+    """A section only some roles see (`roles`), as the renderer's `visibleIf`:
+    `user.role == "Lead" or user.role == "Admin"`."""
+    from services.blueprint.screen_parts import section_audience
+
+    names = section_audience(dict(doc), dict(sec))
+    return " or ".join(f"user.role == {json.dumps(n)}" for n in names) or None
 
 
 def _screen_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict:

@@ -134,6 +134,10 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
     entities = (doc.get("data") or {}).get("entities")
     role_names = {str(r.get("id")): str(r.get("name")) for r in _live(doc.get("roles")) if r.get("id")}
     pages_by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
+    entity_names = {str(e.get("id")): str(e.get("name") or e.get("id")) for e in entities or []
+                    if isinstance(e, dict) and e.get("id")}
+    code_parts = {str(c.get("page")): list((c.get("parts") or {}).keys()) for c in doc.get("pageCode") or []
+                  if isinstance(c, dict) and c.get("parts")}
 
     domain = {
         "name": app.get("domain") or product.get("domain") or "",
@@ -231,10 +235,46 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
                 "who": [role_names.get(str(u), str(u)) for u in p.get("users") or []],
                 "access": p.get("access") or "",
                 "notable_choices": [],
+                # WHAT THE SCREEN HOLDS. A page is a screen of sections — a
+                # list, the panel a record opens in, tabs, dialogs — and Smith
+                # saw only its route and name, so "add a refunds tab to
+                # support" read as a new page and "the lead's approvals" as
+                # nothing it could find.
+                **({"screen": [_section_line(sec, entity_names, role_names)
+                               for sec in p.get("sections") or [] if isinstance(sec, dict)]}
+                   if p.get("sections") else {}),
+                **({"menu": p["menuEntry"]} if p.get("menuEntry") else {}),
+                **({"adds_here": True} if p.get("addsHere") else {}),
+                **({"parts": sorted(code_parts[str(p.get("id"))])}
+                   if code_parts.get(str(p.get("id"))) else {}),
             }
             for p in _live(doc.get("pages"))
         ],
     }
+
+
+def _section_line(sec: dict[str, Any], entity_names: dict[str, str], role_names: dict[str, str]) -> str:
+    """One section of a screen, as Smith reads it:
+    `Refunds [refunds] — tab, list of Refund; only for Lead; actions: Approve refund`."""
+    placement = str(sec.get("placement") or "main")
+    shows = str(sec.get("shows") or "list")
+    entity = entity_names.get(str(sec.get("entity") or ""), str(sec.get("entity") or ""))
+    where = placement + (f" opened from {sec['opensFrom']}" if sec.get("opensFrom") else "") \
+        + (f" at ?{sec['param']}=<id>" if sec.get("param") else "") \
+        + (f" at ?tab={sec['key']}" if placement == "tab" else "")
+    bits = [where + ", " + (f"{shows} of {entity}" if entity else shows)]
+    if sec.get("addsHere"):
+        bits.append("adds them here")
+    if sec.get("live"):
+        bits.append("live")
+    roles = [role_names[str(r)] for r in sec.get("roles") or [] if str(r) in role_names]
+    if roles:
+        bits.append("only for " + ", ".join(roles))
+    if sec.get("menuEntry"):
+        bits.append(f"menu: {sec['menuEntry']}")
+    if sec.get("actions"):
+        bits.append("actions: " + ", ".join(str(a) for a in sec["actions"]))
+    return f"{sec.get('label') or sec.get('key')} [{sec.get('key')}] — " + "; ".join(bits)
 
 
 def connection_lines(doc: dict[str, Any], output_dir: str) -> list[dict[str, Any]]:
