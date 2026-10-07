@@ -1035,7 +1035,7 @@ def menu_scopes(doc: dict, nav: dict | None = None) -> tuple[dict[str, list[str]
     # is its audience, §100), so only that narrows the rail.
     role_names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or []
                   if isinstance(r, dict) and r.get("id")}
-    page_roles = {str(p.get("id")): sorted({role_names.get(str(u), str(u)) for u in p.get("users") or []})
+    page_roles = {str(p.get("id")): restricted_roles(doc, p)
                   for p in (doc.get("pages") or [])
                   if p.get("id") and str(p.get("access") or "") == "role_restricted"}
     # WHO THE DESTINATION IS FOR — the menu's other half. A page's `users` is
@@ -1122,6 +1122,11 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
         if _navigable(route):
             view = str(node.get("view") or "").strip()
             section = str(node.get("section") or "").strip()
+            # ONLY A TAB IS OPENED BY `?tab=`. A panel needs its record and a
+            # main section is the screen itself: "Order Detail" opened
+            # /orders?tab=detail, a tab that does not exist (ToroCommerce).
+            if section and (section_of.get((page_id, section)) or {}).get("placement", "tab") != "tab":
+                section = ""
             # A tab of a screen is its own destination: `?tab=<section key>`.
             out["route"] = (f"{route}?view={view}" if view
                             else f"{route}?tab={section}" if section else route)
@@ -1149,7 +1154,20 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 group["icon"] = str(node["icon"])
             if node.get("tab"):
                 group["tab"] = True
-            group["items"] = [it for it in (item(k) for k in kids) if it is not None]
+            # THE RAIL HAS TWO LEVELS; A MENU MAY HAVE THREE. "Admin >
+            # Catalogue > Products" drew Catalogue as an entry going nowhere
+            # and Products and Add Product not at all — the administrator
+            # could not reach the catalogue (ToroCommerce, forge-v3,
+            # 2026-10-07). A sub-heading's entries join its group, in order.
+            def flat(nodes: list) -> list[dict]:
+                out: list[dict] = []
+                for k in nodes:
+                    deeper = [c for c in (k.get("children") or []) if isinstance(c, dict)]
+                    if k.get("page") or k.get("route") or not deeper:
+                        out.append(k)
+                    out += flat(deeper)
+                return out
+            group["items"] = [it for it in (item(k) for k in flat(kids)) if it is not None]
             # A group is for whoever its children are for: "Admin" holding two
             # Admin-only screens is an Admin group, and says so, so the whole
             # heading goes rather than emptying out.
@@ -1251,8 +1269,8 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
             # does not list: a role-restricted page added later would
             # otherwise be offered to everyone, which is the fault this file
             # is read to avoid.
-            **({"roles": sorted({str((roles.get(u) or {}).get("name") or u) for u in page.get("users") or []})}
-               if access == "role_restricted" and page.get("users") else {}),
+            **({"roles": restricted_roles(doc, page)}
+               if access == "role_restricted" and restricted_roles(doc, page) else {}),
             "presentation": page.get("presentation") or "page",
             # By route, because that is what a router follows — resolved from
             # the page ids the contract carries, so a rename cannot break it.
@@ -1271,7 +1289,8 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
             entry_by_access[access] = route
         # A page addressed to specific roles is a guarded route. Read from the
         # page contract, never invented — an invented guard locks people out.
-        named = [roles[r].get("name") for r in (page.get("users") or []) if r in roles]
+        named = [roles[r].get("name") for r in (page.get("users") or []) if r in roles] \
+            or (restricted_roles(doc, page) if access == "role_restricted" else [])
         if named:
             guards[route] = {"roles": sorted(named)}
         # Read from the contract, not guessed from the route name. A page
@@ -2471,7 +2490,7 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             # A NOTIFICATION OPENS WHAT IT IS ABOUT: the record's address
             # (its screen's panel, or its record page) with its id.
             from services.blueprint.record_links import notification_link
-            if isinstance(config, dict) and (link := notification_link(doc, s, config)):
+            if isinstance(config, dict) and (link := notification_link(doc, s, config, wf)):
                 config = {**config, "link": link}
             nodes.append(_wf_node(
                 s["key"], s.get("type"), len(chain), config,
@@ -2583,11 +2602,10 @@ def launch_roles(doc: dict) -> dict[str, list[str] | None]:
             # their roles — put [] on every admin process, and the published
             # app refused the administrator's every save with "This action is
             # not available to your role" (ihf6pjga, 2026-10-05).
-            named = [u for u in pg.get("users") or [] if u]
+            named = restricted_roles(doc, pg)
             if not named:
                 roles.add(SIGNED_IN)
-            for u in named:
-                nm = names.get(u, u)
+            for nm in named:
                 roles.add("*" if nm == "Guest" else str(nm))
         out[w["id"]] = sorted(roles)
     return out
@@ -2907,6 +2925,16 @@ def _seed_value(field: dict, entity_name: str, row: int,
 
     kind = str(field.get("type") or "text").lower()
     name = field.get("name") or "field"
+    if kind in ("bool", "boolean"):
+        # A YES OR NO IS A BOOLEAN, whatever the examples spell. ToroCommerce's
+        # `isActive` came with options "true"/"false"; seeded as those
+        # strings, every customer landed deactivated and no one could shop
+        # (forge-v3, 2026-10-07). The examples' own mix is kept, as booleans.
+        said = [str(x).strip().lower() for x in (field.get("examples") or enum_values(field) or [])
+                if str(x).strip()]
+        if said:
+            return said[(row - 1) % len(said)] in ("true", "yes", "1", "on", "y")
+        return row % 2 == 1
     if kind in LOCATION_TYPES:
         # NO INVENTED PLACE. Demo rows sat a few streets apart in central
         # London for every application, so a reader in Bangalore saw each
@@ -3782,6 +3810,26 @@ def project_public_resources(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": ["src/lib/public-resources.ts", "src/lib/entity-access.ts"], "resources": slugs}
 
 
+def restricted_roles(doc: dict, page: dict) -> list[str]:
+    """The role NAMES that may open a page: the roles it names, or — for a
+    page restricted to roles that names none — the administrator's.
+
+    A RESTRICTED PAGE THAT NAMES NOBODY IS NOT EVERYONE'S. It was gated on a
+    session alone, so when a contract was lost before its roles were written,
+    ToroCommerce's /admin/products and /admin/orders opened, were offered on
+    the menu, and ran their processes for any customer who signed in (forge-v3,
+    2026-10-07). Restricted means restricted: the administrator — who the
+    back office is for, and who ihf6pjga's nameless admin pages were for —
+    may open it, nobody else, until the page names its roles."""
+    names = {r.get("id"): r.get("name") for r in _live(doc.get("roles")) if r.get("id") and r.get("name")}
+    roles = sorted({str(names.get(u, u)) for u in (page.get("users") or []) if u})
+    if roles or str(page.get("access") or "") != "role_restricted":
+        return roles
+    from services.blueprint.account_model import admin_role
+    admin = admin_role(doc)
+    return [admin] if admin else []
+
+
 def role_routes(doc: dict) -> list[dict[str, Any]]:
     """Each role-restricted page's route and the role NAMES that may open it.
 
@@ -3797,9 +3845,9 @@ def role_routes(doc: dict) -> list[dict[str, Any]]:
     for page in _live(doc.get("pages")):
         if (page.get("access") or "authenticated") != "role_restricted":
             continue
-        roles = sorted({names.get(u, u) for u in (page.get("users") or []) if u})
+        roles = restricted_roles(doc, page)
         if not roles:
-            continue   # nothing to compare to; the session gate still applies
+            continue   # no roles at all in the application; the session gate still applies
         out.append({"route": page.get("route") or "/", "roles": roles})
     return sorted(out, key=lambda r: r["route"])
 

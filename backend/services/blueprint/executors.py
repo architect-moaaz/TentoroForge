@@ -1507,8 +1507,14 @@ NODE_TASKS: dict[str, str] = {
         "contract for the whole screen: its `primaryTasks` include every "
         "section's `actions` and every section that adds; "
         "`data.supportingEntities` names every section's entity besides the "
-        "main one; its states cover the screen with no record chosen. The "
-        "sections themselves are decided; keep them exactly as given.\n\n"
+        "main one. The sections themselves are decided; keep them exactly as "
+        "given.\n\n"
+        "`states` NAMES the states a page handles, from loading, empty, "
+        "populated, error and permission_denied — names only, nothing else. "
+        "What each looks like goes in `stateNotes`, a sentence per state "
+        "(`{\"empty\": \"No orders yet — …\"}`), and so does a moment of a "
+        "screen the names do not cover (`\"noSelection\"`: the list with no "
+        "record opened beside it).\n\n"
         "When a page only means something once something has happened, say so "
         "in `requires`. An approval screen is not a page you can look at; it "
         "is a page you can look at once something has been submitted, and "
@@ -3034,6 +3040,18 @@ def pin_page_set(result: AgentResult) -> None:
             continue
         proposal.body = {k: v for k, v in (proposal.body or {}).items()
                          if k in _DECLARED_PAGE_FIELDS}
+        # A SCREEN'S RECORD IS ITS MAIN SECTION'S, as the declaration is told.
+        # Left unsaid, the screen had no record at all: its contract's facts
+        # could not resolve (`related` needs one) and seven of ToroCommerce's
+        # eleven screens went without contracts, roles or guards (forge-v3,
+        # 2026-10-07).
+        body = proposal.body
+        data = body.get("data") if isinstance(body.get("data"), dict) else {}
+        if not data.get("primaryEntity"):
+            main = next((sec for sec in body.get("sections") or [] if isinstance(sec, dict) and sec.get("entity")
+                         and str(sec.get("placement") or "main") in ("main", "tab")), None)
+            if main is not None:
+                body["data"] = {**data, "primaryEntity": main["entity"]}
 
 
 def _page_details_prompt(doc: dict, system: str, subject: str,

@@ -488,8 +488,13 @@ def test_a_role_restricted_page_names_who_may_open_it(tmp_path):
             {"id": "PAGE-004", "route": "/reports", "access": "role_restricted"},
         ],
     }
+    from services.blueprint.account_model import admin_role
     assert role_routes(doc) == [
         {"route": "/income-auditor-queue", "roles": ["Income Auditor"]},
+        # A restricted page naming nobody is the administrator's — the role
+        # the admin login is seeded with — not anyone signed in (ToroCommerce,
+        # 2026-10-07).
+        {"route": "/reports", "roles": [admin_role(doc)]},
         {"route": "/users/[id]", "roles": ["Admin"]},
     ]
     result = project_middleware(doc, tmp_path / "app")

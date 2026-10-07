@@ -870,7 +870,7 @@ def _page_brief(doc: dict, page: dict) -> dict:
     data = page.get("data") or {}
     return {
         "page": {k: page.get(k) for k in ("id", "name", "route", "pattern", "purpose", "primaryTasks",
-                                          "actions", "states", "users", "access", "responsive")
+                                          "actions", "states", "stateNotes", "users", "access", "responsive")
                  if page.get(k) not in (None, [], "")},
         # ADDING HAPPENS HERE (`addsHere`): no page of its own exists for a new
         # record, so this page carries the form — a panel over the list, or

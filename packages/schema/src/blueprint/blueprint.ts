@@ -670,6 +670,20 @@ export const PageContract = z.object({
     .default(["loading", "empty", "populated", "error"]),
 
   /**
+   * What each state shows, in a sentence — keyed by a state above, or by a
+   * moment of a screen the list does not name ("noSelection": the list with
+   * no record opened beside it).
+   *
+   * THE AUTHOR WANTED TO SAY IT, AND HAD NOWHERE TO. Asked for a screen's
+   * states, the contract author wrote `{empty: "No orders yet — …"}` and
+   * `"detail-empty: panel open with no customer selected"`, and both were
+   * refused by the enum above: two of ToroCommerce's nine contracts were lost
+   * to it (forge-v3, 2026-10-07). The names stay a closed set the build can
+   * act on; what they look like is here, for the page writer.
+   */
+  stateNotes: z.record(z.string(), z.string()).optional(),
+
+  /**
    * Which form factors this page is for.
    *
    * EACH KEY CARRIES ITS OWN DEFAULT, and that is load-bearing rather than

@@ -182,7 +182,14 @@ async function open(context, url, { shot } = {}) {
 // not a form's submit (an empty submit only proves validation), not a field.
 async function controls(page) {
   return page.evaluate(() => {
-    const root = document.querySelector("main") || document.body;
+    // AN OPEN PANEL OR DIALOG IS WHAT A PERSON CAN PRESS. Behind its overlay
+    // the page is inert: a panel opened by its link had the screen's own
+    // links pressed behind it, each a five-second timeout read as broken
+    // (ToroCommerce, 2026-10-07). Its controls are the ones to try.
+    const open = [...document.querySelectorAll("[role='dialog'], [role='alertdialog'], dialog[open]")]
+      .filter((d) => { const r = d.getBoundingClientRect(); return r.width && r.height; });
+    const modal = open.filter((d) => d.getAttribute("aria-modal") === "true" || d.tagName === "DIALOG").pop();
+    const root = modal || document.querySelector("main") || document.body;
     const frame = (el) => el.closest("header, nav[aria-label='Main'], aside");
     const SEL = "button, a[href], [role='button'], [role='menuitem'], [role='tab']";
     const all = [...document.querySelectorAll(SEL)];          // what `press` counts in
@@ -190,7 +197,7 @@ async function controls(page) {
     const out = [];
     const seen = new Set();
     for (const el of els) {
-      if (frame(el) && !el.closest("main")) continue;
+      if (!modal && frame(el) && !el.closest("main")) continue;
       const r = el.getBoundingClientRect();
       if (!r.width || !r.height) continue;
       const style = getComputedStyle(el);
@@ -223,12 +230,21 @@ async function controls(page) {
 function fingerprint(page) {
   return page.evaluate(() => {
     const main = document.querySelector("main") || document.body;
+    const open = [...document.querySelectorAll("[role='dialog'], [role='alertdialog'], dialog[open]")];
+    // A CHOSEN OPTION IS A CHANGE. A size or a colour pressed in a product's
+    // panel says so with aria-pressed and changes no text: it read as a
+    // button that does nothing (ToroCommerce, 2026-10-07).
+    const chosen = [...document.querySelectorAll(
+      "[aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [data-state='checked'], [data-state='on'], [data-state='active']")]
+      .map((el) => (el.getAttribute("aria-label") || el.textContent || "").trim().slice(0, 40)).join("|");
+    const inside = open.map((d) => d.innerText || "").join("\n");
     return {
       url: location.href,
-      text: main.innerText.length + ":" + main.innerText.slice(0, 2000),
-      dialogs: document.querySelectorAll("[role='dialog'], [role='alertdialog'], dialog[open]").length,
+      text: main.innerText.length + ":" + main.innerText.slice(0, 2000) + "\u0000" + inside.slice(0, 2000),
+      dialogs: open.length,
       expanded: [...document.querySelectorAll("[aria-expanded='true']")].length,
       toasts: document.querySelectorAll("[data-sonner-toast]").length,
+      chosen,
     };
   });
 }
@@ -268,7 +284,8 @@ async function press(context, url, control, firstIndex = null) {
       await page.waitForTimeout(400);
       after = await fingerprint(page).catch(() => before);
       if (calls.length || dialog || errors.length || after.url !== before.url || after.dialogs !== before.dialogs
-          || after.expanded !== before.expanded || after.toasts !== before.toasts || after.text !== before.text) break;
+          || after.expanded !== before.expanded || after.toasts !== before.toasts || after.text !== before.text
+          || after.chosen !== before.chosen) break;
     }
     await page.waitForLoadState("load", { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(calls.length ? 800 : 0);            // let a workflow's reply land
@@ -290,9 +307,10 @@ async function press(context, url, control, firstIndex = null) {
       outcome = bad ? "broken-link" : "navigated";
       detail = `${new URL(after.url).pathname} (HTTP ${status}${landed ? `, shows the ${landed} page` : ""})`;
     } else if (dialog || after.dialogs > before.dialogs || after.expanded !== before.expanded
-               || after.toasts > before.toasts || after.text !== before.text) {
+               || after.toasts > before.toasts || after.text !== before.text || after.chosen !== before.chosen) {
       outcome = "changed";
-      detail = dialog ? `asked "${dialog}"` : "the page changed";
+      detail = dialog ? `asked "${dialog}"` : after.chosen !== before.chosen && after.text === before.text
+        ? "it was chosen" : "the page changed";
     }
     // WHAT A DIALOG SHOWS. A dialog that opened counted as working, and what
     // was in it — an add form reading its choices, a record's panel — was
