@@ -188,13 +188,16 @@ def build(project: Project, page_id: str, *, params: dict[str, str] | None = Non
     row = _row(doc, page_id)
     if row is None:
         raise EditorError(409, "not-coded", "This page has no designed code to render yet.")
+    from services.react_editor import files as screen_files
     view, load = str(row.get("view") or ""), str(row.get("load") or "")
-    revision = adapter.revision_of(view, load)
+    parts = screen_files.parts_of(row)
+    revision = adapter.revision_of(view, load, parts)
     # A draft is bundled from its own place in the tree, never from the
     # page's files: the running app keeps showing what was saved.
     drafted = read_draft(project, page_id, revision) if draft else None
     if drafted:
         view, load, revision = drafted["view"], drafted["load"], drafted["revision"]
+        parts = drafted.get("parts") or parts
     params, search = dict(params or {}), dict(search or {})
     # A RECORD PAGE PREVIEWS ON A SAMPLE ROW. The canvas builds every page with
     # empty params; a `[id]` route then reaches `record(entity, undefined)`,
@@ -231,6 +234,20 @@ def build(project: Project, page_id: str, *, params: dict[str, str] | None = Non
         load_path = project.app_root / page_dir / "load.ts"
         if not load_path.exists() or load_path.read_text() != load:
             load_path.write_text(load)
+        # A SPLIT SCREEN'S PARTS, beside the frame that imports them — their
+        # elements' ids prefixed with the part's key, so a click lands in the
+        # right file.
+        parts_dir = project.app_root / page_dir / "parts"
+        for key, code in parts.items():
+            annotated_part = screen_files.annotate_part(key, code, app_root=project.app_root)
+            dest = parts_dir / f"{key}.tsx"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not dest.exists() or dest.read_text() != annotated_part:
+                dest.write_text(annotated_part)
+        if parts_dir.is_dir():
+            for old in parts_dir.glob("*.tsx"):
+                if old.stem not in parts:
+                    old.unlink(missing_ok=True)
     except adapter.AdapterError as exc:
         raise EditorError(422, exc.code, str(exc))
 

@@ -21,7 +21,7 @@ import { GROUPS, type GroupKind } from "./lib/templates";
 import { mainRoot, plainName, topmost } from "./lib/plain";
 import type { Breakpoint, Device, DraftResult, Finding, HistoryEntry, ModelNode, Navigation, Op, PageDoc, PageListItem, PageModel, Proposal, PropValue, ReadOptions, Rect, ThemeDoc, ThemePatch } from "./types";
 
-export interface Snapshot { revision: string; view: string; load: string }
+export interface Snapshot { revision: string; view: string; load: string; parts?: Record<string, string> }
 export interface HistoryOp { label: string; before: Snapshot; after: Snapshot }
 
 export type SaveState = "saved" | "unsaved" | "saving" | "checking" | "failed";
@@ -282,7 +282,8 @@ function writePrefs(state: EditorState) {
 }
 
 function snapshotOf(doc: PageDoc): Snapshot {
-  return { revision: currentRevision(doc), view: doc.source?.view ?? "", load: doc.source?.load ?? "" };
+  return { revision: currentRevision(doc), view: doc.source?.view ?? "", load: doc.source?.load ?? "",
+           ...(doc.source?.parts ? { parts: doc.source.parts } : {}) };
 }
 
 /** The page after an edit on its draft, as the store holds it. */
@@ -811,7 +812,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     set({ busy: true });
     try {
-      const out = await editorApi.draftApply(projectId, pageId, { baseRevision: doc.revision, source: { view: op.before.view, load: op.before.load } });
+      const out = await editorApi.draftApply(projectId, pageId, { baseRevision: doc.revision, source: { view: op.before.view, load: op.before.load, ...(op.before.parts ? { parts: op.before.parts } : {}) } });
       set((s) => ({
         doc: withDraft(doc, out), undoStack: s.undoStack.slice(0, -1), redoStack: [...s.redoStack, op], busy: false,
         saveState: out.dirty ? "unsaved" : "saved", selection: s.selection.filter((id) => out.model.nodes[id]),
@@ -831,7 +832,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (op.before.revision !== currentRevision(doc)) { set({ redoStack: [] }); return; }
     set({ busy: true });
     try {
-      const out = await editorApi.draftApply(projectId, pageId, { baseRevision: doc.revision, source: { view: op.after.view, load: op.after.load } });
+      const out = await editorApi.draftApply(projectId, pageId, { baseRevision: doc.revision, source: { view: op.after.view, load: op.after.load, ...(op.after.parts ? { parts: op.after.parts } : {}) } });
       set((s) => ({
         doc: withDraft(doc, out), redoStack: s.redoStack.slice(0, -1), undoStack: [...s.undoStack, op], busy: false,
         saveState: out.dirty ? "unsaved" : "saved", selection: s.selection.filter((id) => out.model.nodes[id]),

@@ -10,6 +10,9 @@ export interface NodeProp {
   valueSpan: [number, number] | null;
 }
 
+/** A coded page's files: the frame (view), what it loads, and a large screen's parts. */
+export interface PageSource { view: string; load: string; parts?: Record<string, string> }
+
 export interface ModelNode {
   id: string;
   parent: string | null;
@@ -26,6 +29,8 @@ export interface ModelNode {
   wrapperSpan: [number, number] | null;
   line: number;
   endLine: number;
+  /** Which file the element is in: "view", or a split screen's part ("part:coupons"). */
+  file?: string;
   context: "repeat" | "conditional" | null;
   /** For an element inside `source.map((variable) => …)`: what is repeated and what each row is called. */
   repeat?: { source: string; variable: string | null } | null;
@@ -217,12 +222,14 @@ export interface HistoryEntry {
 export interface PageDoc {
   /** Unsaved edits: the model and source are the draft's; `base` is the saved revision they sit on. */
   draft?: { revision: string; base: string } | null;
-  page: { id: string; name: string; route: string; purpose: string; access?: string; file?: string };
+  page: { id: string; name: string; route: string; purpose: string; access?: string; file?: string;
+    /** A large screen's parts — `parts/<key>.tsx` beside the frame. */
+    parts?: string[] };
   coded: boolean;
   reason?: string;
   revision: string;
   model: PageModel | null;
-  source: { view: string; load: string } | null;
+  source: PageSource | null;
   registry: Registry;
   pages: PageRef[];
   workflows: WorkflowRef[];
@@ -265,7 +272,7 @@ export interface Finding {
 export interface ApplyResult {
   revision: string;
   model: PageModel;
-  source: { view: string; load: string };
+  source: PageSource;
   checked: boolean;
   unchanged: boolean;
   version: number | null;
@@ -279,7 +286,7 @@ export interface DraftResult {
   dirty: boolean;
   unchanged: boolean;
   model: PageModel;
-  source: { view: string; load: string };
+  source: PageSource;
 }
 
 export interface Proposal {

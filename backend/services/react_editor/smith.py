@@ -93,10 +93,17 @@ def _ancestors(model: dict, node_id: str) -> list[dict]:
     return out
 
 
-def _opening(view: str, node: dict) -> str:
+def _src(sources: Any, node: dict) -> str:
+    """The file a node is in — the view, or a split screen's part."""
+    if isinstance(sources, str):
+        return sources
+    return str(sources.get(node.get("file") or "view") or "")
+
+
+def _opening(view: Any, node: dict) -> str:
     inner = node.get("innerSpan")
     end = inner[0] if inner else node["span"][1]
-    return view[node["span"][0]:end].strip()
+    return _src(view, node)[node["span"][0]:end].strip()
 
 
 def _request_context(doc: dict, view: str, load: str, model: dict, page: dict, selection: dict,
@@ -113,7 +120,7 @@ def _request_context(doc: dict, view: str, load: str, model: dict, page: dict, s
         parts.append(f"## {nid} — <{node['type']}> {('inside ' + chain) if chain else ''}"
                      f"{' (in a repeated list)' if node.get('context') == 'repeat' else ''}"
                      f"{' (shown conditionally)' if node.get('context') == 'conditional' else ''}\n"
-                     f"```tsx\n{view[node['span'][0]:node['span'][1]]}\n```")
+                     f"```tsx\n{_src(view, node)[node['span'][0]:node['span'][1]]}\n```")
     ext = scope.get("extendableNodeIds") or []
     if ext:
         parts.append("# Ancestors you may extend to, if the request truly needs it\n" + "\n".join(
@@ -121,8 +128,10 @@ def _request_context(doc: dict, view: str, load: str, model: dict, page: dict, s
     if annotation:
         parts.append(f"# The person's note on the selection\n{annotation}")
     parts.append(f"# What they want\n{prompt}")
+    files = view if isinstance(view, dict) else {"view": view}
     parts.append("# The rest of the page, for context only (read, do not return it)\n"
-                 f"```tsx\n// view.tsx\n{view}\n```\n```ts\n// load.ts\n{load}\n```")
+                 f"```tsx\n// view.tsx\n{files.get('view', '')}\n```\n```ts\n// load.ts\n{load}\n```"
+                 + "".join(f"\n```tsx\n// parts/{k[5:]}.tsx\n{v}\n```" for k, v in files.items() if k.startswith("part:")))
     parts.append("# Things that can be added (from the registry)\n" + palette_summary())
     return "\n\n".join(parts)
 
@@ -145,7 +154,7 @@ def _save(project: Project, proposal: dict) -> None:
 
 
 def _public(proposal: dict) -> dict:
-    return {k: v for k, v in proposal.items() if k not in ("viewAfter", "loadAfter")}
+    return {k: v for k, v in proposal.items() if k not in ("viewAfter", "loadAfter", "partsAfter")}
 
 
 def propose(project: Project, page_id: str, *, base_revision: str, prompt: str, selection: dict,
@@ -162,8 +171,11 @@ def propose(project: Project, page_id: str, *, base_revision: str, prompt: str, 
     if base_revision != revision:
         raise EditorError(409, "stale", "The page changed since you loaded it — reload before asking Smith.",
                           current=revision)
+    from services.react_editor import files as screen_files
+    screen_parts = screen_files.parts_of(row)
+    sources = {"view": view, **{f"part:{k}": c for k, c in screen_parts.items()}}
     try:
-        model = adapter.model(view, load, app_root=project.app_root)
+        model = screen_files.merged_model(view, load, screen_parts, app_root=project.app_root)
     except AdapterError as exc:
         raise EditorError(422, exc.code, str(exc))
     ids = [str(x) for x in selection.get("nodeIds") or []]
@@ -181,7 +193,7 @@ def propose(project: Project, page_id: str, *, base_revision: str, prompt: str, 
     scope["extendableNodeIds"] = sorted(set(ext))
 
     system = system_prompt(doc) + _RULES
-    user = _request_context(doc, view, load, model, page, selection, scope, annotation, prompt, breakpoint)
+    user = _request_context(doc, sources, load, model, page, selection, scope, annotation, prompt, breakpoint)
     if prior and prior.get("choice"):
         user += f"\n\n# The person answered your question\n{prior['question']}\n→ {prior['choice']}"
     t0 = time.monotonic()
@@ -224,7 +236,7 @@ def propose(project: Project, page_id: str, *, base_revision: str, prompt: str, 
         else:
             proposal["refused"].append({"nodeId": nid, "why": "outside what was selected"})
             continue
-        before = view[model["nodes"][nid]["span"][0]:model["nodes"][nid]["span"][1]]
+        before = _src(sources, model["nodes"][nid])[model["nodes"][nid]["span"][0]:model["nodes"][nid]["span"][1]]
         proposal["replacements"].append({"nodeId": nid, "type": model["nodes"][nid]["type"], "before": before, "after": jsx})
         ops.append({"op": "replaceNode", "id": nid, "jsx": jsx})
     for imp in proposal["imports"]:
@@ -241,9 +253,12 @@ def propose(project: Project, page_id: str, *, base_revision: str, prompt: str, 
     ops.sort(key=lambda o: (o["op"] != "replaceNode", -len(o.get("id", "")) if o["op"] == "replaceNode" else 0))
     t1 = time.monotonic()
     try:
-        view_after = adapter.patch(view, ops, app_root=project.app_root)
-        findings = service._check(doc, project, page_id, view_after, load)
-        proposal["viewAfter"], proposal["loadAfter"] = view_after, load
+        view_after, load_after, parts_after = screen_files.patch_all(view, load, screen_parts, ops,
+                                                                     app_root=project.app_root)
+        findings = service._check(doc, project, page_id, view_after, load_after, parts_after)
+        proposal["viewAfter"], proposal["loadAfter"] = view_after, load_after
+        if parts_after:
+            proposal["partsAfter"] = parts_after
     except AdapterError as exc:
         findings = [{"file": "view.tsx", "line": exc.line, "code": exc.code, "raw": str(exc),
                      "plain": str(exc), "severity": "must-fix"}]
@@ -277,7 +292,8 @@ def apply_proposal(project: Project, page_id: str, proposal_id: str, *, base_rev
         raise EditorError(409, "scope", "This change also touches the part around what you selected. "
                                         "Allow that to apply it.", expandsScope=proposal["expandsScope"])
     result = service.apply(project, page_id, base_revision=base_revision, ops=[],
-                           source={"view": proposal["viewAfter"], "load": proposal["loadAfter"]},
+                           source={"view": proposal["viewAfter"], "load": proposal["loadAfter"],
+                                   **({"parts": proposal["partsAfter"]} if proposal.get("partsAfter") else {})},
                            label=f"Smith: {proposal.get('summary') or proposal.get('prompt')}"[:120],
                            kind="smith", check=False)
     proposal["status"] = "applied"

@@ -194,7 +194,7 @@ def _project(tmp_path, monkeypatch, *, findings=None):
     (app / "package.json").write_text("{}")
     calls = []
 
-    def fake_check(doc, project, page_id, view, load):
+    def fake_check(doc, project, page_id, view, load, parts=None):
         calls.append((page_id, view, load))
         return list(findings or [])
     monkeypatch.setattr(service, "_check", fake_check)

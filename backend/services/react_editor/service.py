@@ -24,6 +24,7 @@ from services.blueprint.agent_contract import AgentResult, ArtifactProposal, app
 from services.blueprint.app_sdk import code_page_dir, page_keys, project_code_pages, workflow_keys
 from services.blueprint.service import BlueprintService
 from services.react_editor import adapter, diagnostics
+from services.react_editor import files as screen_files
 from services.react_editor.adapter import AdapterError, revision_of
 from services.react_editor.registry import registry
 
@@ -233,45 +234,55 @@ def history(project: Project, page_id: str, *, with_sources: bool = False) -> li
         except json.JSONDecodeError:
             continue
         if not with_sources:
-            entry = {k: v for k, v in entry.items() if k not in ("view", "load")}
+            entry = {k: v for k, v in entry.items() if k not in ("view", "load", "parts")}
         out.append(entry)
     return out
 
 
 def _record(project: Project, page_id: str, *, revision: str, parent: str | None, label: str,
-            kind: str, view: str, load: str, version: int | None) -> dict:
+            kind: str, view: str, load: str, version: int | None, parts: dict[str, str] | None = None) -> dict:
     path = _history_path(project, page_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     entry = {"revision": revision, "parent": parent, "label": label, "kind": kind,
              "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "version": version,
-             "view": view, "load": load}
+             "view": view, "load": load, **({"parts": parts} if parts else {})}
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry) + "\n")
-    return {k: v for k, v in entry.items() if k not in ("view", "load")}
+    return {k: v for k, v in entry.items() if k not in ("view", "load", "parts")}
 
 
-def _ensure_baseline(project: Project, page_id: str, view: str, load: str, version: int | None) -> None:
-    rev = revision_of(view, load)
+def _ensure_baseline(project: Project, page_id: str, view: str, load: str, version: int | None,
+                     parts: dict[str, str] | None = None) -> None:
+    rev = revision_of(view, load, parts)
     if any(e.get("revision") == rev for e in history(project, page_id)):
         return
     _record(project, page_id, revision=rev, parent=None, label="Built by Forge", kind="baseline",
-            view=view, load=load, version=version)
+            view=view, load=load, version=version, parts=parts)
 
 
 # ---------------------------------------------------------------------------
 # Open
 # ---------------------------------------------------------------------------
 
-def _annotate_app_copy(project: Project, doc: dict, page: dict, view: str) -> None:
-    """The running app's copy of view.tsx carries data-fid; the Blueprint's never does."""
+def _annotate_app_copy(project: Project, doc: dict, page: dict, view: str,
+                       parts: dict[str, str] | None = None) -> None:
+    """The running app's copy of view.tsx carries data-fid; the Blueprint's never does.
+    A split screen's parts carry them too, prefixed with the part's key."""
     try:
         annotated = adapter.annotate(view, app_root=project.app_root)
+        annotated_parts = {k: screen_files.annotate_part(k, c, app_root=project.app_root)
+                           for k, c in (parts or {}).items()}
     except AdapterError as exc:
         logger.warning("[react_editor] could not annotate %s: %s", page.get("id"), exc)
         return
     target = project.app_root / code_page_dir(page) / "view.tsx"
     if target.parent.is_dir() and (not target.exists() or target.read_text() != annotated):
         target.write_text(annotated)
+    for key, code in annotated_parts.items():
+        part = target.parent / "parts" / f"{key}.tsx"
+        part.parent.mkdir(parents=True, exist_ok=True)
+        if not part.exists() or part.read_text() != code:
+            part.write_text(code)
 
 
 def _state(svc: BlueprintService, project: Project, page_id: str) -> tuple[dict, dict | None, str, str, str]:
@@ -280,7 +291,7 @@ def _state(svc: BlueprintService, project: Project, page_id: str) -> tuple[dict,
     row = _row(doc, page_id)
     view = str(row.get("view") or "") if row else ""
     load = str(row.get("load") or "") if row else ""
-    return page, row, view, load, revision_of(view, load)
+    return page, row, view, load, revision_of(view, load, screen_files.parts_of(row))
 
 
 # ---------------------------------------------------------------------------
@@ -309,14 +320,17 @@ def read_draft(project: Project, page_id: str, revision: str) -> dict | None:
         return None
     if d.get("base") != revision:
         return None
-    return {"view": str(d.get("view") or ""), "load": str(d.get("load") or ""), "base": revision,
-            "revision": revision_of(str(d.get("view") or ""), str(d.get("load") or ""))}
+    parts = {str(k): str(v) for k, v in (d.get("parts") or {}).items()}
+    return {"view": str(d.get("view") or ""), "load": str(d.get("load") or ""), "parts": parts, "base": revision,
+            "revision": revision_of(str(d.get("view") or ""), str(d.get("load") or ""), parts)}
 
 
-def _write_draft(project: Project, page_id: str, base: str, view: str, load: str) -> None:
+def _write_draft(project: Project, page_id: str, base: str, view: str, load: str,
+                 parts: dict[str, str] | None = None) -> None:
     p = _draft_path(project, page_id)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"base": base, "view": view, "load": load, "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}), "utf-8")
+    p.write_text(json.dumps({"base": base, "view": view, "load": load, **({"parts": parts} if parts else {}),
+                             "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}), "utf-8")
 
 
 def discard_draft(project: Project, page_id: str) -> dict[str, Any]:
@@ -341,30 +355,32 @@ def draft_apply(project: Project, page_id: str, *, base_revision: str, ops: list
             raise EditorError(409, "stale", "The page changed since you last loaded it — your change was not "
                                             "applied. Reload to see the latest version and try again.",
                               current=revision)
+        parts = screen_files.parts_of(row)
         cur = read_draft(project, page_id, revision)
-        start_view, start_load = (cur["view"], cur["load"]) if cur else (view, load)
-        if source is not None:
-            new_view, new_load = str(source.get("view", start_view)), str(source.get("load", start_load))
-        else:
-            view_ops = [o for o in ops or [] if o.get("file") != "load"]
-            load_ops = [{k: v for k, v in o.items() if k != "file"} for o in ops or [] if o.get("file") == "load"]
-            try:
-                new_view = adapter.patch(start_view, view_ops, app_root=project.app_root) if view_ops else start_view
-                new_load = adapter.patch_load(start_load, load_ops, app_root=project.app_root) if load_ops else start_load
-            except AdapterError as exc:
-                raise EditorError(422, exc.code, str(exc), line=exc.line)
-        dirty = not (new_view == view and new_load == load)
+        start_view, start_load, start_parts = (cur["view"], cur["load"], cur["parts"] or parts) if cur \
+            else (view, load, parts)
+        try:
+            if source is not None:
+                new_view, new_load = str(source.get("view", start_view)), str(source.get("load", start_load))
+                new_parts = {**start_parts, **{str(k): str(v) for k, v in (source.get("parts") or {}).items()}}
+            else:
+                new_view, new_load, new_parts = screen_files.patch_all(
+                    start_view, start_load, start_parts, list(ops or []), app_root=project.app_root)
+        except AdapterError as exc:
+            raise EditorError(422, exc.code, str(exc), line=exc.line)
+        dirty = not (new_view == view and new_load == load and new_parts == parts)
         if dirty:
-            _write_draft(project, page_id, revision, new_view, new_load)
+            _write_draft(project, page_id, revision, new_view, new_load, new_parts)
         else:
             _draft_path(project, page_id).unlink(missing_ok=True)
         try:
-            model = adapter.model(new_view, new_load, app_root=project.app_root)
+            model = screen_files.merged_model(new_view, new_load, new_parts, app_root=project.app_root)
         except AdapterError as exc:
             raise EditorError(422, exc.code, str(exc), line=exc.line)
-        return {"revision": revision, "draftRevision": revision_of(new_view, new_load), "dirty": dirty,
-                "unchanged": new_view == start_view and new_load == start_load,
-                "model": model, "source": {"view": new_view, "load": new_load}}
+        return {"revision": revision, "draftRevision": revision_of(new_view, new_load, new_parts), "dirty": dirty,
+                "unchanged": new_view == start_view and new_load == start_load and new_parts == start_parts,
+                "model": model, "source": {"view": new_view, "load": new_load,
+                                           **({"parts": new_parts} if new_parts else {})}}
 
 
 def open_page(project: Project, page_id: str, *, annotate: bool = True) -> dict[str, Any]:
@@ -380,30 +396,34 @@ def open_page(project: Project, page_id: str, *, annotate: bool = True) -> dict[
                               "Ask Smith to design it, then it can be edited here.",
                     "registry": registry(), "pages": _page_refs(doc), "workflows": _workflow_refs(doc),
                     "entities": _entity_refs(doc), "theme": _theme(doc), "history": []}
-        _ensure_baseline(project, page_id, view, load, doc.get("version"))
+        parts = screen_files.parts_of(row)
+        _ensure_baseline(project, page_id, view, load, doc.get("version"), parts)
         try:
-            model = adapter.model(view, load, app_root=project.app_root)
+            model = screen_files.merged_model(view, load, parts, app_root=project.app_root)
         except AdapterError as exc:
             raise EditorError(422, exc.code, str(exc), line=exc.line)
         if annotate:
-            _annotate_app_copy(project, doc, page, view)
+            _annotate_app_copy(project, doc, page, view, parts)
         # Unsaved edits, when there are any, are what the person sees and edits.
         draft = read_draft(project, page_id, revision)
         if draft:
             try:
-                model = adapter.model(draft["view"], draft["load"], app_root=project.app_root)
-                view, load = draft["view"], draft["load"]
+                model = screen_files.merged_model(draft["view"], draft["load"], draft["parts"] or parts,
+                                                  app_root=project.app_root)
+                view, load, parts = draft["view"], draft["load"], draft["parts"] or parts
             except AdapterError:
                 draft = None
         return {
             "draft": {"revision": draft["revision"], "base": revision} if draft else None,
             "page": {"id": page_id, "name": page.get("name"), "route": page.get("route"),
                      "purpose": page.get("purpose") or "", "access": page.get("access") or "authenticated",
-                     "file": f"{code_page_dir(page)}/view.tsx"},
+                     "file": f"{code_page_dir(page)}/view.tsx",
+                     # A split screen's files, for the code view to show each.
+                     "parts": sorted(parts)},
             "coded": True,
             "revision": revision,
             "model": model,
-            "source": {"view": view, "load": load},
+            "source": {"view": view, "load": load, **({"parts": parts} if parts else {})},
             "registry": registry(),
             "pages": _page_refs(doc),
             "workflows": _workflow_refs(doc),
@@ -421,13 +441,17 @@ def open_page(project: Project, page_id: str, *, annotate: bool = True) -> dict[
 # Apply
 # ---------------------------------------------------------------------------
 
-def _check(doc: dict, project: Project, page_id: str, view: str, load: str) -> list[dict]:
+def _check(doc: dict, project: Project, page_id: str, view: str, load: str,
+           parts: dict[str, str] | None = None) -> list[dict]:
     """The compiler and the page rules, as findings. Raises when there is no compiler."""
     from services.blueprint.ui_engineer import _static_findings, typecheck
     raw = [f"view.tsx(1,1): error RULE: {m}" if not m.startswith(("view.tsx", "load.ts")) else m
            for m in _static_findings(load, view)]
+    for key, code in (parts or {}).items():
+        raw += [f"parts/{key}.tsx(1,1): error RULE: {m.split(':', 1)[1].strip()}"
+                for m in _static_findings("", code) if m.startswith("view.tsx")]
     try:
-        raw += typecheck(doc, project.app_root, page_id, load, view)
+        raw += typecheck(doc, project.app_root, page_id, load, view, parts=parts or None)
     except RuntimeError as exc:
         raise EditorError(503, "no-compiler",
                           "The application is not installed on this machine yet, so changes cannot be "
@@ -436,18 +460,21 @@ def _check(doc: dict, project: Project, page_id: str, view: str, load: str) -> l
 
 
 def _write(svc: BlueprintService, project: Project, page: dict, row: dict, view: str, load: str,
-           *, label: str) -> int | None:
+           *, label: str, parts: dict[str, str] | None = None) -> int | None:
     page_id = str(page.get("id"))
-    body = {"page": page_id, "load": load, "view": view,
+    # A SPLIT SCREEN'S PARTS ARE WRITTEN WITH IT. The row is replaced whole: a
+    # save that wrote only load and view took the parts out of the Blueprint,
+    # the projection removed their files, and the frame stopped compiling.
+    body = {"page": page_id, "load": load, "view": view, **({"parts": parts} if parts else {}),
             "rationale": str(row.get("rationale") or ""),
             "requirements": list(row.get("requirements") or page.get("requirements") or [])}
     with svc.lock:
-        apply_agent_result(svc, AgentResult(task_id=f"TASK-editor-{page_id}-{revision_of(view, load)}",
+        apply_agent_result(svc, AgentResult(task_id=f"TASK-editor-{page_id}-{revision_of(view, load, parts)}",
                                             agent="ui_engineer", confidence=1.0,
                                             proposals=[ArtifactProposal(section="pageCode", natural_key=page_id, body=body)]),
                            commit=True, user_request=label)
         project_code_pages(svc.doc, project.app_root)
-    _annotate_app_copy(project, svc.doc, page, view)
+    _annotate_app_copy(project, svc.doc, page, view, parts)
     return svc.doc.get("version")
 
 
@@ -470,37 +497,39 @@ def apply(project: Project, page_id: str, *, base_revision: str, ops: list[dict[
             raise EditorError(409, "stale", "The page changed since you last loaded it — your change was not "
                                             "applied. Reload to see the latest version and try again.",
                               current=revision)
-        if source is not None:
-            new_view, new_load = str(source.get("view", view)), str(source.get("load", load))
-        else:
-            # An op names its file; `load` ops extend what the page reads.
-            view_ops = [o for o in ops if o.get("file") != "load"]
-            load_ops = [{k: v for k, v in o.items() if k != "file"} for o in ops if o.get("file") == "load"]
-            try:
-                new_view = adapter.patch(view, view_ops, app_root=project.app_root) if view_ops else view
-                new_load = adapter.patch_load(load, load_ops, app_root=project.app_root) if load_ops else load
-            except AdapterError as exc:
-                raise EditorError(422, exc.code, str(exc), line=exc.line)
-        if new_view == view and new_load == load:
+        parts = screen_files.parts_of(row)
+        try:
+            if source is not None:
+                new_view, new_load = str(source.get("view", view)), str(source.get("load", load))
+                new_parts = {**parts, **{str(k): str(v) for k, v in (source.get("parts") or {}).items()}}
+            else:
+                # An op names its file by its ids (`coupons:r0.2` is a part's);
+                # `load` ops extend what the page reads.
+                new_view, new_load, new_parts = screen_files.patch_all(view, load, parts, list(ops),
+                                                                       app_root=project.app_root)
+        except AdapterError as exc:
+            raise EditorError(422, exc.code, str(exc), line=exc.line)
+        both = {"parts": new_parts} if new_parts else {}
+        if new_view == view and new_load == load and new_parts == parts:
             _draft_path(project, page_id).unlink(missing_ok=True)
-            model = adapter.model(view, load, app_root=project.app_root)
-            return {"revision": revision, "model": model, "source": {"view": view, "load": load},
+            model = screen_files.merged_model(view, load, parts, app_root=project.app_root)
+            return {"revision": revision, "model": model, "source": {"view": view, "load": load, **both},
                     "checked": False, "unchanged": True, "version": svc.doc.get("version")}
         must_check = check if check is not None else not (
             source is None and all(op.get("op") in _TYPE_SAFE_OPS and op.get("file") != "load" for op in ops))
         found: list[dict] = []
         if must_check:
-            found = _check(svc.doc, project, page_id, new_view, new_load)
+            found = _check(svc.doc, project, page_id, new_view, new_load, new_parts)
             if found:
                 raise EditorError(422, "does-not-compile",
                                   "That change would break the page, so it was not saved.", findings=found)
-        version = _write(svc, project, page, row, new_view, new_load, label=label)
+        version = _write(svc, project, page, row, new_view, new_load, label=label, parts=new_parts)
         _draft_path(project, page_id).unlink(missing_ok=True)
-        new_rev = revision_of(new_view, new_load)
+        new_rev = revision_of(new_view, new_load, new_parts)
         entry = _record(project, page_id, revision=new_rev, parent=revision, label=label, kind=kind,
-                        view=new_view, load=new_load, version=version)
-        model = adapter.model(new_view, new_load, app_root=project.app_root)
-        return {"revision": new_rev, "model": model, "source": {"view": new_view, "load": new_load},
+                        view=new_view, load=new_load, version=version, parts=new_parts)
+        model = screen_files.merged_model(new_view, new_load, new_parts, app_root=project.app_root)
+        return {"revision": new_rev, "model": model, "source": {"view": new_view, "load": new_load, **both},
                 "checked": must_check, "unchanged": False, "version": version, "history": entry}
 
 
@@ -512,7 +541,7 @@ def restore(project: Project, page_id: str, *, revision: str, expected: str) -> 
         raise EditorError(404, "no-revision", "That version is not in this page's history.")
     entry = entries[-1]
     return apply(project, page_id, base_revision=expected, ops=[],
-                 source={"view": entry["view"], "load": entry["load"]},
+                 source={"view": entry["view"], "load": entry["load"], **({"parts": entry["parts"]} if entry.get("parts") else {})},
                  label=f"Restored “{entry.get('label') or revision}”", kind="restore", check=False)
 
 
@@ -523,7 +552,7 @@ def check_page(project: Project, page_id: str) -> dict[str, Any]:
     if row is None:
         return {"revision": revision, "findings": [], "checked": False}
     try:
-        found = _check(svc.doc, project, page_id, view, load)
+        found = _check(svc.doc, project, page_id, view, load, screen_files.parts_of(row))
     except EditorError as exc:
         return {"revision": revision, "findings": [], "checked": False, "reason": str(exc)}
     return {"revision": revision, "findings": found, "checked": True}
