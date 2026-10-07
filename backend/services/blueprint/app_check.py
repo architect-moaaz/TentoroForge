@@ -455,7 +455,8 @@ def affected_pages(doc: dict, touched: list[str]) -> set[str]:
                  and to_snake(str(w.get("name") or w.get("id") or "")).replace("_", "-") in slugs]
         marks = {m for w in flows for m in (str(w.get("id")), _camel(str(w.get("name") or "")),
                                             to_snake(str(w.get("name") or "")).replace("_", "-")) if m}
-        code = {str(c.get("page")): f"{c.get('view') or ''}\n{c.get('load') or ''}"
+        from services.blueprint.app_sdk import page_code_text
+        code = {str(c.get("page")): page_code_text(c)
                 for c in view.get("pageCode") or [] if isinstance(c, dict)}
         out |= {pid for pid, text in code.items() if any(m in text for m in marks)}
     return out

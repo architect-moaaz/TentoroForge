@@ -261,7 +261,7 @@ LOOK_DIR = "src/.forge-look"
 
 def bundle_source(project: Project, doc: dict, page: dict, view: str, load: str, *,
                   params: dict[str, str] | None = None, search: dict[str, str] | None = None,
-                  timeout: float = 120.0) -> dict[str, Any]:
+                  timeout: float = 120.0, parts: dict[str, str] | None = None) -> dict[str, Any]:
     """A page bundled from source that is not (yet) in the Blueprint —
     `page_look` rendering a candidate as it is written. ``{js, css, vendor}``,
     the shared script included so the caller can make one document of it.
@@ -281,6 +281,11 @@ def bundle_source(project: Project, doc: dict, page: dict, view: str, load: str,
     target.mkdir(parents=True, exist_ok=True)
     (target / "view.tsx").write_text(view, encoding="utf-8")
     (target / "load.ts").write_text(load, encoding="utf-8")
+    # A split screen's parts, beside the frame that imports them.
+    if parts:
+        (target / "parts").mkdir(exist_ok=True)
+        for key, code in parts.items():
+            (target / "parts" / f"{key}.tsx").write_text(code, encoding="utf-8")
     # AN AUTH PAGE IS THE WHOLE SCREEN. The app draws sign-in and sign-up
     # without the public top bar (`app_sdk`: the auth frame is a bare grid),
     # so the look must not add one: the reviewer refused both auth pages of

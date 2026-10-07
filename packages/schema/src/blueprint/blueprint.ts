@@ -1214,6 +1214,17 @@ export const PageCode = z.object({
   load: z.string().min(1),
   /** `view.tsx` — a client component, the screen itself. */
   view: z.string().min(1),
+  /**
+   * A large screen's parts, by section key: `parts/<key>.tsx`, each a client
+   * component the frame (`view`) renders as `<Part data={props} />`.
+   *
+   * ONE REPLY HAS A CEILING. A screen holding five tables with their dialogs
+   * is five of yesterday's pages in one file, near the writer's output limit,
+   * and every repair resent all of it. Split along the planner's own sections
+   * (`PageSection`), each part is written, compiled and changed on its own.
+   * Empty for a page that is one file.
+   */
+  parts: z.record(z.string(), z.string()).default({}),
   ...artifactBase,
 });
 

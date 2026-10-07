@@ -3209,6 +3209,13 @@
             "type": "string",
             "minLength": 1
           },
+          "parts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {}
+          },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
           },

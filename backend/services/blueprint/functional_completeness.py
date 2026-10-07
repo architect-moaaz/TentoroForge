@@ -1017,7 +1017,8 @@ def launcher_findings(doc: dict) -> list[dict]:
     the only page that launches it — the member had no way to send their
     document, and the workflow, started from anywhere else, saved none."""
     layouts = {str(l.get("page")): l for l in _live(doc.get("pageLayouts"))}
-    code = {str(c.get("page")): str(c.get("view") or "") for c in doc.get("pageCode") or []
+    from services.blueprint.app_sdk import page_code_text
+    code = {str(c.get("page")): page_code_text(c) for c in doc.get("pageCode") or []
             if isinstance(c, dict)}
     by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
     out: list[dict] = []

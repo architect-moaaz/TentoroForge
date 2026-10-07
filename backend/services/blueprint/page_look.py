@@ -62,7 +62,8 @@ def frame_html(css: str, vendor_js: str, page_js: str) -> str:
             f'<script>{vendor_js}</script><script>{page_js}</script></body></html>')
 
 
-def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir: Path) -> dict[str, Any]:
+def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir: Path,
+           parts: dict[str, str] | None = None) -> dict[str, Any]:
     """Bundle the candidate and screenshot it at every viewport.
 
     ``{"shots": {name: path}, "errors": [...]}`` — the errors are what the
@@ -106,7 +107,7 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
         logger.info("[page_look] tokens not projected for the look (%s)", exc)
     project = Project(root=app_root.parent, app_root=app_root)
     try:
-        bundle = bundle_source(project, doc, page, view, load)
+        bundle = bundle_source(project, doc, page, view, load, parts=parts)
     except EditorError as exc:
         raise LookUnavailable(f"bundle: {exc}") from exc
     finally:
@@ -252,12 +253,12 @@ def rank(verdict: dict) -> tuple[int, int]:
 
 
 def look_at(doc: dict, page: dict, app_root: Path, load: str, view: str, client: Any, *,
-            attempt: int = 1, change: str = "") -> tuple[dict, Any]:
+            attempt: int = 1, change: str = "", parts: dict[str, str] | None = None) -> tuple[dict, Any]:
     """Render, then judge. Raises LookUnavailable when this machine cannot."""
     from services.blueprint import references
 
     out_dir = Path(app_root).parent / ".forge" / "look" / str(page.get("id")) / f"look-{attempt}"
-    look = render(doc, page, Path(app_root), load, view, out_dir)
+    look = render(doc, page, Path(app_root), load, view, out_dir, parts=parts)
     shown = references.paths(app_root.parent) if getattr(client, "accepts_images", True) else []
     verdict, spent = judge(doc, page, look, client, references=shown, change=change)
     verdict["shots"] = look["shots"]
