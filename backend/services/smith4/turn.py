@@ -88,6 +88,14 @@ def answer_untried(ask: str) -> str:
             "answer again.")
 
 
+#: The writes that change code or the definition directly: the first of them
+#: in a turn that has tried nothing is asked to reproduce first. TCommerce's
+#: empty bag (measured on a copy, 2026-10-07) went straight to rewriting
+#: /cart through `write_page_code`, tried afterwards, and ran out of steps.
+REPRODUCE_BEFORE = frozenset({"edit_file", "edit_definition", "write_page_code", "rewrite_pages",
+                              "write_frame", "write_section", "set_field"})
+
+
 #: What an edit to the platform's own files hears without a failing try.
 PATCH_NEEDS_PROOF = (
     "That file is the platform's — the engine every application runs on. It is patched for this "
@@ -457,7 +465,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 return _finished(landed, touched, step)
             continue
 
-        if tool in ("edit_file", "edit_definition"):
+        if tool in REPRODUCE_BEFORE:
             if not any(tools.is_trial(o.tool) for o in observations) \
                     and not any(o.said == REPRODUCE_FIRST for o in observations):
                 observations.append(Observation(tool=tool, args=args, status="error", said=REPRODUCE_FIRST))

@@ -205,13 +205,14 @@ def test_a_control_found_unwired_is_tried_once_wired(tmp_path, monkeypatch):
     monkeypatch.setattr(trials, "run", lambda name, args, **k: calls.append(name) or "/?q=tea as Admin: HTTP 200")
     _repo(tmp_path)
     chooser = _Chooser({"tool": "write_frame", "args": {"file": "f", "brief": "search"}},
+                       {"tool": "write_frame", "args": {"file": "f", "brief": "search"}},   # after reproduce-first
                        {"tool": "write_page_code", "args": {"route": "/", "brief": "read q"}},
                        {"tool": "done", "args": {}},
                        {"tool": "open_page", "args": {"route": "/?q=tea"}},
                        {"tool": "done", "args": {}})
     result = handle(project_id="p1", output_dir=str(tmp_path), message="add a search bar", choose=chooser,
                     move=_Writes(tmp_path))
-    assert chooser.seen[3][-1].said == TRY_WIRED
+    assert chooser.seen[4][-1].said == TRY_WIRED
     assert calls == ["write_frame", "write_page_code", "open_page"]
     assert "Changed the frame." in result.said and "Rewrote /." in result.said
 
@@ -315,7 +316,9 @@ def test_what_was_not_done_is_said_beside_what_was(tmp_path, monkeypatch):
         "finding": "/profile was not laid out again: it needs a process the app does not have"})
     _repo(tmp_path)
     out = handle(project_id="p1", output_dir=str(tmp_path), message="rebuild every screen",
+                 # The first write of a turn that tried nothing is asked to reproduce; sent again, it runs.
                  choose=_Chooser({"tool": "rewrite_pages", "args": {"routes": ["all"], "brief": "x"}},
+                                 {"tool": "rewrite_pages", "args": {"routes": ["all"], "brief": "x"}},
                                  {"tool": "done", "args": {}}), move=_Writes(tmp_path))
     assert "Laid out 10 screen(s) again." in out.said and "Not done: /profile was not laid out again" in out.said
 

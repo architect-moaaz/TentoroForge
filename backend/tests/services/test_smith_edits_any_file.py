@@ -225,3 +225,16 @@ def test_a_platform_patch_stays_only_when_a_try_after_it_passed(tmp_path, tries,
     assert patch["status"] == ("active" if kept else "reverted")
     assert ("evaluate(path)" in engine.read_text()) is kept
     assert ("Kept the platform patch" if kept else "Took back") in out.said
+
+
+def test_a_page_rewrite_in_a_turn_that_tried_nothing_is_asked_to_reproduce_too(tmp_path, tries, monkeypatch):
+    """TCommerce's empty bag went straight to rewriting /cart, then tried."""
+    calls = []
+    monkeypatch.setattr("services.smith.writes.run", lambda name, args, **k: calls.append(name) or
+                        {"applied": True, "said": "Rewrote /cart.", "touched": ["app/src/app/cart/view.tsx"]})
+    _repo(tmp_path)
+    rewrite = {"tool": "write_page_code", "args": {"route": "/cart", "brief": "show the items"}}
+    chooser = _Chooser(rewrite, _TRY, dict(rewrite), _TRY, {"tool": "done", "args": {}})
+    _turn(tmp_path, chooser, "the bag is empty after adding")
+    assert chooser.seen[1][-1].said == REPRODUCE_FIRST
+    assert calls == ["write_page_code"]
