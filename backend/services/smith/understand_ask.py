@@ -111,6 +111,7 @@ SHAPE: frozenset[str] = frozenset({
     "target_file", "element_label", "change", "workflow", "rule", "requirement",
     "api", "integration", "new_value", "entity", "field", "asks",
     "email", "person", "person_name", "role",
+    "section", "new_section", "set", "order", "to_route", "from_route", "new_route",
 })
 
 
@@ -118,7 +119,7 @@ def _blank(**given: Any) -> dict[str, Any]:
     """An understanding with nothing in it but `given` — the full shape."""
     out: dict[str, Any] = {k: "" for k in SHAPE}
     out.update({"widgets": [], "field": {}, "clarification_options": [],
-                "asks": []})
+                "asks": [], "new_section": {}, "set": {}, "order": []})
     out.update(given)
     return out
 

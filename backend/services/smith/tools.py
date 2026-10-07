@@ -53,16 +53,22 @@ FIELD_TYPES: dict[str, str] = {
     "email": "string",
     "entity": "string",
     "field": "object",          # {name, type} for add_field; {name} otherwise
+    "from_route": "string",
     "figma_url": "string",
     "integration": "string",
     "key_env": "string",
+    "new_section": "object",    # a section's settings, `label` at least (add_section)
     "new_value": "string",
+    "order": "array",           # of section names (reorder_sections)
     "person": "string",
     "requirement": "string",
     "route": "string",
     "rule": "string",
     "screen": "string",
+    "section": "string",        # a section of the screen, by its label
+    "set": "object",            # the section's settings that change (edit_section)
     "target_file": "string",
+    "to_route": "string",
     "token_env": "string",
     "uxpilot_ref": "string",
     "widgets": "array",         # of strings

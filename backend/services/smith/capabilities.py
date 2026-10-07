@@ -28,6 +28,13 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "whole screen.",
      frozenset({"compose_route", "add_widgets", "rename", "remove",
                 "remove_page"})),
+    ("What a screen holds",
+     "Add a tab, a list, a panel or a dialog to a screen; change one — what it "
+     "shows, how, where it sits, who sees it, what people do there; take one "
+     "off, put them in another order, move one to another screen, fold two "
+     "screens into one, or give a part a screen of its own.",
+     frozenset({"add_section", "edit_section", "remove_section", "reorder_sections",
+                "move_section", "merge_screens", "split_section"})),
     ("What it keeps",
      "Add a box to a kind of record, rename or remove one everywhere it is "
      "used, or add and retire a whole kind of record.",

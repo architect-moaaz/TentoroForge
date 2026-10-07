@@ -195,7 +195,30 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # this application, written out again from what it already says.
     "sync_app": set(),
     "refresh_sample_data": {"entity"},
+    # WHAT A SCREEN HOLDS — its sections (`pages[].sections`): a list, the
+    # panel a record opens in, tabs, dialogs. Changed in the definition and
+    # carried through to the menu, the workflows, the code and the template
+    # (`services.smith.screen_change`). `new_section` and `set` are objects
+    # of a section's settings; `section` names one by its label.
+    "add_section": {"route", "new_section"},
+    "edit_section": {"route", "section", "set"},
+    "remove_section": {"route", "section"},
+    "reorder_sections": {"route", "order"},
+    "move_section": {"route", "section", "to_route"},
+    "merge_screens": {"route", "from_route"},
+    "split_section": {"route", "section"},
 }
+
+#: A section's settings, in the words the screen verbs' help uses.
+SECTION_SETTINGS = (
+    "A section's settings: `label`; `entity` (the record it shows); `shows` (list, board, calendar, "
+    "map, record, summary or form); `placement` (main, tab, panel or dialog); `opensFrom` (for a "
+    "panel or dialog, the section it opens from); `param` (the link that opens a panel on one "
+    "record: `ticket` for `?ticket=<id>`); `addsHere` (records are added here); `live` (it "
+    "refreshes by itself); `menuEntry` (a menu path, \"Support > Refunds\", that opens it); "
+    "`actions` (what people do there, in their words — each gets a process if it has none); "
+    "`roles` (the role names who alone see it; [] for everyone the screen is for)."
+)
 
 #: What each verb is for, in the words a model should recognise. Shown in the
 #: tool description so the choice is made from a list rather than guessed.
@@ -503,6 +526,52 @@ VERB_HELP: dict[str, str] = {
         "the platform's cost of running the models and not an invoice. Needs "
         "nothing, and changes nothing."
     ),
+    "add_section": (
+        "Add a PART to a screen that exists — a list, a tab, the panel a record opens in, a dialog: "
+        "\"add a refunds tab to the support screen\", \"show the order's items in a panel\", \"a "
+        "calendar of bookings on the front desk\", \"a dialog to add a note\". `new_section` is the "
+        "section: at least its `label`, plus any of its settings, and `first`, or `after`/`before` "
+        "another section, for where it goes. " + SECTION_SETTINGS + " Its actions get processes, "
+        "the menu gets its entry, and the screen's code is changed to draw it. NOT a new screen "
+        "(`compose_route`), NOT a chart (`add_widgets`)."
+    ),
+    "edit_section": (
+        "Change a PART of a screen: rename it, show other records, show it as a board or a calendar "
+        "or a map, make it a tab or a panel or a dialog or put it on the screen itself, open it from "
+        "another list, let records be added there or not, make it live, put it in the menu or take "
+        "it out (`menuEntry: \"\"`), give it actions or take them away (`actions`, or "
+        "`add_actions`/`remove_actions`), show it only to some roles or to everyone again (`roles`, "
+        "or `add_roles`/`remove_roles`). `section` names it; `set` holds only what changes. "
+        + SECTION_SETTINGS
+    ),
+    "remove_section": (
+        "Take a PART off a screen that stays: \"remove the refunds tab\", \"take the notes panel off "
+        "the order screen\". The panels and dialogs that open from it go with it, its menu entries "
+        "come off, and its processes are no longer started there (they are kept). NOT `remove_page` "
+        "(the whole screen) and NOT `remove` (one button)."
+    ),
+    "reorder_sections": (
+        "Change the ORDER of a screen's parts — which tab comes first, what sits on top: \"put "
+        "Refunds first\", \"tabs in this order: Open, Waiting, Closed\". `order` lists sections by "
+        "name; those not named keep their order after them. NOT `reorder` (moving controls around "
+        "inside one part)."
+    ),
+    "move_section": (
+        "MOVE a part of one screen to another: \"move the refunds tab to the finance screen\". It "
+        "takes its panels and dialogs, its menu entries and its processes with it. Needs the screen "
+        "it is on, the section, and `to_route`."
+    ),
+    "merge_screens": (
+        "FOLD a whole screen into another, as its parts: \"put coupons and campaigns on one "
+        "marketing screen\", \"merge the refunds page into support\". `route` is the screen that "
+        "stays, `from_route` the one folded in; its sections become tabs, and its menu entries, "
+        "links, processes and widgets follow. The folded-in screen's address stops answering."
+    ),
+    "split_section": (
+        "Give a part of a screen a SCREEN OF ITS OWN: \"make refunds its own page\", \"take the "
+        "calendar out into a separate screen\". It moves with its panels, dialogs and processes to a "
+        "new route (`new_route`, or the screen's route plus its name), which gets a menu entry."
+    ),
 }
 
 
@@ -586,6 +655,29 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     ),
     'back_up': (
         'what happens if I lose all this?',
+    ),
+    'add_section': (
+        'add a refunds tab to the support screen',
+        'on the orders screen, open the order items in a panel when I click an order',
+    ),
+    'edit_section': (
+        'only the team lead should see the refunds tab on the support screen',
+        'show bookings on the front desk as a calendar instead of a list',
+    ),
+    'remove_section': (
+        'take the notes tab off the customer screen',
+    ),
+    'reorder_sections': (
+        'put the refunds tab first on the support screen',
+    ),
+    'move_section': (
+        'move the refunds tab from support to the finance screen',
+    ),
+    'merge_screens': (
+        'fold the campaigns page into the marketing screen',
+    ),
+    'split_section': (
+        'make the refunds tab on support its own page',
     ),
 }
 

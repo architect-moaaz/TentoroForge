@@ -187,3 +187,15 @@ def test_smith_reads_a_screens_sections_its_menu_and_its_parts():
     assert "· section Ticket [ticket] — panel opened from tickets at ?ticket=<id>, record of Ticket" in text
     assert "· section Tickets [tickets] — main, list of Ticket; adds them here; actions: Assign ticket" in text
     assert "parts/refunds.tsx, parts/tickets.tsx" in text
+
+
+def test_the_fallback_shows_a_sections_action_only_to_its_roles():
+    from services.blueprint.template_page import _screen_layout
+    doc = _doc()
+    doc["workflows"] = [{"id": "FLOW-001", "name": "Approve Refund", "purpose": "Approve it.",
+                         "trigger": {"kind": "manual"}, "launchedFrom": ["PAGE-001"], "steps": [],
+                         "inputs": []}]
+    body = _screen_layout(doc, doc["pages"][0])
+    cards = {c.get("props", {}).get("title"): c for c in body["root"]["children"] if c.get("type") == "Card"}
+    assert cards["Approve Refund"]["visibleIf"] == 'user.role == "Lead"'
+    assert "visibleIf" not in cards["Macros"]

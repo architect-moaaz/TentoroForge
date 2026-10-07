@@ -551,6 +551,10 @@ def _section_cards(doc: Mapping[str, Any], page: Mapping[str, Any], sources: lis
     return cards
 
 
+def _norm_words(text: Any) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split())
+
+
 def _shown_to(doc: Mapping[str, Any], sec: Mapping[str, Any]) -> str | None:
     """A section only some roles see (`roles`), as the renderer's `visibleIf`:
     `user.role == "Lead" or user.role == "Admin"`."""
@@ -586,6 +590,13 @@ def _screen_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict:
             continue                       # already the list's add dialog
         card = _workflow_control(doc, page, wf, entity, None, body["dataSources"])
         if card is not None:
+            # AN ACTION OF A SECTION ONLY SOME SEE is shown only to them.
+            owner = next((sec for sec in page.get("sections") or [] if isinstance(sec, dict)
+                          and _norm_words(wf.get("name")) in {_norm_words(a) for a in sec.get("actions") or []}),
+                         None)
+            shown_to = _shown_to(doc, owner) if owner else None
+            if shown_to:
+                card["visibleIf"] = shown_to
             extra.append(card)
     body["root"]["children"] = list(body["root"].get("children") or []) + extra
     body["rationale"] = "composed as a screen — its main list, each section's records, its workflows"
