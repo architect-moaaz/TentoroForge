@@ -74,6 +74,20 @@ REPRODUCE_FIRST = (
     "screen they used, as them (`open_page`, `try_workflow`, `try_request`) — so the change answers "
     "what happens, not what the code seems to say. If this is a change they asked for rather than a "
     "fault, make the edit again.")
+#: What an answer hears on a turn that has tried nothing.
+ANSWER_UNTRIED_HEAD = "Nothing has been tried this turn"
+
+
+def answer_untried(ask: str) -> str:
+    said = " ".join(str(ask).split())[:300]
+    return (f"{ANSWER_UNTRIED_HEAD}, and an answer says what the application does. They said: \u201c{said}\u201d. "
+            "If that could be a report that something behaves wrongly — or a question about what it does — "
+            "use it first: the screen it is about, as the person it is about (`open_page`, `try_workflow`), "
+            "and answer from what it showed, or fix what it showed. Answer without trying only when it is "
+            "not about what the application does (a plan, a cost, how to do something) — then send the "
+            "answer again.")
+
+
 #: What an edit to the platform's own files hears without a failing try.
 PATCH_NEEDS_PROOF = (
     "That file is the platform's — the engine every application runs on. It is patched for this "
@@ -362,11 +376,21 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 "I could not reach my reasoning service just now, so I stopped here"
                 + (" — what is above is done and kept." if landed else " and nothing was changed.")
                 + " Please try again in a few minutes.")))
-        if tool == "answer" and not landed and not any(
-                o.tool == "answer" and o.said == ANSWER_CHANGES_NOTHING for o in observations):
-            observations.append(Observation(tool=tool, args=args, status="error",
-                                            said=ANSWER_CHANGES_NOTHING))
-            continue
+        if tool == "answer" and not landed:
+            heard = [o.said or "" for o in observations if o.tool == "answer" and o.status == "error"]
+            if not any(tools.is_trial(o.tool) for o in observations):
+                # AN ANSWER ABOUT WHAT THE APP DOES COMES FROM USING IT. TCommerce's
+                # tester reported inactive products showing; Smith answered "Yes,
+                # that is exactly how it works" from the business rule, in two
+                # steps, having tried nothing (measured on a copy, 2026-10-07).
+                if not any(h.startswith(ANSWER_UNTRIED_HEAD) for h in heard):
+                    observations.append(Observation(tool=tool, args=args, status="error",
+                                                    said=answer_untried(ctx.ask or ctx.message or "")))
+                    continue
+            elif ANSWER_CHANGES_NOTHING not in heard:
+                observations.append(Observation(tool=tool, args=args, status="error",
+                                                said=ANSWER_CHANGES_NOTHING))
+                continue
         if tool == "done":
             first = _before_done(observations, landed)
             if first:

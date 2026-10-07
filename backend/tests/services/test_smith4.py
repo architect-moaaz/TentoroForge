@@ -137,9 +137,10 @@ def test_an_answer_is_for_a_turn_that_changed_nothing(tmp_path):
     chooser = _Chooser(said, said)
     result = _turn(tmp_path, chooser, "does it store data?")
     assert result.status == "no_op" and result.said == "It stores them in a database."
-    # Asked once whether the answer is one, or a change it meant to make.
-    from services.smith4.turn import ANSWER_CHANGES_NOTHING
-    assert chooser.seen[1][-1].said == ANSWER_CHANGES_NOTHING
+    # Nothing was tried: asked once to use what the question is about first.
+    from services.smith4.turn import ANSWER_UNTRIED_HEAD
+    assert chooser.seen[1][-1].said.startswith(ANSWER_UNTRIED_HEAD)
+    assert "does it store data?" in chooser.seen[1][-1].said
 
 
 def test_an_answer_that_promises_a_change_is_sent_to_make_it(tmp_path):
@@ -150,9 +151,21 @@ def test_an_answer_that_promises_a_change_is_sent_to_make_it(tmp_path):
     chooser = _Chooser({"tool": "answer", "args": {"text": "I'll fix the page — let me rewrite it now."}, "why": ""},
                        _rename("src/a.json", "A"), {"tool": "done", "args": {}, "why": ""})
     result = _turn(tmp_path, chooser, "rename A", move=writes)
-    from services.smith4.turn import ANSWER_CHANGES_NOTHING
-    assert chooser.seen[1][-1].said == ANSWER_CHANGES_NOTHING
+    from services.smith4.turn import ANSWER_UNTRIED_HEAD
+    assert chooser.seen[1][-1].said.startswith(ANSWER_UNTRIED_HEAD)
     assert result.status == "resolved" and "rewrite it now" not in result.said
+
+
+def test_an_answer_after_trying_with_nothing_changed_is_asked_whether_it_is_one(tmp_path, monkeypatch):
+    from services.smith import trials
+    from services.smith4.turn import ANSWER_CHANGES_NOTHING
+    monkeypatch.setattr(trials, "run", lambda name, args, **k: "/shop as Customer: HTTP 200")
+    _repo(tmp_path)
+    said = {"tool": "answer", "args": {"text": "It works: the shop lists only active products."}, "why": ""}
+    chooser = _Chooser({"tool": "open_page", "args": {"route": "/shop", "as": "Customer"}}, said, said)
+    result = _turn(tmp_path, chooser, "inactive products show in the shop")
+    assert chooser.seen[2][-1].said == ANSWER_CHANGES_NOTHING
+    assert result.said == "It works: the shop lists only active products."
 
 
 def test_an_answer_never_adds_prose_to_a_change(tmp_path):
