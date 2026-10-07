@@ -361,8 +361,22 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     # database's own clock (the copy's, not this process's).
     mark = _query(app, "select coalesce(max(created_at), 'epoch')::text from workflow_execution_log")
     started = mark[0][0] if mark and mark[0] else "epoch"
+    payload = dict(payload) if isinstance(payload, dict) else {}
+    def reach(table: str) -> list[str] | None:
+        """The ids this person reaches in `table`, through the app's own data
+        access as them (ownership rules apply); None when it would not say."""
+        code, _w, body = _http(app, "GET", f"/api/data/{table}?limit=5", None, jar)
+        if code != 200:
+            return None
+        try:
+            rows = json.loads(body).get("data")
+        except (ValueError, AttributeError):
+            return None
+        return [str(r.get("id")) for r in rows or [] if isinstance(r, dict) and r.get("id")]
+
+    filled = fill_records(app, doc, flow, payload, reach=reach)
     status, _where, text = _http(app, "POST", f"/api/workflows/{flow.get('id')}/execute",
-                                 {"input": payload if isinstance(payload, dict) else {}}, jar)
+                                 {"input": payload}, jar)
     after = _snapshot(app, tables)
     # Kept whole for whoever reads the run back (`round_trips`): the report
     # below cuts a wide row at 300 characters.
@@ -373,6 +387,8 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
                         "order by created_at, step_index limit 40")
     out = [f"{flow.get('name')} ({flow.get('id')}) run as {who}: HTTP {status}",
            f"answer: {_body(text)}"]
+    if filled:
+        out.insert(1, "filled with real records: " + "; ".join(filled))
     if status == 403:
         out += launch_rights(bench.output_dir, doc, flow)
     if steps:
@@ -393,6 +409,67 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
         out.append("the server printed:")
         out += [f"  {l}" for l in said]
     return scrub("\n".join(out))
+
+
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def _an_id(value: Any) -> bool:
+    if isinstance(value, dict):
+        value = value.get("id")
+    return isinstance(value, (str, int)) and bool(_UUID.match(str(value)) or str(value).isdigit())
+
+
+def fill_records(app: Any, doc: dict, flow: dict, payload: dict,
+                 reach: Callable[[str], list[str] | None] | None = None) -> list[str]:
+    """A required record input given nothing, or something that is not an id
+    ("first"), takes a real record of its kind from the copy — the newest —
+    and a declared `<name>Id` beside it takes the same id. TCommerce's empty
+    bag was never reproduced: Smith sent `productVariant: "first"`, was told
+    "needs productVariantId", sent that, was told "needs productVariant", and
+    ran out of steps (measured on a copy, 2026-10-07). Returns what was filled,
+    for the observation; a value that is an id is never replaced."""
+    from services.blueprint.page_review import _query
+
+    ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)}
+    declared = {str(i.get("name")): i for i in flow.get("inputs") or [] if isinstance(i, dict) and i.get("name")}
+    said: list[str] = []
+    for name, spec in declared.items():
+        ent = ents.get(str(spec.get("entity") or ""))
+        if spec.get("kind") != "record" or ent is None or _an_id(payload.get(name)):
+            continue
+        if not spec.get("required") and name not in payload:
+            continue
+        table = str(ent.get("table") or "")
+        if not table or not table.replace("_", "").isalnum():
+            continue
+        cols = {r[0] for r in _query(app, "select column_name from information_schema.columns "
+                                          f"where table_schema = 'public' and table_name = '{table}'") if r}
+        label = "".join("_" + c.lower() if c.isupper() else c for c in str(ent.get("labelField") or ""))
+        shown = f', "{label}"::text' if label and label in cols else ""
+        order = " order by created_at desc nulls last" if "created_at" in cols else ""
+        # ONE OF THEIRS. The newest row was another customer's cart line, the
+        # app refused it correctly, and the turn read the refusal as the
+        # fault (ToroCommerce copy, 2026-10-07). Read as the person when the
+        # app will say; the newest row only when it will not.
+        theirs = reach(table) if reach else None
+        if theirs is not None and not theirs:
+            said.append(f"{name}: this person has no {ent.get('name')} — make one first (as them) to try this")
+            continue
+        where = (" where id::text in (" + ", ".join("'" + t.replace("'", "") + "'" for t in theirs) + ")"
+                 if theirs else "")
+        rows = _query(app, f'select id::text{shown} from "{table}"{where}{order} limit 1')
+        if not rows or not rows[0]:
+            said.append(f"{name}: no {ent.get('name')} exists to use")
+            continue
+        rid = rows[0][0]
+        payload[name] = rid
+        said.append(f"{name} = {ent.get('name')} {rows[0][1] if len(rows[0]) > 1 and rows[0][1] else ''} ({rid})".replace("  ", " "))
+        twin = f"{name}Id"
+        if twin in declared and not _an_id(payload.get(twin)):
+            payload[twin] = rid
+            said.append(f"{twin} = the same id")
+    return said
 
 
 def launch_rights(output_dir: str, doc: dict, flow: dict) -> list[str]:

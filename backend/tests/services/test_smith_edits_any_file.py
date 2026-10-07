@@ -21,6 +21,13 @@ from tests.services._loop_fixtures import _Chooser, _repo, _Writes
 ENGINE = "src/lib/workflows/engine.ts"
 
 
+@pytest.fixture(autouse=True)
+def _their_words_ask_for_it(monkeypatch):
+    """A scripted `requested: true` is a change the person asked for; the
+    independent check (`turn.asked_for`) is a model call, not run here."""
+    monkeypatch.setattr("services.smith4.turn.asked_for", lambda words, change: True)
+
+
 def _app(tmp_path: Path, rel: str, text: str) -> Path:
     path = tmp_path / "app" / rel
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -190,8 +197,11 @@ _FAILS = "Add to Cart (FLOW-001) run as Customer: HTTP 422\nanswer: not enough s
 def test_the_first_edit_of_a_turn_that_tried_nothing_is_asked_to_reproduce(tmp_path, tries):
     _repo(tmp_path)
     _app(tmp_path, "src/components/A.tsx", "a\n")
-    chooser = _Chooser(_edit("src/components/A.tsx", "a", "b"), _edit("src/components/A.tsx", "a", "b"), _TRY)
+    again = _edit("src/components/A.tsx", "a", "b")
+    again["args"]["requested"] = True                              # the change they asked for
+    chooser = _Chooser(_edit("src/components/A.tsx", "a", "b"), _edit("src/components/A.tsx", "a", "b"), again, _TRY)
     _turn(tmp_path, chooser, "rename a to b")
+    assert chooser.seen[2][-1].said == REPRODUCE_FIRST           # asking twice is not a way past it
     assert chooser.seen[1][-1].said == REPRODUCE_FIRST
     assert (tmp_path / "app/src/components/A.tsx").read_text() == "b\n"
 
@@ -259,3 +269,188 @@ def test_a_trial_that_names_nobody_is_the_person_the_screen_is_for():
     from services.blueprint.app_check import visits
     by_route = {v["route"]: v["as"] for v in visits(doc) if not v.get("section")}
     assert by_route["/cart"] == "Customer" and by_route["/admin/products"] == "Admin"
+
+
+def test_a_trial_fills_a_missing_record_with_a_real_one(monkeypatch):
+    """TCommerce's empty bag was never reproduced: Smith sent
+    `productVariant: "first"`, then `productVariantId: "first"`, and each run
+    was refused for the other (measured on a copy, 2026-10-07)."""
+    from services.smith.trials import fill_records
+    vid = "1d6f02a5-a1dd-4918-9682-e86440f2d964"
+
+    def query(app, sql):
+        if "information_schema" in sql:
+            return [["id"], ["sku"], ["created_at"]]
+        assert 'from "product_variants"' in sql and "order by created_at desc" in sql
+        return [[vid, "OCS-S-007"]]
+
+    monkeypatch.setattr("services.blueprint.page_review._query", query)
+    doc = {"data": {"entities": [{"id": "ENTITY-004", "name": "ProductVariant", "table": "product_variants",
+                                  "labelField": "sku"}]}}
+    flow = {"id": "FLOW-001", "inputs": [
+        {"entity": "ENTITY-004", "kind": "record", "name": "productVariant", "required": True},
+        {"kind": "field", "name": "quantity", "required": True, "type": "integer"},
+        {"kind": "field", "name": "productVariantId", "required": True, "type": "string"}]}
+    payload = {"productVariant": "first", "quantity": 1}
+    said = fill_records(None, doc, flow, payload)
+    assert payload == {"productVariant": vid, "quantity": 1, "productVariantId": vid}
+    assert said[0] == f"productVariant = ProductVariant OCS-S-007 ({vid})"
+    given = {"productVariant": vid, "quantity": 1, "productVariantId": vid}
+    assert fill_records(None, doc, flow, dict(given)) == []      # an id given is never replaced
+
+
+def test_a_workflow_edit_the_app_cannot_be_written_from_is_refused(tmp_path, monkeypatch):
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Shop", domain="retail")
+    svc.doc["workflows"] = [{"id": "FLOW-001", "name": "Ping", "trigger": {"kind": "manual"}, "steps": [
+        {"key": "done", "name": "Done", "type": "end", "config": {}}]}]
+    svc.save()
+    monkeypatch.setattr("services.smith.sync_app.sync", lambda s, root: {"changed": [], "added": [], "removed": [],
+                                                                       "database": "in step"})
+    def refuse(doc, root):
+        raise ValueError("workflow Ping: node id 'trigger' is used twice")
+    monkeypatch.setattr("services.blueprint.projection.project_workflows", refuse)
+    out = file_edit.edit_definition(str(tmp_path), "workflows.FLOW-001", '"Done"', '"Finished"')
+    assert not out["applied"] and "used twice" in out["finding"]
+    assert BlueprintService.load(output_dir=tmp_path).doc["workflows"][0]["steps"][0]["name"] == "Done"
+
+
+def test_a_filled_record_is_one_the_person_can_reach(monkeypatch):
+    """The newest cart line was another customer's; the app refused it,
+    correctly, and the turn read the refusal as the fault (ToroCommerce copy)."""
+    from services.smith.trials import fill_records
+    mine = "8426eda8-a93a-4b9a-8299-e7b9128a3888"
+    seen: list[str] = []
+
+    def query(app, sql):
+        seen.append(sql)
+        if "information_schema" in sql:
+            return [["id"], ["created_at"]]
+        return [[mine]] if mine in sql else [["not-mine"]]
+
+    monkeypatch.setattr("services.blueprint.page_review._query", query)
+    doc = {"data": {"entities": [{"id": "ENTITY-005", "name": "CartItem", "table": "cart_items"}]}}
+    flow = {"id": "FLOW-002", "inputs": [{"entity": "ENTITY-005", "kind": "record", "name": "cartItem", "required": True}]}
+    payload = {"cartItem": "any"}
+    fill_records(None, doc, flow, payload, reach=lambda table: [mine])
+    assert payload["cartItem"] == mine and f"'{mine}'" in seen[-1]
+    none = {"cartItem": "any"}
+    said = fill_records(None, doc, flow, none, reach=lambda table: [])
+    assert none == {"cartItem": "any"} and "has no CartItem" in said[0]
+
+
+def test_a_different_control_failing_after_a_fix_is_not_the_same_failure():
+    """The minus button was fixed and worked; the plus button answered 422;
+    the turn said "failed the same way" (ToroCommerce copy, 2026-10-07)."""
+    from services.smith.loop import Observation
+    from services.smith4.turn import _failing_note, _still_failing
+    before = Observation(tool="open_page", args={"route": "/cart", "as": "Customer"}, status="read",
+                         said='/cart as Customer: HTTP 200\ncontrols, each pressed from a fresh load:\n'
+                              '  button "Decrease quantity": errors (422)\n  button "Increase quantity": workflow (ran (1))')
+    change = Observation(tool="edit_file", args={"path": "src/app/cart/view.tsx"}, status="resolved",
+                         said="Changed `src/app/cart/view.tsx`.", touched=["app/src/app/cart/view.tsx"])
+    after = Observation(tool="open_page", args={"route": "/cart", "as": "Customer"}, status="read",
+                        said='/cart as Customer: HTTP 200\ncontrols, each pressed from a fresh load:\n'
+                             '  button "Decrease quantity": workflow (ran (1))\n  button "Increase quantity": errors (422)')
+    assert _still_failing([before, change, after]) == []
+    note = _failing_note([before, change, after])
+    assert "same way" not in note and 'button "Increase quantity"' in note
+    still = Observation(tool="open_page", args={"route": "/cart", "as": "Customer"}, status="read",
+                        said=before.said)
+    assert _still_failing([before, change, still]) and "same way" in _failing_note([before, change, still])
+
+
+def test_a_turns_own_steps_are_read_from_the_cache_by_the_next_step(monkeypatch):
+    """On UAT copies Smith's 127 steps sent 2.5M tokens uncached, nearly all of
+    it the turn's own steps re-sent in full (2026-10-07). Each step is a block
+    and the latest carries the cache mark; the text is unchanged."""
+    from services.smith import loop
+    from services.smith.loop import Observation, _shown
+    sent: list[list[dict]] = []
+    monkeypatch.setattr("services.smith.understand_ask._default_provider",
+                        lambda blocks, reasoning=None, images=(): sent.append(blocks) or
+                        '{"tool": "done", "args": {}, "why": ""}')
+    obs = [Observation(tool="read_file", args={"path": f"f{i}"}, status="read", said=f"line {i}") for i in range(3)]
+    loop.next_step("fix it", "the app", obs)
+    blocks = sent[-1]
+    marked = [i for i, b in enumerate(blocks) if b.get("cache_control")]
+    assert marked == [0, 1, len(blocks) - 2], marked            # rules, app, the latest step
+    assert "f2" in blocks[-2]["text"] and "Decide the next step" in blocks[-1]["text"]
+    # Twenty steps in, the shown window starts at a jump, not one step later each time.
+    many = [Observation(tool="grep", args={"pattern": str(i)}, status="read", said="x") for i in range(20)]
+    assert _shown(many[:19])[0] is _shown(many[:20])[0]
+
+
+def test_the_blocks_say_exactly_what_the_string_prompt_says(monkeypatch):
+    from services.smith import loop
+    from services.smith.loop import Observation
+    sent: list = []
+    monkeypatch.setattr("services.smith.understand_ask._default_provider",
+                        lambda blocks, reasoning=None, images=(): sent.append(blocks) or
+                        '{"tool": "done", "args": {}, "why": ""}')
+    said: list[str] = []
+    obs = [Observation(tool="read_file", args={"path": "a"}, status="read", said="one"),
+           Observation(tool="grep", args={"pattern": "b"}, status="read", said="two")]
+    loop.next_step("fix it", "the app", obs, provider=lambda text: said.append(text) or
+                   '{"tool": "done", "args": {}, "why": ""}')
+    loop.next_step("fix it", "the app", obs)
+    assert "".join(b["text"] for b in sent[-1]) == said[-1]
+
+
+def test_a_steps_block_is_the_same_text_when_a_newer_step_follows(monkeypatch):
+    """A block that changes after it is cached is never read back."""
+    from services.smith import loop
+    from services.smith.loop import Observation
+    sent: list = []
+    monkeypatch.setattr("services.smith.understand_ask._default_provider",
+                        lambda blocks, reasoning=None, images=(): sent.append(blocks) or
+                        '{"tool": "done", "args": {}, "why": ""}')
+    obs = [Observation(tool="read_file", args={"path": f"f{i}"}, status="read", said=f"line {i}") for i in range(4)]
+    loop.next_step("fix it", "the app", obs[:3])
+    loop.next_step("fix it", "the app", obs)
+    first, second = sent
+    assert [b["text"] for b in first[:-1]] == [b["text"] for b in second[:len(first) - 1]]
+
+
+def test_requested_is_checked_against_their_words_not_taken_from_smith(tmp_path, tries, monkeypatch):
+    """TCommerce's "bag is empty" was rewritten as a requested change."""
+    from services.smith4.turn import NOT_ASKED_FOR
+    judged = []
+    monkeypatch.setattr("services.smith4.turn.asked_for", lambda words, change: judged.append(words) or False)
+    _repo(tmp_path)
+    _app(tmp_path, "src/components/A.tsx", "a\n")
+    claim = _edit("src/components/A.tsx", "a", "b")
+    claim["args"]["requested"] = True
+    chooser = _Chooser(claim, _TRY, {"tool": "done", "args": {}})
+    _turn(tmp_path, chooser, "the bag is empty after adding")
+    assert chooser.seen[1][-1].said == NOT_ASKED_FOR and judged == ["the bag is empty after adding"]
+    assert (tmp_path / "app/src/components/A.tsx").read_text() == "a\n"
+
+
+def test_a_turn_a_check_started_changes_nothing_for_a_fault_it_has_not_seen(tmp_path, tries):
+    from services.smith4 import handle
+    from services.smith4.turn import FAULT_NOT_SEEN
+    _repo(tmp_path)
+    _app(tmp_path, "src/components/A.tsx", "a\n")
+    claim = _edit("src/components/A.tsx", "a", "b")
+    claim["args"]["requested"] = True                    # means nothing when nobody asked
+    chooser = _Chooser(_TRY, claim, {"tool": "done", "args": {}})   # the try passes: no fault
+    handle(project_id="p1", output_dir=str(tmp_path), message="/cart: plus button errors (422)",
+           choose=chooser, move=_Writes(tmp_path), unattended=True)
+    assert chooser.seen[2][-1].said == FAULT_NOT_SEEN
+    assert (tmp_path / "app/src/components/A.tsx").read_text() == "a\n"
+    tries.append(_FAILS)                                  # now the try shows the fault
+    chooser = _Chooser(_TRY, _edit("src/components/A.tsx", "a", "b"), _TRY, {"tool": "done", "args": {}})
+    handle(project_id="p1", output_dir=str(tmp_path), message="/cart: plus button errors (422)",
+           choose=chooser, move=_Writes(tmp_path), unattended=True)
+    assert (tmp_path / "app/src/components/A.tsx").read_text() == "b\n"
+
+
+def test_a_workflows_own_refusal_is_an_answer_in_the_page_check():
+    """The plus button at the stock limit was reported broken, and the repair
+    it started rewrote a working workflow (ToroCommerce copy, 2026-10-08)."""
+    src = (Path(__file__).resolve().parents[2] / "scripts/page_shots.mjs").read_text()
+    assert "refused: body?.refused === true" in src and '"refused"' in src
+    assert "status of 422/.test(errors[i])" in src
+    from services.blueprint.page_review import BROKEN_OUTCOMES
+    assert "refused" not in BROKEN_OUTCOMES

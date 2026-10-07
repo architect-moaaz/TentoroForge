@@ -476,6 +476,14 @@ WRITES = WRITES + (
      "steps, a page's access, a field, a landing page, a rule; the verbs remain for larger changes.",
      {"section": "string", "find": "string", "replace": "string", "why": "string"}),
 )
+#: `requested`, on every write that changes code or the definition: true only
+#: when the person asked for this change itself. Until a try has run in the
+#: turn, a write without it is sent to reproduce first (`smith4.turn`).
+_REQUESTED = {"edit_file", "edit_definition", "write_page_code", "rewrite_pages", "write_frame",
+              "write_section", "set_field"}
+WRITES = tuple((n, d + " `requested: true` only when they asked for this change itself — never when "
+                "they reported something not working.", {**a, "requested": "boolean"})
+               if n in _REQUESTED else (n, d, a) for n, d, a in WRITES)
 WRITE_NAMES = frozenset(name for name, _d, _a in WRITES)
 
 

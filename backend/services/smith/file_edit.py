@@ -453,6 +453,14 @@ def edit_definition(output_dir: str, section: str, find: str, replace: str, why:
     try:
         svc.validate()
         _check(root, svc.doc, value if isinstance(value, dict) else {root: value}, natural)
+        if root == "workflows":
+            # WRITTEN OUT BEFORE IT IS KEPT. A workflow the projection cannot
+            # write stops EVERY workflow of the app being written (a guard
+            # node twice did, 2026-10-07): tried in a scratch folder first.
+            import tempfile
+            from services.blueprint.projection import project_workflows
+            with tempfile.TemporaryDirectory() as scratch:
+                project_workflows(svc.doc, scratch)
         affected = [str(value.get("id"))] if isinstance(value, dict) and re.match(
             r"^[A-Z]+-\d{3,}$", str(value.get("id") or "")) else []
         svc.commit(user_request=why or f"Edit {section}", smith_interpretation=f"Edited {section}",
