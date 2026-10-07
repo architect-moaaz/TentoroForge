@@ -212,7 +212,7 @@ def _refresh_platform_files(output_dir: Path) -> None:
                 # routes an app carries are the platform's. A fix to them
                 # reached a published app only after a Smith turn, so a
                 # republish asked for to deliver one shipped the old copy.
-                refresh_engine(output_dir, doc)
+                refresh_engine(output_dir, doc)          # re-applies the app's patches too
                 break
     except Exception:  # noqa: BLE001 — a stale frame is not a failed publish
         import logging as _logging

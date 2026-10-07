@@ -180,6 +180,13 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
     if changed:
         logger.info("[engine] %s: %d engine file(s) brought up to the platform's: %s",
                     root, len(changed), ", ".join(changed[:8]))
+    # THE APP'S OWN PATCHES OUTLIVE A REFRESH (`file_edit`): put back, or
+    # retired where the platform now has the fix.
+    try:
+        from services.smith.file_edit import reapply
+        reapply(root.parent)
+    except Exception:  # noqa: BLE001 — a patch is never a reason to lose the refresh
+        logger.warning("[engine] patches could not be re-applied for %s", root, exc_info=True)
     return changed
 
 
@@ -318,6 +325,11 @@ def sync(svc: Any, app_root: str) -> dict:
     # THE DATABASE IS PART OF THE APPLICATION TOO. A record added before its
     # table could be created (Test2's Area) is in the schema files and not in
     # the database; bringing the app in step brings that in step as well.
+    try:
+        from services.smith.file_edit import reapply
+        reapply(root.parent)
+    except Exception:  # noqa: BLE001
+        logger.warning("[sync] patches could not be re-applied for %s", root, exc_info=True)
     pushed = push_now(root)
     try:
         (root.parent / ".forge" / STAMP_FILE).write_text(platform_stamp(), "utf-8")

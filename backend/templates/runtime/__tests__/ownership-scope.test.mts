@@ -635,6 +635,32 @@ console.log("guest: after signing in, the guest cart is still theirs");
   ok(!mine.includes("cart-g2") && !mine.includes("cart-bob"), "and nobody else's");
 }
 
+// ── A filter in the column's own type ──────────────────────────────────────
+// TCommerce and ToroCommerce (forge-v3, 2026-10-07): `where: { isActive: true }`
+// reached the engine as the TEXT "true", the driver wrote it as false, and both
+// shops' home pages listed exactly their inactive products.
+
+const products = makeTable("products", ["id", "name", "isActive", "stock", "createdAt"]);
+products.isActive.columnType = "PgBoolean"; products.isActive.dataType = "boolean";
+products.stock.columnType = "PgInteger"; products.stock.dataType = "number";
+ROWS.products = [
+  { id: "p1", name: "Linen Shirt", isActive: false, stock: 0, createdAt: d(1) },
+  { id: "p2", name: "Oxford Shirt", isActive: true, stock: 4, createdAt: d(2) },
+  { id: "p3", name: "Chinos", isActive: true, stock: 4, createdAt: d(3) },
+];
+engine.registerEntity("products", products, { slug: "products" });
+
+console.log("filters: a yes/no or number filter given as text means what it says");
+{
+  eqJson(ids((await engine.query("products", { filters: { isActive: "true" } }, asAlice)).data), ["p2", "p3"],
+    "isActive=\"true\" lists the active products");
+  eqJson(ids((await engine.query("products", { filters: { isActive: "false" } }, asAlice)).data), ["p1"],
+    "and \"false\" the inactive one");
+  eqJson(ids((await engine.query("products", { filters: { stock: "4" } }, asAlice)).data), ["p2", "p3"],
+    "a number column compares as a number");
+  eqJson(engine.asColumnValue(products.name, "true"), "true", "a text column keeps its text");
+}
+
 // ── row_access rules — the configurable half ───────────────────────────────
 //
 // Everything above is what the Blueprint declares structurally. These are

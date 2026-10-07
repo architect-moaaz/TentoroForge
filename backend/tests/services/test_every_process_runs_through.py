@@ -419,5 +419,5 @@ def test_a_process_is_run_as_the_people_it_is_for():
            "pages": [{"id": "PAGE-002", "route": "/cart", "users": ["ROLE-002"]}],
            "workflows": [{**FLOWS[0], "launchedFrom": ["PAGE-002"]}]}
     brief = json.loads(pt._brief(doc, doc["workflows"], {}))
-    assert brief["processes"][0]["for"] == ["Customer"]
-    assert "never as the administrator unless it is theirs" in pt.INPUTS_SYSTEM
+    assert [s["route"] for s in brief["processes"][0]["startedFrom"]] == ["/cart"]
+    assert "never as a stand-in for a customer" in pt.INPUTS_SYSTEM

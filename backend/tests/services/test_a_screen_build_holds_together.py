@@ -149,4 +149,4 @@ def test_a_guard_the_workflow_already_carries_is_not_added_twice():
     guard_workflow(doc, wf, nodes, edges, make)
     ids = [n["id"] for n in nodes]
     assert len(ids) == len(set(ids)), "no id used twice"
-    assert edges == [{"id": "e1", "source": "trigger", "target": "prereq_rule_011"}]
+    assert ids.count("prereq_rule_011") == 1

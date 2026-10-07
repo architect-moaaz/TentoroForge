@@ -25,7 +25,7 @@ import path from "path";
 // actually read/write the database. Every generated app emits these.
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { getTableName, is, Table, eq, and, sql } from "drizzle-orm";
+import { getTableName, is, Table, eq, ne, gt, gte, lt, lte, inArray, notInArray, and, sql } from "drizzle-orm";
 // Self-heal integration — every catch site below reports the failure to
 // Forge so Smith can pick it up and edit the offending file directly.
 // Fire-and-forget: a report failure never crashes the caller.
@@ -1025,11 +1025,19 @@ export function _finalizeInsert(
 /** A lookup whose key is missing: it matches no row (see `_buildWhere`). */
 export const MATCHES_NOTHING = Symbol("matches-nothing");
 
-/** The comparisons a WHERE value may make, by the names authors write. */
-const _WHERE_OPS: Record<string, string> = {
-  eq: "eq", equals: "eq", ne: "!=", neq: "!=", not_equals: "!=", not: "!=",
-  gt: ">", gte: ">=", lt: "<", lte: "<=",
+/** The comparisons an object `where` value may name, and their spellings. */
+const _OPS: Record<string, "ne" | "gt" | "gte" | "lt" | "lte" | "in" | "notIn"> = {
+  ne: "ne", neq: "ne", not: "ne", "!=": "ne", gt: "gt", ">": "gt", gte: "gte", ">=": "gte",
+  lt: "lt", "<": "lt", lte: "lte", "<=": "lte", in: "in", notIn: "notIn", nin: "notIn",
 };
+
+/** `{ ne: v }` → `{ name: "ne", value: v }`; anything else is not a comparison. */
+export function _comparison(ref: unknown): { name: string; value: any } | null {
+  if (!ref || typeof ref !== "object" || Array.isArray(ref)) return null;
+  const keys = Object.keys(ref as object);
+  if (keys.length !== 1 || !(keys[0] in _OPS)) return null;
+  return { name: _OPS[keys[0]], value: (ref as any)[keys[0]] };
+}
 
 export function _buildWhere(
   table: any, where: unknown, ctx: WorkflowExecutionContext,
@@ -1043,26 +1051,33 @@ export function _buildWhere(
   const dropped: string[] = [];
   const emptyRefs: string[] = [];
   const conds = entries
-    .map(([field, given]) => {
+    .map(([field, ref]) => {
       if (!table[field]) { dropped.push(field); return undefined; }
-      // A COMPARISON, NOT ONLY AN EQUALITY: `{ne: "{{customer.id}}"}`,
-      // `{gte: 10}`. "Is this email someone ELSE's?" needs `id != me`, and
-      // written that way it reached Postgres as the text "[object Object]"
-      // — ToroCommerce's Edit Profile then failed on every save (forge-v3,
-      // 2026-10-07). One operator per field; equality stays the plain form.
-      let op = "eq";
-      let ref: unknown = given;
-      if (given && typeof given === "object" && !Array.isArray(given)) {
-        const pairs = Object.entries(given as Record<string, unknown>);
-        const sym = pairs.length === 1 ? _WHERE_OPS[pairs[0][0]] : undefined;
-        if (!sym) {
-          throw new Error(
-            `WHERE ${field} is ${JSON.stringify(given)} — a value, or one comparison of ` +
-            `${Object.keys(_WHERE_OPS).join(", ")}`,
-          );
+      // A COMPARISON OTHER THAN "EQUALS": `{ id: { ne: "{{customer.id}}" } }`.
+      // Only equality existed, so the object itself reached Postgres —
+      // ToroCommerce's "email not already used by another customer" check
+      // sent "[object Object]" as a uuid and Edit Profile failed for everyone
+      // (forge-v3, 2026-10-07).
+      const op = _comparison(ref);
+      if (op) {
+        const raw = _resolveRef(op.value, ctx);
+        const list = Array.isArray(op.value) ? op.value.map((x: unknown) => _resolveRef(x, ctx)) : raw;
+        if (op.name === "in" || op.name === "notIn") {
+          const vals = (Array.isArray(list) ? list : [list]).filter((x) => x !== "" && x != null)
+            .map((x) => _coerceValue(x, table[field]));
+          if (!vals.length) return op.name === "in" ? sql`false` : undefined;
+          return op.name === "in" ? inArray(table[field], vals as any[]) : notInArray(table[field], vals as any[]);
         }
-        op = sym;
-        ref = pairs[0][1];
+        if (raw === "" || raw == null) {
+          // "Not equal to nothing" holds for every row; any other comparison
+          // with nothing is not a filter anyone wrote.
+          if (op.name === "ne") return undefined;
+          emptyRefs.push(field);
+          return undefined;
+        }
+        const val = _coerceValue(raw, table[field]);
+        const fn = { ne, gt, gte, lt, lte }[op.name as "ne" | "gt" | "gte" | "lt" | "lte"];
+        return fn(table[field], val as any);
       }
       // An unresolved variable reference must never become a literal in a
       // WHERE. `_resolveRef` returns the ref STRING when it names nothing,
@@ -1094,11 +1109,7 @@ export function _buildWhere(
         emptyRefs.push(field);
         return undefined;
       }
-      const value = _coerceValue(v, table[field]);
-      if (op === "eq") return eq(table[field], value);
-      return op === "!=" ? sql`${table[field]} <> ${value}` : op === ">" ? sql`${table[field]} > ${value}`
-        : op === ">=" ? sql`${table[field]} >= ${value}` : op === "<" ? sql`${table[field]} < ${value}`
-        : sql`${table[field]} <= ${value}`;
+      return eq(table[field], _coerceValue(v, table[field]));
     })
     .filter(Boolean) as any[];
   // A LOOKUP WITH A MISSING KEY FINDS NOTHING. Dropping the empty condition

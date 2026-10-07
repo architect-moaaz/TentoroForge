@@ -41,7 +41,7 @@ INPUTS_SCHEMA: dict[str, Any] = {
         "required": ["workflow", "as", "input"],
         "properties": {
             "workflow": {"type": "string", "description": "The process id (FLOW-…)."},
-            "as": {"type": "string", "description": "The role that runs it, by name; empty for the administrator."},
+            "as": {"type": "string", "description": "The role that runs it, by name, one of its `runBy`; \"signed out\" for a visitor."},
             # A list of pairs, each value as JSON: structured output takes no
             # object whose keys it does not know in advance.
             "input": {"type": "array", "description": "One entry per input given, named as the process declares it.",
@@ -61,11 +61,12 @@ INPUTS_SYSTEM = (
     "optional ones when a real person would. Leave out file and image inputs: the run attaches a test file to "
     "each. A row marked `new` was made by this run moments ago — for a process that changes or deletes a "
     "record, take a `new` one of the right kind when there is one, as nothing depends on it yet. Do not try to make "
-    "a process refuse: the run proves it works. When a process shows `lastRun`, its last input "
+    "a process refuse: the run proves it works. RUN EACH AS THE PERSON IT IS FOR: one of its `runBy`, "
+    "the audience of the screens it starts from (`startedFrom`), who meets its rules — a rule that "
+    "needs a customer's own account is met by a customer. The administrator runs only what only the "
+    "administrator may run; never as a stand-in for a customer or a guest. When a process shows `lastRun`, its last input "
     "was refused or failed for the reason given there: choose one that the rule accepts — a name "
-    "not already taken, a record nothing else depends on. Run each as a role in its `runBy`, and as the "
-    "people it is for (`for`) — a process for one kind of person is run as that person, never as the "
-    "administrator unless it is theirs."
+    "not already taken, a record nothing else depends on."
 )
 
 #: The answer to "was each refusal right?" — one small call for all of them.
@@ -135,10 +136,28 @@ def _brief(doc: dict, flows: list[dict], records: dict[str, list[dict]],
            before: dict[str, str] | None = None) -> str:
     from services.blueprint.projection import launch_roles
 
+    from services.blueprint.projection import restricted_roles
+
     entities = {str(e.get("id")): e for e in ((doc.get("data") or {}).get("entities") or [])}
     roles = launch_roles(doc)
-    role_names = {str(r.get("id")): str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    names = [str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict) and r.get("name")]
     pages = {str(p.get("id")): p for p in doc.get("pages") or [] if isinstance(p, dict)}
+
+    def who(flow_id: str) -> list[str]:
+        """`runBy` in role names. "Anyone signed in" was handed over as the
+        token `@signed-in`, and the inputs' author read it as "the
+        administrator": ToroCommerce's Add to Cart, Place Order and the cart
+        processes were all run as Admin, refused correctly, and "repaired"
+        for two rounds each (forge-v3, 2026-10-07)."""
+        out: list[str] = []
+        for r in roles.get(flow_id) or []:
+            if r == "*":
+                out += names + ["signed out"]
+            elif r == "@signed-in":
+                out += names
+            else:
+                out.append(str(r))
+        return list(dict.fromkeys(out))
     shown = []
     for w in flows:
         inputs = []
@@ -147,13 +166,11 @@ def _brief(doc: dict, flows: list[dict], records: dict[str, list[dict]],
             if i.get("entity"):
                 row["entity"] = str((entities.get(str(i["entity"])) or {}).get("name") or i["entity"])
             inputs.append(row)
+        started = [{"route": pages[str(p)].get("route"), "access": pages[str(p)].get("access"),
+                    "for": restricted_roles(doc, pages[str(p)]) or None}
+                   for p in w.get("launchedFrom") or [] if str(p) in pages]
         row = {"workflow": w.get("id"), "name": w.get("name"), "purpose": w.get("description") or "",
-               "inputs": inputs, "runBy": roles.get(str(w.get("id"))) or [],
-               # WHO IT IS FOR: the people of the screens it starts from.
-               # Add to Cart, started from a screen anyone may open, was run
-               # as the administrator and refused (ToroCommerce, 2026-10-07).
-               "for": sorted({role_names.get(str(u), str(u)) for pid in w.get("launchedFrom") or []
-                              for u in (pages.get(str(pid)) or {}).get("users") or []})}
+               "inputs": inputs, "runBy": who(str(w.get("id"))), "startedFrom": started}
         # WHAT THE LAST RUN WAS TOLD. F&B's first round picked "Soups", which
         # the seed already had, a category that still held food items and a
         # dish already ordered — each refused, correctly, by the app's own
