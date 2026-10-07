@@ -861,6 +861,7 @@ Reply with the rationale and the full contents of both files."""
 def _page_brief(doc: dict, page: dict) -> dict:
     from services.blueprint.page_usage import page_requirements
     pages = {str(p.get("id")): p for p in doc.get("pages") or []}
+    from services.blueprint.app_flows import hand_offs
     from services.blueprint.app_sdk import page_keys, workflow_keys
     pkeys, wkeys = page_keys(doc), workflow_keys(doc)
     launched = [w for w in doc.get("workflows") or []
@@ -898,6 +899,15 @@ def _page_brief(doc: dict, page: dict) -> dict:
         "sdkKey": pkeys.get(str(page.get("id"))),
         "primaryEntity": (ents.get(str(data.get("primaryEntity"))) or {}).get("name"),
         "supportingEntities": [(ents.get(str(x)) or {}).get("name") for x in data.get("supportingEntities") or []],
+        # WHERE EACH MOVE LEADS (`flows`): placing an order opens the order;
+        # adding to a cart offers the way to it. Left to the writer, ToroCommerce
+        # placed the order and stayed on the emptied cart (2026-10-07).
+        **({"handOffs": {"rule": HAND_OFF_RULE, "moves": [
+            {**{k: v for k, v in h.items() if k in ("flow", "does", "then", "toName", "carries")},
+             "to": {"sdkKey": pkeys.get(str(h["to"])), "address": h["address"]},
+             **({"workflow": f"workflows.{wkeys.get(h['workflow'])}"} if h.get("workflow") and wkeys.get(h["workflow"]) else {})}
+            for h in hand_offs(doc, str(page.get("id")))]}}
+           if hand_offs(doc, str(page.get("id"))) else {}),
         "leadsTo": [{"page": pages[t].get("name"), "sdkKey": pkeys.get(t), "route": pages[t].get("route")}
                     for t in (str(x) for x in page.get("navigatesTo") or []) if t in pages],
         "workflowsLaunchedHere": [{"sdkKey": wkeys.get(str(w.get("id"))), "name": w.get("name"),
@@ -1191,6 +1201,27 @@ def _unwired_actions(doc: dict, page: dict, view: str) -> list[str]:
             out.append(f"view.tsx: `{w.get('name')}` is launched from this page (workflows.{key}) "
                        f"but nothing on it runs it — give it a control: a WorkflowForm, a "
                        f"WorkflowButton, or useWorkflow(workflows.{key}).")
+    return out
+
+
+def _unfollowed_flows(doc: dict, page: dict, view: str) -> list[str]:
+    """Each flow move off this screen (`go` or `offer`) whose target the
+    code never names. Placing an order that opens the order needs the code
+    to know the orders screen exists; one that never links there leaves the
+    person on an emptied cart (ToroCommerce, 2026-10-07)."""
+    from services.blueprint.app_flows import hand_offs
+    from services.blueprint.app_sdk import page_keys
+
+    keys = page_keys(doc)
+    out = []
+    for h in hand_offs(doc, str(page.get("id"))):
+        if h["then"] not in ("go", "offer") or h["to"] == str(page.get("id")):
+            continue
+        key = keys.get(h["to"])
+        if key and not re.search(r"\bpages\." + re.escape(key) + r"\b", view):
+            how = "take them there" if h["then"] == "go" else "show the way there"
+            out.append(f"view.tsx: in the flow \"{h['flow']}\", after \"{h['does']}\" this screen should {how} — "
+                       f"{h['toName']} (pages.{key}, {h['address']}) — and nothing on it links there.")
     return out
 
 
@@ -1511,6 +1542,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         whole = "\n".join([view, *parts.values()])            # what the screen does, parts and all
         design = _design_findings(doc, page, whole)
         errors = (_static_findings(load, view) + _simulated_writes(whole) + _unwired_actions(doc, page, whole)
+                  + _unfollowed_flows(doc, page, whole)
                   + _unread_handoffs(doc, page, load, whole)
                   + typecheck(doc, app_root, str(page.get("id")), load, view, parts=parts))
         if original_view:
@@ -1614,6 +1646,17 @@ PART_CODE_SCHEMA: dict[str, Any] = {
 def _part_names(parts: list[dict]) -> str:
     return "\n".join(f"  - parts/{p['key']}.tsx — {p['label']}: import {p['component']} from \"./parts/{p['key']}\";"
                      for p in parts)
+
+
+#: How a page's code honours the flows' hand-offs (`app_flows.hand_offs`).
+HAND_OFF_RULE = (
+    "Each move is something a person does on this screen and where it leads. `go`: when it is done — "
+    "its workflow succeeded, or the choice was made — take them there with router.push(href(pages.<to>, "
+    "params, query)), and when it `carries` a record, open that record there (the `{id}` in `address` is "
+    "the id of the record it chose, or the one its workflow wrote). `offer`: they stay; once it is done, "
+    "show the way there — a link or a button to it beside the confirmation. `menu`: "
+    "nothing to add; they go on by themselves. A move with no control on this screen yet needs one."
+)
 
 
 #: How a page's code honours `PageSection.roles` — the brief carries them as
@@ -1853,7 +1896,8 @@ def reshape_screen(doc: dict, page: dict, app_root: Path, client: Any, current: 
     for round_ in range(COMPILE_ROUNDS):
         whole = "\n".join([view, *written.values()])
         compiled = typecheck(doc, app_root, pid, load, view, parts=written)
-        wiring = _unwired_actions(doc, page, whole) + _unread_handoffs(doc, page, load, whole)
+        wiring = (_unwired_actions(doc, page, whole) + _unread_handoffs(doc, page, load, whole)
+                  + _unfollowed_flows(doc, page, whole))
         if not compiled and not wiring:
             break
         if round_ == COMPILE_ROUNDS - 1:
@@ -1967,7 +2011,8 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
     for round_ in range(COMPILE_ROUNDS):
         whole = "\n".join([view, *written.values()])
         compiled = typecheck(doc, app_root, pid, load, view, parts=written)
-        wiring = _unwired_actions(doc, page, whole) + _unread_handoffs(doc, page, load, whole)
+        wiring = (_unwired_actions(doc, page, whole) + _unread_handoffs(doc, page, load, whole)
+                  + _unfollowed_flows(doc, page, whole))
         if not compiled and not wiring:
             break
         if round_ == COMPILE_ROUNDS - 1:

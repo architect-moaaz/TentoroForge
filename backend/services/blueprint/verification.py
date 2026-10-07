@@ -89,6 +89,7 @@ SECTION_OWNER: dict[str, str] = {
     "database": "data_model",
     "apis": "api",
     "workflows": "workflow",
+    "flows": "page_design",
     "businessRules": "business_rules",
     "integrations": "integration",
     "security": "security",

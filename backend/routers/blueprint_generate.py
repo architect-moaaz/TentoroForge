@@ -1205,6 +1205,26 @@ async def read_blueprint(
     return svc.doc
 
 
+@router.get("/api/projects/{project_id}/flows")
+async def read_flows(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The App Flow view: each flow as screens and the moves between them
+    (`app_flows.graph`), with what in the flows names nothing."""
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.app_flows import flow_findings, graph
+    from services.blueprint.service import BlueprintService
+
+    try:
+        svc = BlueprintService.load(output_dir=str(_output_dir(project)))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404,
+                            detail="no Blueprint for this project") from None
+    return {**graph(svc.doc), "findings": flow_findings(svc.doc)}
+
+
 @router.get("/api/projects/{project_id}/gates")
 async def read_gates(
     project_id: uuid.UUID,

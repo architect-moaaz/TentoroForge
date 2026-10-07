@@ -154,7 +154,11 @@ _READS: dict[str, set[str]] = {
     # agent that could edit what the design says could make the design agree
     # with the app it just invented.
     "page_design": {"requirements", "modules", "data", "designSystem",
-                    "roles", "permissions", "designSources"},
+                    "roles", "permissions", "designSources",
+                    # The app flows are the screens' and the processes'
+                    # paths: who moves where, by which process (`flows`) —
+                    # written once the roles are (`security`).
+                    "workflows", "security"},
 
     # Behaviour: what the business does, over the data it does it to.
     "workflow": {"requirements", "data", "pages", "businessRules", "roles"},
@@ -204,7 +208,7 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # business rules, database schema, security rules or role permissions.
     "page_design": _cap(
         "page_design",
-        {"pages", "navigation"},
+        {"pages", "navigation", "flows"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "mcp:a2ui"},
     ),
@@ -712,6 +716,25 @@ def customer_facing(doc: dict, page: dict) -> bool:
     customer = signup_role(doc)
     users = [roles.get(str(u), str(u)) for u in page.get("users") or []]
     return len(roles) > 1 and bool(customer) and bool(users) and all(u == customer for u in users)
+
+
+class InvalidAppFlow(AuthorRefusal):
+    """A flow names a screen, a section or a process that is not there."""
+
+
+def check_flows(result: "AgentResult", doc: dict | None) -> None:
+    """A PATH THROUGH SCREENS THAT EXIST. Each proposed flow is checked as the
+    document would hold it: every step a live screen, a section that screen
+    has, a process it starts — refused naming each, so the author mends the
+    step rather than the page writer being told a hand-off to nowhere."""
+    from services.blueprint.app_flows import flow_findings
+    proposals = [p for p in result.proposals if p.section == "flows" and isinstance(p.body, dict)]
+    if not proposals or not doc:
+        return
+    problems = flow_findings({**doc, "flows": [p.body for p in proposals]})
+    if problems:
+        raise InvalidAppFlow("These flows name what the application does not have — mend each step:\n- "
+                             + "\n- ".join(problems[:30]))
 
 
 def check_analytics(result: "AgentResult", doc: dict | None) -> None:
@@ -1293,6 +1316,7 @@ def apply_agent_result(
     check_role_doors(result, svc.doc)
     check_navigation(result, svc.doc)
     check_analytics(result, svc.doc)
+    check_flows(result, svc.doc)
     check_security(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.

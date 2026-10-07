@@ -259,7 +259,7 @@
           },
           "subject": {
             "type": "string",
-            "pattern": "^(REQ|ROLE|PERM|MODULE|PAGE|CMP|ENTITY|FLOW|RULE|API|TEST|DEC|INT|DEP|WIDGET)-\\d{3,}$",
+            "pattern": "^(REQ|ROLE|PERM|MODULE|PAGE|CMP|ENTITY|FLOW|RULE|API|TEST|DEC|INT|DEP|WIDGET|JOURNEY)-\\d{3,}$",
             "description": "Reference to any Blueprint artifact (§19)"
           },
           "action": {
@@ -1842,6 +1842,96 @@
           "id",
           "name",
           "trigger"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "flows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^JOURNEY-\\d{3,}$",
+            "description": "Stable JOURNEY identifier (§12)"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/properties/roles/items/properties/id",
+            "description": "Stable ROLE identifier (§12)"
+          },
+          "goal": {
+            "type": "string",
+            "default": ""
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "page": {
+                  "$ref": "#/properties/modules/items/properties/pages/items"
+                },
+                "section": {
+                  "type": "string"
+                },
+                "does": {
+                  "type": "string",
+                  "default": ""
+                },
+                "workflow": {
+                  "$ref": "#/properties/pages/items/properties/requires/properties/producedBy",
+                  "description": "Stable FLOW identifier (§12)"
+                },
+                "then": {
+                  "type": "string",
+                  "enum": [
+                    "go",
+                    "offer",
+                    "menu"
+                  ],
+                  "default": "go"
+                },
+                "carries": {
+                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                  "description": "Stable ENTITY identifier (§12)"
+                }
+              },
+              "required": [
+                "page"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 2
+          },
+          "ends": {
+            "type": "string",
+            "default": ""
+          },
+          "status": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/status"
+          },
+          "requirements": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/requirements"
+          },
+          "decisions": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/decisions"
+          },
+          "confidence": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/confidence"
+          },
+          "syncNote": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "steps"
         ],
         "additionalProperties": false
       },

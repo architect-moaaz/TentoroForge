@@ -71,6 +71,7 @@ SECTION_NODE: dict[str, str] = {
     "workflows": "workflow_steps",
     "designSystem": "design_system",
     "navigation": "ux_architecture",
+    "flows": "app_flows",
     "modules": "ux_architecture",
     "pages": "page_contracts",
     "requirements": "requirements",
@@ -94,6 +95,7 @@ SECTION_WORDS: dict[str, str] = {
     "workflows": "its processes",
     "designSystem": "how it looks",
     "navigation": "its menu",
+    "flows": "the paths people take through it",
     "modules": "how it is organised",
     "pages": "its screens",
     "requirements": "what it has to do",
@@ -108,7 +110,10 @@ WRITES = WRITES + (
      "FIELD's rename is `rename_field`, which moves its data; here it would drop "
      "the old field and start the new one empty), "
      "`apis`, `businessRules`, `permissions`, `workflows`, `designSystem`, "
-     "`navigation`, `pages`, `requirements`, `product`. `brief` says what "
+     "`navigation`, `pages`, `requirements`, `product`, and `flows` — the paths "
+     "people take from screen to screen and where each process leaves them "
+     "(\"after checkout, open the order\"; \"write the app flow\" for an app that has none). "
+     "`brief` says what "
      "should be different and what must stay, in terms of what you read "
      "(`read_section`). `subject` narrows it to one artifact's id. The reply "
      "is held to the contract and committed as one version; what changed on "

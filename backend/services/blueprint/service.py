@@ -105,6 +105,7 @@ ARTIFACT_SECTIONS: dict[str, str] = {
     "components": "CMP",
     "widgets": "WIDGET",
     "workflows": "FLOW",
+    "flows": "JOURNEY",
     "businessRules": "RULE",
     "apis": "API",
     "integrations": "INT",

@@ -31,6 +31,7 @@ import {
   TestId,
   WidgetId,
   WorkflowId,
+  JourneyId,
   artifactBase,
   ArtifactStatus,
 } from "./ids";
@@ -2689,6 +2690,68 @@ export const ApplicationState = z.enum([
 
 export const BLUEPRINT_SCHEMA_VERSION = "1" as const;
 
+// ===========================================================================
+// App flows — the paths people take through the application
+// ===========================================================================
+
+/**
+ * One step of a flow: where the person is, what they do there, and how they
+ * get to the next step.
+ */
+export const FlowStep = z.object({
+  /** The screen they are on. */
+  page: PageId,
+  /** The part of it — a tab, the panel a record opens in — by its section key. */
+  section: z.string().optional(),
+  /**
+   * What they do here, in their words: "Choose a size", "Add to cart",
+   * "Place order". Empty on the step a flow ends on.
+   */
+  does: z.string().default(""),
+  /** The process that does it, when one does. */
+  workflow: WorkflowId.optional(),
+  /**
+   * How they reach the next step: `go` — they are taken there when this step
+   * is done (placing an order opens the order); `offer` — they stay, and are
+   * shown the way (a "View cart" after adding); `menu` — they go there
+   * themselves, by the menu or a tab.
+   */
+  then: z.enum(["go", "offer", "menu"]).default("go"),
+  /**
+   * The record the next step opens with — the one this step chose or made
+   * ("Place order" carries the Order: the next step opens that order).
+   */
+  carries: EntityId.optional(),
+});
+
+/**
+ * A path a person takes through the application to reach one of their
+ * goals: Home → a product → the cart → checkout → their order.
+ *
+ * THE APPLICATION KNEW WHERE THINGS WERE, NOT HOW ANYONE MOVED. ToroCommerce
+ * (forge-v3, 2026-10-07) had its screens, sections and processes, and two
+ * links between eleven screens: placing an order left the customer on an
+ * empty cart, a featured product opened a search for its own name, nothing
+ * offered the cart after adding to it. The journeys the planner was asked
+ * for shaped the screens and were then thrown away. A flow keeps them: the
+ * page writer is told each screen's hand-offs, each process's landing is
+ * read from it, the build walks it as its person, and it is drawn.
+ */
+export const AppFlow = z.object({
+  id: JourneyId,
+  /** "Buy something", "Fulfil an order". */
+  name: z.string(),
+  /** Who takes it — the role the person holds. */
+  role: RoleId.optional(),
+  /** The goal it reaches, in the person's terms (one of their persona's goals). */
+  goal: z.string().default(""),
+  /** In order; the last is where it ends. */
+  steps: z.array(FlowStep).min(2),
+  /** What the person sees when it is done: "their order, open, with its status". */
+  ends: z.string().default(""),
+  ...artifactBase,
+});
+
 export const Blueprint = z.object({
   schemaVersion: z.literal(BLUEPRINT_SCHEMA_VERSION),
   /** Bumped on every accepted change (§91). Indexes into changeHistory. */
@@ -2708,6 +2771,8 @@ export const Blueprint = z.object({
 
   data: DataModel.default({}),
   workflows: z.array(Workflow).default([]),
+  /** The paths people take through the application (`AppFlow`). */
+  flows: z.array(AppFlow).default([]),
   businessRules: z.array(BusinessRule).default([]),
   apis: z.array(ApiEndpoint).default([]),
   integrations: z.array(Integration).default([]),

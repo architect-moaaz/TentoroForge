@@ -96,6 +96,7 @@ ID_PREFIXES: tuple[str, ...] = (
     "INT",
     "DEP",
     "WIDGET",
+    "JOURNEY",
 )
 
 _ID_RE = re.compile(rf"^({'|'.join(ID_PREFIXES)})-(\d{{3,}})$")
@@ -196,6 +197,11 @@ def workflow_key(name: str) -> str:
     return f"FLOW:{_norm(name)}"
 
 
+def journey_key(name: str) -> str:
+    """An app flow (`flows`) by its name: "Buy something"."""
+    return f"JOURNEY:{_norm(name)}"
+
+
 def integration_key(name: str) -> str:
     return f"INT:{_norm(name)}"
 
@@ -265,6 +271,8 @@ def natural_key_for(
         return component_key(text("name")) if text("name") else None
     if section == "workflows":
         return workflow_key(text("name")) if text("name") else None
+    if section == "flows":
+        return journey_key(text("name")) if text("name") else None
     if section == "widgets":
         # ``page`` holds a PAGE id and :func:`widget_key` wants the route
         # behind it, so a widget cannot be keyed without the document.

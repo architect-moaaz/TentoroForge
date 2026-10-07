@@ -1613,6 +1613,8 @@ NODE_TASKS: dict[str, str] = {
         "decides: never invent a figure, a score or a term the description "
         "and the data model do not have, and nothing the business rules forbid."
     ),
+    # The paths people take; the text lives with what reads the flows.
+    "app_flows": __import__("services.blueprint.app_flows", fromlist=["FLOWS_PROMPT"]).FLOWS_PROMPT,
     "analytics": (
         "Design the analytics of this application: the KPIs, charts and "
         "breakdowns each page carries, written as `widgets`. Every page and "
@@ -2305,6 +2307,21 @@ def build_prompt(
     if node == "workflow_steps":
         return _workflow_steps_prompt(doc, system, subject, feedback,
                                       output_dir=output_dir, brief=brief)
+
+    if node == "app_flows":
+        # The people, the screens and what each starts — what a path is made
+        # of — rather than the agent's whole slice.
+        from services.blueprint.app_flows import flows_brief
+        user = ("What the flows are made of:\n\n```json\n" + json.dumps(flows_brief(doc), indent=1, default=str)
+                + "\n```")
+        if doc.get("flows"):
+            user += ("\n\nThe flows as they stand — keep each one's `name` when you change it:\n```json\n"
+                     + json.dumps(doc.get("flows"), indent=1, default=str)[:20000] + "\n```")
+        if brief:
+            user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
+        if feedback:
+            user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+        return system, user
 
     if node == "workflows":
         # The node catalog goes to `workflow_steps`, the one task that authors

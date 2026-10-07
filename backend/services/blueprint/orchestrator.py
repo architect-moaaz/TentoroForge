@@ -375,7 +375,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        ("page_details", "design_system", "figma_design_system", "imagery"), ("composition",),
        optional=True, note="§34; the whole app's look and conventions, one call"),
     _n("page_code", "ui_engineer",
-       ("ui_direction", "page_layouts", "workflow_steps", "install"), ("pageCode",),
+       ("ui_direction", "page_layouts", "workflow_steps", "install", "app_flows"), ("pageCode",),
        fanout="pages", optional=True,
        note="§34; each page as React, type-checked against the app SDK"),
     _n("frontend", "frontend", ("page_layouts", "page_code"), ("codeMap",), kind="projection",
@@ -408,6 +408,12 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("workflow_steps", "workflow", ("workflows",), ("workflows",),
        fanout="workflows",
        note="§107 step 16; one authored step graph per declared workflow"),
+    # THE PATHS BETWEEN THE SCREENS. With the screens and the processes
+    # declared, each person's route to each of their goals: where they are,
+    # what they do, which process does it, where it takes them. The page
+    # writer is told each screen's hand-offs from it, so it waits on this.
+    _n("app_flows", "page_design", ("page_details", "workflows", "security"), ("flows",),
+       note="the paths people take through the app, screen to screen"),
     # AFTER THE WORKFLOWS ARE DECLARED: a prerequisite ("verified before
     # listing or buying") names the workflows it gates, and before `workflows`
     # there were none to name — 0l133sp2's KYC rule was refused for empty
@@ -775,6 +781,8 @@ INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "pageCode",
     "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
+    # The paths between the screens follow the screens and the processes.
+    "flows",
     "codeMap", "database", "runtime", "roles", "permissions", "security",
 })
 
