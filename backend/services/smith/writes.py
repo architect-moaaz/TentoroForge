@@ -450,6 +450,27 @@ WRITES = WRITES + (
 )
 
 
+#: THE DIRECT EDITS (`file_edit`). A fix is the text that is there and the
+#: text that should be — no agent between, seconds not minutes.
+WRITES = WRITES + (
+    ("edit_file",
+     "Change one exact piece of text in any file of the application: `path` (as list_files/read_file name "
+     "it), `find` — the text there now, copied exactly from read_file without its line numbers, enough of it "
+     "to occur once — `replace`, and `why` in the person's terms. Read the file first. A page's code is "
+     "type-checked and kept with the page; a file written from the definition is refused with the part "
+     "of the definition to change instead (`edit_definition`); the platform's own files (the engine, the "
+     "SDK, the runtime routes) are patched for this app only after a try has shown the fault, and the "
+     "patch is kept only if a try after it passes. Use it for any fix you can state as an edit; use "
+     "`write_page_code` for a page's redesign.",
+     {"path": "string", "find": "string", "replace": "string", "why": "string"}),
+    ("edit_definition",
+     "Change one exact piece of text in a part of the definition — `section` as read_section names it "
+     "(`workflows.FLOW-001`, `pages.PAGE-004`, `data.entities.ENTITY-002`, `navigation`, `security`) — "
+     "`find` copied exactly from read_section's text, `replace`, `why`. The result is checked as the build "
+     "checks it, recorded, and the app is written out again from it. For a precise fix to a workflow's "
+     "steps, a page's access, a field, a landing page, a rule; the verbs remain for larger changes.",
+     {"section": "string", "find": "string", "replace": "string", "why": "string"}),
+)
 WRITE_NAMES = frozenset(name for name, _d, _a in WRITES)
 
 
@@ -553,6 +574,16 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     if name == "set_field":
         return set_field(output_dir, str(args.get("entity") or ""), str(args.get("field") or ""),
                          unique=args.get("unique"), required=args.get("required"))
+    if name == "edit_file":
+        from services.smith.file_edit import edit_file
+        return edit_file(output_dir, str(args.get("path") or ""), str(args.get("find") or ""),
+                         str(args.get("replace") if args.get("replace") is not None else ""),
+                         str(args.get("why") or ""))
+    if name == "edit_definition":
+        from services.smith.file_edit import edit_definition
+        return edit_definition(output_dir, str(args.get("section") or ""), str(args.get("find") or ""),
+                               str(args.get("replace") if args.get("replace") is not None else ""),
+                               str(args.get("why") or ""))
     if name == "write_section":
         return write_section(output_dir, str(args.get("section") or ""), str(args.get("brief") or ""),
                              subject=str(args.get("subject") or ""), reasoning=reasoning)

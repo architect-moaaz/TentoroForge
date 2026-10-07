@@ -55,7 +55,9 @@ logger = logging.getLogger(__name__)
 #: different reading costs two. The other loops in the tree cap at 2 and 3; a
 #: turn is the one place a person is waiting, so it is not unbounded here
 #: either.
-MAX_STEPS = 12
+#: 20 since direct edits (2026-10-07): a fix is reproduce, read, edit, try —
+#: four steps, not one agent round trip — and twelve ran out while proving it.
+MAX_STEPS = 20
 
 #: How many observations the model is shown. The whole turn, in practice —
 #: this is a ceiling against a cap that someone later raises.
@@ -170,12 +172,17 @@ Values nobody could have typed (outside what the app is for, repeating in a
 pattern) came from somewhere: the sample data, an import, the code. Say where,
 and offer the change that fixes it.
 
-CHANGE CODE FROM WHAT YOU READ. When the ask is a change no verb below
-describes — a rule the screen applies, what a control does, the order things
-appear in — read the page, then `write_page_code` with a brief that names the
-change in the code's own terms: the constant, the component, the line. The
-compiler's verdict comes back as an observation; a page that did not compile
-is a brief to sharpen, not a reason to stop.
+CHANGE CODE FROM WHAT YOU READ — AND WHAT YOU SAW. Every file of the
+application is yours to read and to change. When something does not work,
+first use it as the person did — their screen, their role — and see it fail;
+then read the files it runs through (the page, the workflow, the engine) and
+fix the line that is wrong with `edit_file`: the exact text there and the text
+that should be. A file written from the definition is changed in the
+definition with `edit_definition` (read_section shows it). Then use it again
+and see it work. `write_page_code` is for a change too large to state as an
+edit — a screen laid out again, a redesign. A fix made around a fault instead
+of at it (filtering in a page what the query returns wrong) leaves the fault
+for the next screen: fix where it is.
 
 A CHANGE TO RECORDS IS A WORKFLOW, AND IT COMES FIRST. Adding, deleting,
 approving or updating records happens only through a workflow; a page's code

@@ -66,6 +66,25 @@ ANSWER_CHANGES_NOTHING = (
     "and try it. If you have not seen the fault happen through the screen they used, open "
     "that screen (`open_page`) and use it first. If this is an answer — how to do something, "
     "why it already works, why it cannot be changed — send the same `answer` again.")
+#: What the first direct edit of a turn hears when nothing has been tried. The
+#: variant form Smith "fixed" on ToroCommerce was not broken: it read the code,
+#: blamed a field it misread, and never pressed the button (2026-10-07).
+REPRODUCE_FIRST = (
+    "Nothing has been tried this turn. If they said something does not work, use it first — the "
+    "screen they used, as them (`open_page`, `try_workflow`, `try_request`) — so the change answers "
+    "what happens, not what the code seems to say. If this is a change they asked for rather than a "
+    "fault, make the edit again.")
+#: What an edit to the platform's own files hears without a failing try.
+PATCH_NEEDS_PROOF = (
+    "That file is the platform's — the engine every application runs on. It is patched for this "
+    "application only once a try in this turn has shown the fault it fixes, and the patch is kept only "
+    "if a try after it passes. Try it first; if the try passes, the fault is not there.")
+#: A step these answered never ran: asking for it again is not a repeat.
+_NOT_RUN = frozenset({REPRODUCE_FIRST, PATCH_NEEDS_PROOF})
+#: What `done` hears when the last change has not been used since.
+TRY_AFTER = (
+    "Changed, not yet tried. Use what you changed — as the person who asked, on the screen they use — "
+    "and see it work before ending. If it cannot be tried, end with `answer` saying so.")
 #: The start of the message when a trial that failed has not been tried
 #: again since the change meant to fix it.
 UNPROVEN = "Not shown to work yet:"
@@ -101,6 +120,8 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     if ctx.asked_from and ctx.asked_from not in asked:
         asked = f"{ctx.asked_from}\n(This turn does one part of it: {asked})"
     token = ASKED.set(asked)
+    from services.smith import file_edit
+    started = {p.get("id") for p in file_edit.load_patches(ctx.out)}
     try:
         out = _run(ctx, choose, list(history or []), observations,
                    max_steps or loop_mod.MAX_STEPS, bench)
@@ -108,6 +129,17 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
         ASKED.reset(token)
         bench.close()
     out.steps = [o.tool for o in observations]
+    # A PLATFORM PATCH IS KEPT ONLY ON PROOF: a try after the last edit that
+    # passed, and nothing that failed before still failing.
+    pending = [p["id"] for p in file_edit.load_patches(ctx.out)
+               if p.get("id") not in started and p.get("status") == "pending"]
+    if pending:
+        edits = [i for i, o in enumerate(observations) if o.tool == "edit_file" and _is_change(o)]
+        after = [o for o in observations[(edits[-1] + 1 if edits else 0):] if tools.is_trial(o.tool)]
+        proven = bool(after) and not trials.failed(after[-1].said or "") and not _still_failing(observations)
+        said = file_edit.settle(ctx.out, pending, proven)
+        if said:
+            out.said = (out.said + "\n\n" if out.said else "") + " ".join(said)
     return out
 
 
@@ -202,6 +234,13 @@ def _before_done(observations: list[Observation], landed: list[str]) -> str:
     if unwired and not any(tools.is_trial(o.tool) for o in observations[unwired[-1] + 1:]) \
             and TRY_WIRED.split(".", 1)[0] not in said:
         return TRY_WIRED
+    # NO CLAIM WITHOUT PROOF. A change after which nothing was used is a
+    # change the reply cannot say works.
+    changes = [i for i, o in enumerate(observations) if _is_change(o)]
+    tries = [i for i, o in enumerate(observations) if tools.is_trial(o.tool)]
+    if landed and changes and (not tries or tries[-1] < changes[-1]) \
+            and TRY_AFTER.split(",", 1)[0] not in said:
+        return TRY_AFTER
     return ""
 
 
@@ -357,7 +396,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             logger.info("[smith-try] %s %s -> %s", tool, args, " | ".join(seen.splitlines()[:6])[:600])
             observations.append(Observation(tool=tool, args=args, status="read", said=seen))
             continue
-        if loop_mod.already_done(tool, args, observations):
+        if loop_mod.already_done(tool, args, [o for o in observations if o.said not in _NOT_RUN]):
             observations.append(Observation(
                 tool=tool, args=args, status="error",
                 said="That exact step has already been taken this turn — read what it "
@@ -394,6 +433,18 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 return _finished(landed, touched, step)
             continue
 
+        if tool in ("edit_file", "edit_definition"):
+            if not any(tools.is_trial(o.tool) for o in observations) \
+                    and not any(o.said == REPRODUCE_FIRST for o in observations):
+                observations.append(Observation(tool=tool, args=args, status="error", said=REPRODUCE_FIRST))
+                continue
+            if tool == "edit_file":
+                from services.smith import file_edit
+                rel, _why = file_edit._app_rel(ctx.out, str(args.get("path") or ""))
+                if rel and file_edit.classify(ctx.doc() or {}, rel)["kind"] == "platform" and not any(
+                        tools.is_trial(o.tool) and trials.failed(o.said or "") for o in observations):
+                    observations.append(Observation(tool=tool, args=args, status="error", said=PATCH_NEEDS_PROOF))
+                    continue
         if tools.is_write(tool):
             out = writes.run(tool, args, output_dir=ctx.out, reasoning=ctx.reasoning)
             step = Outcome(status="resolved" if out.get("applied") and not out.get("finding") else "needs_user",

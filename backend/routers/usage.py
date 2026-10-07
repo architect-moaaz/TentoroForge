@@ -66,3 +66,19 @@ async def get_project_usage(
         ],
         "total_cost_usd": round(sum(_entry_cost(e) for e in entries), 4),
     }
+
+
+@router.get("/api/usage/platform-patches")
+async def get_platform_patches(
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every app's open patches to the platform's own files (`file_edit`):
+    what Smith changed in an app's copy of the engine, why, and on what
+    proof — the list the platform folds fixes in from. Nothing here is
+    hidden drift: a patch retires itself when the platform has the fix."""
+    await _require_any_org_admin(user, db)
+    from services.project_paths import OUTPUT_ROOT
+    from services.smith.file_edit import open_patches
+    patches = open_patches(OUTPUT_ROOT)
+    return {"count": len(patches), "patches": patches}
