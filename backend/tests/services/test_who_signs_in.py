@@ -404,3 +404,26 @@ def test_auth_exports_everything_the_scaffold_imports_from_it():
 
     assert wanted, "nothing imports @/auth — this guard would pass vacuously"
     assert wanted <= exported, f"imported from @/auth but not exported: {sorted(wanted - exported)}"
+
+
+def test_a_guard_already_in_the_steps_is_not_added_again(tmp_path):
+    """ToroCommerce's Add to Cart carried its projected guard in its own steps
+    (a repair wrote it back); the next projection added it again and no
+    workflow of the app could be written out (forge-v3, 2026-10-07)."""
+    from services.blueprint.projection import project_workflows
+    doc = _doc(businessRules=[KYC])
+    doc["workflows"] = [{"id": "FLOW-004", "name": "Request to Borrow", "trigger": {"kind": "manual"}, "steps": [
+        {"key": "prereq_rule_001", "type": "action",
+         "config": {"actionType": "db_query", "table": "kyc_verifications", "where": {"memberId": "$user.id"}},
+         "next": ["prereq_rule_001_met"]},
+        {"key": "prereq_rule_001_met", "type": "condition", "config": {"expression": "prereq_rule_001.count > 0"},
+         "next": ["save"]},
+        {"key": "save", "type": "action", "entity": "ENTITY-002",
+         "config": {"actionType": "db_insert", "table": "kyc_verifications", "values": {"status": "pending"}}},
+        {"key": "done", "type": "end"}]}]
+    project_workflows(doc, tmp_path)
+    (defn,) = list((tmp_path / "src/lib/workflows/definitions").glob("*.json"))
+    graph = json.loads(defn.read_text())["definition"]
+    ids = [n["id"] for n in graph["nodes"]]
+    assert len(ids) == len(set(ids)), ids
+    assert [e["target"] for e in graph["edges"] if e["source"] == "trigger"] == ["prereq_signed_in"]

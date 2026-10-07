@@ -453,6 +453,20 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
     guards = guard_nodes(doc, workflow)
     if not guards:
         return
+    # A GUARD ALREADY IN THE STEPS IS NOT ADDED AGAIN. A repair wrote the
+    # projected guard back into ToroCommerce's Add to Cart and Place Order
+    # steps (v80); every projection after added it a second time, the graph
+    # had each guard node twice, and NO workflow of the app could be written
+    # out again (forge-v3, 2026-10-07). What is there is kept, wired as it is.
+    present = {str(n.get("id")) for n in nodes if isinstance(n, dict)}
+
+    def rid_of(i: int, rule: dict) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", str(rule.get("id") or f"rule_{i}").lower())
+
+    guards = [(i, q, r) for i, (q, r) in enumerate(guards) if f"prereq_{rid_of(i, r)}" not in present]
+    ask_sign_in = "prereq_signed_in" not in present
+    if not guards and not ask_sign_in:
+        return
     first = [e for e in edges if e.get("source") == "trigger"]
     targets = [e.get("target") for e in first]
     for e in first:
@@ -469,15 +483,17 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
     # is not signed in has none, and got the rule's message — ToroCommerce's
     # guests pressing Add to Cart were told "Your account has been
     # deactivated" (forge-v3, 2026-10-07). Asked first, once, in plain words.
-    nodes.append(make_node("prereq_signed_in", "condition", {"expression": "user.id != null"},
-                           "Signed in?"))
-    nodes.append(make_node("prereq_signed_in_refused", "end", {
-        "refused": True, "message": SIGN_IN_FIRST}, "Refused: not signed in"))
-    edge("trigger", "prereq_signed_in")
-    edge("prereq_signed_in", "prereq_signed_in_refused", "else")
-    prev = "prereq_signed_in"
-    for i, (query, rule) in enumerate(guards):
-        rid = re.sub(r"[^a-z0-9]+", "_", str(rule.get("id") or f"rule_{i}").lower())
+    prev = "trigger"
+    if ask_sign_in:
+        nodes.append(make_node("prereq_signed_in", "condition", {"expression": "user.id != null"},
+                               "Signed in?"))
+        nodes.append(make_node("prereq_signed_in_refused", "end", {
+            "refused": True, "message": SIGN_IN_FIRST}, "Refused: not signed in"))
+        edge("trigger", "prereq_signed_in")
+        edge("prereq_signed_in", "prereq_signed_in_refused", "else")
+        prev = "prereq_signed_in"
+    for i, query, rule in guards:
+        rid = rid_of(i, rule)
         q, c, stop = f"prereq_{rid}", f"prereq_{rid}_met", f"prereq_{rid}_refused"
         nodes.append(make_node(q, "action", query, f"Check: {rule.get('name') or 'prerequisite'}"))
         nodes.append(make_node(c, "condition", {"expression": f"{q}.count > 0"},
@@ -485,12 +501,12 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
         nodes.append(make_node(stop, "end", {"refused": True,
                                              "message": rule.get("message") or rule.get("statement") or
                                              "This cannot be done yet."}, "Refused: prerequisite not met"))
-        edge(prev, q, "then")
+        edge(prev, q, "then" if prev != "trigger" else "default")
         edge(q, c)
         edge(c, stop, "else")
         prev = c
     for t in targets:
-        edge(prev, t, "then")
+        edge(prev, t, "then" if prev != "trigger" else "default")
 
 
 __all__ = ["AUTH_PAGES", "account_entity", "admin_role", "account_fields", "account_initial", "after_signup_route", "auth_page_bodies",
