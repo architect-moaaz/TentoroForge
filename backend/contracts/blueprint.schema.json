@@ -44,7 +44,7 @@
         },
         "domain": {
           "type": "string",
-          "description": "CRM | HRMS | ATS | Banking | … (§96)"
+          "description": "The field this application serves, in the words the person used (§96). The product frame's own `product.domain` is where the build states it."
         },
         "description": {
           "type": "string",
@@ -75,6 +75,16 @@
     "product": {
       "type": "object",
       "properties": {
+        "domain": {
+          "type": "string",
+          "description": "The field this application serves, in a few plain words, as the people in it would say it. Not a code or a list entry.",
+          "default": ""
+        },
+        "category": {
+          "type": "string",
+          "description": "The kind of product this is, in a few words: what it is to the people who use it and how they meet it — for example something they browse and buy from, a tool they work in all day, a portal they check now and then. When it is two things to two kinds of people, say both.",
+          "default": ""
+        },
         "objectives": {
           "type": "array",
           "items": {
@@ -3210,6 +3220,66 @@
             "sections"
           ],
           "additionalProperties": false
+        },
+        "looks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "audience": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "description": "The role ids this look is for, or `public` for visitors who are not signed in"
+              },
+              "experience": {
+                "type": "string",
+                "description": "What the product is to these people and how they use it — where, how often, for how long"
+              },
+              "chrome": {
+                "type": "string",
+                "enum": [
+                  "standard-rail",
+                  "wide-rail",
+                  "icon-rail",
+                  "floating-rail",
+                  "right-rail",
+                  "topbar",
+                  "dock"
+                ],
+                "description": "How their navigation is built. Visitors always get a header bar; this is ignored for `public`"
+              },
+              "tone": {
+                "type": "string",
+                "enum": [
+                  "dark",
+                  "brand",
+                  "light",
+                  "tinted"
+                ],
+                "description": "What their navigation is painted with"
+              },
+              "rhythm": {
+                "$ref": "#/properties/composition/properties/rhythm"
+              },
+              "why": {
+                "type": "string",
+                "description": "One sentence: why this look, from the domain, the category and these people"
+              }
+            },
+            "required": [
+              "audience",
+              "experience",
+              "chrome",
+              "tone",
+              "rhythm",
+              "why"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
         },
         "pages": {
           "type": "array",

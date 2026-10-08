@@ -56,8 +56,8 @@ def test_the_run_asks_again_instead_of_dying(svc):
         section = "product.capabilities" if len(calls) == 1 else "product"
         return json.dumps({
             "proposals": [{"section": section, "natural_key": "PRODUCT",
-                           "body": json.dumps({"capabilities": [
-                               {"name": "Register a patient"}]})}],
+                           "body": json.dumps({"domain": "a clinic", "category": "a tool staff work in",
+                                               "capabilities": [{"name": "Register a patient"}]})}],
             "confidence": 0.9, "assumptions": [], "issues": [], "change_requests": []})
 
     report = run(svc, make_executor(svc, model), plan=["application_model"])

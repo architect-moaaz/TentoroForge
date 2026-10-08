@@ -7,8 +7,10 @@ identical hover-expand rail and split sign-in. Worse, the layout read
 `design-spec.json` FIRST and threw to the fallback when it was missing, so
 even a dna file would have been ignored. The design agent now decides
 `shell.chrome` and `shell.auth`; the projection writes them where the
-layout reads; a Blueprint that states no shell gets one derived from what
-it did say.
+layout reads. A Blueprint that states no shell gets the one default — the
+frame used to be guessed from words in the personality ("child" made a
+tinted rail), and that is gone (2026-10-08); each audience's own frame is
+its look (`test_each_audience_has_its_own_look`).
 """
 import json
 from pathlib import Path
@@ -32,21 +34,20 @@ def test_a_stated_shell_is_used_as_is():
     assert (s["chrome"], s["auth"]) == ("dock", "brand-wash")
 
 
-def test_a_missing_shell_is_derived_from_what_the_design_said():
-    assert derive_shell(_doc(navigationApproach="A single persistent top bar"))["chrome"] == "topbar"
-    assert derive_shell(_doc(navigationApproach="Mobile-first bottom tab bar"))["chrome"] == "dock"
-    assert derive_shell(_doc(navigationApproach="A narrow icon rail"))["chrome"] == "icon-rail"
-    assert derive_shell(_doc(navigationApproach="Persistent left sidebar", visualPersonality="warm, editorial"))["chrome"] == "floating-rail"
-    assert derive_shell(_doc(navigationApproach="Persistent left sidebar", informationDensity="compact"))["chrome"] == "wide-rail"
-    assert derive_shell(_doc(navigationApproach="Persistent left sidebar"))["chrome"] == "standard-rail"
-
-
-def test_the_sign_in_follows_the_product():
-    assert derive_shell(_doc(navigationApproach="bottom tab bar"))["auth"] == "brand-wash"
-    assert derive_shell(_doc(visualPersonality="a stark utility"))["auth"] == "centered-minimal"
-    assert derive_shell(_doc(informationDensity="compact"))["auth"] == "top-anchored"
-    assert derive_shell(_doc(navigationApproach="top bar"))["auth"] == "split-reversed"
-    assert derive_shell(_doc())["auth"] == "split-editorial"
+def test_a_missing_shell_is_the_one_default_whatever_the_words():
+    from services.blueprint.projection import SHELL_DEFAULT
+    for design in ({"navigationApproach": "A single persistent top bar"},
+                   {"navigationApproach": "Mobile-first bottom tab bar"},
+                   {"visualPersonality": "warm and child-friendly, for families"},
+                   {"visualPersonality": "a dense back-office console", "informationDensity": "compact"},
+                   {}):
+        s = derive_shell(_doc(**design))
+        assert {k: s[k] for k in SHELL_DEFAULT} == SHELL_DEFAULT, design
+    assert SHELL_DEFAULT == {"chrome": "standard-rail", "auth": "split-editorial", "tone": "dark"}
+    src = Path(derive_shell.__code__.co_filename).read_text()
+    body = src[src.index("def derive_shell("):src.index("def project_shell_identity(")]
+    for word in ('"child"', '"consumer"', '"back-office"', '"warm"', "personality"):
+        assert word not in body.split('"""', 2)[2], word
 
 
 def test_every_derived_value_is_one_the_shell_knows():
@@ -59,7 +60,8 @@ def test_every_derived_value_is_one_the_shell_knows():
 def test_the_identity_is_written_where_the_layout_and_the_sign_in_read_it(tmp_path):
     out = project_shell_identity(_doc(shell={"chrome": "wide-rail", "auth": "side-panel"}, informationDensity="spacious"), tmp_path)
     dna = json.loads((tmp_path / SHELL_IDENTITY_PATH).read_text())
-    assert dna["layout"] == {"chrome": "wide-rail", "auth": "side-panel", "tone": "light", "density": "spacious"}
+    assert dna["layout"] == {"chrome": "wide-rail", "auth": "side-panel", "tone": "dark", "density": "spacious"}
+    assert dna["looks"] == {}, "no look stated, none written"
     assert out["chrome"] == "wide-rail"
     layout = (ROOT / "templates/app-foundation/src/app/(dashboard)/layout.tsx").read_text()
     assert 'dna?.layout?.chrome' in layout and 'dna?.layout?.density' in layout
@@ -89,13 +91,10 @@ def test_the_designer_is_asked_and_the_contract_carries_it():
 
 # --- the rail's paint is a decision, and the rail is the person's ------------
 
-def test_the_tone_is_stated_or_read_off_the_personality():
+def test_the_tone_is_stated_or_the_default():
     assert derive_shell(_doc(shell={"chrome": "dock", "auth": "brand-wash", "tone": "brand"}))["tone"] == "brand"
-    assert derive_shell(_doc(visualPersonality="warm and child-friendly, a warm paper ground"))["tone"] == "tinted"
-    assert derive_shell(_doc(visualPersonality="a stark utility"))["tone"] == "light"
-    assert derive_shell(_doc(visualPersonality="bold and confident"))["tone"] == "brand"
-    assert derive_shell(_doc(informationDensity="compact"))["tone"] == "dark"
-    assert derive_shell(_doc(informationDensity="spacious"))["tone"] == "light"
+    assert derive_shell(_doc(visualPersonality="warm and child-friendly, a warm paper ground"))["tone"] == "dark"
+    assert derive_shell(_doc(informationDensity="spacious"))["tone"] == "dark"
     for tone in TONES:
         assert set(RAIL_PAINT[tone]) == {"mode", "bg", "text", "muted"}
         assert "var(--" in RAIL_PAINT[tone]["bg"], "painted from the app's own tokens"

@@ -234,9 +234,11 @@ async function loadScreens(): Promise<Record<string, ScreenNode>> {
 // of its palette (a major "all apps look the same" driver). Also carries the
 // FRAME decision (sidebar | topbar) so the shell's *structure* — not just its
 // paint — varies per app.
+/** One audience's look (`composition.looks`), keyed by role name in design-dna.json. */
+type RoleLook = { chrome?: string; tone?: string; mode?: "dark" | "light"; bg?: string; text?: string; muted?: string };
 type ShellIdentity = Partial<NavProps> & {
   frame: "sidebar" | "topbar" | "persona-pills"; chrome?: string; primary?: string; density?: string;
-  skin?: string;
+  skin?: string; looks?: Record<string, RoleLook>;
 };
 
 // PB-6: nav-flow.personas shape emitted by services/nav_flow_from_plan when a
@@ -324,6 +326,7 @@ async function shellIdentity(): Promise<ShellIdentity> {
     let chrome = String((spec?.layout ?? {}).chrome ?? "standard-rail");
     let skin = String(spec?.skin ?? "");
     let density = String((spec?.layout ?? {}).density ?? "comfortable");
+    let looks: Record<string, RoleLook> | undefined;
     try {
       const dnaRaw = await fs.readFile(
         path.join(process.cwd(), "src", "contracts", "design-dna.json"), "utf8");
@@ -331,9 +334,10 @@ async function shellIdentity(): Promise<ShellIdentity> {
       chrome = String(dna?.layout?.chrome ?? dna?.shell?.chrome ?? chrome);
       skin = String(dna?.skin ?? "");
       density = String(dna?.layout?.density ?? density);
+      if (dna?.looks && typeof dna.looks === "object") looks = dna.looks as Record<string, RoleLook>;
     } catch { /* design-dna optional */ }
     return { frame, chrome, density, skin, ...(bg ? { bg } : {}), ...(text ? { text } : {}),
-             ...(accent ? { accent } : {}), mode, primary: hex(pal.primary) };
+             ...(accent ? { accent } : {}), mode, primary: hex(pal.primary), ...(looks ? { looks } : {}) };
   } catch {
     return { frame: "sidebar", chrome: "standard-rail", mode: "dark" };
   }
@@ -910,6 +914,25 @@ export default async function DashboardLayout({
   const scoped = hasAudience(navProps.groups);
   navProps.groups = visibleTo(navProps.groups, role);
   const identity = await shellIdentity();
+  // THE SIGNED-IN PERSON'S OWN LOOK. A shop's staff and its customers are
+  // two products to two kinds of people; the application decides a frame for
+  // each (`composition.looks`), and the one drawn is the role's. A role it
+  // gave none keeps the application's frame.
+  const look = identity.looks?.[role];
+  if (look) {
+    if (look.chrome) {
+      identity.chrome = look.chrome;
+      // The look's chrome is the frame: a topbar from the menu's own style
+      // does not override a role whose look is a rail, nor the other way.
+      if (identity.frame !== "persona-pills") identity.frame = look.chrome === "topbar" ? "topbar" : "sidebar";
+    }
+    for (const k of ["mode", "bg", "text", "muted"] as const) {
+      if (look[k]) {
+        (navProps as Record<string, unknown>)[k] = look[k];
+        (identity as Record<string, unknown>)[k] = look[k];
+      }
+    }
+  }
   // THE FRAME'S OWN CONTROLS. Rendered once, and placed where the frame has
   // room for them: a rail's footer, a top bar's right end, or — for the
   // chromes with neither — a row above the page. Floating over the page's

@@ -158,6 +158,9 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
         # THE PATHS PEOPLE TAKE (`flows`), one line each, so "after checkout,
         # show the order" is read as a change to a flow, not a guess.
         "flows": _flow_lines(doc),
+        # HOW EACH KIND OF PERSON SEES IT (`composition.looks`), so "make the
+        # staff menu dark" is a change to one audience's look, not the app's.
+        "looks": _look_lines(doc),
         # WHAT THE APP MUST DO, AND WHERE EACH LINE CAME FROM. Smith answers
         # questions from this context, and "which requirements came from the
         # document I uploaded?" has its answer in `requirements[].evidence`
@@ -278,6 +281,21 @@ def _flow_lines(doc: dict[str, Any]) -> list[str]:
         who = roles.get(str(f.get("role") or ""), "")
         out.append(f"{f.get('name')}{' (' + who + ')' if who else ''}: " + " → ".join(parts)
                    + (f" — ends: {f.get('ends')}" if f.get("ends") else ""))
+    return out
+
+
+def _look_lines(doc: dict[str, Any]) -> list[str]:
+    """`Customer, visitors — browse and buy on a phone: topbar, tinted; header band, lists cards …`"""
+    from services.blueprint.looks import resolved_looks
+    product = doc.get("product") or {}
+    out = []
+    if product.get("domain") or product.get("category"):
+        out.append("The product: " + " — ".join(str(x) for x in (product.get("domain"), product.get("category")) if x))
+    for lk in resolved_looks(doc):
+        r = lk["rhythm"]
+        out.append(f"{', '.join(lk['names'])}" + (f" — {lk['experience']}" if lk["experience"] else "")
+                   + f": {lk['chrome']}, {lk['tone']}; header {r['header']}, lead {r['lead']}, lists {r['lists']}, "
+                   f"figures {r['figures']}, sections {r['sections']}" + (f" (why: {lk['why']})" if lk["why"] else ""))
     return out
 
 

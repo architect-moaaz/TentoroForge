@@ -267,43 +267,60 @@ RHYTHM_DEFAULT: dict[str, str] = {"header": "eyebrow-title", "lead": "dark-card"
                                   "figures": "tiles", "sections": "cards"}
 
 
-def derive_rhythm(doc: dict) -> dict[str, str]:
-    """The rhythm the pages follow: the direction's own when it states one;
-    otherwise read off the design (density, personality) so that even a build
-    whose direction step was skipped does not get the default anatomy."""
-    comp = doc.get("composition") or {}
-    stated = comp.get("rhythm") if isinstance(comp.get("rhythm"), dict) else {}
-    out = dict(RHYTHM_DEFAULT)
-    design = doc.get("designSystem") or {}
-    density = str(design.get("informationDensity") or "comfortable")
-    personality = str(design.get("visualPersonality") or "").lower()
-    if density == "compact":
-        out.update(header="compact", figures="strip", sections="dense", lead="outlined-panel")
-    elif any(w in personality for w in ("warm", "editorial", "playful", "friendly", "consumer")):
-        out.update(header="band", lead="gradient-band", lists="cards", sections="open", figures="inline")
-    elif any(w in personality for w in ("stark", "minimal", "utility", "quiet")):
-        out.update(header="title-only", lead="type-only", lists="rows", sections="open")
-    for key, options in RHYTHM_OPTIONS.items():
-        if str(stated.get(key) or "") in options:
-            out[key] = str(stated[key])
-    return out
+def derive_rhythm(doc: dict, page: dict | None = None) -> dict[str, str]:
+    """The rhythm a page follows: its audience's look's
+    (`composition.looks`), else the application's stated rhythm, else
+    `RHYTHM_DEFAULT`. NOTHING IS READ OFF WORDS: a missing rhythm used to be
+    guessed from the personality ("warm", "consumer" made bands and cards),
+    which put a consumer's anatomy on a staff screen whose description
+    happened to be friendly (2026-10-08)."""
+    from services.blueprint.looks import look_for_page
+    return dict(look_for_page(doc, page)["rhythm"])
 
 
-def _rhythm(doc: dict) -> str:
-    """The rhythm as the page author reads it: each decision with what to do."""
-    r = derive_rhythm(doc)
+def _rhythm_lines(r: dict[str, str]) -> str:
     return "\n".join(f"- {key}: `{r[key]}` — {RHYTHM_OPTIONS[key][r[key]]}" for key in RHYTHM_OPTIONS)
+
+
+def _rhythm(doc: dict, page: dict | None = None) -> str:
+    """The rhythm as the page author reads it: each decision with what to do.
+    Given no page and an application with a look per audience, every
+    audience's — the cached prefix is the same for every page, and the page's
+    brief says whose look it is in (`look`)."""
+    from services.blueprint.looks import resolved_looks
+    looks = resolved_looks(doc)
+    if page is not None or len(looks) < 2:
+        return _rhythm_lines(derive_rhythm(doc, page))
+    blocks = [f"For {', '.join(lk['names'])}" + (f" — {lk['experience']}" if lk["experience"] else "") + ":\n"
+              + _rhythm_lines(lk["rhythm"]) for lk in looks]
+    return ("Each kind of person has its own look; a page keeps to the rhythm of the people it is for "
+            "(its brief's `look` names them):\n\n" + "\n\n".join(blocks))
+
+
+def _look_schema() -> dict[str, Any]:
+    from services.blueprint.projection import CHROMES, TONES
+    return {
+        "type": "object", "additionalProperties": False,
+        "required": ["audience", "experience", "chrome", "tone", "rhythm", "why"],
+        "properties": {
+            "audience": {"type": "array", "items": {"type": "string"}},
+            "experience": {"type": "string"},
+            "chrome": {"type": "string", "enum": list(CHROMES)},
+            "tone": {"type": "string", "enum": list(TONES)},
+            "rhythm": {
+                "type": "object", "additionalProperties": False, "required": list(RHYTHM_OPTIONS),
+                "properties": {key: {"type": "string", "enum": list(opts)} for key, opts in RHYTHM_OPTIONS.items()},
+            },
+            "why": {"type": "string"},
+        },
+    }
 
 
 DIRECTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["vision", "conventions", "rhythm"],
+    "required": ["vision", "conventions", "looks"],
     "properties": {
-        "rhythm": {
-            "type": "object", "additionalProperties": False, "required": list(RHYTHM_OPTIONS),
-            "properties": {key: {"type": "string", "enum": list(opts)} for key, opts in RHYTHM_OPTIONS.items()},
-        },
         "vision": {"type": "string"},
         "conventions": {
             "type": "array",
@@ -311,6 +328,9 @@ DIRECTION_SCHEMA: dict[str, Any] = {
                       "required": ["topic", "rule"],
                       "properties": {"topic": {"type": "string"}, "rule": {"type": "string"}}},
         },
+        # ONE LOOK PER AUDIENCE (`composition.looks`): the frame and the page
+        # rhythm each kind of person gets.
+        "looks": {"type": "array", "items": _look_schema()},
     },
 }
 
@@ -803,7 +823,7 @@ the first line is how a page runs out of room and arrives empty.
 {comp.get('vision') or '(no vision stated — choose a calm, professional, information-dense style)'}
 {conventions}
 
-# Its page rhythm — decided once for this application; every page keeps to it
+# Its page rhythm — decided once; every page keeps to it
 {_rhythm(doc)}
 
 # Its look — what each colour class means here
@@ -869,10 +889,16 @@ def _page_brief(doc: dict, page: dict) -> dict:
                 and w.get("status") != "DEPRECATED"]
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     data = page.get("data") or {}
+    from services.blueprint.looks import look_for_page, resolved_looks
+    look = look_for_page(doc, page) if len(resolved_looks(doc)) > 1 else None
     return {
         "page": {k: page.get(k) for k in ("id", "name", "route", "pattern", "purpose", "primaryTasks",
                                           "actions", "states", "stateNotes", "users", "access", "responsive")
                  if page.get(k) not in (None, [], "")},
+        # WHOSE LOOK THIS PAGE IS IN: the system prompt lists every
+        # audience's rhythm (it is the same for every page); this says which.
+        **({"look": {"for": ", ".join(look["names"]) or "everyone", "rhythm": look["rhythm"]}}
+           if look else {}),
         # ADDING HAPPENS HERE (`addsHere`): no page of its own exists for a new
         # record, so this page carries the form — a panel over the list, or
         # the workspace opening empty — and runs the workflow that creates it.
@@ -2057,27 +2083,65 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
 # The direction
 # ---------------------------------------------------------------------------
 
-def direction_prompts(doc: dict) -> tuple[str, str]:
+def _product_brief(doc: dict) -> str:
+    """What the product is — the field it serves and the kind of product it
+    is — as the product frame stated them. The look is chosen from these."""
+    product = doc.get("product") or {}
+    app = doc.get("application") or {}
+    domain = str(product.get("domain") or "").strip() or (
+        str(app.get("domain") or "").strip() if str(app.get("domain") or "").strip().lower() != "unknown" else "")
+    category = str(product.get("category") or "").strip()
+    lines = [f"Its field: {domain}" if domain else "", f"What kind of product it is: {category}" if category else ""]
+    return "\n".join(line for line in lines if line) + ("\n\n" if any(lines) else "")
+
+
+def _audiences_brief(doc: dict) -> str:
+    """Each audience the director gives a look to — every role by id, and the
+    visitors when there are public pages — with who they are and the screens
+    that are theirs."""
+    from services.blueprint.looks import PUBLIC, audiences
+    pages = [p for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("status") != "DEPRECATED"]
+    personas = {str(p.get("name") or "").lower(): p for p in (doc.get("product") or {}).get("personas") or []
+                if isinstance(p, dict)}
+    roles = {str(r.get("id")): r for r in doc.get("roles") or [] if isinstance(r, dict)}
+    rows = []
+    for a in audiences(doc):
+        if a == PUBLIC:
+            theirs = [p for p in pages if str(p.get("access") or "") == "public"]
+            who = "visitors who are not signed in"
+        else:
+            role = roles.get(a) or {}
+            theirs = [p for p in pages if a in [str(u) for u in p.get("users") or []]]
+            persona = personas.get(str(role.get("name") or "").lower()) or {}
+            who = "; ".join(x for x in (str(role.get("name") or a), str(role.get("description") or ""),
+                                        str(persona.get("description") or ""),
+                                        ", ".join(str(g) for g in persona.get("goals") or [])) if x)
+        names = ", ".join(str(p.get("name") or p.get("route")) for p in theirs[:8])
+        rows.append(f"- `{a}` — {who}. Their screens ({len(theirs)}): {names or 'none of their own'}")
+    return "Who uses it — each needs a look:\n" + "\n".join(rows) + "\n\n"
+
+
+def direction_prompts(doc: dict, *, brief: str = "", feedback: str = "") -> tuple[str, str]:
     app = doc.get("application") or {}
     ds = doc.get("designSystem") or {}
     system = ("You are the design director of a software product. You decide, once, what the whole "
-              "application should feel like and the conventions every page will follow, so that "
-              "thirty pages written separately read as one product, as good as "
-              f"{bar(doc)}. Be concrete: a page author must be able to follow each rule "
-              "without guessing. Rules are about layout, hierarchy, density, tone of copy, how "
+              "application should feel like, the look each kind of person who uses it gets, and the "
+              "conventions every page will follow, so that thirty pages written separately read as "
+              f"one product, as good as {bar(doc)}. Be concrete: a page author must be able to follow "
+              "each rule without guessing. Rules are about layout, hierarchy, density, tone of copy, how "
               "status and money read, empty/loading/error states, where actions live, and how "
               "lists, records and forms are built — never about colours by hex (the design "
               "system owns the palette).")
-    pages = [{k: p.get(k) for k in ("name", "route", "pattern", "purpose")}
+    pages = [{k: p.get(k) for k in ("name", "route", "pattern", "purpose", "users", "access")}
              for p in doc.get("pages") or [] if p.get("status") != "DEPRECATED"]
-    roles = [r.get("name") for r in doc.get("roles") or []]
     user = (f"The application: {app.get('name')}\n{str(app.get('description') or '')[:2000]}\n\n"
-            f"Who uses it: {', '.join(r for r in roles if r) or 'staff'}\n\n"
+            + _product_brief(doc)
+            + _audiences_brief(doc)
             # THE DESIGN AS IT IS NAMED. This read `density` and `personality`,
             # which the design system has never had (`informationDensity`,
             # `visualPersonality`): the director saw the fonts and the radius
             # and nothing of what the product is like (2026-10-02).
-            f"Its design system (personality, density, frame, type, radius):\n"
+            + f"Its design system (personality, density, frame, type, radius):\n"
             f"{json.dumps({k: ds.get(k) for k in ('visualPersonality', 'informationDensity', 'shell', 'navigationApproach', 'typography', 'radius') if ds.get(k)}, indent=1)[:3000]}\n\n"
             + _references_brief(ds) +
             f"Its pages:\n{json.dumps(pages, indent=1)[:12000]}\n\n"
@@ -2091,14 +2155,37 @@ def direction_prompts(doc: dict) -> tuple[str, str]:
             "to the dashboard. A reading list's direction said \"tiles and charts are "
             "for the dashboard only\", the list page drew the chart its analytics "
             "required, and was marked down for it (2026-09-27).\n\n"
-            "AND THE PAGE RHYTHM — five anatomy decisions, made once, that every page then "
-            "shares and that make this product's pages differ from another's. Choose each "
-            "from its personality, its density and how it is used, not by habit:\n"
-            + "\n".join(f"- `{key}`: " + "; ".join(f"`{o}` ({what})" for o, what in opts.items())
+            "AND `looks` — ONE LOOK FOR EACH AUDIENCE ABOVE. Two kinds of people in one application "
+            "can be using two kinds of product: decide each audience's look from this product's field, "
+            "the kind of product it is, and how THOSE people use it — where, how often, on what "
+            "device, for how long, what they come to do. People who meet the product in the same way "
+            "share one look; people who do not get their own. Every audience id above appears in "
+            "exactly one look's `audience`. Each look states:\n"
+            "- `experience`: what the product is to them and how they use it, in one line;\n"
+            "- `chrome` — how their navigation is built: `wide-rail` (a labelled sidebar, for many "
+            "destinations worked all day), `icon-rail` (a narrow rail of icons, for a focused tool), "
+            "`standard-rail` (a rail that expands on hover), `floating-rail` (the rail as a raised card, "
+            "lighter), `right-rail` (navigation after the content), `topbar` (one bar across the top, for "
+            "a few destinations), `dock` (a floating dock at the bottom, for use on a phone on the go). "
+            "Visitors (`public`) always get a header bar; give them `topbar`;\n"
+            "- `tone` — what their navigation is painted with: `dark` (the inverse surface), `brand` "
+            "(the primary colour), `light` (a card beside the page), `tinted` (the ground washed with "
+            "the primary);\n"
+            "- `rhythm` — five anatomy decisions every page of theirs shares, which make this product's "
+            "pages differ from another's:\n"
+            + "\n".join(f"  - `{key}`: " + "; ".join(f"`{o}` ({what})" for o, what in opts.items())
                         for key, opts in RHYTHM_OPTIONS.items())
-            + "\nA product read all day at a desk wants a compact header, figures in a strip "
-            "and dense sections; a consumer product wants a band, cards and open sections; a "
-            "quiet tool wants a title alone and rows. Make the vision agree with what you chose.")
+            + "\n- `why`: one sentence — why this look, from the field, the kind of product and these "
+            "people.\nA screen read all day at a desk wants different anatomy from one glanced at on a "
+            "phone or browsed at leisure; choose from how it is used, not by habit, and make the vision "
+            "agree with what you chose.")
+    if brief:
+        current = {k: (doc.get("composition") or {}).get(k) for k in ("vision", "conventions", "looks")}
+        user += ("\n\nTHIS IS A CHANGE to a direction already decided. The current direction:\n"
+                 + json.dumps(current, indent=1)[:8000]
+                 + f"\n\nChange only what this asks, and return everything else exactly as it is: {brief}")
+    if feedback:
+        user += f"\n\nYOUR LAST ANSWER WAS REFUSED — mend it: {feedback}"
     return system, user
 
 
@@ -2118,12 +2205,16 @@ def _references_brief(ds: dict) -> str:
             "generated application.\n\n")
 
 
-def compose_direction(doc: dict, client: Any, *, references: Sequence[Path] = ()) -> tuple[dict, Any]:
+def compose_direction(doc: dict, client: Any, *, references: Sequence[Path] = (),
+                      brief: str = "", feedback: str = "") -> tuple[dict, Any]:
     """The director's decision — shown the user's reference images when
-    there are any, read for the feel (`references.READ_FOR["ui_direction"]`)."""
+    there are any, read for the feel (`references.READ_FOR["ui_direction"]`).
+    A look that leaves an audience out is not mended here: the composition
+    is refused by `agent_contract.check_looks`, naming what is missing, and
+    the director is asked again with that (`feedback`)."""
     from services.blueprint.references import READ_FOR
 
-    system, user = direction_prompts(doc)
+    system, user = direction_prompts(doc, brief=brief, feedback=feedback)
     shown = [str(p) for p in references] if getattr(client, "accepts_images", False) else []
     if shown:
         user += (f"\n\nThe {len(shown)} image(s) attached are what the user showed to convey what "
@@ -2132,12 +2223,20 @@ def compose_direction(doc: dict, client: Any, *, references: Sequence[Path] = ()
     else:
         reply = client(system=system, user=user, schema=DIRECTION_SCHEMA)
     body = json.loads(getattr(reply, "text", reply))
-    rhythm = body.get("rhythm") if isinstance(body.get("rhythm"), dict) else {}
-    rhythm = {k: str(v) for k, v in rhythm.items() if k in RHYTHM_OPTIONS and str(v) in RHYTHM_OPTIONS[k]}
+    looks = []
+    for lk in body.get("looks") or []:
+        if not isinstance(lk, dict):
+            continue
+        rhythm = lk.get("rhythm") if isinstance(lk.get("rhythm"), dict) else {}
+        looks.append({"audience": [str(a) for a in lk.get("audience") or [] if str(a).strip()],
+                      "experience": str(lk.get("experience") or ""),
+                      "chrome": str(lk.get("chrome") or ""), "tone": str(lk.get("tone") or ""),
+                      "rhythm": {k: str(v) for k, v in rhythm.items() if k in RHYTHM_OPTIONS},
+                      "why": str(lk.get("why") or "")})
     return ({"vision": str(body.get("vision") or ""),
              "conventions": [{"topic": str(c.get("topic")), "rule": str(c.get("rule"))}
                              for c in body.get("conventions") or []],
-             **({"rhythm": rhythm} if len(rhythm) == len(RHYTHM_OPTIONS) else {})},
+             "looks": looks},
             getattr(reply, "usage", None))
 
 

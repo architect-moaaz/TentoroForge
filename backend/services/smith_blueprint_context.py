@@ -109,6 +109,7 @@ def blueprint_to_context(
     integrations = _render_integrations(bp)
     accounts = _render_accounts(bp)
     flows = _render_flows(bp)
+    looks = _render_looks(bp)
     decisions = _render_design_decisions(bp)
 
     # WHAT SURVIVES A SMALL BUDGET is what Smith answers and edits from: the
@@ -116,8 +117,9 @@ def blueprint_to_context(
     # the decisions are shortened first — the cap used to cut the END, which
     # was the pages and integrations.
     sections = [header, domain, requirements, entities, rules, workflows, pages, integrations, decisions, accounts,
-                flows]
-    keep_whole = {id(header), id(entities), id(workflows), id(pages), id(integrations), id(accounts), id(flows)}
+                flows, looks]
+    keep_whole = {id(header), id(entities), id(workflows), id(pages), id(integrations), id(accounts), id(flows),
+                  id(looks)}
     over = sum(len(x) for x in sections if x) - (budget.max_chars - 200)
     if over > 0:
         for i in (8, 2, 4, 1):          # decisions, requirements, rules, domain
@@ -388,6 +390,15 @@ def _render_pages(bp: Blueprint) -> str:
                 if choice:
                     lines.append(f"  · {choice}" + (f"  ({why})" if why else ""))
     return "\n".join(lines)
+
+
+def _render_looks(bp: Blueprint) -> str:
+    """The look each kind of person gets — its frame and its page rhythm."""
+    lines = [str(x) for x in getattr(bp, "looks", None) or [] if x]
+    if not lines:
+        return ""
+    return ("## How each kind of person sees it (their look — change one with `write_section` on "
+            "`composition`, naming whose)\n" + "\n".join(f"- {x}" for x in lines))
 
 
 def _render_flows(bp: Blueprint) -> str:
