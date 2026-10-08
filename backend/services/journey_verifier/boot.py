@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from services.proc_compat import group_kwargs, kill_group, tool
 import os
-import signal
 import subprocess
 import sys
 import time

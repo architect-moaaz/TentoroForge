@@ -33,7 +33,6 @@ import json
 import logging
 import os
 import shutil
-import signal
 import socket
 import subprocess
 import threading
@@ -537,10 +536,14 @@ def run_shots(app: RunningApp, pages: list[dict], out_dir: Path, *, probe: bool 
     shutil.copyfile(_SHOTS, script)
     env = {**os.environ}
     env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(Path.home() / "Library/Caches/ms-playwright"))
+    # node writes UTF-8; read it as that (Windows would otherwise decode with the ANSI code page, and a
+    # page with a non-ASCII character killed the reader thread, leaving stdout/stderr None).
     proc = subprocess.run(["node", str(script), str(cfg)], cwd=work, capture_output=True,
-                          text=True, timeout=180 + 240 * len(pages), env=env)
-    line = next((l for l in reversed(proc.stdout.splitlines()) if l.startswith("[") or l.startswith("{")), "")
-    result = json.loads(line) if line else {"error": proc.stderr[-400:]}
+                          text=True, encoding="utf-8", errors="replace",
+                          timeout=180 + 240 * len(pages), env=env)
+    out, err = proc.stdout or "", proc.stderr or ""
+    line = next((l for l in reversed(out.splitlines()) if l.startswith("[") or l.startswith("{")), "")
+    result = json.loads(line) if line else {"error": err[-400:]}
     if isinstance(result, dict):
         raise ReviewUnavailable(f"screenshots failed: {result.get('error')}")
     return result

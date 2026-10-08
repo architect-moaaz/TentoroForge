@@ -172,6 +172,9 @@ def test_stopping_the_app_on_windows_survives_a_process_that_will_not_end(monkey
     class Holds:
         pid = 4242
 
+        def poll(self):
+            return None
+
         def wait(self, timeout=None):
             raise subprocess.TimeoutExpired("next", timeout)
 
@@ -183,10 +186,11 @@ def test_stopping_the_app_on_windows_survives_a_process_that_will_not_end(monkey
 
     ran = []
     monkeypatch.setattr(pr, "os", FakeOS())
+    monkeypatch.setattr("services.proc_compat.IS_WINDOWS", True)     # the group is ended with taskkill
     monkeypatch.setattr(pr.subprocess, "run", lambda cmd, **k: ran.append(cmd[0]) or types.SimpleNamespace(returncode=0))
     monkeypatch.setattr("services.dev_servers.forget", lambda pid: None)
     app = pr.RunningApp.__new__(pr.RunningApp)
     app.proc, app._sink, app.clone, app.started_db = Holds(), None, None, False
     app.root, app.dist_dir = tmp_path, "dist"
     app._stop()                                                    # must not raise TimeoutExpired
-    assert ran == ["taskkill"]
+    assert set(ran) == {"taskkill"}                                 # asked twice (gently, then for good); both are taskkill

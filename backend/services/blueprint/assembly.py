@@ -1177,7 +1177,6 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
     a sign-in — both mean the server started and routed. This checks booting,
     not behaviour, and a database is not required to run it.
     """
-    import signal
     import socket
     import subprocess
     import time
