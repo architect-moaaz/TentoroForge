@@ -82,3 +82,13 @@ def test_plain_anchors_in_the_shell_navigate_softly():
     assert "router.push(href)" in source
     assert "e.defaultPrevented" in source, "next/link already handles its own clicks"
     assert "(api|_next)" in source, "an API route or an asset is never a page"
+
+
+def test_the_root_loading_state_is_the_shape_of_the_app_not_a_card():
+    """The root `loading.tsx` shows whenever a layout is still being prepared: a full load,
+    signing out, and the move from the sign-in page into the signed-in layout. A card on a blank
+    window read as a different app starting; it is the app's own shape filling in."""
+    root = (TEMPLATES.parent.parent / "standalone-app" / "src" / "app" / "loading.tsx").read_text("utf-8")
+    assert "AppShellSkeleton" in root and "EdgePageFrame" not in root
+    skeleton = (TEMPLATES / "components" / "PageSkeleton.tsx").read_text("utf-8")
+    assert "export function AppShellSkeleton" in skeleton
