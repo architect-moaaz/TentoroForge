@@ -69,6 +69,7 @@ _advance_state_to_review = _brief_mod.advance_to_review
 #: here until they finish and discard themselves.
 from services import run_registry
 from services.smith import design_language
+from services.smith import ui_designer
 from services.smith.clarify_brief import (
     company_palette_option as clarify_company_option)
 from services.blueprint.run_progress import Progress
@@ -1483,7 +1484,7 @@ async def smith_chat(
         if event == "message":
             _remember(loop, project_id, "assistant", str(data.get("text") or ""),
                       {k: v for k, v in data.items()
-                       if k in ("options", "diffSummary", "status", "intent")
+                       if k in ("options", "diffSummary", "status", "intent", "secret")
                        and v},
                       lock=memory_lock)
         # The telemetry is still not written to the transcript — it would make
@@ -1623,6 +1624,27 @@ async def smith_chat(
                             svc, _answer,
                             company_name=(_offer or ("", ""))[0])})
                     return _run_dag(str(output_dir), app_root, req.message,
+                                    approved=True, emit=emit,
+                                    app_name=getattr(project, "name", "") or "")
+
+            # WHO DESIGNS THE SCREENS — the answer, and the key that goes with UX Pilot. Both are
+            # commands like the design-language answer above: the option or the "key saved" line
+            # arrives as an ordinary message and is recognised only when the turn before it was
+            # the question (`answer_in`, `key_saved_in`), so these words in a sentence decide
+            # nothing. Nothing here carries the key: the panel stores it straight to the
+            # organisation's integrations and says only that it did.
+            if svc is not None:
+                _history = [(t.role, t.text) for t in req.history if t.text]
+                _designer = ui_designer.answer_in(req.message, _history)
+                _key_saved = (not _designer) and ui_designer.key_saved_in(req.message, _history)
+                if _designer or _key_saved:
+                    _said = ui_designer.record(svc, _designer) if _designer else ""
+                    _stop = ui_designer.gate(svc.doc, output_dir)
+                    if _stop is not None:
+                        emit("message", _stop)
+                        return {"status": "asked"}
+                    emit("message", {"text": _said or "Key saved. Building now."})
+                    return _run_dag(str(output_dir), app_root, "",
                                     approved=True, emit=emit,
                                     app_name=getattr(project, "name", "") or "")
 
@@ -2191,6 +2213,14 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     existing = Path(output_dir) / ".forge" / "blueprint" / "current.json"
     if existing.is_file():
         svc = BlueprintService.load(output_dir=output_dir)
+        # WHO DESIGNS THE SCREENS IS SETTLED BEFORE A BUILD STARTS, WHICHEVER DOOR IT CAME
+        # THROUGH: the card, a typed "build", the product model's button. Asked once per
+        # application; and when UX Pilot is the answer, the key it needs is asked for here too.
+        if approved and announce_completion and phase == "build":
+            _stop = ui_designer.gate(svc.doc, output_dir)
+            if _stop is not None:
+                emit("message", _stop)
+                return {"status": "asked"}
         if approved and announce_completion:
             # "APPROVE AND BUILD" IS THE APPROVAL. Recorded now, against the
             # definition as it stands, so a plan approval that had gone stale

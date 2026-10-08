@@ -36,10 +36,11 @@ def test_the_question_names_both_designers_and_the_cost(svc):
     q = ud.question(svc.doc)
     assert ud.is_question(q)
     assert "Forge UI Designer" in q and "UX Pilot" in q
-    assert "per page the build defines" in q and "credit" in q
+    assert "one UX Pilot run draws every screen" in q and "9 UX Pilot credits per screen" in q
+    assert "per page" not in q, "it is one run for the application now, not a credit per page"
     assert list(ud.OPTIONS) == ["Forge UI Designer", "UX Pilot"]
     svc.doc["pages"] = [{"id": "PAGE-001", "name": "Tasks", "route": "/tasks", "purpose": "x"}]
-    assert "(1 page)" in ud.question(svc.doc)
+    assert "(1 screen)" in ud.question(svc.doc)
 
 
 def test_an_option_counts_only_as_the_answer_to_the_question_just_asked(svc):
@@ -78,17 +79,69 @@ def test_recording_writes_the_fact_and_the_citation(svc):
         ud.record(svc, "figma")
 
 
-def test_the_approval_builds_without_asking_who_designs_the_screens():
-    """The build lays every page out from its contract with no model, so there
-    is no designer to choose at the gate: Approve goes straight to the graph."""
+def test_every_build_passes_the_designer_gate():
+    """UX Pilot's drawing now guides each page's code, so who designs is a real choice: every
+    build starts through `_run_dag`, which stops to ask it, and the answer is recognised
+    before the generic approval handling."""
     from routers import blueprint_generate
 
-    src = inspect.getsource(blueprint_generate.smith_chat)
-    approved_at = src.index("if req.approved:")
-    assert "ui_designer" not in src
-    assert "_run_dag(" in src[approved_at:approved_at + 1500]
+    assert "ui_designer.gate(" in inspect.getsource(blueprint_generate._run_dag)
+    chat = inspect.getsource(blueprint_generate.smith_chat)
+    assert "ui_designer.answer_in(" in chat and "ui_designer.key_saved_in(" in chat
 
 
-def test_the_configure_text_never_asks_for_the_key_itself():
-    assert "Settings" in ud.CONFIGURE_TEXT and "UXPILOT_API_KEY" in ud.CONFIGURE_TEXT
-    assert "never take the key" in ud.CONFIGURE_TEXT
+def test_an_undecided_application_is_asked_and_a_decided_one_is_not(svc, monkeypatch):
+    monkeypatch.delenv("FORGE_UI_DESIGNER", raising=False)
+    stop = ud.gate(svc.doc, svc.output_dir)
+    assert stop and ud.is_question(stop["text"]) and stop["options"] == list(ud.OPTIONS)
+    assert stop["status"] == "asked"
+    svc.doc["application"]["uiDesigner"] = "forge"
+    assert ud.gate(svc.doc, svc.output_dir) is None
+
+
+def test_an_operators_platform_default_is_not_asked_again(svc, monkeypatch):
+    monkeypatch.setenv("FORGE_UI_DESIGNER", "uxpilot")
+    monkeypatch.setattr(ud, "configured", lambda _o: True)
+    assert ud.gate(svc.doc, svc.output_dir) is None
+
+
+def test_choosing_ux_pilot_without_a_key_asks_for_the_key_in_the_chat(svc, monkeypatch):
+    monkeypatch.setattr(ud, "configured", lambda _o: False)
+    svc.doc["application"]["uiDesigner"] = "uxpilot"
+    stop = ud.gate(svc.doc, svc.output_dir)
+    assert stop and ud.is_key_prompt(stop["text"])
+    assert stop["secret"] == ud.SECRET_FIELD
+    assert stop["options"] == [ud.USE_FORGE_INSTEAD], "a way out that needs no key"
+    monkeypatch.setattr(ud, "configured", lambda _o: True)
+    assert ud.gate(svc.doc, svc.output_dir) is None
+
+
+def test_the_key_request_names_the_field_and_never_carries_a_key():
+    prompt = ud.key_prompt()
+    assert prompt["secret"] == {"provider": "uxpilot", "key": "UXPILOT_API_KEY",
+                                "label": "UX Pilot API key", "placeholder": "ep_...",
+                                "saved": ud.KEY_SAVED}
+    # A descriptor of a field to fill, never a value; and the words promise the key stays out of the chat.
+    assert "value" not in prompt["secret"]
+    assert "never written into this conversation" in ud.KEY_TEXT
+    from services.uxpilot.credentials import looks_like_key
+
+    assert not looks_like_key(str(prompt))
+
+
+def test_the_saved_key_and_the_forge_chip_count_only_after_the_key_request():
+    prompt = ud.key_prompt()["text"]
+    assert ud.key_saved_in(ud.KEY_SAVED, [("smith", prompt)]) is True
+    assert ud.key_saved_in(ud.KEY_SAVED, [("smith", "Anything else?")]) is False
+    assert ud.key_saved_in("key saved please", [("smith", prompt)]) is False
+    assert ud.answer_in(ud.USE_FORGE_INSTEAD, [("smith", prompt)]) == "forge"
+    assert ud.answer_in("UX Pilot", [("smith", prompt)]) == ""
+    assert ud.answer_in(ud.USE_FORGE_INSTEAD, [("smith", "Anything else?")]) == ""
+
+
+def test_the_field_descriptor_is_what_the_transcript_keeps():
+    """The message's metadata is persisted with the conversation, so `secret` must be allowed
+    through - and it is only the field's name, which is why that is safe."""
+    from routers import blueprint_generate
+
+    assert '"secret"' in inspect.getsource(blueprint_generate)
