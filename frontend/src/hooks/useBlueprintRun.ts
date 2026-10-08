@@ -112,6 +112,20 @@ export interface RunThought {
   node?: string;
 }
 
+/**
+ * A field Smith asks the person to fill in the chat — a key, say. It names the integration
+ * row to write and what to say after; it never holds a value, and the panel sends what is
+ * typed straight to that row instead of into the conversation.
+ */
+export interface SecretField {
+  provider: string;
+  key: string;
+  label: string;
+  placeholder?: string;
+  /** The words sent as the next turn once the value is stored. */
+  saved: string;
+}
+
 /** Something Smith said, in the order it said it. */
 export interface RunMessage {
   text: string;
@@ -120,6 +134,7 @@ export interface RunMessage {
   /** The server's word for the message: "progress" is a line said while a
    *  turn runs, drawn quieter than an answer. */
   status?: string;
+  secret?: SecretField;
 }
 
 /**
@@ -731,6 +746,7 @@ export function reduce(
           options: (data.options as string[]) ?? undefined,
           diffSummary: (data.diffSummary as string) || undefined,
           status: (data.status as string) || undefined,
+          secret: (data.secret as SecretField) ?? undefined,
         }].filter((m) => m.text),
       };
 
