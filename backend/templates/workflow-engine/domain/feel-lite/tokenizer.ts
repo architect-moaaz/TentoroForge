@@ -81,7 +81,15 @@ export function tokenize(input: string): Token[] {
       const quote = advance();
       let str = "";
       while (pos < input.length && input[pos] !== quote) {
-        if (input[pos] === "\\") { advance(); if (pos < input.length) str += advance(); }
+        // A backslash is kept unless it escapes the quote or another backslash (`\\S`, `\\d`
+        // are regex shortcuts for `matches`; dropping the backslash turned them into letters).
+        if (input[pos] === "\\") {
+          advance();
+          if (pos < input.length) {
+            const next = input[pos];
+            str += next === quote || next === "\\" ? advance() : "\\" + advance();
+          }
+        }
         else str += advance();
       }
       if (pos < input.length) advance();
