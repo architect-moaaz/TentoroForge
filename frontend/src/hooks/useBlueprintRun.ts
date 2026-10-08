@@ -861,6 +861,16 @@ export function momentOf(event: string, data: Record<string, unknown>): RunMomen
 
 function describe(event: string, data: Record<string, unknown>): string {
   switch (event) {
+    case "huddle": {
+      // The agents a question touches, meeting (backend/services/huddle).
+      const who = Array.isArray(data.participants) ? (data.participants as unknown[]).join(", ") : "";
+      const phase = String(data.phase ?? "");
+      if (phase === "start") return `Huddle ${data.id}: ${who} meet — ${data.topic}`;
+      if (phase === "position") return `Huddle ${data.id}: ${data.agent} — ${data.change || data.view}`;
+      if (phase === "decided") return `Huddle ${data.id} decided: ${data.decision}`;
+      if (phase === "deadlock") return `Huddle ${data.id} needs you: ${data.question || data.reason || "undecided"}`;
+      return `Huddle ${data.id}`;
+    }
     case "started":
       return "Run started";
     case "plan": {

@@ -42,7 +42,13 @@ DEPARTMENTS: dict[str, str] = {
     "security": "Security",
     "qa": "Verification",
     "shipping": "Shipping",
+    # Where the agents a question touches meet; nobody's desk is here.
+    "huddle": "Huddle Room",
 }
+
+#: Rooms people come to rather than sit in. Nobody is seated here; the agents
+#: of a huddle walk in and back (`services.huddle.room`).
+MEETING_ROOMS: frozenset[str] = frozenset({"huddle"})
 
 
 #: Which department each Blueprint agent sits in. Keys are agent names from

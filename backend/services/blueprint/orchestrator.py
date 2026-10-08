@@ -1715,13 +1715,14 @@ def _execute(
             return
         _record_observation(report, ledger, obs)
         from services.blueprint.observer import CRITIC_EDGE as _CRITIC_EDGE
+        from services.blueprint.observer import HUDDLE_EDGE as _HUDDLE_EDGE
         # WHAT THIS NODE CANNOT FIX, SAID ONCE AND KEPT. Deferred findings
         # used to be counted and dropped. The ones the critic raised are the
         # useful kind — "no Patient entity is defined" — so they travel as
         # change requests to the report, where Smith and a person can read
         # them, instead of burning repair rounds on an author that cannot act.
         for f in getattr(obs, "deferred", ()) or ():
-            if getattr(f, "edge", "") != _CRITIC_EDGE:
+            if getattr(f, "edge", "") not in (_CRITIC_EDGE, _HUDDLE_EDGE):
                 continue
             key_ = (key, f.section, f.detail)
             if key_ in w.deferred_seen:

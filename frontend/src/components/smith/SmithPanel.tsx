@@ -54,6 +54,7 @@ import { MarkdownLink } from "@/components/chat/MarkdownLink";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
+import { HuddleCards } from "@/components/smith/HuddleCards";
 import { STAGE_VERB, labelFor } from "./stages";
 import { QuestMap } from "./QuestMap";
 import { progressMark, slowStepNote } from "./slowStep";
@@ -1160,6 +1161,14 @@ export function SmithPanel({
             </button>
           )}
           <StageList run={sidePlan} projectId={projectId ?? undefined} />
+          {projectId && (
+            <HuddleCards
+              projectId={projectId}
+              tick={run.events.filter((e) => e.event === "huddle").length}
+              onOverrule={sendText}
+              className="mt-4"
+            />
+          )}
         </div>
       ) : openGate === "requirements" && gates.data ? (
         // THE FIRST REVIEW: what the app must do.

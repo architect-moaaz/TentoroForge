@@ -63,6 +63,9 @@
             "company",
             "custom"
           ]
+        },
+        "huddles": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -3543,7 +3546,8 @@
               "smith_recommendation",
               "domain_default",
               "figma",
-              "uxpilot"
+              "uxpilot",
+              "huddle"
             ]
           },
           "approvedBy": {

@@ -9,6 +9,7 @@
 //  Row 0:  Discovery (0,0) | Architecture (1,0) | Design Studio (2,0)
 //  Row 1:  Data      (0,1) | Composition  (1,1) | Logic         (2,1)
 //  Row 2:  Security   (0,2) | Verification (1,2) | Shipping     (2,2)
+//  Row 3:                    | Huddle Room  (1,3) |
 //
 // Discovery feeds Architecture, which forks into Data (down the left wall)
 // and Design Studio → Composition (down the right). Security sits under Data
@@ -181,6 +182,23 @@ const rooms: Room[] = [
     { type: "monitor_large", x: 0, y: 0 },
     { type: "plant", x: 7, y: 0 },
   ]),
+
+  // Row 3 — where the agents a question touches meet; under Verification,
+  // whose observer chairs. The table is in the middle; seats ring it.
+  makeRoom("huddle", 1, 3, "floor_wood", [
+    { type: "meeting_table", x: 2, y: 2 },
+    { type: "meeting_table", x: 3, y: 2 },
+    { type: "meeting_table", x: 4, y: 2 },
+    { type: "meeting_table", x: 5, y: 2 },
+    { type: "meeting_table", x: 2, y: 3 },
+    { type: "meeting_table", x: 3, y: 3 },
+    { type: "meeting_table", x: 4, y: 3 },
+    { type: "meeting_table", x: 5, y: 3 },
+    { type: "whiteboard", x: 1, y: 0 },
+    { type: "whiteboard", x: 6, y: 0 },
+    { type: "plant", x: 0, y: 5 },
+    { type: "plant", x: 7, y: 5 },
+  ]),
 ];
 
 // ── Corridor / walkable path tiles ─────────────────────────────────────────
@@ -201,6 +219,18 @@ function buildPaths(): Position[] {
     for (let x = x2Start; x < x2Start + GAP; x++) {
       paths.push({ x, y: cy });
       paths.push({ x, y: cy - 1 });
+    }
+  }
+
+  // The Huddle Room hangs under Verification: one corridor down to it.
+  {
+    const hr = rooms.find((r) => r.id === "huddle");
+    if (hr) {
+      const cx = hr.x + Math.floor(hr.w / 2);
+      for (let y = hr.y - GAP; y < hr.y; y++) {
+        paths.push({ x: cx, y });
+        paths.push({ x: cx - 1, y });
+      }
     }
   }
 
@@ -246,12 +276,29 @@ function buildPaths(): Position[] {
 // ── Lobby position (centre of the grid) ────────────────────────────────────
 
 const GRID_W = 3 * ROOM_W + 2 * GAP; // 28
-const GRID_H = 3 * ROOM_H + 2 * GAP; // 22
+// Three rows of departments and the Huddle Room under them.
+const GRID_H = 4 * ROOM_H + 3 * GAP; // 30
 
 const lobby: Position = {
   x: Math.floor(GRID_W / 2),
-  y: Math.floor(GRID_H / 2),
+  y: Math.floor((3 * ROOM_H + 2 * GAP) / 2),
 };
+
+// ── The Huddle Room's seats ────────────────────────────────────────────────
+
+/** Where each person sits at the table: the chair at the head, the others
+ *  along the two sides, in the order they arrive. */
+export function huddleSeats(): { chair: Position; seats: Position[] } {
+  const r = rooms.find((x) => x.id === "huddle")!;
+  return {
+    chair: { x: r.x + 1, y: r.y + 3 },
+    seats: [
+      { x: r.x + 3, y: r.y + 1 }, { x: r.x + 3, y: r.y + 4 },
+      { x: r.x + 5, y: r.y + 1 }, { x: r.x + 5, y: r.y + 4 },
+      { x: r.x + 6, y: r.y + 3 }, { x: r.x + 4, y: r.y + 1 },
+    ],
+  };
+}
 
 // ── Export ──────────────────────────────────────────────────────────────────
 

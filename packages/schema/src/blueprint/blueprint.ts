@@ -98,6 +98,13 @@ export const ApplicationMeta = z.object({
    * nothing to offer.
    */
   designLanguage: DesignLanguageSource.optional(),
+  /**
+   * Whether the application's agents huddle — meet over a big decision or a
+   * deadlock one of them cannot settle, chaired by the observer
+   * (docs/plans/2026-10-08-huddle-room.md). Absent means yes; `false` turns
+   * them off for this application, to measure a build without them.
+   */
+  huddles: z.boolean().optional(),
 });
 
 // ===========================================================================
@@ -2397,7 +2404,8 @@ export const Decision = z.object({
   id: DecisionId,
   decision: z.string(),
   reason: z.string().default(""),
-  source: z.enum(["user", "smith_recommendation", "domain_default", "figma", "uxpilot"]),
+  /** `huddle` — decided by the agents that own the parts it touches, chaired by the observer (`.forge/huddles`). */
+  source: z.enum(["user", "smith_recommendation", "domain_default", "figma", "uxpilot", "huddle"]),
   approvedBy: z.enum(["user", "smith"]).default("smith"),
   version: z.number().default(1),
   supersedes: DecisionId.optional(),
