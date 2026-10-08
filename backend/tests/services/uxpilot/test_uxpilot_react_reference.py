@@ -515,3 +515,46 @@ def test_the_standalone_scaffold_maps_the_status_colours_a_badge_reads():
     for token in ("success", "warning", "info", "destructive", "accent"):
         assert f'--{token}-subtle' in config, f"bg-{token}-subtle would render with no colour"
     assert "heading:" in config
+
+
+# --------------------------------------------------------------------------- #
+# UX Pilot refuses a prompt over 8,000 characters
+# --------------------------------------------------------------------------- #
+
+def _many_pages(n):
+    doc = _doc()
+    base = doc["pages"][0]
+    doc["pages"] = []
+    for i in range(n):
+        page = dict(base, id=f"PAGE-{i + 1:03d}", name=f"Screen number {i + 1}", route=f"/screen-{i + 1}",
+                    purpose="A purpose that takes a fair number of words to say, so that many of these add up. " * 3)
+        doc["pages"].append(page)
+    return doc
+
+
+def test_a_prompt_that_is_too_long_gives_up_its_repeated_bullets_first():
+    doc = _many_pages(9)
+    pages = g.design_pages(doc)
+    full = g.app_prompt_for(doc, pages)
+    fitted = g.fit_prompt(doc, pages)
+    assert fitted is not None and len(fitted) <= g.MAX_PROMPT_CHARS
+    assert len(fitted) <= len(full)
+    assert "Screen number 9" in fitted, "every screen is still asked for"
+
+
+def test_an_application_too_big_for_one_prompt_is_split_in_halves_not_per_page():
+    doc = _many_pages(40)
+    batches = g.prompt_batches(doc, g.design_pages(doc))
+    assert 1 < len(batches) < 40, "a few jobs, not one per page"
+    assert sum(len(b) for b in batches) == 40
+    for batch in batches:
+        assert len(g.fit_prompt(doc, batch) or "") <= g.MAX_PROMPT_CHARS
+
+
+def test_a_small_application_is_still_one_job(tmp_path):
+    doc = _doc()
+    assert len(g.prompt_batches(doc, g.design_pages(doc))) == 1
+    gw = _Gateway()
+    g.app_designs(doc, tmp_path, gateway=gw)
+    assert gw.calls == ["start_design_agent"]
+    assert all(len(p) <= g.MAX_PROMPT_CHARS for p in gw.prompts)
