@@ -115,4 +115,30 @@ export function PageSkeleton({ pattern = "default" }: { pattern?: SkeletonPatter
   );
 }
 
+/**
+ * The whole app arriving: a rail and the page area, drawn as placeholders.
+ *
+ * Used by the ROOT `loading.tsx`, which Next shows whenever a layout is still being prepared:
+ * a full page load, signing out, and the move from the sign-in page (outside the signed-in
+ * layout) into the app, which has to load that layout first. A card in the middle of a blank
+ * window read as a different, slower app starting; this reads as the same app filling in.
+ */
+export function AppShellSkeleton() {
+  return (
+    <div className="flex min-h-screen bg-background">
+      <aside aria-hidden="true" className="hidden w-60 shrink-0 flex-col gap-3 border-r bg-card p-4 lg:flex">
+        <Bar className="mb-3 h-8 w-32" />
+        {[0, 1, 2, 3].map((i) => <Bar key={i} className="h-9 w-full rounded-lg" />)}
+        <div className="mt-auto flex items-center gap-3 pt-6">
+          <Bar className="h-9 w-9 rounded-full" />
+          <Bar className="h-4 w-28" />
+        </div>
+      </aside>
+      <main className="min-w-0 flex-1">
+        <PageSkeleton />
+      </main>
+    </div>
+  );
+}
+
 export default PageSkeleton;
