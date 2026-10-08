@@ -104,11 +104,16 @@ def annotate(view: str, *, app_root: Path | None = None) -> str:
     return str(run("annotate", {"view": view}, app_root=app_root)["view"])
 
 
-def revision_of(view: str, load: str) -> str:
+def revision_of(view: str, load: str, parts: dict[str, str] | None = None) -> str:
     """A revision is the content: the same sources are the same revision, on
-    any machine, which is what makes an apply idempotent to retry."""
+    any machine, which is what makes an apply idempotent to retry. A split
+    screen's parts are content too; a page without parts hashes as it always
+    did, so its history keeps its revisions."""
     h = hashlib.sha1()
     h.update(view.encode("utf-8"))
     h.update(b"\0")
     h.update(load.encode("utf-8"))
+    for key in sorted(parts or {}):
+        h.update(b"\0part:" + key.encode("utf-8") + b"\0")
+        h.update(str((parts or {})[key]).encode("utf-8"))
     return h.hexdigest()[:16]

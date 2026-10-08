@@ -17,7 +17,7 @@
 
 import { promises as fs } from "fs";
 import { missingRequiredInputs } from "./required-inputs";
-import { hydrateRecordInputs } from "./record-inputs";
+import { fillSelfInputs, hydrateRecordInputs } from "./record-inputs";
 import { queryResult } from "./query-result";
 import crypto from "node:crypto";
 import path from "path";
@@ -25,7 +25,7 @@ import path from "path";
 // actually read/write the database. Every generated app emits these.
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { getTableName, is, Table, eq, and, sql } from "drizzle-orm";
+import { getTableName, is, Table, eq, ne, gt, gte, lt, lte, inArray, notInArray, and, sql } from "drizzle-orm";
 // Self-heal integration — every catch site below reports the failure to
 // Forge so Smith can pick it up and edit the offending file directly.
 // Fire-and-forget: a report failure never crashes the caller.
@@ -146,6 +146,19 @@ export async function loadWorkflows(
   return workflowCache;
 }
 
+/** Whether a table is the account entity's — the table each login's own row
+ * lives in. Loaded when first needed: an app with no account entity has a
+ * `null` there and no record input is ever the signed-in person. */
+async function accountTableMatcher(): Promise<(table: string) => boolean> {
+  let accountTable: unknown = null;
+  try {
+    accountTable = (await import("@/lib/account-table")).accountTable;
+  } catch {
+    accountTable = null;
+  }
+  return (table: string) => !!accountTable && _resolveTable(table) === accountTable;
+}
+
 /**
  * Trigger a workflow by ID or name.
  *
@@ -179,6 +192,8 @@ export async function triggerWorkflow(
   // column it was meant to fill — the run said "completed" and the person
   // was told their document was submitted (0l133sp2). Refused here, the
   // caller gets 422 and the form says which box is empty.
+  input = fillSelfInputs(workflow, input as Record<string, unknown>, user as any,
+                         await accountTableMatcher());
   const missing = missingRequiredInputs(workflow, input as Record<string, unknown>);
   if (missing.length) {
     const now = new Date().toISOString();
@@ -614,6 +629,31 @@ function _walkPath(root: unknown, path: string): unknown {
   return cur;
 }
 
+/** The visitor's guest token for this run, when they are signed out. */
+export function guestOf(ctx: WorkflowExecutionContext): string | null {
+  const g = (ctx as any)?.guest ?? ctx.variables?.__guest;
+  return typeof g === "string" && g ? g : null;
+}
+
+/** A guest's row carries their token, as the data engine stamps it on its own
+ *  creates: a workflow's insert writes directly, so it is stamped here. Only
+ *  for a table whose ownership rule names a `guestColumn`, only when nobody is
+ *  signed in. */
+async function stampGuest(tableName: string, values: Record<string, unknown>,
+                          ctx: WorkflowExecutionContext): Promise<void> {
+  const guest = guestOf(ctx);
+  if (!guest || (ctx as any)?.user?.id) return;
+  let rulesFor: ((e: string) => Array<{ guestColumn?: string }>) | undefined;
+  try {
+    rulesFor = (await import("../ownership-rules")).ownershipRulesFor;
+  } catch {
+    return;
+  }
+  for (const rule of rulesFor?.(tableName) ?? []) {
+    if (rule.guestColumn) values[rule.guestColumn] = guest;
+  }
+}
+
 // A config value is either a process-variable name, a special token, or a
 // literal. `{{var}}` templates interpolate from the workflow variables.
 export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknown {
@@ -631,6 +671,9 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
     return d;
   }
   if (ref === "$user.id") return (ctx as any)?.user?.id ?? ctx.variables?.__user?.id ?? ctx.variables?.user?.id ?? null;
+  // A signed-out visitor's guest token (the `forge-guest` cookie the execute
+  // route hands over): what finds the cart a guest already started.
+  if (ref === "$guest") return guestOf(ctx);
   if (ref === "true") return true;
   if (ref === "false") return false;
   if (ref.includes("{{")) {
@@ -982,6 +1025,20 @@ export function _finalizeInsert(
 /** A lookup whose key is missing: it matches no row (see `_buildWhere`). */
 export const MATCHES_NOTHING = Symbol("matches-nothing");
 
+/** The comparisons an object `where` value may name, and their spellings. */
+const _OPS: Record<string, "ne" | "gt" | "gte" | "lt" | "lte" | "in" | "notIn"> = {
+  ne: "ne", neq: "ne", not: "ne", "!=": "ne", gt: "gt", ">": "gt", gte: "gte", ">=": "gte",
+  lt: "lt", "<": "lt", lte: "lte", "<=": "lte", in: "in", notIn: "notIn", nin: "notIn",
+};
+
+/** `{ ne: v }` → `{ name: "ne", value: v }`; anything else is not a comparison. */
+export function _comparison(ref: unknown): { name: string; value: any } | null {
+  if (!ref || typeof ref !== "object" || Array.isArray(ref)) return null;
+  const keys = Object.keys(ref as object);
+  if (keys.length !== 1 || !(keys[0] in _OPS)) return null;
+  return { name: _OPS[keys[0]], value: (ref as any)[keys[0]] };
+}
+
 export function _buildWhere(
   table: any, where: unknown, ctx: WorkflowExecutionContext,
   opts: { strict?: boolean } = { strict: true },
@@ -996,6 +1053,32 @@ export function _buildWhere(
   const conds = entries
     .map(([field, ref]) => {
       if (!table[field]) { dropped.push(field); return undefined; }
+      // A COMPARISON OTHER THAN "EQUALS": `{ id: { ne: "{{customer.id}}" } }`.
+      // Only equality existed, so the object itself reached Postgres —
+      // ToroCommerce's "email not already used by another customer" check
+      // sent "[object Object]" as a uuid and Edit Profile failed for everyone
+      // (forge-v3, 2026-10-07).
+      const op = _comparison(ref);
+      if (op) {
+        const raw = _resolveRef(op.value, ctx);
+        const list = Array.isArray(op.value) ? op.value.map((x: unknown) => _resolveRef(x, ctx)) : raw;
+        if (op.name === "in" || op.name === "notIn") {
+          const vals = (Array.isArray(list) ? list : [list]).filter((x) => x !== "" && x != null)
+            .map((x) => _coerceValue(x, table[field]));
+          if (!vals.length) return op.name === "in" ? sql`false` : undefined;
+          return op.name === "in" ? inArray(table[field], vals as any[]) : notInArray(table[field], vals as any[]);
+        }
+        if (raw === "" || raw == null) {
+          // "Not equal to nothing" holds for every row; any other comparison
+          // with nothing is not a filter anyone wrote.
+          if (op.name === "ne") return undefined;
+          emptyRefs.push(field);
+          return undefined;
+        }
+        const val = _coerceValue(raw, table[field]);
+        const fn = { ne, gt, gte, lt, lte }[op.name as "ne" | "gt" | "gte" | "lt" | "lte"];
+        return fn(table[field], val as any);
+      }
       // An unresolved variable reference must never become a literal in a
       // WHERE. `_resolveRef` returns the ref STRING when it names nothing,
       // so `where: {id: "applicationId"}` with no applicationId supplied
@@ -1132,6 +1215,7 @@ export function registerDefaultActions(): void {
     if (!table) { console.warn("[workflow] db_insert: unknown table", (config as any).table); return { error: "unknown table" }; }
     try {
       const raw = _resolveValueMap((config as any).values, ctx, table);
+      await stampGuest(getTableName(table), raw, ctx);
       // Array-fanout: if ANY value resolved to an array of objects, treat that
       // as "insert one row per element" and merge the other (static) values
       // into each row. This is what LLM-authored workflows write when they
@@ -1600,6 +1684,12 @@ export function registerDefaultActions(): void {
     const role = (config as any).toRole ?? (config as any).assigneeRole ?? (config as any).recipientRole ?? null;
     const type = String((config as any).notificationType ?? (config as any).type ?? "info");
     const entityId = _resolveRef((config as any).entityId ?? null, ctx);
+    // WHERE IT OPENS: the address of the record it is about, filled when the
+    // definition was written (`record_links.notification_link`). Stored only
+    // where the table has the column — an app not yet brought up to date
+    // keeps its notifications rather than failing the insert.
+    const linkRaw = (config as any).link ? _resolveRef((config as any).link, ctx) : null;
+    const link = typeof linkRaw === "string" && linkRaw.startsWith("/") && !linkRaw.includes("{{") ? linkRaw : null;
     const table = (schema as any).forgeNotifications;
     let notificationId: string | null = null;
     if (table) {
@@ -1607,6 +1697,7 @@ export function registerDefaultActions(): void {
         const inserted: any = await (db as any).insert(table).values({
           title, message, userId: userId ? String(userId) : null,
           role: role ? String(role) : null, type, entityId: entityId ? String(entityId) : null, read: false,
+          ...(link && "link" in table ? { link } : {}),
         }).returning();
         const row = Array.isArray(inserted) ? inserted[0] : inserted;
         notificationId = row?.id ?? null;

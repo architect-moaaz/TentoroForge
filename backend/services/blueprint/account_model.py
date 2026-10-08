@@ -89,10 +89,18 @@ def signup_role(doc: dict) -> str | None:
 
 def demo_email(role: str) -> str:
     """The demo login the seed makes for a role — `seedRoleLogins` in
-    templates/runtime/seed.ts derives it the same way."""
+    templates/runtime/seed.ts derives it the same way.
+
+    NEVER THE ADMINISTRATOR'S ADDRESS. A role named "Admin" that is not the
+    built-in administrator's came out as admin@example.com — the seeded
+    admin's own address — so it got no login of its own and the test-logins
+    table listed one account under two roles (wz7a99ir, 2026-10-04)."""
     import re as _re
-    local = _re.sub(r"[^a-z0-9]+", ".", role.lower()).strip(".")
-    return f"{local or 'user'}@example.com"
+
+    from services.smith.accounts import SEEDED_ADMIN
+    local = _re.sub(r"[^a-z0-9]+", ".", role.lower()).strip(".") or "user"
+    email = f"{local}@example.com"
+    return f"{local}.role@example.com" if email == SEEDED_ADMIN else email
 
 
 def demo_logins(doc: dict) -> list[tuple[str, str]]:
@@ -118,6 +126,15 @@ def admin_role(doc: dict) -> str | None:
     roles = _live(doc.get("roles"))
     if not roles:
         return None
+    # THE ROLE PEOPLE GIVE THEMSELVES IS NOT THE BACK OFFICE'S. Anyone who
+    # signs up holds it, so it is never the administrator's while another
+    # role exists. F&B's admin pages named no role and the customer pages
+    # named Customer; the ranking below then made admin@example.com a
+    # Customer, and the admin never saw an admin menu (wz7a99ir, 2026-10-04).
+    signup = str(((doc.get("security") or {}).get("signupRole")) or "")
+    if signup and len(roles) > 1:
+        others = [r for r in roles if signup not in (str(r.get("id")), str(r.get("name")))]
+        roles = others or roles
     pages = [p for p in _live(doc.get("pages")) if str(p.get("pattern") or "") != "auth"]
 
     def opens(rid: str) -> list[dict]:
@@ -288,7 +305,35 @@ def landing_by_role(doc: dict) -> dict[str, str]:
         name = by_key.get(str(key).strip().lower())
         if name and isinstance(route, str) and route.startswith("/") and "[" not in route:
             out[name] = route
+    # A ROLE THE NAVIGATION NAMES NO LANDING FOR ARRIVES AT ITS OWN DOOR: the
+    # page its author marked `entry` among the pages only that audience may
+    # open. The navigation is authored before any page exists, so it could not
+    # name one; ToroCommerce's never did, its landing map was empty, and the
+    # administrator signed in to the shop front every time — while
+    # /admin/products said `entry: true` (forge-v3, 2026-10-07).
+    from services.blueprint.projection import restricted_roles
+    for page in _live(doc.get("pages")):
+        route = str(page.get("route") or "")
+        if not page.get("entry") or str(page.get("access") or "") != "role_restricted" \
+                or not route.startswith("/") or "[" in route:
+            continue
+        for name in restricted_roles(doc, page):
+            out.setdefault(str(name), route)
     return out
+
+
+def roles_without_a_door(doc: dict) -> list[str]:
+    """Roles that have pages only they may open and nowhere to land: no
+    navigation landing and no `entry` page among their own. Such a role signs
+    in to whatever the default is — another audience's screens."""
+    from services.blueprint.projection import restricted_roles
+    landed = landing_by_role(doc)
+    own: dict[str, list[str]] = {}
+    for page in _live(doc.get("pages")):
+        if str(page.get("access") or "") == "role_restricted":
+            for name in restricted_roles(doc, page):
+                own.setdefault(str(name), []).append(str(page.get("route") or page.get("id")))
+    return sorted(name for name in own if name not in landed)
 
 
 def home_route(doc: dict) -> str:
@@ -380,6 +425,10 @@ def project_account(doc: dict, app_root: str | Path) -> dict[str, Any]:
 # Projection: every gated workflow starts with its prerequisite
 # ---------------------------------------------------------------------------
 
+#: What a visitor who is not signed in hears from a workflow that needs an account.
+SIGN_IN_FIRST = "Please sign in first — you need an account to do this."
+
+
 def guard_nodes(doc: dict, workflow: dict) -> list[tuple[dict, dict]]:
     """``[(query config, rule)]`` for each prerequisite gating `workflow`."""
     ents = {str(e.get("id")): e for e in _live((doc.get("data") or {}).get("entities"))}
@@ -404,6 +453,20 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
     guards = guard_nodes(doc, workflow)
     if not guards:
         return
+    # A GUARD ALREADY IN THE STEPS IS NOT ADDED AGAIN. A repair wrote the
+    # projected guard back into ToroCommerce's Add to Cart and Place Order
+    # steps (v80); every projection after added it a second time, the graph
+    # had each guard node twice, and NO workflow of the app could be written
+    # out again (forge-v3, 2026-10-07). What is there is kept, wired as it is.
+    present = {str(n.get("id")) for n in nodes if isinstance(n, dict)}
+
+    def rid_of(i: int, rule: dict) -> str:
+        return re.sub(r"[^a-z0-9]+", "_", str(rule.get("id") or f"rule_{i}").lower())
+
+    guards = [(i, q, r) for i, (q, r) in enumerate(guards) if f"prereq_{rid_of(i, r)}" not in present]
+    ask_sign_in = "prereq_signed_in" not in present
+    if not guards and not ask_sign_in:
+        return
     first = [e for e in edges if e.get("source") == "trigger"]
     targets = [e.get("target") for e in first]
     for e in first:
@@ -415,9 +478,22 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
             e["sourceHandle"] = "else"
         edges.append(e)
 
+    # A GUEST IS ASKED TO SIGN IN, NOT TOLD THEIR ACCOUNT IS DEACTIVATED. Every
+    # prerequisite looks for the signed-in person's own record; a visitor who
+    # is not signed in has none, and got the rule's message — ToroCommerce's
+    # guests pressing Add to Cart were told "Your account has been
+    # deactivated" (forge-v3, 2026-10-07). Asked first, once, in plain words.
     prev = "trigger"
-    for i, (query, rule) in enumerate(guards):
-        rid = re.sub(r"[^a-z0-9]+", "_", str(rule.get("id") or f"rule_{i}").lower())
+    if ask_sign_in:
+        nodes.append(make_node("prereq_signed_in", "condition", {"expression": "user.id != null"},
+                               "Signed in?"))
+        nodes.append(make_node("prereq_signed_in_refused", "end", {
+            "refused": True, "message": SIGN_IN_FIRST}, "Refused: not signed in"))
+        edge("trigger", "prereq_signed_in")
+        edge("prereq_signed_in", "prereq_signed_in_refused", "else")
+        prev = "prereq_signed_in"
+    for i, query, rule in guards:
+        rid = rid_of(i, rule)
         q, c, stop = f"prereq_{rid}", f"prereq_{rid}_met", f"prereq_{rid}_refused"
         nodes.append(make_node(q, "action", query, f"Check: {rule.get('name') or 'prerequisite'}"))
         nodes.append(make_node(c, "condition", {"expression": f"{q}.count > 0"},
@@ -430,9 +506,9 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
         edge(c, stop, "else")
         prev = c
     for t in targets:
-        edge(prev, t, "then")
+        edge(prev, t, "then" if prev != "trigger" else "default")
 
 
 __all__ = ["AUTH_PAGES", "account_entity", "admin_role", "account_fields", "account_initial", "after_signup_route", "auth_page_bodies",
-           "guard_workflow", "has_sign_in", "home_route", "is_auth_page", "prerequisites",
+           "guard_workflow", "has_sign_in", "home_route", "roles_without_a_door", "is_auth_page", "prerequisites",
            "project_account", "signup_role"]

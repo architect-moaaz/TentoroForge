@@ -15,6 +15,10 @@ from httpx import ASGITransport, AsyncClient
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite://"
 os.environ["SECRET_KEY"] = "test-secret"
 os.environ["ANTHROPIC_API_KEY"] = "test-key"
+# The suite's dev servers (real and faked) are recorded apart from the
+# machine's, where a running backend's reaper would act on them.
+import tempfile as _tempfile
+os.environ["FORGE_DEV_SERVERS_DIR"] = _tempfile.mkdtemp(prefix="forge-dev-servers-test-")
 
 # ---------------------------------------------------------------------------
 # The rate limiter is a WALL-CLOCK token bucket, and the suite shares one.

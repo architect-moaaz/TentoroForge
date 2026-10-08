@@ -41,6 +41,16 @@ def _account(svc: Any, app_root: str) -> dict:
     return project_account(svc.doc, app_root)
 
 
+def _data_manifests() -> tuple:
+    from services.blueprint.projection import (
+        project_append_only_entities, project_embedding_columns, project_ownership_rules,
+        project_searchable_columns, project_sensitive_columns,
+    )
+    return (("ownership_rules", project_ownership_rules), ("sensitive_columns", project_sensitive_columns),
+            ("searchable_columns", project_searchable_columns), ("embedding_columns", project_embedding_columns),
+            ("append_only", project_append_only_entities))
+
+
 def everything(svc: Any, app_root: str | None) -> list[str]:
     """Re-project every part of the application from `svc.doc`."""
     if not app_root:
@@ -84,6 +94,13 @@ def everything(svc: Any, app_root: str | None) -> list[str]:
     _run("code_pages", lambda: _code_pages(svc, app_root))
     _run("account", lambda: _account(svc, app_root))
     _run("business_rules", lambda: project_business_rules(svc.doc, app_root))
+    # WHO REACHES WHICH ROWS, AND WHAT IS HIDDEN IN THEM. The build writes
+    # these beside the schema (`orchestrator._project_data`); nothing after
+    # the build did, so a changed ownership rule stayed in the document and the
+    # app went on with the one it was built with — TCommerce's cart rule
+    # gained its guest column and the engine never heard (2026-10-06).
+    for name, fn in _data_manifests():
+        _run(name, lambda fn=fn: fn(svc.doc, app_root))
     for name, fn in (("middleware", project_middleware),
                      ("public_resources", project_public_resources),
                      # An undo that makes a page private again has to take its

@@ -147,6 +147,13 @@ SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     # `null` body when no logo was given; this stands in when that projection
     # did not run at all.
     "src/contracts/brand.ts",
+    # THE KIT PARTS A SCREEN IS BUILT FROM (2026-10-07): a page that imports
+    # one must find it, in an application built before it existed. Their
+    # packages arrive when a page first imports them (`ui_engineer.SDK_PACKAGES`).
+    "src/components/ui/sheet.tsx", "src/components/ui/popover.tsx",
+    "src/components/ui/dropdown-menu.tsx", "src/components/ui/tooltip.tsx",
+    "src/components/ui/switch.tsx", "src/components/ui/scroll-area.tsx",
+    "src/components/ui/calendar.tsx", "src/components/ui/command.tsx",
     # THE PLATFORM'S USERS TABLE IS A DEFAULT THE BLUEPRINT MAY EXTEND. The
     # projection emits `user.ts` for a Blueprint entity that maps to `users`
     # — the platform's columns as the platform declares them, then whatever
@@ -1128,6 +1135,8 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
         text=True, env={**os.environ, "BROWSER": "none"},
         start_new_session=True,
     )
+    from services import dev_servers
+    dev_servers.track(proc.pid, port=port, root=root, kind="boot-check")
 
     def _kill_tree() -> None:
         for sig in (signal.SIGTERM, signal.SIGKILL):
@@ -1196,6 +1205,7 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
         # server it spawned running — on a port, holding the pipe, outliving
         # the build that started it.
         _kill_tree()
+        dev_servers.forget(proc.pid)
         if proc.stdout:
             proc.stdout.close()
 

@@ -335,6 +335,78 @@ export const PageContentItem = z.object({
   source: PageContentSource,
 });
 
+/**
+ * One part of a screen: the records it holds and where they sit on it.
+ *
+ * A SCREEN IS A JOB, NOT A TABLE. Pages were planned one per list, record and
+ * "new" form, so Mozato (forge-v3, 2026-10-06) came to 106 routes — 46 of them
+ * the back office — while the pages are written in React, where a list with a
+ * record opening beside it, tabs of related records and a dialog for adding
+ * are one screen. A section says which records a screen holds and how: the
+ * page stays the unit everything else works by (its contract, its code, who
+ * may open it, the workflows launched from it), and a record opened inside it
+ * keeps a link of its own through `param` (`/ops/support?ticket=<id>`).
+ */
+export const PageSection = z.object({
+  /** Stable within the page: `tickets`, `ticket`, `refunds`. */
+  key: z.string().min(1),
+  /** What a person calls this part: "Open tickets", "Refunds". */
+  label: z.string().min(1),
+  /** The records this section shows. Omit for a summary of several. */
+  entity: EntityId.optional(),
+  /** How it shows them. */
+  shows: z
+    .enum(["list", "board", "calendar", "map", "record", "summary", "form"])
+    .default("list"),
+  /**
+   * Where it sits: the screen's main area, a tab beside it, a panel that opens
+   * over or beside the main area when a record is chosen, or a dialog a
+   * control opens.
+   */
+  placement: z.enum(["main", "tab", "panel", "dialog"]).default("main"),
+  /** For a panel: the section whose chosen record it opens. */
+  opensFrom: z.string().optional(),
+  /**
+   * For a panel showing one record: the query parameter that opens it from a
+   * link (`ticket` -> `?ticket=<id>`), so a notification or a shared link
+   * lands on the record inside its screen.
+   */
+  param: z.string().optional(),
+  /** Records of `entity` are added in this section, in a form on the screen. */
+  addsHere: z.boolean().optional(),
+  /**
+   * Its records change while someone watches — orders arriving on a board, a
+   * rider moving, a queue filling — so the screen reads them again by itself
+   * (`useLive`) instead of only when the person does something.
+   */
+  live: z.boolean().optional(),
+  /**
+   * The menu entry this section answers, by its label path in
+   * `navigation.tree` ("Admin Console > Offers & Campaigns"), when a tab of
+   * the screen is its own menu destination.
+   */
+  menuEntry: z.string().optional(),
+  /**
+   * What a person does here, in their own words: "Accept order", "Mark
+   * ready", "Approve refund". Each is something a workflow does; naming them
+   * is how the screen asks for the workflows its job needs, not only the ones
+   * that create a record.
+   */
+  actions: z.array(z.string()).default([]),
+  /**
+   * Shown only to these roles; empty means everyone the screen is for.
+   *
+   * ONE SCREEN, SEVERAL PEOPLE. A screen is a job, and some jobs are shared
+   * with a part only one of the people needs: the support screen an agent
+   * and a lead both work in, where only the lead approves refunds. Without
+   * this the part is either shown to everyone or given a screen of its own,
+   * which is the page-per-record plan this field set out to replace. Hiding
+   * a section is what a person sees, not what they may read — the entity's
+   * own rules still decide which records reach them.
+   */
+  roles: z.array(RoleId).default([]),
+});
+
 export const PageContract = z.object({
   id: PageId,
   name: z.string(),
@@ -474,6 +546,49 @@ export const PageContract = z.object({
     .describe("page = its own route; drawer/modal = opened over the caller"),
 
   /**
+   * Records of this page's primary entity are added HERE — a panel over the
+   * list, or the workspace opening empty — not on a page of their own.
+   *
+   * The planner offered every entity a list, a detail and an "Add a {name}"
+   * page, filled whole, so a brief that named everything got a `/new` route
+   * for every record: Mozato (forge-v3, 2026-10-06) planned 106 pages, 21 of
+   * them a create form beside a list of the same record, and 46 for the back
+   * office alone. A create form is one task on the list it fills, not a page;
+   * it earns a route only when adding is a job of its own (several steps, or
+   * a form someone outside fills in to ask for something).
+   *
+   * Set by the page-set decision; the workflow that creates the record
+   * launches from this page, the contract lists adding among its tasks, and
+   * the page's code carries the form.
+   */
+  addsHere: z
+    .boolean()
+    .optional()
+    .describe(
+      "Records of this page's primary entity are added on this page (a panel " +
+        "over the list, or this workspace opening empty) instead of on a page " +
+        "of their own",
+    ),
+
+  /**
+   * The parts of this screen — records as lists, panels, tabs and dialogs
+   * (see `PageSection`). Empty for a page that shows one thing.
+   */
+  sections: z.array(PageSection).default([]),
+
+  /**
+   * The menu entry this screen answers, by its label path in
+   * `navigation.tree` ("Restaurant Partner > Menu & Catalog").
+   *
+   * THE MENU IS DESIGNED BEFORE THE PAGES, and linked to them by page id —
+   * which nothing wrote: Mozato's 56 menu entries (forge-v3, 2026-10-06)
+   * pointed at no page, so its rail would have been labels going nowhere.
+   * The planner names the entry each screen answers as it plans the screen,
+   * and the entry is linked when the page lands.
+   */
+  menuEntry: z.string().optional(),
+
+  /**
    * Saved views over this page's data — the same list, filtered differently.
    *
    * Without this a filtered variant has nowhere to live, so the only way to
@@ -555,6 +670,20 @@ export const PageContract = z.object({
     .default(["loading", "empty", "populated", "error"]),
 
   /**
+   * What each state shows, in a sentence — keyed by a state above, or by a
+   * moment of a screen the list does not name ("noSelection": the list with
+   * no record opened beside it).
+   *
+   * THE AUTHOR WANTED TO SAY IT, AND HAD NOWHERE TO. Asked for a screen's
+   * states, the contract author wrote `{empty: "No orders yet — …"}` and
+   * `"detail-empty: panel open with no customer selected"`, and both were
+   * refused by the enum above: two of ToroCommerce's nine contracts were lost
+   * to it (forge-v3, 2026-10-07). The names stay a closed set the build can
+   * act on; what they look like is here, for the page writer.
+   */
+  stateNotes: z.record(z.string(), z.string()).optional(),
+
+  /**
    * Which form factors this page is for.
    *
    * EACH KEY CARRIES ITS OWN DEFAULT, and that is load-bearing rather than
@@ -613,6 +742,7 @@ export type NavNodeT = {
   page?: string;
   icon?: string;
   view?: string;
+  section?: string;
   tab?: boolean;
   roles?: string[];
   children?: NavNodeT[];
@@ -629,6 +759,11 @@ export const NavNode: z.ZodType<NavNodeT> = z.lazy(() =>
      * again. Two entries naming one route lit together and collided.
      */
     view: z.string().optional(),
+    /**
+     * A section of the page (a key of its `sections`), when the destination is
+     * one tab of a screen — "Coupons" is `/ops/marketing?tab=coupons`.
+     */
+    section: z.string().optional(),
     /** One of the bottom tab bar's destinations, when `navigation.mobile` is `tabs`. */
     tab: z.boolean().optional(),
     /** Visible only to these roles; empty means all authenticated roles. */
@@ -1105,6 +1240,17 @@ export const PageCode = z.object({
   load: z.string().min(1),
   /** `view.tsx` — a client component, the screen itself. */
   view: z.string().min(1),
+  /**
+   * A large screen's parts, by section key: `parts/<key>.tsx`, each a client
+   * component the frame (`view`) renders as `<Part data={props} />`.
+   *
+   * ONE REPLY HAS A CEILING. A screen holding five tables with their dialogs
+   * is five of yesterday's pages in one file, near the writer's output limit,
+   * and every repair resent all of it. Split along the planner's own sections
+   * (`PageSection`), each part is written, compiled and changed on its own.
+   * Empty for a page that is one file.
+   */
+  parts: z.record(z.string(), z.string()).default({}),
   ...artifactBase,
 });
 
@@ -1788,7 +1934,8 @@ export const RecordScopeRule = z.object({
   ),
   /** Column holding the actor's value (`ownerId`, `createdByUserId`, …). */
   column: z.string().describe(
-    "Column on that entity holding the actor's value, e.g. ownerId, workspaceId or createdByUserId.",
+    "Column on that entity holding the actor's value, e.g. ownerId, workspaceId or createdByUserId — " +
+    "or, with `through`, the reference to the record that does (childId). It must be a field the entity has.",
   ),
   /**
    * `scope` — the column decides who may reach the row: set on create and
@@ -1840,6 +1987,42 @@ export const RecordScopeRule = z.object({
       "the actor's workspace — homePropertyId, organisationId, tenantId. The " +
       "session carries that column and the engine compares `column` to it. " +
       "Omit for scope \"user\", where the actor's id is the value.",
+    )
+    .optional(),
+  /**
+   * OWNED THROUGH ANOTHER RECORD. An appointment is a parent's because its
+   * child is; the appointment carries `childId`, not `parentId`. The security
+   * agent wrote a rule on an Appointment `parentId` the table never had, the
+   * data engine refused it, and every parent saw no appointments (Kids
+   * Vaccination Tracker, forge-v3, 2026-09-26). With `through`, `column` is
+   * the reference (`childId`) and the row is reachable when the record it
+   * points to is reachable under that entity's own rule.
+   */
+  through: z
+    .string()
+    .describe(
+      "When the row belongs to the actor through another record: the entity " +
+      "`column` references (an Appointment's childId -> \"Child\"). The row " +
+      "is reachable when that record is reachable under its own scope rule, " +
+      "which it must have. Omit when `column` holds the actor's value itself.",
+    )
+    .optional(),
+  /**
+   * RECORDS A VISITOR MAKES BEFORE SIGNING IN. A guest's cart has no
+   * customer; scoped by `customerId` alone it was unreadable to the guest who
+   * made it, and TCommerce's bag was empty after every "Added to bag"
+   * (2026-10-06). The column holding the visitor's guest token: a signed-out
+   * visitor reaches the rows carrying theirs, the platform fills it when they
+   * create one, and once they sign in they still reach them.
+   */
+  guestColumn: z
+    .string()
+    .describe(
+      "For records a visitor may make before signing in (a guest's cart): the " +
+      "column of this entity holding the visitor's guest token. A signed-out " +
+      "visitor reaches the rows carrying their own token, the platform fills " +
+      "it on create, and the same person keeps reaching them after signing in. " +
+      "Omit for records only signed-in people make.",
     )
     .optional(),
   note: z.string().describe("Why this rule exists, in one sentence.").default(""),
@@ -2393,6 +2576,25 @@ export const Runtime = z.object({
         rewritten: z.boolean().nullable().optional(),
       }),
     )
+    .optional(),
+  /**
+   * The whole application used before the build is done: every page opened
+   * as every role it is for, its controls pressed, what it shows read
+   * (`services/blueprint/app_check`). `working` of `pages` work for everyone
+   * they are for; `fixed` were repaired during the check; `failing` still do
+   * not, and are named in the completion message. Declared before its
+   * producer writes it.
+   */
+  check: z
+    .object({
+      pages: z.number(),
+      working: z.number(),
+      fixed: z.array(z.string()).default([]),
+      failing: z.array(z.string()).default([]),
+      /** The Blueprint version the check reflects; a later version is a
+       *  change nobody has used the app after. */
+      version: z.number().optional(),
+    })
     .optional(),
 });
 

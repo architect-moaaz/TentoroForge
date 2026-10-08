@@ -312,6 +312,30 @@ def compose(ctx: Ctx, u: dict) -> Outcome:
                          + (f"\n\nUpdated: {', '.join(touched[:6])}." if touched else "")))
 
 
+def screen(ctx: Ctx, u: dict) -> Outcome:
+    """What a screen holds — its sections — added, changed, taken off,
+    reordered, moved, folded together or split out (`screen_change.run`).
+    A change that takes something with it waits for a yes; what did not
+    follow (a page's code refused, an action left without a process) is a
+    finding the loop finishes."""
+    from services.smith.screen_change import consequences, run
+    verb = u["verb"]
+    args = {"route": _s(u, "route"), "section": _s(u, "section"), "to_route": _s(u, "to_route"),
+            "from_route": _s(u, "from_route"), "new_route": _s(u, "new_route")}
+    takes = consequences(ctx.doc(), verb, **args)
+    gate = confirm_cascade(ctx, verb, f"{args['route']}#{args['section'] or args['from_route']}", takes)
+    if gate is not None:
+        return gate
+    out = run(ctx.out, verb, new_section=u.get("new_section"), settings=u.get("set"), order=u.get("order"),
+              request=ctx.ask, reasoning=ctx.reasoning, **args)
+    step = from_seam(out, fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+    left = [str(x) for x in out.get("left") or []]
+    if out.get("applied") and left:
+        step.finding = ("The screen's sections changed, but not everything followed:\n"
+                        + "\n".join(f"- {x}" for x in left))
+    return step
+
+
 def remove_page(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.page_change import consequences, run, why_not
     route = _s(u, "route")
@@ -817,6 +841,8 @@ PERFORM: dict[str, Perform] = {
     "add_login": accounts, "remove_login": accounts, "reset_login": accounts,
     "explain_crash": incident, "explain_slowness": incident, "back_up": records_out,
     "rebuild": rebuild,
+    "add_section": screen, "edit_section": screen, "remove_section": screen, "reorder_sections": screen,
+    "move_section": screen, "merge_screens": screen, "split_section": screen,
     "rename_entity": section_write, "change_field_type": section_write, "edit_api": section_write,
 }
 

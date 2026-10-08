@@ -18,8 +18,8 @@ installHarness({
   stubs: {
     "@/db": "export const db = { insert: (t) => ({ values: (v) => { globalThis.__persisted.push(v); const r = Promise.resolve([v]); r.returning = async () => [{ ...v, id: 'n-1' }]; return r; } }), execute: async () => ({ rows: [] }) };",
     "./embedding-columns": "export const EMBEDDING_DIMENSIONS = 512;\nexport const embeddingColumnsFor = () => [];\n",
-    "@/db/schema": "export const forgeNotifications = { __name: 'forge_notifications' };",
-    "drizzle-orm": "export const getTableName = (t) => t.__name || 'x'; export const is = (v) => !!(v && v.__name); export class Table {}; export const eq = () => ({}); export const and = () => ({}); export const sql = (...a) => ({ __sql: a });",
+    "@/db/schema": "export const forgeNotifications = (globalThis.__ntf = { __name: 'forge_notifications' });",
+    "drizzle-orm": "export const getTableName = (t) => t.__name || 'x'; export const is = (v) => !!(v && v.__name); export class Table {}; export const eq = () => ({}); export const and = () => ({}); export const sql = (...a) => ({ __sql: a }); export const ne = (c, v) => ({ op: 'ne', col: c && c.__col, v }); export const gt = (c, v) => ({ op: 'gt', col: c && c.__col, v }); export const gte = (c, v) => ({ op: 'gte', col: c && c.__col, v }); export const lt = (c, v) => ({ op: 'lt', col: c && c.__col, v }); export const lte = (c, v) => ({ op: 'lte', col: c && c.__col, v }); export const inArray = (c, v) => ({ op: 'inArray', col: c && c.__col, v }); export const notInArray = (c, v) => ({ op: 'notInArray', col: c && c.__col, v });",
     "@/lib/error_reporter": "export const reportFromError = () => {};",
     "../fk-roles": "export const FK_ROLES = {}; export const fkRole = () => null; export const isDomainFk = () => false;",
     "@/lib/rules": "export const evaluateRuleSetForTable = async () => ({ errors: [], patches: {} });",
@@ -63,5 +63,22 @@ eqJson([persisted()[0]?.userId, persisted()[0]?.role], [null, "Admin"], "a team 
 (globalThis as any).__persisted = [];
 await notify({ title: "Legacy", to: "{{userId}}" }, { input: {}, variables: { userId: "u-1" }, log: [] });
 eqJson(persisted()[0]?.userId, "u-1", "`to` still works");
+
+// A NOTIFICATION OPENS WHAT IT IS ABOUT (Mozato, 2026-10-06): the link the
+// definition carries is resolved and stored — only where the table has the
+// column, so an app not yet brought up to date keeps its notifications.
+const order = { input: {}, variables: { order: { id: "o-42" } }, log: [] };
+(globalThis as any).__persisted = [];
+await notify({ title: "Out for delivery", recipient: "u-1", entityId: "{{order.id}}",
+               link: "/orders?order={{order.id}}" }, order);
+ok(!("link" in persisted()[0]), "no `link` column: nothing extra is written");
+(globalThis as any).__ntf.link = { name: "link" };
+(globalThis as any).__persisted = [];
+await notify({ title: "Out for delivery", recipient: "u-1", entityId: "{{order.id}}",
+               link: "/orders?order={{order.id}}" }, order);
+eqJson(persisted()[0]?.link, "/orders?order=o-42", "the link is the record's address with its id");
+(globalThis as any).__persisted = [];
+await notify({ title: "x", recipient: "u-1", link: "https://elsewhere.example/x" }, order);
+ok(!persisted()[0]?.link, "only an address inside the application is kept");
 
 done("send_notification recipient");

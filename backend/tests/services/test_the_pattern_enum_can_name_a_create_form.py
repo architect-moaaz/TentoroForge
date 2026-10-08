@@ -23,7 +23,7 @@ import pathlib
 import pytest
 
 from services.blueprint.executors import DAG, writable_shapes
-from services.blueprint.page_planner import ENTITY_SLOTS
+from services.blueprint.page_planner import SECTION_PLACEMENTS, SECTION_SHOWS
 from services.page_kind_anatomy import _FAMILY
 
 _CONTRACT = pathlib.Path(__file__).resolve().parents[2] / "contracts" / "blueprint.schema.json"
@@ -34,14 +34,18 @@ def _pattern_enum() -> list[str]:
     return c["properties"]["pages"]["items"]["properties"]["pattern"]["enum"]
 
 
-@pytest.mark.parametrize("slot,pattern,_desc", ENTITY_SLOTS)
-def test_every_planner_slot_pattern_is_a_legal_pattern(slot, pattern, _desc):
-    """A pattern the planner emits and the contract rejects is a page that
-    cannot be written down."""
-    assert pattern in _pattern_enum(), (
-        f"ENTITY_SLOTS names {pattern!r} for the {slot!r} slot, but the "
-        f"contract's pattern enum does not accept it"
-    )
+def _section_enum(field: str) -> list[str]:
+    """`PageSection.<field>`'s enum, wherever the emitter placed the section."""
+    c = json.loads(_CONTRACT.read_text())
+    return c["properties"]["pages"]["items"]["properties"]["sections"]["items"]["properties"][field]["enum"]
+
+
+def test_the_planner_says_how_a_section_shows_in_the_contracts_words():
+    """The planner now places records as sections of screens; the words it
+    offers for how they show and where they sit are the contract's own, or a
+    section it describes cannot be written down."""
+    assert list(SECTION_SHOWS) == _section_enum("shows")
+    assert list(SECTION_PLACEMENTS) == _section_enum("placement")
 
 
 def test_the_enum_can_name_a_create_form():

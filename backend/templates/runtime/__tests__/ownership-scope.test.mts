@@ -56,7 +56,10 @@ function matches(row: any, c: Cond | undefined): boolean {
     case "gt": return row[c.col] > (c.val as any);
     case "lte": return row[c.col] <= (c.val as any);
     case "lt": return row[c.col] < (c.val as any);
-    case "in": return c.vals.includes(row[c.col]);
+    // A subquery (`inArray(col, db.select(...).from(...).where(...))`) is
+    // evaluated against the same in-memory rows, its ids the set.
+    case "in": return (Array.isArray(c.vals) ? c.vals : runQuery((c.vals as any).__state).map((r) => r.id))
+      .includes(row[c.col]);
     case "isNull": return row[c.col] == null;
     case "isNotNull": return row[c.col] != null;
     case "not": return !matches(row, c.cond);
@@ -96,6 +99,12 @@ const announcements = makeTable(tableOf("Announcement"), fieldsOf("Announcement"
 const tickets = makeTable(tableOf("Ticket"), fieldsOf("Ticket"));
 // RefundCase is workspace-scoped; the rule names the users column that IS the workspace.
 const refundCases = makeTable(tableOf("RefundCase"), fieldsOf("RefundCase"));
+const children = makeTable(tableOf("Child"), fieldsOf("Child"));
+const appointments = makeTable(tableOf("Appointment"), fieldsOf("Appointment"));
+const carts = makeTable(tableOf("Cart"), fieldsOf("Cart"));
+const cartItems = makeTable(tableOf("CartItem"), fieldsOf("CartItem"));
+const GUEST_ONE = "6f1c2b8e-0000-4000-8000-000000000001";
+const GUEST_TWO = "6f1c2b8e-0000-4000-8000-000000000002";
 const ST_GILES = "prop-st-giles";
 const ROYAL = "prop-royal";
 
@@ -112,6 +121,26 @@ const ROWS: Record<string, any[]> = {
   ],
   [tickets.__name]: [
     { id: "t1", title: "Printer jammed", createdAt: d(1) },
+  ],
+  [children.__name]: [
+    { id: "c-ava", parentId: ALICE, fullName: "Ava", createdAt: d(1) },
+    { id: "c-eli", parentId: ALICE, fullName: "Eli", createdAt: d(2) },
+    { id: "c-max", parentId: BOB, fullName: "Max", createdAt: d(3) },
+  ],
+  [appointments.__name]: [
+    { id: "ap1", childId: "c-ava", status: "booked", createdAt: d(1) },
+    { id: "ap2", childId: "c-eli", status: "done", createdAt: d(2) },
+    { id: "ap3", childId: "c-max", status: "booked", createdAt: d(3) },
+  ],
+  [carts.__name]: [
+    { id: "cart-g1", customerId: null, guestToken: GUEST_ONE, status: "open", createdAt: d(1) },
+    { id: "cart-g2", customerId: null, guestToken: GUEST_TWO, status: "open", createdAt: d(2) },
+    { id: "cart-bob", customerId: BOB, guestToken: null, status: "open", createdAt: d(3) },
+  ],
+  [cartItems.__name]: [
+    { id: "ci1", cartId: "cart-g1", quantity: 1, createdAt: d(1) },
+    { id: "ci2", cartId: "cart-g2", quantity: 2, createdAt: d(2) },
+    { id: "ci3", cartId: "cart-bob", quantity: 3, createdAt: d(3) },
   ],
   [refundCases.__name]: [
     { id: "r1", propertyId: ST_GILES, guestName: "Patel", createdAt: d(1) },
@@ -166,6 +195,7 @@ function insertBuilder() {
 function builder(shape: Shape) {
   const state: any = { shape, table: null, where: undefined, limit: null, offset: 0 };
   const b: any = {
+    __state: state,
     from(t: any) { state.table = t; return b; },
     // REPLACES, exactly like drizzle. A second .where() drops the first.
     where(c: Cond) { state.where = c; return b; },
@@ -247,7 +277,10 @@ const STUBS: Record<string, string> = {
     "export const FK_ROLES = {};\n" +
     "export const fkRole = () => undefined;\n" +
     "export const isDomainFk = () => false;\n",
-  "./sensitive-columns": "export const sensitiveColumnsFor = () => ({});\n",
+  // Cart's guest token is marked sensitive, as TCommerce's is: the guest
+  // tests below prove it is still stored as it is, or no visitor matches it.
+  "./sensitive-columns":
+    "export const sensitiveColumnsFor = (e) => /^carts?$/i.test(e) ? { guestToken: { mask: 'full', readers: [] } } : {};\n",
   "./searchable-columns": "export const searchableColumnsFor = () => [];\n",
   "./sensitive-crypto":
     "export const encryptSensitive = async (v) => v;\n" +
@@ -291,6 +324,10 @@ engine.registerEntity(invoices.__name, invoices, { slug: invoices.__name });
 engine.registerEntity(announcements.__name, announcements, { slug: announcements.__name });
 engine.registerEntity(tickets.__name, tickets, { slug: tickets.__name });
 engine.registerEntity(refundCases.__name, refundCases, { slug: refundCases.__name });
+engine.registerEntity(children.__name, children, { slug: children.__name });
+engine.registerEntity(appointments.__name, appointments, { slug: appointments.__name });
+engine.registerEntity(carts.__name, carts, { slug: carts.__name });
+engine.registerEntity(cartItems.__name, cartItems, { slug: cartItems.__name });
 
 // ── Assertions ─────────────────────────────────────────────────────────────
 
@@ -519,6 +556,109 @@ console.log("query(): search and filter apply together");
     asAlice,
   );
   eqJson(ids(scoped.data), [], "and both AND with the ownership predicate");
+}
+
+// ── Owned through another record ───────────────────────────────────────────
+
+console.log("through: an appointment is a parent's because its child is");
+{
+  const alice = await engine.query(appointments.__name, {}, asAlice);
+  const bob = await engine.query(appointments.__name, {}, asBob);
+  eqJson(ids(alice.data), ["ap1", "ap2"], "Alice sees her children's appointments");
+  eqJson(ids(bob.data), ["ap3"], "Bob sees only his child's");
+  eqJson(alice.total, 2, "and the total counts them, not the table");
+  eqJson(ids((await engine.query("Appointment", {}, asAdmin)).data), ["ap1", "ap2", "ap3"],
+    "a role the rule exempts reads every appointment");
+  await throwsNamed(() => engine.findById(appointments.__name, "ap3", asAlice),
+    "NotFoundError", "Bob's child's appointment is Not Found for Alice");
+}
+
+console.log("through: a parent books for their own child, not anyone's");
+{
+  const own = await engine.create(appointments.__name, { childId: "c-ava", status: "booked" }, asAlice);
+  eqJson((own as any).data?.childId ?? (own as any).childId, "c-ava",
+    "the child is kept — a through column is never stamped with the actor's id");
+  await throwsNamed(() => engine.create(appointments.__name, { childId: "c-max", status: "booked" }, asAlice),
+    "ValidationError", "booking for someone else's child is refused");
+  await throwsNamed(() => engine.update(appointments.__name, "ap1", { childId: "c-max" }, asAlice),
+    "ValidationError", "nor can an appointment be moved onto their child");
+  const onBehalf = await engine.create(appointments.__name, { childId: "c-max", status: "booked" }, asAdmin);
+  ok(!!onBehalf, "an administrator books for any child");
+}
+
+// ── A guest's own rows ─────────────────────────────────────────────────────
+// TCommerce, 2026-10-06: a signed-out shopper added to a cart the cart page
+// could never read back — the rule scoped carts to a customer, and a guest has
+// none, so the read failed closed. `guestColumn` names the column their guest
+// token is in.
+
+const asGuestOne = { guest: GUEST_ONE };
+const asGuestTwo = { guest: GUEST_TWO };
+const asNobody = {};
+
+console.log("guest: a visitor reads the cart they filled, and nobody else's");
+{
+  eqJson(ids((await engine.query("Cart", {}, asGuestOne)).data), ["cart-g1"], "guest one reads their cart");
+  eqJson(ids((await engine.query("Cart", {}, asGuestTwo)).data), ["cart-g2"], "guest two reads theirs");
+  eqJson(ids((await engine.query("Cart", {}, asNobody)).data), [], "no token, no cart — still closed");
+  await throwsNamed(() => engine.findById(carts.__name, "cart-g2", asGuestOne),
+    "NotFoundError", "another guest's cart is Not Found");
+  ok(!!(await engine.findById(carts.__name, "cart-g1", asGuestOne)), "their own by id");
+  eqJson(ids((await engine.query("Cart", {}, asBob)).data), ["cart-bob"],
+    "a signed-in customer with no guest token reads only their own");
+}
+
+console.log("guest: the lines of a guest's cart are reachable through it");
+{
+  eqJson(ids((await engine.query("CartItem", {}, asGuestOne)).data), ["ci1"], "guest one's lines");
+  eqJson(ids((await engine.query("CartItem", {}, asNobody)).data), [], "nobody's lines without a token");
+  await throwsNamed(() => engine.create(cartItems.__name, { cartId: "cart-g2", quantity: 1 }, asGuestOne),
+    "ValidationError", "a guest cannot add to another guest's cart");
+}
+
+console.log("guest: a cart a guest makes carries their token, whatever the body says");
+{
+  const made: any = await engine.create(carts.__name, { status: "open", guestToken: GUEST_TWO }, asGuestOne);
+  const row = made?.data ?? made;
+  const stored = ROWS[carts.__name].find((r) => r.id === row.id);
+  eqJson(stored.guestToken, GUEST_ONE, "stored with the visitor's own token, not the one sent — and in the clear, though marked sensitive");
+  ok(row.guestToken !== GUEST_ONE, "while what is answered masks it, as a sensitive column is");
+  ok(ids((await engine.query("Cart", {}, asGuestOne)).data).includes(row.id), "and they read it back");
+  ok(!ids((await engine.query("Cart", {}, asGuestTwo)).data).includes(row.id), "the token they named does not");
+}
+
+console.log("guest: after signing in, the guest cart is still theirs");
+{
+  const signedIn = { user: { id: ALICE, role: "member" }, guest: GUEST_ONE };
+  const mine = ids((await engine.query("Cart", {}, signedIn)).data);
+  ok(mine.includes("cart-g1"), "the cart filled as a guest");
+  ok(!mine.includes("cart-g2") && !mine.includes("cart-bob"), "and nobody else's");
+}
+
+// ── A filter in the column's own type ──────────────────────────────────────
+// TCommerce and ToroCommerce (forge-v3, 2026-10-07): `where: { isActive: true }`
+// reached the engine as the TEXT "true", the driver wrote it as false, and both
+// shops' home pages listed exactly their inactive products.
+
+const products = makeTable("products", ["id", "name", "isActive", "stock", "createdAt"]);
+products.isActive.columnType = "PgBoolean"; products.isActive.dataType = "boolean";
+products.stock.columnType = "PgInteger"; products.stock.dataType = "number";
+ROWS.products = [
+  { id: "p1", name: "Linen Shirt", isActive: false, stock: 0, createdAt: d(1) },
+  { id: "p2", name: "Oxford Shirt", isActive: true, stock: 4, createdAt: d(2) },
+  { id: "p3", name: "Chinos", isActive: true, stock: 4, createdAt: d(3) },
+];
+engine.registerEntity("products", products, { slug: "products" });
+
+console.log("filters: a yes/no or number filter given as text means what it says");
+{
+  eqJson(ids((await engine.query("products", { filters: { isActive: "true" } }, asAlice)).data), ["p2", "p3"],
+    "isActive=\"true\" lists the active products");
+  eqJson(ids((await engine.query("products", { filters: { isActive: "false" } }, asAlice)).data), ["p1"],
+    "and \"false\" the inactive one");
+  eqJson(ids((await engine.query("products", { filters: { stock: "4" } }, asAlice)).data), ["p2", "p3"],
+    "a number column compares as a number");
+  eqJson(engine.asColumnValue(products.name, "true"), "true", "a text column keeps its text");
 }
 
 // ── row_access rules — the configurable half ───────────────────────────────

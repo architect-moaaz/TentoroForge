@@ -26,6 +26,7 @@ and keeps the honest placeholder.
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Mapping
 
@@ -192,6 +193,10 @@ def template_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict:
     """The `pageLayouts` body for `page`. Every page gets one: a page outside
     the three families, or one its family cannot serve (a form with no create
     workflow, a page with no entity), is composed as a workspace."""
+    # A SCREEN (`sections`) is no single family's: it is laid out as a
+    # workspace — every workflow launched from it, and its records.
+    if page.get("sections"):
+        return _screen_layout(doc, page)
     return _family_layout(doc, page) or workspace_layout(doc, page)
 
 
@@ -221,7 +226,28 @@ def _family_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict | No
 
     if family == "collection":
         header = [heading(name)]
-        if form_page:
+        add_dialog: dict | None = None
+        if page.get("addsHere") and create:
+            # ADDED HERE, NOT ON A PAGE OF ITS OWN (`addsHere`): the create
+            # form is a dialog over the list, and it stays on the list when it
+            # has saved — the default "back to the parent" would leave the very
+            # list the record was added to.
+            dialog_sources: list[dict] = []
+            form = _workflow_form(doc, page, create, entity, None, dialog_sources) \
+                if create.get("inputs") else _node("Form", {
+                    "workflow": str(create.get("id")), "entity": ename,
+                    "fields": [_field_kind(f) for f in fields]})
+            if form is not None and (form.get("props") or {}).get("fields"):
+                dialog_id = f"add-{src}"
+                form["props"]["submitLabel"] = f"Add {ename}"
+                form["props"]["onSuccess"] = {"toast": f"{ename} added",
+                                              "navigate": str(page.get("route") or "/")}
+                header.append({"type": "Button", "props": {
+                    "label": f"Add {ename}", "variant": "primary",
+                    "opensDialog": dialog_id}, "children": []})
+                add_dialog = {"type": "Dialog", "props": {"id": dialog_id, "title": f"Add {ename}"},
+                              "children": [form]}
+        if form_page and add_dialog is None:
             header.append({"type": "Button", "props": {
                 "label": f"Add {ename}", "variant": "primary",
                 "navigate": str(form_page.get("route"))}, "children": []})
@@ -235,6 +261,18 @@ def _family_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict | No
         elif form_page and update:
             row_actions.append({"label": "Edit",
                                 "navigate": f"{form_page.get('route')}?id={{{{id}}}}"})
+        elif record_page and update:
+            # No form page to edit on: the record's own page edits it in place
+            # (see the record branch), so Edit opens it there.
+            row_actions.append({"label": "Edit",
+                                "navigate": _ROUTE_ID.sub("{{id}}", str(record_page.get("route")))})
+        elif update and (panel := next((sec for sec in page.get("sections") or []
+                                        if isinstance(sec, dict) and sec.get("placement") == "panel"
+                                        and str(sec.get("entity") or "") == eid and sec.get("param")),
+                                       None)):
+            # On a screen the record opens in its panel, by its link parameter.
+            row_actions.append({"label": "Edit",
+                                "navigate": f"{page.get('route')}?{panel['param']}={{{{id}}}}"})
         if delete:
             row_actions.append({"label": "Delete", "workflow": str(delete.get("id")), "variant": "danger"})
         table: dict[str, Any] = {"data": f"{{{{{src}}}}}",
@@ -244,12 +282,15 @@ def _family_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict | No
         if row_actions:
             table["rowActions"] = row_actions
         sources = [{"name": src, "entity": ename, "op": "list"}]
+        if add_dialog is not None:
+            sources += [d for d in dialog_sources if d not in sources]
         similar = _similar_section(entity, ename, src, table, sources)
         root = {"type": "Stack", "props": {"direction": "vertical", "gap": "lg"}, "children": [
             {"type": "Row", "props": {"justify": "between", "align": "center"}, "children": header},
             *([para(purpose)] if purpose else []),
             *([similar] if similar else []),
             {"type": "Table", "props": table, "children": []},
+            *([add_dialog] if add_dialog is not None else []),
         ]}
 
     elif family == "form":
@@ -478,6 +519,90 @@ def _workflow_control(doc: Mapping[str, Any], page: Mapping[str, Any], wf: Mappi
     ])
 
 
+def _section_cards(doc: Mapping[str, Any], page: Mapping[str, Any], sources: list[dict],
+                   seen: set) -> list[dict]:
+    """EACH SECTION'S RECORDS on a screen (`sections`), beyond those already
+    shown: a table per list-like section in the main area or a tab. Panels and
+    dialogs need a chosen record or a control, which the page's code draws.
+    `sources` gains each table's list."""
+    cards: list[dict] = []
+    for sec in page.get("sections") or []:
+        if not isinstance(sec, dict) or sec.get("placement", "main") not in ("main", "tab") \
+                or sec.get("shows", "list") not in ("list", "board", "calendar"):
+            continue
+        sent = _entity_by_id(doc, str(sec.get("entity") or ""))
+        if sent is None:
+            continue
+        sname = str(sent.get("name") or "")
+        ssrc = _slug(sname)
+        if ssrc in seen:
+            continue
+        seen.add(ssrc)
+        sources.append({"name": ssrc, "entity": sname, "op": "list", "limit": 25})
+        card = _node("Card", {"title": str(sec.get("label") or _humanise(sname))}, [
+            _node("Table", {"data": f"{{{{{ssrc}}}}}",
+                            "columns": [_column(f) for f in _fields(sent)] or [{"key": "id", "label": "Id"}],
+                            "searchable": True, "striped": True,
+                            "emptyText": f"No {sname.lower()} records yet."})])
+        shown_to = _shown_to(doc, sec)
+        if shown_to:
+            card["visibleIf"] = shown_to
+        cards.append(card)
+    return cards
+
+
+def _norm_words(text: Any) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).split())
+
+
+def _shown_to(doc: Mapping[str, Any], sec: Mapping[str, Any]) -> str | None:
+    """A section only some roles see (`roles`), as the renderer's `visibleIf`:
+    `user.role == "Lead" or user.role == "Admin"`."""
+    from services.blueprint.screen_parts import section_audience
+
+    names = section_audience(dict(doc), dict(sec))
+    return " or ".join(f"user.role == {json.dumps(n)}" for n in names) or None
+
+
+def _screen_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict:
+    """A SCREEN (`sections`): its main records laid out as their list — adding
+    in a dialog, Edit opening the record's panel — then every other section's
+    records and every workflow launched from it. A screen whose main part is
+    not a list is laid out as a workspace."""
+    main = next((sec for sec in page.get("sections") or [] if isinstance(sec, dict)
+                 and sec.get("placement", "main") == "main"
+                 and str(sec.get("entity") or "") == str((page.get("data") or {}).get("primaryEntity") or "")),
+                None)
+    view = dict(page)
+    if main and main.get("addsHere"):
+        view["addsHere"] = True
+    if main is None or main.get("shows", "list") not in ("list", "board", "calendar"):
+        return workspace_layout(doc, view)
+    body = _family_layout(doc, {**view, "pattern": "entity_list"})
+    if body is None:
+        return workspace_layout(doc, view)
+    entity = _entity(doc, page)
+    src = _slug(str((entity or {}).get("name") or "")) if entity else None
+    extra = _section_cards(doc, page, body["dataSources"], {src} if src else set())
+    for wf in _launched_from(doc, page):
+        create_id = str((_workflow_for(doc, str((entity or {}).get("id") or ""), "db_insert") or {}).get("id") or "")
+        if view.get("addsHere") and str(wf.get("id")) == create_id:
+            continue                       # already the list's add dialog
+        card = _workflow_control(doc, page, wf, entity, None, body["dataSources"])
+        if card is not None:
+            # AN ACTION OF A SECTION ONLY SOME SEE is shown only to them.
+            owner = next((sec for sec in page.get("sections") or [] if isinstance(sec, dict)
+                          and _norm_words(wf.get("name")) in {_norm_words(a) for a in sec.get("actions") or []}),
+                         None)
+            shown_to = _shown_to(doc, owner) if owner else None
+            if shown_to:
+                card["visibleIf"] = shown_to
+            extra.append(card)
+    body["root"]["children"] = list(body["root"].get("children") or []) + extra
+    body["rationale"] = "composed as a screen — its main list, each section's records, its workflows"
+    return body
+
+
 def workspace_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict:
     """The `pageLayouts` body for a page no family template serves."""
     entity = _entity(doc, page)
@@ -553,6 +678,8 @@ def workspace_layout(doc: Mapping[str, Any], page: Mapping[str, Any]) -> dict:
             table["rowActions"] = row_actions
         sources.append({"name": src, "entity": ename, "op": "list", "limit": 25})
         body.append(_node("Card", {"title": _humanise(ename)}, [_node("Table", table)]))
+
+    body += _section_cards(doc, page, sources, {src} if src else set())
 
     by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
     links = [by_id[str(t)] for t in page.get("navigatesTo") or []

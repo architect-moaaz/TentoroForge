@@ -855,7 +855,9 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
     from services.blueprint.agent_contract import AgentResult, ArtifactProposal, apply_agent_result
     from services.blueprint.app_sdk import project_code_pages, widget_keys
     from services.blueprint.executors import RunUsage, make_executor, tiered_router
-    from services.blueprint.ui_engineer import CompileError, NeedsWorkflow, compose_page, ensure_sdk
+    from services.blueprint.ui_engineer import (
+        CompileError, NeedsWorkflow, compose_page, ensure_sdk, reshape_screen,
+    )
 
     page = _page_for_route(svc.doc, route)
     row = code_row(svc.doc, str((page or {}).get("id")))
@@ -908,9 +910,14 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
         try:
             # `whole`: laid out again from the start, its actions held — not
             # edited inside the layout it has.
-            body, spent = compose_page(doc, page, root, llm, brief=brief,
-                                       current=None if whole else row, relayout_of=row if whole else None,
-                                       node="page_code", critic=critic)
+            if row is not None and row.get("parts") and not whole:
+                # A SPLIT SCREEN WHOSE SECTIONS CHANGED may gain or lose a
+                # part; an edit alone can only change the files it has.
+                body, spent = reshape_screen(doc, page, root, llm, row, brief=brief, critic=critic)
+            else:
+                body, spent = compose_page(doc, page, root, llm, brief=brief,
+                                           current=None if whole else row, relayout_of=row if whole else None,
+                                           node="page_code", critic=critic)
         except NeedsWorkflow as exc:
             raise NeedsWorkflowError(route, exc.needs) from exc
         except CompileError as exc:
@@ -935,7 +942,8 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
         # writer's words, so the loop goes where the writer pointed.
         if not widgets and row is not None and \
                 str(body.get("view") or "") == str(row.get("view") or "") and \
-                str(body.get("load") or "") == str(row.get("load") or ""):
+                str(body.get("load") or "") == str(row.get("load") or "") and \
+                dict(body.get("parts") or {}) == dict(row.get("parts") or {}):
             why = str(body.get("rationale") or "").strip()
             return {"applied": False, "committed": [], "version": int(svc.doc.get("version") or 0),
                     "reason": "the page writer left the code as it was" + (f": {why}" if why else ""),

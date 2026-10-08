@@ -132,20 +132,47 @@ def _content_blocks(content: Any) -> list[Any]:
     return [TextBlock(text=_text_of(content))]
 
 
+class _Spent:
+    """One call's usage in the shape `build_usage.spent` reads."""
+
+    def __init__(self, model: str, usage: Usage):
+        self.model, self._usage = model, usage
+
+    def as_ledger_dict(self) -> dict[str, int]:
+        u = self._usage
+        return {"input_tokens": u.input_tokens, "output_tokens": u.output_tokens,
+                "cache_read_input_tokens": u.cache_read_input_tokens,
+                "cache_creation_input_tokens": u.cache_creation_input_tokens}
+
+
 def _to_message(ai_msg: Any, model: str) -> Message:
     um = getattr(ai_msg, "usage_metadata", None) or {}
     details = um.get("input_token_details") or {}
     meta = getattr(ai_msg, "response_metadata", None) or {}
+    # ANTHROPIC'S SPLIT, NOT LANGCHAIN'S TOTAL. `usage_metadata.input_tokens`
+    # counts the cached tokens too, and a cache write may arrive only as
+    # `ephemeral_5m_input_tokens`; read as Anthropic's `input_tokens` (the
+    # uncached part), a cached call was priced at full input plus the cache
+    # read on top.
+    read = int(details.get("cache_read") or 0)
+    write = int(details.get("cache_creation") or 0) or sum(
+        int(v or 0) for k, v in details.items() if str(k).startswith("ephemeral_") and str(k).endswith("_input_tokens"))
+    usage = Usage(
+        input_tokens=max(0, int(um.get("input_tokens") or 0) - read - write),
+        output_tokens=int(um.get("output_tokens") or 0),
+        cache_read_input_tokens=read,
+        cache_creation_input_tokens=write,
+    )
+    try:
+        from services.build_usage import spent
+        spent(_Spent(model, usage))
+    except Exception:  # noqa: BLE001 — accounting never fails a call
+        pass
     return Message(
         content=_content_blocks(ai_msg.content),
         stop_reason=meta.get("stop_reason"),
         model=model,
-        usage=Usage(
-            input_tokens=int(um.get("input_tokens") or 0),
-            output_tokens=int(um.get("output_tokens") or 0),
-            cache_read_input_tokens=int(details.get("cache_read") or 0),
-            cache_creation_input_tokens=int(details.get("cache_creation") or 0),
-        ),
+        usage=usage,
     )
 
 

@@ -726,6 +726,8 @@ class AnthropicModel:
         # failed node whose reason was the empty string.
         text = next((b.text for b in response.content
                      if getattr(b, "type", None) == "text"), None)
+        from services.build_usage import spent as _report_spent
+        _report_spent(spent)
         if text is None:
             if stop == "max_tokens":
                 why = (f"the model spent all {spent.output_tokens:,} output tokens "
@@ -800,14 +802,14 @@ class OpenAICompatibleModel:
         if choice.finish_reason == "content_filter":
             raise ModelRefused(f"{self.model} declined this task")
         u = response.usage
-        return ModelReply(
-            text=choice.message.content or "",
-            usage=Usage(
-                model=self.model,
-                input_tokens=getattr(u, "prompt_tokens", 0) or 0,
-                output_tokens=getattr(u, "completion_tokens", 0) or 0,
-            ),
+        used = Usage(
+            model=self.model,
+            input_tokens=getattr(u, "prompt_tokens", 0) or 0,
+            output_tokens=getattr(u, "completion_tokens", 0) or 0,
         )
+        from services.build_usage import spent as _report_spent
+        _report_spent(used)
+        return ModelReply(text=choice.message.content or "", usage=used)
 
 
 
@@ -986,12 +988,15 @@ class GeminiModel:
             # way a refusal is surfaced elsewhere rather than returning "".
             raise ModelRefused(f"{self.model} returned no content")
         m = getattr(response, "usage_metadata", None)
-        return ModelReply(text=text, usage=Usage(
+        used = Usage(
             model=self.model,
             input_tokens=getattr(m, "prompt_token_count", 0) or 0,
             output_tokens=getattr(m, "candidates_token_count", 0) or 0,
             cache_read_tokens=getattr(m, "cached_content_token_count", 0) or 0,
-        ))
+        )
+        from services.build_usage import spent as _report_spent
+        _report_spent(used)
+        return ModelReply(text=text, usage=used)
 
 
 @dataclass
@@ -1038,7 +1043,12 @@ def context_for(doc: dict, agent: str) -> dict:
     removes a class of defect rather than detecting it later.
     """
     cap = capability_for(agent)
-    always = {"application", "product", "schemaVersion", "version", "state"}
+    # NOT `version` OR `state`. The version ticks every time a sibling's answer
+    # lands, and this slice is the cached head of every fan-out call and every
+    # repair edit: one changed number at its end made the whole ~250k-token
+    # block a cache miss, so each call wrote it again. Mozato paid ~$60 of a
+    # $95 build rewriting it (2026-10-06). No agent authors from either.
+    always = {"application", "product", "schemaVersion"}
     readable = set(always)
 
     if "*" in cap.reads:
@@ -1442,8 +1452,11 @@ NODE_TASKS: dict[str, str] = {
         "a feature completely or decline it completely, and for every page "
         "you keep give its `name`, `route`, a one-sentence `purpose`, its "
         "`pattern`, its `module`, `data.primaryEntity` (the entity the page is "
-        "about; omit for a dashboard or a sign-in), `access`, and `figmaFrame` "
-        "where a slot carries one. NOTHING ELSE: no tasks, states, views, "
+        "about; omit for a dashboard or a sign-in), `access`, `sections` (the "
+        "records the screen holds and where they sit), `addsHere: true` on a "
+        "page whose main records are added on it, `menuEntry` (the menu entry "
+        "the screen answers), and `figmaFrame` where a slot carries one. "
+        "NOTHING ELSE: no tasks, states, views, "
         "actions, users or widgets — the contracts are written afterwards, "
         "one feature per call, against the set you decide here, and anything "
         "beyond the set is dropped. A page earns its route when it has a "
@@ -1485,6 +1498,23 @@ NODE_TASKS: dict[str, str] = {
         "it serves, the tasks users come to it for, its pattern, its primary "
         "entity, and the states it must handle. Declare empty and error states up "
         "front — a page that discovers them later ships broken.\n\n"
+        "A page carrying `addsHere: true` is where its entity's records are "
+        "added: adding one is among its `primaryTasks` and `create` among its "
+        "`actions`, and the form for it lives on that page. No other page adds "
+        "them, so nothing navigates anywhere to add one.\n\n"
+        "A page with `sections` is a SCREEN holding several records — a list, "
+        "the panel that opens a record from it, tabs, dialogs. Write ONE "
+        "contract for the whole screen: its `primaryTasks` include every "
+        "section's `actions` and every section that adds; "
+        "`data.supportingEntities` names every section's entity besides the "
+        "main one. The sections themselves are decided; keep them exactly as "
+        "given.\n\n"
+        "`states` NAMES the states a page handles, from loading, empty, "
+        "populated, error and permission_denied — names only, nothing else. "
+        "What each looks like goes in `stateNotes`, a sentence per state "
+        "(`{\"empty\": \"No orders yet — …\"}`), and so does a moment of a "
+        "screen the names do not cover (`\"noSelection\"`: the list with no "
+        "record opened beside it).\n\n"
         "When a page only means something once something has happened, say so "
         "in `requires`. An approval screen is not a page you can look at; it "
         "is a page you can look at once something has been submitted, and "
@@ -1510,7 +1540,9 @@ NODE_TASKS: dict[str, str] = {
         "has a dashboard its author signs in to AND a link a respondent opens "
         "straight into, and the second must never meet a login screen. `access` "
         "already says which audience a page serves, so mark one entry per "
-        "distinct access level and no more.\n\n"
+        "distinct access level — and among pages only certain roles may open, "
+        "one for EACH of those roles: it is where that role lands after signing "
+        "in, so it is a concrete route, never one with `[id]`.\n\n"
         "Use `presentation` when a view belongs over its caller rather than "
         "beside it. A record opened from a row is often a drawer — the reader "
         "keeps the list they were scanning — while `page` is right when the URL "
@@ -1785,13 +1817,15 @@ NODE_TASKS: dict[str, str] = {
         "(`{{extract_listings.output[0].images ?? inputImage}}`). A field each item "
         "brings itself (its currency, its unit) is read from the item, never written as "
         "one literal for all of them.\n\n"
-        + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
+        + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. The `where` of a lookup maps a field to a value, which means equals; any other comparison is that field mapped to ONE comparison — `{"id": {"ne": "{{customer.id}}"}}` (`ne`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`), never `id__neq`. A signed-out visitor is `$guest`, their guest token — a record a rule gives a `guestColumn` is stamped with it on insert by itself; `$guest` is for finding theirs (an open cart whose guest column is `$guest`). There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
         + "\n\nTELL THE OTHER PERSON. When a step changes something another person "
         "must act on or would want to know — a request arrives for them, their "
         "request is approved or declined, a case is opened against them, a job "
         "they asked for is done — add an `action` step with `actionType: "
-        "send_notification`, a short `title`, a `message` in the domain's words "
-        "and `recipient`: that person's user id. Find it with a `db_query` "
+        "send_notification`, a short `title`, a `message` in the domain's words, "
+        "`recipient`: that person's user id, and `entityId`: the id of the record "
+        "it is about (on a step whose `entity` is that record's), so the "
+        "notification opens it. Find a recipient with a `db_query` "
         "first when it lives on another record (`{{find_order.customerId}}` — a "
         "query's fields are read from its first row); never `$user.id`, which "
         "is the person acting. A whole team is `recipientRole`. Where the "
@@ -1837,6 +1871,16 @@ NODE_TASKS: dict[str, str] = {
         "workspace also names `actorColumn`: the users column whose value is "
         "the actor's workspace (homePropertyId, organisationId), because the "
         "session carries that column and the engine compares against it. "
+        "The column must be a field the entity has. A row that belongs to "
+        "someone through another record it references — it carries the other "
+        "record's id, not the owner's — is scoped with that reference as "
+        "`column` and the referenced entity as `through`; that entity needs a "
+        "scope rule of its own, and the row is reachable when the record it "
+        "points to is. "
+        "A record a visitor may make before signing in — when the application "
+        "lets people act without an account — also names `guestColumn`: the "
+        "entity's field holding the visitor's guest token; a signed-out visitor "
+        "reaches the rows carrying theirs, and keeps them after signing in. "
         "Where authorisation really "
         "is by role and every holder sees every row, write that as a prose rule "
         "so the absence of a scoping object reads as a decision.\n\n"
@@ -2291,11 +2335,11 @@ def build_prompt(
             + json.dumps(context_for(doc, agent), indent=2, sort_keys=True)
             + "\n```"
         )
+        said = workflow_slot_prompt(doc)    # the screens' actions, then the pages
+        if said:
+            user += "\n\n" + said
         if slots:
-            user += (
-                "\n\n" + workflow_slot_prompt(doc) + "\n\n```json\n"
-                + json.dumps(slots, indent=2, ensure_ascii=False) + "\n```"
-            )
+            user += "\n\n```json\n" + json.dumps(slots, indent=2, ensure_ascii=False) + "\n```"
         if brief:
             user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
         if feedback:
@@ -2750,6 +2794,11 @@ _DECLARED_FIELDS: tuple[str, ...] = (
 )
 
 
+#: What a subject naming no requirements is told in its own part: the whole
+#: section, which now rides in the cached half beside the rest of the slice.
+ALL_REQUIREMENTS_ABOVE = "every requirement in the `requirements` section above; this one names none of its own"
+
+
 def _workflow_steps_prompt(doc: dict, system: str, subject: str,
                            feedback: str, *, output_dir: Any = None,
                            brief: str = "") -> tuple[str, str]:
@@ -2773,6 +2822,10 @@ def _workflow_steps_prompt(doc: dict, system: str, subject: str,
     if wanted:
         requirements = [r for r in requirements
                         if isinstance(r, dict) and r.get("id") in wanted]
+    else:
+        # The whole section, shared with every workflow that names none —
+        # cached with the rest, not re-sent in each call's own part.
+        context["requirements"], requirements = requirements, ALL_REQUIREMENTS_ABOVE
     natural_key = _declared_key(output_dir, subject) or str(row.get("name") or subject)
     user = (
         "The Blueprint slice a workflow's steps may name.\n\n```json\n"
@@ -2852,6 +2905,12 @@ def _entity_fields_prompt(doc: dict, system: str, subject: str,
     if wanted:
         requirements = [r for r in requirements
                         if isinstance(r, dict) and r.get("id") in wanted]
+    else:
+        # NAMING NONE, IT ANSWERS THEM ALL — and so does every sibling that
+        # names none: the same section, so it is cached with the rest. In each
+        # call's own part it was ~8k uncached tokens a call, on every one of
+        # Mozato's 128 entity calls (none of its 54 entities named any).
+        context["requirements"], requirements = requirements, ALL_REQUIREMENTS_ABOVE
     # Shared by every entity first; this entity's own part after the break.
     context["data"] = {"entities": others}
     own = {"data": {"relationships": touching, "constraints": []},
@@ -2955,10 +3014,12 @@ def pin_entity_identity(svc: Any, entity_id: str, result: AgentResult) -> None:
 _DECLARED_PAGE_FIELDS: frozenset[str] = frozenset({
     "name", "route", "purpose", "pattern", "module", "data", "access", "entry",
     "presentation", "figmaFrame", "requirements", "confidence", "status",
+    "addsHere", "sections", "menuEntry",
 })
 
 #: What the declaration decided and the contract author may not move.
-_PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module")
+_PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module", "addsHere", "sections",
+                                        "menuEntry")
 
 
 def pin_page_set(result: AgentResult) -> None:
@@ -2981,6 +3042,18 @@ def pin_page_set(result: AgentResult) -> None:
             continue
         proposal.body = {k: v for k, v in (proposal.body or {}).items()
                          if k in _DECLARED_PAGE_FIELDS}
+        # A SCREEN'S RECORD IS ITS MAIN SECTION'S, as the declaration is told.
+        # Left unsaid, the screen had no record at all: its contract's facts
+        # could not resolve (`related` needs one) and seven of ToroCommerce's
+        # eleven screens went without contracts, roles or guards (forge-v3,
+        # 2026-10-07).
+        body = proposal.body
+        data = body.get("data") if isinstance(body.get("data"), dict) else {}
+        if not data.get("primaryEntity"):
+            main = next((sec for sec in body.get("sections") or [] if isinstance(sec, dict) and sec.get("entity")
+                         and str(sec.get("placement") or "main") in ("main", "tab")), None)
+            if main is not None:
+                body["data"] = {**data, "primaryEntity": main["entity"]}
 
 
 def _page_details_prompt(doc: dict, system: str, subject: str,
@@ -3385,7 +3458,9 @@ class RunUsage:
         # Also append to the platform-wide ledger so a Blueprint run shows up
         # alongside everything else rather than in its own silo.
         try:
-            from services.build_usage import record_usage
+            from services.build_usage import claim, record_usage
+
+            claim(usage)
 
             record_usage(
                 project=project or self.project or "blueprint",
@@ -3494,6 +3569,15 @@ EFFORT_BY_NODE: dict[str, str] = {
     # finding and has something concrete to do. It fans out per entity, so
     # the ceiling is paid once per record rather than once per build.
     "entity_fields": "medium",
+    # ONE SUBJECT AGAINST A CONTRACT THAT IS ALREADY DECIDED. A feature's page
+    # contracts and a workflow's steps fill in a declaration `page_contracts`
+    # and `workflows` made at `high`; the shape is the schema's. They were the
+    # two biggest output lines of Mozato's build (2026-10-06: 760k output
+    # tokens over 91 calls, $7.6 of thinking and answer). A reply the contract
+    # REFUSES is retried at `high` (`after_refusal`), so the saving never
+    # costs a subject its correctness.
+    "page_details": "medium",
+    "workflow_steps": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     # A short list of named third parties.
     "integrations": "low",
@@ -3529,13 +3613,21 @@ EFFORT_BY_NODE: dict[str, str] = {
 #: the same score and the same five issues.
 EFFORT_BY_AGENT: dict[str, str] = {
     "page_reviewer": "medium",
+    # The observer judges an output against a list; `anthropic_observer` says
+    # `medium`, but handed the build's router it took the router's default
+    # (`high`) — Mozato's 255 checks wrote 850k output tokens (2026-10-06).
+    "observer": "medium",
 }
 
 MAX_TOKENS_BY_NODE: dict[str, int] = {
     # Names the entities and their relationships without a field; the 64k
     # the single call needed went on fields, which `entity_fields` writes one
     # entity at a time inside the default.
-    "data_model": 32000,
+    #
+    # 64k AGAIN FOR A LARGE APPLICATION. Mozato (54 entities, 2026-10-06) was
+    # cut off at 32,000 after 290s, and the retry paid for it all again.
+    # Unused headroom is free; a cut-off answer is not.
+    "data_model": 64000,
     # Declares the page set without the contracts; the 64k the single call
     # needed went on contracts, which `page_details` writes per feature.
     #
@@ -3550,7 +3642,16 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     # Declares thirty-odd workflows without their steps; the 64k the single
     # call needed went on step graphs, which `workflow_steps` now writes one
     # workflow at a time inside the default.
-    "workflows": 32000,
+    # Mozato's 31 declarations were cut off at 32,000 after 239s (2026-10-06).
+    "workflows": 64000,
+    # THE REST MEASURED AT THE CEILING ON MOZATO (2026-10-06): a 78k-character
+    # request's requirements (267s), its business rules (31,622), its
+    # analytics (295s), and three workflows' step graphs (one on TCommerce),
+    # each thrown away whole and asked again.
+    "requirements": 64000,
+    "business_rules": 64000,
+    "analytics": 64000,
+    "workflow_steps": 64000,
     # One page's thinking plus two whole files — a record workspace's view
     # runs to several hundred lines — and a compile round re-sends the code.
     # 48k ran out on a fifteen-fact record page (0l133sp2); headroom is free.
@@ -3585,6 +3686,30 @@ def after_no_answer(client: Any, feedback: str) -> Any:
     lower = "low"
     return dataclasses.replace(client, effort=lower,
                                max_tokens=max(int(getattr(client, "max_tokens", 0) or 0), NO_ANSWER_RETRY_TOKENS))
+
+
+#: Nodes whose first pass runs below `high` to save thinking, and whose retry
+#: after a refusal goes back to `high`.
+RETRY_AT_HIGH: frozenset[str] = frozenset({"page_details", "workflow_steps"})
+
+
+def after_refusal(client: Any, spec: Any) -> Any:
+    """The client for a retry after the CONTRACT refused a subject's answer:
+    the node's effort, unless the node runs its first pass below `high` to
+    save thinking — then `high`. The cheap first pass is a bet that the
+    shape is easy; a refusal says it was not. A repair, a reply that never
+    started or was cut off (`after_no_answer`), and a first pass are left
+    as they are."""
+    import dataclasses
+
+    feedback = str(getattr(spec, "feedback", "") or "")
+    if (not feedback or getattr(spec, "repair", False)
+            or feedback.startswith(("NoAnswer", "Truncated"))
+            or getattr(spec, "node", "") not in RETRY_AT_HIGH
+            or not dataclasses.is_dataclass(client) or not hasattr(client, "effort")
+            or str(client.effort) not in ("low", "medium")):
+        return client
+    return dataclasses.replace(client, effort="high")
 
 
 #: One notch down, never below `low`.
@@ -4151,12 +4276,12 @@ def make_executor(
             composed = _compose_via_a2ui(spec)
             if composed is not None:
                 return composed
-        client = for_repair(after_no_answer(
+        client = for_repair(after_refusal(after_no_answer(
             model.for_task(spec.node, spec.agent)
             if isinstance(model, ModelRouter)
             else model,
             spec.feedback,
-        ), spec)
+        ), spec), spec)
         # §5 — an application can be described by showing as well as by
         # telling. Resolved per call rather than threaded through `run`,
         # because the references belong to the application and `svc` is the

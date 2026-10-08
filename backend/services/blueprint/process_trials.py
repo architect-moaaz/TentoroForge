@@ -41,7 +41,7 @@ INPUTS_SCHEMA: dict[str, Any] = {
         "required": ["workflow", "as", "input"],
         "properties": {
             "workflow": {"type": "string", "description": "The process id (FLOW-…)."},
-            "as": {"type": "string", "description": "The role that runs it, by name; empty for the administrator."},
+            "as": {"type": "string", "description": "The role that runs it, by name, one of its `runBy`; \"signed out\" for a visitor."},
             # A list of pairs, each value as JSON: structured output takes no
             # object whose keys it does not know in advance.
             "input": {"type": "array", "description": "One entry per input given, named as the process declares it.",
@@ -58,10 +58,41 @@ INPUTS_SYSTEM = (
     "values you are shown; a record input or a reference to another record — including an id "
     "inside a list of items — takes one of the real ids listed, never a made-up one. A new "
     "record's name must not be one already listed among that record's rows. Fill every required input with a value the process should accept; fill "
-    "optional ones when a real person would. Leave out file and image inputs. Do not try to make "
-    "a process refuse: the run proves it works. When a process shows `lastRun`, its last input "
+    "optional ones when a real person would. Leave out file and image inputs: the run attaches a test file to "
+    "each. A row marked `new` was made by this run moments ago — for a process that changes or deletes a "
+    "record, take a `new` one of the right kind when there is one, as nothing depends on it yet. Do not try to make "
+    "a process refuse: the run proves it works. RUN EACH AS THE PERSON IT IS FOR: one of its `runBy`, "
+    "the audience of the screens it starts from (`startedFrom`), who meets its rules — a rule that "
+    "needs a customer's own account is met by a customer. The administrator runs only what only the "
+    "administrator may run; never as a stand-in for a customer or a guest. When a process shows `lastRun`, its last input "
     "was refused or failed for the reason given there: choose one that the rule accepts — a name "
     "not already taken, a record nothing else depends on."
+)
+
+#: The answer to "was each refusal right?" — one small call for all of them.
+JUDGE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["verdicts"],
+    "properties": {"verdicts": {"type": "array", "items": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["workflow", "refusal", "why"],
+        "properties": {
+            "workflow": {"type": "string"},
+            "refusal": {"type": "string", "enum": ["right", "wrong"]},
+            "why": {"type": "string", "description": "One sentence."},
+        }}}},
+}
+
+JUDGE_SYSTEM = (
+    "Each process below was run with an input, and the application refused it with its own message. "
+    "Say for each whether the refusal is RIGHT — the input broke a rule the application should keep: a "
+    "name already taken, more than is in stock, an account not allowed to act, a record in the wrong "
+    "state for this — or WRONG: a real person giving that input would expect it to work, and the "
+    "application is mistaken (their own unchanged email reported as taken by someone else, a valid "
+    "quantity refused, a rule refusing what it was written to allow). Judge from the input, the "
+    "message, the process's purpose, the rules and the records shown; when unsure, say wrong."
 )
 
 
@@ -105,8 +136,28 @@ def _brief(doc: dict, flows: list[dict], records: dict[str, list[dict]],
            before: dict[str, str] | None = None) -> str:
     from services.blueprint.projection import launch_roles
 
+    from services.blueprint.projection import restricted_roles
+
     entities = {str(e.get("id")): e for e in ((doc.get("data") or {}).get("entities") or [])}
     roles = launch_roles(doc)
+    names = [str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict) and r.get("name")]
+    pages = {str(p.get("id")): p for p in doc.get("pages") or [] if isinstance(p, dict)}
+
+    def who(flow_id: str) -> list[str]:
+        """`runBy` in role names. "Anyone signed in" was handed over as the
+        token `@signed-in`, and the inputs' author read it as "the
+        administrator": ToroCommerce's Add to Cart, Place Order and the cart
+        processes were all run as Admin, refused correctly, and "repaired"
+        for two rounds each (forge-v3, 2026-10-07)."""
+        out: list[str] = []
+        for r in roles.get(flow_id) or []:
+            if r == "*":
+                out += names + ["signed out"]
+            elif r == "@signed-in":
+                out += names
+            else:
+                out.append(str(r))
+        return list(dict.fromkeys(out))
     shown = []
     for w in flows:
         inputs = []
@@ -115,8 +166,11 @@ def _brief(doc: dict, flows: list[dict], records: dict[str, list[dict]],
             if i.get("entity"):
                 row["entity"] = str((entities.get(str(i["entity"])) or {}).get("name") or i["entity"])
             inputs.append(row)
+        started = [{"route": pages[str(p)].get("route"), "access": pages[str(p)].get("access"),
+                    "for": restricted_roles(doc, pages[str(p)]) or None}
+                   for p in w.get("launchedFrom") or [] if str(p) in pages]
         row = {"workflow": w.get("id"), "name": w.get("name"), "purpose": w.get("description") or "",
-               "inputs": inputs, "runBy": roles.get(str(w.get("id"))) or []}
+               "inputs": inputs, "runBy": who(str(w.get("id"))), "startedFrom": started}
         # WHAT THE LAST RUN WAS TOLD. F&B's first round picked "Soups", which
         # the seed already had, a category that still held food items and a
         # dish already ordered — each refused, correctly, by the app's own
@@ -188,12 +242,74 @@ def _phases(flows: list[dict]) -> list[list[str]]:
     return [g for g in (makes, changes, removes) if g]
 
 
+#: Input types a person fills by choosing a file. `compose_inputs` leaves them
+#: out; the run attaches a stored test file. Left empty, F&B's Create Category
+#: and Add Food Item were refused "needs image" on every build, and a Smith
+#: turn each was spent finding that the input, not the app, was short
+#: (wz7a99ir, 2026-10-04).
+FILE_INPUTS = frozenset({"image", "photo", "picture", "file", "document", "pdf", "attachment"})
+
+
+def attach_files(bench: Any, doc: dict, flow: dict, run: dict) -> None:
+    """Give each file or image input the run left empty a stored test file."""
+    from services.smith import trials
+    given = run.setdefault("input", {})
+    for i in flow.get("inputs") or []:
+        if not isinstance(i, dict) or not i.get("name") or given.get(i["name"]) not in (None, ""):
+            continue
+        kind = str(i.get("type") or i.get("kind") or "").lower()
+        if kind not in FILE_INPUTS:
+            continue
+        stored = trials.stored_file(bench, doc, "file" if kind in ("file", "document", "pdf", "attachment")
+                                    else "image", run.get("as") or "")
+        if stored:
+            given[i["name"]] = stored
+
+
+def _mark_new(records: dict[str, list[dict]], before: set[str]) -> dict[str, list[dict]]:
+    """Rows this run made since `before` was read, marked `new`."""
+    return {k: [{**r, "new": True} if r.get("id") not in before else r for r in rows]
+            for k, rows in records.items()}
+
+
 def run_failed(said: str) -> bool:
     """A trial that shows the process not working — and one that could not
     finish at all (the trial's own timeout or a crash), which `trials.failed`
     reads as a missing header rather than a failure."""
     from services.smith import trials
     return trials.failed(said) or said.startswith("`try_workflow` failed")
+
+
+def refused(said: str) -> bool:
+    """A run the application itself turned down, with its own message — as
+    opposed to one that broke (an error, a failed step, no answer)."""
+    return '"refused": true' in said
+
+
+def judge_refusals(doc: dict, items: list[tuple[dict, dict, str]], client: Any) -> dict[str, str]:
+    """`{FLOW-id: "right" | "wrong"}` for each refused run — one small call.
+
+    A REFUSAL IS OFTEN THE APP WORKING. ToroCommerce's trials were refused
+    "only 1 of this item in stock" and "that email is already in use" — the
+    app's own rules, given inputs a person would not give — and each sent an
+    unattended Smith turn after a fault that was not there: $9.64 of a $24.91
+    build (forge-v3, 2026-10-07). But one refusal was a fault — a person's own
+    unchanged email reported as taken — so refusals are judged, not waved
+    through. A call that fails judges none: they go to Smith as before."""
+    shown = [{"workflow": f.get("id"), "name": f.get("name"), "purpose": f.get("description") or "",
+              "as": run.get("as") or "the administrator", "input": run.get("input") or {},
+              "refused": _why(said)} for f, run, said in items]
+    rules = [{"name": r.get("name"), "statement": r.get("statement")}
+             for r in doc.get("businessRules") or [] if isinstance(r, dict)]
+    try:
+        reply = client(system=JUDGE_SYSTEM, user=json.dumps({"runs": shown, "rules": rules}, default=str)[:40000],
+                       schema=JUDGE_SCHEMA)
+        body = json.loads(getattr(reply, "text", reply))
+    except Exception:  # noqa: BLE001
+        logger.warning("[process-trials] refusals not judged", exc_info=True)
+        return {}
+    return {str(v.get("workflow")): str(v.get("refusal")) for v in (body or {}).get("verdicts") or []
+            if isinstance(v, dict) and v.get("refusal") in ("right", "wrong")}
 
 
 def _why(said: str) -> str:
@@ -216,7 +332,14 @@ def fault_ask(flow: dict, run: dict, said: str) -> str:
     )
 
 
-def prove_processes(svc: Any, output_dir: str, *,
+def prove_processes(svc: Any, output_dir: str, *args: Any, **kwargs: Any) -> dict:
+    """See `_prove_processes`; its model calls, and the Smith turns it starts, are the build's spend."""
+    from services.build_usage import usage_scope
+    with usage_scope(agent="process_trials", output_dir=str(output_dir), phase="build", kind="build"):
+        return _prove_processes(svc, output_dir, *args, **kwargs)
+
+
+def _prove_processes(svc: Any, output_dir: str, *,
                     emit: Callable[[str, dict], None] | None = None,
                     client: Any = None,
                     run_turn: Callable[..., dict] | None = None,
@@ -224,6 +347,7 @@ def prove_processes(svc: Any, output_dir: str, *,
                     rounds: int = ROUNDS, record: bool = True) -> dict:
     """Run every process; repair what fails; returns {passed, fixed, left}."""
     from services.blueprint.page_repair import _ledger
+    from services.blueprint.round_trips import read_back
     from services.smith import trials
 
     say = emit or (lambda _e, _d: None)
@@ -249,6 +373,10 @@ def prove_processes(svc: Any, output_dir: str, *,
         return {"passed": [], "fixed": [], "left": []}
     passed: list[str] = []
     fixed: list[str] = []
+    # FIXED MEANS SOMETHING CHANGED. A repair that only ran the process again
+    # with a better input left the app as it was; counting that as "fixed"
+    # told the owner three working processes had been broken (wz7a99ir).
+    changed: set[str] = set()
     left: list[dict] = []
     pending = [str(w["id"]) for w in flows]
     lessons: dict[str, str] = {}
@@ -274,10 +402,15 @@ def prove_processes(svc: Any, output_dir: str, *,
                 # delete left for a later round has something new to delete.
                 makes = (_phases([by_id[p] for p in by_id]) or [[]])[0]
                 setup = [p for p in proven if p in makes and p not in pending]
+                seeded: set[str] | None = None
                 for group in _phases([by_id[p] for p in pending + setup]):
                     if not group:
                         continue
                     records = _records(app, svc.doc)
+                    if seeded is None:
+                        seeded = {r.get("id") for rows in records.values() for r in rows}
+                    else:
+                        records = _mark_new(records, seeded)
                     plan = compose_inputs(svc.doc, [by_id[p] for p in group], records, client, before=lessons)
                     # A PROCESS LEFT OUT IS ASKED FOR AGAIN, ON ITS OWN. Told its
                     # last run was rightly refused, the writer skipped F&B's
@@ -288,15 +421,54 @@ def prove_processes(svc: Any, output_dir: str, *,
                                                    before=lessons))
                     for pid in group:
                         run = plan.get(pid) or {"as": "", "input": {}}
+                        attach_files(bench, svc.doc, by_id[pid], run)
                         said = trials.run("try_workflow", {"workflow": pid, "input": run["input"], "as": run["as"]},
                                           bench=bench, doc=svc.doc)
                         if pid in setup:
                             continue
-                        if run_failed(said):
+                        if not run_failed(said):
+                            # RAN THROUGH IS HALF. The other half is what a
+                            # person then sees: Add Child wrote every child
+                            # and My Children showed none (`round_trips`).
+                            unseen = read_back(bench, svc.doc, run["as"])
+                            if unseen:
+                                said += ("\n\nthen, looking for it as the person who ran it:\n"
+                                         + "\n".join(f"  {u}" for u in unseen))
+                        if run_failed(said) or "\nthen, looking for it as the person who ran it:" in said:
                             failing.append((by_id[pid], run, said))
                         else:
                             proven.append(pid)
-                            (fixed if round_ > 1 else passed).append(str(by_id[pid].get("name") or pid))
+                            (fixed if round_ > 1 and pid in changed else passed).append(str(by_id[pid].get("name") or pid))
+                            ledger.node_subject("process_trials", pid, len(passed) + len(fixed), len(flows), True)
+                # A RIGHT REFUSAL IS TRIED AGAIN, NOT REPAIRED: new inputs,
+                # chosen knowing the reason, before anyone is sent to fix it.
+                turned_down = [item for item in failing if refused(item[2])]
+                verdicts = judge_refusals(svc.doc, turned_down, client) if turned_down else {}
+                again = [item for item in turned_down if verdicts.get(str(item[0].get("id"))) == "right"]
+                if again:
+                    for flow, run, said in again:
+                        lessons[str(flow.get("id"))] = (f"input {json.dumps(run.get('input') or {}, default=str)[:400]} "
+                                                        f"as {run.get('as') or 'the administrator'} -> {_why(said)} "
+                                                        "(rightly refused: choose an input and a person the rule accepts)")
+                    records = _mark_new(_records(app, svc.doc), seeded or set())
+                    replan = compose_inputs(svc.doc, [f for f, _r, _s in again], records, client, before=lessons)
+                    for flow, first, first_said in again:
+                        pid = str(flow.get("id"))
+                        run = replan.get(pid) or first
+                        attach_files(bench, svc.doc, flow, run)
+                        said = trials.run("try_workflow", {"workflow": pid, "input": run["input"], "as": run["as"]},
+                                          bench=bench, doc=svc.doc)
+                        failing = [x for x in failing if x[0] is not flow]
+                        if run_failed(said):
+                            failing.append((flow, run, (
+                                f"Refused twice, each time with an input chosen to satisfy its rules — first "
+                                f"{json.dumps(first.get('input') or {}, default=str)[:300]} as "
+                                f"{first.get('as') or 'the administrator'}: {_why(first_said)}; then:\n{said}\n"
+                                "If no input can pass, the data or a rule is what is wrong (records in a state "
+                                "nothing can act on, a rule that refuses everyone).")))
+                        else:
+                            proven.append(pid)
+                            passed.append(str(flow.get("name") or pid))
                             ledger.node_subject("process_trials", pid, len(passed) + len(fixed), len(flows), True)
             except trials.TrialUnavailable as exc:
                 logger.warning("[process-trials] the app could not be run: %s", exc)
@@ -315,8 +487,11 @@ def prove_processes(svc: Any, output_dir: str, *,
                 say("message", {"text": f"{flow.get('name')} did not run through — fixing the cause and running it again."})
                 found = ""
                 try:
-                    found = str((run_turn("", output_dir, fault_ask(flow, run, said), max_steps=STEPS,
-                                          unattended=True) or {}).get("answer") or "")
+                    turn = run_turn("", output_dir, fault_ask(flow, run, said), max_steps=STEPS,
+                                    unattended=True) or {}
+                    found = str(turn.get("answer") or "")
+                    if turn.get("edited_paths"):
+                        changed.add(str(flow.get("id")))
                 except Exception as exc:  # noqa: BLE001 — one repair never ends the build
                     logger.warning("[process-trials] %s: %s", flow.get("id"), exc)
                 lessons[str(flow.get("id"))] = (f"input {json.dumps(run.get('input') or {}, default=str)[:400]} -> "

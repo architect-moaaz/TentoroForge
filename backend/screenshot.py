@@ -71,6 +71,8 @@ async def capture_screenshot(output_dir: str) -> str | None:
             # Use a new process group so we can kill the whole tree
             preexec_fn=lambda: __import__("os").setpgrp(),
         )
+        from services import dev_servers
+        dev_servers.track(server_proc.pid, port=port, root=project_path, kind="screenshot")
 
         # 2. Wait for the server to be ready
         ready = await _wait_for_server(port)
@@ -124,6 +126,9 @@ async def capture_screenshot(output_dir: str) -> str | None:
 
     finally:
         # 5. Kill the dev server process group
+        if server_proc:
+            from services import dev_servers
+            dev_servers.forget(server_proc.pid)
         if server_proc and server_proc.returncode is None:
             try:
                 import os

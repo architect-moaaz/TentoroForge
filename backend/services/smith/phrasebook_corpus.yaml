@@ -178,6 +178,128 @@ sentences:
     source: phrasebook
     reaches: {verb: remove_page, states: []}
 
+  # -- What a screen holds -------------------------------------------------
+
+  - id: holds-add-a-refunds-tab-to-the-support-screen
+    say: "add a refunds tab to the support screen"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_section, states: [route, new_section]}
+
+  - id: holds-on-the-orders-screen-open-the-order-items-in-a-pan
+    say: "on the orders screen, open the order items in a panel when I click an order"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_section, states: [route, new_section]}
+
+  - id: holds-add-a-calendar-of-bookings-to-the-front-desk
+    say: "add a calendar of bookings to the front desk"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: add_section, states: [route, new_section]}
+
+  - id: holds-add-a-dialog-on-the-customer-screen-to-log-a-call
+    say: "add a dialog on the customer screen to log a call"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: add_section, states: [route, new_section]}
+
+  - id: holds-add-a-tab
+    say: "add a tab"
+    checked: {colour: asks, via: none, missing: [new_section, route]}
+    source: phrasebook
+    reaches: {verb: add_section, states: []}
+
+  - id: holds-only-the-team-lead-should-see-the-refunds-tab-on-t
+    say: "only the team lead should see the refunds tab on the support screen"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_section, states: [route, section, set]}
+
+  - id: holds-show-bookings-on-the-front-desk-as-a-calendar-inst
+    say: "show bookings on the front desk as a calendar instead of a list"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_section, states: [route, section, set]}
+
+  - id: holds-rename-the-refunds-tab-to-refund-requests
+    say: "rename the refunds tab to refund requests"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: phrasebook
+    reaches: {verb: edit_section, states: [section, set]}
+
+  - id: holds-on-the-support-screen-open-a-ticket-in-a-side-pane
+    say: "on the support screen, open a ticket in a side panel instead of a separate tab"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: edit_section, states: [route, section, set]}
+
+  - id: holds-let-agents-add-notes-right-on-the-ticket-panel-of-
+    say: "let agents add notes right on the ticket panel of the support screen"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: edit_section, states: [route, section, set]}
+
+  - id: holds-put-the-coupons-tab-of-the-marketing-screen-in-the
+    say: "put the coupons tab of the marketing screen in the menu under Admin"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: edit_section, states: [route, section, set]}
+
+  - id: holds-the-orders-board-on-the-kitchen-screen-should-upda
+    say: "the orders board on the kitchen screen should update by itself"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: edit_section, states: [route, section, set]}
+
+  - id: holds-add-an-approve-button-to-the-refunds-tab-on-suppor
+    say: "add an approve button to the refunds tab on support"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: edit_section, states: [route, section, set]}
+
+  - id: holds-take-the-notes-tab-off-the-customer-screen
+    say: "take the notes tab off the customer screen"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_section, states: [route, section]}
+
+  - id: holds-remove-the-notes-tab
+    say: "remove the notes tab"
+    checked: {colour: asks, via: none, missing: [route]}
+    source: phrasebook
+    reaches: {verb: remove_section, states: [section]}
+
+  - id: holds-put-the-refunds-tab-first-on-the-support-screen
+    say: "put the refunds tab first on the support screen"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: reorder_sections, states: [route, order]}
+
+  - id: holds-move-the-refunds-tab-from-support-to-the-finance-s
+    say: "move the refunds tab from support to the finance screen"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: move_section, states: [route, section, to_route]}
+
+  - id: holds-fold-the-campaigns-page-into-the-marketing-screen
+    say: "fold the campaigns page into the marketing screen"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: merge_screens, states: [route, from_route]}
+
+  - id: holds-we-have-too-many-pages-put-coupons-and-campaigns-o
+    say: "we have too many pages, put coupons and campaigns on one screen"
+    checked: {colour: acts, via: handler}
+    source: phrasebook
+    reaches: {verb: merge_screens, states: [route, from_route]}
+
+  - id: holds-make-the-refunds-tab-on-support-its-own-page
+    say: "make the refunds tab on support its own page"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: split_section, states: [route, section]}
+
   # -- What it keeps -------------------------------------------------------
 
   - id: keeps-discount-field

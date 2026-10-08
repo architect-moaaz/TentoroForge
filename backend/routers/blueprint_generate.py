@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import logging
 import re
 import time
@@ -669,6 +670,36 @@ def _failing_processes_line(doc: dict) -> str:
             "Tell me to carry on and I will keep at it.")
 
 
+def _check_score(doc: dict) -> str:
+    """What using the application found (`app_check`, `process_trials`),
+    as the sentence that opens the completion message — or "" when no check
+    ran (a build before it existed). "Built" stopped meaning "works" the day a
+    page could be on disk and broken; this says how many were proven to work."""
+    check = (doc.get("runtime") or {}).get("check")
+    if not isinstance(check, dict) or not check.get("pages"):
+        return ""
+    from services.blueprint.process_trials import manual_workflows
+    pages, working = int(check.get("pages") or 0), int(check.get("working") or 0)
+    issues = [i for i in (doc.get("runtime") or {}).get("issues") or [] if isinstance(i, dict)]
+    flows = len(manual_workflows(doc))
+    stuck = [i for i in issues if i.get("kind") == "process"]
+    fixed = list(check.get("fixed") or [])
+    parts = [f"{working} of {pages} page{'' if pages == 1 else 's'} opened and worked for every kind of "
+             f"person they are for"]
+    if flows:
+        parts.append(f"{flows - len(stuck)} of {flows} process{'' if flows == 1 else 'es'} ran through and "
+                     f"showed what they saved")
+    said = "I used the whole application before handing it over: " + "; ".join(parts) + "."
+    if fixed:
+        said += f" Fixed while checking: {', '.join(fixed[:6])}{' and more' if len(fixed) > 6 else ''}."
+    failing = [i for i in issues if i.get("kind") == "page_check"]
+    if failing:
+        lines = "\n".join(f"- {i.get('route')} — {str(i.get('detail') or '').split(' | ')[0][:160]}"
+                           for i in failing[:8])
+        said += f"\n\nStill not working:\n{lines}\nTell me to carry on and I will keep at it."
+    return said
+
+
 def _build_complete_message(doc: dict | None) -> str | None:
     """One line, in Smith's voice, saying the build finished — or ``None``
     when nothing was built to announce.
@@ -714,6 +745,14 @@ def _build_complete_message(doc: dict | None) -> str | None:
 
     later += _sign_in_line(full) + _failing_processes_line(full)
 
+    # WHAT WAS PROVEN, NOT WHAT WAS WRITTEN. When the build used the app,
+    # the message says how much of it worked, and names what did not.
+    score = _check_score(full)
+    if score:
+        lead = ("Your application is built. " if not unbuilt else
+                f"Your application is built — {served} of {planned} pages are served. ")
+        return lead + score + later
+
     if not unbuilt:
         s = "" if planned == 1 else "s"
         return (f"Your application is built — {planned} page{s} ready. Open the "
@@ -745,6 +784,13 @@ _VERIFY_OFFER_TEXT = (
     "is it laid out well, does it match what you asked for — and check the "
     "buttons, search and links actually work, then re-compose anything that's off."
 )
+#: After a build that already used every page, the offer is for what using it
+#: cannot judge: how each page looks and reads.
+_LOOK_OFFER_TEXT = (
+    "Want me to also review how each page looks? I'll read every page as it renders — "
+    "is it laid out well, does it read clearly, does it match what you asked for — and "
+    "re-compose anything that's off."
+)
 
 
 def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
@@ -768,7 +814,8 @@ def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
             return
         emit("message", {"text": done})
         if offer_verify:
-            emit("message", {"text": _VERIFY_OFFER_TEXT,
+            checked = isinstance(((doc or {}).get("runtime") or {}).get("check"), dict)
+            emit("message", {"text": _LOOK_OFFER_TEXT if checked else _VERIFY_OFFER_TEXT,
                              "options": list(_VERIFY_OFFER_OPTIONS),
                              "status": "asked"})
     except Exception:  # noqa: BLE001 — never let the announcement fail the build
@@ -1093,9 +1140,36 @@ async def read_run(
     # read. A run it shows as ended more than a couple of minutes ago is not
     # this visit's run — the same rule the registry keeps.
     ledger = run_registry.ledger_snapshot(_output_dir(project))
+    if ledger and ledger.get("interrupted"):
+        return _interrupted_turn(project, ledger)
     if ledger and (ledger.get("active") or (time.time() - float(ledger.get("endedAt") or 0)) < 120):
         return ledger
     return snap
+
+
+def _interrupted_turn(project: Any, ledger: dict) -> dict:
+    """A Smith turn whose process died: said once in the conversation, and
+    closed in its ledger so it is said once.
+
+    The person's message was left with no answer — the turn died with the
+    worker, and nothing that lived on knew it had been asked (ihf6pjga,
+    2026-10-05, two asks unanswered). Whichever poll finds the dead turn
+    first claims it; the claim is a file only one process can create."""
+    runs = _output_dir(project) / ".forge" / "runs"
+    run_id = str(ledger.get("runId") or "")
+    try:
+        os.close(os.open(runs / f"{run_id}.noted", os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except OSError:
+        return ledger
+    try:
+        with (runs / f"{run_id}.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"event": "run:crashed", "error": "its process went away",
+                                 "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}) + "\n")
+    except OSError:
+        pass
+    _remember(asyncio.get_running_loop(), project.id, "assistant", str(ledger.get("error") or ""),
+              {"status": "error"})
+    return ledger
 
 
 @router.get("/api/projects/{project_id}/looks/{page_id}/{attempt}/{name}")
@@ -1942,6 +2016,16 @@ async def smith_chat(
             # but the inner build keeps running, and it is the inner one we wait
             # on to emit the real completion afterwards.
             _inner = loop.run_in_executor(None, work)
+            # ON DISK, FOR EVERY WORKER. The registry above is this worker's
+            # memory; a panel whose stream dropped polls whichever worker
+            # answers, and only a ledger tells it the turn is still working —
+            # or that the process working on it is gone.
+            from services.blueprint.run_ledger import TurnLedger
+            _turn_ledger = TurnLedger(output_dir, phase="build" if req.approved else "define")
+
+            def _ledger_end(f: Any) -> None:
+                _turn_ledger.end(None if f.cancelled() else f.exception())
+            _inner.add_done_callback(_ledger_end)
             _fut = asyncio.shield(_inner)
             try:
                 emit("done", await asyncio.wait_for(_fut, timeout=_turn_timeout))
@@ -2138,7 +2222,8 @@ def build_in_flight(output_dir: str | Path) -> dict | None:
     """The run writing this application now, as its ledger tells it — read
     from disk because the backend runs two workers and either may hold it."""
     from services.run_registry import ledger_snapshot
-    snap = ledger_snapshot(output_dir)
+    # Builds only: the turn asking is itself in flight, and it is not a build.
+    snap = ledger_snapshot(output_dir, turns=False)
     return snap if snap and snap.get("active") else None
 
 
@@ -2346,7 +2431,8 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
 def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: Any, emit) -> None:
     """Every page the build did not finish goes to Smith with why it failed,
     to fix the cause and write it (`page_repair`); then every process is run
-    once and what fails is fixed the same way. Only for a built tree —
+    once and what fails is fixed the same way; then every page is used as
+    each role it is for (`app_check`). Only for a built tree —
     there is nothing to run before assembly — and never fatal: what is still
     unfinished is recorded and said in the completion message."""
     try:
@@ -2370,6 +2456,18 @@ def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: A
                     [t["name"] for t in out["left"]] or "-")
     except Exception:  # noqa: BLE001
         logger.warning("[blueprint] %s: process trials failed", Path(output_dir).name, exc_info=True)
+    # THEN THE WHOLE APPLICATION IS USED, as each kind of person it is for —
+    # every page opened, every control pressed, what it shows read — and
+    # what fails is fixed the same way (`app_check`). The build knew when a
+    # page was missing; only this knows when one is wrong.
+    try:
+        from services.blueprint.app_check import check_app
+        out = check_app(svc, output_dir, emit=emit)
+        logger.info("[blueprint] %s: pages working %d of %d, fixed %s, still failing %s",
+                    Path(output_dir).name, out["working"], out["pages"], out["fixed"] or "-",
+                    [t["route"] for t in out["left"]] or "-")
+    except Exception:  # noqa: BLE001
+        logger.warning("[blueprint] %s: the app check failed", Path(output_dir).name, exc_info=True)
 
 
 def _approve_requirements(output_dir: str, app_root: str, *, emit, app_name: str = "",

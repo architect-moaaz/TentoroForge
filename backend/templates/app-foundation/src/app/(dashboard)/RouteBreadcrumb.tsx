@@ -23,8 +23,9 @@
  * services.page_nav.write_route_tree_contract during post-generation.
  */
 
+import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 export type RouteNode = {
   parent: string | null;
@@ -34,7 +35,46 @@ export type RouteNode = {
   owned_by_schema: boolean;
 };
 
-type Props = { routes: Record<string, RouteNode> };
+/** A screen's tabs (`?tab=<key>`) and record panels (`?<param>=<id>`), by label. */
+export type ScreenNode = {
+  title: string;
+  tabs?: Record<string, string>;
+  panels?: Record<string, string>;
+};
+
+type Props = { routes: Record<string, RouteNode>; screens?: Record<string, ScreenNode> };
+
+/** WHERE YOU ARE INSIDE A SCREEN: "Support desk › Open tickets › Ticket".
+ *  A screen holds its records as tabs and panels on one route, so the trail
+ *  is read from the search params the menu and links open them with. Only
+ *  drawn when something inside the screen is open — a screen alone is its
+ *  own title. */
+function ScreenTrail({ screens }: { screens: Record<string, ScreenNode> }) {
+  const pathname = usePathname() || "/";
+  const search = useSearchParams();
+  const screen = screens[pathname];
+  if (!screen || !search) return null;
+  const tabKey = search.get("tab");
+  const tab = tabKey ? screen.tabs?.[tabKey] : undefined;
+  const panel = Object.entries(screen.panels ?? {}).find(([param]) => search.get(param));
+  if (!tab && !panel) return null;
+  const crumbs: { label: string; href?: string }[] = [{ label: screen.title, href: pathname }];
+  if (tab) crumbs.push({ label: tab, href: panel ? `${pathname}?tab=${encodeURIComponent(tabKey!)}` : undefined });
+  if (panel) crumbs.push({ label: panel[1] });
+  return (
+    <nav aria-label="Breadcrumb" className="mb-4 text-sm text-muted-foreground">
+      <ol className="flex flex-wrap items-center gap-1">
+        {crumbs.map((c, i) => (
+          <li key={i} className="flex items-center gap-1">
+            {c.href ? <Link href={c.href} className="hover:underline">{c.label}</Link>
+                    : <span className="text-foreground">{c.label}</span>}
+            {i < crumbs.length - 1 && <span aria-hidden="true" className="select-none opacity-60">/</span>}
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
 
 /** Concrete pathname → the contract key, which may be parameterised.
  *
@@ -92,10 +132,16 @@ function hrefFor(ancestor: string, pathname: string): string {
   );
 }
 
-export function RouteBreadcrumb({ routes }: Props) {
+export function RouteBreadcrumb({ routes, screens }: Props) {
   const pathname = usePathname() || "/";
   const key = resolveRoute(pathname, routes);
-  if (!key) return null;
+  if (!key) {
+    // A screen's own trail. Suspense, because reading the search params on
+    // the client opts the subtree into client rendering.
+    return screens && screens[pathname]
+      ? <React.Suspense fallback={null}><ScreenTrail screens={screens} /></React.Suspense>
+      : null;
+  }
 
   const node = routes[key];
   // The page schema already renders one — stay out of the way.

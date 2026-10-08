@@ -118,6 +118,9 @@ export interface DataEngineContext {
    *  the caller's role is in the column's `readers` list — otherwise the
    *  request is silently ignored (mask stays), never a 403. */
   unmaskColumns?: string[];
+  /** A signed-out visitor's guest token (the `forge-guest` cookie): the rows
+   *  a rule's `guestColumn` marks as theirs are reachable with it. */
+  guest?: string;
 }
 
 // ─── Slice-4 encrypt-at-rest helpers ─────────────────────────────────────
@@ -178,8 +181,12 @@ async function _encryptSensitiveOnWrite(
   const specs = sensitiveColumnsFor(entityName);
   const keys = Object.keys(specs);
   if (keys.length === 0) return;   // no sensitive columns — fast path.
+  // A GUEST COLUMN IS A KEY, NOT A SECRET TO HIDE IN THE TABLE: rows are found
+  // by it, so it is stored as it is. TCommerce marked its cart's guestToken
+  // sensitive; encrypted, it would match no visitor ever again.
+  const guestCols = new Set(ownershipRulesFor(entityName).map((r) => r.guestColumn).filter(Boolean));
   for (const col of keys) {
-    if (!(col in data)) continue;
+    if (!(col in data) || guestCols.has(col)) continue;
     const raw = data[col];
     // Empty / undefined = "keep existing" on update, "no value" on create.
     // Either way, we must not overwrite _encrypted / _mask with an empty
@@ -281,12 +288,36 @@ const NO_READER = "00000000-0000-0000-0000-000000000000";
 export function withReader(
   filter: Record<string, any> | undefined | null,
   ctx: DataEngineContext,
+  table?: Record<string, any>,
 ): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(filter || {})) {
-    out[k] = v === "$user.id" ? (ctx?.user?.id ?? NO_READER) : v;
+    const value = v === "$user.id" ? (ctx?.user?.id ?? NO_READER) : v;
+    out[k] = table ? asColumnValue(table[k], value) : value;
   }
   return out;
+}
+
+/**
+ * A FILTER VALUE IN THE COLUMN'S OWN TYPE. A filter arrives as text — the
+ * SDK's `where` is stringified on its way here and a query string is text —
+ * and the Postgres driver writes a yes/no parameter as `x === true ? 't' :
+ * 'f'`, so the TEXT "true" became false. `where: { isActive: true }` listed
+ * exactly the inactive products on both live shops, TCommerce and ToroCommerce
+ * (forge-v3, 2026-10-07). Yes/no and number columns take their own type;
+ * anything else is left as it came.
+ */
+export function asColumnValue(col: any, value: unknown): unknown {
+  if (typeof value !== "string" || !col) return value;
+  const kind = String(col.columnType || col.dataType || "").toLowerCase();
+  if (kind.includes("boolean")) {
+    const v = value.trim().toLowerCase();
+    if (v === "true" || v === "1" || v === "t" || v === "yes") return true;
+    if (v === "false" || v === "0" || v === "f" || v === "no") return false;
+    return value;
+  }
+  if (col.dataType === "number" && /^\s*-?\d+(\.\d+)?\s*$/.test(value)) return Number(value);
+  return value;
 }
 
 
@@ -335,6 +366,7 @@ function scopeConditions(
   entityName: string,
   entity: { table: PgTableWithColumns<any> },
   ctx: DataEngineContext,
+  depth = 0,
 ): SQL[] {
   // Tested for "not attribution" rather than "is scope" deliberately: a
   // manifest from an older projection carries no `kind`, and the safe reading
@@ -357,14 +389,84 @@ function scopeConditions(
       conds.push(sql`false`);
       continue;
     }
-    const actor = actorValue(rule, ctx);
-    if (actor === undefined) {
-      conds.push(sql`false`);
+    if (rule.through) {
+      // OWNED THROUGH ANOTHER RECORD. An appointment is a parent's because its
+      // child is: `childId` must be one of the children this actor reaches
+      // under Child's own rule. A target the actor reaches unscoped (no rule,
+      // or a role the rule exempts) adds nothing.
+      const inner = throughConditions(rule, ctx, depth);
+      if (inner === null) {
+        conds.push(sql`false`);
+        continue;
+      }
+      if (inner.where) conds.push(inArray(col, db.select({ id: inner.id }).from(inner.table).where(inner.where)));
       continue;
     }
-    conds.push(eq(col, actor as any));
+    const actor = actorValue(rule, ctx);
+    // A VISITOR'S OWN GUEST ROWS. A rule with a `guestColumn` also admits the
+    // rows carrying this visitor's guest token — before they sign in (a
+    // guest's cart has no customer yet) and after (the cart they filled as a
+    // guest is still theirs). TCommerce's guests added to a bag they could
+    // never read back (2026-10-06).
+    const guestCol = rule.guestColumn ? cols[rule.guestColumn] : undefined;
+    const guest = guestCol !== undefined && ctx.guest ? eq(guestCol, ctx.guest as any) : undefined;
+    if (actor === undefined) {
+      conds.push(guest ?? sql`false`);
+      continue;
+    }
+    conds.push(guest ? (or(eq(col, actor as any), guest) as SQL) : eq(col, actor as any));
   }
   return conds;
+}
+
+/**
+ * What reaching a `through` rule's target means for this actor: the target's
+ * table, its id column and the WHERE its own scope rules give — `where`
+ * undefined when the actor reaches every row of it. `null` when the target
+ * cannot be resolved (or the chain runs deeper than any real ownership does),
+ * which fails closed like a missing column.
+ */
+function throughConditions(
+  rule: OwnershipRule,
+  ctx: DataEngineContext,
+  depth: number,
+): { table: PgTableWithColumns<any>; id: any; where: SQL | undefined } | null {
+  const target = depth < 3 && rule.through ? getEntity(rule.through) : undefined;
+  const id = (target?.table as any)?.id;
+  if (!target || id === undefined) {
+    console.error(
+      `[data-engine] ownership rule reaches ${rule.through} through "${rule.column}", ` +
+      `which is not a record the engine knows — returning no rows rather than every row.`,
+    );
+    return null;
+  }
+  return { table: target.table, id, where: allOf(scopeConditions(rule.through!, target, ctx, depth + 1)) };
+}
+
+/**
+ * A row written with a `through` column must point at a record the actor
+ * reaches: a parent books for their own child, not for anyone's. Reads are
+ * already narrowed by scopeConditions; this is the write side of the same rule.
+ */
+async function assertReachableThrough(
+  entityName: string,
+  data: Record<string, any>,
+  ctx: DataEngineContext,
+): Promise<void> {
+  for (const rule of ownershipRulesFor(entityName)) {
+    if (!rule.through || rule.kind === "attribution") continue;
+    if (ctx.user?.role && (rule.unscopedRoles || []).includes(ctx.user.role)) continue;
+    const value = data[rule.column];
+    if (value === undefined || value === null || value === "") continue;
+    const inner = throughConditions(rule, ctx, 0);
+    if (inner && !inner.where) continue;
+    const hit = inner
+      ? await db.select({ id: inner.id }).from(inner.table).where(and(eq(inner.id, value), inner.where!)).limit(1)
+      : [];
+    if (!hit.length) {
+      throw new ValidationError([`That ${String(rule.through).toLowerCase()} is not one of yours.`]);
+    }
+  }
 }
 
 /**
@@ -805,6 +907,14 @@ export async function create(
   for (const rule of ownershipRulesFor(entityName)) {
     if (ctx.user?.role && (rule.unscopedRoles || []).includes(ctx.user.role)) continue;
     if (!(rule.column in entity.table)) continue;
+    // A `through` column holds another record's id, never the actor's.
+    if (rule.through) continue;
+    // A GUEST'S ROW CARRIES THEIR TOKEN, whatever the request said: it is
+    // what lets them read it back, and a body value would let anyone claim
+    // another visitor's row.
+    if (rule.guestColumn && rule.guestColumn in entity.table && !ctx.user?.id && ctx.guest) {
+      cleanData[rule.guestColumn] = ctx.guest;
+    }
     const actor = actorValue(rule, ctx);
     // No actor value to write: leave what the tenancy fill above put there
     // rather than nulling a NOT NULL column. A scope column's read path
@@ -812,6 +922,8 @@ export async function create(
     if (actor === undefined) continue;
     cleanData[rule.column] = actor;
   }
+
+  await assertReachableThrough(entityName, cleanData, ctx);
 
   // jsonb columns arrive as JSON strings from KeyValueInput — parse them back.
   coerceJsonColumns(entity.table, cleanData);
@@ -893,6 +1005,7 @@ export async function update(
 
   // Strip system fields
   const { id: _, createdAt, updatedAt, created_at, updated_at, ...cleanData } = data;
+  await assertReachableThrough(entityName, cleanData, ctx);
 
   // jsonb columns arrive as JSON strings from KeyValueInput — parse them back.
   coerceJsonColumns(entity.table, cleanData);
@@ -1024,8 +1137,8 @@ export async function query(
 
   // Filters
   if (filters) {
-    for (const [key, value] of Object.entries(withReader(filters, ctx))) {
-      if (value && value !== "undefined" && entity.table[key]) {
+    for (const [key, value] of Object.entries(withReader(filters, ctx, entity.table))) {
+      if (value !== undefined && value !== "" && value !== "undefined" && entity.table[key]) {
         conditions.push(eq(entity.table[key], value));
       }
     }
@@ -1207,7 +1320,7 @@ async function computeSimple(
   const start = range ? range.start : windowStart(m.window);
   if (start && dateCol) conds.push(gte(dateCol, start));
   if (range?.end && dateCol) conds.push(lt(dateCol, range.end));
-  for (const [k, v] of Object.entries(withReader(m.filter, ctx))) {
+  for (const [k, v] of Object.entries(withReader(m.filter, ctx, cols))) {
     if (cols[k] !== undefined && (v === null || typeof v !== "object")) { conds.push(eq(cols[k], v as any)); continue; }
     const joined = cols[k] !== undefined ? await joinedCondition(cols[k], v, ctx) : null;
     if (joined) { conds.push(joined); continue; }
@@ -1369,7 +1482,7 @@ export async function resolveSeries(
     const orderCol = cols[orderName];
     if (orderCol === undefined) return [];
     const conds: SQL[] = [...scope];
-    for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
+    for (const [k, v] of Object.entries(withReader(source.filter, ctx, cols))) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
     }
     try {
@@ -1412,7 +1525,7 @@ export async function resolveSeries(
   const labelExpr: any = bucket ? sql`date_trunc(${bucket}, ${groupCol})` : groupCol;
 
   const conds: SQL[] = [...scope];
-  for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
+  for (const [k, v] of Object.entries(withReader(source.filter, ctx, cols))) {
     if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
   }
 
@@ -1599,7 +1712,7 @@ export async function resolveQuery(
                                 max(c);
   });
 
-  for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
+  for (const [k, v] of Object.entries(withReader(source.filter, ctx, cols))) {
     if (cols[k] === undefined || v === undefined) continue;
     if (Array.isArray(v)) { if (v.length) conds.push(inArray(cols[k], v as any[])); }
     else conds.push(eq(cols[k], v as any));
@@ -1822,7 +1935,7 @@ export async function resolveSearch(
       sql`${vectorExpr} @@ ${tsq}`,
       ...await accessConditions(entityName, entity, ctx),
     ];
-    for (const [k, v] of Object.entries(withReader(source.filter, ctx))) {
+    for (const [k, v] of Object.entries(withReader(source.filter, ctx, cols))) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
     }
 

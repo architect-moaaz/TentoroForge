@@ -20,11 +20,13 @@ Design notes:
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
 import time
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -171,6 +173,91 @@ def record_usage(
             f.write(json.dumps(entry) + "\n")
     except Exception:  # noqa: BLE001 — accounting must never break a build
         logger.debug("[build-usage] record failed", exc_info=True)
+
+
+# --------------------------------------------------------------------------- #
+# Calls nobody records
+# --------------------------------------------------------------------------- #
+# A build node hands each reply's usage to `RunUsage.record`, which writes it
+# here. Smith's turns, the page reviewer and the process trials never did: the
+# ledger held the build and none of what came after, so "what does checking an
+# app cost?" had no answer (2026-10-03). Every model client now hands each
+# call's usage to the scope it runs in (`spent`); `RunUsage.record` claims the
+# ones it writes itself (`claim`); when the scope ends, what nobody claimed is
+# written under the scope's application, agent and phase. A call made outside
+# any scope is left to whoever made it, as before — never written twice.
+
+class _Scope:
+    __slots__ = ("output_dir", "project", "agent", "phase", "kind", "spent", "claimed")
+
+    def __init__(self, *, output_dir: str, project: str, agent: str, phase: str, kind: str):
+        self.output_dir, self.project, self.agent = output_dir, project, agent
+        self.phase, self.kind = phase, kind
+        self.spent: list[Any] = []
+        self.claimed: set[int] = set()
+
+
+_SCOPE: contextvars.ContextVar[_Scope | None] = contextvars.ContextVar("forge_usage_scope", default=None)
+
+
+def _project_of(output_dir: str) -> str:
+    if not output_dir:
+        return ""
+    try:
+        from services.smith.spend import _application
+        return _application(output_dir)[0]
+    except Exception:  # noqa: BLE001
+        return Path(output_dir).name
+
+
+@contextmanager
+def usage_scope(*, agent: str, output_dir: str = "", project: str = "",
+                phase: str = "", kind: str = "smith"):
+    """Every model call made inside is written to the ledger when the scope
+    ends, unless a `RunUsage` already wrote it. A scope inside another keeps
+    its own calls, is named under the outer one (`process_trials:smith`) and
+    takes its phase: a Smith turn the build starts is the build's spend."""
+    outer = _SCOPE.get()
+    if outer is not None:
+        agent = f"{outer.agent}:{agent}"
+        phase = phase or outer.phase
+        output_dir = output_dir or outer.output_dir
+        project = project or outer.project
+    scope = _Scope(output_dir=str(output_dir or ""), project=project, agent=agent,
+                   phase=phase or "change", kind=kind)
+    token = _SCOPE.set(scope)
+    try:
+        yield scope
+    finally:
+        _SCOPE.reset(token)
+        _flush(scope)
+
+
+def spent(usage: Any, *, elapsed_s: float = 0.0) -> None:
+    """A model client reporting one call's usage. Never raises."""
+    scope = _SCOPE.get()
+    if scope is not None and usage is not None:
+        scope.spent.append((usage, elapsed_s))
+
+
+def claim(usage: Any) -> None:
+    """`RunUsage.record` wrote this call itself; the scope must not again."""
+    scope = _SCOPE.get()
+    if scope is not None and usage is not None:
+        scope.claimed.add(id(usage))
+
+
+def _flush(scope: _Scope) -> None:
+    project = scope.project or _project_of(scope.output_dir) or "unknown"
+    for usage, elapsed_s in scope.spent:
+        if id(usage) in scope.claimed:
+            continue
+        try:
+            record_usage(project=project, agent=scope.agent, model=getattr(usage, "model", None),
+                         usage=usage.as_ledger_dict(), duration_ms=int(elapsed_s * 1000),
+                         kind=scope.kind, phase=scope.phase)
+        except Exception:  # noqa: BLE001 — accounting never fails the work
+            logger.debug("[build-usage] scope flush failed", exc_info=True)
 
 
 def _entry_cost(e: dict[str, Any]) -> float:

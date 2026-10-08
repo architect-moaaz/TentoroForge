@@ -194,7 +194,11 @@ def test_every_gated_workflow_starts_with_its_prerequisite(tmp_path):
     (defn,) = list((tmp_path / "src/lib/workflows/definitions").glob("*.json"))
     graph = json.loads(defn.read_text())["definition"]
     nodes = {n["id"]: n for n in graph["nodes"]}
-    assert [e["target"] for e in graph["edges"] if e["source"] == "trigger"] == ["prereq_rule_001"]
+    # Signed in first: a guest is asked to sign in, not given the rule's message.
+    assert [e["target"] for e in graph["edges"] if e["source"] == "trigger"] == ["prereq_signed_in"]
+    assert ("prereq_signed_in", "prereq_rule_001") in {(e["source"], e["target"]) for e in graph["edges"]}
+    from services.blueprint.account_model import SIGN_IN_FIRST
+    assert nodes["prereq_signed_in_refused"]["data"]["config"]["message"] == SIGN_IN_FIRST
     assert nodes["prereq_rule_001"]["data"]["config"]["where"] == {"memberId": "$user.id", "status": "approved"}
     refused = nodes["prereq_rule_001_refused"]["data"]["config"]
     assert refused["refused"] is True and refused["message"] == KYC["message"]
@@ -219,9 +223,9 @@ import {{ readFileSync }} from "node:fs";
 const e: any = (mod as any).executeWorkflow ? mod : (mod as any).default;
 const wf = JSON.parse(readFileSync({json.dumps(str(defn))}, "utf8"));
 const out: any[] = [];
-for (const n of [0, 1]) {{
+for (const [n, who] of [[0, {{ id: "member-1", role: "Member" }}], [1, {{ id: "member-1", role: "Member" }}], [1, undefined]] as any[]) {{
   e.registerActionHandler("db_query", async () => ({{ rows: Array(n).fill({{}}), count: n }}));
-  const r = await e.executeWorkflow(wf, {{}}, {{ id: "member-1", role: "Member" }});
+  const r = await e.executeWorkflow(wf, {{}}, who);
   out.push({{ status: r.status, refused: r.refused ?? null, error: r.error ?? null }});
 }}
 console.log(JSON.stringify(out));
@@ -229,9 +233,11 @@ console.log(JSON.stringify(out));
     proc = subprocess.run([str(_ROOT / "node_modules/.bin/tsx"), str(script)], cwd=_ROOT,
                           capture_output=True, text=True, timeout=120)
     assert proc.returncode == 0, proc.stderr[-800:]
-    none, met = json.loads(proc.stdout.strip().splitlines()[-1])
+    none, met, guest = json.loads(proc.stdout.strip().splitlines()[-1])
     assert none == {"status": "failed", "refused": True, "error": KYC["message"]}
     assert met["status"] == "completed"
+    from services.blueprint.account_model import SIGN_IN_FIRST
+    assert guest == {"status": "failed", "refused": True, "error": SIGN_IN_FIRST}
 
 
 def test_an_embedding_on_an_ordinary_field_is_dropped_not_refused(tmp_path):
@@ -398,3 +404,26 @@ def test_auth_exports_everything_the_scaffold_imports_from_it():
 
     assert wanted, "nothing imports @/auth — this guard would pass vacuously"
     assert wanted <= exported, f"imported from @/auth but not exported: {sorted(wanted - exported)}"
+
+
+def test_a_guard_already_in_the_steps_is_not_added_again(tmp_path):
+    """ToroCommerce's Add to Cart carried its projected guard in its own steps
+    (a repair wrote it back); the next projection added it again and no
+    workflow of the app could be written out (forge-v3, 2026-10-07)."""
+    from services.blueprint.projection import project_workflows
+    doc = _doc(businessRules=[KYC])
+    doc["workflows"] = [{"id": "FLOW-004", "name": "Request to Borrow", "trigger": {"kind": "manual"}, "steps": [
+        {"key": "prereq_rule_001", "type": "action",
+         "config": {"actionType": "db_query", "table": "kyc_verifications", "where": {"memberId": "$user.id"}},
+         "next": ["prereq_rule_001_met"]},
+        {"key": "prereq_rule_001_met", "type": "condition", "config": {"expression": "prereq_rule_001.count > 0"},
+         "next": ["save"]},
+        {"key": "save", "type": "action", "entity": "ENTITY-002",
+         "config": {"actionType": "db_insert", "table": "kyc_verifications", "values": {"status": "pending"}}},
+        {"key": "done", "type": "end"}]}]
+    project_workflows(doc, tmp_path)
+    (defn,) = list((tmp_path / "src/lib/workflows/definitions").glob("*.json"))
+    graph = json.loads(defn.read_text())["definition"]
+    ids = [n["id"] for n in graph["nodes"]]
+    assert len(ids) == len(set(ids)), ids
+    assert [e["target"] for e in graph["edges"] if e["source"] == "trigger"] == ["prereq_signed_in"]

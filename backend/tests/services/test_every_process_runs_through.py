@@ -109,7 +109,8 @@ def test_a_failing_process_goes_to_smith_and_is_run_again(tmp_path, monkeypatch)
 
     def smith(project_id, output_dir, message, *, max_steps, unattended):
         asks.append((message, unattended))
-        return {"answer": "Added a status field and the step that sets it."}
+        return {"answer": "Added a status field and the step that sets it.",
+                "edited_paths": [".forge/blueprint/current.json", "app/src/db/schema/order.ts"]}
 
     svc = _Svc(tmp_path, DOC)
     out = pt.prove_processes(svc, str(tmp_path), client=_client([]), bench_factory=_Bench, run_turn=smith)
@@ -272,7 +273,7 @@ def test_creates_then_changes_then_deletes():
 def test_a_later_round_runs_the_proven_creates_again_first_unjudged(tmp_path, monkeypatch):
     runs = _setup(tmp_path, monkeypatch, {"FLOW-001": [OK, REFUSED], "FLOW-005": [REFUSED, OK]})
     out = pt.prove_processes(_Svc(tmp_path, DOC), str(tmp_path), client=_client([]), bench_factory=_Bench,
-                             run_turn=lambda *a, **k: {"answer": ""})
+                             run_turn=lambda *a, **k: {"answer": "", "edited_paths": ["app/x.ts"]})
     assert [r["workflow"] for r in runs] == ["FLOW-001", "FLOW-005", "FLOW-001", "FLOW-005"]
     assert out["passed"] == ["Create Category"] and out["fixed"] == ["Mark Order Fulfilled"] and not out["left"]
 
@@ -295,3 +296,128 @@ def test_a_process_the_writer_left_out_is_asked_for_on_its_own(tmp_path, monkeyp
                        run_turn=lambda *a, **k: {})
     assert calls == [["FLOW-001", "FLOW-005"], ["FLOW-005"]]
     assert {r["workflow"]: r["input"] for r in runs}["FLOW-005"] == {"order": "o-1"}
+
+
+# --- wz7a99ir (2026-10-04): a test file for a file input; "fixed" only when something changed ---
+
+IMAGE_FLOW = {"id": "FLOW-002", "name": "Create Category", "trigger": {"kind": "manual"},
+              "inputs": [{"name": "name", "kind": "field", "type": "string", "required": True},
+                         {"name": "image", "kind": "field", "type": "image", "required": True}]}
+
+
+def test_a_file_or_image_input_gets_a_stored_test_file(tmp_path, monkeypatch):
+    runs = _setup(tmp_path, monkeypatch, {"FLOW-002": [OK]})
+    stored = []
+    monkeypatch.setattr(trials, "stored_file", lambda bench, doc, kind, as_: stored.append((kind, as_)) or "file-1")
+
+    def client(*, system, user, schema):
+        return json.dumps({"runs": [{"workflow": "FLOW-002", "as": "Admin",
+                                     "input": [{"name": "name", "value": '"Vegan Specials"'}]}]})
+    doc = {**DOC, "workflows": [IMAGE_FLOW]}
+    out = pt.prove_processes(_Svc(tmp_path, doc), str(tmp_path), client=client, bench_factory=_Bench,
+                             run_turn=lambda *a, **k: (_ for _ in ()).throw(AssertionError("no repair needed")))
+    assert runs[0]["input"] == {"name": "Vegan Specials", "image": "file-1"}
+    assert stored == [("image", "Admin")] and out["passed"] == ["Create Category"]
+
+
+def test_a_given_file_is_kept_and_other_inputs_are_left_alone():
+    run = {"as": "Admin", "input": {"image": "mine", "name": "x"}}
+    pt.attach_files(None, {}, IMAGE_FLOW, run)
+    assert run["input"] == {"image": "mine", "name": "x"}
+
+
+def test_a_rerun_with_a_better_input_is_passed_not_fixed(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch, {"FLOW-001": [OK] * 3, "FLOW-005": [REFUSED, OK]})
+    out = pt.prove_processes(_Svc(tmp_path, DOC), str(tmp_path), client=_client([]), bench_factory=_Bench,
+                             run_turn=lambda *a, **k: {"answer": "The process is right; ran it with an open order.",
+                                                       "edited_paths": []})
+    assert out["passed"] == ["Create Category", "Mark Order Fulfilled"] and out["fixed"] == []
+
+
+def test_rows_made_by_this_run_are_marked_new():
+    records = {"FoodItem": [{"id": "f-9", "label": "Beef Wellington"}, {"id": "f-1", "label": "Samosa"}]}
+    assert pt._mark_new(records, {"f-1"}) == {"FoodItem": [{"id": "f-9", "label": "Beef Wellington", "new": True},
+                                                           {"id": "f-1", "label": "Samosa"}]}
+    assert "marked `new`" in pt.INPUTS_SYSTEM and "the run attaches a test file" in pt.INPUTS_SYSTEM
+
+
+def test_a_change_with_no_file_after_a_failing_try_ends_the_turn_cleanly():
+    """ihf6pjga, 2026-10-05 18:52: a workflow refused the admin (403), Smith
+    rewrote the permissions — a change with no file — read the rows, and said
+    `done`. The check before `done` counted the rewrite as a change, then asked
+    for the latest change WITH a file, found none, and the turn died on
+    `max()` of nothing: "Something went wrong on my side (ValueError)"."""
+    from services.smith.loop import Observation
+    from services.smith4.turn import UNPROVEN, _before_done
+
+    tried = Observation(tool="try_workflow", args={"workflow": "Create Product"}, status="read",
+                        said="Create Product: HTTP 403 — This action is not available to your role")
+    rewrote = Observation(tool="write_section", args={"section": "permissions"}, status="resolved",
+                          said="permissions rewritten")
+    read = Observation(tool="read_rows", args={"entity": "Product"}, status="read", said="0 rows")
+
+    said = _before_done([tried, rewrote, read], landed=[])
+    assert said.startswith(UNPROVEN), "the change is a guess until the refused action is tried again"
+
+    again = Observation(tool="try_workflow", args={"workflow": "Create Product"}, status="read",
+                        said="Create Product: HTTP 200 — created")
+    assert _before_done([tried, rewrote, read, again], landed=[]) == ""
+
+
+# --- a refusal is the app's own rule more often than a fault (ToroCommerce, 2026-10-07) ---
+
+TURNED_DOWN = ('Mark Order Fulfilled (FLOW-005) run as Admin: HTTP 422\nanswer: {"status": "failed", '
+               '"refused": true, "error": "That order is already fulfilled."}')
+
+
+def _judging_client(seen, verdict):
+    runs = _client(seen)
+
+    def call(*, system, user, schema):
+        if schema is pt.JUDGE_SCHEMA:
+            seen.append(("judge", json.loads(user)))
+            return json.dumps({"verdicts": [{"workflow": "FLOW-005", "refusal": verdict, "why": "x"}]})
+        return runs(system=system, user=user, schema=schema)
+    return call
+
+
+def test_a_rightly_refused_run_is_tried_again_with_a_new_input_not_sent_to_smith(tmp_path, monkeypatch):
+    runs = _setup(tmp_path, monkeypatch, {"FLOW-001": [OK] * 3, "FLOW-005": [TURNED_DOWN, OK]})
+    seen, asks = [], []
+    out = pt.prove_processes(_Svc(tmp_path, DOC), str(tmp_path), client=_judging_client(seen, "right"),
+                             bench_factory=_Bench, run_turn=lambda *a, **k: asks.append(a) or {})
+    assert asks == [], "no Smith turn for the app keeping its own rule"
+    assert out["passed"] == ["Create Category", "Mark Order Fulfilled"] and not out["left"]
+    judged = [s for s in seen if isinstance(s, tuple)]
+    assert judged and judged[0][1]["runs"][0]["refused"] == "That order is already fulfilled."
+    replanned = [s for s in seen if isinstance(s, dict) and any(p.get("lastRun") for p in s["processes"])]
+    assert "rightly refused" in replanned[0]["processes"][0]["lastRun"], "the new input is chosen knowing why"
+    assert [r["workflow"] for r in runs].count("FLOW-005") == 2
+
+
+def test_a_wrong_refusal_is_a_fault_and_goes_to_smith(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch, {"FLOW-001": [OK] * 3, "FLOW-005": [TURNED_DOWN, OK]})
+    asks = []
+    out = pt.prove_processes(_Svc(tmp_path, DOC), str(tmp_path), client=_judging_client([], "wrong"),
+                             bench_factory=_Bench,
+                             run_turn=lambda pid, od, message, **k: asks.append(message) or {"edited_paths": ["x"]})
+    assert len(asks) == 1 and "already fulfilled" in asks[0]
+    assert out["fixed"] == ["Mark Order Fulfilled"]
+
+
+def test_refused_again_with_an_input_meant_to_pass_goes_to_smith_saying_so(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch, {"FLOW-001": [OK] * 3, "FLOW-005": [TURNED_DOWN, TURNED_DOWN, OK]})
+    asks = []
+    pt.prove_processes(_Svc(tmp_path, DOC), str(tmp_path), client=_judging_client([], "right"),
+                       bench_factory=_Bench,
+                       run_turn=lambda pid, od, message, **k: asks.append(message) or {"edited_paths": ["x"]})
+    assert len(asks) == 1 and "Refused twice" in asks[0] and "the data or a rule is what is wrong" in asks[0]
+
+
+def test_a_process_is_run_as_the_people_it_is_for():
+    doc = {**DOC, "roles": [{"id": "ROLE-001", "name": "Admin"}, {"id": "ROLE-002", "name": "Customer"}],
+           "pages": [{"id": "PAGE-002", "route": "/cart", "users": ["ROLE-002"]}],
+           "workflows": [{**FLOWS[0], "launchedFrom": ["PAGE-002"]}]}
+    brief = json.loads(pt._brief(doc, doc["workflows"], {}))
+    assert [s["route"] for s in brief["processes"][0]["startedFrom"]] == ["/cart"]
+    assert "never as a stand-in for a customer" in pt.INPUTS_SYSTEM

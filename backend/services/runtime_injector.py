@@ -1446,6 +1446,25 @@ export async function POST(
     // The ROLE, which is the owner's own vocabulary — never the id or the
     // email beside it, which are a person.
     actingRole = user?.role ? String(user.role) : undefined;
+    // A SIGNED-OUT VISITOR IS SOMEBODY TOO. Their guest token (the
+    // `forge-guest` cookie) is what a record they make before signing in — a
+    // guest's cart — is theirs by; the engine stamps it and reads by it. Made
+    // here, on the first thing they do, and kept by the browser; a signed-in
+    // person still carries theirs, so the cart they filled as a guest stays
+    // theirs (TCommerce, 2026-10-06).
+    const _cookieGuest = (request.headers.get("cookie") ?? "").match(/(?:^|;\\s*)forge-guest=([0-9a-f-]{36})/)?.[1];
+    const _guest = _cookieGuest ?? (user?.id ? undefined : globalThis.crypto.randomUUID());
+    const _mintedGuest = Boolean(_guest && !_cookieGuest);
+    if (_guest) (input as any).__guest = _guest;
+    const _keepGuest = (res: NextResponse): NextResponse => {
+      if (_mintedGuest && _guest) {
+        res.cookies.set("forge-guest", _guest, {
+          httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 90,
+          secure: new URL(request.url).protocol === "https:" || Boolean(process.env.VERCEL),
+        });
+      }
+      return res;
+    };
     // A LAUNCH IS GATED BY THE ROLES ITS PAGES DECLARE. The Blueprint names
     // the pages a workflow launches from and the roles those pages serve;
     // Reception could post a refund through the API because nothing here
@@ -1561,10 +1580,10 @@ export async function POST(
           role: actingRole,
         });
       });
-      return NextResponse.json(
+      return _keepGuest(NextResponse.json(
         { status: "queued", workflowId: id, mode: "detached" },
         { status: 202 },
-      );
+      ));
     }
 
     // triggerWorkflow persists a pending task itself if the workflow pauses.
@@ -1628,7 +1647,7 @@ export async function POST(
     const _body = result && typeof result === "object"
       ? { ..._rest, ...(!(result as any).id && _first ? { id: _first } : {}), records: _records, log: _steps }
       : result;
-    return NextResponse.json(_body, _wfFailed ? { status: 422 } : undefined);
+    return _keepGuest(NextResponse.json(_body, _wfFailed ? { status: 422 } : undefined));
   } catch (error) {
     reportFromError(error, {
       kind: "api_route",

@@ -179,3 +179,63 @@ def test_field_changes_in_words():
     assert mt.what_changed(before, after) == [
         "Order.note was removed", "Order.status was added",
         "Order.total is no longer required", "Order.total changed from integer to numeric"]
+
+
+# --- TCommerce (ihf6pjga, forge-v3, 2026-10-05) ----------------------------------------------
+# The publish handed over `<output>/app`; the trial appended `app` again, drizzle-kit died on
+# FileNotFoundError in a folder that did not exist, that was read as "the live data cannot take
+# this change", Smith (pointed at the wrong folder) found "no application defined here", and its
+# reading was printed twice in the refusal. Every publish was refused.
+
+def _project(tmp_path):
+    (tmp_path / ".forge").mkdir()
+    (tmp_path / "app").mkdir()
+    return tmp_path
+
+
+def test_the_project_and_app_folders_are_found_from_either():
+    from pathlib import Path as _P
+    assert mt.project_dirs("/out/x") == (_P("/out/x"), _P("/out/x/app"))
+
+
+def test_the_app_folder_is_not_doubled(tmp_path):
+    root = _project(tmp_path)
+    assert mt.project_dirs(root / "app") == (root, root / "app")
+
+
+@pytest.mark.asyncio
+async def test_given_the_app_folder_the_chain_runs_there_and_smith_reads_the_project(tmp_path):
+    root = _project(tmp_path)
+    chain = _chain(REFUSED, TAKEN)
+    seen = []
+
+    def smith(project_id, output_dir, message, **k):
+        seen.append(output_dir)
+        return {"answer": "kept every record", "edited_paths": ["x"]}
+    out = await mt.ensure_publishable(_Neon(), "np_1", root / "app", chain=chain, run_turn=smith)
+    assert [s[0] for s in chain.seen] == [str(root / "app")] * 2
+    assert seen == [str(root)] and out["ok"]
+
+
+@pytest.mark.asyncio
+async def test_a_chain_that_could_not_run_does_not_stop_the_publish_or_reach_smith(tmp_path):
+    broken = {"applied": False, "reason": "`drizzle-kit push --force` did not finish (FileNotFoundError)",
+              "lines": [], "error": True}
+    neon = _Neon()
+    out = await mt.ensure_publishable(neon, "np_1", tmp_path, chain=_chain(broken),
+                                      run_turn=lambda *a, **k: (_ for _ in ()).throw(AssertionError("not Smith's")))
+    assert out["ok"] and not out["ran"] and "could not run" in out["reason"]
+    assert neon.deleted, "the copy is still removed"
+
+
+@pytest.mark.asyncio
+async def test_the_refusal_says_the_chains_reason_and_smiths_reading_once_each(tmp_path):
+    out = await mt.ensure_publishable(_Neon(), "np_1", tmp_path, chain=_chain(REFUSED),
+                                      run_turn=lambda *a, **k: {"answer": "Two records hold 'twelve'.", "edited_paths": []})
+    assert out["reason"] == REFUSED["reason"] and out["settle"] == "Two records hold 'twelve'."
+
+
+def test_run_chain_says_when_it_could_not_run(tmp_path):
+    from services.blueprint.schema_push import run_chain
+    out = run_chain(tmp_path / "no-such-folder", "postgres://x")
+    assert out["error"] and not out["applied"] and "did not finish" in out["reason"]

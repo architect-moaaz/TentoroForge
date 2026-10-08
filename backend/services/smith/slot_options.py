@@ -38,6 +38,12 @@ ASKS: dict[str, str] = {
     "element_label": "Which control? Copy the words printed on it.",
     "widgets": "What should go on it?",
     "screen": "Which screen?",
+    "section": "Which part of the screen?",
+    "new_section": "What should the new part show — which records, and as a list, a tab, a panel or a dialog?",
+    "set": "What should be different about it?",
+    "order": "In what order?",
+    "to_route": "Which screen should it go to?",
+    "from_route": "Which screen should be folded in?",
     "current_behavior": "What does it do now?",
     "desired_behavior": "What should it do instead?",
     "figma_url": "Paste the Figma link.",
@@ -83,8 +89,15 @@ def options_for(slot: str, doc: dict, understanding: dict | None = None) -> list
                 if isinstance(f, dict) and f.get("name")
                 and str(f["name"]).lower() not in managed and not f.get("primaryKey")][:MAX_OPTIONS]
 
-    if slot in ("route", "target_file", "screen"):
+    if slot in ("route", "target_file", "screen", "to_route", "from_route"):
         return [str(p.get("route")) for p in _live(doc.get("pages")) if p.get("route")][:MAX_OPTIONS]
+
+    if slot == "section":
+        # The parts of the screen they named — its tabs, panels and lists.
+        from services.smith.screen_change import find_page
+        page = find_page(doc, str(said.get("route") or said.get("target_file") or ""))
+        return [str(s.get("label") or s.get("key")) for s in (page or {}).get("sections") or []
+                if isinstance(s, dict) and s.get("key")][:MAX_OPTIONS]
 
     if slot == "workflow":
         return [str(w.get("name")) for w in _live(doc.get("workflows")) if w.get("name")][:MAX_OPTIONS]

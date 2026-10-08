@@ -23,9 +23,10 @@ def test_a_step_that_splits_keeps_the_rest_of_the_plan(tmp_path):
 
 
 def test_the_session_splices_rather_than_replaces_and_keeps_the_plan_in_view():
-    from services.smith4 import handle as handle_mod, turn as turn_mod
+    import importlib
+    from services.smith4 import turn as turn_mod
     src = inspect.getsource(turn_mod)
-    handle_src = inspect.getsource(handle_mod)
+    handle_src = inspect.getsource(importlib.import_module("services.smith4.handle"))
     assert "plan_mod.remember_all(ctx.out, planned + over + rest)" in src
     assert "plan_mod.remaining_note(plan_mod.peek(output_dir))" in handle_src
 

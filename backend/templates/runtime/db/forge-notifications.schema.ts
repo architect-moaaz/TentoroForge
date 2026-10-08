@@ -14,6 +14,8 @@ export const forgeNotifications = pgTable("forge_notifications", {
   role: text("role"),
   type: text("type").notNull().default("info"),
   entityId: text("entity_id"),
+  /** Where the record it is about lives — its screen's panel or its page. */
+  link: text("link"),
   read: boolean("read").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });

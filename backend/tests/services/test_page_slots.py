@@ -13,18 +13,18 @@ DOC = {
 }
 
 
-def test_a_feature_is_one_entity_and_all_of_its_pages():
-    """The unit of decision is the feature, so half-built cannot be chosen."""
+def test_a_record_is_asked_where_it_goes_not_given_pages():
+    """Screens are the pages; a record is placed as a section of one."""
     features = {f["feature"]: f for f in page_slots(DOC)}
     assert set(features) == {"home", "ENTITY-001", "ENTITY-002"}
-    assert {p["slot"] for p in features["ENTITY-001"]["pages"]} == {
-        "ENTITY-001.list", "ENTITY-001.detail", "ENTITY-001.create"}
+    assert [p["slot"] for p in features["ENTITY-001"]["pages"]] == ["ENTITY-001.place"]
+    assert "a section of one of the screens above" in features["ENTITY-001"]["pages"][0]["prompt"]
 
 
 def test_completeness_is_asked_for_over_coverage():
     text = page_slot_prompt(DOC)
-    assert "fill it completely or decline it completely" in text
-    assert "few features a user can complete over many they cannot" in text
+    assert "serves its person fully beats three that each serve them partly" in text
+    assert "a job a person cannot finish" in text
 
 
 def test_the_users_own_words_travel_with_the_question():
@@ -59,9 +59,9 @@ def test_there_is_no_slot_for_a_filtered_list():
 
 def test_the_prompt_carries_features_and_the_blueprint():
     _, user = build_prompt(DOC, "page_contracts")
-    assert "feature by feature" in user
-    assert "ENTITY-001.list" in user
-    assert "join table" in user
+    assert "people first, then the records" in user
+    assert "ENTITY-001.place" in user
+    assert "a line item lives on its order" in user
 
 
 # --- §32: a relation is a fact, not an inference ----------------------------
@@ -100,7 +100,7 @@ def test_an_optional_reference_does_not_make_a_feature_a_child():
 def test_the_prompt_tells_the_agent_what_reached_through_means():
     text = page_slot_prompt(REL_DOC)
     assert "reachedThrough" in text
-    assert "declining" in text
+    assert "a section of that one's panel" in text
 
 
 def test_relations_are_named_not_ided():
@@ -108,3 +108,50 @@ def test_relations_are_named_not_ided():
     has to do itself."""
     by = {f["feature"]: f for f in page_slots(REL_DOC) if f.get("entity")}
     assert by["E2"]["reachedThrough"] == ["Job"]
+
+
+# --- Mozato (forge-v3, 2026-10-06): 106 pages, 21 of them a create form ------
+# beside a list of the same record, 46 for the back office, and no page where a
+# customer could open a restaurant. Adding moved onto the list, and the people
+# the product is for are asked about before the tables are.
+
+PERSONAS = {**DOC, "product": {"personas": [
+    {"name": "Customer", "description": "Drops a bike off and collects it",
+     "goals": ["Know when the bike is ready"]},
+    {"name": "Mechanic", "goals": ["Work through today's repairs"]},
+]}}
+
+
+def test_a_screen_holds_its_records_as_sections():
+    """Mozato planned 106 routes for jobs a React screen does in one."""
+    from services.blueprint.page_planner import SECTION_PLACEMENTS, SECTION_SHOWS
+    text = page_slot_prompt(DOC)
+    for word in ("`sections`", "`placement`", "`opensFrom`", "`param`", "`addsHere: true`", "`actions`"):
+        assert word in text, word
+    assert all(v in text for v in SECTION_SHOWS + SECTION_PLACEMENTS)
+    assert "a record opened from a list is a panel with a `param`, not a route" in text
+    assert "orders arrive and nothing accepts them is not finished" in text
+    assert "A PAGE FOR ADDING is the exception" in text
+
+
+def test_the_people_are_asked_about_before_the_tables():
+    slots = page_slots(PERSONAS)
+    order = [f["feature"] for f in slots]
+    assert order[:3] == ["home", "journey:Customer", "journey:Mechanic"]
+    customer = slots[1]
+    assert customer["goals"] == ["Know when the bike is ready"] and customer["entity"] is None
+    assert "see a record differently" in customer["pages"][0]["prompt"]
+    assert "screens a Customer works in" in customer["pages"][0]["prompt"]
+    assert "PEOPLE FIRST" in page_slot_prompt(PERSONAS)
+
+
+def test_no_personas_no_journeys():
+    assert not [f for f in page_slots(DOC) if f["feature"].startswith("journey:")]
+
+
+def test_the_page_set_may_say_where_records_are_added():
+    """Declared by the page-set call, kept through the contract author."""
+    from services.blueprint.executors import _DECLARED_PAGE_FIELDS, _PINNED_PAGE_FIELDS, NODE_TASKS
+    for field in ("addsHere", "sections"):
+        assert field in _DECLARED_PAGE_FIELDS and field in _PINNED_PAGE_FIELDS, field
+        assert field in NODE_TASKS["page_contracts"], field

@@ -98,6 +98,10 @@ services:
       # Where a PUBLISHED app reports its failures to Smith (services/app_reporting):
       # this platform's public address, whose /api/* reaches the backend.
       FORGE_PUBLIC_URL: ${FORGE_PUBLIC_URL:-}
+      # The usage ledger lives beside the projects, on the volume: left at its
+      # default it sat inside the container and every cutover erased it — the
+      # ledger on forge-v3 stopped at 2026-09-23 (2026-10-03).
+      FORGE_USAGE_LOG: ${FORGE_USAGE_LOG:-/output/_usage/build-usage.jsonl}
       # --- feature flags (mirror local dev defaults) ---
       FORGE_SMITH_ARCHITECT: ${FORGE_SMITH_ARCHITECT:-0}
       FORGE_SELF_HEAL: ${FORGE_SELF_HEAL:-1}

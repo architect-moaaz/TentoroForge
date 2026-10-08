@@ -474,6 +474,92 @@
             "default": "page",
             "description": "page = its own route; drawer/modal = opened over the caller"
           },
+          "addsHere": {
+            "type": "boolean",
+            "description": "Records of this page's primary entity are added on this page (a panel over the list, or this workspace opening empty) instead of on a page of their own"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "entity": {
+                  "type": "string",
+                  "pattern": "^ENTITY-\\d{3,}$",
+                  "description": "Stable ENTITY identifier (§12)"
+                },
+                "shows": {
+                  "type": "string",
+                  "enum": [
+                    "list",
+                    "board",
+                    "calendar",
+                    "map",
+                    "record",
+                    "summary",
+                    "form"
+                  ],
+                  "default": "list"
+                },
+                "placement": {
+                  "type": "string",
+                  "enum": [
+                    "main",
+                    "tab",
+                    "panel",
+                    "dialog"
+                  ],
+                  "default": "main"
+                },
+                "opensFrom": {
+                  "type": "string"
+                },
+                "param": {
+                  "type": "string"
+                },
+                "addsHere": {
+                  "type": "boolean"
+                },
+                "live": {
+                  "type": "boolean"
+                },
+                "menuEntry": {
+                  "type": "string"
+                },
+                "actions": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": []
+                },
+                "roles": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/properties/roles/items/properties/id"
+                  },
+                  "default": []
+                }
+              },
+              "required": [
+                "key",
+                "label"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "menuEntry": {
+            "type": "string"
+          },
           "views": {
             "type": "array",
             "items": {
@@ -555,8 +641,7 @@
                       ]
                     },
                     "entity": {
-                      "type": "string",
-                      "pattern": "^ENTITY-\\d{3,}$",
+                      "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
                       "description": "Stable ENTITY identifier (§12)"
                     },
                     "field": {
@@ -597,7 +682,7 @@
                           "type": "string"
                         },
                         "entity": {
-                          "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                          "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                         },
                         "field": {
                           "type": "string"
@@ -657,13 +742,13 @@
             "type": "object",
             "properties": {
               "primaryEntity": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
                 "description": "Stable ENTITY identifier (§12)"
               },
               "supportingEntities": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                 },
                 "default": []
               }
@@ -698,6 +783,12 @@
               "populated",
               "error"
             ]
+          },
+          "stateNotes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "responsive": {
             "type": "object",
@@ -809,6 +900,9 @@
                 "type": "string"
               },
               "view": {
+                "type": "string"
+              },
+              "section": {
                 "type": "string"
               },
               "tab": {
@@ -941,7 +1035,7 @@
                     "const": "list"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                   },
                   "fields": {
                     "type": "array",
@@ -977,7 +1071,7 @@
                     "const": "single"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                   },
                   "filter": {
                     "type": "object",
@@ -999,7 +1093,7 @@
                     "const": "aggregate"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                   },
                   "aggregation": {
                     "type": "string",
@@ -1036,7 +1130,7 @@
                     "const": "series"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                   },
                   "aggregation": {
                     "$ref": "#/properties/widgets/items/properties/dataSource/anyOf/2/properties/aggregation"
@@ -1069,7 +1163,7 @@
                     "const": "query"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
                   },
                   "measures": {
                     "type": "array",
@@ -1292,7 +1386,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "name": {
                 "type": "string"
@@ -1338,7 +1432,7 @@
                       "default": false
                     },
                     "references": {
-                      "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+                      "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
                       "description": "Stable ENTITY identifier (§12)"
                     },
                     "min": {
@@ -1417,10 +1511,10 @@
             "type": "object",
             "properties": {
               "from": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "to": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "kind": {
                 "type": "string",
@@ -1461,7 +1555,7 @@
             "type": "object",
             "properties": {
               "entity": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "kind": {
                 "type": "string",
@@ -1498,7 +1592,7 @@
                 "type": "string"
               },
               "entity": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "table": {
                 "type": "string"
@@ -1637,7 +1731,7 @@
                   ]
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "next": {
@@ -1705,7 +1799,7 @@
                   ]
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "type": {
@@ -1799,7 +1893,7 @@
             "type": "object",
             "properties": {
               "entity": {
-                "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "account": {
                 "type": "string"
@@ -1830,7 +1924,7 @@
             "description": "Stable PAGE identifier (§12)"
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+            "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           },
           "when": {
@@ -1987,7 +2081,7 @@
             "default": ""
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+            "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           },
           "permission": {
@@ -2123,7 +2217,7 @@
                   },
                   "column": {
                     "type": "string",
-                    "description": "Column on that entity holding the actor's value, e.g. ownerId, workspaceId or createdByUserId."
+                    "description": "Column on that entity holding the actor's value, e.g. ownerId, workspaceId or createdByUserId — or, with `through`, the reference to the record that does (childId). It must be a field the entity has."
                   },
                   "kind": {
                     "type": "string",
@@ -2154,6 +2248,14 @@
                   "actorColumn": {
                     "type": "string",
                     "description": "For scope \"workspace\": the column on the users table whose value is the actor's workspace — homePropertyId, organisationId, tenantId. The session carries that column and the engine compares `column` to it. Omit for scope \"user\", where the actor's id is the value."
+                  },
+                  "through": {
+                    "type": "string",
+                    "description": "When the row belongs to the actor through another record: the entity `column` references (an Appointment's childId -> \"Child\"). The row is reachable when that record is reachable under its own scope rule, which it must have. Omit when `column` holds the actor's value itself."
+                  },
+                  "guestColumn": {
+                    "type": "string",
+                    "description": "For records a visitor may make before signing in (a guest's cart): the column of this entity holding the visitor's guest token. A signed-out visitor reaches the rows carrying their own token, the platform fills it on create, and the same person keeps reaching them after signing in. Omit for records only signed-in people make."
                   },
                   "note": {
                     "type": "string",
@@ -3120,6 +3222,13 @@
             "type": "string",
             "minLength": 1
           },
+          "parts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {}
+          },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
           },
@@ -3633,6 +3742,39 @@
             },
             "additionalProperties": false
           }
+        },
+        "check": {
+          "type": "object",
+          "properties": {
+            "pages": {
+              "type": "number"
+            },
+            "working": {
+              "type": "number"
+            },
+            "fixed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "failing": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "version": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "pages",
+            "working"
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,
@@ -3772,7 +3914,7 @@
             "default": []
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/content/items/properties/source/properties/entity",
+            "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           }
         },

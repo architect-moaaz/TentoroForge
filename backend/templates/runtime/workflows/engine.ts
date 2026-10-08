@@ -262,7 +262,18 @@ export async function executeWorkflow(
  * Resolve input parameters for a node from process variables.
  */
 /** `{{path}}` inside a config string, read from ctx.variables. */
-function interpolateValue(value: unknown, variables: Record<string, unknown>): unknown {
+/**
+ * `{{a ?? b}}`: the first side that holds something. Each side is a path or a
+ * literal ("text", 'text', a number, true, false, null). The workflow module's
+ * `_resolveRef` has read fallbacks since they were taught to the authors; this
+ * copy, which `set_variable` uses, read `quantity ?? 1` as ONE variable name,
+ * found nothing and stored null — so ToroCommerce's Add to Cart compared null
+ * with the stock and refused every shopper "not enough stock" (forge-v3,
+ * 2026-10-07). Empty text counts as nothing, as it does there.
+ */
+const _LITERAL = /^(?:"([^"]*)"|'([^']*)'|(-?\d+(?:\.\d+)?)|(true|false|null))$/;
+
+export function interpolateValue(value: unknown, variables: Record<string, unknown>): unknown {
   if (typeof value !== "string" || !value.includes("{{")) return value;
   // `a.b[0].c`: dotted, with a bracketed index reaching into a query's rows.
   const segments = (path: string): (string | number)[] =>
@@ -279,13 +290,30 @@ function interpolateValue(value: unknown, variables: Record<string, unknown>): u
       if (p === "id" && (typeof cur === "string" || typeof cur === "number")) return cur;
       return cur[p as any];
     }, variables);
+  const term = (t: string): unknown => {
+    const m = _LITERAL.exec(t.trim());
+    if (!m) return read(t);
+    if (m[1] !== undefined) return m[1];
+    if (m[2] !== undefined) return m[2];
+    if (m[3] !== undefined) return Number(m[3]);
+    return m[4] === "true" ? true : m[4] === "false" ? false : null;
+  };
+  const evaluate = (expr: string): unknown => {
+    if (!expr.includes("??")) return read(expr);
+    const sides = expr.split("??");
+    for (const side of sides) {
+      const v = term(side);
+      if (v !== undefined && v !== null && v !== "") return v;
+    }
+    return null;
+  };
   const whole = value.match(/^\s*\{\{\s*([^{}]+?)\s*\}\}\s*$/);
   if (whole) {
-    const v = read(whole[1]);
+    const v = evaluate(whole[1]);
     return v === undefined ? null : v;
   }
   return value.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_m, p) => {
-    const v = read(p);
+    const v = evaluate(p);
     return v === null || v === undefined ? "" : String(v);
   });
 }
@@ -1339,6 +1367,12 @@ async function handleAction(
     (ctx as unknown as { workflowId?: string }).workflowId ||
     (ctx as unknown as { workflow?: { id?: string } }).workflow?.id ||
     "";
+  // A HANDLER THAT ANSWERS { error } FAILED TOO. executeNode fails the run
+  // on it, but the row said "completed" with the error tucked in its output:
+  // RK_Test's insert of patientId "001" read as a success in the log Smith
+  // and the owner look at (2026-09-28).
+  const answered = !runError && result && typeof result === "object"
+    ? (result as { error?: unknown }).error : undefined;
   void writeExecutionLog({
     runId: String(runId),
     workflowId: String(workflowId),
@@ -1348,8 +1382,8 @@ async function handleAction(
     stepIndex: Math.max(0, ctx.log.length - 1),
     inputs: resolved,
     outputs: runError ? null : (result as any),
-    status: runError ? "failed" : "completed",
-    error: runError?.message,
+    status: runError || answered ? "failed" : "completed",
+    error: runError?.message ?? (answered ? String(answered) : undefined),
     durationMs,
   });
 

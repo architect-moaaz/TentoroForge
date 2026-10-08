@@ -169,6 +169,16 @@ def drizzle_column(field: dict) -> tuple[str, str]:
     if field.get("defaultNow") or derived_now:
         line += ".defaultNow()"
     default = field.get("default")
+    if default is None and builder == "boolean" and field.get("required"):
+        # A REQUIRED YES OR NO THAT SAYS NO DEFAULT TAKES ITS EXAMPLES' OWN.
+        # Left to the seeder it was `false`, and ToroCommerce's demo customer —
+        # and every account made without naming it — was created deactivated:
+        # no one could shop (forge-v3, 2026-10-07). Most examples say what a
+        # new record is.
+        said = [str(x).strip().lower() for x in field.get("examples") or [] if str(x).strip()]
+        yes = sum(1 for x in said if x in ("true", "yes", "1", "on", "y"))
+        if said:
+            default = yes * 2 > len(said)
     if default is not None:
         # A platform column's default is part of its contract, not decoration.
         # Dropping `isActive.default(true)` made every signup write NULL, and
@@ -1019,34 +1029,14 @@ def mobile_tabs(doc: dict, groups: list[dict]) -> list[dict]:
     return out if len(out) >= 2 else []
 
 
-def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
-    """Write ``src/schemas/shell.json`` from ``navigation.tree``.
 
-    THE SHELL READS ONE FILE, AND NOTHING WROTE IT. The scaffold's layout builds
-    its rail from `shell.json` — a `SideNav` node whose `props.groups` carry
-    grouped destinations — and only falls back to a flat menu from nav-flow's
-    page list when the file is absent. Every Blueprint application was absent
-    it, so every rail was the fallback: one flat list of page titles, whatever
-    `navigation.tree` said. When the tree began carrying a connected design's
-    own groups (Overview, Cases, Approvals…), they had nowhere to go.
-
-    Written only when the tree has grouped nodes: a flat tree is exactly what
-    the fallback already renders, and writing it again would be a second
-    representation of one fact. Destinations resolve `page` ids to routes
-    through the page list, so a rename cannot break the rail; a drawn
-    destination with no page is kept, route-less, so its absence is visible
-    in the rail rather than silent (§49).
-    """
-    nav = doc.get("navigation") or {}
-    tree = [n for n in (nav.get("tree") or []) if isinstance(n, dict)]
-    # A FLAT RAIL IS STILL A RAIL. This returned without writing when no node
-    # had children, so a one-screen application had no shell file at all and
-    # the root page, which reads it, failed to compile.
-    if not tree:
-        return {"files": [], "groups": 0, "reason": "no navigation"}
-
-    routes = {str(p.get("id")): str(p.get("route") or "")
-              for p in (doc.get("pages") or []) if p.get("id")}
+def menu_scopes(doc: dict, nav: dict | None = None) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Who each page's menu entry is shown to: `(roles, audience)` by page id —
+    the role names a role-restricted page admits, and the kinds of user a page
+    is for. The shell's rail and Smith's navigation tool both read this: the
+    menu has no visibility of its own, an entry is shown to whoever its page
+    is for. An id in neither map is shown to everyone."""
+    nav = nav if isinstance(nav, dict) else (doc.get("navigation") or {})
     # WHO THE DESTINATION IS FOR — the menu's half of the gate. A
     # role-restricted page names the roles that may open it, and the rail
     # offered it to everyone: a neighbour who had just signed up was shown
@@ -1055,7 +1045,7 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # is its audience, §100), so only that narrows the rail.
     role_names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or []
                   if isinstance(r, dict) and r.get("id")}
-    page_roles = {str(p.get("id")): sorted({role_names.get(str(u), str(u)) for u in p.get("users") or []})
+    page_roles = {str(p.get("id")): restricted_roles(doc, p)
                   for p in (doc.get("pages") or [])
                   if p.get("id") and str(p.get("access") or "") == "role_restricted"}
     # WHO THE DESTINATION IS FOR — the menu's other half. A page's `users` is
@@ -1084,6 +1074,42 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
         if landers:
             page_audience[pid] = landers
 
+    return page_roles, page_audience
+
+def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/schemas/shell.json`` from ``navigation.tree``.
+
+    THE SHELL READS ONE FILE, AND NOTHING WROTE IT. The scaffold's layout builds
+    its rail from `shell.json` — a `SideNav` node whose `props.groups` carry
+    grouped destinations — and only falls back to a flat menu from nav-flow's
+    page list when the file is absent. Every Blueprint application was absent
+    it, so every rail was the fallback: one flat list of page titles, whatever
+    `navigation.tree` said. When the tree began carrying a connected design's
+    own groups (Overview, Cases, Approvals…), they had nowhere to go.
+
+    Written only when the tree has grouped nodes: a flat tree is exactly what
+    the fallback already renders, and writing it again would be a second
+    representation of one fact. Destinations resolve `page` ids to routes
+    through the page list, so a rename cannot break the rail; a drawn
+    destination with no page is kept, route-less, so its absence is visible
+    in the rail rather than silent (§49).
+    """
+    nav = doc.get("navigation") or {}
+    tree = [n for n in (nav.get("tree") or []) if isinstance(n, dict)]
+    # A FLAT RAIL IS STILL A RAIL. This returned without writing when no node
+    # had children, so a one-screen application had no shell file at all and
+    # the root page, which reads it, failed to compile.
+    if not tree:
+        return {"files": [], "groups": 0, "reason": "no navigation"}
+
+    routes = {str(p.get("id")): str(p.get("route") or "")
+              for p in (doc.get("pages") or []) if p.get("id")}
+    page_roles, page_audience = menu_scopes(doc, nav)
+    from services.blueprint.screen_parts import section_audience
+    section_of = {(str(p.get("id")), str(sec.get("key"))): sec
+                  for p in (doc.get("pages") or []) if isinstance(p, dict)
+                  for sec in p.get("sections") or [] if isinstance(sec, dict) and sec.get("key")}
+
     # A DYNAMIC ROUTE IS NOT A RAIL DESTINATION. `/rentals/[id]/return` is
     # reached through a row or an action that fills a concrete id, never from the
     # sidebar: Next's <Link> refuses a literal "[id]" href ("Dynamic href … not
@@ -1105,7 +1131,15 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
         out: dict[str, Any] = {"label": str(node.get("label") or "")}
         if _navigable(route):
             view = str(node.get("view") or "").strip()
-            out["route"] = f"{route}?view={view}" if view else route
+            section = str(node.get("section") or "").strip()
+            # ONLY A TAB IS OPENED BY `?tab=`. A panel needs its record and a
+            # main section is the screen itself: "Order Detail" opened
+            # /orders?tab=detail, a tab that does not exist (ToroCommerce).
+            if section and (section_of.get((page_id, section)) or {}).get("placement", "tab") != "tab":
+                section = ""
+            # A tab of a screen is its own destination: `?tab=<section key>`.
+            out["route"] = (f"{route}?view={view}" if view
+                            else f"{route}?tab={section}" if section else route)
         if node.get("icon"):
             out["icon"] = str(node["icon"])
         if node.get("tab"):
@@ -1114,6 +1148,11 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
             out["roles"] = page_roles[page_id]
         if page_audience.get(page_id):
             out["audience"] = page_audience[page_id]
+        # A TAB ONLY SOME ROLES SEE is offered only to them: the rail would
+        # otherwise open the screen on a tab its viewer is not shown.
+        sec = section_of.get((page_id, str(node.get("section") or "").strip()))
+        if sec is not None and section_audience(doc, sec):
+            out["audience"] = section_audience(doc, sec)
         return out
 
     groups: list[dict[str, Any]] = []
@@ -1125,7 +1164,20 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 group["icon"] = str(node["icon"])
             if node.get("tab"):
                 group["tab"] = True
-            group["items"] = [it for it in (item(k) for k in kids) if it is not None]
+            # THE RAIL HAS TWO LEVELS; A MENU MAY HAVE THREE. "Admin >
+            # Catalogue > Products" drew Catalogue as an entry going nowhere
+            # and Products and Add Product not at all — the administrator
+            # could not reach the catalogue (ToroCommerce, forge-v3,
+            # 2026-10-07). A sub-heading's entries join its group, in order.
+            def flat(nodes: list) -> list[dict]:
+                out: list[dict] = []
+                for k in nodes:
+                    deeper = [c for c in (k.get("children") or []) if isinstance(c, dict)]
+                    if k.get("page") or k.get("route") or not deeper:
+                        out.append(k)
+                    out += flat(deeper)
+                return out
+            group["items"] = [it for it in (item(k) for k in flat(kids)) if it is not None]
             # A group is for whoever its children are for: "Admin" holding two
             # Admin-only screens is an Admin group, and says so, so the whole
             # heading goes rather than emptying out.
@@ -1227,8 +1279,8 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
             # does not list: a role-restricted page added later would
             # otherwise be offered to everyone, which is the fault this file
             # is read to avoid.
-            **({"roles": sorted({str((roles.get(u) or {}).get("name") or u) for u in page.get("users") or []})}
-               if access == "role_restricted" and page.get("users") else {}),
+            **({"roles": restricted_roles(doc, page)}
+               if access == "role_restricted" and restricted_roles(doc, page) else {}),
             "presentation": page.get("presentation") or "page",
             # By route, because that is what a router follows — resolved from
             # the page ids the contract carries, so a rename cannot break it.
@@ -1247,7 +1299,8 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
             entry_by_access[access] = route
         # A page addressed to specific roles is a guarded route. Read from the
         # page contract, never invented — an invented guard locks people out.
-        named = [roles[r].get("name") for r in (page.get("users") or []) if r in roles]
+        named = [roles[r].get("name") for r in (page.get("users") or []) if r in roles] \
+            or (restricted_roles(doc, page) if access == "role_restricted" else [])
         if named:
             guards[route] = {"roles": sorted(named)}
         # Read from the contract, not guessed from the route name. A page
@@ -1296,11 +1349,27 @@ def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
     from services.blueprint.account_model import landing_by_role
     initial_for = landing_by_role(doc)
 
+    # WHERE YOU ARE INSIDE A SCREEN, for the breadcrumb: a screen's tabs
+    # (`?tab=<key>`) and the panels that open one record (`?<param>=<id>`).
+    screens = {
+        str(p.get("route")).split("?")[0]: {
+            "title": str(p.get("name") or p.get("route")),
+            "tabs": {str(sec["key"]): str(sec.get("label") or sec["key"])
+                     for sec in p.get("sections") or []
+                     if isinstance(sec, dict) and sec.get("key") and sec.get("placement") == "tab"},
+            "panels": {str(sec["param"]): str(sec.get("label") or sec["param"])
+                       for sec in p.get("sections") or []
+                       if isinstance(sec, dict) and sec.get("param") and sec.get("placement") == "panel"},
+        }
+        for p in pages if p.get("route") and p.get("sections")
+    }
+
     out = Path(app_root) / "src" / "contracts"
     out.mkdir(parents=True, exist_ok=True)
     (out / "nav-flow.json").write_text(json.dumps({
         "version": "1.0",
         "pages": entries,
+        **({"screens": screens} if screens else {}),
         # Per role, by the role's name. Absent when the Blueprint names none.
         **({"initialFor": initial_for} if initial_for else {}),
         # The guards read this as "reachable without a session".
@@ -2426,10 +2495,15 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
         chain = ["trigger"]
         for s in steps:
             entity = entities.get(s.get("entity")) or {}
+            config = _roles_by_name(_step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
+                                    role_names)
+            # A NOTIFICATION OPENS WHAT IT IS ABOUT: the record's address
+            # (its screen's panel, or its record page) with its id.
+            from services.blueprint.record_links import notification_link
+            if isinstance(config, dict) and (link := notification_link(doc, s, config, wf)):
+                config = {**config, "link": link}
             nodes.append(_wf_node(
-                s["key"], s.get("type"), len(chain),
-                _roles_by_name(_step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
-                               role_names),
+                s["key"], s.get("type"), len(chain), config,
                 s.get("name") or s["key"],
             ))
             chain.append(s["key"])
@@ -2532,8 +2606,16 @@ def launch_roles(doc: dict) -> dict[str, list[str] | None]:
             if access != "role_restricted":
                 roles.add(SIGNED_IN)
                 continue
-            for u in pg.get("users") or []:
-                nm = names.get(u, u)
+            # A RESTRICTED PAGE THAT NAMES NOBODY is gated by the middleware on
+            # a session alone (`role_routes`), so its launches are too. Read
+            # as "no role may", TCommerce's admin pages — restored without
+            # their roles — put [] on every admin process, and the published
+            # app refused the administrator's every save with "This action is
+            # not available to your role" (ihf6pjga, 2026-10-05).
+            named = restricted_roles(doc, pg)
+            if not named:
+                roles.add(SIGNED_IN)
+            for nm in named:
                 roles.add("*" if nm == "Guest" else str(nm))
         out[w["id"]] = sorted(roles)
     return out
@@ -2790,7 +2872,14 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
     for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
         if isinstance(rule, dict) and rule.get("status") != "DEPRECATED" and by_name.get(rule.get("entity")) in entities:
             readers[by_name[rule["entity"]]] |= {str(r) for r in (rule.get("unscopedRoles") or [])}
-    return {slug_of[eid]: {"read": sorted(readers[eid]), "write": sorted(writers[eid])} for eid in entities}
+    # NO PAGE DECLARES IT: NOT LISTED. An entry with two empty lists refused
+    # every role, the administrator's included, while the file and the data
+    # route both say an entity left out is open to any signed-in role. A page
+    # written as code reads through the server and never declares what it
+    # reads, so TCommerce's categories, variants, images, cart and order items
+    # came out empty and the data API answered 403 to the admin (2026-10-05).
+    return {slug_of[eid]: {"read": sorted(readers[eid]), "write": sorted(writers[eid])}
+            for eid in entities if readers[eid] or writers[eid]}
 
 
 def project_entity_access(doc: dict, app_root: str | Path) -> dict[str, Any]:
@@ -2833,7 +2922,7 @@ def category_period(fields: list) -> int:
 
 
 def _seed_value(field: dict, entity_name: str, row: int,
-                tables_by_id: dict | None = None, *, period: int = 0) -> Any:
+                tables_by_id: dict | None = None, *, period: int = 0, person: bool = False) -> Any:
     # A FOREIGN KEY IS A REFERENCE, NOT A LABEL. Written as "Committee Id 1"
     # it failed every child insert as an invalid uuid and the demo database
     # held nothing but the admin. The seeder resolves `ref:<table>[i]` to the
@@ -2846,6 +2935,16 @@ def _seed_value(field: dict, entity_name: str, row: int,
 
     kind = str(field.get("type") or "text").lower()
     name = field.get("name") or "field"
+    if kind in ("bool", "boolean"):
+        # A YES OR NO IS A BOOLEAN, whatever the examples spell. ToroCommerce's
+        # `isActive` came with options "true"/"false"; seeded as those
+        # strings, every customer landed deactivated and no one could shop
+        # (forge-v3, 2026-10-07). The examples' own mix is kept, as booleans.
+        said = [str(x).strip().lower() for x in (field.get("examples") or enum_values(field) or [])
+                if str(x).strip()]
+        if said:
+            return said[(row - 1) % len(said)] in ("true", "yes", "1", "on", "y")
+        return row % 2 == 1
     if kind in LOCATION_TYPES:
         # NO INVENTED PLACE. Demo rows sat a few streets apart in central
         # London for every application, so a reader in Bangalore saw each
@@ -2884,6 +2983,17 @@ def _seed_value(field: dict, entity_name: str, row: int,
         return row * 100
     if kind in ("bool", "boolean"):
         return row % 2 == 1
+    if kind == "time":
+        # A TIME OF DAY IS A TIME. It fell through to the label below, so a
+        # slot started at "Start Time 12" — which the seed's `new Date()` read
+        # as 1 December 2001, the "junk value in place of time" a booking app
+        # showed (RK_Test, 2026-09-28). The field's own examples when they are
+        # times; else the working day, an end an hour after its start.
+        times = [x for x in examples if _TIME_OF_DAY.match(x)]
+        if times:
+            return times[(row - 1) % len(times)]
+        hour = 9 + (row - 1) % 8 + (1 if _ENDS.search(str(name)) else 0)
+        return f"{hour:02d}:{30 if row % 2 == 0 else 0:02d}"
     if kind in ("date", "datetime", "timestamp"):
         # Across the six months before today, so a trend has a line to draw.
         import datetime as _dt
@@ -2894,9 +3004,31 @@ def _seed_value(field: dict, entity_name: str, row: int,
         return f"{year:04d}-{month:02d}-{1 + (row * 5) % 27:02d}T{9 + row % 8:02d}:00:00Z"
     if kind == "email":
         return f"{to_snake(entity_name)}{row}@example.com"
+    # A VALUE BEFORE A LABEL. "Full Name 1", "Phone 1", "Email 1" read as a
+    # broken page to anyone looking at one (RK_Test's patients, 2026-10-03), and
+    # the build's check of what a screen shows says so. A field whose name says
+    # what it holds gets a plausible one; only what nothing recognises keeps
+    # the label.
+    from services.seed_values import column_role, person_name, value_for_role
+    low = str(name).lower()
+    if person and low in ("name", "fullname", "displayname"):
+        return person_name(row - 1)          # the record a login IS: its name is somebody's
+    if "email" in low:
+        return person_name(row - 1).lower().replace(" ", ".") + "@example.com"
+    if any(k in low for k in ("phone", "mobile", "tel")):
+        return f"+1 555 01{row % 100:02d}"
+    shaped = value_for_role(column_role(str(name), entity_name), str(name), entity_name, row - 1)
+    if shaped not in (None, ""):
+        return shaped
     return f"{entity_name} {row}" if name.lower() in ("name", "title") else \
         f"{_humanise_field(name)} {row}"
 
+
+#: "09:00", "9:30", "14:45:00" — a time of day as an example gives it.
+_TIME_OF_DAY = re.compile(r"^\s*\d{1,2}:\d{2}(:\d{2})?\s*$")
+#: A field that closes a span its sibling opens: endTime, closesAt, untilTime.
+_ENDS = re.compile(r"(^|_)(end|ends|close|closes|until|finish)([A-Z_]|$)"
+                   r"|[a-z0-9](End|Ends|Close|Closes|Until|Finish)([A-Z_]|$)")
 
 #: A text field whose values are each a different thing — a name, a title.
 _UNIQUE_TEXT = re.compile(r"(^|_)(name|title|subject|label|headline|email)$|[a-z](Name|Title)$")
@@ -3092,7 +3224,8 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
                 if is_image_field(field) or is_file_field(field) or is_embedding_field(field):
                     continue
                 record[field.get("name")] = (_ref_by_label(field, row, tables_by_id, labels_by_id)
-                                             or _seed_value(field, name, row, tables_by_id, period=period))
+                                             or _seed_value(field, name, row, tables_by_id, period=period,
+                                                            person=bool(entity.get("account"))))
             out_rows.append(years_within_age(record, entity.get("fields") or []))
         seed[table] = out_rows
     return seed
@@ -3440,6 +3573,18 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
         # it. Without one, `scope: "workspace"` compared every row to nothing.
         if item.get("actorColumn"):
             rule["actorColumn"] = str(item["actorColumn"])
+        # A RECORD A VISITOR MAKES BEFORE SIGNING IN: the column holding their
+        # guest token, which the engine reads from the `forge-guest` cookie.
+        if item.get("guestColumn"):
+            rule["guestColumn"] = str(item["guestColumn"])
+        # OWNED THROUGH ANOTHER RECORD: `column` references a record of
+        # `through`, and the row is reachable when that one is. Written as
+        # the target's TABLE, which the engine's registry always resolves —
+        # "Child" does not lead to `children` without an alias file.
+        if item.get("through"):
+            target = by_key.get(_canonical_key(str(item["through"])))
+            rule["through"] = str((target.get("table") or to_snake(target.get("name") or ""))
+                                  if target else item["through"])
         # Key the rule under every spelling of the entity it actually resolves
         # to, so an SSR source asking for `rentPayments` and a route asking for
         # `rent-payments` both find it. An unresolved entity is still emitted
@@ -3489,6 +3634,12 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         "  unscopedRoles: string[];\n"
         "  /** For scope \"workspace\": the users column whose value is the actor's workspace. */\n"
         "  actorColumn?: string;\n"
+        "  /** The entity `column` references when the row is owned through it: reachable\n"
+        "   *  when that record is reachable under its own rule. */\n"
+        "  through?: string;\n"
+        "  /** For records a visitor makes before signing in: the column holding their\n"
+        "   *  guest token — a signed-out visitor reaches the rows carrying theirs. */\n"
+        "  guestColumn?: string;\n"
         "}\n\n"
         "export const OWNERSHIP_RULES: Record<string, OwnershipRule[]> = "
         f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"
@@ -3669,6 +3820,26 @@ def project_public_resources(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": ["src/lib/public-resources.ts", "src/lib/entity-access.ts"], "resources": slugs}
 
 
+def restricted_roles(doc: dict, page: dict) -> list[str]:
+    """The role NAMES that may open a page: the roles it names, or — for a
+    page restricted to roles that names none — the administrator's.
+
+    A RESTRICTED PAGE THAT NAMES NOBODY IS NOT EVERYONE'S. It was gated on a
+    session alone, so when a contract was lost before its roles were written,
+    ToroCommerce's /admin/products and /admin/orders opened, were offered on
+    the menu, and ran their processes for any customer who signed in (forge-v3,
+    2026-10-07). Restricted means restricted: the administrator — who the
+    back office is for, and who ihf6pjga's nameless admin pages were for —
+    may open it, nobody else, until the page names its roles."""
+    names = {r.get("id"): r.get("name") for r in _live(doc.get("roles")) if r.get("id") and r.get("name")}
+    roles = sorted({str(names.get(u, u)) for u in (page.get("users") or []) if u})
+    if roles or str(page.get("access") or "") != "role_restricted":
+        return roles
+    from services.blueprint.account_model import admin_role
+    admin = admin_role(doc)
+    return [admin] if admin else []
+
+
 def role_routes(doc: dict) -> list[dict[str, Any]]:
     """Each role-restricted page's route and the role NAMES that may open it.
 
@@ -3684,9 +3855,9 @@ def role_routes(doc: dict) -> list[dict[str, Any]]:
     for page in _live(doc.get("pages")):
         if (page.get("access") or "authenticated") != "role_restricted":
             continue
-        roles = sorted({names.get(u, u) for u in (page.get("users") or []) if u})
+        roles = restricted_roles(doc, page)
         if not roles:
-            continue   # nothing to compare to; the session gate still applies
+            continue   # no roles at all in the application; the session gate still applies
         out.append({"route": page.get("route") or "/", "roles": roles})
     return sorted(out, key=lambda r: r["route"])
 

@@ -65,6 +65,8 @@ ENGINE_DIRS: dict[str, str] = {
 RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     ("storage.ts", "src/lib/storage.ts"),
     ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts"),
+    # The notification's `link` column (where the record it is about lives).
+    ("db/forge-notifications.schema.ts", "src/db/schema/_forge_notifications.ts"),
     # The engine's reads (labels on a chart's groups) and the seed (a login
     # per role) are the platform's logic, copied verbatim into every app.
     ("data-engine.ts", "src/lib/data-engine.ts"),
@@ -74,6 +76,10 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
 #: Database scripts every app runs, the platform's: prepare, verify, reset.
 DB_SCRIPTS: tuple[str, ...] = ("src/db/prepare-schema.ts", "src/db/verify-schema.ts",
                                "src/db/reset-schema.ts", "src/db/extensions.ts")
+
+#: The workflow routes, the platform's: written by `_generate_workflow_api_route`.
+WORKFLOW_ROUTES: tuple[str, ...] = ("src/app/api/workflows/[id]/execute/route.ts",
+                                    "src/app/api/workflows/event/[event]/route.ts")
 
 #: The engine's typed doorway for pages, the platform's too — it carries the
 #: row type the engine returns, so the two move together.
@@ -150,6 +156,21 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
             continue
         shutil.copyfile(src, dst)
         changed.append(rel)
+    # THE WORKFLOW ROUTES ARE WRITTEN BY CODE, not copied from a file, so the
+    # lists above never carried them: an app kept the route it was built with.
+    # TCommerce's kept one that gave a signed-out shopper no guest token, so the
+    # bag they filled was never theirs to read (2026-10-06). Written out fresh
+    # in a scratch folder; copied in where the app has the route and it moved.
+    import tempfile
+    from services.runtime_injector import _generate_workflow_api_route
+    with tempfile.TemporaryDirectory() as scratch:
+        _generate_workflow_api_route(Path(scratch))
+        for rel in WORKFLOW_ROUTES:
+            src, dst = Path(scratch) / rel, root / rel
+            if not src.is_file() or not dst.is_file() or dst.read_bytes() == src.read_bytes():
+                continue
+            shutil.copyfile(src, dst)
+            changed.append(rel)
     if doc is not None:
         from services.blueprint.ui_engineer import ensure_sdk
         before = _fingerprint(root)
@@ -159,6 +180,13 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
     if changed:
         logger.info("[engine] %s: %d engine file(s) brought up to the platform's: %s",
                     root, len(changed), ", ".join(changed[:8]))
+    # THE APP'S OWN PATCHES OUTLIVE A REFRESH (`file_edit`): put back, or
+    # retired where the platform now has the fix.
+    try:
+        from services.smith.file_edit import reapply
+        reapply(root.parent)
+    except Exception:  # noqa: BLE001 — a patch is never a reason to lose the refresh
+        logger.warning("[engine] patches could not be re-applied for %s", root, exc_info=True)
     return changed
 
 
@@ -297,6 +325,11 @@ def sync(svc: Any, app_root: str) -> dict:
     # THE DATABASE IS PART OF THE APPLICATION TOO. A record added before its
     # table could be created (Test2's Area) is in the schema files and not in
     # the database; bringing the app in step brings that in step as well.
+    try:
+        from services.smith.file_edit import reapply
+        reapply(root.parent)
+    except Exception:  # noqa: BLE001
+        logger.warning("[sync] patches could not be re-applied for %s", root, exc_info=True)
     pushed = push_now(root)
     try:
         (root.parent / ".forge" / STAMP_FILE).write_text(platform_stamp(), "utf-8")

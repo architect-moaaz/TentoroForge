@@ -167,6 +167,13 @@ function isPublicResource(entity: string | undefined): boolean {
 
 // ─── Route Handlers ───
 
+/** The signed-out visitor's guest token (the `forge-guest` cookie the workflow
+ *  route set). Records a guest made are theirs by it — and stay theirs once
+ *  they sign in, so it rides beside the session user too. */
+function guestOf(request: Request): string | undefined {
+  return (request.headers.get("cookie") ?? "").match(/(?:^|;\s*)forge-guest=([0-9a-f-]{36})/)?.[1];
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ path: string[] }> }
@@ -192,7 +199,7 @@ export async function GET(
   // `session` is null on a public resource — the guard above let it through
   // deliberately. The data engine takes an anonymous context; what it must not
   // take is `session.user` off a null.
-  const ctx = { user: (session?.user ?? null) as any, unmaskColumns };
+  const ctx = { user: (session?.user ?? null) as any, unmaskColumns, guest: guestOf(request) };
 
   try {
     // GET /api/data/[entity]/stats
@@ -249,7 +256,7 @@ export async function POST(
   if (deniedFor(entity, session as any, "write")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  const ctx = { user: session.user as any };
+  const ctx = { user: session.user as any, guest: guestOf(request) };
 
   try {
     const body = await request.json();
@@ -295,7 +302,7 @@ export async function PUT(
     return NextResponse.json({ error: { code: "BAD_REQUEST", message: "ID required" } }, { status: 400 });
   }
   if (isAppendOnly(entity)) return ledgerImmutableResponse(entity);
-  const ctx = { user: session.user as any };
+  const ctx = { user: session.user as any, guest: guestOf(request) };
 
   try {
     const body = await request.json();
@@ -326,7 +333,7 @@ export async function DELETE(
     return NextResponse.json({ error: { code: "BAD_REQUEST", message: "ID required" } }, { status: 400 });
   }
   if (isAppendOnly(entity)) return ledgerImmutableResponse(entity);
-  const ctx = { user: session.user as any };
+  const ctx = { user: session.user as any, guest: guestOf(request) };
 
   try {
     const result = await measured({ operation: "delete", entity },
