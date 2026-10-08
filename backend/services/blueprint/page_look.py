@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 LOOKS = 2
 #: Viewports the reviewer is shown — a desk and a phone.
 VIEWPORTS: dict[str, tuple[int, int]] = {"desktop": (1280, 900), "mobile": (390, 844)}
+#: The tallest screenshot sent to the reviewer, in pixels (scale factor 1).
+#: The API refuses an image with a side over 8000: a long admin list's full
+#: page did, and the page's first attempt died on a 400 (wz7a99ir,
+#: 2026-10-04). The top of a page is what a reviewer judges first.
+MAX_SHOT_PX = 7800
 #: Renders at once per process: Chromium is ~150 MB each, and twelve pages
 #: compose in parallel.
 _RENDERS = threading.BoundedSemaphore(4)
@@ -57,7 +62,8 @@ def frame_html(css: str, vendor_js: str, page_js: str) -> str:
             f'<script>{vendor_js}</script><script>{page_js}</script></body></html>')
 
 
-def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir: Path) -> dict[str, Any]:
+def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir: Path,
+           parts: dict[str, str] | None = None) -> dict[str, Any]:
     """Bundle the candidate and screenshot it at every viewport.
 
     ``{"shots": {name: path}, "errors": [...]}`` — the errors are what the
@@ -101,7 +107,7 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
         logger.info("[page_look] tokens not projected for the look (%s)", exc)
     project = Project(root=app_root.parent, app_root=app_root)
     try:
-        bundle = bundle_source(project, doc, page, view, load)
+        bundle = bundle_source(project, doc, page, view, load, parts=parts)
     except EditorError as exc:
         raise LookUnavailable(f"bundle: {exc}") from exc
     finally:
@@ -131,7 +137,9 @@ def render(doc: dict, page: dict, app_root: Path, load: str, view: str, out_dir:
                             errors.append("view.tsx: nothing rendered within 15s")
                         tab.wait_for_timeout(700)
                         file = out_dir / f"{name}.png"
-                        tab.screenshot(path=str(file), full_page=True)
+                        tall = int(tab.evaluate("document.documentElement.scrollHeight") or h)
+                        tab.screenshot(path=str(file), full_page=True,
+                                       clip={"x": 0, "y": 0, "width": w, "height": min(max(tall, h), MAX_SHOT_PX)})
                         shots[name] = str(file)
                         errors.extend(str(e) for e in (tab.evaluate("window.__forgeLookErrors") or []))
                         tab.close()
@@ -245,12 +253,12 @@ def rank(verdict: dict) -> tuple[int, int]:
 
 
 def look_at(doc: dict, page: dict, app_root: Path, load: str, view: str, client: Any, *,
-            attempt: int = 1, change: str = "") -> tuple[dict, Any]:
+            attempt: int = 1, change: str = "", parts: dict[str, str] | None = None) -> tuple[dict, Any]:
     """Render, then judge. Raises LookUnavailable when this machine cannot."""
     from services.blueprint import references
 
     out_dir = Path(app_root).parent / ".forge" / "look" / str(page.get("id")) / f"look-{attempt}"
-    look = render(doc, page, Path(app_root), load, view, out_dir)
+    look = render(doc, page, Path(app_root), load, view, out_dir, parts=parts)
     shown = references.paths(app_root.parent) if getattr(client, "accepts_images", True) else []
     verdict, spent = judge(doc, page, look, client, references=shown, change=change)
     verdict["shots"] = look["shots"]

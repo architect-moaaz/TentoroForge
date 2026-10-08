@@ -29,7 +29,7 @@ from typing import Any, Callable
 
 from services.smith import loop as loop_mod
 from services.smith import plan as plan_mod
-from services.smith import reads, tools, trials, writes
+from services.smith import reads, tools, trials, web, writes
 from services.smith.loop import Observation
 from services.smith.verbs import missing_fields
 from services.smith4.context import opening
@@ -54,6 +54,51 @@ NOTHING_TRIED = ("Nothing has changed this turn and nothing was tried. If they s
                  "something does not work, try it (`try_workflow`, `try_request`, "
                  "`open_page`) and see what it does before deciding nothing needs "
                  "doing. If nothing does need doing, end with `answer` and say why.")
+#: What an `answer` hears, once, on a turn that has changed nothing. ToroCommerce
+#: (forge-v3, 2026-10-07): asked why the admin could not add a variant, Smith
+#: answered "I'll fix the page so the form sends the full product record — let
+#: me rewrite that part of the view now", and that answer ended the turn: the
+#: person waited for a change no step made. `answer` is how a turn speaks, not
+#: how it acts; one look at what it is about to say decides which.
+ANSWER_CHANGES_NOTHING = (
+    "Nothing has been changed this turn, and `answer` changes nothing — it ends the turn. "
+    "If what you are about to say is that something should be changed, make that change now "
+    "and try it. If you have not seen the fault happen through the screen they used, open "
+    "that screen (`open_page`) and use it first. If this is an answer — how to do something, "
+    "why it already works, why it cannot be changed — send the same `answer` again.")
+#: What the first direct edit of a turn hears when nothing has been tried. The
+#: variant form Smith "fixed" on ToroCommerce was not broken: it read the code,
+#: blamed a field it misread, and never pressed the button (2026-10-07).
+REPRODUCE_FIRST = (
+    "Nothing has been tried this turn. If they said something does not work, use it first — the "
+    "screen they used, as them (`open_page`, `try_workflow`, `try_request`) — so the change answers "
+    "what happens, not what the code seems to say. If this is a change they asked for rather than a "
+    "fault, make the edit again.")
+#: What an answer hears on a turn that has tried nothing.
+ANSWER_UNTRIED_HEAD = "Nothing has been tried this turn"
+
+
+def answer_untried(ask: str) -> str:
+    said = " ".join(str(ask).split())[:300]
+    return (f"{ANSWER_UNTRIED_HEAD}, and an answer says what the application does. They said: \u201c{said}\u201d. "
+            "If that could be a report that something behaves wrongly — or a question about what it does — "
+            "use it first: the screen it is about, as the person it is about (`open_page`, `try_workflow`), "
+            "and answer from what it showed, or fix what it showed. Answer without trying only when it is "
+            "not about what the application does (a plan, a cost, how to do something) — then send the "
+            "answer again.")
+
+
+#: What an edit to the platform's own files hears without a failing try.
+PATCH_NEEDS_PROOF = (
+    "That file is the platform's — the engine every application runs on. It is patched for this "
+    "application only once a try in this turn has shown the fault it fixes, and the patch is kept only "
+    "if a try after it passes. Try it first; if the try passes, the fault is not there.")
+#: A step these answered never ran: asking for it again is not a repeat.
+_NOT_RUN = frozenset({REPRODUCE_FIRST, PATCH_NEEDS_PROOF})
+#: What `done` hears when the last change has not been used since.
+TRY_AFTER = (
+    "Changed, not yet tried. Use what you changed — as the person who asked, on the screen they use — "
+    "and see it work before ending. If it cannot be tried, end with `answer` saying so.")
 #: The start of the message when a trial that failed has not been tried
 #: again since the change meant to fix it.
 UNPROVEN = "Not shown to work yet:"
@@ -89,6 +134,8 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     if ctx.asked_from and ctx.asked_from not in asked:
         asked = f"{ctx.asked_from}\n(This turn does one part of it: {asked})"
     token = ASKED.set(asked)
+    from services.smith import file_edit
+    started = {p.get("id") for p in file_edit.load_patches(ctx.out)}
     try:
         out = _run(ctx, choose, list(history or []), observations,
                    max_steps or loop_mod.MAX_STEPS, bench)
@@ -96,6 +143,17 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
         ASKED.reset(token)
         bench.close()
     out.steps = [o.tool for o in observations]
+    # A PLATFORM PATCH IS KEPT ONLY ON PROOF: a try after the last edit that
+    # passed, and nothing that failed before still failing.
+    pending = [p["id"] for p in file_edit.load_patches(ctx.out)
+               if p.get("id") not in started and p.get("status") == "pending"]
+    if pending:
+        edits = [i for i, o in enumerate(observations) if o.tool == "edit_file" and _is_change(o)]
+        after = [o for o in observations[(edits[-1] + 1 if edits else 0):] if tools.is_trial(o.tool)]
+        proven = bool(after) and not trials.failed(after[-1].said or "") and not _still_failing(observations)
+        said = file_edit.settle(ctx.out, pending, proven)
+        if said:
+            out.said = (out.said + "\n\n" if out.said else "") + " ".join(said)
     return out
 
 
@@ -105,20 +163,30 @@ def _trial_key(o: Observation) -> str:
                      str(a.get("method") or ""), str(a.get("as") or "").lower()])
 
 
+def _is_change(o: Observation) -> bool:
+    """A step that changed the app. A rewrite that reports no file is still a
+    change: Smith rewrote F&B's Orders page to fix what its try showed, and
+    every try after was refused as "nothing has changed since" — five steps
+    lost to not being allowed to look at its own fix (2026-10-02).
+
+    ONE MEANING FOR EVERY CHECK. `_changed_after` counted such a rewrite and
+    the checks after it counted only steps with files: a permissions rewrite
+    (no file) after a failing try, then `done`, asked for the latest change
+    with a file, found none, and the turn died on `max()` of nothing
+    (ihf6pjga, 2026-10-05 18:52)."""
+    return bool(o.touched) or (o.status == "resolved" and not tools.is_read(o.tool)
+                               and not tools.is_trial(o.tool))
+
+
 def _changed_after(observations: list[Observation], i: int) -> bool:
-    """Whether anything landed after step `i`. A rewrite that reports no file
-    is still a change: Smith rewrote F&B's Orders page to fix what its try
-    showed, and every try after was refused as "nothing has changed since" —
-    five steps lost to not being allowed to look at its own fix (2026-10-02)."""
-    return any(o.touched or (o.status == "resolved" and not tools.is_read(o.tool)
-                             and not tools.is_trial(o.tool))
-               for o in observations[i + 1:])
+    """Whether anything landed after step `i`."""
+    return any(_is_change(o) for o in observations[i + 1:])
 
 
 def _still_failing(observations: list[Observation]) -> list[str]:
     """Trials whose latest run came after a change and still failed — the
     change did not fix what it was for."""
-    changes = [j for j, x in enumerate(observations) if x.touched]
+    changes = [j for j, x in enumerate(observations) if _is_change(x)]
     if not changes:
         return []
     latest: dict[str, int] = {}
@@ -150,7 +218,7 @@ def _unproven(observations: list[Observation]) -> str:
             continue
         if not _changed_after(observations, i):
             continue
-        last_change = max(j for j, x in enumerate(observations) if x.touched)
+        last_change = max(j for j, x in enumerate(observations) if _is_change(x))
         key = _trial_key(o)
         if any(_trial_key(x) == key for x in observations[last_change + 1:] if tools.is_trial(x.tool)):
             continue
@@ -180,6 +248,13 @@ def _before_done(observations: list[Observation], landed: list[str]) -> str:
     if unwired and not any(tools.is_trial(o.tool) for o in observations[unwired[-1] + 1:]) \
             and TRY_WIRED.split(".", 1)[0] not in said:
         return TRY_WIRED
+    # NO CLAIM WITHOUT PROOF. A change after which nothing was used is a
+    # change the reply cannot say works.
+    changes = [i for i, o in enumerate(observations) if _is_change(o)]
+    tries = [i for i, o in enumerate(observations) if tools.is_trial(o.tool)]
+    if landed and changes and (not tries or tries[-1] < changes[-1]) \
+            and TRY_AFTER.split(",", 1)[0] not in said:
+        return TRY_AFTER
     return ""
 
 
@@ -301,6 +376,21 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 "I could not reach my reasoning service just now, so I stopped here"
                 + (" — what is above is done and kept." if landed else " and nothing was changed.")
                 + " Please try again in a few minutes.")))
+        if tool == "answer" and not landed:
+            heard = [o.said or "" for o in observations if o.tool == "answer" and o.status == "error"]
+            if not any(tools.is_trial(o.tool) for o in observations):
+                # AN ANSWER ABOUT WHAT THE APP DOES COMES FROM USING IT. TCommerce's
+                # tester reported inactive products showing; Smith answered "Yes,
+                # that is exactly how it works" from the business rule, in two
+                # steps, having tried nothing (measured on a copy, 2026-10-07).
+                if not any(h.startswith(ANSWER_UNTRIED_HEAD) for h in heard):
+                    observations.append(Observation(tool=tool, args=args, status="error",
+                                                    said=answer_untried(ctx.ask or ctx.message or "")))
+                    continue
+            elif ANSWER_CHANGES_NOTHING not in heard:
+                observations.append(Observation(tool=tool, args=args, status="error",
+                                                said=ANSWER_CHANGES_NOTHING))
+                continue
         if tool == "done":
             first = _before_done(observations, landed)
             if first:
@@ -330,7 +420,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             logger.info("[smith-try] %s %s -> %s", tool, args, " | ".join(seen.splitlines()[:6])[:600])
             observations.append(Observation(tool=tool, args=args, status="read", said=seen))
             continue
-        if loop_mod.already_done(tool, args, observations):
+        if loop_mod.already_done(tool, args, [o for o in observations if o.said not in _NOT_RUN]):
             observations.append(Observation(
                 tool=tool, args=args, status="error",
                 said="That exact step has already been taken this turn — read what it "
@@ -339,6 +429,12 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
 
         if tools.is_read(tool):
             seen = reads.run(tool, args, output_dir=ctx.out, doc=ctx.doc())
+            observations.append(Observation(tool=tool, args=args, status="read", said=seen))
+            continue
+
+        if tools.is_web(tool):
+            seen = web.run(tool, args, said=web.person_said(ctx.ask, history), output_dir=ctx.out)
+            logger.info("[smith-web] %s %s -> %s", tool, args, " | ".join(seen.splitlines()[:2])[:300])
             observations.append(Observation(tool=tool, args=args, status="read", said=seen))
             continue
 
@@ -361,6 +457,18 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 return _finished(landed, touched, step)
             continue
 
+        if tool in ("edit_file", "edit_definition"):
+            if not any(tools.is_trial(o.tool) for o in observations) \
+                    and not any(o.said == REPRODUCE_FIRST for o in observations):
+                observations.append(Observation(tool=tool, args=args, status="error", said=REPRODUCE_FIRST))
+                continue
+            if tool == "edit_file":
+                from services.smith import file_edit
+                rel, _why = file_edit._app_rel(ctx.out, str(args.get("path") or ""))
+                if rel and file_edit.classify(ctx.doc() or {}, rel)["kind"] == "platform" and not any(
+                        tools.is_trial(o.tool) and trials.failed(o.said or "") for o in observations):
+                    observations.append(Observation(tool=tool, args=args, status="error", said=PATCH_NEEDS_PROOF))
+                    continue
         if tools.is_write(tool):
             out = writes.run(tool, args, output_dir=ctx.out, reasoning=ctx.reasoning)
             step = Outcome(status="resolved" if out.get("applied") and not out.get("finding") else "needs_user",

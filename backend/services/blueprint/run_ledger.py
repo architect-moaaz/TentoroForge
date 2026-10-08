@@ -374,3 +374,39 @@ def explain(output_dir: str | Path, run_id: str | None = None) -> dict[str, Any]
         "crashed": crashed,
         "events": len(events),
     }
+
+
+class TurnLedger:
+    """A Smith turn's own ledger: when it began, a pulse while it works, and
+    how it ended.
+
+    A turn wrote none. The run registry knew of it, in the memory of the one
+    worker running it — so a panel whose stream dropped polled the other
+    worker, found nothing, and said the turn "could not be picked back up"
+    while it was still working; and a turn whose worker died left no trace at
+    all (ihf6pjga, 2026-10-05). This is the account every worker can read,
+    and a pulse that stops when its process does."""
+
+    SUFFIX = "-smith-turn"
+
+    def __init__(self, output_dir: str | Path, *, phase: str = "") -> None:
+        import threading
+        run_id = time.strftime("%Y%m%d-%H%M%S", time.gmtime()) + self.SUFFIX
+        self.ledger = RunLedger(output_dir, run_id, phase=phase)
+        self._stop = threading.Event()
+
+        def pulse() -> None:
+            while not self._stop.wait(20):
+                self.ledger.heartbeat()
+        threading.Thread(target=pulse, daemon=True, name="smith-turn-pulse").start()
+
+    def end(self, error: BaseException | None = None) -> None:
+        """The turn's work returned, or raised `error`. Once only."""
+        if self._stop.is_set():
+            return
+        self._stop.set()
+        if error is not None:
+            self.ledger.crashed(error)
+        else:
+            from types import SimpleNamespace
+            self.ledger.finish(SimpleNamespace())

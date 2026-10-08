@@ -54,6 +54,15 @@ async def trial(neon: Any, project_id: str, app_root: str | Path, *,
         # As the publish runs it on a redeploy: the data is kept, never reset.
         out = await asyncio.to_thread(chain, app_root, branch["database_url"],
                                       extra_env={"FORGE_KEEP_DB_STATE": "1"})
+        if out.get("error"):
+            # A CHAIN THAT COULD NOT RUN SAID NOTHING ABOUT THE DATA. TCommerce's
+            # trial ran in a folder that did not exist; drizzle-kit died on
+            # FileNotFoundError, that was read as "the live data cannot take
+            # this change", and every publish was refused (ihf6pjga,
+            # 2026-10-05). Like no copy at all, it does not stop the publish:
+            # the build's own prepare step still refuses what would lose data.
+            logger.warning("[migration-trial] the trial could not run for %s: %s", project_id, out.get("reason"))
+            return {"ran": False, "ok": True, "reason": f"the trial could not run: {out.get('reason')}", "lines": []}
         return {"ran": True, "ok": bool(out.get("applied")), "reason": str(out.get("reason") or ""),
                 "lines": list(out.get("lines") or [])}
     finally:
@@ -82,6 +91,17 @@ def fault_ask(reason: str, lines: list[str]) -> str:
 from services.blueprint.field_changes import field_settings, what_changed  # noqa: E402,F401
 
 
+def project_dirs(output_dir: str | Path) -> tuple[Path, Path]:
+    """`(project, app root)` from either. The publish hands over the app's
+    own folder (`<output>/app`, what it ships); this appended `app` to it and
+    ran the chain in `<output>/app/app`, and Smith, pointed there, found "no
+    application defined here yet" (TCommerce, 2026-10-05)."""
+    given = Path(output_dir)
+    if given.name == "app" and (given.parent / ".forge").is_dir():
+        return given.parent, given
+    return given, given / "app"
+
+
 def _definition(output_dir: str | Path) -> dict:
     import json
     try:
@@ -101,7 +121,8 @@ async def ensure_publishable(neon: Any, project_id: str, output_dir: str | Path,
     if run_turn is None:
         from services.smith4.platform import smith_result as run_turn
     say = say or (lambda _t: None)
-    app_root = Path(output_dir) / "app"
+    project, app_root = project_dirs(output_dir)
+    output_dir = str(project)
     out = await trial(neon, project_id, app_root, chain=chain)
     fixed = False
     changed: list[str] = []
@@ -122,8 +143,10 @@ async def ensure_publishable(neon: Any, project_id: str, output_dir: str | Path,
         if not turn.get("edited_paths"):
             # NOTHING CHANGED: it is the owner's to settle. Their words to read,
             # not another trial of the same definition.
+            # The chain's own reason, and Smith's reading of it beside — each
+            # once: given as both, the publish message said it twice.
             said = str(turn.get("answer") or turn.get("question") or "").strip()
-            return {"ok": False, "ran": True, "fixed": False, "reason": said or out["reason"],
+            return {"ok": False, "ran": True, "fixed": False, "reason": out["reason"],
                     "lines": out["lines"], "changed": "; ".join(changed), "settle": said}
         out = await trial(neon, project_id, app_root, chain=chain)
         fixed = out["ok"]

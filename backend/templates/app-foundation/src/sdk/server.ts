@@ -91,12 +91,27 @@ async function reviewingEmpty(): Promise<boolean> {
   }
 }
 
+/** The signed-out visitor's guest token — the `forge-guest` cookie the
+ *  workflow route gave them on the first thing they did. A record a guest
+ *  made (their cart) is theirs by it, read here as it was written there. */
+async function guestToken(): Promise<string | undefined> {
+  try {
+    const { cookies } = await import("next/headers");
+    const v = (await cookies()).get("forge-guest")?.value;
+    return v && /^[0-9a-f-]{36}$/.test(v) ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function actor() {
+  const guest = await guestToken();
   try {
     const session = await auth();
-    return actorCtx(session?.user as Record<string, unknown> | undefined) ?? {};
+    const ctx = actorCtx(session?.user as Record<string, unknown> | undefined) ?? {};
+    return guest ? { ...ctx, guest } : ctx;
   } catch {
-    return {};
+    return guest ? { guest } : {};
   }
 }
 
@@ -121,6 +136,25 @@ function filters(where?: Record<string, unknown>): Record<string, string> | unde
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(where)) if (v !== undefined && v !== null) out[k] = String(v);
   return Object.keys(out).length ? out : undefined;
+}
+
+/** A READ THAT FAILED IS SAID, NOT HIDDEN. A page keeps working — it shows
+ *  its empty state rather than crashing — but the error is printed where the
+ *  build's checks read the server, and sent to Smith like any crash. "Add a
+ *  child" saved every child and "My Children" showed none: the list read
+ *  failed on "Unknown entity: Child", returned [], and every check saw a tidy
+ *  empty page (forge-v3, 2026-09-27). */
+function swallowed(op: string, entity: string, err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`[forge:swallowed] ${op} ${entity} failed: ${message}`);
+  import("@/lib/error_reporter")
+    .then((r) => r.reportFromError(err, { kind: "page_render", source_file: "src/sdk/server.ts" }))
+    .catch(() => { /* reporting is best-effort */ });
+}
+
+/** A record that is not there, or not this person's: an answer, not a fault. */
+function notThere(err: unknown): boolean {
+  return (err as { name?: string } | null)?.name === "NotFoundError";
 }
 
 /** The signed-in user, or null. */
@@ -153,7 +187,7 @@ export async function listPage<E extends EntityName>(
     }, await actor());
     return { rows: res.data.map((r) => plain(entity, r)), total: res.total, page, limit };
   } catch (err) {
-    console.warn(`[sdk] list ${entity} failed:`, err);
+    swallowed("list", entity, err);
     return { rows: [], total: 0, page, limit };
   }
 }
@@ -204,7 +238,8 @@ export async function record<E extends EntityName>(
   await ensureDataEngineInitialized();
   try {
     return plain(entity, await engine.findById(entity, id, await actor()));
-  } catch {
+  } catch (err) {
+    if (!notThere(err)) swallowed("record", entity, err);
     return null;
   }
 }
@@ -314,7 +349,7 @@ export async function similar<E extends EntityName>(
   } catch (err) {
     const e = err as Error;
     if (e?.name === "EmbeddingUnavailable") return { rows: [], error: e.message };
-    console.warn(`[sdk] similar ${entity} failed:`, err);
+    swallowed("similar", entity, err);
     return empty;
   }
 }

@@ -33,6 +33,7 @@ threshold is refused rather than applied with a warning.
 from __future__ import annotations
 
 import copy
+import re
 
 from dataclasses import dataclass, field
 from typing import Any, Iterable
@@ -451,6 +452,11 @@ class InvalidWorkflowStep(AuthorRefusal):
     leaves a node's declared configuration empty."""
 
 
+#: The comparisons a workflow `where` value may name — the engine's `_OPS`.
+WHERE_COMPARISONS = frozenset({"ne", "neq", "not", "!=", "gt", ">", "gte", ">=", "lt", "<",
+                               "lte", "<=", "in", "notIn", "nin"})
+
+
 def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
                          mcp_servers: list[dict] | None = None) -> None:
     """Reject workflows whose steps are not configured catalog nodes.
@@ -490,6 +496,22 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
     from services.blueprint.mcp_catalog import workflow_errors as mcp_errors
     for proposal in proposals:
         problems.extend(mcp_errors(with_loop_bodies(proposal.body), mcp_servers))
+    # A LOOKUP THE ENGINE CAN READ. `where` maps a field to a value (equals)
+    # or to ONE comparison: `{"id": {"ne": "{{customer.id}}"}}`. ToroCommerce
+    # wrote `"id__neq"` and `{"ne": …}` with nothing to read either: the first
+    # was no column, the second reached Postgres as "[object Object]".
+    for proposal in proposals:
+        name = proposal.body.get("name") or proposal.natural_key
+        for st in with_loop_bodies(proposal.body).get("steps") or []:
+            where = ((st or {}).get("config") or {}).get("where") if isinstance(st, dict) else None
+            for field, value in (where.items() if isinstance(where, dict) else ()):
+                bad = re.search(r"__(ne|neq|not|gt|gte|lt|lte|in|nin|notin|like)$", str(field), re.I)
+                odd = isinstance(value, dict) and not (len(value) == 1 and next(iter(value)) in WHERE_COMPARISONS)
+                if bad or odd:
+                    problems.append(
+                        f"{name}/{st.get('key')}: where {field!r} — write a comparison as "
+                        f"{{\"<field>\": {{\"ne\": <value>}}}} (ne, gt, gte, lt, lte, in, notIn); "
+                        "a field alone with a value means equals")
     # WOULD THE ENGINE RUN IT. A step whose condition the engine's parser
     # refuses, a function the engine lacks, a template naming what the engine
     # never holds — each is a workflow the author can fix now and nobody can
@@ -858,6 +880,43 @@ def check_page_access(result: "AgentResult", doc: dict | None) -> None:
         raise InconsistentPageAccess(_all_of(problems))
 
 
+class RoleWithoutADoor(AuthorRefusal):
+    """A role has pages only it may open and none it arrives on."""
+
+
+def check_role_doors(result: "AgentResult", doc: dict | None) -> None:
+    """Every audience with pages of its own has a door: one of them marked
+    `entry`. ToroCommerce's back office had four pages for Admin and the
+    navigation named no landing; the administrator signed in to the shop
+    front every time (forge-v3, 2026-10-07). Refused at the page author, and
+    only for the roles whose pages this proposal says who they are for."""
+    from services.blueprint.account_model import roles_without_a_door
+    from services.blueprint.projection import restricted_roles
+
+    proposed = [p.body for p in result.proposals
+                if p.section == "pages" and isinstance(p.body, dict)]
+    if not any({"access", "users", "entry"} & set(b) for b in proposed):
+        return
+    merged: dict[str, dict] = {}
+    for page in (doc or {}).get("pages") or []:
+        if isinstance(page, dict) and str(page.get("status") or "").upper() not in ("REMOVED", "DEPRECATED"):
+            merged[str(page.get("id") or page.get("route"))] = page
+    touched: list[dict] = []
+    for body in proposed:
+        key = str(body.get("id") or "") or next(
+            (k for k, v in merged.items() if v.get("route") == body.get("route")), str(body.get("route")))
+        merged[key] = {**merged.get(key, {}), **body}
+        touched.append(merged[key])
+    after = {**(doc or {}), "pages": list(merged.values())}
+    theirs = {str(n) for page in touched for n in restricted_roles(after, page)}
+    missing = [r for r in roles_without_a_door(after) if r in theirs]
+    if missing:
+        raise RoleWithoutADoor(_all_of([
+            f"{role} has pages only {role} may open and none marked as where {role} arrives — "
+            f"give the page {role} opens first `entry: true` (a concrete route, no `[id]`)"
+            for role in missing]))
+
+
 class InvalidNavigation(AuthorRefusal):
     """Two menu entries lead to the same address."""
 
@@ -893,6 +952,79 @@ def check_navigation(result: "AgentResult", doc: dict | None = None) -> None:
         walk(body.get("tree"))
     if problems:
         raise InvalidNavigation(_all_of(problems))
+
+
+class InvalidOwnershipRule(AuthorRefusal):
+    """An ownership rule the data engine could not apply as written."""
+
+
+def _field_names(entity: dict) -> set[str]:
+    names: set[str] = set()
+    for f in entity.get("fields") or []:
+        if isinstance(f, dict) and f.get("name"):
+            names |= {str(f["name"]), re.sub(r"(?<!^)(?=[A-Z])", "_", str(f["name"])).lower()}
+    return names
+
+
+def ownership_findings(security: dict, doc: dict) -> list[str]:
+    """Each enforceable ownership rule names an entity the data model has and
+    a column that entity has; a rule owned `through` another record names an
+    entity that exists and is itself scoped.
+
+    Kids Vaccination Tracker's security agent scoped Appointment by a
+    "denormalized parentId" the table never had; the data engine refused the
+    rule at run time and every parent saw no appointments (forge-v3,
+    2026-09-26). Refused here, at the author, with the way to say it."""
+    entities = [e for e in ((doc.get("data") or {}).get("entities") or [])
+                if isinstance(e, dict) and e.get("status") != "DEPRECATED"]
+    def find(name: str) -> dict | None:
+        key = re.sub(r"[^a-z0-9]", "", str(name).lower())
+        for e in entities:
+            for form in (e.get("name"), e.get("table"), e.get("id")):
+                if form and re.sub(r"[^a-z0-9]", "", str(form).lower()) in (key, key + "s", key + "es"):
+                    return e
+        return None
+    rules = [r for r in (security.get("ownershipRules") or []) if isinstance(r, dict)]
+    scoped = {re.sub(r"[^a-z0-9]", "", str((find(r.get("entity") or "") or {}).get("name") or "").lower())
+              for r in rules if r.get("kind", "scope") != "attribution" and not r.get("through")}
+    problems: list[str] = []
+    for r in rules:
+        named, column = str(r.get("entity") or ""), str(r.get("column") or "")
+        entity = find(named)
+        if entity is None:
+            problems.append(f"ownership rule for {named!r}: the data model has no such entity")
+            continue
+        if column not in _field_names(entity):
+            problems.append(
+                f"ownership rule for {entity.get('name')}: {column!r} is not a field of {entity.get('name')} "
+                f"(its fields: {', '.join(sorted(str(f.get('name')) for f in entity.get('fields') or [] if isinstance(f, dict)))}). "
+                f"Name the field that holds the owner; where a row belongs to someone through another "
+                f"record it references, name that reference as `column` and the referenced entity as "
+                f"`through`")
+            continue
+        guest = str(r.get("guestColumn") or "")
+        if guest and guest not in _field_names(entity):
+            problems.append(f"ownership rule for {entity.get('name')}: guestColumn {guest!r} is not a field of "
+                            f"{entity.get('name')} — name the field that holds the visitor's guest token, or "
+                            f"ask for one in the data model")
+        if r.get("through"):
+            target = find(str(r["through"]))
+            if target is None:
+                problems.append(f"ownership rule for {entity.get('name')}: `through` names "
+                                f"{r['through']!r}, which the data model does not have")
+            elif re.sub(r"[^a-z0-9]", "", str(target.get("name") or "").lower()) not in scoped:
+                problems.append(f"ownership rule for {entity.get('name')}: it is owned through "
+                                f"{target.get('name')}, which has no scope rule of its own — scope "
+                                f"{target.get('name')} first")
+    return problems
+
+
+def check_security(result: "AgentResult", doc: dict | None) -> None:
+    """The security section's ownership rules are ones the engine can apply."""
+    problems = [msg for p in result.proposals if p.section == "security" and isinstance(p.body, dict)
+                for msg in ownership_findings(p.body, doc or {})]
+    if problems:
+        raise InvalidOwnershipRule(_all_of(problems))
 
 
 class InvalidBusinessRule(AuthorRefusal):
@@ -1158,8 +1290,10 @@ def apply_agent_result(
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)
     check_page_access(result, svc.doc)
+    check_role_doors(result, svc.doc)
     check_navigation(result, svc.doc)
     check_analytics(result, svc.doc)
+    check_security(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
     #
@@ -1335,6 +1469,13 @@ def apply_agent_result(
             if art.get("id"):
                 ids.append(art["id"])
         result.artifacts = ids
+
+        # THE MENU FOLLOWS THE SCREENS. Pages name the menu entry they answer
+        # (`menuEntry`); the entry is linked here, when they land, so the
+        # rail never holds labels that go nowhere (`menu_binding`).
+        if any(p.section == "pages" for p in result.proposals):
+            from services.blueprint.menu_binding import bind_menu
+            bind_menu(svc.doc)
 
         # §17 middle band: proceed, but the assumption must be on the record.
         recorded: list[str] = []

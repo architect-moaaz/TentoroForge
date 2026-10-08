@@ -67,6 +67,17 @@ interface Props {
   initialTab?: "web" | "mobile";
 }
 
+/** What the build found when it used the app (GET /api/projects/{id}/check). */
+interface CheckNote {
+  checked: boolean;
+  /** The app changed since anyone last used it (an edit outside Smith). */
+  stale?: boolean;
+  pages: number;
+  working: number;
+  failing: Array<{ route: string; detail: string }>;
+  processes: string[];
+}
+
 const STAGES: Array<{
   key: DeployEvent["stage"];
   label: string;
@@ -91,6 +102,7 @@ export function PublishDialog({
   const [reconciledError, setReconciledError] = useState<string | null>(null);
   const [priorFinishedAt, setPriorFinishedAt] = useState<string | null>(null);
   const { events, status, start, reset } = useDeployStream(projectId);
+  const [check, setCheck] = useState<CheckNote | null>(null);
   const reconcilePoll = useRef<number | null>(null);
 
   const publish = () => {
@@ -103,6 +115,18 @@ export function PublishDialog({
   // deploys only run when the user explicitly clicks "Publish now" or
   // "Republish". Opening the modal (e.g. to switch to the Mobile tab
   // or just check the last URL) must never trigger a redeploy.
+  // WHAT DOES NOT WORK YET IS SAID BEFORE IT GOES LIVE. The build used every
+  // page and process; what still fails is named here, above the button —
+  // a warning, never a gate.
+  useEffect(() => {
+    if (!open || !projectId) return;
+    let cancelled = false;
+    api.get<CheckNote>(`/api/projects/${projectId}/check`)
+      .then((note) => { if (!cancelled) setCheck(note); })
+      .catch(() => { if (!cancelled) setCheck(null); });
+    return () => { cancelled = true; };
+  }, [open, projectId]);
+
   useEffect(() => {
     if (!open || !projectId) return;
     let cancelled = false;
@@ -276,6 +300,37 @@ export function PublishDialog({
           gate the actual deploy behind an explicit click so opening
           the modal never has a side-effect.
         */}
+        {!started && check?.checked && (check.failing.length > 0 || check.processes.length > 0) && (
+          <div
+            role="status"
+            className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+          >
+            <p className="font-medium">
+              Not everything works yet — {check.working} of {check.pages} pages
+              {check.processes.length > 0 ? `, and ${check.processes.length} process${check.processes.length === 1 ? "" : "es"},` : ""}
+              {" "}passed the build&rsquo;s check.
+            </p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-4">
+              {check.failing.slice(0, 5).map((f) => (
+                <li key={f.route}>
+                  <code>{f.route}</code> — {f.detail}
+                </li>
+              ))}
+              {check.processes.slice(0, 5).map((name) => (
+                <li key={name}>{name} does not run through</li>
+              ))}
+            </ul>
+            <p className="mt-1">Publishing puts them live as they are. Ask Smith to carry on to fix them first.</p>
+          </div>
+        )}
+
+        {!started && check?.checked && check.stale && (
+          <p role="status" className="text-xs text-amber-800 dark:text-amber-300">
+            The app has changed since it was last checked. Ask Smith to check it again before
+            publishing if you want to be sure it all still works.
+          </p>
+        )}
+
         {!started && (
           <div className="flex items-center justify-between rounded border bg-muted/30 px-3 py-2 text-xs">
             <span className="text-muted-foreground">

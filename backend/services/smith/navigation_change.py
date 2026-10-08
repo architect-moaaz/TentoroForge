@@ -89,15 +89,56 @@ def _navigable(route: str) -> bool:
     return bool(route) and "[" not in route
 
 
+def shown_to(doc: dict) -> dict[str, list[str]]:
+    """Who each page's menu entry is shown to, by page id — the roles the
+    shell's rail shows it to (`projection.menu_scopes`); [] is everyone.
+
+    THE MENU HAS NO VISIBILITY OF ITS OWN. An entry is shown to whoever its
+    page is for, so "show the admin items only to admins" is a change to who
+    may open those pages. Told nothing of this, the revision answered that the
+    navigation "has no mechanism for per-role visibility", and Smith spent a
+    turn reconciling that with a layout that plainly filters by role
+    (wz7a99ir, 2026-10-04)."""
+    from services.blueprint.projection import menu_scopes
+    roles, audience = menu_scopes(doc)
+    return {str(p.get("id")): roles.get(str(p.get("id"))) or audience.get(str(p.get("id"))) or []
+            for p in _live_pages(doc)}
+
+
 def pages_brief(doc: dict) -> list[dict]:
     from services.blueprint.functional_completeness import page_family
+    who = shown_to(doc)
     out = []
     for p in _live_pages(doc):
         route = str(p.get("route") or "")
         out.append({"id": str(p.get("id")), "route": route, "name": str(p.get("name") or ""),
                     "kind": page_family(p) or str(p.get("pattern") or ""),
-                    "canBeInMenu": _navigable(route)})
+                    "canBeInMenu": _navigable(route),
+                    "shownTo": who.get(str(p.get("id"))) or "everyone"})
     return out
+
+
+def without_removed(doc: dict, nav: dict) -> dict:
+    """The navigation with every entry whose page was removed left out, and a
+    group left empty with it. A removed page's entry stayed in F&B's stored
+    tree; shown to the revision, it was kept, and the whole menu was refused
+    for opening "a page that is not a page of this application"."""
+    live = {str(p.get("id")) for p in _live_pages(doc)}
+
+    def keep(node: Any) -> Any:
+        if not isinstance(node, dict):
+            return None
+        kids = [k for k in (keep(c) for c in node.get("children") or []) if k]
+        if node.get("page") and str(node["page"]) not in live:
+            return None
+        if node.get("children") and not kids and not node.get("page"):
+            return None
+        out = {k: v for k, v in node.items() if k != "children"}
+        if kids:
+            out["children"] = kids
+        return out
+
+    return {**nav, "tree": [n for n in (keep(n) for n in nav.get("tree") or []) if n]}
 
 
 def _walk(tree: list) -> list[dict]:
@@ -125,7 +166,10 @@ def validate(doc: dict, nav: dict) -> list[str]:
         kids = n.get("children") or []
         if pid:
             if pid not in pages:
-                problems.append(f"{n.get('label')!r} opens {pid}, which is not a page of this application")
+                removed = any(str(p.get("id")) == pid for p in doc.get("pages") or [] if isinstance(p, dict))
+                problems.append(f"{n.get('label')!r} opens {pid}, which " + (
+                    "was removed from this application — leave its entry out" if removed
+                    else "is not a page of this application"))
             elif not _navigable(str(pages[pid].get("route") or "")):
                 problems.append(f"{n.get('label')!r} opens {pid} ({pages[pid].get('route')}), a record route that "
                                 "cannot be a menu destination")
@@ -208,6 +252,10 @@ def _prompt(doc: dict, change: str) -> tuple[str, str]:
         "- `initialRoute` is where the app opens, per kind of user: an entry for \"default\" and "
         "one per role name given, each a route from the pages given. Return only the landings the "
         "request changes; a kind of user you leave out keeps its landing.\n"
+        "- Who sees an entry is not set in the menu: each entry is shown to the people its page is "
+        "for (`shownTo` on each page). A request to show or hide entries for a kind of user is a "
+        "change to who may open those pages — make any menu part of the request, and say in `note`, "
+        "naming the pages, that who may open them is changed with edit_access.\n"
         "- If part of the request cannot be honoured (the page does not exist, the entry is "
         "already as asked), do what can be done and say the rest in `note`."
     )
@@ -216,7 +264,7 @@ def _prompt(doc: dict, change: str) -> tuple[str, str]:
         f"The request: \"{change}\".\n\n"
         f"The pages:\n{json.dumps(pages_brief(doc), indent=1)}\n\n"
         f"The kinds of user (roles): {', '.join(roles) or kinds_note}\n\n"
-        f"The navigation as it stands:\n{json.dumps(nav, indent=1)}\n\n"
+        f"The navigation as it stands:\n{json.dumps(without_removed(doc, nav), indent=1)}\n\n"
         "Return the whole navigation as it should be after the change."
     )
     return system, user
@@ -227,13 +275,18 @@ def _client(reasoning: Any = None) -> Any:
     return AnthropicModel(model=AGENT_MODEL, effort="medium")
 
 
-def _labels(nav: dict) -> list[str]:
+def _labels(nav: dict, who: dict[str, list[str]] | None = None) -> list[str]:
+    """Each entry's label, and — with `who` — whom it is shown to, so what the
+    menu looks like to each kind of user is said, never assumed."""
+    def one(n: dict) -> str:
+        roles = (who or {}).get(str(n.get("page") or ""))
+        return f"{n.get('label')} ({', '.join(roles)} only)" if roles else str(n.get("label"))
     out = []
     for n in (nav.get("tree") or []):
         if not isinstance(n, dict):
             continue
-        kids = [str(k.get("label")) for k in (n.get("children") or []) if isinstance(k, dict)]
-        out.append(f"{n.get('label')} [{', '.join(kids)}]" if kids else str(n.get("label")))
+        kids = [one(k) for k in (n.get("children") or []) if isinstance(k, dict)]
+        out.append(f"{n.get('label')} [{', '.join(kids)}]" if kids else one(n))
     return out
 
 
@@ -296,7 +349,7 @@ def change_navigation(svc: Any, change: str, *, app_root: str | None = None,
         files += project_navigation(svc.doc, app_root)["files"]
     after = svc.doc.get("navigation") or {}
     landings = after.get("initialRoute") if isinstance(after.get("initialRoute"), dict) else {}
-    return {"applied": True, "before": _labels(before), "after": _labels(after),
+    return {"applied": True, "before": _labels(before), "after": _labels(after, shown_to(svc.doc)),
             "landing": landings.get("default"),
             "landings": {k: v for k, v in landings.items() if k != "default"
                          and v != (before.get("initialRoute") or {}).get(k)},

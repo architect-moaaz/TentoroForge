@@ -124,7 +124,7 @@ def test_the_review_server_is_booted_with_the_preview_secret():
 def test_the_shot_script_opens_a_page_in_its_own_session():
     src = pr._SHOTS.read_text()
     assert "contextsFor(p)" in src and "own.addCookies(p.cookies)" in src
-    assert "press(who.ctx, url, c)" in src and "firstId(who.ctx, p.entity)" in src
+    assert "press(who.ctx, url, c)" in src and "firstRow(who.ctx, p.entity)" in src
     assert "as: p.as" in src and "state: main.state" in src
 
 

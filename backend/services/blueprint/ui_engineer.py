@@ -35,7 +35,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Iterable, Sequence
 
 from services.blueprint.app_sdk import (
     code_page_files, project_app_sdk, sdk_reference,
@@ -124,15 +124,34 @@ class EditsDidNotApply(ValueError):
     """An edit's `find` is not in the file exactly once; nothing was applied."""
 
 
+def edit_schema(parts: Iterable[str] = ()) -> dict[str, Any]:
+    """The edit reply, able to name a split screen's parts (`part:<key>`)."""
+    keys = list(parts)
+    if not keys:
+        return PAGE_EDIT_SCHEMA
+    schema = json.loads(json.dumps(PAGE_EDIT_SCHEMA))
+    schema["properties"]["edits"]["items"]["properties"]["file"]["enum"] = (
+        ["load", "view"] + [f"part:{k}" for k in keys])
+    return schema
+
+
+def _file_label(key: str) -> str:
+    return "load.ts" if key == "load" else "view.tsx" if key == "view" else f"parts/{key[5:]}.tsx"
+
+
 def apply_edits(current: dict, edits: list[dict]) -> dict[str, str]:
-    """``{"load": …, "view": …}`` with each edit applied in order, or raise
-    `EditsDidNotApply` naming every edit that could not be — all or nothing,
-    so a half-applied change is never compiled as if it were the page."""
+    """``{"load": …, "view": …, "part:<key>": …}`` with each edit applied in
+    order, or raise `EditsDidNotApply` naming every edit that could not be —
+    all or nothing, so a half-applied change is never compiled as if it were
+    the page. A split screen's parts are edited as `part:<key>`."""
     files = {"load": str(current.get("load") or ""), "view": str(current.get("view") or "")}
+    files.update({f"part:{k}": str(v or "") for k, v in (current.get("parts") or {}).items()})
     problems: list[str] = []
     for i, e in enumerate(edits, 1):
-        name = "load.ts" if e.get("file") == "load" else "view.tsx"
-        key = "load" if e.get("file") == "load" else "view"
+        key = str(e.get("file") or "view")
+        if key not in files:
+            key = "load" if key == "load" else "view"
+        name = _file_label(key)
         find, replace = str(e.get("find") or ""), str(e.get("replace") or "")
         if not find:
             problems.append(f"edit {i} ({name}): `find` is empty — quote the text it replaces.")
@@ -597,7 +616,9 @@ What a finished page looks like:
   375px; wide tables scroll horizontally inside their card.
 - ACCESSIBLE. Real <button>/<a>, labels on inputs, aria-label on icon-only buttons,
   visible focus (`focus-visible:ring-2 ring-ring` on anything you build yourself),
-  sufficient contrast (use the tokens).
+  sufficient contrast (use the tokens). A button that picks one of several options
+  (a segmented choice, a filter chip, a tab) says which is picked: `aria-pressed`
+  on the picked one, or `role="tab"` with `aria-selected`.
 - TOKENS, NOT HEX. Only the semantic classes, each for its job: bg-background (the
   ground), bg-card (panels), bg-muted / bg-secondary (quiet fills), text-foreground,
   text-muted-foreground, border, bg-primary / text-primary (brand, default button,
@@ -638,8 +659,14 @@ view.tsx — "use client" on the first line.
     react, next/link, next/navigation (useRouter, useSearchParams, usePathname),
     lucide-react (icons), clsx, tailwind-merge, class-variance-authority, sonner (toast),
     the @radix-ui primitives the kit is built on, the UI kit and the library below (optional),
+    @dnd-kit/core + @dnd-kit/sortable (drag a card across a board, reorder a list — the move
+    itself still runs a workflow), motion/react (`motion.div`, `AnimatePresence`: a panel
+    sliding in, a row arriving), "@/sdk/map" (MapView: places as pins, a path as a line —
+    `<MapView points={[{ id, lat, lng, label }]} route={[{ lat, lng }, …]} onPointClick={…} />`),
     "@/sdk" (entity types, workflows, pages, widgets, href, fileUrl), "@/sdk/client" (useWorkflow,
-    WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm),
+    WorkflowForm, WorkflowButton, WidgetView, ImageSearch, NearMe, formatDistance, distanceKm,
+    useLive — `useLive(10)` in a view whose records change while someone watches: it re-reads
+    the page every 10 seconds while the tab is open; a section marked `live` calls it),
     "@/sdk/camera" (CameraCapture, BarcodeScanner), "@/sdk/i18n" (useT, useLanguage, LanguageSwitch), and
     `import type { Page, SeriesPoint, QueryRow, WidgetData } from "@/sdk/server"`.
   Nothing else is installed; an import of any other package fails to compile.
@@ -653,6 +680,11 @@ view.tsx — "use client" on the first line.
     <WorkflowButton workflow={workflows.x} input={{ … }} />, or useWorkflow(workflows.x).run(input).
     `fields` has one entry per workflow input, keyed by the input's name; an input the page
     already knows (the record's id, a fixed decision) is { value: … } and renders nothing.
+    The form's shape is yours too: `groups={[{ title, description?, fields: [...] }]}` puts
+    fields under headings, `steps` shows the groups one at a time with Back and Next (a long
+    application), `submitPlacement="full" | "sticky"`; and a field's `render: ({ id, value,
+    onChange, required }) => …` draws its control yourself — chips, a stepper, a calendar in a
+    popover, a map — while the form still holds, checks and sends the value.
     A CHANGE NO WORKFLOW MAKES IS NEVER SIMULATED. There is no delete, save or update
     function besides the workflows listed for this application; do not invent one, and do
     not fake one — removing a row from React state, a timer that "saves", a success toast
@@ -839,8 +871,31 @@ def _page_brief(doc: dict, page: dict) -> dict:
     data = page.get("data") or {}
     return {
         "page": {k: page.get(k) for k in ("id", "name", "route", "pattern", "purpose", "primaryTasks",
-                                          "actions", "states", "users", "access", "responsive")
+                                          "actions", "states", "stateNotes", "users", "access", "responsive")
                  if page.get(k) not in (None, [], "")},
+        # ADDING HAPPENS HERE (`addsHere`): no page of its own exists for a new
+        # record, so this page carries the form — a panel over the list, or
+        # the workspace opening empty — and runs the workflow that creates it.
+        **({"addsHere": "New " + str((ents.get(str(data.get("primaryEntity"))) or {}).get("name") or "records")
+            + " are added on this page: give it the form for one (a panel or drawer over the list, or "
+            "this workspace opening empty) that runs the workflow below which creates it. There is "
+            "no separate page to send anyone to."} if page.get("addsHere") else {}),
+        # A SCREEN, NOT A PAGE (`sections`): every part of it is written here —
+        # the list, the panel a chosen record opens in (and its link `param`,
+        # read from the page's search params), the tabs, the dialogs.
+        **({"screen": {
+            "write": ("This page is a SCREEN: build every section below in it. A `panel` opens when "
+                      "a record is chosen in the section it `opensFrom` and when the page is opened "
+                      "with `?<param>=<id>` (read it from the page's searchParams in load.ts, so a "
+                      "link lands on the record); a `tab` is a tab of the screen, chosen by "
+                      "`?tab=<section key>` so the menu can open it; a `dialog` opens "
+                      "from a control. Each section's `actions` are done by the workflows launched "
+                      "here; a section that `addsHere` carries the form that adds its records; a section "
+                      "marked `live` changes while someone watches, so the view calls `useLive()`."),
+            "sections": brief_sections(doc, [sec for sec in page.get("sections") or [] if isinstance(sec, dict)]),
+            **({"roles": SECTION_ROLES_RULE} if any(isinstance(sec, dict) and sec.get("roles")
+                                                    for sec in page.get("sections") or []) else {})}}
+           if page.get("sections") else {}),
         "sdkKey": pkeys.get(str(page.get("id"))),
         "primaryEntity": (ents.get(str(data.get("primaryEntity"))) or {}).get("name"),
         "supportingEntities": [(ents.get(str(x)) or {}).get("name") for x in data.get("supportingEntities") or []],
@@ -1024,7 +1079,10 @@ def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "",
         out.append(f"\nWhat is wanted of it now:\n{brief}")
     if current:
         out.append("\nIts current code:\n"
-                   f"```ts\n// load.ts\n{current.get('load')}\n```\n```tsx\n// view.tsx\n{current.get('view')}\n```")
+                   f"```ts\n// load.ts\n{current.get('load')}\n```\n```tsx\n// view.tsx\n{current.get('view')}\n```"
+                   # A SPLIT SCREEN'S PARTS: each edited as `part:<key>`.
+                   + "".join(f"\n```tsx\n// parts/{k}.tsx — edit as file `part:{k}`\n{v}\n```"
+                             for k, v in (current.get("parts") or {}).items()))
         out.append(
             "\nTHIS PAGE EXISTS — CHANGE IT WITH EDITS, NOT BY WRITING IT AGAIN. Reply with `edits`: "
             "each names the file (`load` or `view`), a `find` copied exactly from the current code "
@@ -1081,7 +1139,20 @@ def ensure_sdk(doc: dict, app_root: Path) -> None:
 
 #: SDK modules built on a package the scaffold did not always carry: a page
 #: that imports one needs it in the tree it compiles and runs in.
-SDK_PACKAGES: dict[str, tuple[str, ...]] = {"@/sdk/camera": ("@zxing/browser", "@zxing/library")}
+SDK_PACKAGES: dict[str, tuple[str, ...]] = {
+    "@/sdk/camera": ("@zxing/browser", "@zxing/library"),
+    # SCREENS THAT MOVE (2026-10-07): a map, a calendar, a command palette,
+    # dragging a card across a board, motion. An app built before them has
+    # the kit file or SDK module (filled in by `fill_scaffold_defaults` /
+    # `ensure_sdk`) but not the package, until a page imports it — then here.
+    "@/sdk/map": ("maplibre-gl",),
+    "@/components/ui/calendar": ("react-day-picker",),
+    "@/components/ui/command": ("cmdk",),
+    "@dnd-kit/core": ("@dnd-kit/core",),
+    "@dnd-kit/sortable": ("@dnd-kit/core", "@dnd-kit/sortable", "@dnd-kit/utilities"),
+    "@dnd-kit/utilities": ("@dnd-kit/utilities",),
+    "motion/react": ("motion",),
+}
 
 
 def ensure_sdk_packages(app_root: Path, view: str) -> list[str]:
@@ -1140,7 +1211,7 @@ class CompileError(RuntimeError):
 
 
 def typecheck(doc: dict, app_root: Path, page_id: str, load: str, view: str,
-              timeout: float = 180.0) -> list[str]:
+              timeout: float = 180.0, parts: dict[str, str] | None = None) -> list[str]:
     """Compile one page — its route module, load and view — against the SDK.
 
     Only errors in the page's own three files count: the scaffold's modules
@@ -1158,21 +1229,25 @@ def typecheck(doc: dict, app_root: Path, page_id: str, load: str, view: str,
         raise RuntimeError(f"no TypeScript compiler under {app_root} — install has not run")
     tsc = Path(tsc_path)
     ensure_sdk(doc, app_root)
-    ensure_sdk_packages(app_root, view)
-    files = code_page_files(doc, {"page": page_id, "load": load, "view": view})
+    ensure_sdk_packages(app_root, "\n".join([view, *(parts or {}).values()]))
+    files = code_page_files(doc, {"page": page_id, "load": load, "view": view, "parts": parts or {}})
     if not files:
         return [f"{page_id} is not a live page"]
+    # A split screen's parts keep their folder, so the frame's `./parts/x` resolves.
+    base = next(r for r in files if r.endswith("/view.tsx"))[: -len("/view.tsx")]
     check = app_root / ".forge-check" / f"{page_id}-{os.getpid()}-{threading.get_ident()}"
     if check.exists():
         shutil.rmtree(check, ignore_errors=True)
     check.mkdir(parents=True)
     try:
         for rel, content in files.items():
-            (check / Path(rel).name).write_text(content, encoding="utf-8")
+            dest = check / (rel[len(base) + 1:] if rel.startswith(base + "/") else Path(rel).name)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
         (check / "tsconfig.json").write_text(json.dumps({
             "extends": "../../tsconfig.json",
             "compilerOptions": {"incremental": False, "noEmit": True},
-            "include": ["page.tsx", "load.ts", "view.tsx", "../../next-env.d.ts",
+            "include": ["page.tsx", "load.ts", "view.tsx", "parts/*.tsx", "../../next-env.d.ts",
                         "../../src/types/**/*.d.ts"],
         }))
         proc = subprocess.run([str(tsc), "-p", str(check / "tsconfig.json"), "--pretty", "false"],
@@ -1458,6 +1533,15 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     happen here accepts the page as the compiler did. The critic's calls are
     in `spent` as `(usage, elapsed, "page_reviewer")`."""
     from services.blueprint import page_look
+    from services.blueprint.screen_parts import screen_parts
+
+    # A LARGE SCREEN IS WRITTEN IN PARTS (`screen_parts`), cut along the
+    # planner's sections. Written fresh (or laid out again) here; a screen
+    # already in parts is changed below with edits that can name a part.
+    cut = screen_parts(doc, page)
+    if cut and current is None:
+        return compose_screen(doc, page, app_root, client, cut, feedback=feedback,
+                              brief=brief, critic=critic, on_look=on_look)
 
     system = system_prompt(doc)
     spent: list[Any] = []
@@ -1505,7 +1589,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                                                        current=current, plan=plan,
                                                        relayout_of=relayout_of,
                                                        reference=reference if seeded else None),
-                       schema=PAGE_EDIT_SCHEMA if editing else PAGE_CODE_SCHEMA)
+                       schema=edit_schema((current or {}).get("parts") or {}) if editing else PAGE_CODE_SCHEMA)
         text = getattr(reply, "text", reply)
         if getattr(reply, "usage", None) is not None:
             spent.append((reply.usage, time.monotonic() - t0))
@@ -1515,6 +1599,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             note = f"Your reply was not valid JSON ({exc}). Return the object only."
             continue
         load, view = str(body.get("load") or ""), str(body.get("view") or "")
+        parts = dict((current or {}).get("parts") or {})     # a split screen keeps its parts
         emitted = len(load) + len(view)
         if editing and [n for n in body.get("needs") or [] if str(n).strip()]:
             # NOTHING IS WRITTEN AROUND A MISSING WORKFLOW. The writer says
@@ -1524,7 +1609,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             # A file left empty keeps its current contents; the edits apply
             # to whatever each file then is.
             base = {"load": load or str(current.get("load") or ""),
-                    "view": view or str(current.get("view") or "")}
+                    "view": view or str(current.get("view") or ""), "parts": parts}
             edits = [e for e in body.get("edits") or [] if isinstance(e, dict)]
             emitted += sum(len(str(e.get("find") or "")) + len(str(e.get("replace") or "")) for e in edits)
             try:
@@ -1536,14 +1621,17 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                                page.get("id"), round_, str(exc)[:300])
                 continue
             load, view = files["load"], files["view"]
+            parts = {k[5:]: v for k, v in files.items() if k.startswith("part:")}
         view = _use_client_first(view)
+        parts = {k: _use_client_first(v) for k, v in parts.items()}
+        whole = "\n".join([view, *parts.values()])            # what the screen does, parts and all
         # A DESIGNER'S PAGE IS NOT HELD TO THE HOUSE STYLE: those rules exist to
         # keep the model's own pages from looking alike, and here they would
         # push the rewrite back toward the look the design was chosen to replace.
-        design = [] if seeded else _design_findings(doc, page, view)
-        errors = (_static_findings(load, view) + _simulated_writes(view) + _unwired_actions(doc, page, view)
-                  + _unread_handoffs(doc, page, load, view)
-                  + typecheck(doc, app_root, str(page.get("id")), load, view))
+        design = [] if seeded else _design_findings(doc, page, whole)
+        errors = (_static_findings(load, view) + _simulated_writes(whole) + _unwired_actions(doc, page, whole)
+                  + _unread_handoffs(doc, page, load, whole)
+                  + typecheck(doc, app_root, str(page.get("id")), load, view, parts=parts))
         if original_view:
             dropped = _dropped_controls(original_view, view, change or brief)
             if dropped:
@@ -1560,7 +1648,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
             errors += design
         if not errors:
             body = {"page": str(page.get("id")), "rationale": str(body.get("rationale") or ""),
-                    "load": load, "view": view,
+                    "load": load, "view": view, **({"parts": parts} if parts else {}),
                     "requirements": list(page.get("requirements") or [])}
             if looks_left:
                 # LOOK BEFORE ACCEPTING. Rendered with sample data and judged
@@ -1571,7 +1659,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                 try:
                     verdict, cost = page_look.look_at(doc, page, Path(app_root), load, view, critic,
                                                       attempt=page_look.LOOKS - looks_left,
-                                                      change=change)
+                                                      change=change, parts=parts)
                 except page_look.LookUnavailable as exc:
                     logger.info("[ui_engineer] %s not looked at (%s); accepted as compiled", page.get("id"), exc)
                     looks_left = 0
@@ -1599,7 +1687,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                         # rewrite of a list page changed one border and kept
                         # every issue; as feedback it is what the writer is
                         # told to fix, every one, keeping what worked.
-                        current = {"load": load, "view": view}
+                        current = {"load": load, "view": view, "parts": parts}
                         note = page_look.look_brief(verdict, change_only=changing)
                         logger.info("[ui_engineer] %s sent back by the reviewer (%s/10)",
                                     page.get("id"), verdict.get("score"))
@@ -1619,7 +1707,7 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                         page.get("id"), round_, emitted, len(body["load"]), len(body["view"]))
             return body, spent
         last_errors = errors
-        current = {"load": load, "view": view}
+        current = {"load": load, "view": view, "parts": parts}
         note = ("The TypeScript compiler (strict) and the page rules refused it:\n"
                 + "\n".join(f"- {e}" for e in errors[:40]))
         logger.warning("[ui_engineer] %s round %d: %d error(s): %s", page.get("id"), round_,
@@ -1631,6 +1719,415 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         return best[1], spent
     raise CompileError(f"{page.get('id')}: still does not compile after {COMPILE_ROUNDS} rounds — "
                        + "; ".join(last_errors[:12]))
+
+
+#: The reply for one part of a split screen: its whole file.
+PART_CODE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["rationale", "code"],
+    "properties": {
+        "rationale": {"type": "string", "description": "One or two sentences: how this part works."},
+        "code": {"type": "string", "description": "The full contents of this part's file."},
+    },
+}
+
+
+def _part_names(parts: list[dict]) -> str:
+    return "\n".join(f"  - parts/{p['key']}.tsx — {p['label']}: import {p['component']} from \"./parts/{p['key']}\";"
+                     for p in parts)
+
+
+#: How a page's code honours `PageSection.roles` — the brief carries them as
+#: role names, the names the signed-in user's `role` holds.
+SECTION_ROLES_RULE = (
+    "A section that names `roles` is only for people of those roles: load.ts returns the viewer's "
+    "role (`role: ctx.user?.role ?? null`) and does not read that section's records for anyone "
+    "else; the view draws the section — and its tab, its control, its menu of actions — only when "
+    "the role is one of them. Everyone else sees the screen without it, as if it were never there."
+)
+
+
+def brief_sections(doc: dict, sections: list[dict]) -> list[dict]:
+    """The sections as the page writer reads them: entities and roles by name."""
+    from services.blueprint.screen_parts import section_audience
+
+    ents = {str(e.get("id")): e.get("name") for e in (doc.get("data") or {}).get("entities") or []}
+    out = []
+    for sec in sections:
+        row = {k: v for k, v in sec.items() if k not in ("entity", "roles") and v not in (None, [], "")}
+        if sec.get("entity"):
+            row["entity"] = ents.get(str(sec.get("entity"))) or sec.get("entity")
+        if section_audience(doc, sec):
+            row["roles"] = section_audience(doc, sec)
+        out.append(row)
+    return out
+
+
+def frame_prompt(doc: dict, page: dict, parts: list[dict], *, plan: dict | None = None,
+                 feedback: str = "", brief: str = "", current: dict | None = None) -> str:
+    """Ask for the screen's data and its frame — not its parts."""
+    from services.blueprint.app_sdk import workflow_keys
+    from services.blueprint.screen_parts import frame_workflows
+
+    keys = workflow_keys(doc)
+    mine = [f"workflows.{keys.get(w)}" for w in frame_workflows(doc, page, parts) if keys.get(w)]
+    out = ["Write this SCREEN's data and its frame.\n\n```json\n" + json.dumps(_page_brief(doc, page), indent=2)
+           + "\n```",
+           "\nTHIS SCREEN IS WRITTEN IN PARTS, each its own file written separately against what your "
+           "load.ts returns:\n" + _part_names(parts) + "\n\n"
+           "You write two files. load.ts — everything the WHOLE screen shows, every part's records "
+           "included: each part reads its data from what load returns. view.tsx — the frame only: the "
+           "screen's header and its own actions, the tabs (`?tab=<part key>` chooses the open one; the "
+           "first when none), and each part where it goes as `<CouponsPart data={props} />` — `data` is "
+           "exactly what load returns. Do NOT write the parts' contents; they are written next."
+           + ("\n\nA part whose section names `roles` is the frame's to show or not: its tab and the part "
+              "itself only for those roles. " + SECTION_ROLES_RULE
+              if any(sec.get("roles") for p in parts for sec in p["sections"]) else ""),
+           ("\nThe frame itself runs: " + ", ".join(mine) + "." if mine else
+            "\nEvery workflow launched here is run by a part; the frame runs none.")]
+    if plan:
+        out.append("\nYour plan for the screen:\n```json\n" + json.dumps(plan, indent=2) + "\n```")
+    if brief:
+        out.append(f"\nWhat is wanted of it now:\n{brief}")
+    if current:
+        out.append("\nYour last frame, refused:\n"
+                   f"```ts\n// load.ts\n{current.get('load')}\n```\n```tsx\n// view.tsx\n{current.get('view')}\n```")
+    if feedback:
+        out.append(f"\nWhy it was refused — fix exactly this:\n{feedback}")
+    return "\n".join(out)
+
+
+def part_prompt(doc: dict, page: dict, part: dict, load: str, *, feedback: str = "",
+                brief: str = "", current: str = "") -> str:
+    """Ask for one part of a split screen, against the screen's load."""
+    from services.blueprint.app_sdk import workflow_keys
+
+    keys = workflow_keys(doc)
+    sections = brief_sections(doc, part["sections"])
+    runs = [f"workflows.{keys.get(w)}" for w in part["workflows"] if keys.get(w)]
+    screen = {k: v for k, v in _page_brief(doc, page).items() if k in ("page", "primaryEntity", "roles", "content")}
+    out = [f"Write ONE PART of a screen: parts/{part['key']}.tsx — {part['label']}.",
+           "\nThe screen:\n```json\n" + json.dumps(screen, indent=2) + "\n```",
+           "\nThis part draws these sections — its list, the panel a chosen record opens in, its "
+           "dialogs:\n```json\n" + json.dumps(sections, indent=2) + "\n```",
+           ("\nThis part runs: " + ", ".join(runs) + " — each needs its control here." if runs
+            else "\nThis part runs no workflow of its own."),
+           "\nThe screen's load.ts — your data is exactly what it returns:\n```ts\n" + load + "\n```",
+           "\nThe file: \"use client\" on the first line; "
+           f"`import type {{ load }} from \"../load\"; type Data = NonNullable<Awaited<ReturnType<typeof load>>>;` "
+           f"and `export default function {part['component']}({{ data }}: {{ data: Data }}) {{ … }}`. "
+           "The frame draws the screen's header and the tabs — draw this part whole beneath them: a "
+           "record opened in a panel is read from and written to the address (`?<param>=<id>` with "
+           "useSearchParams and useRouter), so a link lands on it. Imports as for a page; the only "
+           "sibling file you import is ../load, for its type."]
+    if any(sec.get("roles") for sec in sections):
+        out.append("\n" + SECTION_ROLES_RULE)
+    if brief:
+        out.append(f"\nWhat is wanted of the screen now:\n{brief}")
+    if current:
+        out.append(f"\nYour last version of this part, refused:\n```tsx\n{current}\n```")
+    if feedback:
+        out.append(f"\nWhy it was refused — fix exactly this:\n{feedback}")
+    return "\n".join(out)
+
+
+def _errors_by_file(errors: list[str], parts: list[dict]) -> dict[str, list[str]]:
+    """`{"frame": […], "<part key>": […]}` — each error with the file it is in."""
+    out: dict[str, list[str]] = {}
+    for e in errors:
+        hit = next((p["key"] for p in parts if e.startswith(f"parts/{p['key']}.tsx")), None)
+        out.setdefault(hit or "frame", []).append(e)
+    return out
+
+
+def _route_unwired(doc: dict, page: dict, parts: list[dict], errors: list[str]) -> dict[str, list[str]]:
+    """An unwired workflow is the part's that runs it, or the frame's."""
+    from services.blueprint.app_sdk import workflow_keys
+
+    keys = workflow_keys(doc)
+    owner = {f"workflows.{keys.get(w)}": p["key"] for p in parts for w in p["workflows"] if keys.get(w)}
+    out: dict[str, list[str]] = {}
+    for e in errors:
+        hit = next((key for ref, key in owner.items() if re.search(re.escape(ref) + r"\b", e)), "frame")
+        out.setdefault(hit, []).append(e.replace("view.tsx:", f"parts/{hit}.tsx:" if hit != "frame" else "view.tsx:", 1))
+    return out
+
+
+def _write_part(doc: dict, page: dict, part: dict, app_root: Path, call: Any, writer: Any, *,
+                load: str, view: str, siblings: dict[str, str], brief: str = "", note: str = "",
+                current_code: str = "") -> tuple[str, str, list[str]]:
+    """One part of a split screen, written against the screen's load and
+    compiled with `siblings` beside it: `(key, code, errors left)`."""
+    pid = str(page.get("id"))
+    code, errors = current_code, []
+    for _ in range(COMPILE_ROUNDS):
+        body = call(part_prompt(doc, page, part, load, feedback=note, brief=brief, current=code),
+                    PART_CODE_SCHEMA, writer)
+        if body is None:
+            note = "Your reply was not valid JSON. Return the object only."
+            continue
+        code = _use_client_first(str(body.get("code") or ""))
+        own = [e.replace("view.tsx", f"parts/{part['key']}.tsx") for e in _static_findings("", code)
+               if not e.startswith("load.ts:")] + _simulated_writes(code)
+        compiled = typecheck(doc, app_root, pid, load, view, parts={**siblings, part["key"]: code})
+        errors = own + [e for e in compiled if e.startswith(f"parts/{part['key']}.tsx")]
+        if not errors:
+            return part["key"], code, []
+        note = ("The TypeScript compiler (strict) and the page rules refused it:\n"
+                + "\n".join(f"- {e}" for e in errors[:40]))
+    return part["key"], code, errors
+
+
+def _caller(system: str, spent: list, lock: Any) -> Any:
+    """`call(user, schema, writer) -> dict | None`, its usage counted in `spent`."""
+    def call(user: str, schema: dict, writer: Any) -> dict | None:
+        t0 = time.monotonic()
+        reply = writer(system=system, user=user, schema=schema)
+        if getattr(reply, "usage", None) is not None:
+            with lock:
+                spent.append((reply.usage, time.monotonic() - t0))
+        try:
+            return json.loads(getattr(reply, "text", reply))
+        except json.JSONDecodeError:
+            return None
+    return call
+
+
+def reshape_screen(doc: dict, page: dict, app_root: Path, client: Any, current: dict, *,
+                   brief: str = "", critic: Any = None, on_look: Any = None) -> tuple[dict, list[Any]]:
+    """Change a screen already written in parts, when the change adds or
+    takes away parts of it — a tab added, a section removed.
+
+    An edit can only change files that exist, so a new section of a split
+    screen had nowhere to be written and a removed one stayed behind as a file
+    nothing imported. Here: the frame and the parts that stay are edited with
+    the new parts stubbed and the gone ones absent; then each new part is
+    written against the edited load; then the whole screen is compiled, each
+    failure sent to the file it is in. A change that keeps the same parts is
+    `compose_page`'s edit, unchanged."""
+    import concurrent.futures as cf
+
+    from services.blueprint import page_look
+    from services.blueprint.screen_parts import part_key, screen_parts, stub_part
+
+    have = dict(current.get("parts") or {})
+    cut = screen_parts(doc, page)
+    if cut:
+        keep_keys = {p["key"] for p in cut} & set(have)
+        new = [p for p in cut if p["key"] not in have]
+    else:
+        # Fewer sections than a split needs: the parts whose sections remain
+        # stay parts; nothing new is cut.
+        anchors = {part_key(sec.get("key")) for sec in page.get("sections") or []
+                   if isinstance(sec, dict) and str(sec.get("placement") or "main") in ("main", "tab")}
+        keep_keys, new = set(have) & anchors, []
+    gone = sorted(set(have) - keep_keys)
+    if not new and not gone:
+        return compose_page(doc, page, app_root, client, brief=brief, current=current,
+                            critic=critic, on_look=on_look)
+    pid = str(page.get("id"))
+    stubs = {p["key"]: stub_part(p["component"]) for p in new}
+    files_note = "\n\nTHE SCREEN'S FILES CHANGE WITH IT."
+    if new:
+        files_note += ("\nNew parts, each written NEXT by another writer — do not edit their stub files; "
+                       "in view.tsx import each and place it where its section goes, and make load.ts "
+                       "return what it shows:\n" + _part_names(new))
+    if gone:
+        files_note += ("\nParts that are gone (their files are deleted): "
+                       + ", ".join(f"parts/{k}.tsx" for k in gone)
+                       + " — take each one's import and its place out of view.tsx, and out of load.ts "
+                         "whatever only it read.")
+    # THE FRAME IS NOT ASKED TO RUN WHAT A NEW PART RUNS. Checked against the
+    # whole page, the edit would be refused for a new part's workflows that
+    # only the part — not written yet — offers.
+    theirs = {w for p in new for w in p["workflows"]}
+    staging = {**doc, "workflows": [
+        {**w, "launchedFrom": [x for x in w.get("launchedFrom") or [] if str(x) != pid]}
+        if isinstance(w, dict) and str(w.get("id")) in theirs else w
+        for w in doc.get("workflows") or []]}
+    staged = {**current, "parts": {**{k: have[k] for k in keep_keys}, **stubs}}
+    body, spent = compose_page(staging, page, app_root, client, brief=(brief + files_note).strip(),
+                               current=staged)
+    load, view = str(body.get("load") or ""), str(body.get("view") or "")
+    kept = {k: v for k, v in (body.get("parts") or {}).items() if k in keep_keys}
+    unplaced = [p for p in new if f"./parts/{p['key']}" not in view]
+    if unplaced:
+        raise CompileError(f"{pid}: the reshaped frame never places " + ", ".join(
+            f"parts/{p['key']}.tsx" for p in unplaced))
+
+    system = system_prompt(doc)
+    lock = threading.Lock()
+    call = _caller(system, spent, lock)
+    written = dict(kept)
+    siblings = {**kept, **stubs}
+    if new:
+        with cf.ThreadPoolExecutor(min(4, len(new))) as pool:
+            results = list(pool.map(lambda p: _write_part(doc, page, p, app_root, call, client, load=load,
+                                                          view=view, siblings=siblings, brief=brief), new))
+        for key, code, errors in results:
+            if errors:
+                raise CompileError(f"{pid}: parts/{key}.tsx still does not compile after "
+                                   f"{COMPILE_ROUNDS} rounds — " + "; ".join(errors[:8]))
+            written[key] = code
+
+    # THE WHOLE SCREEN, against the real definition.
+    for round_ in range(COMPILE_ROUNDS):
+        whole = "\n".join([view, *written.values()])
+        compiled = typecheck(doc, app_root, pid, load, view, parts=written)
+        wiring = _unwired_actions(doc, page, whole) + _unread_handoffs(doc, page, load, whole)
+        if not compiled and not wiring:
+            break
+        if round_ == COMPILE_ROUNDS - 1:
+            raise CompileError(f"{pid}: the reshaped screen does not hold together — "
+                               + "; ".join((compiled + wiring)[:8]))
+        faults = _errors_by_file(compiled, cut or [{"key": k} for k in written])
+        routed = _route_unwired(doc, page, cut, wiring) if cut else ({"frame": wiring} if wiring else {})
+        for key, errs in routed.items():
+            faults.setdefault(key, []).extend(errs)
+        fresh = {p["key"]: p for p in new}
+        for key, errs in faults.items():
+            text = "The screen, put together, refused this file:\n" + "\n".join(f"- {e}" for e in errs[:30])
+            if key in fresh:
+                _, code, _errs = _write_part(doc, page, fresh[key], app_root, call, client, load=load,
+                                             view=view, siblings=written, brief=brief, note=text,
+                                             current_code=written[key])
+                written[key] = code
+            else:
+                fixed, more = compose_page(doc, page, app_root, client, feedback=text,
+                                           current={"load": load, "view": view, "parts": written})
+                spent += more
+                load, view = str(fixed.get("load") or load), str(fixed.get("view") or view)
+                written = {**written, **{k: v for k, v in (fixed.get("parts") or {}).items() if k in written}}
+    out = {**body, "load": load, "view": view, "parts": written}
+    if critic is not None:
+        try:
+            verdict, cost = page_look.look_at(doc, page, Path(app_root), load, view, critic,
+                                              change=brief, parts=written)
+            if cost[0] is not None:
+                spent.append((cost[0], cost[1], "page_reviewer"))
+            if on_look is not None:
+                on_look(verdict)
+        except page_look.LookUnavailable as exc:
+            logger.info("[ui_engineer] %s not looked at (%s); accepted as compiled", pid, exc)
+        except Exception:  # noqa: BLE001 — narration never fails a screen
+            pass
+    logger.info("[ui_engineer] %s reshaped: +%d part(s), -%d part(s)", pid, len(new), len(gone))
+    return out, spent
+
+
+def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: list[dict], *,
+                   feedback: str = "", brief: str = "", critic: Any = None,
+                   on_look: Any = None) -> tuple[dict, list[Any]]:
+    """Author a large screen as its frame and its parts (`screen_parts`):
+    the frame (load.ts + view.tsx) first, compiled with the parts stubbed;
+    then every part side by side, each compiled with its siblings stubbed;
+    then the whole screen, compiled together and held to the page rules, with
+    each failure sent back to the file it is in. Returns the `pageCode` body,
+    `parts` included, and the usage of every call."""
+    import concurrent.futures as cf
+
+    from services.blueprint import page_look
+    from services.blueprint.screen_parts import stub_part
+
+    system = system_prompt(doc)
+    spent: list[Any] = []
+    lock = threading.Lock()
+    pid = str(page.get("id"))
+
+    def call(user: str, schema: dict, writer: Any) -> dict | None:
+        t0 = time.monotonic()
+        reply = writer(system=system, user=user, schema=schema)
+        if getattr(reply, "usage", None) is not None:
+            with lock:
+                spent.append((reply.usage, time.monotonic() - t0))
+        try:
+            return json.loads(getattr(reply, "text", reply))
+        except json.JSONDecodeError:
+            return None
+
+    stubs = {p["key"]: stub_part(p["component"]) for p in parts}
+    plan = None if feedback else _page_plan(doc, page, client, system, spent, brief)
+    writer = _with(client, effort=WRITE_EFFORT, max_tokens=WRITE_MAX_TOKENS) if plan else client
+
+    # 1. THE FRAME: the screen's data and where each part goes.
+    load = view = ""
+    note, current = feedback, None
+    for _ in range(COMPILE_ROUNDS):
+        body = call(frame_prompt(doc, page, parts, plan=plan, feedback=note, brief=brief, current=current),
+                    PAGE_CODE_SCHEMA, writer)
+        if body is None:
+            note = "Your reply was not valid JSON. Return the object only."
+            continue
+        load, view = str(body.get("load") or ""), _use_client_first(str(body.get("view") or ""))
+        missing = [p for p in parts if f"./parts/{p['key']}" not in view]
+        errors = (_static_findings(load, view)
+                  + [f"view.tsx: the frame never places parts/{p['key']}.tsx — import {p['component']} "
+                     f"from \"./parts/{p['key']}\" and render <{p['component']} data={{props}} />." for p in missing]
+                  + typecheck(doc, app_root, pid, load, view, parts=stubs))
+        if not errors:
+            break
+        current, note = {"load": load, "view": view}, (
+            "The TypeScript compiler (strict) and the page rules refused it:\n" + "\n".join(f"- {e}" for e in errors[:40]))
+    else:
+        raise CompileError(f"{pid}: the screen's frame still does not compile after {COMPILE_ROUNDS} rounds — {note[:600]}")
+
+    # 2. THE PARTS, side by side, each against the frame and stubbed siblings.
+    def write_part(part: dict, note: str = "", current_code: str = "") -> tuple[str, str, list[str]]:
+        return _write_part(doc, page, part, app_root, call, writer, load=load, view=view,
+                           siblings=stubs, brief=brief, note=note, current_code=current_code)
+
+    written: dict[str, str] = {}
+    with cf.ThreadPoolExecutor(min(4, len(parts))) as pool:
+        for key, code, errors in pool.map(lambda p: write_part(p, feedback), parts):
+            if errors:
+                raise CompileError(f"{pid}: parts/{key}.tsx still does not compile after "
+                                   f"{COMPILE_ROUNDS} rounds — " + "; ".join(errors[:8]))
+            written[key] = code
+
+    # 3. THE WHOLE SCREEN: compiled together, held to the page's rules.
+    for round_ in range(COMPILE_ROUNDS):
+        whole = "\n".join([view, *written.values()])
+        compiled = typecheck(doc, app_root, pid, load, view, parts=written)
+        wiring = _unwired_actions(doc, page, whole) + _unread_handoffs(doc, page, load, whole)
+        if not compiled and not wiring:
+            break
+        if round_ == COMPILE_ROUNDS - 1:
+            raise CompileError(f"{pid}: the screen does not hold together — " + "; ".join((compiled + wiring)[:8]))
+        faults = _errors_by_file(compiled, parts)
+        for key, errs in _route_unwired(doc, page, parts, wiring).items():
+            faults.setdefault(key, []).extend(errs)
+        for key, errs in faults.items():
+            text = "The screen, put together, refused this file:\n" + "\n".join(f"- {e}" for e in errs[:30])
+            if key == "frame":
+                body = call(frame_prompt(doc, page, parts, plan=plan, feedback=text, brief=brief,
+                                         current={"load": load, "view": view}), PAGE_CODE_SCHEMA, writer)
+                if body:
+                    load = str(body.get("load") or load)
+                    view = _use_client_first(str(body.get("view") or view))
+            else:
+                part = next(p for p in parts if p["key"] == key)
+                _, code, _errs = write_part(part, text, written[key])
+                written[key] = code
+
+    body = {"page": pid, "rationale": str((plan or {}).get("state") or ""), "load": load, "view": view,
+            "parts": written, "requirements": list(page.get("requirements") or [])}
+    # 4. LOOKED AT AS ONE SCREEN, when a reviewer is at hand. A look never
+    # loses a screen: the review is reported, and the screen kept as compiled.
+    if critic is not None:
+        try:
+            verdict, cost = page_look.look_at(doc, page, Path(app_root), load, view, critic, parts=written)
+            if cost[0] is not None:
+                spent.append((cost[0], cost[1], "page_reviewer"))
+            if on_look is not None:
+                on_look(verdict)
+        except page_look.LookUnavailable as exc:
+            logger.info("[ui_engineer] %s not looked at (%s); accepted as compiled", pid, exc)
+        except Exception:  # noqa: BLE001 — narration never fails a screen
+            pass
+    logger.info("[ui_engineer] %s composed as a screen: frame + %d part(s), %d chars",
+                pid, len(written), len(load) + len(view) + sum(len(c) for c in written.values()))
+    return body, spent
 
 
 # ---------------------------------------------------------------------------

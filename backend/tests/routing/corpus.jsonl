@@ -271,3 +271,23 @@
 {"say": "it says it is public but it still asks me to sign in", "verb": "sync_app"}
 {"say": "the sample areas are wrong, make them real India and Sri Lanka ones", "verb": "refresh_sample_data", "note": "Test2 2026-09-28: Nepal paired with Uttar Pradesh"}
 {"say": "fix the demo data so each country has its own states", "verb": "refresh_sample_data"}
+{"say": "add a refunds tab to the support screen", "verb": "add_section"}
+{"say": "on the orders screen, open the order items in a panel when I click an order", "verb": "add_section"}
+{"say": "add a calendar of bookings to the front desk", "verb": "add_section"}
+{"say": "add a dialog on the customer screen to log a call", "verb": "add_section"}
+{"say": "add a tab", "verb": "add_section", "note": "names nothing; the turn asks"}
+{"say": "only the team lead should see the refunds tab on the support screen", "verb": "edit_section"}
+{"say": "show bookings on the front desk as a calendar instead of a list", "verb": "edit_section"}
+{"say": "rename the refunds tab to refund requests", "verb": "edit_section"}
+{"say": "on the support screen, open a ticket in a side panel instead of a separate tab", "verb": "edit_section"}
+{"say": "let agents add notes right on the ticket panel of the support screen", "verb": "edit_section"}
+{"say": "put the coupons tab of the marketing screen in the menu under Admin", "verb": "edit_section"}
+{"say": "the orders board on the kitchen screen should update by itself", "verb": "edit_section"}
+{"say": "add an approve button to the refunds tab on support", "verb": "edit_section"}
+{"say": "take the notes tab off the customer screen", "verb": "remove_section"}
+{"say": "remove the notes tab", "verb": "remove_section"}
+{"say": "put the refunds tab first on the support screen", "verb": "reorder_sections"}
+{"say": "move the refunds tab from support to the finance screen", "verb": "move_section"}
+{"say": "fold the campaigns page into the marketing screen", "verb": "merge_screens"}
+{"say": "we have too many pages, put coupons and campaigns on one screen", "verb": "merge_screens"}
+{"say": "make the refunds tab on support its own page", "verb": "split_section"}

@@ -18,7 +18,41 @@ from services.smith4.turn import turn
 from services.smith4.verbs import Ctx
 
 
-def handle(*, project_id: str, output_dir: str, message: str,
+def handle(**kwargs: Any) -> Outcome:
+    """One Smith turn, its model calls written to the usage ledger, and the
+    pages its change reaches used again before it answers."""
+    from services.build_usage import usage_scope
+    with usage_scope(agent="smith", output_dir=str(kwargs.get("output_dir") or ""), kind="smith"):
+        out = _handle(**kwargs)
+    if not kwargs.get("unattended"):
+        out = _checked(str(kwargs.get("output_dir") or ""), out)
+    return out
+
+
+def _checked(output_dir: str, out: Outcome) -> Outcome:
+    """A CHANGE IS CHECKED WHERE IT REACHES. Smith tries what it changed; the
+    pages it did not touch but did reach — a list of a record type whose
+    fields moved, a page that starts a process that changed — are opened as
+    the people they are for, and what broke is repaired once (`app_check`).
+    Both chat paths come through `handle`; a turn the platform runs unattended
+    is already inside a check and is not checked again."""
+    if out.status != "resolved" or not out.touched:
+        return out
+    try:
+        from services.blueprint.app_check import check_change
+        checked = check_change(output_dir, list(out.touched))
+    except Exception:  # noqa: BLE001 — the change landed; its check is a bonus
+        import logging
+        logging.getLogger(__name__).exception("[smith4] checking the pages a change reaches failed")
+        return out
+    if not checked:
+        return out
+    out.said = f"{out.said}\n\n{checked['said']}" if out.said else checked["said"]
+    out.touched = list(out.touched) + [t for t in checked["touched"] if t not in out.touched]
+    return out
+
+
+def _handle(*, project_id: str, output_dir: str, message: str,
            history: list | None = None,
            choose: Callable | None = None,
            move: Callable | None = None,

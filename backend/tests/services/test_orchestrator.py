@@ -1220,6 +1220,22 @@ def test_an_optional_node_failure_does_not_sink_the_run(svc):
     assert "credit balance too low" in report.degraded["ui_direction"]
 
 
+def test_pages_wait_for_credit_rather_than_ship_on_the_floor(svc):
+    """Ferry Booking (2026-09-28) shipped twelve pages on the plain fallback
+    layout when the account ran dry while they were being written, and no
+    later run wrote them. An outage says nothing about a page: `page_code`
+    waits for credit, so a resume writes exactly the pages still missing."""
+    svc.upsert("pages", {"name": "Bikes", "route": "/bikes", "pattern": "entity_list",
+                         "purpose": "Every bike."}, natural_key="/bikes")
+
+    def executor(spec: TaskSpec) -> AgentResult:
+        raise RuntimeError("Your credit balance is too low to access the Anthropic API")
+
+    report = run(svc, executor, plan=["page_code"], max_attempts=2)
+    assert not report.ok and "credit" in (report.paused_because or "").lower(), report
+    assert not any(str(k).startswith("page_code") for k in (report.degraded or {}))
+
+
 # ---------------------------------------------------------------------------
 # Event-driven: a node starts when ITS dependencies are done, not its level's
 # ---------------------------------------------------------------------------

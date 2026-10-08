@@ -48,7 +48,8 @@ async def test_async_create_matches_anthropic_shape():
     assert resp.content[0].text == "async-reply"
     assert resp.content[0].type == "text"
     assert resp.stop_reason == "end_turn"
-    assert resp.usage.input_tokens == 10 and resp.usage.cache_read_input_tokens == 4
+    # Anthropic's shape: input_tokens is the uncached part of LangChain's total of 10.
+    assert resp.usage.input_tokens == 6 and resp.usage.cache_read_input_tokens == 4
     assert _FakeChat.last_kwargs["model"] == "claude-sonnet-4-6"
     assert _FakeChat.last_kwargs["temperature"] == 0.0
     assert isinstance(_FakeChat.last_messages[0], SystemMessage)

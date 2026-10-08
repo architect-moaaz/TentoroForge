@@ -58,7 +58,7 @@ def test_a_column_that_merely_sounds_alike_keeps_its_value(tmp_path):
     row = seed["nurses"][0]
     assert row["salt"] == "Salt 1"
     assert row["passes"] == 1
-    assert row["passType"] == "Pass Type 1"
+    assert row["passType"] and "pass" not in str(row["passType"]).lower()   # a value of its own, not emptied
 
 
 def test_which_names_count_is_one_rule_with_no_exceptions():

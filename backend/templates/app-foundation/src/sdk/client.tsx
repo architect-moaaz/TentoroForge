@@ -19,6 +19,31 @@ export { distanceKm, formatDistance, parseNear, type GeoPoint } from "./geo";
 
 type Json = Record<string, unknown>;
 
+/**
+ * A SCREEN THAT CHANGES WHILE SOMEONE WATCHES — an orders board, a rider's
+ * live trip, live operations: the page's own `load` runs again every
+ * `seconds` while the tab is visible, at once when the person comes back to
+ * it, and not at all while it is hidden. What the person is typing stays: a
+ * refresh re-reads the data, it does not remount the screen.
+ *
+ *   export default function View(props: Props) { useLive(10); … }
+ */
+export function useLive(seconds = 10): void {
+  const router = useRouter();
+  React.useEffect(() => {
+    if (typeof document === "undefined") return;
+    const every = Math.max(3, seconds) * 1000;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const tick = () => { if (document.visibilityState === "visible") router.refresh(); };
+    const start = () => { if (!timer) timer = setInterval(tick, every); };
+    const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+    const seen = () => { if (document.visibilityState === "visible") { tick(); start(); } else stop(); };
+    start();
+    document.addEventListener("visibilitychange", seen);
+    return () => { stop(); document.removeEventListener("visibilitychange", seen); };
+  }, [router, seconds]);
+}
+
 export interface RunResult {
   ok: boolean;
   /** What the workflow returned — its log, and the record it wrote if any. */
@@ -97,12 +122,23 @@ export interface Option {
   value: string;
 }
 
+/** What a field's own control is handed when it draws itself (`render`):
+ *  the form still holds the value, checks it and sends it. */
+export interface FieldControl<V> {
+  id: string;
+  value: V | undefined;
+  onChange: (value: V | undefined) => void;
+  required: boolean;
+}
+
 /** How one workflow input is collected. `value` fixes it instead (the record
  *  the page is about, the decision a button stands for) and renders nothing.
- *  `span: "full"` takes the whole row of a two-column form. */
+ *  `span: "full"` takes the whole row of a two-column form. `render` draws
+ *  the control yourself — chips, a stepper, a calendar, a map — while the
+ *  form keeps the wiring. */
 export type FieldSpec<V> =
   | { value: V }
-  | (V extends number
+  | ((V extends number
       ? { label: string; span?: "full"; kind?: "number"; placeholder?: string; help?: string; min?: number; max?: number; step?: number }
       : V extends boolean
         ? { label: string; span?: "full"; kind?: "checkbox" | "switch"; help?: string }
@@ -113,7 +149,8 @@ export type FieldSpec<V> =
           : { label: string; span?: "full";
               kind?: "text" | "textarea" | "email" | "date" | "time" | "datetime" | "select" | "password" | "url" | "tel" | "image" | "file";
               accept?: string;
-              options?: Option[]; placeholder?: string; help?: string });
+              options?: Option[]; placeholder?: string; help?: string })
+    & { render?: (control: FieldControl<V>) => React.ReactNode });
 
 type RequiredKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? never : K }[keyof T];
 type OptionalKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? K : never }[keyof T];
@@ -145,7 +182,8 @@ function Field({ name, spec, value, required, onChange }: {
     </label>
   );
 
-  if (kind === "checkbox" || kind === "switch") {
+  const render = spec.render as ((c: FieldControl<unknown>) => React.ReactNode) | undefined;
+  if ((kind === "checkbox" || kind === "switch") && !render) {
     return (
       <div className="flex items-start gap-3 sm:col-span-2" data-forge-field={name}>
         <input id={id} type="checkbox" className="mt-0.5 h-4 w-4 rounded border-input accent-[hsl(var(--primary))]"
@@ -155,7 +193,9 @@ function Field({ name, spec, value, required, onChange }: {
     );
   }
   let control: React.ReactNode;
-  if (kind === "textarea") {
+  if (render) {
+    control = render({ id, value, onChange, required });
+  } else if (kind === "textarea") {
     control = <textarea id={id} rows={4} required={required} className={inputClass + " h-auto min-h-[96px]"}
       placeholder={spec.placeholder as string | undefined}
       value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />;
@@ -425,8 +465,16 @@ export function ImageSearch({ label = "Search by image", param = "image", classN
 
 /** A form that runs a workflow. `fields` has one entry per workflow input,
  *  keyed by the input's name. */
+/** A heading over some of a form's fields — and, with `steps`, one step. */
+export interface FieldGroup<I> {
+  title: string;
+  description?: string;
+  fields: (keyof I & string)[];
+}
+
 export function WorkflowForm<I extends Json>({
   workflow, fields, initial, submitLabel, submitVariant = "primary", cancelHref, redirectTo, successMessage, columns = 2, className, onDone,
+  groups, steps = false, submitPlacement = "end",
 }: {
   workflow: Workflow<I>;
   fields: FieldMap<I>;
@@ -441,9 +489,17 @@ export function WorkflowForm<I extends Json>({
   columns?: 1 | 2;
   className?: string;
   onDone?: (result: RunResult) => void;
+  /** Fields under headings, in order; a field in none joins the last group. */
+  groups?: FieldGroup<I>[];
+  /** Show the groups one at a time, with Back and Next — a long application. */
+  steps?: boolean;
+  /** `full`: a full-width button (a phone's form); `sticky`: kept in view at the bottom of a long one. */
+  submitPlacement?: "end" | "full" | "sticky";
 }) {
   const router = useRouter();
   const specs = fields as Record<string, Record<string, unknown>>;
+  const [step, setStep] = React.useState(0);
+  const box = React.useRef<HTMLFormElement | null>(null);
   const required = new Set(workflow.required ?? []);
   const [values, setValues] = React.useState<Record<string, unknown>>(() => ({ ...(initial ?? {}) }));
   const { run, pending, error } = useWorkflow(workflow, { redirectTo, successMessage });
@@ -463,29 +519,80 @@ export function WorkflowForm<I extends Json>({
     onDone?.(out);
   };
 
-  return (
-    <form onSubmit={submit} className={"grid gap-6 " + (className ?? "")}>
-      <div className={"grid gap-5 " + (columns === 2 ? "sm:grid-cols-2" : "")}>
-        {Object.entries(specs).map(([name, spec]) =>
-          spec && !("value" in spec) ? (
-            <Field key={name} name={name} spec={spec as never} value={values[name]}
-              required={required.has(name) && !["checkbox", "switch"].includes(String(spec.kind))}
-              onChange={(v) => setValues((cur) => ({ ...cur, [name]: v }))} />
-          ) : null)}
+  const field = (name: string) => {
+    const spec = specs[name];
+    return spec && !("value" in spec) ? (
+      <Field key={name} name={name} spec={spec as never} value={values[name]}
+        required={required.has(name) && !["checkbox", "switch"].includes(String(spec.kind))}
+        onChange={(v) => setValues((cur) => ({ ...cur, [name]: v }))} />
+    ) : null;
+  };
+  const grid = (names: string[]) => (
+    <div className={"grid gap-5 " + (columns === 2 ? "sm:grid-cols-2" : "")}>{names.map(field)}</div>
+  );
+  // THE GROUPS, with every field somewhere: one named in none joins the last.
+  const named = new Set((groups ?? []).flatMap((g) => g.fields as string[]));
+  const loose = Object.keys(specs).filter((n) => !named.has(n));
+  const parts = (groups ?? []).map((g, i, all) => ({
+    ...g, names: [...(g.fields as string[]), ...(i === all.length - 1 ? loose : [])],
+  }));
+  const stepped = steps && parts.length > 1;
+  const last = !stepped || step === parts.length - 1;
+  // A step goes on only when what it asks is filled in — the browser's own check.
+  const next = () => {
+    const form = box.current;
+    if (form && !form.reportValidity()) return;
+    setStep((s) => Math.min(s + 1, parts.length - 1));
+  };
+  const section = (g: (typeof parts)[number]) => (
+    <fieldset key={g.title} className="grid gap-4">
+      <div className="grid gap-1">
+        <legend className="text-base font-semibold">{g.title}</legend>
+        {g.description && <p className="text-sm text-muted-foreground">{g.description}</p>}
       </div>
+      {grid(g.names)}
+    </fieldset>
+  );
+
+  return (
+    <form ref={box} onSubmit={last ? submit : (e) => { e.preventDefault(); next(); }}
+      className={"grid gap-6 " + (className ?? "")}>
+      {stepped && (
+        <ol className="flex flex-wrap items-center gap-2 text-sm" aria-label="Steps">
+          {parts.map((g, i) => (
+            <li key={g.title} aria-current={i === step ? "step" : undefined}
+              className={"flex items-center gap-2 " + (i === step ? "font-semibold text-foreground" : "text-muted-foreground")}>
+              <span className={"grid h-6 w-6 place-items-center rounded-full text-xs "
+                + (i <= step ? "bg-primary text-primary-foreground" : "bg-muted")}>{i + 1}</span>
+              {g.title}
+            </li>
+          ))}
+        </ol>
+      )}
+      {parts.length === 0 ? grid(Object.keys(specs))
+        : stepped ? section(parts[step])
+        : parts.map(section)}
       {error && <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
-      <div className="flex items-center justify-end gap-3">
-        {cancelHref && (
+      <div className={"flex items-center gap-3 "
+        + (submitPlacement === "full" ? "flex-col-reverse items-stretch" : "justify-end")
+        + (submitPlacement === "sticky" ? " sticky bottom-0 -mx-1 border-t bg-background/95 px-1 py-3 backdrop-blur" : "")}>
+        {cancelHref && !(stepped && step > 0) && (
           <button type="button" onClick={() => router.push(cancelHref)}
-            className="inline-flex h-10 items-center rounded-md px-4 text-sm font-medium text-muted-foreground hover:bg-muted">
+            className="inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium text-muted-foreground hover:bg-muted">
             Cancel
           </button>
         )}
+        {stepped && step > 0 && (
+          <button type="button" onClick={() => setStep((s) => Math.max(0, s - 1))}
+            className="inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium text-muted-foreground hover:bg-muted">
+            Back
+          </button>
+        )}
         <button type="submit" disabled={pending}
-          className={"inline-flex h-10 items-center gap-2 rounded-md px-5 text-sm font-medium shadow-sm transition disabled:opacity-60 "
+          className={"inline-flex h-10 items-center justify-center gap-2 rounded-md px-5 text-sm font-medium shadow-sm transition disabled:opacity-60 "
             + (submitVariant === "accent" ? "bg-accent text-accent-foreground hover:bg-accent/90" : "bg-primary text-primary-foreground hover:bg-primary/90")}>
           {pending && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
-          {submitLabel ?? workflow.name}
+          {last ? (submitLabel ?? workflow.name) : "Next"}
         </button>
       </div>
     </form>

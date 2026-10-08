@@ -11,8 +11,9 @@ installHarness({
   stubs: {
     "@/db": "export const db = { insert: () => ({ values: (v) => ({ returning: async () => [{ id: 'row-1', ...v }] }) }) };",
     "./embedding-columns": "export const EMBEDDING_DIMENSIONS = 512;\nexport const embeddingColumnsFor = () => [];\n",
-    "@/db/schema": "export const cases = { __name: 'cases', id: { columnType: 'PgUUID', dataType: 'string' }, title: { columnType: 'PgText', dataType: 'string' }, caseNumber: { columnType: 'PgText', dataType: 'string' } };",
-    "drizzle-orm": "export const getTableName = (t) => t.__name || 'cases'; export const is = (v) => !!(v && v.__name); export class Table {}; export const eq = () => ({}); export const and = () => ({}); export const sql = () => ({});",
+    "@/db/schema": "export const cases = { __name: 'cases', id: { columnType: 'PgUUID', dataType: 'string' }, title: { columnType: 'PgText', dataType: 'string' }, caseNumber: { columnType: 'PgText', dataType: 'string' } };\nexport const carts = { __name: 'carts', id: { columnType: 'PgUUID', dataType: 'string' }, status: { columnType: 'PgText', dataType: 'string' }, guestToken: { columnType: 'PgText', dataType: 'string' } };",
+    "../ownership-rules": "export const ownershipRulesFor = (e) => /^carts?$/.test(e) ? [{ entity: 'Cart', column: 'customerId', scope: 'user', guestColumn: 'guestToken' }] : [];",
+    "drizzle-orm": "export const getTableName = (t) => t.__name || 'cases'; export const is = (v) => !!(v && v.__name); export class Table {}; export const eq = () => ({}); export const and = () => ({}); export const sql = () => ({}); export const ne = (c, v) => ({ op: 'ne', col: c && c.__col, v }); export const gt = (c, v) => ({ op: 'gt', col: c && c.__col, v }); export const gte = (c, v) => ({ op: 'gte', col: c && c.__col, v }); export const lt = (c, v) => ({ op: 'lt', col: c && c.__col, v }); export const lte = (c, v) => ({ op: 'lte', col: c && c.__col, v }); export const inArray = (c, v) => ({ op: 'inArray', col: c && c.__col, v }); export const notInArray = (c, v) => ({ op: 'notInArray', col: c && c.__col, v });",
     "@/lib/error_reporter": "export const reportFromError = () => {};",
     "../fk-roles": "export const FK_ROLES = {}; export const fkRole = () => null; export const isDomainFk = () => false;",
     "@/lib/rules": "export const evaluateRuleSetForTable = async () => ({ errors: [], patches: {} });",
@@ -97,4 +98,42 @@ const result = await handlers.db_insert(
 eqJson(result.id, "row-1", "the step's output carries the row's id at the top");
 eqJson(result.inserted.id, "row-1", "`inserted` still carries the row");
 eqJson(resolve("{{insert_case.id}}", { variables: { insert_case: result } }), "row-1", "{{insert_case.id}} walks into it");
+
+// A GUEST'S CART CARRIES THEIR TOKEN (TCommerce, 2026-10-06). The execute
+// route puts the visitor's `forge-guest` token in `__guest`; an insert into a
+// table whose ownership rule names a guestColumn stamps it — over anything the
+// step said — so the data engine can hand the cart back to that visitor.
+const GUEST = "6f1c2b8e-0000-4000-8000-000000000001";
+const asGuest = await handlers.db_insert(
+  { table: "carts", values: { status: "open", guestToken: "someone-else" } },
+  { variables: { __guest: GUEST } } as any,
+);
+eqJson(asGuest.inserted.guestToken, GUEST, "a guest's insert is stamped with their own token");
+const signedIn = await handlers.db_insert(
+  { table: "carts", values: { status: "open" } },
+  { variables: { __guest: GUEST }, user: { id: "user-1" } } as any,
+);
+ok(signedIn.inserted.guestToken === undefined, "a signed-in person's cart is theirs by customer, not stamped");
+const other = await handlers.db_insert(
+  { table: "cases", values: { title: "x" } }, { variables: { __guest: GUEST } } as any,
+);
+ok(!("guestToken" in other.inserted), "a table with no guestColumn is left alone");
+eqJson(resolve("$guest", { variables: { __guest: GUEST } } as any), GUEST, "$guest names the visitor's token");
+eqJson(resolve("$guest", { variables: {} } as any), null, "and nothing when there is none");
+
+// A COMPARISON OTHER THAN "EQUALS" (ToroCommerce, 2026-10-07): "email not
+// already used by another customer" sent the `{ ne: … }` object itself to
+// Postgres as a uuid. The shipped _buildWhere, against the stubs above.
+const customers = { __name: "customers", id: { __col: "id", columnType: "PgUUID", dataType: "string" },
+                    email: { __col: "email", columnType: "PgText", dataType: "string" },
+                    stock: { __col: "stock", columnType: "PgInteger", dataType: "number" } };
+const wctx: any = { variables: { customer: { id: "c-1" }, email: "a@b.co" } };
+const notMe = mod._buildWhere(customers, { id: { ne: "{{customer.id}}" } }, wctx);
+eqJson([notMe.op, notMe.col, notMe.v], ["ne", "id", "c-1"], "{ ne: {{customer.id}} } is id <> that customer");
+const atLeast = mod._buildWhere(customers, { stock: { gte: 2 } }, wctx);
+eqJson([atLeast.op, atLeast.v], ["gte", 2], "{ gte: 2 } on a number column");
+const among = mod._buildWhere(customers, { id: { in: ["c-1", "{{customer.id}}"] } }, wctx);
+eqJson([among.op, among.v], ["inArray", ["c-1", "c-1"]], "{ in: [...] } resolves each value");
+eqJson(mod._comparison({ neq: 1 })?.name, "ne", "neq is ne");
+eqJson(mod._comparison({ id: 1 }), null, "an object that is not one comparison is not one");
 done("insert-binding");

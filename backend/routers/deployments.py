@@ -178,6 +178,22 @@ async def publish(
 # --------------------------------------------------------------------------- #
 
 
+@router.get("/api/projects/{project_id}/check")
+async def app_check_state(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """What the build found when it used the application, for the Publish
+    dialog to say before anything goes live: pages and processes that still do
+    not work, by name (`app_check.publish_note`). A warning, never a gate."""
+    project = await _require_project(project_id, user, db)
+    if not project.output_dir:
+        return {"checked": False, "pages": 0, "working": 0, "failing": [], "processes": []}
+    from services.blueprint.app_check import publish_note
+    return publish_note(str(project.output_dir))
+
+
 @router.get("/api/projects/{project_id}/deployments/latest")
 async def latest_deployment(
     project_id: uuid.UUID,

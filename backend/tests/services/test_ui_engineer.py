@@ -177,7 +177,8 @@ def test_the_reviewer_never_shares_the_persons_build_or_database(monkeypatch, tm
     (tmp_path / ".env.local").write_text("DATABASE_URL=postgresql://postgres:postgres@localhost:5437/app\n")
     assert page_review._database_port(tmp_path) == 5437
     ran, started = [], {}
-    monkeypatch.setattr(page_review, "_listening", lambda port: True)          # the person's DB is up
+    monkeypatch.setattr(page_review, "_listening", lambda port: True)          # the person's DB is up:
+    monkeypatch.setattr(page_review, "_database_container", lambda port: "c1")  # their container serves it
     monkeypatch.setattr(page_review, "_clone_database",
                         lambda root: ("c1", "app_review", "postgresql://x@localhost:5437/app_review"))
     monkeypatch.setattr(page_review.subprocess, "run", lambda cmd, **kw: ran.append(cmd))

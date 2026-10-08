@@ -455,7 +455,19 @@ def critic_prompt(context: dict[str, Any]) -> tuple[str, str]:
         "If the output is complete, the verdict is pass and findings is "
         "empty. A fail verdict requires at least one finding."
     )
-    user = json.dumps(context, ensure_ascii=False, indent=1)
+    # WHAT EVERY CHECK SHARES GOES IN THE CACHED HALF. The person's request
+    # rode in each check's message beside the one subject judged: Mozato's
+    # 78k-character prompt was ~19k of every ~21k-token check, 255 checks, none
+    # cached ($20 of a $116 day, 2026-10-06). In the system prompt it is the
+    # same text for every check of a run, so the first writes it and the rest
+    # read it at a tenth of the price; the message keeps only the subject.
+    shared = {k: context[k] for k in ("application", "userRequest") if context.get(k)}
+    if shared:
+        system += ("\n\nThe application, and what the person asked for — the same "
+                   "for every output you judge in this build:\n```json\n"
+                   + json.dumps(shared, ensure_ascii=False, indent=1) + "\n```")
+    user = json.dumps({k: v for k, v in context.items() if k not in shared},
+                      ensure_ascii=False, indent=1)
     return system, user
 
 

@@ -71,6 +71,9 @@ const db = {
 };
 installHarness({
   stubs: {
+    // seed.ts reads the account model (d8b972a0): an app with no account entity.
+    "../lib/account": "export const ACCOUNT = null; export const ADMIN_ROLE = 'Admin'; export const SIGNUP_ROLE = null; export const ROLES = [];",
+    "../lib/account-table": "export const accountTable = null;",
     "./index": "export const db = globalThis.__db;",
     "./schema": "export const users = globalThis.__tables.users; export const categories = globalThis.__tables.categories; export const pets = globalThis.__tables.pets; export const products = globalThis.__tables.products;",
     "bcryptjs": "export default { hashSync: () => 'hash', hash: async () => 'hash' };",
@@ -90,6 +93,10 @@ for (let i = 0; i < 50 && (globalThis as any).__seedExit === undefined; i++) awa
 // stub answers with { id: "admin" }; seedDomain pre-loads ids["users"] with it.
 ok((inserted.pets ?? []).length === 1, "pets seeded despite a label ownerId and a label date");
 ok(inserted.pets?.[0]?.dob instanceof Date, "a garbage date string became a Date, not a crash");
+// V8 reads a label as a date: "Date Of Birth 1" is January 2001, and "Start
+// Time 12" put RK_Test's slots in December 2001 (forge-v3, 2026-09-28).
+ok(inserted.pets?.[0]?.dob?.getFullYear?.() !== 2001, "a label is not read as a date — no 2001");
+ok(inserted.products?.[0]?.releaseDate?.getFullYear?.() !== 2001, "nor a release date");
 eqJson(inserted.pets?.[0]?.ownerId, "admin", "ownerId resolved to the seeded users pool (user-semantic)");
 ok((inserted.products ?? []).length === 1, "products seeded — a compound FK resolved");
 eqJson(inserted.products?.[0]?.productCategoryId, inserted.categories?.[0]?.id,

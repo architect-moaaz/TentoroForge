@@ -132,6 +132,8 @@ _PLATFORM_REFRESH_RUNTIME_MAP = (
     # store; an app built before that kept failing every upload on Vercel.
     ("storage.ts", "src/lib/storage.ts"),
     ("db/forge-files.schema.ts", "src/db/schema/_forge_files.ts"),
+    # Notifications carry the link to the record they are about.
+    ("db/forge-notifications.schema.ts", "src/db/schema/_forge_notifications.ts"),
     # The engine: foreign keys and yes/no groups shown by name on charts.
     ("data-engine.ts", "src/lib/data-engine.ts"),
 )
@@ -200,15 +202,21 @@ def _refresh_platform_files(output_dir: Path) -> None:
     # in the rail) otherwise reached a published app only after a Smith turn.
     try:
         import json as _json
-        from services.smith.sync_app import refresh_frame
+        from services.smith.sync_app import refresh_engine, refresh_frame
         for blueprint in (output_dir.parent / ".forge" / "blueprint" / "current.json",
                           output_dir / ".forge" / "blueprint" / "current.json"):
             if blueprint.is_file():
-                refresh_frame(output_dir, _json.loads(blueprint.read_text("utf-8")))
+                doc = _json.loads(blueprint.read_text("utf-8"))
+                refresh_frame(output_dir, doc)
+                # AND THE ENGINE: the workflow engine, the SDK and the workflow
+                # routes an app carries are the platform's. A fix to them
+                # reached a published app only after a Smith turn, so a
+                # republish asked for to deliver one shipped the old copy.
+                refresh_engine(output_dir, doc)          # re-applies the app's patches too
                 break
     except Exception:  # noqa: BLE001 — a stale frame is not a failed publish
         import logging as _logging
-        _logging.getLogger(__name__).warning("[vercel] could not refresh the frame of %s", output_dir, exc_info=True)
+        _logging.getLogger(__name__).warning("[vercel] could not refresh the frame and engine of %s", output_dir, exc_info=True)
 
 
 class VercelDeployProvider:

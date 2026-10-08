@@ -24,6 +24,7 @@ Deterministic and idempotent: the same Blueprint writes the same bytes.
 from __future__ import annotations
 
 import json
+import shutil
 import re
 from pathlib import Path
 from typing import Any, Iterable
@@ -748,12 +749,24 @@ def code_page_files(doc: dict, row: dict) -> dict[str, str]:
         f"{base}/page.tsx": page_module(doc, page, row),
         f"{base}/load.ts": str(row.get("load") or ""),
         f"{base}/view.tsx": str(row.get("view") or ""),
+        # A large screen's parts, beside its frame (`pageCode.parts`).
+        **{f"{base}/parts/{key}.tsx": str(code or "")
+           for key, code in (row.get("parts") or {}).items() if code},
     }
     # The root page is rendered by the catch-all, which a `loading.tsx` beside it cannot
     # reach; and a sign-in page has no shell to keep, so its own look is its loading state.
     if base != ROOT_DIR and str(page.get("pattern") or "") != "auth":
         files[f"{base}/loading.tsx"] = loading_module(page)
     return files
+
+
+def page_code_text(row: dict) -> str:
+    """Everything a page's code says — its view, its parts and its load — for
+    a check that looks for what the page does (a workflow it runs). A split
+    screen's controls live in its parts."""
+    return "\n".join([str(row.get("view") or ""),
+                      *[str(c or "") for c in (row.get("parts") or {}).values()],
+                      str(row.get("load") or "")])
 
 
 #: The template sign-in pages — each `auth` page's floor when it has no code.
@@ -769,7 +782,16 @@ def project_code_pages(doc: dict, app_root: str | Path) -> list[str]:
     root = Path(app_root)
     written: list[str] = []
     for row in _live(doc.get("pageCode")):
-        for rel, content in code_page_files(doc, row).items():
+        files = code_page_files(doc, row)
+        # A PART THE SCREEN NO LONGER HAS goes, so a renamed section does not
+        # leave yesterday's file compiling beside it.
+        for rel in [r for r in files if r.endswith("/view.tsx")]:
+            parts_dir = root / Path(rel).parent / "parts"
+            if parts_dir.is_dir():
+                for old in parts_dir.glob("*.tsx"):
+                    if f"{Path(rel).parent}/parts/{old.name}" not in files:
+                        old.unlink(missing_ok=True)
+        for rel, content in files.items():
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -800,6 +822,7 @@ def project_code_pages(doc: dict, app_root: str | Path) -> list[str]:
             if head.startswith(CODE_PAGE_MARKER):
                 for name in ("page.tsx", "load.ts", "view.tsx", "loading.tsx"):
                     (page_file.parent / name).unlink(missing_ok=True)
+                shutil.rmtree(page_file.parent / "parts", ignore_errors=True)
                 if page_file.parent == root / ROOT_DIR and _ROOT_STUB.exists():
                     # The catch-all imports it: `/` without code is the stub.
                     page_file.write_text(_ROOT_STUB.read_text(encoding="utf-8"), encoding="utf-8")

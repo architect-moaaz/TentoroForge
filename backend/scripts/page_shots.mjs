@@ -3,7 +3,7 @@
 //
 //   node page_shots.mjs <config.json>
 //   config = { baseUrl, email, password, outDir, width?, height?, probe?,
-//              states?, pages: [{ id, route, entity?, cookies?, anonymous? }] }
+//              states?, pages: [{ id, route, entity?, cookies?, anonymous?, group? }] }
 //
 // `states: false` skips the empty and missing-record openings (Smith's
 // `open_page` asks how ONE page behaves, not how it degrades). A page with
@@ -17,9 +17,14 @@
 //   * with `probe`, every control clicked from a fresh load: what happened.
 //
 // A route with a `[param]` is opened on a real record: the first row of the
-// page's entity, read through the app's own data API as the signed-in user.
+// page's entity, read through the app's own data API as the signed-in user —
+// in the path (`/orders/[id]`) or in the query, where a screen opens a record
+// in its panel (`/support?ticket=[ticket]`). Pages of one `group` are one
+// screen opened at different places (a tab, a panel): a control already
+// pressed in the group is not pressed again.
 // Prints one JSON line: [{ id, route, url, landed, text, status, file, errors[], ms,
-//                          states: { empty?, missing? }, controls? }].
+//                          tabs[], states: { empty?, missing? }, controls? }];
+// a control that opened a dialog carries what it showed (`opened`).
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
@@ -28,6 +33,8 @@ const cfg = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 fs.mkdirSync(cfg.outDir, { recursive: true });
 const browser = await chromium.launch();
 const viewport = { width: cfg.width ?? 1440, height: cfg.height ?? 900 };
+// The tallest screenshot a reviewer is sent (scale factor 1): under the API's 8000.
+const MAX_SHOT_PX = 7800;
 const ctx = await browser.newContext({ viewport });
 
 // NextAuth's own credentials endpoint; the session cookie lands in this context.
@@ -73,13 +80,29 @@ async function contextsFor(p) {
 const MISSING_ID = "00000000-0000-4000-8000-000000000000";
 const MAX_CONTROLS = 24;
 
-async function firstId(context, entity) {
+async function firstRow(context, entity) {
   if (!entity) return null;
   try {
     const res = await context.request.get(`${cfg.baseUrl}/api/data/${encodeURIComponent(entity)}?limit=1`);
     const body = await res.json();
-    return body?.data?.[0]?.id ?? null;
+    return body?.data?.[0] ?? null;
   } catch { return null; }
+}
+
+// EACH [param] BY ITS NAME. `/shop/[slug]` opened on a product's id answered
+// "not found", and every look at TCommerce's product page — the one with Add
+// to Bag — was a look at the not-found screen (2026-10-06). A param the row
+// carries as a field (slug, code) takes that value; any other takes the id.
+function fillRoute(url, row) {
+  const camel = (s) => s.replace(/[-_]([a-z])/g, (_, c) => c.toUpperCase());
+  const [pathPart, query] = url.split("?");
+  const filled = pathPart.replace(/\[([^\]]+)\]/g, (_, name) => {
+    const v = name === "id" ? row.id : (row[name] ?? row[camel(name)] ?? row.id);
+    return encodeURIComponent(String(v));
+  });
+  // A panel's link names the record by its id, whatever the parameter is called.
+  return query === undefined ? filled
+    : `${filled}?${query.replace(/\[([^\]]+)\]/g, () => encodeURIComponent(String(row.id)))}`;
 }
 
 // The shell scrolls its main column, so a full-page screenshot would stop at
@@ -130,7 +153,11 @@ async function open(context, url, { shot } = {}) {
   if (shot) {
     await unclip(page);
     await page.waitForTimeout(250);
-    await page.screenshot({ path: shot, fullPage: true, animations: "disabled", timeout: 30000 })
+    // At most MAX_SHOT_PX tall: the API refuses an image with a side over
+    // 8000, and a long list's full page passed it (wz7a99ir, 2026-10-04).
+    const tall = await page.evaluate(() => document.documentElement.scrollHeight).catch(() => viewport.height);
+    await page.screenshot({ path: shot, fullPage: true, animations: "disabled", timeout: 30000,
+                            clip: { x: 0, y: 0, width: viewport.width, height: Math.min(Math.max(tall, viewport.height), MAX_SHOT_PX) } })
       .catch((e) => errors.push(`screenshot: ${e.message}`));
   }
   // What the page SAYS it is — streaming sends a not-found page as HTTP 200.
@@ -140,7 +167,11 @@ async function open(context, url, { shot } = {}) {
   // wrong screen, or a list that is empty, is only visible here.
   const landed = new URL(page.url()).pathname;
   const text = (await page.locator("body").innerText({ timeout: 5000 }).catch(() => "")).slice(0, 6000);
-  return { page, status, errors, state, landed, text };
+  // The screen's tabs, by what they say — who is shown which is a fact here.
+  const tabs = await page.evaluate(() => [...(document.querySelector("main") || document.body)
+    .querySelectorAll("[role='tab']")].map((t) => (t.textContent || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)).catch(() => []);
+  return { page, status, errors, state, landed, text, tabs };
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +182,14 @@ async function open(context, url, { shot } = {}) {
 // not a form's submit (an empty submit only proves validation), not a field.
 async function controls(page) {
   return page.evaluate(() => {
-    const root = document.querySelector("main") || document.body;
+    // AN OPEN PANEL OR DIALOG IS WHAT A PERSON CAN PRESS. Behind its overlay
+    // the page is inert: a panel opened by its link had the screen's own
+    // links pressed behind it, each a five-second timeout read as broken
+    // (ToroCommerce, 2026-10-07). Its controls are the ones to try.
+    const open = [...document.querySelectorAll("[role='dialog'], [role='alertdialog'], dialog[open]")]
+      .filter((d) => { const r = d.getBoundingClientRect(); return r.width && r.height; });
+    const modal = open.filter((d) => d.getAttribute("aria-modal") === "true" || d.tagName === "DIALOG").pop();
+    const root = modal || document.querySelector("main") || document.body;
     const frame = (el) => el.closest("header, nav[aria-label='Main'], aside");
     const SEL = "button, a[href], [role='button'], [role='menuitem'], [role='tab']";
     const all = [...document.querySelectorAll(SEL)];          // what `press` counts in
@@ -159,7 +197,7 @@ async function controls(page) {
     const out = [];
     const seen = new Set();
     for (const el of els) {
-      if (frame(el) && !el.closest("main")) continue;
+      if (!modal && frame(el) && !el.closest("main")) continue;
       const r = el.getBoundingClientRect();
       if (!r.width || !r.height) continue;
       const style = getComputedStyle(el);
@@ -174,7 +212,16 @@ async function controls(page) {
       const key = `${el.tagName}|${label}|${href.replace(/[0-9a-f-]{8,}/gi, ":id")}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ index: all.indexOf(el), label, kind: href ? "link" : "button", href });
+      // AN OPTION ALREADY CHOSEN. "Dine-in" was the order type a page opened
+      // with; pressing it changed nothing, rightly, and read as a dead button
+      // (F&B, 2026-10-03). Said by the control itself when it says it, and
+      // otherwise found by pressing an option beside it first (`alt`).
+      const chosen = ["aria-pressed", "aria-checked", "aria-selected"].some((a) => el.getAttribute(a) === "true")
+        || (el.hasAttribute("aria-current") && el.getAttribute("aria-current") !== "false");
+      const sibling = href ? null : [...(el.parentElement?.children || [])]
+        .find((x) => x !== el && x.matches(SEL) && !x.disabled);
+      out.push({ index: all.indexOf(el), label, kind: href ? "link" : "button", href, chosen,
+                 alt: sibling ? all.indexOf(sibling) : null });
     }
     return out;
   });
@@ -183,17 +230,26 @@ async function controls(page) {
 function fingerprint(page) {
   return page.evaluate(() => {
     const main = document.querySelector("main") || document.body;
+    const open = [...document.querySelectorAll("[role='dialog'], [role='alertdialog'], dialog[open]")];
+    // A CHOSEN OPTION IS A CHANGE. A size or a colour pressed in a product's
+    // panel says so with aria-pressed and changes no text: it read as a
+    // button that does nothing (ToroCommerce, 2026-10-07).
+    const chosen = [...document.querySelectorAll(
+      "[aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [data-state='checked'], [data-state='on'], [data-state='active']")]
+      .map((el) => (el.getAttribute("aria-label") || el.textContent || "").trim().slice(0, 40)).join("|");
+    const inside = open.map((d) => d.innerText || "").join("\n");
     return {
       url: location.href,
-      text: main.innerText.length + ":" + main.innerText.slice(0, 2000),
-      dialogs: document.querySelectorAll("[role='dialog'], [role='alertdialog'], dialog[open]").length,
+      text: main.innerText.length + ":" + main.innerText.slice(0, 2000) + "\u0000" + inside.slice(0, 2000),
+      dialogs: open.length,
       expanded: [...document.querySelectorAll("[aria-expanded='true']")].length,
       toasts: document.querySelectorAll("[data-sonner-toast]").length,
+      chosen,
     };
   });
 }
 
-async function press(context, url, control) {
+async function press(context, url, control, firstIndex = null) {
   const page = await context.newPage();
   const errors = watch(page);
   const calls = [];
@@ -210,6 +266,12 @@ async function press(context, url, control) {
   try {
     await page.goto(cfg.baseUrl + url, { waitUntil: "load", timeout: 60000 });
     await page.waitForTimeout(700);
+    if (firstIndex !== null) {
+      // Another option first, so this one is not the one already chosen.
+      await page.locator("button, a[href], [role='button'], [role='menuitem'], [role='tab']")
+        .nth(firstIndex).click({ timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
     const before = await fingerprint(page);
     const target = page.locator("button, a[href], [role='button'], [role='menuitem'], [role='tab']")
       .nth(control.index);
@@ -222,7 +284,8 @@ async function press(context, url, control) {
       await page.waitForTimeout(400);
       after = await fingerprint(page).catch(() => before);
       if (calls.length || dialog || errors.length || after.url !== before.url || after.dialogs !== before.dialogs
-          || after.expanded !== before.expanded || after.toasts !== before.toasts || after.text !== before.text) break;
+          || after.expanded !== before.expanded || after.toasts !== before.toasts || after.text !== before.text
+          || after.chosen !== before.chosen) break;
     }
     await page.waitForLoadState("load", { timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(calls.length ? 800 : 0);            // let a workflow's reply land
@@ -244,11 +307,25 @@ async function press(context, url, control) {
       outcome = bad ? "broken-link" : "navigated";
       detail = `${new URL(after.url).pathname} (HTTP ${status}${landed ? `, shows the ${landed} page` : ""})`;
     } else if (dialog || after.dialogs > before.dialogs || after.expanded !== before.expanded
-               || after.toasts > before.toasts || after.text !== before.text) {
+               || after.toasts > before.toasts || after.text !== before.text || after.chosen !== before.chosen) {
       outcome = "changed";
-      detail = dialog ? `asked "${dialog}"` : "the page changed";
+      detail = dialog ? `asked "${dialog}"` : after.chosen !== before.chosen && after.text === before.text
+        ? "it was chosen" : "the page changed";
     }
-    return { label: control.label, kind: control.kind, outcome, detail };
+    // WHAT A DIALOG SHOWS. A dialog that opened counted as working, and what
+    // was in it — an add form reading its choices, a record's panel — was
+    // never looked at. Read once it has settled; a crash inside it after it
+    // opened is still this press's error.
+    let opened = null;
+    if (outcome === "changed" && after.dialogs > before.dialogs) {
+      await page.waitForTimeout(800);
+      opened = await page.evaluate(() => {
+        const all = document.querySelectorAll("[role='dialog'], [role='alertdialog'], dialog[open]");
+        return all.length ? (all[all.length - 1].innerText || "").slice(0, 3000) : null;
+      }).catch(() => null);
+      if (errors.length) { outcome = "error"; detail = `inside the dialog it opened: ${errors[0]}`; }
+    }
+    return { label: control.label, kind: control.kind, outcome, detail, ...(opened !== null ? { opened } : {}) };
   } catch (e) {
     return { label: control.label, kind: control.kind, outcome: "error",
              detail: `could not be pressed: ${e.message.split("\n")[0].slice(0, 200)}` };
@@ -260,6 +337,7 @@ async function press(context, url, control) {
 // ---------------------------------------------------------------------------
 
 const out = [];
+const pressedIn = new Set();          // `${group}|${control}` — a screen's control is pressed once
 for (const p of cfg.pages) {
   if (p.signIn) {
     // SIGNING IN, THROUGH THE FORM, as a person does: where it lands is the
@@ -303,15 +381,15 @@ for (const p of cfg.pages) {
   const who = await contextsFor(p);
   const isRecord = /\[[^\]]+\]/.test(url);
   if (isRecord) {
-    const id = await firstId(who.ctx, p.entity);
-    if (!id) { out.push({ id: p.id, route: p.route, skipped: "no record to open" }); continue; }
-    url = url.replace(/\[[^\]]+\]/g, id);
+    const row = await firstRow(who.ctx, p.entity);
+    if (!row?.id) { out.push({ id: p.id, route: p.route, skipped: "no record to open" }); continue; }
+    url = fillRoute(url, row);
   }
   const t0 = Date.now();
   const file = path.join(cfg.outDir, `${p.id}.png`);
   const main = await open(who.ctx, url, { shot: file });
   const result = { id: p.id, route: p.route, url, as: p.as ?? null, status: main.status, state: main.state,
-                   landed: main.landed, text: main.text,
+                   landed: main.landed, text: main.text, tabs: main.tabs,
                    file, errors: [...new Set(main.errors)].slice(0, 12), states: {} };
   let found = [];
   if (cfg.probe) found = await controls(main.page).catch(() => []);
@@ -333,13 +411,28 @@ for (const p of cfg.pages) {
 
   if (cfg.probe) {
     result.controls = [];
-    for (const c of found.slice(0, MAX_CONTROLS)) {
+    const fresh = found.filter((c) => {
+      if (!p.group) return true;
+      const key = `${p.group}|${c.kind}|${c.label}|${(c.href || "").replace(/[0-9a-f-]{8,}/gi, ":id")}`;
+      if (pressedIn.has(key)) return false;
+      pressedIn.add(key);
+      return true;
+    });
+    for (const c of fresh.slice(0, MAX_CONTROLS)) {
       // A DEAD CONTROL IS DEAD TWICE. The first press of a link on a cold dev
       // server compiles the page it opens, and F&B's working Edit link read
       // as "does nothing when pressed" (2026-10-01) — a false finding that
       // sends Smith to fix what works. Pressed again, the page is compiled.
       let outcome = await press(who.ctx, url, c);
       if (outcome.outcome === "nothing") outcome = await press(who.ctx, url, c);
+      if (outcome.outcome === "nothing" && c.chosen) {
+        outcome = { ...outcome, outcome: "chosen", detail: "the option already chosen" };
+      } else if (outcome.outcome === "nothing" && c.alt !== null) {
+        const again = await press(who.ctx, url, c, c.alt);
+        if (again.outcome !== "nothing") {
+          outcome = { ...again, detail: `the option already chosen; after another is chosen it ${again.detail}` };
+        }
+      }
       result.controls.push(outcome);
     }
   }

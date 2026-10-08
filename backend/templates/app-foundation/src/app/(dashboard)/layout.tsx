@@ -209,6 +209,25 @@ async function loadRouteTree(): Promise<Record<string, RouteNode>> {
   }
 }
 
+// A screen's tabs and record panels, for the breadcrumb ("Support desk ›
+// Ticket"). Written by the navigation projection beside the pages; absent in
+// an app without screens → no crumb, as before.
+//
+// Declared here rather than imported, and handed over by spread: an
+// application may own its breadcrumb (`frameCode`, changed by Smith) from
+// before screens, with neither the type nor the prop. Importing either would
+// stop that application compiling; spread, an older breadcrumb ignores it.
+type ScreenNode = { title: string; tabs?: Record<string, string>; panels?: Record<string, string> };
+async function loadScreens(): Promise<Record<string, ScreenNode>> {
+  try {
+    const np = path.join(process.cwd(), "src", "contracts", "nav-flow.json");
+    const parsed = JSON.parse(await fs.readFile(np, "utf8"));
+    return (parsed?.screens ?? {}) as Record<string, ScreenNode>;
+  } catch {
+    return {};
+  }
+}
+
 // The app's own design identity for the shell. Every generated app ships a
 // design-spec.json with sidebarBg/sidebarText/sidebarActiveItem — without this,
 // every shell-less app rendered the identical hardcoded navy rail regardless
@@ -908,6 +927,7 @@ export default async function DashboardLayout({
   const clusterInBar = chromeName === "topbar" || identity.frame === "topbar";
   const caption = scoped && role ? role : undefined;
   const routeTree = await loadRouteTree();
+  const screens = await loadScreens();
   // Every frame below renders `body` rather than `children` directly, so
   // the crumb lands above page content in all four shell shapes without
   // four copies of the same JSX.
@@ -917,7 +937,7 @@ export default async function DashboardLayout({
     <>
       {/* The frame's own row: where you are, and what the app told you. */}
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1"><RouteBreadcrumb routes={routeTree} /></div>
+        <div className="min-w-0 flex-1"><RouteBreadcrumb routes={routeTree} {...({ screens } as Record<string, unknown>)} /></div>
         {/* THE WAY OUT. Only the persona frame had one; every other app
             shipped with no way to sign out at all. */}
         {cluster && !clusterInRail && !clusterInBar && (

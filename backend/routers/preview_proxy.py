@@ -32,7 +32,8 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
-from preview import get_preview_port
+from preview import get_preview_port, start_preview
+from services import dev_servers
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,16 @@ def _filter_headers(headers) -> list[tuple[str, str]]:
 async def _proxy(request: Request, project_id: str, path: str) -> Response:
     port = get_preview_port(project_id)
     if port is None:
+        # A PREVIEW THE REAPER ENDED COMES BACK WHEN IT IS OPENED. The tab
+        # still shows it; the person clicks, and waits for a start rather
+        # than reading a 503.
+        root = dev_servers.reaped(project_id)
+        if root:
+            try:
+                port = await start_preview(project_id, root)
+            except RuntimeError as exc:
+                logger.warning("preview %s did not come back: %s", project_id, exc)
+    if port is None:
         raise HTTPException(
             status_code=503,
             detail="Preview server not running for this project. Call /preview/start first.",
@@ -84,6 +95,7 @@ async def _proxy(request: Request, project_id: str, path: str) -> Response:
     # prefix. That keeps `<Link href="/foo">` renders correctly since
     # Next writes them as `/api/projects/.../preview/serve/foo` and the
     # dev server sees the same shape it emitted.
+    dev_servers.touch(port)
     upstream_url = f"http://localhost:{port}{request.url.path}"
     if request.url.query:
         upstream_url = f"{upstream_url}?{request.url.query}"

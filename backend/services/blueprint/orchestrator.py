@@ -517,6 +517,10 @@ PAGES_PER_SUBJECT = 3
 #: Separates a feature from its part: ``ENTITY-003~2``.
 PART = "~"
 
+#: Optional nodes that still wait for credit rather than ship their floor —
+#: the pages, whose floor is a visibly older application (see `settle`).
+PAUSE_ON_CREDIT: frozenset[str] = frozenset({"page_code"})
+
 
 def _feature_groups(doc: Mapping[str, Any]) -> dict[str, list[dict]]:
     """Each feature's pages, in first-seen order: an entity's pages together,
@@ -1879,12 +1883,26 @@ def _execute(
                 # rightly flagged and could not repair. What the subject
                 # authored before and did not re-propose is retired here.
                 now = _proposed_identities(outcome, application)
-                stale = w.authored.get(spec.subject, set()) - now
+                # …BUT ONLY FOR WHAT IT ANSWERED. A repair whose reply held no
+                # pages at all — the edit touched a section the node does not
+                # write, and the rewrite came back without its own — retired
+                # all seventeen of TCommerce's pages as "superseded"; the
+                # product model then showed 0 screens and the build made two
+                # (ihf6pjga, forge-v3, 2026-10-05). A section the repair said
+                # nothing about is not one it replaced.
+                answered = {ident[1] for ident in now}
+                stale = {ident for ident in w.authored.get(spec.subject, set()) - now
+                         if ident[1] in answered}
+                kept = {ident[1] for ident in w.authored.get(spec.subject, set())} - answered
+                if kept:
+                    logger.warning("[%s] repair of %s returned nothing for %s — what was authored there stands",
+                                   key, spec.subject, ", ".join(sorted(kept)))
                 if stale:
                     _retire(svc, stale,
                             note=f"superseded by the observer's repair of "
                                  f"{spec.task_id}")
-                w.authored[spec.subject] = now
+                w.authored[spec.subject] = now | {ident for ident in w.authored.get(spec.subject, set())
+                                                  if ident[1] in kept}
                 if was_edited(outcome):
                     w.edited.add(spec.subject)
                 else:
@@ -2625,8 +2643,16 @@ def _apply_subject(
         # An OPTIONAL node never holds the application, and that includes
         # for an account that cannot pay: what is required has landed, and
         # the app ships without the extra, recorded as degraded — the policy
-        # `settle_optional` already states. Only a required node pauses.
-        if kind == "credit" and not DAG[key].optional:
+        # `settle_optional` already states. Only a required node pauses…
+        #
+        # …AND THE PAGES. `page_code` is optional because a page that cannot
+        # be written has a floor to stand on, not because the floor is as
+        # good: Ferry Booking shipped twelve of its pages on it when the
+        # account ran dry mid-build (2026-09-28), and nothing wrote them
+        # afterwards. An outage says nothing about the page, so the build
+        # waits for credit and writes it then — a resume codes exactly the
+        # pages still without code.
+        if kind == "credit" and (not DAG[key].optional or key in PAUSE_ON_CREDIT):
             return "paused"
         if kind == "transient":
             _note(ledger, "node_stalled", key, subject, _reason(outcome))
@@ -3200,6 +3226,14 @@ def _project_assemble(svc: BlueprintService, app_root: str) -> None:
 
 def review_coded_pages(svc: BlueprintService, app_root: str, *,
                        only: set[str] | None = None, emit: Any = None, asked: str = "") -> dict:
+    """See `_review_coded_pages`; the review's model calls are written to the ledger."""
+    from services.build_usage import usage_scope
+    with usage_scope(agent="page_review", output_dir=str(getattr(svc, "output_dir", "") or ""), kind="review"):
+        return _review_coded_pages(svc, app_root, only=only, emit=emit, asked=asked)
+
+
+def _review_coded_pages(svc: BlueprintService, app_root: str, *,
+                        only: set[str] | None = None, emit: Any = None, asked: str = "") -> dict:
     """Verify & fix for coded pages: judge each as it renders; have the weak
     ones rewritten. `only` narrows it to those page ids.
 

@@ -56,14 +56,14 @@ class ApplyRequest(BaseModel):
     baseRevision: str
     ops: list[dict[str, Any]] = Field(default_factory=list)
     label: str = "Edit"
-    #: A whole source (view, load) to save as one revision — what a draft becomes.
-    source: dict[str, str] | None = None
+    #: A whole source (view, load, and a split screen's parts) to save as one revision — what a draft becomes.
+    source: dict[str, Any] | None = None
 
 
 class DraftRequest(BaseModel):
     baseRevision: str
     ops: list[dict[str, Any]] = Field(default_factory=list)
-    source: dict[str, str] | None = None
+    source: dict[str, Any] | None = None
 
 
 class RestoreRequest(BaseModel):

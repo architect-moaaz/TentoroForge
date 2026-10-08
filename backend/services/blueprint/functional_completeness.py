@@ -421,6 +421,14 @@ def _somewhere_to_go(doc: dict, page: dict, entity: str, by_name: dict,
     wanted = {entity, by_name.get(entity, "")} - {""}
     if page_family(page) in families:
         return True
+    # A page where its records are added (`addsHere`) collects the fields
+    # itself: its own form is where `create` goes.
+    if "form" in families and page.get("addsHere"):
+        return True
+    if "form" in families and any(
+            isinstance(sec, dict) and sec.get("addsHere") and str(sec.get("entity") or "") in wanted
+            for sec in page.get("sections") or []):
+        return True
     return any(page_family(p) in families
                and str((p.get("data") or {}).get("primaryEntity") or "") in wanted
                for p in _live(doc.get("pages")))
@@ -1009,7 +1017,8 @@ def launcher_findings(doc: dict) -> list[dict]:
     the only page that launches it — the member had no way to send their
     document, and the workflow, started from anywhere else, saved none."""
     layouts = {str(l.get("page")): l for l in _live(doc.get("pageLayouts"))}
-    code = {str(c.get("page")): str(c.get("view") or "") for c in doc.get("pageCode") or []
+    from services.blueprint.app_sdk import page_code_text
+    code = {str(c.get("page")): page_code_text(c) for c in doc.get("pageCode") or []
             if isinstance(c, dict)}
     by_id = {str(p.get("id")): p for p in _live(doc.get("pages"))}
     out: list[dict] = []

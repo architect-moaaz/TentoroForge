@@ -119,6 +119,15 @@ class Bench:
         self._app: Any = None
         self._log_at = 0
         self.log = Path(output_dir) / ".forge" / "trials" / "server.log"
+        #: The last `try_workflow`'s tables before and after it ran.
+        self.last_written: tuple[dict[str, Any], dict[str, Any]] | None = None
+        #: ONE SIGNED-OUT VISITOR FOR THE TURN. A shopper's browser keeps the
+        #: `forge-guest` cookie between adding to the bag and opening it; each
+        #: trial used to arrive as a stranger, so TCommerce's guest bag read
+        #: empty on the bench and Smith blamed a cart page that worked
+        #: (2026-10-06). Every signed-out trial carries this token.
+        import uuid as _uuid
+        self.guest = str(_uuid.uuid4())
 
     def app(self) -> Any:
         if self._app is None:
@@ -185,16 +194,20 @@ def _role(doc: dict, ref: str) -> tuple[str, bool]:
     raise ValueError(f"no role called {want!r}; the app's roles are {known or 'none'}, or `signed out`")
 
 
-def _session(app: Any, doc: dict, ref: str) -> tuple[str, list[dict]]:
+def _session(app: Any, doc: dict, ref: str, guest: str | None = None) -> tuple[str, list[dict]]:
     """`(who, cookies)` — the administrator's seeded login, a login of the
-    role on the copy, or a preview session for the role; no cookies signed out."""
+    role on the copy, or a preview session for the role; signed out, only the
+    turn's guest token (`Bench.guest`), so it is the same visitor each time."""
     from services.blueprint.page_review import ADMIN_EMAIL, login_of_role
     from services.preview_session import Session, cookies
     from services.seed_backstop import _ADMIN_UUID
 
     role, is_admin = _role(doc, ref)
     if not role:
-        return "signed out", []
+        if not guest:
+            return "signed out", []
+        return ("signed out (the same visitor in every signed-out trial this turn)",
+                [{"name": "forge-guest", "value": guest, "url": app.base}])
     if is_admin:
         who = Session(sub=_ADMIN_UUID, name="Admin", email=ADMIN_EMAIL, role=role)
     else:
@@ -308,7 +321,7 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     if flow is None:
         return f"No process called {ref!r}. The app has: {names(flows)}."
     app = bench.app()
-    who, jar = _session(app, doc, as_)
+    who, jar = _session(app, doc, as_, bench.guest)
     tables = _tables(app)
     before = _snapshot(app, tables)
     bench.server_said()
@@ -319,12 +332,17 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     status, _where, text = _http(app, "POST", f"/api/workflows/{flow.get('id')}/execute",
                                  {"input": payload if isinstance(payload, dict) else {}}, jar)
     after = _snapshot(app, tables)
+    # Kept whole for whoever reads the run back (`round_trips`): the report
+    # below cuts a wide row at 300 characters.
+    bench.last_written = (before, after)
     steps = _query(app, "select step_index, node_label, action_type, status, coalesce(error, ''), "
                         "replace(coalesce(outputs::text, ''), E'\\n', ' ') "
                         f"from workflow_execution_log where created_at > '{started.replace(chr(39), '')}' "
                         "order by created_at, step_index limit 40")
     out = [f"{flow.get('name')} ({flow.get('id')}) run as {who}: HTTP {status}",
            f"answer: {_body(text)}"]
+    if status == 403:
+        out += launch_rights(bench.output_dir, doc, flow)
     if steps:
         out.append("steps:")
         # WHAT EACH STEP HANDED ON. F&B's duplicate check read
@@ -345,6 +363,46 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     return scrub("\n".join(out))
 
 
+def launch_rights(output_dir: str, doc: dict, flow: dict) -> list[str]:
+    """Why a run was refused for the role: who the APP lets launch the process
+    — its own `launch-roles.ts`, the file the execute route reads — and where
+    that comes from in the definition.
+
+    TCommerce's published app refused the administrator's every save with
+    "This action is not available to your role"; the file said `[]` for every
+    admin process, and Smith, never shown it, read code around it for two
+    turns and asked the owner which screen it was on (2026-10-05)."""
+    import re as _re
+
+    file = Path(output_dir) / "app" / "src" / "lib" / "workflows" / "launch-roles.ts"
+    try:
+        text = file.read_text("utf-8")
+    except OSError:
+        return [f"who may launch it: {file.relative_to(Path(output_dir))} is missing — every launch is refused "
+                "or admitted by default; `sync_app` writes it from the definition"]
+    from services.blueprint.projection import _workflow_slug
+    keys = [str(flow.get("id") or ""), _workflow_slug(flow)]
+    m = next((_re.search(r'"%s"\s*:\s*(\[[^\]]*\]|null)' % _re.escape(k), text) for k in keys
+              if _re.search(r'"%s"\s*:' % _re.escape(k), text)), None)
+    said = m.group(1) if m else "(no entry: anyone may launch it)"
+    pages = {str(pg.get("id")): pg for pg in doc.get("pages") or [] if isinstance(pg, dict)}
+    froms = []
+    for pid in flow.get("launchedFrom") or []:
+        pg = pages.get(str(pid)) or {}
+        froms.append(f"{pid} {pg.get('route', '?')} (access {pg.get('access') or 'authenticated'}, "
+                     f"users {pg.get('users') or 'none named'}{', ' + pg['status'] if pg.get('status') == 'DEPRECATED' else ''})")
+    return [
+        f"who may launch it, as the app reads it: app/src/lib/workflows/launch-roles.ts says {flow.get('id')}: {said}"
+        + (" — [] admits nobody" if said.replace(" ", "") == "[]" else ""),
+        "  that file is written from the definition: the roles of the pages the process is launched from "
+        "(a public page admits everyone, a signed-in page any signed-in role, a role-restricted page the "
+        "roles it names) — " + ("; ".join(froms) if froms else "it names no launching page"),
+        "  fix it where it comes from — who may open those pages (`edit_access`), or the pages the process "
+        "is launched from — never by editing the file, which the next sync rewrites; `sync_app` rewrites it "
+        "now if the definition is already right",
+    ]
+
+
 def try_request(bench: Bench, doc: dict, method: str, path: str, body: Any, as_: str) -> str:
     method = (method or "GET").strip().upper()
     path = (path or "").strip()
@@ -353,7 +411,7 @@ def try_request(bench: Bench, doc: dict, method: str, path: str, body: Any, as_:
     if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         return f"`method` is GET, POST, PUT, PATCH or DELETE, not {method!r}."
     app = bench.app()
-    who, jar = _session(app, doc, as_)
+    who, jar = _session(app, doc, as_, bench.guest)
     tables = _tables(app) if method != "GET" else []
     before = _snapshot(app, tables) if tables else {}
     bench.server_said()
@@ -383,12 +441,16 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     ent = ents.get(str(((page or {}).get("data") or {}).get("primaryEntity") or ""))
     app = bench.app()
-    who, jar = _session(app, doc, as_)
+    who, jar = _session(app, doc, as_, bench.guest)
     role, is_admin = _role(doc, as_)
     entry: dict[str, Any] = {"id": str((page or {}).get("id") or "trial"), "route": route,
                              "entity": (ent or {}).get("name"), "as": who}
     if not role:
-        entry["anonymous"] = True
+        # Signed out, but the same visitor: the guest cookie and nothing else.
+        if jar:
+            entry["cookies"] = jar
+        else:
+            entry["anonymous"] = True
     elif not is_admin:
         entry["cookies"] = jar
     bench.server_said()
@@ -452,12 +514,13 @@ def _sign_in(bench: Bench, doc: dict, route: str, as_: str) -> str:
     return scrub("\n".join(out))
 
 
-def try_upload(bench: Bench, doc: dict, kind: str, as_: str) -> str:
+def _upload(bench: Bench, doc: dict, kind: str, as_: str) -> tuple[str, str, int, str, list[dict], Any]:
+    """Upload a small picture (or PDF) as a role: (who, filename, status, body, cookies, app)."""
     import uuid as _uuid
     pdf = (kind or "").strip().lower() in ("file", "pdf", "document")
     data, name, ctype = (_PDF, "trial.pdf", "application/pdf") if pdf else (_PNG, "trial.png", "image/png")
     app = bench.app()
-    who, jar = _session(app, doc, as_)
+    who, jar = _session(app, doc, as_, bench.guest)
     boundary = _uuid.uuid4().hex
     body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\n"
             f"Content-Type: {ctype}\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
@@ -470,6 +533,22 @@ def try_upload(bench: Bench, doc: dict, kind: str, as_: str) -> str:
             status, text = r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         status, text = e.code, e.read().decode("utf-8", "replace")
+    return who, name, status, text, jar, app
+
+
+def stored_file(bench: Bench, doc: dict, kind: str, as_: str) -> str | None:
+    """The id of a small test picture (or PDF) stored as a role — what a
+    process's file or image input takes — or None when the app would not
+    store it."""
+    try:
+        _who, _name, status, text, _jar, _app = _upload(bench, doc, kind, as_)
+        return str(json.loads(text).get("id") or "") or None if status < 400 else None
+    except Exception:  # noqa: BLE001 — no file is a refusal the run will show
+        return None
+
+
+def try_upload(bench: Bench, doc: dict, kind: str, as_: str) -> str:
+    who, name, status, text, jar, app = _upload(bench, doc, kind, as_)
     out = [f"upload of {name} as {who}: HTTP {status}", f"answer: {_body(text)}"]
     try:
         stored = json.loads(text).get("id")

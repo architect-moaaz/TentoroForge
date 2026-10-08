@@ -23,8 +23,12 @@ IS_WINDOWS = os.name == "nt"
 
 
 def tool(name: str) -> str:
-    """The executable to run for ``name`` (``npm`` -> ``...\\npm.cmd`` on Windows)."""
-    return shutil.which(name) or name
+    """The executable to run for ``name``.
+
+    On Windows ``npm`` and ``npx`` are ``.cmd`` shims that ``subprocess`` does not find by their bare
+    name, so they are resolved to the real file. Everywhere else the name is returned as it was, so
+    the process is found by the system's own PATH lookup exactly as it always was."""
+    return (shutil.which(name) or name) if IS_WINDOWS else name
 
 
 def resolve(argv: list[str]) -> list[str]:

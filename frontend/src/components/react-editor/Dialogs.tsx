@@ -1,6 +1,6 @@
 "use client";
 /** Readiness check (UX-011), version history (UX-007) and the page's code (Advanced). */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, Loader2, RotateCcw, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -118,9 +118,15 @@ export function CodeDialog() {
   const setOpen = useEditorStore((s) => s.setShowCode);
   const doc = useEditorStore((s) => s.doc);
   const selection = useEditorStore((s) => s.selection);
-  const [which, setWhich] = useState<"view" | "load">("view");
+  // "view", "load", or a split screen's part as "part:<key>".
+  const [which, setWhich] = useState<string>("view");
   const node = selection[0] ? doc?.model?.nodes[selection[0]] : null;
-  const src = doc?.source?.[which] ?? "";
+  const parts = doc?.source?.parts ?? {};
+  // What is selected is shown in the file it is in.
+  useEffect(() => { if (open && node?.file) setWhich(node.file); }, [open, node?.file]);
+  const src = which === "view" ? doc?.source?.view ?? ""
+    : which === "load" ? doc?.source?.load ?? ""
+    : parts[which.slice(5)] ?? "";
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="max-w-4xl">
@@ -131,11 +137,15 @@ export function CodeDialog() {
         <div className="flex gap-1">
           <Button size="xs" variant={which === "view" ? "default" : "outline"} onClick={() => setWhich("view")}>The screen (view.tsx)</Button>
           <Button size="xs" variant={which === "load" ? "default" : "outline"} onClick={() => setWhich("load")}>What it loads (load.ts)</Button>
+          {Object.keys(parts).sort().map((key) => (
+            <Button key={key} size="xs" variant={which === `part:${key}` ? "default" : "outline"}
+              onClick={() => setWhich(`part:${key}`)}>parts/{key}.tsx</Button>
+          ))}
         </div>
         <pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 font-mono text-[11px] leading-relaxed">
           {src.split("\n").map((line, i) => {
             const n = i + 1;
-            const hit = which === "view" && node && n >= node.line && n <= node.endLine;
+            const hit = which !== "load" && node && (node.file ?? "view") === which && n >= node.line && n <= node.endLine;
             return <div key={i} className={cn(hit && "bg-primary/10")}><span className="mr-3 inline-block w-8 select-none text-right text-muted-foreground">{n}</span>{line}</div>;
           })}
         </pre>

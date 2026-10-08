@@ -104,8 +104,11 @@ def run_chain(app_root: str | Path, url: str, *, extra_env: dict[str, str] | Non
                                   capture_output=True, text=True, timeout=TIMEOUT_S)
         except (OSError, subprocess.TimeoutExpired) as exc:
             logger.warning("[schema_push] %s: %s", " ".join(cmd), exc)
+            # THE CHAIN COULD NOT RUN — a program or folder missing, a step
+            # that never ended. Said apart from a refusal: nothing about the
+            # data is known from it.
             return {"applied": False, "reason": f"`{' '.join(cmd[1:])}` did not finish ({type(exc).__name__})",
-                    "lines": []}
+                    "lines": [], "error": True}
         if proc.returncode != 0:
             said = (proc.stderr or proc.stdout or "").strip().splitlines()
             marked = [l for l in said if l.startswith(("[prepare-schema]", "[verify-schema]", "  - "))]

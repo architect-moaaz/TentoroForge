@@ -371,7 +371,14 @@ def _render_pages(bp: Blueprint) -> str:
         role = p.get("role") or ""
         who = p.get("who") or []
         lines.append(f"- `{route}` — {role}" + (f"  · for {', '.join(who)}" if who else "")
-                     + ("  · public" if p.get("access") == "public" else ""))
+                     + ("  · public" if p.get("access") == "public" else "")
+                     + (f"  · menu: {p['menu']}" if p.get("menu") else "")
+                     + ("  · its records are added here" if p.get("adds_here") else ""))
+        for sec in p.get("screen") or []:
+            lines.append(f"  · section {sec}")
+        if p.get("parts"):
+            lines.append("  · its code is written in parts: view.tsx (the frame) and "
+                         + ", ".join(f"parts/{k}.tsx" for k in p["parts"]))
         for c in (p.get("notable_choices") or [])[:3]:
             if isinstance(c, dict):
                 choice = c.get("choice") or ""
