@@ -133,6 +133,8 @@ VERDICT_SCHEMA: dict[str, Any] = {
 #: The edge name the critic's findings carry, so a report can tell a model's
 #: judgement from a matrix check.
 CRITIC_EDGE = "Observer↔Requirement"
+#: The edge a review huddle's briefs carry (`Observer._review`).
+HUDDLE_EDGE = "Huddle↔Decision"
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +491,7 @@ class Observer:
         *,
         rounds: int = OBSERVER_ROUNDS,
         usage: Any = None,
+        huddle: Any = None,
     ) -> None:
         cap = capability_for(OBSERVER_AGENT)
         assert not cap.writes and cap.may_set_status, (
@@ -500,6 +503,11 @@ class Observer:
         self._lock = threading.Lock()
         #: Every observation made, in order — the account of what was judged.
         self.history: list[Observation] = []
+        #: The room a big decision is reviewed in (`services.huddle.room.Room`),
+        #: or nothing; each big decision is reviewed once a run, when it is
+        #: first judged — its repairs are judged by the critic, as any node's.
+        self.huddle = huddle
+        self._reviewed: set[str] = set()
 
     # -- judging -----------------------------------------------------------
 
@@ -546,9 +554,51 @@ class Observer:
             self._consult(obs, doc, user_request=user_request,
                           subject_of=subject_of, mode=mode)
 
+        if self.huddle is not None and mode != "subjects":
+            self._review(obs, doc)
+
         with self._lock:
             self.history.append(obs)
         return obs
+
+    def _review(self, obs: Observation, doc: Mapping[str, Any]) -> None:
+        """A BIG DECISION IS REVIEWED BY THOSE WHO BUILD ON IT. The data model,
+        the page set, the processes, the permissions — each was judged by one
+        critic, never by the agents that must build screens, processes and
+        permissions on it. The agents that read it most meet, each says whether
+        it can build its part on the decision as it stands, and the observer,
+        chairing, decides. A brief for the decision's own author is filed as a
+        finding — the repair loop sends it back like any other; a brief for
+        another agent is that agent's, deferred, and travels on as a change
+        request. Once a run per node, on its first judgement."""
+        from services.blueprint.orchestrator import DAG
+        from services.huddle.room import big_decisions, builders_of, owned_sections
+        with self._lock:
+            if obs.node in self._reviewed or obs.node not in big_decisions():
+                return
+            self._reviewed.add(obs.node)
+        if (doc.get("application") or {}).get("huddles") is False:
+            return
+        people = builders_of(obs.node, dict(doc))
+        if not people:
+            return
+        decided = {path: _section(doc, path) for path in DAG[obs.node].produces}
+        evidence = json.dumps(decided, indent=1, default=str)
+        evidence = evidence if len(evidence) <= 40_000 else evidence[:40_000] + "\n…(cut)"
+        try:
+            h = self.huddle.convene(
+                dict(doc), kind="review", owner=obs.agent, participants=people,
+                topic=(f"The {obs.agent} agent has decided {', '.join(sorted(DAG[obs.node].produces))}. "
+                       "Can each of you build your part on it as it stands?"),
+                evidence=f"What it decided:\n```json\n{evidence}\n```",
+                trigger={"kind": "review", "node": obs.node, "subject": ""})
+        except Exception:  # noqa: BLE001 — the critic's verdict stands without the review
+            logger.warning("[observer] review huddle for %s failed", obs.node, exc_info=True)
+            return
+        for agent, brief in h.briefs.items():
+            sections = owned_sections(agent)
+            section = next((s for s in DAG[obs.node].produces if s in sections), sections[0] if sections else None)
+            self._file(obs, Finding(HUDDLE_EDGE, detail=f"{h.id}: {brief}", section=section), None)
 
     def _file(self, obs: Observation, f: Finding,
               subject_of: Callable[[str], str | None] | None = None) -> None:
@@ -748,7 +798,8 @@ OBSERVER_MODEL_ENV = "FORGE_OBSERVER_MODEL"
 
 def anthropic_observer(model: Any = None, *, effort: str = "medium",
                        usage: Any = None, rounds: int = OBSERVER_ROUNDS,
-                       model_id: str | None = None) -> Observer:
+                       model_id: str | None = None, output_dir: Any = None,
+                       emit: Any = None) -> Observer:
     """An observer whose critic is a model.
 
     ``model_id`` (or :data:`OBSERVER_MODEL_ENV` in the environment) names the
@@ -774,7 +825,13 @@ def anthropic_observer(model: Any = None, *, effort: str = "medium",
         client = model
     else:
         client = AnthropicModel(effort=effort)
-    return Observer(critic=client, usage=usage, rounds=rounds)
+    # A ROOM WHEN THERE IS AN APPLICATION TO KEEP ITS RECORDS: big decisions
+    # are reviewed by the agents that build on them (`Observer._review`).
+    room = None
+    if output_dir is not None:
+        from services.huddle.room import Room
+        room = Room(output_dir, client, usage=usage, emit=emit)
+    return Observer(critic=client, usage=usage, rounds=rounds, huddle=room)
 
 
 __all__ = [

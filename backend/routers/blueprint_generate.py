@@ -892,6 +892,11 @@ async def generate_via_blueprint(
     except ValueError as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     output_dir.mkdir(parents=True, exist_ok=True)
+    # The office this application is shown in — huddles walk its agents to
+    # the meeting room (`services.huddle.room.Room`).
+    import asyncio as _asyncio
+    from services.office_bridge import bind_office
+    bind_office(output_dir, str(project_id), _asyncio.get_running_loop())
     _adopt_design_references(output_dir, str(project_id))
     await _adopt_brand_language(output_dir, project, db)
     # The application is projected beside the Blueprint it comes from, so a
@@ -1223,6 +1228,54 @@ async def read_flows(
         raise HTTPException(status_code=404,
                             detail="no Blueprint for this project") from None
     return {**graph(svc.doc), "findings": flow_findings(svc.doc)}
+
+
+@router.get("/api/projects/{project_id}/huddles")
+async def read_huddles(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The Huddle Room's record: every huddle the agents held over this
+    application — who met, what each said, what was decided, what came of
+    it — newest first (`services.huddle.room`)."""
+    from dataclasses import asdict
+
+    from services.huddle.room import huddles
+    project = await get_project_with_auth(project_id, user, db)
+    rows = huddles(_output_dir(project))
+    return {"huddles": [asdict(h) for h in reversed(rows)]}
+
+
+class HuddleOverrule(BaseModel):
+    words: str
+
+
+@router.post("/api/projects/{project_id}/huddles/{huddle_id}/overrule")
+async def overrule_huddle(
+    project_id: uuid.UUID,
+    huddle_id: str,
+    body: HuddleOverrule,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The person decides otherwise. Recorded here; the panel then sends
+    `message` to Smith, whose turn carries the decision out."""
+    from services.blueprint.service import BlueprintService
+    from services.huddle.room import ask, overrule
+    project = await get_project_with_auth(project_id, user, db)
+    if not re.fullmatch(r"HUD-\d{3,}", huddle_id):
+        raise HTTPException(status_code=404, detail="no such huddle")
+    try:
+        svc = BlueprintService.load(output_dir=str(_output_dir(project)))
+        h = overrule(svc, huddle_id, body.words)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="no Blueprint for this project") from None
+    except KeyError:
+        raise HTTPException(status_code=404, detail="no such huddle") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"huddle": h.summary(), "message": ask(h)}
 
 
 @router.get("/api/projects/{project_id}/gates")
@@ -2385,7 +2438,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     usage = RunUsage.for_app(svc)
     router = tiered_router()
     executor = make_executor(svc, router, usage=usage)
-    watcher = anthropic_observer(router, usage=usage)
+    watcher = anthropic_observer(router, usage=usage, output_dir=output_dir, emit=emit)
     progress = Progress(emit, total=len(plan))
 
     report = run(svc, executor, plan=plan, commit=True,
@@ -2448,6 +2501,17 @@ def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: A
     each role it is for (`app_check`). Only for a built tree —
     there is nothing to run before assembly — and never fatal: what is still
     unfinished is recorded and said in the completion message."""
+    # FIRST, WHAT ONE AGENT COULD NOT SETTLE ALONE: the owners of what it
+    # names meet, the observer decides, the owners carry it out (`huddle`) —
+    # before any code is mended to a definition about to change.
+    try:
+        from services.huddle.deadlocks import settle_deadlocks
+        settled = settle_deadlocks(svc, output_dir, report, app_root=app_root, emit=emit)
+        if settled:
+            logger.info("[blueprint] %s: huddles %s", Path(output_dir).name,
+                        ", ".join(f"{h.id} {h.status}" for h in settled))
+    except Exception:  # noqa: BLE001 — the build's own result stands
+        logger.warning("[blueprint] %s: the huddles failed", Path(output_dir).name, exc_info=True)
     try:
         if not (Path(app_root) / "package.json").is_file():
             return
