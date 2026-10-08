@@ -117,6 +117,13 @@ def track(pid: int, *, port: int, root: str | Path, kind: str, key: str = "") ->
     # Read from /proc where there is one (the platform's containers). Without
     # it (a laptop) nothing is spawned to ask, here on the path that starts a
     # server: the record carries no start time and the group check is all.
+    # PROCESS GROUPS ARE A POSIX NOTION. Where the platform has none (Windows) there is nothing to
+    # record and nothing for the reaper to end: it only acts on what is written here, and every
+    # caller already stops its own server (`proc_compat.kill_group`). Without this the missing
+    # `os.getpgid` escaped as an AttributeError and the build's own check of the app ("the app could
+    # not be started to check it") reported every page as not working.
+    if not hasattr(os, "getpgid"):
+        return
     seen = _proc(int(pid), ask_ps=False)
     try:
         ours = (seen is None or seen[0] == os.getpid()) and os.getpgid(int(pid)) == int(pid)

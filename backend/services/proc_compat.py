@@ -36,6 +36,23 @@ def resolve(argv: list[str]) -> list[str]:
     return [tool(argv[0]), *argv[1:]] if argv else argv
 
 
+def link_dir(link: "os.PathLike[str] | str", target: "os.PathLike[str] | str") -> None:
+    """Make ``link`` a directory that is ``target``: a symbolic link, or on Windows a junction.
+
+    Creating a symlink on Windows needs administrator rights or Developer Mode (``WinError 1314``), which
+    a person running the platform on their own machine usually does not have. A directory junction does
+    the same job for this (reading a shared ``node_modules``) and needs no privilege. Everywhere else it
+    is the symlink it always was."""
+    try:
+        os.symlink(os.fspath(target), os.fspath(link), target_is_directory=True)
+    except OSError:
+        if not IS_WINDOWS:
+            raise
+        import _winapi  # CPython on Windows only
+
+        _winapi.CreateJunction(os.fspath(target), os.fspath(link))
+
+
 def group_kwargs() -> dict[str, Any]:
     """``Popen`` keywords that make the child the leader of its own group, so the
     whole tree it starts can be ended together."""
