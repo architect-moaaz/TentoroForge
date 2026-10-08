@@ -89,6 +89,7 @@ from routers.design import router as design_router
 from routers.brand import router as brand_router
 from routers.brand_discovery import router as brand_discovery_router
 from routers.usage import router as usage_router
+from routers.brain_juice import router as brain_juice_router
 
 # Middleware
 from middleware.rate_limit import RateLimitMiddleware
@@ -222,6 +223,8 @@ app.include_router(ir_router)
 app.include_router(design_router)
 app.include_router(brand_router)
 app.include_router(usage_router)
+# Brain Juice: Smith and a person work an idea out before any app exists.
+app.include_router(brain_juice_router)
 
 # Metrics endpoint (Prometheus format)
 app.add_api_route("/metrics", metrics_endpoint, methods=["GET"], tags=["monitoring"])

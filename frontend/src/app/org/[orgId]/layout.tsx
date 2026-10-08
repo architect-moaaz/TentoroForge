@@ -19,6 +19,7 @@ import {
   Sparkles,
   Globe,
   LogOut,
+  Brain,
 } from "lucide-react";
 import { AuthGuard } from "@/components/auth-guard";
 import { useAuthStore } from "@/stores/auth";
@@ -55,6 +56,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "BUILD",
     items: [
       { href: "/projects", label: "Projects", icon: FolderOpen },
+      { href: "/brain-juice", label: "Brain Juice", icon: Brain },
       { href: "/discover", label: "Discover", icon: Sparkles },
       { href: "/templates", label: "Templates", icon: LayoutTemplate },
     ],

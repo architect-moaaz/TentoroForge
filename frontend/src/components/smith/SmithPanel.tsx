@@ -705,6 +705,28 @@ export function SmithPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // BRAIN JUICE HANDS AN AGREED IDEA HERE. The person and Smith agreed the
+  // app in Brain Juice, which wrote the requirements document, made this
+  // project and navigated to it with `brain_juice_<projectId>`. Agreeing
+  // there IS both reviews, so the document goes as an APPROVED first message:
+  // a project with no definition yet is built straight through from it.
+  useEffect(() => {
+    if (!projectId) return;
+    const key = `brain_juice_${projectId}`;
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return;
+    sessionStorage.removeItem(key);
+    try {
+      const opening = String(JSON.parse(raw).opening || "").trim();
+      if (!opening) return;
+      setMessages((m) => [...m, { role: "user", text: opening, at: Date.now() }]);
+      void start({ description: opening, evidence, approved: true });
+    } catch {
+      // A malformed hand-off is not worth a broken panel.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
   const approve = () => {
     // THE BRIEF MAY NOT BE IN MEMORY. After a reload — or after any later turn
     // — the last user message can be a clarification answer or nothing at all,
