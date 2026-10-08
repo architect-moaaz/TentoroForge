@@ -261,7 +261,8 @@ def _design_language(doc: dict) -> str:
     return "\n".join(lines)
 
 
-def prompt_for(doc: dict, page: dict, *, feedback: str = "", section: bool = False) -> str:
+def prompt_for(doc: dict, page: dict, *, feedback: str = "", section: bool = False,
+               req_limit: int = 6, req_chars: int = 0) -> str:
     """The generate prompt for one page, from its brief and nothing else.
 
     ``section=True`` is what only this page adds to an application-wide prompt:
@@ -371,7 +372,9 @@ def prompt_for(doc: dict, page: dict, *, feedback: str = "", section: bool = Fal
                      f"\"No {_plural(entity_name).lower()} yet\".")
     reqs = [str(r.get("text") or r.get("statement") or r.get("description") or "")
             for r in (brief.get("requirements") or []) if isinstance(r, dict)]
-    reqs = [r for r in reqs if r][:6]
+    reqs = [r for r in reqs if r][:req_limit]
+    if req_chars:
+        reqs = [r if len(r) <= req_chars else r[: req_chars - 1].rstrip() + "\u2026" for r in reqs]
     if reqs:
         parts.append("What people come here to do:\n" + "\n".join(f"- {r}" for r in reqs))
     if section:
@@ -572,7 +575,16 @@ def design_pages(doc: dict) -> list[dict]:
             if str(p.get("pattern") or "") != "auth" and designer_for(doc, p) == "uxpilot"]
 
 
-def app_prompt_for(doc: dict, pages: list[dict]) -> str:
+#: UX Pilot refuses a prompt longer than 8,000 characters (a seven-screen application made 8,153 and
+#: the job was rejected before it started). Stay under it with room to spare.
+MAX_PROMPT_CHARS = 7800
+
+#: What gives first when a prompt is too long: the "what people come here to do" bullets, which
+#: repeat what the labels and the purpose already say. (bullets per screen, characters each)
+_PROMPT_LEVELS: tuple[tuple[int, int], ...] = ((6, 0), (3, 110), (2, 80), (0, 0))
+
+
+def app_prompt_for(doc: dict, pages: list[dict], *, level: int = 0) -> str:
     """One prompt for every screen: the application and its shared design
     language once, then each page's own brief under its name. Deterministic, so
     its hash means "no page's brief has changed"."""
@@ -603,8 +615,29 @@ def app_prompt_for(doc: dict, pages: list[dict]) -> str:
         parts.append(f"=== Screen \"{name}\"" + (f" (route {route})" if route else "") + " ===\n"
                      f"Purpose: {page.get('purpose') or ''}\n"
                      + (f"Page pattern: {str(page['pattern']).replace('_', ' ')}.\n" if page.get("pattern") else "")
-                     + prompt_for(doc, page, section=True))
+                     + prompt_for(doc, page, section=True, req_limit=_PROMPT_LEVELS[level][0],
+                                  req_chars=_PROMPT_LEVELS[level][1]))
     return "\n\n".join(parts)
+
+
+def fit_prompt(doc: dict, pages: list[dict]) -> str | None:
+    """The fullest prompt for these pages that UX Pilot will accept, or None when even the
+    barest one is too long."""
+    for level in range(len(_PROMPT_LEVELS)):
+        prompt = app_prompt_for(doc, pages, level=level)
+        if len(prompt) <= MAX_PROMPT_CHARS:
+            return prompt
+    return None
+
+
+def prompt_batches(doc: dict, pages: list[dict]) -> list[list[dict]]:
+    """The pages in as few jobs as the prompt limit allows: all of them when one prompt fits,
+    otherwise split in half until each half does. One job keeps the screens one style, so a split
+    is the last resort, and it is a fraction of the application each, not a page each."""
+    if len(pages) <= 1 or fit_prompt(doc, pages) is not None:
+        return [pages]
+    mid = len(pages) // 2
+    return prompt_batches(doc, pages[:mid]) + prompt_batches(doc, pages[mid:])
 
 
 def _screen_for(page: dict, screens: list[dict], taken: set[str]) -> dict | None:
@@ -623,61 +656,62 @@ def _screen_for(page: dict, screens: list[dict], taken: set[str]) -> dict | None
 
 
 def app_designs(doc: dict, output_dir: str | Path, *, gateway: Any = None) -> dict[str, GeneratedDesign]:
-    """``{page id: design}`` for every page UX Pilot designs, from ONE run.
+    """``{page id: design}`` for every page UX Pilot designs, from as few runs as the prompt limit
+    allows (ONE, for most applications).
 
-    From the ledger when no page's brief has changed since, so a rebuild spends
-    nothing; otherwise one run draws every screen, which is also what keeps
-    them one style. Safe to call from parallel page writers: the first one
-    generates, the rest wait for it and read the ledger."""
+    From the ledger when no page's brief has changed since, so a rebuild spends nothing; otherwise
+    one run draws every screen of its batch, which is also what keeps them one style. Safe to call
+    from parallel page writers: the first one generates, the rest wait for it and read the ledger."""
     from services.uxpilot.credentials import UxPilotCredentialError
     from services.uxpilot.gateway import UxPilotGatewayError
 
     pages = design_pages(doc)
     if not pages:
         return {}
-    prompt = app_prompt_for(doc, pages)
-    digest = brief_hash(prompt)
-
-    def from_ledger() -> dict[str, GeneratedDesign]:
-        found: dict[str, GeneratedDesign] = {}
-        for page in pages:
-            entry = ledger_entry(output_dir, str(page.get("id")))
-            if not (entry and entry.get("briefHash") == digest and entry.get("html")):
-                return {}
-            found[str(page.get("id"))] = GeneratedDesign(
-                page_id=str(page.get("id")), design_id=str(entry.get("designId") or ""),
-                html=str(entry["html"]), prompt=prompt,
-                preview_url=str(entry.get("previewUrl") or ""), reused=True)
-        return found
+    out: dict[str, GeneratedDesign] = {}
 
     with _app_lock:
-        cached = from_ledger()
-        if cached:
-            return cached
-        gw = gateway or gateway_for(output_dir)
-        try:
-            screens = _run(_generate_app_async(gw, prompt))
-        except UxPilotCredentialError as exc:
-            raise GenerationFailed(f"no UX Pilot key could be resolved ({exc})") from exc
-        except UxPilotGatewayError as exc:
-            raise GenerationFailed(f"UX Pilot {exc.kind}: {exc.detail}") from exc
-        except Exception as exc:  # noqa: BLE001 - the reason travels, the page does not die
-            raise GenerationFailed(f"UX Pilot call failed: {type(exc).__name__}: {exc}") from exc
-        taken: set[str] = set()
-        out: dict[str, GeneratedDesign] = {}
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        for page in pages:
-            pid = str(page.get("id"))
-            sc = _screen_for(page, [x for x in screens if x.get("html")], taken)
-            if sc is None:
+        for batch in prompt_batches(doc, pages):
+            prompt = fit_prompt(doc, batch) or app_prompt_for(doc, batch, level=len(_PROMPT_LEVELS) - 1)
+            digest = brief_hash(prompt)
+
+            cached: dict[str, GeneratedDesign] = {}
+            for page in batch:
+                entry = ledger_entry(output_dir, str(page.get("id")))
+                if not (entry and entry.get("briefHash") == digest and entry.get("html")):
+                    cached = {}
+                    break
+                cached[str(page.get("id"))] = GeneratedDesign(
+                    page_id=str(page.get("id")), design_id=str(entry.get("designId") or ""),
+                    html=str(entry["html"]), prompt=prompt,
+                    preview_url=str(entry.get("previewUrl") or ""), reused=True)
+            if cached:
+                out.update(cached)
                 continue
-            taken.add(sc["designId"])
-            _record(output_dir, pid, {
-                "page": pid, "designId": sc["designId"], "briefHash": digest, "html": sc["html"],
-                "previewUrl": sc["previewUrl"], "prompt": prompt, "generatedAt": now})
-            out[pid] = GeneratedDesign(page_id=pid, design_id=sc["designId"], html=sc["html"],
-                                       prompt=prompt, preview_url=sc["previewUrl"])
-        return out
+
+            gw = gateway or gateway_for(output_dir)
+            try:
+                screens = _run(_generate_app_async(gw, prompt))
+            except UxPilotCredentialError as exc:
+                raise GenerationFailed(f"no UX Pilot key could be resolved ({exc})") from exc
+            except UxPilotGatewayError as exc:
+                raise GenerationFailed(f"UX Pilot {exc.kind}: {exc.detail}") from exc
+            except Exception as exc:  # noqa: BLE001 - the reason travels, the page does not die
+                raise GenerationFailed(f"UX Pilot call failed: {type(exc).__name__}: {exc}") from exc
+            taken: set[str] = set()
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            for page in batch:
+                pid = str(page.get("id"))
+                sc = _screen_for(page, [x for x in screens if x.get("html")], taken)
+                if sc is None:
+                    continue
+                taken.add(sc["designId"])
+                _record(output_dir, pid, {
+                    "page": pid, "designId": sc["designId"], "briefHash": digest, "html": sc["html"],
+                    "previewUrl": sc["previewUrl"], "prompt": prompt, "generatedAt": now})
+                out[pid] = GeneratedDesign(page_id=pid, design_id=sc["designId"], html=sc["html"],
+                                           prompt=prompt, preview_url=sc["previewUrl"])
+    return out
 
 
 def generate(svc: Any, page: dict, *, gateway: Any = None, feedback: str = "") -> GeneratedDesign:
