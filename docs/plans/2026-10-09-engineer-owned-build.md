@@ -601,3 +601,12 @@ What the run found, fixed the same evening (e9d1a7e5, 8a9ffe6b):
 
 Crumb resumed on the fixed platform: two fix rounds at the whole-app pass,
 then "6 pages ready … Customer lands on /menu … 13 of 13 statements held".
+
+After the fixes (forge-v3 at 925cc7ee): Crumb's last feature re-run built
+cleanly and the final pass held 13 of 13; the definition is at v76 with all
+four pages' code, state PREVIEW; $9.91 in all over the first build and two
+resumes. A deploy's cutover had restarted the backend under a running build
+between two graph runs (21:29): the engineer's build now carries one ledger
+with a pulse from its first feature to its last. Not yet run live: a build
+started from the UI, Smith's problem report from the panel,
+`report_platform_fault`; the mend of a failed node is proven by tests only.
