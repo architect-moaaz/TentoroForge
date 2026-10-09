@@ -174,7 +174,12 @@ def _prove(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] | Non
         from services.blueprint.page_review import RunningApp
 
         def app_factory(root: Path) -> Any:
-            return RunningApp(root, log=Path(output_dir) / ".forge" / "expects" / "server.log")
+            from services.blueprint.assembly import VERIFY_DIST_DIR
+            # THE BUILD THAT SHIPS, SERVED. The assemble step's own production
+            # build, started with `next start`; built again only when a source
+            # changed since (a give-back's rewrite).
+            return RunningApp(root, log=Path(output_dir) / ".forge" / "expects" / "server.log",
+                              mode="production", dist_dir=VERIFY_DIST_DIR)
     trial = trial or runner.run
     author = author or _author
 

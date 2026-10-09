@@ -1403,6 +1403,8 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
             )
         if name == "install":
             _mark_install_finished(root)
+        if name == "build":
+            stamp_build(root, VERIFY_DIST_DIR)
     if build and dispatches:
         out["dispatches"] = verify_dispatches(root, timeout=timeout)
     return out
@@ -1496,6 +1498,58 @@ def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
 
 
 #: Where a verification build writes, beside — never inside — the served app.
+#: What a build was made from, written into its dist: the newest change
+#: under the sources it compiles. A dist whose stamp is not older than the
+#: sources is served as it is; the statements ran on ToroCommerce's
+#: production build in milliseconds a page, where a cold `next dev` capped at
+#: 2.5 GB restarted itself twenty times in 35 minutes (2026-10-09).
+BUILT_FROM = ".forge-built-from"
+#: What a build compiles: a change anywhere here makes a dist stale.
+COMPILED = ("src", "vendor", "package.json", "next.config.js", "tsconfig.json",
+            "tailwind.config.js", "tailwind.config.ts", "postcss.config.js", "postcss.config.mjs")
+
+
+def source_stamp(app_root: str | Path) -> float:
+    """The newest modification time under what a build compiles."""
+    root = Path(app_root)
+    newest = 0.0
+    for name in COMPILED:
+        top = root / name
+        try:
+            if top.is_file():
+                newest = max(newest, top.stat().st_mtime)
+                continue
+            for p in top.rglob("*"):
+                try:
+                    if p.is_file():
+                        newest = max(newest, p.stat().st_mtime)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+    return newest
+
+
+def stamp_build(app_root: str | Path, dist_dir: str) -> None:
+    """Record what the build in `dist_dir` was made from."""
+    stamp = Path(app_root) / dist_dir / BUILT_FROM
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(repr(source_stamp(app_root)), "utf-8")
+    except OSError:
+        pass
+
+
+def build_is_fresh(app_root: str | Path, dist_dir: str) -> bool:
+    """Whether the build in `dist_dir` was made from the sources as they are."""
+    root = Path(app_root)
+    try:
+        return (root / dist_dir / "BUILD_ID").is_file() and \
+            float((root / dist_dir / BUILT_FROM).read_text("utf-8")) >= source_stamp(root)
+    except (OSError, ValueError):
+        return False
+
+
 VERIFY_DIST_DIR = ".next-verify"
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")

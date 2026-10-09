@@ -215,6 +215,27 @@ def ensure_docker_database(app_root: Path) -> bool:
     return True
 
 
+def production_build(app_root: Path, dist_dir: str, *, env: dict, sink: Any) -> str:
+    """`next build` into `dist_dir`, unless the build there was made from the
+    sources as they are now. Returns "" or why it could not be built."""
+    from services.blueprint import assembly
+    if assembly.build_is_fresh(app_root, dist_dir):
+        return ""
+    done = subprocess.run(["npx", "next", "build"], cwd=app_root, capture_output=True, text=True,
+                          env=env, timeout=900)
+    if sink is not subprocess.DEVNULL:
+        try:
+            sink.write(((done.stdout or "") + (done.stderr or "")).encode("utf-8", "replace"))
+            sink.flush()
+        except (OSError, AttributeError):
+            pass
+    if done.returncode != 0:
+        return f"the production build failed ({done.returncode}): " \
+               f"{assembly.build_message(done.stdout or '', done.stderr or '')[:600]}"
+    assembly.stamp_build(app_root, dist_dir)
+    return ""
+
+
 def _capped(env: dict) -> dict:
     from services.dev_servers import capped_env
     return capped_env(env)
@@ -224,8 +245,17 @@ class RunningApp:
     """The generated app, its database up and its dev server serving — beside
     whatever the person is already running, never over it."""
 
-    def __init__(self, app_root: Path, *, log: Path | None = None, dist_dir: str = REVIEW_DIST_DIR):
+    def __init__(self, app_root: Path, *, log: Path | None = None, dist_dir: str = REVIEW_DIST_DIR,
+                 mode: str = "development"):
         self.root = app_root
+        # "production": the app's production build (`next build`, kept and
+        # served again while the sources are unchanged) under `next start` —
+        # a page in milliseconds, a quarter of a gigabyte, no self-restart.
+        # "development": `next dev`, for a loop that changes code between
+        # looks. ToroCommerce's statements on a cold dev server capped at
+        # 2.5 GB: twenty restarts in 35 minutes, 17 statements failed on
+        # "connection refused" (forge-v3, 2026-10-09).
+        self.mode = mode
         # Each server builds into its own directory and deletes it after: two
         # sharing one (a review and a Smith trial on the same app) took each
         # other's build away mid-run and every page answered ENOENT.
@@ -294,25 +324,33 @@ class RunningApp:
         if self.log is not None:
             self.log.parent.mkdir(parents=True, exist_ok=True)
             sink = self._sink = open(self.log, "ab")  # noqa: SIM115 — closed in __exit__
+        env = _capped({**os.environ, "BROWSER": "none",
+                       # The preview secret, so a session minted for a role the
+                       # administrator does not hold is a session this server accepts.
+                       **boot_env(self.base),
+                       # Also what the SDK's empty state answers to: only this server
+                       # builds into its own dist dir.
+                       "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2],
+                       # NEVER THE APP'S OWN VOICE. The app reports crashes to the
+                       # platform under its project id (`.env.local`); a server the
+                       # platform runs to try the app reported its trials' aborted
+                       # requests as the app's crashes, and self-heal turns ran on
+                       # them beside the person's own (E-commerce, 2026-10-09). An
+                       # id set empty here is kept empty: Next never overrides a
+                       # variable the process already carries.
+                       "FORGE_PROJECT_ID": ""})
+        if self.mode == "production":
+            why = production_build(self.root, self.dist_dir, env=env, sink=sink)
+            if why:
+                self.__exit__(None, None, None)
+                raise ReviewUnavailable(why)
+            cmd = ["npx", "next", "start", "--port", str(self.port)]
+        else:
+            cmd = ["npx", "next", "dev", "--port", str(self.port)]
         self.proc = subprocess.Popen(
-            ["npx", "next", "dev", "--port", str(self.port)], cwd=self.root,
+            cmd, cwd=self.root,
             stdout=sink, stderr=subprocess.STDOUT if self.log is not None else subprocess.DEVNULL,
-            start_new_session=True,
-            env=_capped({**os.environ, "BROWSER": "none",
-                 # The preview secret, so a session minted for a role the
-                 # administrator does not hold is a session this server accepts.
-                 **boot_env(self.base),
-                 # Also what the SDK's empty state answers to: only this server
-                 # builds into `.next-review`.
-                 "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2],
-                 # NEVER THE APP'S OWN VOICE. The app reports crashes to the
-                 # platform under its project id (`.env.local`); a server the
-                 # platform runs to try the app reported its trials' aborted
-                 # requests as the app's crashes, and self-heal turns ran on
-                 # them beside the person's own (E-commerce, 2026-10-09). An
-                 # id set empty here is kept empty: Next never overrides a
-                 # variable the process already carries.
-                 "FORGE_PROJECT_ID": ""}))
+            start_new_session=True, env=env)
         from services import dev_servers
         dev_servers.track(self.proc.pid, port=self.port, root=self.root, kind="review")
         deadline = time.monotonic() + 180
@@ -374,7 +412,10 @@ class RunningApp:
                                capture_output=True, timeout=120)
         if self.started_db:
             subprocess.run(["docker", "compose", "stop"], cwd=self.root, capture_output=True, timeout=120)
-        shutil.rmtree(self.root / self.dist_dir, ignore_errors=True)
+        # A production build is kept: the next run serves it as it is while
+        # the sources are unchanged. A dev server's dist is its own and goes.
+        if self.mode != "production":
+            shutil.rmtree(self.root / self.dist_dir, ignore_errors=True)
 
 
 def _query(app: RunningApp, sql: str) -> list[list[str]]:

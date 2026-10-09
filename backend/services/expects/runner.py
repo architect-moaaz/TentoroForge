@@ -1252,7 +1252,9 @@ def main(argv: list[str]) -> int:
     from services.blueprint.service import BlueprintService
     project = Path(argv[0]).resolve()
     doc = BlueprintService.load(output_dir=str(project)).doc
-    with RunningApp(project / "app", log=project / ".forge" / "expects" / "server.log") as app:
+    from services.blueprint.assembly import VERIFY_DIST_DIR
+    with RunningApp(project / "app", log=project / ".forge" / "expects" / "server.log",
+                    mode="production", dist_dir=VERIFY_DIST_DIR) as app:
         def show(r: dict) -> None:
             print(f"{r['id']} {r['verdict'].upper():10} {r['seconds']:>5}s  {r['says']}", flush=True)
             for f in r["failures"] + r["untried"]:
