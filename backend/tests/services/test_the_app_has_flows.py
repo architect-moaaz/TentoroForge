@@ -202,3 +202,25 @@ def test_the_administrator_signing_in_is_seen_to_arrive_where_they_start(monkeyp
     assert [e["route"] for e in asked] == ["/login", "/login?callbackUrl=%2F"] and all(e["signIn"] for e in asked)
     assert found == ["the Admin, signing in from a link that names the home page, lands on / — they start on "
                      "/admin/products"]
+
+
+def test_a_flow_written_beside_its_screens_names_them_by_route():
+    """forge-v3, 2026-10-09: the screen author wrote flows in the same reply
+    as the screens, naming them `/register` and `/`, and every screen was
+    refused as "not a screen of the application"."""
+    from types import SimpleNamespace
+    from services.blueprint.agent_contract import check_flows
+    doc = _doc()
+    flow = copy.deepcopy(DOC["flows"][0])
+    for st, route in zip(flow["steps"], ["/", "/search", "/cart", "/orders"]):
+        st["page"] = route
+    assert af.flow_findings({**doc, "flows": [flow]}) == []
+    assert [st["page"] for st in af.flows({**doc, "flows": [flow]})[0]["steps"]] == \
+        ["PAGE-001", "PAGE-002", "PAGE-003", "PAGE-004"]
+    assert af.hand_offs({**doc, "flows": [flow]}, "PAGE-003")[0]["address"] == "/orders?order={id}"
+    bare = {k: v for k, v in doc.items() if k != "pages"}
+    flow["steps"][0]["page"] = "/register"
+    pages = [{"id": "", "name": "Register", "route": "/register"}, *doc["pages"]]
+    result = SimpleNamespace(proposals=[SimpleNamespace(section="pages", body=p) for p in pages]
+                             + [SimpleNamespace(section="flows", body=flow)])
+    check_flows(result, {**bare, "pages": []})

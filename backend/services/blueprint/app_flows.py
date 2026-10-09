@@ -28,11 +28,32 @@ def _live(rows: Any) -> list[dict]:
 
 
 def flows(doc: dict) -> list[dict]:
-    return [f for f in _live(doc.get("flows")) if isinstance(f.get("steps"), list)]
+    """The live flows, every step naming its screen by id.
+
+    A STEP MAY NAME ITS SCREEN BY ROUTE. The author that writes the screens
+    can write flows in the same reply, before those screens have ids, and it
+    names them the way it knows them — `/register`, `/`. Read back here, a
+    route that is a screen's is that screen's id, so everything downstream
+    compares ids. A data-entry build's screens were refused because their
+    flows said `/register` (forge-v3, 2026-10-09)."""
+    ids = {str(p.get("route")): str(p.get("id")) for p in _live(doc.get("pages"))
+           if p.get("id") and p.get("route")}
+    out = []
+    for f in _live(doc.get("flows")):
+        if not isinstance(f.get("steps"), list):
+            continue
+        steps = [{**st, "page": ids.get(str(st.get("page")), st.get("page"))}
+                 for st in f["steps"] if isinstance(st, dict)]
+        out.append({**f, "steps": steps})
+    return out
 
 
 def _pages(doc: dict) -> dict[str, dict]:
-    return {str(p.get("id")): p for p in _live(doc.get("pages")) if p.get("id")}
+    """Every screen by id, and by route — a screen proposed in the same reply
+    as its flows has no id yet (see `flows`)."""
+    live = _live(doc.get("pages"))
+    by_route = {str(p.get("route")): p for p in live if p.get("route")}
+    return {**by_route, **{str(p.get("id")): p for p in live if p.get("id")}}
 
 
 def _section(page: dict, key: Any) -> dict | None:

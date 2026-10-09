@@ -732,7 +732,13 @@ def check_flows(result: "AgentResult", doc: dict | None) -> None:
     proposals = [p for p in result.proposals if p.section == "flows" and isinstance(p.body, dict)]
     if not proposals or not doc:
         return
-    problems = flow_findings({**doc, "flows": [p.body for p in proposals]})
+    # THE SCREENS IN THE SAME REPLY COUNT. The author that writes the screens
+    # may write their flows beside them; judged against the document alone,
+    # every screen it had just proposed was "not a screen of the application"
+    # and the build's screens were refused for it (forge-v3, 2026-10-09).
+    proposed = [p.body for p in result.proposals if p.section == "pages" and isinstance(p.body, dict)]
+    problems = flow_findings({**doc, "pages": [*(doc.get("pages") or []), *proposed],
+                              "flows": [p.body for p in proposals]})
     if problems:
         raise InvalidAppFlow("These flows name what the application does not have — mend each step:\n- "
                              + "\n- ".join(problems[:30]))
