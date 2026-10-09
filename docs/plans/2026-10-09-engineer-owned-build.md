@@ -1,7 +1,7 @@
 # One engineer per app: building by proof instead of by assembly
 
 Date: 2026-10-09
-Status: agreed 2026-10-10 (self-heal stays); step 1 in progress — see §11
+Status: agreed 2026-10-10 (self-heal stays); steps 1–5 built on `smithv4`, not yet deployed — see §11
 
 ## 1. Why this proposal exists
 
@@ -533,3 +533,42 @@ multi-week change and should not be rushed onto forge-v3.
 Open in step 1: the kept-warm, host-sized dev server for change loops; the
 preview on the production build. Step 2 (the engineer on copies of TStyle
 and E-commerce) not started.
+
+### 2026-10-10 — steps 2–5, on `smithv4` (not deployed, not yet run live)
+
+- **Step 2, the engineer** (`services/engineer`): features are the approved
+  modules in order of dependence; the scheduler takes a `Scope` so the same
+  nodes author one feature's subjects and a node that writes once is told
+  which feature the call is for; after each feature the app is projected
+  and built, its statements tried on the Workbench, failures handed to their
+  authors and then to bounded unattended fix turns; every statement once
+  more at the end. A journal makes the run resumable and single-flight; a
+  time budget ends it with what it proved. `python -m services.engineer
+  <output_dir>` runs it on a copy.
+- **Step 3, decisions in the definition:** `Blueprint.policies` (money,
+  time, quantities, lifecycles, anonymous, selfRegistration, decisions) and
+  `Workflow.writes`; a `decisions` node by the engineer that every writer
+  waits for and reads; `check_policies`. Enforced: the SDK's one money
+  formatter from the decided currency (a page naming a currency is refused),
+  the engine starts records in the life cycle's initial state and refuses a
+  move it does not allow, launch roles and sign-up take the anonymous and
+  self-registration decisions, the page writer's brief carries what each
+  process writes and the decisions its records follow, the step writer
+  declares `writes`.
+- **Step 4, the build is the engineer's:** an approved build goes through
+  the engineer; nothing is repaired after it; definition and model runs
+  still go through the graph.
+- **Step 5, Smith in change mode:** the panel sends who saw it and where
+  (the preview's route, device, viewport); the turn is told it first, the
+  trials reproduce as that person, and a change waits until the named screen
+  was used through the screen; `report_platform_fault` records a platform
+  fault instead of patching around it; a requirement that reads as an
+  instruction is refused; a turn has a clock and a journal, and "carry on"
+  picks up from the last unfinished turn.
+
+Not built: the kept-warm, host-sized dev server for change loops (Smith's
+bench still starts a dev server per turn); reset-by-email; the engineer's
+early handover after the first features (it hands over at the end). The
+preview's route reaches the report only when the frame is same-origin.
+
+Measured locally only by tests; the first live run is the deploy's.
