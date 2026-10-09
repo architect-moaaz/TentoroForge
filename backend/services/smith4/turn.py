@@ -127,6 +127,16 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     own budget — a fault dispatched by the journey verifier gets a few steps,
     a person's ask gets the full cap."""
     observations: list[Observation] = []
+    # A TEMPLATE WAITING TO BE USED IS ALREADY READ. Its facts are on the page
+    # (`context.template_page`), and the first move is usually to ask "the
+    # exact same app, or something like it?" — which LOOK_FIRST would refuse
+    # as unread, spending a step to look at nothing new.
+    from services import project_templates as _templates
+    _staged = _templates.pending(ctx.out)
+    if _staged:
+        observations.append(Observation(tool="template", status="read", said=(
+            f"This project was started from the template “{_staged.get('name')}”; "
+            "what it holds is on the page.")))
     bench = trials.Bench(ctx.out)
     # THE PERSON'S WORDS GO WITH EVERY BRIEF THIS TURN HANDS ON (`asked`).
     from services.smith.asked import ASKED

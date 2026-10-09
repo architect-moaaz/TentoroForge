@@ -86,6 +86,9 @@ type Greeting = {
   detail: string;
   nextAct: string;
   openers: { kind: string; example: string }[];
+  /** A question with its answers as buttons — a project started from a
+   *  template is asked "the exact same app, or something like it?". */
+  choices?: string[];
   facts: Record<string, unknown>;
 };
 
@@ -845,6 +848,20 @@ export function SmithPanel({
                   </li>
                 ))}
               </ul>
+            )}
+            {!!greeting?.choices?.length && (
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {greeting.choices.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => sendText(c)}
+                    className="rounded-full border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         )}

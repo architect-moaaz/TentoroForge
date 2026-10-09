@@ -180,6 +180,7 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # A copy of the whole thing — records AND the definition — that the owner
     # keeps. Needs nothing; there is only ever one application to copy.
     "back_up": set(),
+    "save_as_template": set(),
     # THE ASKS THAT REACH NOTHING, GIVEN SOMEWHERE TO LAND. Each of these is a
     # thing people ask for that Smith genuinely cannot do. Without a verb they
     # were classified as whatever was nearest — "delete the Wards page" as a
@@ -462,6 +463,14 @@ VERB_HELP: dict[str, str] = {
         "what has been taking too long, and I say plainly that I cannot make "
         "it faster on its own. Needs nothing."
     ),
+    "save_as_template": (
+        "Keep this application as a TEMPLATE the organisation can start new apps "
+        "from: \"save this as a template\", \"make a template of this app\", "
+        "\"I want to reuse this app later\". Saves its whole definition — screens, "
+        "records, processes, rules, roles, look — to Templates, where anyone in the "
+        "organisation can use it for the same app again or one like it. Takes an "
+        "optional name in `new_value`; changes nothing in this application."
+    ),
     "back_up": (
         "A copy of the whole application the owner keeps: \"back it up "
         "somewhere\", \"what if I lose all this?\", \"can I take a backup?\". "
@@ -652,6 +661,10 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'sync_app': (
         'I still cannot see it in the menu',
         'it says it is public but it still asks me to sign in',
+    ),
+    'save_as_template': (
+        'save this app as a template',
+        'I want to reuse this app later for another client',
     ),
     'back_up': (
         'what happens if I lose all this?',

@@ -52,6 +52,7 @@ import { DRDEditorPanel } from "@/components/decision/DRDEditorPanel";
 import { BusinessRulesPanel } from "@/components/business-rules/BusinessRulesPanel";
 import { ExportDialog } from "@/components/projects/ExportDialog";
 import { PublishButton } from "@/components/deploy/PublishButton";
+import { SaveAsTemplateButton } from "@/components/templates/SaveAsTemplateButton";
 import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -452,6 +453,7 @@ function ProjectWorkspace({
               <Download className="h-3.5 w-3.5" />
             </button>
           </Tooltip>
+          <SaveAsTemplateButton projectId={projectId} orgId={orgId} projectName={project?.name} />
           <div className="w-px h-4 bg-slate-200 mx-1 dark:bg-slate-700" />
           <PublishButton projectId={projectId} orgId={orgId} />
         </div>
