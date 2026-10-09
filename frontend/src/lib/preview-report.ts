@@ -16,9 +16,16 @@ export interface PreviewReport {
 const state: PreviewReport = {};
 
 /** The preview frame's current route, read off its document when it loads. */
-export function rememberPreview(frame: HTMLIFrameElement | null, device?: string, size?: { width: number; height: number }) {
+export function rememberPreview(
+  frame: HTMLIFrameElement | null,
+  device?: string,
+  size?: { width: number | string; height: number | string },
+) {
   if (device) state.device = device;
-  if (size) state.viewport = { width: size.width, height: size.height };
+  // The frame's emulated size is "390px" or "100%"; only a real size is a viewport.
+  const w = size ? parseInt(String(size.width), 10) : NaN;
+  const h = size ? parseInt(String(size.height), 10) : NaN;
+  if (Number.isFinite(w) && Number.isFinite(h)) state.viewport = { width: w, height: h };
   try {
     const path = frame?.contentWindow?.location?.pathname;
     if (path) {
