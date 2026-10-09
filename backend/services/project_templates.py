@@ -94,7 +94,7 @@ def _dir(template_id: str) -> Path:
 def _write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), "utf-8")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
     os.replace(tmp, path)
 
 
@@ -142,6 +142,23 @@ def summary(doc: dict) -> dict:
         "palette": palette,
         "designed": bool(pages) and all(str(p.get("id")) in coded for p in pages),
     }
+
+
+#: How a count is said: (key, one, many).
+_COUNTED = (("pages", "screen", "screens"), ("entities", "kind of record", "kinds of record"),
+            ("workflows", "process", "processes"), ("roles", "role", "roles"),
+            ("requirements", "requirement", "requirements"))
+
+
+def counted(counts: dict, keys: tuple[str, ...] = ("pages", "entities", "workflows", "roles")) -> str:
+    """``"3 screens, 1 kind of record, 4 processes"`` — what a template holds,
+    said the way a person says it."""
+    parts = []
+    for key, one, many in _COUNTED:
+        n = counts.get(key) if key in keys else 0
+        if n:
+            parts.append(f"{n} {one if n == 1 else many}")
+    return ", ".join(parts)
 
 
 def is_defined(doc: dict) -> bool:
@@ -541,7 +558,7 @@ def mark_built(output_dir: str | Path) -> None:
 
 __all__ = [
     "BUILT", "MODE_ADAPT", "MODE_EXACT", "PENDING", "PER_PROJECT_SECTIONS", "STAGE_DIR",
-    "TemplateError", "delete", "exact_build_pending", "project_facts", "get", "is_defined",
+    "TemplateError", "counted", "delete", "exact_build_pending", "project_facts", "get", "is_defined",
     "is_modelled", "list_for_org",
     "load_definition", "mark_built", "pending", "prepare_adapt", "reference_document", "save",
     "snapshot", "source_of", "stage", "summary", "templates_root", "update", "use_exact",
