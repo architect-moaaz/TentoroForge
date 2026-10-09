@@ -1846,6 +1846,14 @@ export const Workflow = z.object({
     detail: z.string().default(""),
   }),
   steps: z.array(WorkflowStep).default([]),
+  /** What the process writes, declared with its steps: the records, the fields
+   *  it sets and the states it puts them in — what screens, charts and
+   *  statements bind to instead of guessing. */
+  writes: z.array(z.object({
+    entity: EntityId,
+    fields: z.array(z.string()).default([]),
+    states: z.array(z.string()).default([]),
+  })).default([]),
   /** Pages that can launch this workflow — the wiring, declared not inferred. */
   launchedFrom: z.array(PageId).default([]),
   /**
@@ -2963,6 +2971,80 @@ export const Expectation = z.object({
   ...artifactBase,
 });
 
+// ===========================================================================
+// Policies — the business facts decided once, that every writer reads
+// ===========================================================================
+//
+// Currency, money rules, record life cycles, time, what a quantity means and
+// what a signed-out visitor may do had no place in the definition, so each
+// writer invented its own: an order created "pending" and set "processing" in
+// the same process while the merchant's list filtered "pending"; GBP on one
+// page and USD on the next; £6.99 shipping shown and 0 stored; a glass of
+// water logged replacing the day's total; a cart button anyone could press
+// that only a signed-in customer could use (E-commerce, TStyle, 2026-10-09).
+// Decided here, by the engineer, before anything that depends on them; the
+// platform formats money, enforces life-cycle moves, gates sign-up and the
+// anonymous rule from these fields, so no page can disagree with them.
+
+export const MoneyRule = z.object({
+  name: z.string().min(1),
+  applies: z.enum(["shipping", "tax", "discount", "fee", "other"]),
+  /** How the amount is worked out, in the engine's expression language over the
+   *  record's fields ("subtotal * 0.2", "6.99", "0") — or empty for "none". */
+  formula: z.string().default(""),
+  note: z.string().default(""),
+});
+
+export const Lifecycle = z.object({
+  entity: EntityId,
+  field: z.string().min(1),
+  /** The state a new record starts in; one of the field's enumValues. */
+  initial: z.string().min(1),
+  /** The moves allowed, and who may make each (every role when empty). */
+  moves: z.array(z.object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+    by: z.array(RoleId).default([]),
+  })).default([]),
+});
+
+export const Policies = z.object({
+  money: z.object({
+    /** ISO 4217 — "USD", "GBP", "INR". Every amount in the application is shown in it. */
+    currency: z.string().default(""),
+    /** BCP-47 locale the amounts are formatted in; the interface locale when empty. */
+    locale: z.string().default(""),
+    rules: z.array(MoneyRule).default([]),
+  }).default({}),
+  time: z.object({
+    /** "person" (each person's own), "app" (one zone for all, named in `zone`), or empty for the server's. */
+    mode: z.enum(["person", "app", ""]).default(""),
+    zone: z.string().default(""),
+  }).default({}),
+  /** Per process that records an amount: whether a new entry ADDS to what is
+   *  there for the period or REPLACES it. */
+  quantities: z.array(z.object({
+    workflow: WorkflowId,
+    mode: z.enum(["add", "replace"]),
+  })).default([]),
+  lifecycles: z.array(Lifecycle).default([]),
+  /** Per process a signed-out visitor can reach: allowed as they are, asked to
+   *  sign in first, or owned by their guest session. */
+  anonymous: z.array(z.object({
+    workflow: WorkflowId,
+    rule: z.enum(["allowed", "sign_in", "guest_owned"]),
+  })).default([]),
+  /** The roles a person may sign up as. Empty: the default role only, never
+   *  one the request names. */
+  selfRegistration: z.array(RoleId).default([]),
+  /** Any other fact decided once that writers must agree on. */
+  decisions: z.array(z.object({
+    about: z.string().min(1),
+    decided: z.string().min(1),
+    why: z.string().default(""),
+  })).default([]),
+});
+
 export const Blueprint = z.object({
   schemaVersion: z.literal(BLUEPRINT_SCHEMA_VERSION),
   /** Bumped on every accepted change (§91). Indexes into changeHistory. */
@@ -2971,6 +3053,7 @@ export const Blueprint = z.object({
 
   application: ApplicationMeta,
   product: Product.default({}),
+  policies: Policies.default({}),
 
   roles: z.array(Role).default([]),
   permissions: z.array(Permission).default([]),

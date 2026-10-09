@@ -286,7 +286,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # Produces `pages`, as the single node did; it writes widgets too, but a
     # produced section is what resume and impact analysis read, and an
     # application with no dashboard has none.
-    _n("page_details", "page_design", ("page_contracts",), ("pages",),
+    _n("page_details", "page_design", ("page_contracts", "decisions"), ("pages",),
        fanout="page_features",
        note="the contracts: tasks, states, views, actions, widgets, per feature"),
     # SIGNING IN IS A PAGE. `/login` and `/signup` were template files the
@@ -310,7 +310,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # `page_details`, one feature at a time, which is why a dashboard (a page
     # about every feature) so often came out empty. `page_layouts` and
     # `page_code` read what it writes; the Data Engine runs it live.
-    _n("analytics", "analytics", ("page_details", "entity_fields", "content_fields", "workflows"), ("widgets",),
+    _n("analytics", "analytics", ("page_details", "entity_fields", "content_fields", "workflows", "decisions"), ("widgets",),
        note="KPIs, charts and breakdowns per page, as measures by dimensions"),
     # §47 — the design language the connected file already states, projected
     # onto the Blueprint. Deterministic (§116): published variables *are* the
@@ -398,7 +398,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # everything at its level had. A page needs a workflow's identity and
     # contract to wire a button, never its steps; `page_layouts` depends on
     # this node and not on `workflow_steps` for exactly that reason.
-    _n("workflows", "workflow", ("entity_fields", "page_contracts", "content_fields"), ("workflows",),
+    _n("workflows", "workflow", ("entity_fields", "page_contracts", "content_fields", "decisions"), ("workflows",),
        note="§107 step 16; declares each workflow's identity and contract"),
     # One call per declared workflow, in parallel, each given the node
     # catalog and one workflow to fill in. A step is a catalog node carrying
@@ -412,6 +412,14 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # declared, each person's route to each of their goals: where they are,
     # what they do, which process does it, where it takes them. The page
     # writer is told each screen's hand-offs from it, so it waits on this.
+    # DECIDED ONCE, BEFORE ANYTHING DEPENDS ON IT. The business facts every
+    # writer must agree on — currency and money rules, record life cycles,
+    # time, add-or-replace, the anonymous rule, who may sign up — had no
+    # place in the document, so each writer invented its own (E-commerce,
+    # TStyle, 2026-10-09). The engineer writes them from what was agreed at
+    # the two reviews; the first build-phase node, read by the rest.
+    _n("decisions", "engineer", ("page_contracts", "entity_fields", "security"), ("policies",),
+       note="the business facts decided once: money, time, life cycles, the anonymous rule"),
     _n("app_flows", "page_design", ("page_details", "workflows", "security"), ("flows",),
        note="the paths people take through the app, screen to screen"),
     # AFTER THE WORKFLOWS ARE DECLARED: a prerequisite ("verified before
@@ -419,14 +427,14 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # there were none to name — 0l133sp2's KYC rule was refused for empty
     # `gates` and dropped on the retry, so nothing was enforced. Nothing waits
     # on rules but `integration` and `memory`, so this costs no time.
-    _n("business_rules", "business_rules", ("entity_fields", "workflows"), ("businessRules",),
+    _n("business_rules", "business_rules", ("entity_fields", "workflows", "decisions"), ("businessRules",),
        note="§107 step 16; not a distinct box in §28"),
     # WHAT MUST HAPPEN, SAID BEFORE ANY SCREEN IS CODED. With the screens,
     # the processes, the people and the rules declared, the statements the
     # finished application is tried against — written from the requirements,
     # so they say what is right rather than what the code happens to do.
     # Nothing waits on them while the pages are written.
-    _n("expectations", "testing", ("page_details", "workflows", "security", "business_rules"),
+    _n("expectations", "testing", ("page_details", "workflows", "security", "business_rules", "decisions"),
        ("expectations",), fanout="expectation_groups", optional=True,
        note="what must happen when someone does something, tried as the person"),
     _n("security", "security", ("entity_fields",), ("security", "roles", "permissions"),
@@ -3009,7 +3017,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     from services.blueprint.projection import (
         apply_frontend_projection, project_brand_logo, project_design_tokens,
         project_middleware, project_public_resources, project_public_routes,
-        project_nav_flow, project_root_route, project_shell, project_shell_identity,
+        project_nav_flow, project_policies, project_root_route, project_shell, project_shell_identity,
     )
 
     # NO SECOND COMPOSER. A landing page whose composition is refused leaves no
@@ -3088,6 +3096,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # fails, the retry still happens, and what the failure destroys is now the
     # page that failed rather than everything around it.
     project_nav_flow(view, app_root)
+    project_policies(view, app_root)
     # The rail itself, from the same tree the route graph was read from:
     # `shell.json` is what the scaffold's layout builds its sidebar from, and
     # nothing wrote it, so every rail was the flat fallback.

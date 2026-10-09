@@ -63,6 +63,9 @@ ROOM_OF: dict[str, str] = {
     # Architecture — modules, navigation, the seams to the outside (§28, §60)
     "solution_architecture": "architecture",
     "integration": "architecture",
+    # The engineer decides the business facts every writer reads, and owns
+    # the build feature by feature: an architect's desk.
+    "engineer": "architecture",
     # Design Studio — the design language, before anything composes (§37)
     "accessibility": "design_studio",
     "figma_intelligence": "design_studio",

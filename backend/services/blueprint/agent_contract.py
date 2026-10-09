@@ -50,7 +50,7 @@ ASK_USER = 0.40
 WRITABLE_SECTIONS: frozenset[str] = frozenset(
     set(ARTIFACT_SECTIONS)
     | {"data.entities", "data.relationships", "data.constraints",
-       "navigation", "designSystem", "security",
+       "navigation", "designSystem", "security", "policies",
        "runtime", "database", "deployment", "product", "codeMap",
        "pageLayouts", "pageCode", "composition", "completeness"}
 )
@@ -135,6 +135,10 @@ _READS: dict[str, set[str]] = {
 
     # Data: grounded in requirements, not in anybody's UI.
     "data_model": {"requirements"},
+    # THE ENGINEER DECIDES ONCE what every writer then reads: it sees the
+    # whole of what was agreed before the build.
+    "engineer": {"requirements", "product", "modules", "data", "pages", "roles",
+                 "permissions", "security", "workflows"},
 
     # Design language: the product and what the UI already uses.
     "accessibility": {"requirements", "pages"},
@@ -153,7 +157,7 @@ _READS: dict[str, set[str]] = {
     # Read-only, and it stays that way: the extraction is evidence (§48), and an
     # agent that could edit what the design says could make the design agree
     # with the app it just invented.
-    "page_design": {"requirements", "modules", "data", "designSystem",
+    "page_design": {"policies", "requirements", "modules", "data", "designSystem",
                     "roles", "permissions", "designSources",
                     # The app flows are the screens' and the processes'
                     # paths: who moves where, by which process (`flows`) —
@@ -161,24 +165,24 @@ _READS: dict[str, set[str]] = {
                     "workflows", "security"},
 
     # Behaviour: what the business does, over the data it does it to.
-    "workflow": {"requirements", "data", "pages", "businessRules", "roles"},
-    "business_rules": {"requirements", "data", "workflows"},
+    "workflow": {"policies", "requirements", "data", "pages", "businessRules", "roles"},
+    "business_rules": {"policies", "requirements", "data", "workflows"},
 
     # The analytics each page carries, over the data the pages show and the
     # processes that move it — the states a workflow changes are what a
     # dashboard counts.
-    "analytics": {"requirements", "product", "data", "pages", "roles",
+    "analytics": {"policies", "requirements", "product", "data", "pages", "roles",
                   "workflows", "security"},
 
     # §100 — permissions guard entities, pages and workflow execution.
-    "security": {"requirements", "data", "pages", "workflows"},
+    "security": {"policies", "requirements", "data", "pages", "workflows"},
 
     "integration": {"requirements"},
 
     # What must happen when someone does something: written from the
     # requirements and the rules, over the people, the screens, the records
     # and the processes they name — and never the code that does it.
-    "testing": {"requirements", "businessRules", "data", "pages", "workflows",
+    "testing": {"policies", "requirements", "businessRules", "data", "pages", "workflows",
                 "roles", "permissions", "security", "navigation", "integrations",
                 "product"},
 
@@ -210,6 +214,7 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     "domain_intelligence": _cap("domain_intelligence", {"product"}),
     "product_analysis": _cap("product_analysis", {"product", "requirements"}),
     "solution_architecture": _cap("solution_architecture", {"modules", "navigation"}),
+    "engineer": _cap("engineer", {"policies"}),
     # §30, verbatim: may compose pages, select patterns, define UI interactions,
     # use A2UI MCP, update UI-related Blueprint information. May NOT touch
     # business rules, database schema, security rules or role permissions.
@@ -932,6 +937,65 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
             + " Add or amend `kind: chart` widgets for these pages (keep the metrics you have).")
 
 
+class InvalidPolicies(AuthorRefusal):
+    """A decision names something the application does not have."""
+
+
+def check_policies(result: "AgentResult", doc: dict | None) -> None:
+    """DECIDED ABOUT THINGS THAT EXIST. A life cycle over a field the entity
+    has, in states the field allows, starting in one of them; a quantity or
+    anonymous rule about a declared process; sign-up roles the application
+    has. Refused naming each, so the decision is mended where it is made."""
+    proposals = [p for p in result.proposals if p.section == "policies" and isinstance(p.body, dict)]
+    if not proposals or not doc:
+        return
+    ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []
+            if isinstance(e, dict) and e.get("status") != "DEPRECATED"}
+    names = {str(e.get("name")): str(e.get("id")) for e in ents.values()}
+    roles = {str(r.get("id")) for r in doc.get("roles") or [] if isinstance(r, dict) and r.get("id")}
+    flows = {str(w.get("id")) for w in doc.get("workflows") or [] if isinstance(w, dict) and w.get("id")}
+    problems: list[str] = []
+    for p in proposals:
+        body = p.body
+        for lc in body.get("lifecycles") or []:
+            if not isinstance(lc, dict):
+                continue
+            eid = names.get(str(lc.get("entity")), str(lc.get("entity")))
+            ent = ents.get(eid)
+            if ent is None:
+                problems.append(f"lifecycle names entity {lc.get('entity')!r}, which the data model does not have")
+                continue
+            fld = next((f for f in ent.get("fields") or [] if isinstance(f, dict)
+                        and str(f.get("name")) == str(lc.get("field"))), None)
+            if fld is None:
+                problems.append(f"lifecycle on {ent.get('name')}.{lc.get('field')}: the entity has no such field")
+                continue
+            allowed = [str(v) for v in fld.get("enumValues") or []]
+            states = {str(lc.get("initial"))} | {str(m.get(k)) for m in lc.get("moves") or []
+                                                  if isinstance(m, dict) for k in ("from", "to")}
+            if allowed:
+                unknown = sorted(st for st in states if st not in allowed)
+                if unknown:
+                    problems.append(f"lifecycle on {ent.get('name')}.{lc.get('field')}: {', '.join(unknown)} "
+                                    f"not among its values {allowed}")
+            for m in lc.get("moves") or []:
+                for r in (m or {}).get("by") or []:
+                    if str(r) not in roles:
+                        problems.append(f"lifecycle on {ent.get('name')}.{lc.get('field')}: move "
+                                        f"{m.get('from')}→{m.get('to')} names role {r!r}, which the app does not have")
+        for q in body.get("quantities") or []:
+            if isinstance(q, dict) and flows and str(q.get("workflow")) not in flows:
+                problems.append(f"quantities names process {q.get('workflow')!r}, which is not declared")
+        for a in body.get("anonymous") or []:
+            if isinstance(a, dict) and flows and str(a.get("workflow")) not in flows:
+                problems.append(f"anonymous names process {a.get('workflow')!r}, which is not declared")
+        for r in body.get("selfRegistration") or []:
+            if str(r) not in roles:
+                problems.append(f"selfRegistration names role {r!r}, which the app does not have")
+    if problems:
+        raise InvalidPolicies(_all_of(problems[:12]))
+
+
 class InvalidPageContent(AuthorRefusal):
     """A page's content plan names a source the data model does not have."""
 
@@ -1421,6 +1485,7 @@ def apply_agent_result(
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)
+    check_policies(result, svc.doc)
     check_page_access(result, svc.doc)
     check_role_doors(result, svc.doc)
     check_navigation(result, svc.doc)

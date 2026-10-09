@@ -75,7 +75,7 @@ VALID_STATUSES = (
 #: artifacts. They carry no ``id`` and no ``status``, so they are written by
 #: merge rather than by allocate-and-append.
 SINGLETON_SECTIONS: frozenset[str] = frozenset({
-    "product", "navigation", "designSystem", "security",
+    "product", "policies", "navigation", "designSystem", "security",
     "runtime", "database", "deployment", "completeness",
     # §34 — the whole app sketched once. One object per app, like designSystem.
     "composition",

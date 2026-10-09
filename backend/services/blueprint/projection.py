@@ -1238,6 +1238,37 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": ["src/schemas/shell.json"], "groups": len(groups)}
 
 
+def project_policies(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/contracts/policies.json``: the decided business facts the
+    platform enforces — money (the SDK's one formatter reads the currency and
+    locale), life cycles (the engine refuses any other move), time."""
+    pol = doc.get("policies") if isinstance(doc.get("policies"), dict) else {}
+    ents = {str(e.get("id")): e for e in _live((doc.get("data") or {}).get("entities")) if e.get("id")}
+    lifecycles = []
+    for lc in pol.get("lifecycles") or []:
+        if not isinstance(lc, dict):
+            continue
+        ent = ents.get(str(lc.get("entity")))
+        if ent is None:
+            continue
+        lifecycles.append({"table": str(ent.get("table") or to_snake(str(ent.get("name") or ""))),
+                           "entity": str(ent.get("name") or ""), "field": str(lc.get("field") or ""),
+                           "initial": str(lc.get("initial") or ""),
+                           "moves": [{"from": str(m.get("from")), "to": str(m.get("to")),
+                                      "by": [str(r) for r in m.get("by") or []]}
+                                     for m in lc.get("moves") or [] if isinstance(m, dict)]})
+    money = pol.get("money") if isinstance(pol.get("money"), dict) else {}
+    body = {"money": {"currency": str(money.get("currency") or ""),
+                      "locale": str(money.get("locale") or (doc.get("product") or {}).get("locale") or ""),
+                      "rules": [r for r in money.get("rules") or [] if isinstance(r, dict)]},
+            "time": pol.get("time") if isinstance(pol.get("time"), dict) else {},
+            "lifecycles": lifecycles}
+    out = Path(app_root) / "src" / "contracts"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "policies.json").write_text(json.dumps(body, indent=2), "utf-8")
+    return {"files": ["src/contracts/policies.json"], "lifecycles": len(lifecycles)}
+
+
 def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/contracts/nav-flow.json`` from navigation + pages.
 
@@ -2549,11 +2580,24 @@ def launch_roles(doc: dict) -> dict[str, list[str] | None]:
     had just offered it."""
     names = {r.get("id"): r.get("name") for r in _live(doc.get("roles")) if r.get("id")}
     pages = {p.get("id"): p for p in _live(doc.get("pages")) if p.get("id")}
+    # DECIDED, NOT INFERRED. `policies.anonymous` says what a signed-out
+    # visitor may do with each process; a page's access only stands in when
+    # nothing was decided (an open "Add to cart" that needed a signed-in
+    # customer, E-commerce 2026-10-09).
+    decided = {str(a.get("workflow")): str(a.get("rule")) for a in
+               ((doc.get("policies") or {}).get("anonymous") or []) if isinstance(a, dict)}
     out: dict[str, list[str] | None] = {}
     for w in _live(doc.get("workflows")):
         if not w.get("id"):
             continue
         launched = [pages[pid] for pid in (w.get("launchedFrom") or []) if pid in pages]
+        rule = decided.get(str(w["id"]))
+        if rule == "sign_in":
+            out[w["id"]] = [SIGNED_IN]
+            continue
+        if rule in ("allowed", "guest_owned"):
+            out[w["id"]] = ["*"]
+            continue
         if not launched:
             out[w["id"]] = None
             continue

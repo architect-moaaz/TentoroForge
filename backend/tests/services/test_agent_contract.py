@@ -103,9 +103,12 @@ def test_figma_intelligence_is_registered_from_section_101():
     # analytics writes each page's widgets — the KPIs and charts, as queries
     # of measures by dimensions — with every page and entity in view, where
     # page design wrote them one feature at a time.
+    #
+    # engineer owns the app's build (docs/plans/2026-10-09-engineer-owned-build.md):
+    # it writes the decisions every other writer reads (`policies`).
     assert extra == {"figma_intelligence", "page_template", "a2ui_pages",
                      "memory", "smith", "observer",
-                     "ui_director", "ui_engineer", "page_reviewer", "analytics"}
+                     "ui_director", "ui_engineer", "page_reviewer", "analytics", "engineer"}
     cap = capability_for("figma_intelligence")
     assert "mcp:figma" in cap.tools
     # §48 — Figma is design evidence, not confirmed requirements; it may not

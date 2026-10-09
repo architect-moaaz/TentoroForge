@@ -1883,6 +1883,27 @@ NODE_TASKS: dict[str, str] = {
         "new account is sent there first). Every gated workflow then starts "
         "by checking it and refuses with the message when it is not met."
     ),
+    "decisions": (
+        "Decide, once, the business facts every writer of this application must "
+        "agree on, from what was agreed at the reviews — the requirements, the "
+        "product, its people, its records and screens. Write them as `policies`: "
+        "`money` (the one currency every amount is shown in, from the request or "
+        "the market it names, and the rules that compute amounts — shipping, tax, "
+        "discounts — each with its formula over the record's fields, or none); "
+        "`time` (whose time zone 'today' means); `quantities` (for every process "
+        "that records an amount — a glass of water, hours slept, a payment — "
+        "whether a new entry ADDS to the period's total or REPLACES it); "
+        "`lifecycles` (for every status-like field: the state a record starts "
+        "in, every move allowed, and who may make it — the engine refuses any "
+        "other move, and screens filter by these states); `anonymous` (for every "
+        "process a signed-out visitor can reach: allowed, asked to sign in first, "
+        "or owned by their guest session — never a button anyone can press that "
+        "only a signed-in person can use); `selfRegistration` (the roles a person "
+        "may sign up as — empty means the default role only); and `decisions` for "
+        "any other fact two writers could otherwise read differently. Decide from "
+        "the domain as its practitioners would; do not ask. Name only entities, "
+        "fields, states, roles and processes the document has."
+    ),
     "security": (
         "Define roles and the permissions that guard entities and endpoints. "
         "Then say who reaches which rows: an entity whose rows belong to one "

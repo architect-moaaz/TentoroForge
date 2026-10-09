@@ -99,7 +99,9 @@ def readers(node: str) -> list[str]:
     me = DAG[node]
     sections = {s.split(".")[0] for s in me.produces}
     out = []
-    for agent in sorted(_running_agents() - {me.agent}):
+    # The engineer owns the build and reads most of it; a huddle's outcome
+    # goes to it, it is not a builder that reads another's decision.
+    for agent in sorted(_running_agents() - {me.agent, OWNER}):
         reads = set(AGENT_REGISTRY[agent].reads)
         if "*" in reads or sections & reads:
             out.append(agent)
@@ -154,9 +156,15 @@ def builders_of(node: str, doc: dict | None = None) -> list[str]:
     from services.blueprint.agent_contract import AGENT_REGISTRY
     from services.blueprint.orchestrator import DAG
     sections = {s.split(".")[0] for s in DAG[node].produces}
+    # The engineer owns the build and reads most of it; it is the one a
+    # huddle's outcome goes to, not a builder it consults.
     named = [a for a in readers(node) if sections & set(AGENT_REGISTRY[a].reads) and takes_part(a, doc)]
     return sorted(named, key=lambda a: (-_weight(a), a))[:MAX_PARTICIPANTS]
 
+
+#: The agent that owns the build (services/engineer); it chairs no huddle and
+#: sits in none as a builder.
+OWNER = "engineer"
 
 _ID = re.compile(r"\b([A-Z]+)-\d{3,}\b")
 

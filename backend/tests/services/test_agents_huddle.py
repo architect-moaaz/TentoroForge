@@ -30,7 +30,8 @@ from services.huddle.room import Huddle, Room
 
 def test_a_big_decision_is_one_many_agents_build_on():
     big = room.big_decisions()
-    assert set(big) == {"data_model", "page_contracts", "workflows", "security"}, big
+    # `decisions` — the business facts every writer reads — is one too.
+    assert set(big) == {"data_model", "page_contracts", "workflows", "security", "decisions"}, big
     from services.blueprint.orchestrator import DAG
     assert all(not DAG[k].fanout for k in big), "a decision made a page or a record at a time is not one"
     assert "requirements" not in big, "the person's own requirements are reviewed by the person"

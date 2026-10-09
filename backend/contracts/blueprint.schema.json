@@ -209,15 +209,234 @@
       "additionalProperties": false,
       "default": {}
     },
+    "policies": {
+      "type": "object",
+      "properties": {
+        "money": {
+          "type": "object",
+          "properties": {
+            "currency": {
+              "type": "string",
+              "default": ""
+            },
+            "locale": {
+              "type": "string",
+              "default": ""
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "applies": {
+                    "type": "string",
+                    "enum": [
+                      "shipping",
+                      "tax",
+                      "discount",
+                      "fee",
+                      "other"
+                    ]
+                  },
+                  "formula": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "note": {
+                    "type": "string",
+                    "default": ""
+                  }
+                },
+                "required": [
+                  "name",
+                  "applies"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
+        "time": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "person",
+                "app",
+                ""
+              ],
+              "default": ""
+            },
+            "zone": {
+              "type": "string",
+              "default": ""
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
+        "quantities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "workflow": {
+                "type": "string",
+                "pattern": "^FLOW-\\d{3,}$",
+                "description": "Stable FLOW identifier (§12)"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "add",
+                  "replace"
+                ]
+              }
+            },
+            "required": [
+              "workflow",
+              "mode"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "lifecycles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "entity": {
+                "type": "string",
+                "pattern": "^ENTITY-\\d{3,}$",
+                "description": "Stable ENTITY identifier (§12)"
+              },
+              "field": {
+                "type": "string",
+                "minLength": 1
+              },
+              "initial": {
+                "type": "string",
+                "minLength": 1
+              },
+              "moves": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "to": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "by": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^ROLE-\\d{3,}$",
+                        "description": "Stable ROLE identifier (§12)"
+                      },
+                      "default": []
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to"
+                  ],
+                  "additionalProperties": false
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "entity",
+              "field",
+              "initial"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "anonymous": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "workflow": {
+                "$ref": "#/properties/policies/properties/quantities/items/properties/workflow"
+              },
+              "rule": {
+                "type": "string",
+                "enum": [
+                  "allowed",
+                  "sign_in",
+                  "guest_owned"
+                ]
+              }
+            },
+            "required": [
+              "workflow",
+              "rule"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "selfRegistration": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/policies/properties/lifecycles/items/properties/moves/items/properties/by/items"
+          },
+          "default": []
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "about": {
+                "type": "string",
+                "minLength": 1
+              },
+              "decided": {
+                "type": "string",
+                "minLength": 1
+              },
+              "why": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": [
+              "about",
+              "decided"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
     "roles": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "pattern": "^ROLE-\\d{3,}$",
-            "description": "Stable ROLE identifier (§12)"
+            "$ref": "#/properties/policies/properties/lifecycles/items/properties/moves/items/properties/by/items"
           },
           "name": {
             "type": "string"
@@ -435,7 +654,7 @@
           "users": {
             "type": "array",
             "items": {
-              "$ref": "#/properties/roles/items/properties/id"
+              "$ref": "#/properties/policies/properties/lifecycles/items/properties/moves/items/properties/by/items"
             },
             "default": []
           },
@@ -465,8 +684,7 @@
                 "description": "The value that record must hold — one of the entity's own enumValues, not a state invented here"
               },
               "producedBy": {
-                "type": "string",
-                "pattern": "^FLOW-\\d{3,}$",
+                "$ref": "#/properties/policies/properties/quantities/items/properties/workflow",
                 "description": "The workflow that puts a record into that state, when one does. Without it the precondition can be checked and waited on but not satisfied."
               }
             },
@@ -505,8 +723,7 @@
                   "minLength": 1
                 },
                 "entity": {
-                  "type": "string",
-                  "pattern": "^ENTITY-\\d{3,}$",
+                  "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "shows": {
@@ -557,7 +774,7 @@
                 "roles": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/properties/roles/items/properties/id"
+                    "$ref": "#/properties/policies/properties/lifecycles/items/properties/moves/items/properties/by/items"
                   },
                   "default": []
                 }
@@ -605,7 +822,7 @@
             "default": []
           },
           "dispatches": {
-            "$ref": "#/properties/pages/items/properties/requires/properties/producedBy",
+            "$ref": "#/properties/policies/properties/quantities/items/properties/workflow",
             "description": "Stable FLOW identifier (§12)"
           },
           "primaryTasks": {
@@ -654,7 +871,7 @@
                       ]
                     },
                     "entity": {
-                      "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                      "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity",
                       "description": "Stable ENTITY identifier (§12)"
                     },
                     "field": {
@@ -695,7 +912,7 @@
                           "type": "string"
                         },
                         "entity": {
-                          "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                          "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
                         },
                         "field": {
                           "type": "string"
@@ -755,13 +972,13 @@
             "type": "object",
             "properties": {
               "primaryEntity": {
-                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity",
                 "description": "Stable ENTITY identifier (§12)"
               },
               "supportingEntities": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                  "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
                 },
                 "default": []
               }
@@ -924,7 +1141,7 @@
               "roles": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/properties/roles/items/properties/id"
+                  "$ref": "#/properties/policies/properties/lifecycles/items/properties/moves/items/properties/by/items"
                 },
                 "default": []
               },
@@ -1048,7 +1265,7 @@
                     "const": "list"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                    "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
                   },
                   "fields": {
                     "type": "array",
@@ -1084,7 +1301,7 @@
                     "const": "single"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                    "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
                   },
                   "filter": {
                     "type": "object",
@@ -1106,7 +1323,7 @@
                     "const": "aggregate"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                    "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
                   },
                   "aggregation": {
                     "type": "string",
@@ -1143,7 +1360,7 @@
                     "const": "series"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                    "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
                   },
                   "aggregation": {
                     "$ref": "#/properties/widgets/items/properties/dataSource/anyOf/2/properties/aggregation"
@@ -1176,7 +1393,7 @@
                     "const": "query"
                   },
                   "entity": {
-                    "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                    "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
                   },
                   "measures": {
                     "type": "array",
@@ -1399,7 +1616,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
               },
               "name": {
                 "type": "string"
@@ -1445,7 +1662,7 @@
                       "default": false
                     },
                     "references": {
-                      "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                      "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity",
                       "description": "Stable ENTITY identifier (§12)"
                     },
                     "min": {
@@ -1524,10 +1741,10 @@
             "type": "object",
             "properties": {
               "from": {
-                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
               },
               "to": {
-                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
               },
               "kind": {
                 "type": "string",
@@ -1568,7 +1785,7 @@
             "type": "object",
             "properties": {
               "entity": {
-                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
               },
               "kind": {
                 "type": "string",
@@ -1605,7 +1822,7 @@
                 "type": "string"
               },
               "entity": {
-                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
               },
               "table": {
                 "type": "string"
@@ -1675,7 +1892,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/properties/pages/items/properties/requires/properties/producedBy"
+            "$ref": "#/properties/policies/properties/quantities/items/properties/workflow"
           },
           "name": {
             "type": "string"
@@ -1744,7 +1961,7 @@
                   ]
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                  "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "next": {
@@ -1788,6 +2005,36 @@
             },
             "default": []
           },
+          "writes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "entity": {
+                  "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
+                },
+                "fields": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": []
+                },
+                "states": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": []
+                }
+              },
+              "required": [
+                "entity"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
           "launchedFrom": {
             "type": "array",
             "items": {
@@ -1812,7 +2059,7 @@
                   ]
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                  "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "type": {
@@ -1874,7 +2121,7 @@
             "type": "string"
           },
           "role": {
-            "$ref": "#/properties/roles/items/properties/id",
+            "$ref": "#/properties/policies/properties/lifecycles/items/properties/moves/items/properties/by/items",
             "description": "Stable ROLE identifier (§12)"
           },
           "goal": {
@@ -1897,7 +2144,7 @@
                   "default": ""
                 },
                 "workflow": {
-                  "$ref": "#/properties/pages/items/properties/requires/properties/producedBy",
+                  "$ref": "#/properties/policies/properties/quantities/items/properties/workflow",
                   "description": "Stable FLOW identifier (§12)"
                 },
                 "then": {
@@ -1910,7 +2157,7 @@
                   "default": "go"
                 },
                 "carries": {
-                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                  "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 }
               },
@@ -1997,7 +2244,7 @@
                   "minLength": 1
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                  "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
                 },
                 "values": {
                   "type": "object",
@@ -2007,7 +2254,7 @@
                 "as": {
                   "anyOf": [
                     {
-                      "$ref": "#/properties/roles/items/properties/id"
+                      "$ref": "#/properties/policies/properties/lifecycles/items/properties/moves/items/properties/by/items"
                     },
                     {
                       "type": "string",
@@ -2068,7 +2315,7 @@
                   "default": ""
                 },
                 "workflow": {
-                  "$ref": "#/properties/pages/items/properties/requires/properties/producedBy",
+                  "$ref": "#/properties/policies/properties/quantities/items/properties/workflow",
                   "description": "Stable FLOW identifier (§12)"
                 }
               },
@@ -2135,7 +2382,7 @@
                   ]
                 },
                 "entity": {
-                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                  "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity",
                   "description": "Stable ENTITY identifier (§12)"
                 },
                 "values": {
@@ -2228,7 +2475,7 @@
           "gates": {
             "type": "array",
             "items": {
-              "$ref": "#/properties/pages/items/properties/requires/properties/producedBy"
+              "$ref": "#/properties/policies/properties/quantities/items/properties/workflow"
             },
             "default": []
           },
@@ -2236,7 +2483,7 @@
             "type": "object",
             "properties": {
               "entity": {
-                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity"
               },
               "account": {
                 "type": "string"
@@ -2267,7 +2514,7 @@
             "description": "Stable PAGE identifier (§12)"
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+            "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           },
           "when": {
@@ -2340,7 +2587,7 @@
                   }
                 },
                 "workflow": {
-                  "$ref": "#/properties/pages/items/properties/requires/properties/producedBy",
+                  "$ref": "#/properties/policies/properties/quantities/items/properties/workflow",
                   "description": "Stable FLOW identifier (§12)"
                 }
               },
@@ -2424,7 +2671,7 @@
             "default": ""
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+            "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           },
           "permission": {
@@ -2540,7 +2787,7 @@
           "default": true
         },
         "signupRole": {
-          "$ref": "#/properties/roles/items/properties/id",
+          "$ref": "#/properties/policies/properties/lifecycles/items/properties/moves/items/properties/by/items",
           "description": "Stable ROLE identifier (§12)"
         },
         "ownershipRules": {
@@ -4358,7 +4605,7 @@
             "default": []
           },
           "entity": {
-            "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+            "$ref": "#/properties/policies/properties/lifecycles/items/properties/entity",
             "description": "Stable ENTITY identifier (§12)"
           }
         },
