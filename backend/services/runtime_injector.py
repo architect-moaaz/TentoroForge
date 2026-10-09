@@ -352,6 +352,17 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
         except Exception as e:
             errors.append(f"Failed to copy error_reporter: {e}")
 
+    # Same-origin `/api/...` fetches under the Preview's base path — the SDK,
+    # the hooks and every page call the app's API that way, and behind the
+    # prefix they reached Forge instead (see base_path_fetch.ts).
+    base_fetch_src = _TEMPLATE_DIR / "base_path_fetch.ts"
+    if base_fetch_src.exists():
+        try:
+            shutil.copy2(base_fetch_src, src_lib / "base_path_fetch.ts")
+            copied.append("src/lib/base_path_fetch.ts")
+        except Exception as e:
+            errors.append(f"Failed to copy base_path_fetch: {e}")
+
     # The two lookups the reporter needs to name a crash in the owner's words:
     # the routes this app declares, and which control runs which workflow.
     # `project_dispatches` overwrites it with the real thing; this empty copy
@@ -391,6 +402,11 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
             _ensure_providers_imports_reporter(providers_dst)
         except Exception as e:
             errors.append(f"Failed to patch providers.tsx reporter import: {e}")
+        try:
+            _ensure_providers_import(providers_dst, "@/lib/base_path_fetch",
+                                     "API requests under the Preview's base path.")
+        except Exception as e:
+            errors.append(f"Failed to patch providers.tsx base-path import: {e}")
 
     # Deterministic DB seed (admin login + demo data). Authoritative — every app
     # needs a login account or it's unusable; this guarantees one regardless of any
@@ -1927,8 +1943,8 @@ def _plan_has_task_entity(output_path: Path) -> bool:
     try:
         plan = _json.loads(plan_fp.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return False
-    ents = plan.get("entities") or {}
+        plan = {}
+    ents = (plan.get("entities") if isinstance(plan, dict) else None) or {}
     names: list[str] = []
     if isinstance(ents, dict):
         for k, v in ents.items():
@@ -1939,7 +1955,45 @@ def _plan_has_task_entity(output_path: Path) -> bool:
         for e in ents:
             if isinstance(e, dict):
                 names.extend(str(e.get(x) or "") for x in ("name", "table"))
-    return any(n.lower() in ("task", "tasks") for n in names)
+    if any(n.lower() in ("task", "tasks") for n in names):
+        return True
+    return _blueprint_owns_tasks_route(output_path)
+
+
+def _blueprint_owns_tasks_route(output_path: Path) -> bool:
+    """The Living Blueprint says the app's own pages own /tasks: a live page at
+    /tasks or under it, or an entity named Task. A Blueprint-built app has no
+    `plan.json`, so the check above never fired for one, and the inbox took
+    /tasks from a task board's own list (live, 2026-10-09)."""
+    import json as _json
+    current = output_path.parent / ".forge" / "blueprint" / "current.json"
+    try:
+        doc = _json.loads(current.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    live = lambda rows: [r for r in rows or [] if isinstance(r, dict)  # noqa: E731
+                         and r.get("status") not in ("DEPRECATED", "SUPERSEDED")]
+    for page in live(doc.get("pages")):
+        route = str(page.get("route") or "").rstrip("/")
+        if route == "/tasks" or route.startswith("/tasks/"):
+            return True
+    for ent in live((doc.get("data") or {}).get("entities")):
+        if str(ent.get("name") or "").lower() in ("task", "tasks") \
+                or str(ent.get("table") or "").lower() == "tasks":
+            return True
+    return False
+
+
+def _relink_inbox(text: str, slug: str) -> str:
+    """The inbox's own page links moved to /<slug>/ — and only those. A bare
+    replace also turned `/api/tasks/` (the inbox's data route, which does not
+    move) into `/api/inbox/`, a route nothing serves."""
+    import re as _re
+    return _re.sub(r"(?<!/api)/tasks/", f"/{slug}/", text) if slug != "tasks" else text
+
+
+#: First lines that mark a file as the platform's workflow inbox, not the app's.
+_INBOX_MARKERS = ("Task Inbox (Slice E T2)", "Task Detail (Slice E T2)")
 
 
 def _inject_task_inbox_pages(output_path: Path) -> list[str]:
@@ -1973,12 +2027,31 @@ def _inject_task_inbox_pages(output_path: Path) -> list[str]:
                    output_path / "src" / "app" / slug / "[id]" / "page.tsx"):
         if legacy.exists():
             legacy.unlink()
+    # THE APP'S /tasks IS THE APP'S. The foundation template carries the inbox
+    # at (dashboard)/tasks, copied before this runs; when the inbox parks at
+    # /inbox that copy would still shadow the app's own /tasks page (a static
+    # route outranks the catch-all that serves it). Only the platform's inbox
+    # files go — recognised by their header — never a page of the app's.
+    if slug != "tasks":
+        for owned in (output_path / "src" / "app" / "(dashboard)" / "tasks" / "page.tsx",
+                      output_path / "src" / "app" / "(dashboard)" / "tasks" / "[id]" / "page.tsx"):
+            try:
+                head = owned.read_text(encoding="utf-8")[:400]
+            except OSError:
+                continue
+            if any(marker in head for marker in _INBOX_MARKERS):
+                owned.unlink()
+                for d in (owned.parent, owned.parent.parent):
+                    try:
+                        d.rmdir()  # only when empty
+                    except OSError:
+                        pass
     inbox_src = _TEMPLATE_DIR.parent / "app-foundation" / "src" / "app" / "(dashboard)" / "tasks" / "page.tsx"
     inbox_dst = output_path / "src" / "app" / "(dashboard)" / slug / "page.tsx"
     if inbox_src.exists() and not inbox_dst.exists():
         inbox_dst.parent.mkdir(parents=True, exist_ok=True)
         inbox_dst.write_text(
-            inbox_src.read_text(encoding="utf-8").replace("/tasks/", f"/{slug}/"),
+            _relink_inbox(inbox_src.read_text(encoding="utf-8"), slug),
             encoding="utf-8",
         )
         written.append(f"src/app/(dashboard)/{slug}/page.tsx")
@@ -1988,7 +2061,7 @@ def _inject_task_inbox_pages(output_path: Path) -> list[str]:
     if detail_src.exists() and not detail_dst.exists():
         detail_dst.parent.mkdir(parents=True, exist_ok=True)
         detail_dst.write_text(
-            detail_src.read_text(encoding="utf-8").replace("/tasks/", f"/{slug}/"),
+            _relink_inbox(detail_src.read_text(encoding="utf-8"), slug),
             encoding="utf-8",
         )
         written.append(f"src/app/(dashboard)/{slug}/[id]/page.tsx")
@@ -3001,6 +3074,25 @@ def _ensure_providers_imports_reporter(providers_file: Path) -> None:
     lines.insert(insert_at, marker)
     providers_file.write_text("\n".join(lines) + ("\n" if not text.endswith("\n") else ""), encoding="utf-8")
     logger.info("Patched providers.tsx to import error_reporter for browser bootstrap")
+
+
+def _ensure_providers_import(providers_file: Path, module: str, why: str) -> None:
+    """A side-effect import of `module` in providers.tsx, after "use client".
+    Idempotent: nothing is written when the module is already imported."""
+    try:
+        text = providers_file.read_text(encoding="utf-8")
+    except OSError:
+        return
+    if f'"{module}"' in text or f"'{module}'" in text:
+        return
+    lines = text.splitlines()
+    insert_at = 0
+    for i, ln in enumerate(lines[:5]):
+        if ln.strip() in ('"use client";', "'use client';"):
+            insert_at = i + 1
+            break
+    lines.insert(insert_at, f'// Auto-added by runtime_injector: {why}\nimport "{module}";')
+    providers_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _upsert_env_keys(env_file: Path, updates: dict[str, str]) -> None:

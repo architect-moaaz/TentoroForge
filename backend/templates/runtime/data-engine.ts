@@ -1641,6 +1641,18 @@ function asDate(v: string | Date | null | undefined): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+/** A range bound as the column takes it. A `date` or string-mode timestamp
+ *  column is written as text, and handed a Date the driver threw ("The
+ *  'string' argument must be of type string … Received an instance of Date")
+ *  — every widget on a page with a range read 0 (live, 2026-10-09). */
+function asBound(col: unknown, d: Date): Date | string {
+  const c = col as { dataType?: string; columnType?: string } | undefined;
+  if (c?.dataType !== "string") return d;
+  return /Date(String)?$/.test(String(c.columnType ?? "")) && !/Timestamp/.test(String(c.columnType ?? ""))
+    ? d.toISOString().slice(0, 10)
+    : d.toISOString();
+}
+
 /**
  * Resolve an op:"query" dataSource into tidy rows — one per combination of
  * dimension values, keyed by each dimension's field and each measure's key:
@@ -1723,8 +1735,8 @@ export async function resolveQuery(
   if (timeField && source.range) {
     const from = asDate(source.range.from);
     const to = asDate(source.range.to);
-    if (from) conds.push(gte(cols[timeField], from));
-    if (to) conds.push(lt(cols[timeField], to));
+    if (from) conds.push(gte(cols[timeField], asBound(cols[timeField], from)));
+    if (to) conds.push(lt(cols[timeField], asBound(cols[timeField], to)));
   }
 
   // Sort: an explicit measure key or dimension field; else chronological on a
