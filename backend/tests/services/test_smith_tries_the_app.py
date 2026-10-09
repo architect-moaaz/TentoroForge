@@ -448,3 +448,36 @@ def test_try_upload_is_a_trial():
 def test_a_control_that_did_nothing_is_pressed_again_before_it_counts():
     shots = (Path(__file__).resolve().parents[2] / "scripts/page_shots.mjs").read_text()
     assert 'if (outcome.outcome === "nothing") outcome = await press(who.ctx, url, c);' in shots
+
+
+def test_an_idle_bench_is_stopped_and_started_again_on_the_next_trial(tmp_path):
+    """forge-v3, 2026-10-09: a Smith turn held its app's dev server — 6-8 GB —
+    for all 34 minutes of a turn that mostly thought, and two such turns ran
+    the host out of memory. A bench with no trial for its idle time stops."""
+    import time as _time
+
+    from services.smith.trials import Bench
+
+    events: list[str] = []
+
+    class _App:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def __enter__(self):
+            events.append("start")
+            return self
+
+        def __exit__(self, *_a):
+            events.append("stop")
+
+    bench = Bench(str(tmp_path), factory=_App, idle_s=0.2)
+    bench.begin(); bench.app(); bench.end()
+    bench.begin(); _time.sleep(0.3); bench.end()           # a trial in progress is never stopped
+    assert events == ["start"] and bench.running
+    _time.sleep(0.4)
+    assert events == ["start", "stop"] and not bench.running
+    bench.begin(); bench.app(); bench.end()
+    assert events == ["start", "stop", "start"], "the next trial starts it again"
+    bench.close()
+    assert events[-1] == "stop"

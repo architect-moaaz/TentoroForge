@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import urllib.error
 import urllib.request
@@ -119,15 +120,30 @@ class TrialUnavailable(RuntimeError):
     """The app could not be started for a trial. The message is the observation."""
 
 
+#: A bench nobody has tried anything on for this long is stopped. Its dev
+#: server holds gigabytes: E-commerce's held 6-8 GB through a 34-minute Smith
+#: turn that spent most of it thinking, and with two such turns the host ran
+#: out of memory (forge-v3, 2026-10-09). Long enough that a trial and the
+#: next one that looks at what it did share one copy.
+IDLE_S = float(os.environ.get("FORGE_TRIAL_IDLE_S") or 120)
+
+
 class Bench:
     """One running copy of the application for a turn: started on the first
-    trial, stopped when the turn ends (`close`), started again after a change
-    to the data model (`reset`)."""
+    trial, stopped when the turn ends (`close`) or after `IDLE_S` with no trial,
+    started again after a change to the data model (`reset`) and on the next
+    trial after an idle stop."""
 
-    def __init__(self, output_dir: str, *, factory: Callable[..., Any] | None = None):
+    def __init__(self, output_dir: str, *, factory: Callable[..., Any] | None = None,
+                 idle_s: float | None = None):
+        import threading
         self.output_dir = output_dir
         self._factory = factory
         self._app: Any = None
+        self._lock = threading.RLock()
+        self._busy = 0
+        self._idle_s = IDLE_S if idle_s is None else idle_s
+        self._timer: Any = None
         self._log_at = 0
         self.log = Path(output_dir) / ".forge" / "trials" / "server.log"
         #: The last `try_workflow`'s tables before and after it ran.
@@ -139,6 +155,33 @@ class Bench:
         #: (2026-10-06). Every signed-out trial carries this token.
         import uuid as _uuid
         self.guest = str(_uuid.uuid4())
+
+    def begin(self) -> None:
+        """A trial is starting: the bench is not idle."""
+        with self._lock:
+            self._busy += 1
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+
+    def end(self) -> None:
+        """A trial has finished: stop the bench if no other starts soon."""
+        import threading
+        with self._lock:
+            self._busy = max(0, self._busy - 1)
+            if self._busy or self._app is None or self._idle_s <= 0:
+                return
+            self._timer = threading.Timer(self._idle_s, self._idle_stop)
+            self._timer.daemon = True
+            self._timer.start()
+
+    def _idle_stop(self) -> None:
+        with self._lock:
+            self._timer = None
+            if not self._busy and self._app is not None:
+                logger.info("[trials] %s: no trial for %.0fs; stopping its dev server",
+                            Path(self.output_dir).name, self._idle_s)
+                self.close()
 
     def app(self) -> Any:
         if self._app is None:
@@ -170,6 +213,9 @@ class Bench:
         self.close()
 
     def close(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
         if self._app is not None:
             try:
                 self._app.__exit__(None, None, None)
@@ -696,6 +742,14 @@ def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
     """Carry out one trial. The observation is returned, never raised."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
     as_ = str(args.get("as") or "")
+    bench.begin()
+    try:
+        return _run(name, args, as_, bench=bench, doc=doc)
+    finally:
+        bench.end()
+
+
+def _run(name: str, args: dict, as_: str, *, bench: Bench, doc: dict) -> str:
     try:
         if name == "try_workflow":
             return try_workflow(bench, doc, str(args.get("workflow") or ""), args.get("input"), as_)
