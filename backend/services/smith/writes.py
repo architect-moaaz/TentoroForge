@@ -510,6 +510,53 @@ WRITES = WRITES + (
 )
 
 
+#: A FAULT IN THE PLATFORM GOES TO THE PLATFORM. About thirty of the 95
+#: requests Smith had on forge-v3 were platform faults — inverted filters, a
+#: guest cart with no owner, sign-in that did not stick — and Smith, which
+#: cannot change the platform, patched around them in the app or said nothing
+#: needed doing (2026-10-09). Reported, they reach the people who can fix it.
+WRITES = WRITES + (
+    ("report_platform_fault",
+     "Report a fault in the platform's own code — the engine, the SDK, a template, vendor/@tentoroforge — "
+     "found while trying the application: what happened (`detail`, in the words the trial showed) and "
+     "where (`where`: the route, process or file). It is recorded for the platform's people and said to "
+     "the person; the application is not patched around it. Use it when a fix would mean changing a file "
+     "`edit_file` classes as the platform's, or when the same failure shows on every screen.",
+     {"detail": "string", "where": "string"}),
+)
+
+
+def report_platform_fault(output_dir: str, detail: str, where: str = "") -> dict:
+    """Record a platform fault: an incident of kind `platform` beside the
+    app's crashes, and a `runtime.issues` row the handover and the panel
+    show. Returns what to say."""
+    from services import incident_ledger
+    from services.blueprint.service import BlueprintService
+
+    detail = " ".join(str(detail or "").split())[:600]
+    where = str(where or "")[:200]
+    if not detail:
+        return {"applied": False, "said": "", "finding": "`report_platform_fault` needs `detail`: what the trial showed."}
+    incident_ledger.record(output_dir, {"kind": incident_ledger.KIND_PLATFORM, "message": detail,
+                                        "where": where, "source": "smith"})
+    try:
+        svc = BlueprintService.load(output_dir=output_dir)
+        runtime = dict(svc.doc.get("runtime") or {})
+        issues = [i for i in runtime.get("issues") or [] if isinstance(i, dict)]
+        if not any(i.get("kind") == "platform" and i.get("detail") == detail for i in issues):
+            issues.append({"kind": "platform", "detail": detail, "where": where, "reported_by": "smith",
+                           "statements": []})
+        runtime["issues"] = issues
+        svc.doc["runtime"] = runtime
+        svc.save()
+    except Exception:  # noqa: BLE001 — the incident is recorded; the issue row is a convenience
+        logger.warning("[smith] could not record the platform fault as an issue", exc_info=True)
+    said = (f"This is a fault in the platform, not in your application: {detail}"
+            + (f" (at {where})" if where else "") + ". I have reported it to the people who maintain "
+            "the platform rather than work around it in your application.")
+    return {"applied": True, "said": said, "touched": [], "finding": ""}
+
+
 def add_expectation(output_dir: str, statement: Any, origin: str = "report") -> dict:
     """A new statement, checked as the build checks one and recorded with
     where it came from. One that would change or repeat an existing
@@ -640,6 +687,8 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     """Carry out one write. The result's `finding` is the observation when an
     oracle refused; `said` is what the person is told."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
+    if name == "report_platform_fault":
+        return report_platform_fault(output_dir, str(args.get("detail") or ""), str(args.get("where") or ""))
     if name in ("write_page_code", "rewrite_pages", "write_frame") and args.get("brief"):
         from services.smith.asked import with_their_words
         args["brief"] = with_their_words(str(args["brief"]))

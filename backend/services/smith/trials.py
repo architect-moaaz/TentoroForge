@@ -262,7 +262,15 @@ def default_person(doc: dict, *, route: str = "", flow: dict | None = None) -> s
     administrator only when there is none."""
     from services.blueprint.account_model import admin_role, signup_role
     from services.blueprint.projection import launch_roles, restricted_roles
+    from services.smith.reported import REPORTED, who
 
+    # THE PERSON WHO SAW IT, when the turn knows one: a signed-out shopper's
+    # fault was tried as a signed-in Customer and "the workflow works" was the
+    # answer (E-commerce, 2026-10-09).
+    reported = who(REPORTED.get() or {}, [str(r.get("name")) for r in doc.get("roles") or []
+                                           if isinstance(r, dict) and r.get("name")])
+    if reported:
+        return reported
     admin = admin_role(doc) or "Admin"
     audience = signup_role(doc) or admin
     if flow is not None:

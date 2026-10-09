@@ -51,6 +51,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { MarkdownLink } from "@/components/chat/MarkdownLink";
+import { previewReport } from "@/lib/preview-report";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
@@ -649,7 +650,7 @@ export function SmithPanel({
       // with every message and was dropped there.
       const prior = messages.slice(-SENT_HISTORY).map((m) => ({ role: m.role, text: m.text }));
       setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
-      void start({ description: text, evidence, history: prior });
+      void start({ description: text, evidence, history: prior, report: previewReport() });
     },
     [projectId, messages, evidence, start],
   );

@@ -50,6 +50,9 @@ class ChatV2Request:
     #: an error — and a caller that has no transcript (self-heal, cron) simply
     #: has none.
     history: list[tuple[str, str]] = field(default_factory=list)
+    #: Who saw the problem and where — the panel's report of the preview
+    #: they were in (`services.smith.reported`).
+    report: dict = field(default_factory=dict)
     source: str = "user"
     #: Called with each reasoning chunk as it arrives, from the worker thread.
     #: The router hands in one that emits a `thought` event; a caller with
@@ -114,6 +117,7 @@ def handle_chat_v2(req: ChatV2Request) -> ChatV2Response:
         reasoning=req.reasoning_fn,
         evidence=list(req.evidence or []),
         app_name=req.app_name,
+        report=dict(req.report or {}),
     )
     return ChatV2Response(status=out.status, answer=out.said, options=list(out.options),
                           diff_summary=out.diff_summary, touched_paths=list(out.touched),

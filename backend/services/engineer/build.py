@@ -86,7 +86,7 @@ def fix_ask(feature: Feature, items: list[dict]) -> str:
         "wiring, a field or record the data model lacks, a rule, who may open or start it. Then try "
         "the statements again (`try_expectation`) and stop when they hold. Nobody is waiting to answer "
         "questions: decide from the definition and act. A fault in the platform itself is not yours to "
-        "patch around: say so plainly and leave the statement failing."
+        "patch around: report it with `report_platform_fault` and leave the statement failing."
     )
 
 

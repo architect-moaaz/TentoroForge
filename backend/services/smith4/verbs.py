@@ -79,6 +79,9 @@ class Ctx:
     unattended: bool = False
     #: The ask an agreed plan was made from, while one of its steps runs.
     asked_from: str = ""
+    #: Who saw the problem and where (`services.smith.reported`): the screen,
+    #: the role or signed-out, the viewport. Empty when nobody reported one.
+    report: dict = field(default_factory=dict)
 
     @property
     def out(self) -> str:

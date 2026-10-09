@@ -57,6 +57,9 @@ def _checked(output_dir: str, out: Outcome) -> Outcome:
     return out
 
 
+from services.smith import reported as _reported
+
+
 def _handle(*, project_id: str, output_dir: str, message: str,
            history: list | None = None,
            choose: Callable | None = None,
@@ -67,7 +70,8 @@ def _handle(*, project_id: str, output_dir: str, message: str,
            attachments: list[dict] | None = None,
            evidence: list[str] | None = None,
            app_name: str = "",
-           unattended: bool = False) -> Outcome:
+           unattended: bool = False,
+           report: dict | None = None) -> Outcome:
     """One turn on a built application. `choose` decides each step; absent,
     `services.smith.loop.next_step` on the real model. `move` is the tree
     editor for layout pages; absent, `move_dispatcher`."""
@@ -86,7 +90,8 @@ def _handle(*, project_id: str, output_dir: str, message: str,
                    attachments=list(attachments or []), history=list(history or []),
                    evidence=[str(e) for e in (evidence or []) if str(e).strip()],
                    app_name=str(app_name or ""), engine_refreshed=_once(refreshed),
-                   unattended=unattended, asked_from=planned_from if step else "")
+                   unattended=unattended, asked_from=planned_from if step else "",
+                   report=_reported.clean(report))
 
     # A TURN THE PLATFORM STARTED is the fault and nothing else: the person's
     # waiting plan or held question is theirs, not something to clear or join.

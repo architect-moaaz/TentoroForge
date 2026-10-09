@@ -20,6 +20,8 @@ unavailable" or "call the app Nurse Roster" had no path.
 """
 from __future__ import annotations
 
+import re
+
 import json
 import logging
 from pathlib import Path
@@ -62,10 +64,32 @@ def _citing(doc: dict, req_id: str) -> dict[str, list[dict]]:
     return out
 
 
+#: A sentence that tells someone to change something, rather than saying what
+#: the product must do. E-commerce's REQ-015 read "Change the post-sign-in
+#: landing route for the Customer role from /account to /" (2026-10-09): an
+#: instruction to the builder, filed as a requirement.
+_INSTRUCTION = re.compile(r"^\s*(?:please\s+)?(?:change|make|set|fix|update|move|remove|add|rename|replace|"
+                          r"keep|use|put|switch|turn|ensure that you|do not|don't)\b", re.I)
+
+
+def an_instruction(text: str) -> bool:
+    """Whether `text` is an instruction to the builder, not a requirement."""
+    return bool(_INSTRUCTION.match(text or ""))
+
+
+def _requirement_or_refuse(text: str) -> None:
+    if an_instruction(text):
+        raise SectionChangeError(
+            f"A requirement says what the product must do for its people, not what to change: {text[:120]!r} "
+            "reads as an instruction. Say it as what must be true (\"A customer who signs in lands on the "
+            "shop home\"), or make the change where it lives — the navigation, the page, the process.")
+
+
 def add_requirement(svc: Any, text: str, *, reasoning: Any = None) -> dict:
     text = (text or "").strip()
     if not text:
         raise SectionChangeError("no requirement was stated.")
+    _requirement_or_refuse(text)
     req = record_requirement(svc, text, owner="")
     if not req.get("owner"):
         req.pop("owner", None)
@@ -84,6 +108,7 @@ def edit_requirement(svc: Any, ref: str, change: str, *, app_root: str | None = 
         raise SectionChangeError(f"I cannot tell which requirement {ref!r} means. They are: {known or '(none)'}.")
     if not change:
         raise SectionChangeError(f"what should {req.get('id')} say instead?")
+    _requirement_or_refuse(change)
     before = str(req.get("description") or "")
     req["description"] = change
     req.setdefault("evidence", []).append({"message": change, "type": "conversation"})

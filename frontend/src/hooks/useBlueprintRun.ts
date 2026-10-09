@@ -221,6 +221,9 @@ export interface StartOptions {
   domain?: string;
   /** §14 — text of documents the user supplied rather than typed. */
   evidence?: string[];
+  /** Who saw the problem and where: the preview's route and device size
+   *  (`lib/preview-report`). Smith reproduces as them before changing anything. */
+  report?: { route?: string; device?: string; viewport?: { width: number; height: number } };
   /** §25 — false stops after the definition and waits to be accepted. */
   approved?: boolean;
   defineOnly?: boolean;
@@ -479,6 +482,7 @@ export function useBlueprintRun(projectId: string | null) {
               // §14 — the documents attached on /blueprint/new. Carried on
               // every turn: the definition re-reads the whole brief each time.
               evidence: opts.evidence ?? [],
+              ...(opts.report ? { report: opts.report } : {}),
               ...(opts.gate ? { gate: opts.gate } : {}),
               ...(opts.modules ? { modules: opts.modules } : {}),
             }),

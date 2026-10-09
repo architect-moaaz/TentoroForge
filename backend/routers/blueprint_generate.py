@@ -1508,6 +1508,10 @@ class SmithChatRequest(BaseModel):
     #: The modules to build, when the person picked some at the product-model
     #: review. Absent means the whole application.
     modules: list[str] | None = None
+    #: Who saw the problem and where: the panel's report of the preview they
+    #: were in — `route`, `role`, `signedIn`, `viewport` {width, height},
+    #: `device`. Smith reproduces as them before changing anything.
+    report: dict | None = None
 
 
 def _attach_named_design(output_dir: Any, named: dict, emit) -> None:
@@ -2033,6 +2037,7 @@ async def smith_chat(
                     project_id=str(project_id), output_dir=str(output_dir),
                     message=req.message,
                     history=[(t.role, t.text) for t in req.history if t.text][-10:],
+                report=dict(getattr(req, "report", None) or {}),
                     evidence=list(req.evidence or []),
                     app_name=getattr(project, "name", "") or "",
                     reasoning_fn=lambda text, kind="reasoning", node="": emit(
@@ -2112,6 +2117,7 @@ async def smith_chat(
                 message=req.message,
                 # The recent exchange only — Smith reads the last few turns.
                 history=[(t.role, t.text) for t in req.history if t.text][-10:],
+                report=dict(getattr(req, "report", None) or {}),
                 reasoning_fn=lambda text, kind="reasoning", node="": emit(
                     "thought", {"text": text, "kind": kind, "node": node}),
             ))

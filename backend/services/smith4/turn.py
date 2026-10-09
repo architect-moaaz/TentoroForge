@@ -23,14 +23,17 @@ happen. `answer` may speak only in a turn that changed nothing.
 """
 from __future__ import annotations
 
+import os
+
 import logging
 import re
 from typing import Any, Callable
 
 from services.smith import loop as loop_mod
 from services.smith import plan as plan_mod
-from services.smith import reads, tools, trials, web, writes
+from services.smith import reads, reported, tools, trials, web, writes
 from services.smith.loop import Observation
+from services.engineer.journal import Budget, Journal
 from services.smith.verbs import missing_fields
 from services.smith4.context import opening
 from services.smith4.outcome import Outcome
@@ -40,6 +43,32 @@ logger = logging.getLogger(__name__)
 
 #: (ask, page, observations, history) -> {tool, args, why}
 Choose = Callable[[str, str, list, list], dict]
+
+#: How long a turn may run, in minutes. A turn had twenty steps and no
+#: clock: 34 minutes on one request, then "ran out of steps" (E-commerce,
+#: 2026-10-09). When the time is spent the turn ends with what it proved.
+TURN_MINUTES = float(os.environ.get("FORGE_SMITH_TURN_MINUTES") or 20)
+
+#: What a change hears when the person named the screen they were on and
+#: nothing has been tried THROUGH that screen yet — a process run directly
+#: proves nothing about the button they pressed.
+REPRODUCE_AS_REPORTED = (
+    "They saw this on {route} as {who}. Nothing has been tried through that screen yet: "
+    "open it as them (`open_page` with `route` and `as`) and do what they did before changing "
+    "anything. A process run directly (`try_workflow`) is not what they saw.")
+
+def untried_as_reported(report: dict, tried: list) -> str:
+    """When the person named the screen they were on and nothing has been
+    tried THROUGH it, what the change is told; empty otherwise. `tried` are
+    the turn's trial observations so far."""
+    route = (report or {}).get("route")
+    if not route or not tried or any(o.tool in reported.BROWSER_TRIALS for o in tried):
+        return ""
+    return REPRODUCE_AS_REPORTED.format(route=route, who=reported.who(report) or "them")
+
+
+#: Words that mean: pick up the last turn where it stopped.
+CARRY_ON = re.compile(r"^\s*(?:carry on|continue|go on|keep going|resume|proceed|pick (?:it )?up)\b", re.I)
 
 LOOK_FIRST = ("Nothing has been read this turn. Read the page (`read_page_code`, "
               "`grep`, `read_section`) or its data (`read_rows`) — the application "
@@ -184,14 +213,25 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     if ctx.asked_from and ctx.asked_from not in asked:
         asked = f"{ctx.asked_from}\n(This turn does one part of it: {asked})"
     token = ASKED.set(asked)
+    rtoken = reported.REPORTED.set(dict(ctx.report or {}))
     from services.smith import file_edit
     started = {p.get("id") for p in file_edit.load_patches(ctx.out)}
+    journal = Journal(ctx.out)
+    journal.write("turn:start", message=(ctx.message or ctx.ask or "")[:300], report=dict(ctx.report or {}),
+                  unattended=ctx.unattended)
     try:
         out = _run(ctx, choose, list(history or []), observations,
-                   max_steps or loop_mod.MAX_STEPS, bench)
+                   max_steps or loop_mod.MAX_STEPS, bench, journal=journal)
     finally:
+        reported.REPORTED.reset(rtoken)
         ASKED.reset(token)
         bench.close()
+        try:
+            journal.write("turn:end", status=getattr(out, "status", "crashed") if "out" in locals() else "crashed",
+                          said=(getattr(out, "said", "") or "")[:400] if "out" in locals() else "",
+                          steps=[o.tool for o in observations])
+        except Exception:  # noqa: BLE001 — the journal never ends a turn
+            logger.warning("smith4: could not journal the turn's end", exc_info=True)
     out.steps = [o.tool for o in observations]
     # A PLATFORM PATCH IS KEPT ONLY ON PROOF: a try after the last edit that
     # passed, and nothing that failed before still failing.
@@ -408,9 +448,35 @@ def standing_faults(doc: dict | None) -> list[str]:
     return out
 
 
+def _last_turn_unfinished(journal: Journal) -> list[dict]:
+    """The steps of the last turn when it did not finish — what "carry on"
+    picks up from. Empty when it finished, or there was none."""
+    rows = list(journal.rows())
+    starts = [i for i, r in enumerate(rows) if r.get("event") == "turn:start"]
+    if not starts:
+        return []
+    last = rows[starts[-1]:]
+    end = next((r for r in last if r.get("event") == "turn:end"), None)
+    if end is not None and str(end.get("status") or "") in ("resolved", "done", "asked"):
+        return []
+    return [r for r in last if r.get("event") == "turn:step"]
+
+
 def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation],
-         max_steps: int, bench: "trials.Bench | None" = None) -> Outcome:
+         max_steps: int, bench: "trials.Bench | None" = None, journal: Journal | None = None) -> Outcome:
     bench = bench or trials.Bench(ctx.out)
+    journal = journal or Journal(ctx.out)
+    # CARRY ON MEANS FROM WHERE IT STOPPED. "Carry on" started a fresh turn
+    # whose only memory was six lines of chat (E-commerce, 2026-10-09); the
+    # last turn's journal is what it picks up.
+    if not observations and CARRY_ON.match(ctx.message or ""):
+        steps = _last_turn_unfinished(journal)
+        if steps:
+            shown = "\n".join(f"- {r.get('tool')} ({r.get('status')}): {str(r.get('said') or '')[:160]}"
+                              for r in steps[-12:])
+            observations.append(Observation(tool="last_turn", status="read", said=(
+                "The last turn stopped before it finished. What it did and found, in order:\n" + shown
+                + "\nPick up from there: do not repeat what is known; try what was about to be tried.")))
     if ctx.engine_refreshed and not observations:
         # SAID, SO A PASSING TRY IS BELIEVED. F&B's duplicate check passed on
         # the first try once the engine was current; not knowing why, the
@@ -440,10 +506,21 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
 
     import time as _time
     turn_started = _time.monotonic()
+    budget = Budget(TURN_MINUTES)
+    out_of_time = False
+    journaled = 0
     for _step in range(1, max_steps + 1):
         from services.smith4.definition import brief_of
+        for o in observations[journaled:]:
+            journal.write("turn:step", tool=o.tool, status=o.status, said=(o.said or "")[:300])
+        journaled = len(observations)
+        if budget.over():
+            out_of_time = True
+            break
         t0 = _time.monotonic()
-        page = opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx))
+        # WHO SAW IT, first: the person, the screen, the viewport the
+        # problem was reported from (`services.smith.reported`).
+        page = reported.block(ctx.report) + opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx))
         t1 = _time.monotonic()
         chosen = choose(ctx.ask, page, observations, history) or {}
         t2 = _time.monotonic()
@@ -582,10 +659,11 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 if not any(trials.failed(o.said or "") for o in tried):
                     observations.append(Observation(tool=tool, args=args, status="error", said=FAULT_NOT_SEEN))
                     continue
-            elif not tried:
+            elif not tried or untried_as_reported(ctx.report, tried):
                 claimed = str(args.get("requested") or "").strip().lower() in ("true", "1", "yes")
                 if not claimed:
-                    observations.append(Observation(tool=tool, args=args, status="error", said=REPRODUCE_FIRST))
+                    said = REPRODUCE_FIRST if not tried else untried_as_reported(ctx.report, tried)
+                    observations.append(Observation(tool=tool, args=args, status="error", said=said))
                     continue
                 if not asked_for(ctx.message or ctx.ask or "", _change_said(tool, args)):
                     observations.append(Observation(tool=tool, args=args, status="error", said=NOT_ASKED_FOR))
@@ -681,10 +759,11 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                      if tools.is_trial(o.tool) and o.status == "read" and o.said]
             if tried:
                 said = "What I tried, and what it showed:\n" + "\n".join(f"- {t}" for t in tried[-6:])
-        tail = (f"\n\nThis turn ran out of steps ({max_steps}) before I changed anything. "
+        spent = f"time ({TURN_MINUTES:g} minutes)" if out_of_time else f"steps ({max_steps})"
+        tail = (f"\n\nThis turn ran out of {spent} before I changed anything. "
                 "Say “carry on” and I will pick up from there.")
         return Outcome(status="no_op", touched=list(touched), said=(said + tail) if said else (
-            f"I have not changed anything yet — this turn ran out of steps ({max_steps}) "
+            f"I have not changed anything yet — this turn ran out of {spent} "
             "while I was still looking into it. Say “carry on” and I will pick up from there."))
     failing = _failing_note(observations)
     if not failing and _unproven(observations).startswith(UNPROVEN):
