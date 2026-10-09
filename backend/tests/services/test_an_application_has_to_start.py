@@ -183,20 +183,25 @@ def test_an_install_that_was_cut_off_is_thrown_away_not_built_on(tmp_path):
     assert not _clear_unfinished_install(linked), "a linked tree is never removed"
 
 
-def test_the_lockfile_a_cut_off_install_was_writing_goes_with_it(tmp_path):
-    """TStyle (forge-v3, 2026-10-09): the cut-off install left 29 lockfile
-    entries empty and every install after it died on "Invalid Version"."""
-    from services.blueprint.assembly import _clear_unfinished_install, _mark_install_finished
+def test_a_lockfile_npm_cannot_read_is_written_again(tmp_path):
+    """TStyle (forge-v3, 2026-10-09): a cut-off install left 28 packages in
+    the lockfile with no version, and every install after it died on
+    "Invalid Version" — whether or not `node_modules` was still there."""
+    import json
+    from services.blueprint.assembly import _drop_unreadable_lockfile
 
-    (tmp_path / "node_modules" / "braces").mkdir(parents=True)
-    (tmp_path / "package-lock.json").write_text('{"packages": {"node_modules/braces": {}}}')
-    assert _clear_unfinished_install(tmp_path)
-    assert not (tmp_path / "package-lock.json").exists()
-    (tmp_path / "node_modules").mkdir()
-    (tmp_path / "package-lock.json").write_text("{}")
-    _mark_install_finished(tmp_path)
-    assert not _clear_unfinished_install(tmp_path)
-    assert (tmp_path / "package-lock.json").exists(), "a finished install keeps its lockfile"
+    lock = tmp_path / "package-lock.json"
+    assert not _drop_unreadable_lockfile(tmp_path), "no lockfile, nothing to do"
+    whole = {"packages": {"": {"name": "app"}, "vendor/@forge/schema": {},
+                          "node_modules/next": {"version": "15.5.15"},
+                          "node_modules/@tentoroforge/engine": {"resolved": "vendor/@tentoroforge/engine", "link": True}}}
+    lock.write_text(json.dumps(whole))
+    assert not _drop_unreadable_lockfile(tmp_path) and lock.exists(), "a whole lockfile is kept"
+    whole["packages"]["node_modules/braces"] = {}
+    lock.write_text(json.dumps(whole))
+    assert _drop_unreadable_lockfile(tmp_path) and not lock.exists()
+    lock.write_text('{"packages": {"node_modules/next": {"vers')
+    assert _drop_unreadable_lockfile(tmp_path) and not lock.exists(), "a lockfile cut off mid-JSON too"
 
 
 def test_a_server_that_will_not_start_says_so(tmp_path, monkeypatch):

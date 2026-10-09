@@ -1307,21 +1307,40 @@ def _clear_unfinished_install(root: Path) -> bool:
     143 MB binary. The next build's install saw the package in place and moved
     on, and `next build` died on it with "Bus error (core dumped)". A linked
     tree (a local copy's `node_modules` pointing into another app) is never
-    removed.
-
-    THE LOCKFILE IT WAS WRITING GOES WITH IT. npm rewrites `package-lock.json`
-    as it installs; TStyle's cut-off install left 29 of its entries empty
-    (`{}`), and every install after it died in five seconds on "Invalid
-    Version" while comparing them — the tree was thrown away and the broken
-    record of it kept (forge-v3, 2026-10-09). npm writes a new one from
-    `package.json`."""
+    removed."""
     import shutil
 
     nm = root / "node_modules"
     if nm.is_symlink() or not nm.is_dir() or (nm / INSTALLED_MARK).exists():
         return False
     shutil.rmtree(nm, ignore_errors=True)
-    (root / "package-lock.json").unlink(missing_ok=True)
+    return True
+
+
+def _drop_unreadable_lockfile(root: Path) -> bool:
+    """Remove a `package-lock.json` npm cannot read; npm writes a new one
+    from `package.json`.
+
+    npm rewrites the lockfile as it installs. TStyle's install, killed with
+    its worker, left 28 installed packages recorded with no version (`{}`),
+    and every install after it died in five seconds on "Invalid Version"
+    while comparing them (forge-v3, 2026-10-09). Every package npm records
+    under `node_modules/` carries its version or is a link; one without
+    either is a lockfile cut off mid-write."""
+    import json
+
+    lock = root / "package-lock.json"
+    try:
+        packages = json.loads(lock.read_text("utf-8")).get("packages") or {}
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError, AttributeError):
+        packages = None                   # not JSON npm wrote whole
+    if packages is not None and not any(
+            k.startswith("node_modules/") and isinstance(v, dict) and not v.get("version") and not v.get("link")
+            for k, v in packages.items()):
+        return False
+    lock.unlink(missing_ok=True)
     return True
 
 
@@ -1373,6 +1392,7 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
     for name, cmd in steps:
         if name == "install":
             _clear_unfinished_install(root)
+            _drop_unreadable_lockfile(root)
         proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
                               timeout=timeout, env=env)
         out[name] = proc.returncode
