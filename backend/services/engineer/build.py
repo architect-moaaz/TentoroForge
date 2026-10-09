@@ -22,6 +22,50 @@ from typing import Any, Callable, Mapping
 from services.engineer.features import Feature, brief_for, features, statements_of, subjects_of
 from services.engineer.journal import Budget, Journal
 
+
+class _Pulse:
+    """The engineer's own run ledger, alive for the whole build.
+
+    A graph run heartbeats its ledger while it runs and stops when it ends;
+    between the engineer's runs — trying the statements, a fix turn — nothing
+    on disk said a build was in flight, and a deploy's cutover read Crumb's
+    build as idle and restarted the backend under it (forge-v3, 2026-10-09
+    21:29). One ledger spans the build: planned as its features, a feature
+    per node, a pulse every twenty seconds, finished with the merged report."""
+
+    def __init__(self, output_dir: str, plan: list[Feature]):
+        import threading
+        import time as _time
+        from services.blueprint.run_ledger import RunLedger
+        self.ledger = RunLedger(output_dir, f"{_time.strftime('%Y%m%d-%H%M%S')}-engineer", phase="build")
+        self.ledger.planned([f"feature:{f.id}" for f in plan])
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._beat, name="forge-engineer-pulse", daemon=True)
+        self._thread.start()
+
+    def _beat(self) -> None:
+        while not self._stop.wait(20.0):
+            try:
+                self.ledger.heartbeat()
+            except Exception:  # noqa: BLE001 — a pulse never breaks the build
+                pass
+
+    def start(self, feature: Feature) -> None:
+        self.ledger.node_start(f"feature:{feature.id}")
+
+    def done(self, feature: Feature) -> None:
+        self.ledger.node_done(f"feature:{feature.id}")
+
+    def end(self, report: Any = None, error: BaseException | None = None) -> None:
+        self._stop.set()
+        try:
+            if error is not None:
+                self.ledger.crashed(error)
+            else:
+                self.ledger.finish(report)
+        except Exception:  # noqa: BLE001
+            logger.warning("[engineer] could not close the build's ledger", exc_info=True)
+
 logger = logging.getLogger(__name__)
 
 #: The build-phase nodes that are one feature's at a time, in the graph's order.
@@ -154,6 +198,7 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
         say("message", {"text": _opening(plan, earlier, app_name)})
         results: list[dict] = []
         stopped = ""
+        pulse = _Pulse(output_dir, [f for f in plan if f.id not in earlier])
 
         if not earlier and once:
             reports.append(run(svc, executor, plan=once, commit=True, user_request=description,
@@ -170,6 +215,7 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
                 break
             journal.write("feature:start", feature=feature.id, name=feature.name,
                           pages=feature.pages, requirements=feature.requirements)
+            pulse.start(feature)
             say("message", {"text": f"Building {feature.label}: its screens, its processes, and the "
                                     f"checks that say what must happen on them."})
             scope = FeatureScope(feature, first=(i == 0)).on(svc.doc)
@@ -190,6 +236,7 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
                    "failed_nodes": failed, **proof}
             results.append(row)
             journal.write("feature:done", **row)
+            pulse.done(feature)
             say("message", {"text": _said_feature(feature, proof)})
 
         if not stopped and last:
@@ -213,7 +260,14 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
         out = {"features": results, "statements": whole, "stopped": stopped,
                "state": str(svc.doc.get("state") or ""), "report": merged(reports)}
         journal.write("run:end", **{k: v for k, v in out.items() if k not in ("features", "report")})
+        pulse.end(out["report"])
         return out
+    except BaseException as exc:
+        try:
+            pulse.end(error=exc)
+        except NameError:
+            pass
+        raise
     finally:
         journal.release()
 

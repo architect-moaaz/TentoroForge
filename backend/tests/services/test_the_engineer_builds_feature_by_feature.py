@@ -325,3 +325,29 @@ def test_the_opening_says_when_everything_is_already_proven():
     assert _opening(plan, [f.id for f in plan], "Crumb") == \
         "Every feature of Crumb is already proven (3); trying the whole application once more and finishing it."
     assert "picking up from there: Accounts, Cart & Checkout" in _opening(plan, ["MODULE-001"], "Crumb")
+
+
+def test_the_build_is_in_flight_from_its_first_feature_to_its_last(tmp_path, monkeypatch):
+    """A deploy's cutover read Crumb's build as idle between two graph runs
+    and restarted the backend under it (forge-v3, 2026-10-09 21:29)."""
+    import json
+    from services.run_registry import ledger_snapshot
+    _project(tmp_path)
+    seen: list = []
+
+    def run(svc, executor, *, plan, scope=None, **kw):
+        snap = ledger_snapshot(tmp_path, turns=False)
+        seen.append(bool(snap and snap.get("active")))
+        return SimpleNamespace(failed=[], paused_because="")
+    prove = lambda svc, od, **kw: {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": [], "results": []}
+    build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=lambda od, ask: {})
+    assert seen and all(seen), "in flight at every run of the build, not only inside one"
+    ledgers = sorted((tmp_path / ".forge" / "runs").glob("*-engineer.jsonl"))
+    assert len(ledgers) == 1
+    events = [json.loads(l) for l in ledgers[0].read_text().splitlines()]
+    kinds = [e["event"] for e in events]
+    assert kinds[0] == "run:start" and kinds[1] == "plan" and kinds[-1] == "run:end"
+    assert events[1]["nodes"] == ["feature:MODULE-001", "feature:MODULE-003", "feature:MODULE-002"]
+    assert [e["node"] for e in events if e["event"] == "node:done"] == events[1]["nodes"]
+    after = ledger_snapshot(tmp_path, turns=False)
+    assert not (after and after.get("active")), "and idle once it has finished"
