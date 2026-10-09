@@ -1105,9 +1105,7 @@ async def smith_greeting(
     if staged:
         facts = staged.get("summary") or {}
         counts = facts.get("counts") or {}
-        held = ", ".join(f"{counts[k]} {label}" for k, label in (
-            ("pages", "screens"), ("entities", "kinds of record"),
-            ("workflows", "processes")) if counts.get(k))
+        held = project_templates.counted(counts, ("pages", "entities", "workflows"))
         return {
             "state": "DISCOVERY",
             "headline": f"Start from “{staged.get('name')}”",

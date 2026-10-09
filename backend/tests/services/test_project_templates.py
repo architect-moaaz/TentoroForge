@@ -336,3 +336,10 @@ def test_an_exact_copy_of_a_template_saved_at_the_requirements_review_is_authore
     assert out["complete"] is False and copied["state"] == "BLUEPRINT_REVIEW"
     assert gates.current(copied, new) == gates.REQUIREMENTS
     assert not templates.exact_build_pending(new), "the rest must be authored, not skipped"
+
+
+def test_counts_are_said_the_way_a_person_says_them():
+    assert templates.counted({"pages": 3, "entities": 1, "workflows": 4, "roles": 1}) == \
+        "3 screens, 1 kind of record, 4 processes, 1 role"
+    assert templates.counted({"pages": 1, "entities": 2}) == "1 screen, 2 kinds of record"
+    assert templates.counted({}) == ""

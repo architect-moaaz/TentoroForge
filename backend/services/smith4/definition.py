@@ -175,12 +175,9 @@ def use_template(ctx: Ctx, args: dict) -> dict:
         if mode == templates.MODE_EXACT:
             out = templates.use_exact(ctx.out, app_name=ctx.app_name or "")
             facts = out["summary"]
-            c = facts["counts"]
-            parts = [f"{c[k]} {label}" for k, label in (
-                ("pages", "screens"), ("entities", "kinds of record"),
-                ("workflows", "processes"), ("roles", "roles")) if c.get(k)]
+            held = templates.counted(facts["counts"])
             copied = (f"This is now an exact copy of “{src.get('name')}”: "
-                      + (", ".join(parts) if parts else "its whole definition") + ". ")
+                      + (held or "its whole definition") + ". ")
             if out.get("complete", True):
                 left = out.get("authoring_left") or []
                 said = copied + ("Nothing has been built yet — press Build app on the card to "
