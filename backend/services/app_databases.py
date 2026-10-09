@@ -97,7 +97,13 @@ def ensure(app_root: str | Path) -> dict | None:
     url = url_for(name)
     _write_url(root, url)
     pushed, reason = False, ""
-    if created or not _has_tables(name):
+    # SEEDED, NOT MERELY SHAPED. Pushed while the app was not installed yet,
+    # TStyle's database got its tables and never its rows: every later call
+    # found tables and seeded nothing, the handover named a login that did
+    # not exist, and every statement was refused at the sign-in form
+    # (forge-v3, 2026-10-09). The seed always writes a login, and it is
+    # idempotent, so a database with no login is pushed and seeded again.
+    if created or not _has_tables(name) or not _has_a_login(name):
         from services.blueprint.schema_push import push_now
         _extensions(root, url)
         out = push_now(root)
@@ -113,6 +119,21 @@ def _has_tables(name: str) -> bool:
         with con.cursor() as cur:
             cur.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'")
             return int(cur.fetchone()[0]) > 0
+    finally:
+        con.close()
+
+
+def _has_a_login(name: str) -> bool:
+    """Whether the app's `users` table holds a row; an app with no such table
+    has no logins to seed."""
+    con = _connect(name)
+    try:
+        with con.cursor() as cur:
+            cur.execute("SELECT to_regclass('public.users') IS NOT NULL")
+            if not cur.fetchone()[0]:
+                return True
+            cur.execute("SELECT EXISTS (SELECT 1 FROM public.users)")
+            return bool(cur.fetchone()[0])
     finally:
         con.close()
 
