@@ -93,4 +93,12 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # Migrate then serve. `alembic upgrade head` is idempotent — safe to
 # re-run on every container start, and prevents "fresh disk boots
 # without schema" surprises on new instances.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn main:app --host 0.0.0.0 --port 6500 --workers 2"]
+#
+# A BUSY WORKER IS NOT A DEAD ONE. uvicorn's supervisor pings each worker and
+# kills one that has not answered in `--timeout-worker-healthcheck` seconds
+# (default 5). With three apps compiling at once (load 23 on four cores) a
+# worker answered late, was killed and respawned, and the Smith turn it was
+# running — a tester's post-build trials — vanished with no end in its ledger
+# (forge-v3, 2026-10-09 10:40, "Child process [9] died"). A worker that is
+# truly hung still goes, after a minute instead of five seconds.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn main:app --host 0.0.0.0 --port 6500 --workers 2 --timeout-worker-healthcheck 60"]
