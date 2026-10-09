@@ -72,3 +72,21 @@ def test_a_definition_run_still_goes_through_the_graph(project, tmp_path, monkey
     router._run_dag(str(tmp_path), str(tmp_path / "app"), "define it", approved=False,
                     emit=lambda kind, data: None, phase="define")
     assert ran["plan"] and set(ran["plan"]) <= {"requirements", "figma_intelligence"}
+
+
+def test_a_resumed_build_counts_what_was_complete_before_it(project, tmp_path, monkeypatch):
+    """Crumb's resume completed only its last nodes, and the state walk left a
+    built, proven app at IMPLEMENTATION (2026-10-09)."""
+    from routers import blueprint_generate as router
+    from services.blueprint.orchestrator import RunReport
+    monkeypatch.setattr("services.engineer.build.build",
+                        lambda od, app, **kw: {"features": [], "statements": {}, "stopped": "", "state": "",
+                                               "report": RunReport(completed=["verification"])})
+    monkeypatch.setattr("services.blueprint.orchestrator.completed_nodes",
+                        lambda doc, confirmed=None: {"install", "assemble", "page_code"})
+    monkeypatch.setattr(router, "_finish_unfinished_pages", lambda *a, **k: None)
+    seen = {}
+    monkeypatch.setattr("services.smith.smith.settle_state_after_build",
+                        lambda svc, report: seen.update(completed=sorted(report.completed)) or "PREVIEW")
+    router._run_dag(str(tmp_path), str(tmp_path / "app"), "", approved=True, emit=lambda k, d: None)
+    assert seen["completed"] == ["assemble", "install", "page_code", "verification"]

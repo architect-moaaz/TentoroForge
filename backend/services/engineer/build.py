@@ -344,6 +344,9 @@ def _opening(plan: list[Feature], earlier: list[str], app_name: str) -> str:
     left = [f for f in plan if f.id not in earlier]
     names = ", ".join(f.label for f in left)
     head = f"Building {app_name or 'the application'} feature by feature"
+    if earlier and not left:
+        return (f"Every feature of {app_name or 'the application'} is already proven ({len(earlier)}); "
+                f"trying the whole application once more and finishing it.")
     if earlier:
         head += f" — {len(earlier)} already proven, picking up from there"
     return f"{head}: {names}. Each is tried as the people it is for before the next begins."

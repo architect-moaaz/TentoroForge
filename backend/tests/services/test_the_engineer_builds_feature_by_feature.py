@@ -317,3 +317,11 @@ def test_the_whole_app_pass_fixes_what_a_later_feature_broke(tmp_path):
     assert proofs[-1][0] == ["EXP-001"] and proofs[-1][1] is False, "then what the fix changed is tried again"
     assert len(fixes) == 1 and "While building the whole application" in fixes[0] and "/orders, not /menu" in fixes[0]
     assert out["statements"]["fixed"] == ["EXP-001"] and out["statements"]["failing"] == []
+
+
+def test_the_opening_says_when_everything_is_already_proven():
+    from services.engineer.build import _opening
+    plan = F.features(DOC)
+    assert _opening(plan, [f.id for f in plan], "Crumb") == \
+        "Every feature of Crumb is already proven (3); trying the whole application once more and finishing it."
+    assert "picking up from there: Accounts, Cart & Checkout" in _opening(plan, ["MODULE-001"], "Crumb")

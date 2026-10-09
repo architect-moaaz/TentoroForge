@@ -2552,6 +2552,13 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                                executor=executor, observer_agent=watcher, observer=progress,
                                done_nodes=set(already), svc=svc)
         report = built["report"]
+        # WHAT WAS COMPLETE BEFORE THIS RUN IS COMPLETE. The state walk reads
+        # the report's completed nodes; a resumed run completes few of them
+        # and Crumb's handover left the state at IMPLEMENTATION over a built,
+        # proven app (2026-10-09).
+        for k in sorted(already):
+            if k not in report.completed:
+                report.completed.append(k)
     else:
         report = run(svc, executor, plan=plan, commit=True,
                      user_request=description, app_root=app_root,
