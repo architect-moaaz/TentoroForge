@@ -2517,9 +2517,16 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     watcher = anthropic_observer(router, usage=usage, output_dir=output_dir, emit=emit)
     progress = Progress(emit, total=len(plan))
 
+    # WHAT THIS BUILD WRITES IS WHAT WAS AGREED TO: the approvals that stand
+    # as it starts are carried over its own writes at each checkpoint
+    # (`_carry_approvals`), so the build does not leave its own approval stale.
+    if approved and phase not in ("define", "model"):
+        from services.blueprint import approval as _approval
+        svc._carry_gates = [g for g in ("blueprint", "plan") if _approval.state_of(svc.doc, g) == "approved"]
     report = run(svc, executor, plan=plan, commit=True,
                  user_request=description, app_root=app_root,
                  observer=progress, observer_agent=watcher)
+    _carry_approvals(svc, "the approved build wrote it")
     # DEFECT-B-07: a define run left the state at DISCOVERY (the DAG never calls
     # transition()), so GET /blueprint reported DISCOVERY forever and the
     # approve/build gates were unreachable. A define that produced requirements
@@ -2586,6 +2593,21 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             "report": _report_payload(report, svc.doc)}
 
 
+def _carry_approvals(svc: Any, why: str) -> None:
+    """Carry the approvals this build started under over what it has written
+    so far (`approval.carry`). Never fatal: an approval that cannot be carried
+    is asked for again, which is where it was before."""
+    gates = getattr(svc, "_carry_gates", None) or []
+    if not gates:
+        return
+    from services.blueprint import approval as _approval
+    for gate in gates:
+        try:
+            _approval.carry(svc, gate, why=why)
+        except Exception:  # noqa: BLE001
+            logger.warning("[blueprint] could not carry the %s approval", gate, exc_info=True)
+
+
 def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: Any, emit) -> None:
     """Every page the build did not finish goes to Smith with why it failed,
     to fix the cause and write it (`page_repair`); then every statement of
@@ -2598,6 +2620,7 @@ def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: A
     try:
         from services.huddle.deadlocks import settle_deadlocks
         settled = settle_deadlocks(svc, output_dir, report, app_root=app_root, emit=emit)
+        _carry_approvals(svc, "the approved build's huddles decided it")
         if settled:
             logger.info("[blueprint] %s: huddles %s", Path(output_dir).name,
                         ", ".join(f"{h.id} {h.status}" for h in settled))
@@ -2608,6 +2631,7 @@ def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: A
             return
         from services.blueprint.page_repair import repair_pages
         out = repair_pages(svc, output_dir, app_root, report, emit=emit)
+        _carry_approvals(svc, "the approved build's page repair wrote it")
         if out["fixed"] or out["left"]:
             logger.info("[blueprint] %s: pages finished by repair %s; still unfinished %s",
                         Path(output_dir).name, out["fixed"] or "-",
@@ -2630,6 +2654,7 @@ def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: A
     try:
         from services.expects.build import prove_expectations
         out = prove_expectations(svc, output_dir, emit=emit)
+        _carry_approvals(svc, "the approved build's checks mended it")
         if out["statements"]:
             logger.info("[blueprint] %s: statements holding %d of %d, fixed %s, failing %s, untried %s",
                         Path(output_dir).name, out["passed"], out["statements"], out["fixed"] or "-",

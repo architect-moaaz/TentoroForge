@@ -181,6 +181,26 @@ def record(svc: Any, gate: str, outcome: str = "accepted", *,
     return entry
 
 
+def carry(svc: Any, gate: str, *, why: str) -> dict[str, Any] | None:
+    """Carry an approval over what the approved work itself wrote.
+
+    A build that was approved fills in the very things the fingerprint is
+    taken over — the sign-in pages, the design system, the security rules,
+    the workflows a huddle adds — so every build left its own approval stale,
+    and "rebuild" was refused with "approved at version 20, now at 68" by a
+    tester who had changed nothing (Lifestyle App, forge-v3, 2026-10-09).
+    Called by the build at its own checkpoints, only when the approval stood
+    when it started: what it wrote is what was agreed to. A change made
+    outside a build still makes the approval stale. Returns the new entry,
+    or None when there was nothing to carry."""
+    if state_of(svc.doc, gate) != "stale":
+        return None
+    last = latest(svc.doc, gate) or {}
+    if last.get("outcome") != "accepted":
+        return None
+    return record(svc, gate, note=f"carried: {why}")
+
+
 def require(doc: dict, gate: str, *, doing: str = "") -> None:
     """Raise unless ``gate`` is satisfied against the document as it stands.
 

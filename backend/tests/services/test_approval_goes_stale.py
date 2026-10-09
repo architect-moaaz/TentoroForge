@@ -44,3 +44,34 @@ def test_adding_only_a_field_does_not_invalidate_approval():
     doc["data"]["entities"][0].setdefault("fields", []).append(
         {"name": "discountPercent", "type": "decimal"})
     assert A.state_of(doc, "build") == "approved"
+
+
+def test_what_the_approved_build_wrote_carries_its_approval():
+    """Lifestyle App (forge-v3, 2026-10-09): approved at version 20, the build
+    and its huddles wrote 48 versions — pages, workflows, a requirement — and
+    "rebuild" was refused as stale for a tester who had changed nothing."""
+    doc = _doc(); svc = _FakeSvc(doc)
+    A.record(svc, "plan")
+    assert A.carry(svc, "plan", why="x") is None, "nothing to carry while it stands"
+    doc.setdefault("pages", []).append({"id": "PAGE-099", "name": "Sign in"})
+    assert A.state_of(doc, "plan") == "stale"
+    entry = A.carry(svc, "plan", why="the approved build wrote it")
+    assert entry and entry["note"] == "carried: the approved build wrote it"
+    assert A.state_of(doc, "plan") == "approved"
+    # Never carried over a "no".
+    doc2 = _doc(); svc2 = _FakeSvc(doc2)
+    A.record(svc2, "plan", outcome="rejected")
+    doc2.setdefault("pages", []).append({"id": "PAGE-098", "name": "X"})
+    assert A.carry(svc2, "plan", why="x") is None
+
+
+def test_the_build_carries_only_the_approvals_it_started_under():
+    from routers.blueprint_generate import _carry_approvals
+    doc = _doc(); svc = _FakeSvc(doc)
+    A.record(svc, "plan")
+    doc.setdefault("pages", []).append({"id": "PAGE-099", "name": "Sign in"})
+    _carry_approvals(svc, "x")
+    assert A.state_of(doc, "plan") == "stale", "a change outside a build stays a change"
+    svc._carry_gates = ["plan"]
+    _carry_approvals(svc, "the approved build wrote it")
+    assert A.state_of(doc, "plan") == "approved"
