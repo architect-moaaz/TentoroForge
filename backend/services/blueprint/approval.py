@@ -201,6 +201,38 @@ def carry(svc: Any, gate: str, *, why: str) -> dict[str, Any] | None:
     return record(svc, gate, note=f"carried: {why}")
 
 
+def carry_after_cut_off_build(svc: Any, output_dir: str, gate: str = "plan") -> dict[str, Any] | None:
+    """Carry an approval over a build that started under it and was cut off.
+
+    `carry` runs at the build's own checkpoints; a build whose process was
+    killed mid-way never reaches one. TStyle's build (forge-v3, 2026-10-09)
+    was killed with its worker at the screens, and its approval was left
+    stale by the steps that did land. A build run — its plan reaches
+    `assemble` — that started at or after the approval wrote what the
+    definition shows since; asked before a "rebuild" is refused as stale."""
+    from pathlib import Path
+
+    last = latest(svc.doc, gate) or {}
+    if state_of(svc.doc, gate) != "stale" or last.get("outcome") != "accepted" or not last.get("at"):
+        return None
+    approved_at = str(last["at"])[:19]
+    runs = Path(output_dir) / ".forge" / "runs"
+    for ledger in sorted(runs.glob("*.jsonl"), reverse=True):
+        if ledger.name.endswith("smith-turn.jsonl"):
+            continue
+        try:
+            head = [json.loads(line) for _, line in zip(range(2), ledger.open())]
+        except (OSError, ValueError):
+            continue
+        start = next((e for e in head if e.get("event") == "run:start"), {})
+        plan = next((e for e in head if e.get("event") == "plan"), {})
+        if str(start.get("at") or "")[:19] < approved_at:
+            break                    # every older run is older still
+        if "assemble" in (plan.get("nodes") or []):
+            return carry(svc, gate, why=f"the approved build {start.get('runId')} wrote it before it was cut off")
+    return None
+
+
 def require(doc: dict, gate: str, *, doing: str = "") -> None:
     """Raise unless ``gate`` is satisfied against the document as it stands.
 

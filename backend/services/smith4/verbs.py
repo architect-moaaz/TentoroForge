@@ -688,7 +688,11 @@ def rebuild(ctx: Ctx, u: dict) -> Outcome:
         try:
             from services.blueprint import approval
             from services.blueprint.service import BlueprintService
-            doc = BlueprintService.load(output_dir=ctx.out).doc
+            svc = BlueprintService.load(output_dir=ctx.out)
+            # WHAT THE APPROVED BUILD WROTE IS NOT A CHANGE TO REVIEW — even
+            # when its process was killed before it could say so.
+            approval.carry_after_cut_off_build(svc, ctx.out)
+            doc = svc.doc
             if approval.state_of(doc, "plan") == "stale":
                 last = approval.latest(doc, "plan") or {}
                 stale = (f"the plan was approved at version {last.get('version', '?')} and the "

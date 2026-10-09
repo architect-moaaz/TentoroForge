@@ -1939,6 +1939,7 @@ async def smith_chat(
             if svc is not None and defined and not _answers_smith \
                     and (_is_build_consent(req.message) or _is_forced_rebuild(req.message)):
                 from services.blueprint import approval as _approval
+                _approval.carry_after_cut_off_build(svc, str(output_dir))
                 if not _is_forced_rebuild(req.message) and _is_built(output_dir) \
                         and _approval.state_of(svc.doc, "plan") == "approved":
                     # Already built, and nothing has changed since it was

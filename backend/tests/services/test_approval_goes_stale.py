@@ -75,3 +75,26 @@ def test_the_build_carries_only_the_approvals_it_started_under():
     svc._carry_gates = ["plan"]
     _carry_approvals(svc, "the approved build wrote it")
     assert A.state_of(doc, "plan") == "approved"
+
+
+def test_a_build_cut_off_after_the_approval_carries_it(tmp_path):
+    """TStyle (forge-v3, 2026-10-09): the build was killed with its worker at
+    the screens; the steps that landed left the approval stale and no
+    checkpoint ran to carry it."""
+    import json as _json
+    doc = _doc(); svc = _FakeSvc(doc)
+    entry = A.record(svc, "plan")
+    runs = tmp_path / ".forge" / "runs"
+    runs.mkdir(parents=True)
+    def ledger(name, at, nodes):
+        (runs / name).write_text(_json.dumps({"event": "run:start", "phase": "build", "at": at, "runId": name[:-6]})
+                                 + "\n" + _json.dumps({"event": "plan", "nodes": nodes}) + "\n")
+    ledger("20260101-000000-aaaaaa.jsonl", "2000-01-01T00:00:00Z", ["requirements"])
+    doc.setdefault("pages", []).append({"id": "PAGE-099", "name": "Sign in"})
+    assert A.carry_after_cut_off_build(svc, str(tmp_path)) is None, "no build since the approval"
+    ledger("29990101-000000-bbbbbb.jsonl", "2999-01-01T00:00:00Z", ["data_model", "page_contracts"])
+    assert A.carry_after_cut_off_build(svc, str(tmp_path)) is None, "a definition run is not the build"
+    ledger("29990101-000001-cccccc.jsonl", "2999-01-01T00:00:01Z", ["design_system", "page_details", "assemble"])
+    carried = A.carry_after_cut_off_build(svc, str(tmp_path))
+    assert carried and "29990101-000001-cccccc" in carried["note"] and A.state_of(doc, "plan") == "approved"
+    assert entry["at"] <= "2999"
