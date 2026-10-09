@@ -1092,6 +1092,30 @@ sentences:
     source: routing
     reaches: {verb: back_up, states: []}
 
+  - id: template-1
+    say: "save this app as a template"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: save_as_template, states: []}
+
+  - id: template-2
+    say: "I want to reuse this app later for another client"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: save_as_template, states: []}
+
+  - id: template-3
+    say: "make a template out of this"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: save_as_template, states: []}
+
+  - id: template-4
+    say: "can I keep this as a starting point for other apps?"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: save_as_template, states: []}
+
   - id: data-stored-anywhere-else
     say: "is any of this stored anywhere else?"
     checked: {colour: acts, via: handler}

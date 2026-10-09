@@ -96,6 +96,11 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "definition they belong to, in one archive you keep. Taken when you ask; "
      "nothing is scheduled and nothing puts them back for you.",
      frozenset({"back_up"})),
+    ("Reusing it as a template",
+     "Save the whole application — screens, records, processes, rules, roles "
+     "and look — to Templates, so a new app can start from it: the exact same "
+     "app again, or one like it for another purpose.",
+     frozenset({"save_as_template"})),
     ("Putting it back",
      "Undo the last change — the application returns to how it stood before "
      "it, and saying it again goes back another. Nothing is deleted: the undo "

@@ -291,3 +291,7 @@
 {"say": "fold the campaigns page into the marketing screen", "verb": "merge_screens"}
 {"say": "we have too many pages, put coupons and campaigns on one screen", "verb": "merge_screens"}
 {"say": "make the refunds tab on support its own page", "verb": "split_section"}
+{"say": "save this app as a template", "verb": "save_as_template"}
+{"say": "I want to reuse this app later for another client", "verb": "save_as_template"}
+{"say": "make a template out of this", "verb": "save_as_template"}
+{"say": "can I keep this as a starting point for other apps?", "verb": "save_as_template"}

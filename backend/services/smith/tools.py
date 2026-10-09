@@ -126,6 +126,19 @@ DEFINITION: tuple[tuple[str, str, dict[str, str]], ...] = (
      "— nothing is built until they approve on the card. `brief` is optional; "
      "left out, the whole exchange is the brief, which is usually right.",
      {"brief": "string"}),
+    ("use_template",
+     "Only when this project was started from a template (the page says so). "
+     "`mode` \"exact\": the template's application becomes this one exactly as "
+     "it is — its whole definition, ready for the person to build with no "
+     "changes; use it when they want the same app, or the same app with small "
+     "edits (a name, a field, a screen) that the change verbs make cheaply "
+     "after. `mode` \"adapt\": a NEW application defined from what they say is "
+     "different (`changes`, in their words), working from the template as a "
+     "reference — use it when it is another business or a materially "
+     "different app. `keep_look` (default true) keeps the template's colours "
+     "and type; false when they asked for a new look. Never guess the mode: "
+     "if they have not said, ask with the two choices.",
+     {"mode": "string", "changes": "string", "keep_look": "boolean"}),
 )
 
 DEFINITION_NAMES: frozenset[str] = frozenset(name for name, _d, _a in DEFINITION)
