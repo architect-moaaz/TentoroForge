@@ -1883,6 +1883,17 @@ def template_findings(doc: dict) -> list[dict]:
                                                   f"holds or a literal (\"text\", a number, true/false); "
                                                   f"{', '.join(repr(s) for s in bad + unknown)} is neither"})
                         continue
+                    if inner.strip().startswith("$"):
+                        # A SENTINEL IN BRACES. `{{$user.id}}` was refused as
+                        # a template that "computes" four times in one build
+                        # (Lifestyle App, forge-v3, 2026-10-09) — true, and no
+                        # help: the author never learned the braces were the
+                        # fault.
+                        out.append({"rule": "template-computes", "page": str(wf.get("id")),
+                                    "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
+                                              f"{{{{{inner.strip()}}}}} — `{inner.strip()}` is a whole value, "
+                                              f"written without braces: `\"{inner.strip()}\"`"})
+                        continue
                     if _TEMPLATE_RE.fullmatch("{{" + inner + "}}") is None:
                         out.append({"rule": "template-computes", "page": str(wf.get("id")),
                                     "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "

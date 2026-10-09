@@ -189,3 +189,14 @@ def test_each_proposal_is_blamed_only_for_its_own_expression():
     ]}
     found = expression_findings(doc)
     assert [f["detail"].split(":")[0] for f in found] == ["rule broken"]
+
+
+def test_a_sentinel_in_braces_is_told_to_drop_them():
+    """Lifestyle App (forge-v3, 2026-10-09): `{{$user.id}}` was refused four
+    times as a template that "computes" — the author never learned the braces
+    were the fault."""
+    doc = _wf([{"key": "insert_log", "type": "action", "config": {"actionType": "db_insert", "table": "logs",
+                                                                   "values": {"user_id": "{{$user.id}}"}}}])
+    details = [f["detail"] for f in template_findings(doc)]
+    assert details == ["Create Case, step 'insert_log': {{$user.id}} — `$user.id` is a whole value, written "
+                       "without braces: `\"$user.id\"`"]
