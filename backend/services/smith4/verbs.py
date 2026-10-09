@@ -698,10 +698,8 @@ def save_as_template(ctx: Ctx, u: dict) -> Outcome:
                               name=_s(u, "new_value") or "")
     except templates.TemplateError as exc:
         return Outcome(status="needs_user", said=str(exc))
-    c = (meta.get("summary") or {}).get("counts") or {}
-    held = ", ".join(f"{c[k]} {label}" for k, label in (
-        ("pages", "screens"), ("entities", "kinds of record"), ("workflows", "processes"))
-        if c.get(k))
+    held = templates.counted((meta.get("summary") or {}).get("counts") or {},
+                             ("pages", "entities", "workflows"))
     return Outcome(status="resolved", said=(
         f"Saved “{meta['name']}” to Templates" + (f" — {held}" if held else "") + ". Anyone in "
         "your organisation can start a new app from it there: the exact same app again, or "

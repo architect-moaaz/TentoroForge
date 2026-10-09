@@ -509,6 +509,67 @@ def image_blocks(paths: Sequence[str | Path]) -> list[dict[str, Any]]:
     return blocks
 
 
+def _endpoint_enforces_schema() -> bool:
+    """Whether the Messages endpoint this client talks to holds a reply to
+    ``output_config.format``. Anthropic's does. An Anthropic-COMPATIBLE host
+    (``ANTHROPIC_BASE_URL`` — Kimi's, for one) accepts the field and does not
+    hold to it: Kimi answered `entity_fields` with ``"fields": [{}]`` and,
+    the schema never having been stated in the prompt, every entity of two
+    apps was committed with no columns (live, 2026-10-09). Elsewhere the
+    schema is stated in the prompt and the envelope checks carry the rest."""
+    from urllib.parse import urlparse
+    base = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+    host = (urlparse(base).hostname or "") if base else "api.anthropic.com"
+    return host == "anthropic.com" or host.endswith(".anthropic.com")
+
+
+#: Property names an Anthropic-compatible endpoint's schema compiler reads as
+#: JSON-Schema keywords. Kimi's answers ``{"fields": [{}, {}]}`` to any schema
+#: with a property named ``required`` (a field's own required flag) — the
+#: same request without it answers in full (measured, 2026-10-09). Sent under
+#: an alias and named back in the reply, so nothing past the transport knows.
+_KEYWORD_PROPERTIES = {"required": "isRequiredField"}
+
+
+def _alias_keyword_properties(schema: Any) -> Any:
+    """``schema`` with every keyword-named property renamed to its alias —
+    in ``properties`` and in the ``required`` list beside it."""
+    if isinstance(schema, list):
+        return [_alias_keyword_properties(v) for v in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {}
+    for k, v in schema.items():
+        if k == "properties" and isinstance(v, dict):
+            out[k] = {_KEYWORD_PROPERTIES.get(name, name): _alias_keyword_properties(sub)
+                      for name, sub in v.items()}
+        elif k == "required" and isinstance(v, list):
+            out[k] = [_KEYWORD_PROPERTIES.get(n, n) if isinstance(n, str) else n for n in v]
+        else:
+            out[k] = _alias_keyword_properties(v)
+    return out
+
+
+def _unalias_keyword_properties(text: str) -> str:
+    """The reply with each alias named back. A reply that is not JSON is
+    returned as it came — the envelope checks say what is wrong with it."""
+    back = {v: k for k, v in _KEYWORD_PROPERTIES.items()}
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {back.get(k, k): walk(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        return node
+    try:
+        data = json.loads(text, strict=False)
+    except (TypeError, ValueError):
+        return text
+    if not any(alias in text for alias in back):
+        return text
+    return json.dumps(walk(data), ensure_ascii=False)
+
+
 @dataclass
 class AnthropicModel:
     """The real client. Uses the official SDK — see the claude-api reference.
@@ -521,8 +582,9 @@ class AnthropicModel:
     model: str = DEFAULT_MODEL
     max_tokens: int = DEFAULT_MAX_TOKENS
     effort: str = "high"
-    #: output_config.format is a hard constraint, not a request.
-    enforces_schema: bool = True
+    #: output_config.format is a hard constraint, not a request — on
+    #: Anthropic's own endpoint (see `_endpoint_enforces_schema`).
+    enforces_schema: bool = field(default_factory=_endpoint_enforces_schema)
     #: The only transport here that carries images. The OpenAI-compatible and
     #: Gemini clients take (system, user, schema) and would reject the keyword.
     accepts_images: bool = True
@@ -690,7 +752,8 @@ class AnthropicModel:
             messages=[{"role": "user", "content": _content(shown, user)}],
             output_config={
                 "effort": self.effort,
-                "format": {"type": "json_schema", "schema": schema},
+                "format": {"type": "json_schema", "schema": (
+                    schema if self.enforces_schema else _alias_keyword_properties(schema))},
             },
         )
         client = self._anthropic()
@@ -737,6 +800,8 @@ class AnthropicModel:
                 why = (f"the model stopped ({stop or 'no stop reason'}) without "
                        f"writing an answer")
             raise NoAnswer(why, usage=spent, stop_reason=stop)
+        if not self.enforces_schema:
+            text = _unalias_keyword_properties(text)
         return ModelReply(text=text, usage=spent, stop_reason=stop)
 
 
@@ -3347,6 +3412,16 @@ def parse_envelope(raw: str, *, task_id: str, agent: str,
     proposals: list[ArtifactProposal] = []
     if node in SCHEMA_BY_NODE:
         proposals = expand_data_model(data)
+        if node == "entity_fields":
+            # One entity's columns is the whole job; an entity with none is
+            # not an answer (see `_meant_to_store_nothing`). Committed, it
+            # read as done and every page naming a field was refused after.
+            empty = [p.natural_key for p in proposals
+                     if p.section == "data.entities" and not p.body.get("fields")]
+            if empty:
+                raise MalformedEnvelope(
+                    f"entity_fields: {', '.join(empty)} came back with no fields — "
+                    "every field needs at least a name and a type")
         if not proposals and not _meant_to_store_nothing(node, data):
             # A reply that parsed but named nothing is not a data model. Said
             # here rather than committed as an empty section, which is how a

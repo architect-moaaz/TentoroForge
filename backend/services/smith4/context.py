@@ -67,9 +67,8 @@ def template_page(staged: dict, brief: str = "") -> str:
     question, and the answer to "what's in it?", come from what it holds."""
     facts = staged.get("summary") or {}
     counts = facts.get("counts") or {}
-    held = ", ".join(f"{counts[k]} {label}" for k, label in (
-        ("pages", "screens"), ("entities", "kinds of record"), ("workflows", "processes"),
-        ("roles", "roles"), ("requirements", "requirements")) if counts.get(k))
+    from services.project_templates import counted
+    held = counted(counts, ("pages", "entities", "workflows", "roles", "requirements"))
     lines = [
         f"THIS PROJECT WAS STARTED FROM THE TEMPLATE “{staged.get('name')}”, and the template "
         "has not been used yet. Nothing is defined, so the change verbs do not apply.",
