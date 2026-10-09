@@ -74,6 +74,7 @@ SECTION_NODE: dict[str, str] = {
     "designSystem": "design_system",
     "navigation": "ux_architecture",
     "flows": "app_flows",
+    "composition": "ui_direction",
     "modules": "ux_architecture",
     "pages": "page_contracts",
     "requirements": "requirements",
@@ -98,6 +99,7 @@ SECTION_WORDS: dict[str, str] = {
     "designSystem": "how it looks",
     "navigation": "its menu",
     "flows": "the paths people take through it",
+    "composition": "the look each kind of person gets",
     "modules": "how it is organised",
     "pages": "its screens",
     "requirements": "what it has to do",
@@ -114,7 +116,9 @@ WRITES = WRITES + (
      "`apis`, `businessRules`, `permissions`, `workflows`, `designSystem`, "
      "`navigation`, `pages`, `requirements`, `product`, and `flows` — the paths "
      "people take from screen to screen and where each process leaves them "
-     "(\"after checkout, open the order\"; \"write the app flow\" for an app that has none). "
+     "(\"after checkout, open the order\"; \"write the app flow\" for an app that has none), and "
+     "`composition` — the look each kind of person gets (their menu's kind and tone, their pages' "
+     "rhythm) and the direction every page follows (\"give the staff a dark wide rail\"). "
      "`brief` says what "
      "should be different and what must stay, in terms of what you read "
      "(`read_section`). `subject` narrows it to one artifact's id. The reply "
@@ -161,7 +165,8 @@ WRITES = WRITES + (
      "`read_file` under `app/`): " + _frame_files_said() + ". `brief` names the change "
      "in the code's terms. Edited, compiled, committed as one version; from then on "
      "that file is the application's own. To switch the KIND of frame (side rail, "
-     "top bar, bottom dock, its tone) use `write_section` on `designSystem`.",
+     "top bar, bottom dock, its tone) for one kind of person use `write_section` on "
+     "`composition`; for the whole app and its sign-in screen, on `designSystem`.",
      {"file": "string", "brief": "string"}),
 )
 
@@ -335,6 +340,16 @@ def _reproject(svc: Any, app_root: str, section: str) -> list[str]:
             files = list(project_design_tokens(svc.doc, app_root).get("files") or [])
             files += list(project_navigation(svc.doc, app_root).get("files") or [])
             files += list(project_shell_identity(svc.doc, app_root).get("files") or [])
+            files += refresh_frame(app_root, svc.doc)
+            return files
+        if section == "composition":
+            # EACH AUDIENCE'S FRAME, written where the layout and the public
+            # header read it. Pages keep the rhythm they were written to until
+            # they are written again (`rewrite_pages`).
+            from services.blueprint.projection import project_public_nav, project_shell_identity
+            from services.smith.sync_app import refresh_frame
+            files = list(project_shell_identity(svc.doc, app_root).get("files") or [])
+            files.append(project_public_nav(svc.doc, app_root))
             files += refresh_frame(app_root, svc.doc)
             return files
         if section in ("pages", "navigation", "modules"):

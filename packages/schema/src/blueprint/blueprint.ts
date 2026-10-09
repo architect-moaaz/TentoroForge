@@ -70,7 +70,10 @@ export const DesignLanguageSource = z.enum(["company", "custom"]);
 export const ApplicationMeta = z.object({
   id: z.string(),
   name: z.string(),
-  domain: z.string().describe("CRM | HRMS | ATS | Banking | … (§96)"),
+  domain: z.string().describe(
+    "The field this application serves, in the words the person used (§96). "
+    + "The product frame's own `product.domain` is where the build states it.",
+  ),
   description: z.string().default(""),
   /**
    * The application-wide answer to "who designs the screens", recorded when
@@ -125,6 +128,32 @@ export const Capability = z.object({
 });
 
 export const Product = z.object({
+  /**
+   * The field this application serves and the kind of product it is, stated
+   * by the product frame and read by everything that decides how it looks.
+   * `application.domain` was never filled — every Blueprint said "unknown" —
+   * so the agents choosing the frame and the page rhythm were told the
+   * personality and the density, never what the product is; and the code
+   * filled the gap by reading words like "child" or "back-office" off the
+   * personality (2026-10-08). Stated here, the design follows the product;
+   * no table in code maps one to the other.
+   */
+  domain: z
+    .string()
+    .describe(
+      "The field this application serves, in a few plain words, as the people in it "
+      + "would say it. Not a code or a list entry.",
+    )
+    .default(""),
+  category: z
+    .string()
+    .describe(
+      "The kind of product this is, in a few words: what it is to the people who use it "
+      + "and how they meet it — for example something they browse and buy from, a tool "
+      + "they work in all day, a portal they check now and then. When it is two things "
+      + "to two kinds of people, say both.",
+    )
+    .default(""),
   objectives: z.array(z.string()).default([]),
   personas: z.array(Persona).default([]),
   /** Domain vocabulary. Drives generated copy so labels match the business. */
@@ -1312,6 +1341,36 @@ export const PageSketch = z.object({
  * still per page. The sketch is the instruction a page author is given, not a
  * gate a page is rejected against — coherence is judged, not measured.
  */
+/** The five anatomy decisions every page of one audience shares. */
+export const PageRhythm = z.object({
+  header: z.enum(["eyebrow-title", "title-only", "band", "compact"]),
+  lead: z.enum(["dark-card", "gradient-band", "outlined-panel", "type-only"]),
+  lists: z.enum(["table", "cards", "rows"]),
+  figures: z.enum(["tiles", "strip", "inline"]),
+  sections: z.enum(["cards", "open", "dense"]),
+});
+
+/** What the visitors who are not signed in are called in `AudienceLook.audience`. */
+export const PUBLIC_AUDIENCE = "public";
+
+export const AudienceLook = z.object({
+  audience: z
+    .array(z.string())
+    .min(1)
+    .describe("The role ids this look is for, or `public` for visitors who are not signed in"),
+  experience: z
+    .string()
+    .describe("What the product is to these people and how they use it — where, how often, for how long"),
+  chrome: z
+    .enum(["standard-rail", "wide-rail", "icon-rail", "floating-rail", "right-rail", "topbar", "dock"])
+    .describe("How their navigation is built. Visitors always get a header bar; this is ignored for `public`"),
+  tone: z
+    .enum(["dark", "brand", "light", "tinted"])
+    .describe("What their navigation is painted with"),
+  rhythm: PageRhythm,
+  why: z.string().describe("One sentence: why this look, from the domain, the category and these people"),
+});
+
 export const Composition = z.object({
   /** One paragraph: what the whole application should feel like to use. */
   vision: z.string().default(""),
@@ -1329,15 +1388,18 @@ export const Composition = z.object({
    * and title, a dark leading card, KPI tiles, tables in cards), which is why
    * two apps with different palettes still read as one product recoloured.
    */
-  rhythm: z
-    .object({
-      header: z.enum(["eyebrow-title", "title-only", "band", "compact"]),
-      lead: z.enum(["dark-card", "gradient-band", "outlined-panel", "type-only"]),
-      lists: z.enum(["table", "cards", "rows"]),
-      figures: z.enum(["tiles", "strip", "inline"]),
-      sections: z.enum(["cards", "open", "dense"]),
-    })
-    .optional(),
+  rhythm: PageRhythm.optional(),
+  /**
+   * ONE LOOK PER AUDIENCE. A shop's customers and its staff are two kinds of
+   * people in two kinds of product — a shop window they browse on a phone and
+   * a console they work in all day — and one frame and one rhythm for both
+   * made the storefront a console or the console a storefront. Each look is
+   * for the roles it names (and `public` for visitors who are not signed in),
+   * decided by the director from the domain, the category and how those
+   * people use it. Every role and, when there are public pages, the visitors
+   * have exactly one.
+   */
+  looks: z.array(AudienceLook).default([]),
   pages: z.array(PageSketch).default([]),
 });
 
@@ -2308,8 +2370,10 @@ export const DesignSystem = z.object({
    * navigation is built (`chrome`) and how the sign-in screen is composed
    * (`auth`). Every generated app shipped the same hover-expand rail and the
    * same split sign-in because nothing carried this decision to the shell,
-   * which has six of each. Derived from `navigationApproach` and the
-   * personality when the design does not state it.
+   * which has six of each. This is the application's own frame and its
+   * sign-in screen; each audience's frame is its look (`composition.looks`).
+   * Unstated, the platform's one default — never a guess read off the
+   * personality's words.
    */
   shell: z
     .object({
@@ -2320,7 +2384,7 @@ export const DesignSystem = z.object({
        * surface), `brand` (the primary colour), `light` (a card beside the
        * page), `tinted` (the ground washed with the primary). Every rail was
        * the inverse surface — the one navy rail on a warm pediatric app and a
-       * stark tool alike. Derived from the personality when not stated.
+       * stark tool alike. Unstated, the one default (`dark`).
        */
       tone: z.enum(["dark", "brand", "light", "tinted"]).optional(),
     })

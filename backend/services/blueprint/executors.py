@@ -1281,8 +1281,11 @@ NODE_TASKS: dict[str, str] = {
         "or a dense console), `brand` (the primary colour, when the brand "
         "leads), `light` (a card beside the page, for a quiet tool), `tinted` "
         "(the ground washed with the primary, for a warm or consumer "
-        "product). Choose all three from the personality and how the product "
-        "is used, and make them agree with `navigationApproach`.\n\n"
+        "product). Choose all three from the product's field, the kind of "
+        "product it is and how it is used, and make them agree with "
+        "`navigationApproach`. This is the application's own frame and its "
+        "sign-in screen; once the screens and the roles exist, the director "
+        "gives each kind of person their own look.\n\n"
         "TYPE IS TWO DECISIONS. Name `typography.fontFamilyBase` (the body, a "
         "highly legible face) and `typography.fontFamilyHeading` (page and card "
         "titles — a display serif or a characterful sans when the personality "
@@ -1327,6 +1330,13 @@ NODE_TASKS: dict[str, str] = {
         "Then the product frame: objectives, personas, the domain vocabulary "
         "the generated app should use in its labels, and the capabilities it must "
         "offer.\n\n"
+        "SAY WHAT THE PRODUCT IS. `domain` is the field it serves, in a few "
+        "plain words as the people in it would say it; `category` is the kind "
+        "of product it is to the people who use it and how they meet it — "
+        "something they browse and buy from, a tool they work in all day, a "
+        "portal they check now and then, a service they book. When it is two "
+        "things to two kinds of people, say both. Every screen's look is "
+        "chosen from these two, so neither is ever left empty.\n\n"
         "On `locale` — set it when the request says what language the INTERFACE is in — "
         "\"Arabic-first\", \"the UI should be in French\", a brief written "
         "throughout in another language. A BCP-47 tag: `ar`, `ar-PS`, `fr`. "
@@ -4254,7 +4264,9 @@ def make_executor(
             doc = _copy.deepcopy(svc.doc)
         if spec.agent == "ui_director":
             t0 = time.monotonic()
-            body, u = ui_engineer.compose_direction(doc, client, references=references.paths(svc.output_dir))
+            body, u = ui_engineer.compose_direction(doc, client, references=references.paths(svc.output_dir),
+                                                    brief=getattr(spec, "brief", "") or "",
+                                                    feedback=spec.feedback or "")
             record(u, time.monotonic() - t0)
             return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                                proposals=[ArtifactProposal(section="composition",

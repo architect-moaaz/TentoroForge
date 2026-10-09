@@ -1324,7 +1324,8 @@ def test_a_dependent_starts_before_an_unrelated_fanout_finishes(svc):
         elif spec.node == "application_model":
             out = AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.95,
                               proposals=[ArtifactProposal(section="product", natural_key="product",
-                                                          body={"objectives": ["x"]})])
+                                                          body={"objectives": ["x"], "domain": "d",
+                                                                "category": "c"})])
         else:
             out = _wave_result(spec)
         with lock:

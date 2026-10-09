@@ -249,8 +249,9 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         reads={"pages", "data", "workflows", "security", "designSources"},
         tools={"blueprint:read"},
     ),
-    # §34 — the whole app's direction, once: `composition.vision` and its
-    # conventions. No model output reaches a page without passing through them.
+    # §34 — the whole app's direction, once: `composition.vision`, its
+    # conventions and each audience's look. No model output reaches a page
+    # without passing through them.
     "ui_director": _cap(
         "ui_director",
         {"composition"},
@@ -768,6 +769,56 @@ def check_expectations(result: "AgentResult", doc: dict | None) -> None:
     if problems:
         raise InvalidExpectation("These statements cannot be tried as written — mend each one:\n- "
                                  + "\n- ".join(problems[:40]))
+
+
+class InvalidLooks(AuthorRefusal):
+    """The director's looks leave an audience out, say one twice, or name
+    nobody this application has."""
+
+
+def check_looks(result: "AgentResult", doc: dict | None) -> None:
+    """ONE LOOK FOR EVERY AUDIENCE. The design each kind of person gets is the
+    director's decision, from the product's field and kind and how those
+    people use it — so a look missing for anyone is refused naming them,
+    rather than that person getting a frame read off the personality's words
+    (`services.blueprint.looks`)."""
+    from services.blueprint.looks import look_findings
+    if not doc:
+        return
+    for p in result.proposals:
+        if p.section != "composition" or not isinstance(p.body, dict) or result.agent != "ui_director":
+            continue
+        problems = look_findings(doc, p.body.get("looks") or [])
+        if problems:
+            raise InvalidLooks("Each audience needs exactly one look — mend these:\n- " + "\n- ".join(problems[:20]))
+
+
+class InvalidProductFrame(AuthorRefusal):
+    """The product frame does not say what field the product serves or what
+    kind of product it is."""
+
+
+def check_product_frame(result: "AgentResult", doc: dict | None) -> None:
+    """THE PRODUCT SAYS WHAT IT IS. Every look, the frame and the rhythm, is
+    chosen from the field the product serves and the kind of product it is;
+    the frame that leaves either out is asked again for it."""
+    if result.agent != "product_analysis":
+        return
+    bodies = [p.body for p in result.proposals if p.section == "product" and isinstance(p.body, dict)]
+    if not bodies:
+        return
+    # THE PRODUCT AS IT WILL STAND: a reply may add capabilities alone, and
+    # what an earlier reply already said still counts.
+    stands = dict((doc or {}).get("product") or {})
+    for body in bodies:
+        stands.update({k: v for k, v in body.items() if k in ("domain", "category") and str(v or "").strip()})
+    missing = [k for k in ("domain", "category") if not str(stands.get(k) or "").strip()]
+    if missing:
+        raise InvalidProductFrame(
+            "Say " + " and ".join({"domain": "the field this product serves (`domain`)",
+                                   "category": "what kind of product it is to the people who use it (`category`)"}[k]
+                                  for k in missing)
+            + " — the look of every screen is chosen from them.")
 
 
 def check_analytics(result: "AgentResult", doc: dict | None) -> None:
@@ -1351,6 +1402,8 @@ def apply_agent_result(
     check_analytics(result, svc.doc)
     check_flows(result, svc.doc)
     check_expectations(result, svc.doc)
+    check_looks(result, svc.doc)
+    check_product_frame(result, svc.doc)
     check_security(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
