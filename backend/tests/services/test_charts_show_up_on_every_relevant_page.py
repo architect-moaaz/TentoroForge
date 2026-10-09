@@ -182,3 +182,25 @@ def test_the_design_director_sees_the_design_and_the_references():
     assert "Linear" not in system + user and "Zomato" in system
     assert "warm street-food stall" in user and "topbar" in user and "LAYOUT patterns" in user
     assert "Zomato: photo-led rows" in user
+
+
+def test_a_change_is_judged_on_the_pages_it_changes_counted_with_what_is_there():
+    """TStyle (forge-v3, 2026-10-09): Smith's rewrites of /trends, / and
+    /water-intake were refused one after another — counted from the rewrite's
+    own widgets alone, every other page read as chartless."""
+    import copy
+    full = [_w(1, "PAGE-001", "chart", "line", bucket="month"), _w(2, "PAGE-001", "chart", "donut"),
+            _w(3, "PAGE-001", "chart", "bar")] + KPIS
+    doc = copy.deepcopy(DOC)
+    doc["widgets"] = full                      # /products still has none: an older fault, not this change's
+    # A change to the dashboard alone, keeping its charts, is not refused for /products.
+    check_analytics(_result([dict(_w(2, "PAGE-001", "chart", "bar"), label="renamed")]), doc)
+    # A change that takes the dashboard below its bar is still refused — counted with what stays.
+    with pytest.raises(InvalidAnalytics, match="PAGE-001 / \\(dashboard\\) has 2 charts"):
+        check_analytics(_result([dict(_w(3, "PAGE-001", "chart", "bar"), status="DEPRECATED", page="PAGE-009")]), doc)
+    # A change to /products is judged on /products.
+    with pytest.raises(InvalidAnalytics, match="PAGE-002 /products"):
+        check_analytics(_result([_w(5, "PAGE-002", "metric")]), doc)
+    # The first authoring is still judged on the whole application.
+    with pytest.raises(InvalidAnalytics, match="PAGE-002 /products"):
+        check_analytics(_result(full), DOC)

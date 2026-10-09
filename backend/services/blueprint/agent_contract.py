@@ -847,8 +847,35 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
     over_time: set[str] = set()
     problems: list[str] = []
     known = {str(r.get("id")) for r in doc.get("requirements") or [] if isinstance(r, dict) and r.get("id")}
+    # A CHANGE IS JUDGED ON WHAT IT CHANGES. Counted from this reply alone and
+    # judged over every page, a rewrite of one screen's widgets read every
+    # other page as chartless and was refused for them — TStyle's /trends,
+    # / and /water-intake rewrites, one after another (forge-v3, 2026-10-09).
+    # The first authoring (no widgets yet) is judged on the whole app, which
+    # is what catches a dashboard decided to need none; a later change on the
+    # pages it gives widgets to, counted with the widgets already there.
+    existing = [w for w in doc.get("widgets") or []
+                if isinstance(w, dict) and w.get("status") != "DEPRECATED"]
+    changing = {str((p.body or {}).get("id") or "") for p in proposals if isinstance(p.body, dict)} - {""}
+    # The pages it gives widgets to, and the pages the widgets it changes
+    # leave — a chart moved or retired off a dashboard is a change to it.
+    touched = {str((p.body or {}).get("page") or "") for p in proposals if isinstance(p.body, dict)} | \
+              {str(w.get("page") or "") for w in existing if str(w.get("id") or "") in changing}
+    counted = [w for w in existing if str(w.get("id") or "") not in changing] + \
+              [p.body for p in proposals if isinstance(p.body, dict) and p.body.get("status") != "DEPRECATED"]
     for p in proposals:
         body = p.body if isinstance(p.body, dict) else {}
+        # EVERYTHING ON IT IS ABOUT THIS APPLICATION. A widget that cites no
+        # requirement is a number nobody asked for; one that cites a
+        # requirement that does not exist is a number nobody can check.
+        cited = [str(r) for r in body.get("requirements") or []]
+        if known and not cited:
+            problems.append(f"{body.get('id') or p.natural_key} ({body.get('label')}): names no requirement it answers; "
+                            "cite the one it does, or leave it out")
+        elif known and not any(c in known for c in cited):
+            problems.append(f"{body.get('id') or p.natural_key} ({body.get('label')}): cites {', '.join(cited)}, "
+                            "which this application does not have")
+    for body in counted:
         pid = str(body.get("page") or "")
         if str(body.get("kind") or "") == "metric":
             metrics[pid] = metrics.get(pid, 0) + 1
@@ -860,19 +887,11 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
             src = body.get("dataSource") if isinstance(body.get("dataSource"), dict) else {}
             if any(isinstance(d, dict) and d.get("bucket") for d in src.get("dimensions") or []):
                 over_time.add(pid)
-        # EVERYTHING ON IT IS ABOUT THIS APPLICATION. A widget that cites no
-        # requirement is a number nobody asked for; one that cites a
-        # requirement that does not exist is a number nobody can check.
-        cited = [str(r) for r in body.get("requirements") or []]
-        if known and not cited:
-            problems.append(f"{body.get('id') or p.natural_key} ({body.get('label')}): names no requirement it answers; "
-                            "cite the one it does, or leave it out")
-        elif known and not any(c in known for c in cited):
-            problems.append(f"{body.get('id') or p.natural_key} ({body.get('label')}): cites {', '.join(cited)}, "
-                            "which this application does not have")
     for page in doc.get("pages") or []:
         if not isinstance(page, dict) or page.get("status") == "DEPRECATED":
             continue
+        if existing and str(page.get("id")) not in touched:
+            continue                      # a change, and not to this page
         need = CHARTS_REQUIRED.get(str(page.get("pattern") or ""), 0)
         if not need or customer_facing(doc, page):
             continue
