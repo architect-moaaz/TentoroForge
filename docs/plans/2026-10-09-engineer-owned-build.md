@@ -1,7 +1,7 @@
 # One engineer per app: building by proof instead of by assembly
 
 Date: 2026-10-09
-Status: proposal, for decision
+Status: agreed 2026-10-10 (self-heal stays); step 1 in progress — see §11
 
 ## 1. Why this proposal exists
 
@@ -499,3 +499,37 @@ multi-week change and should not be rushed onto forge-v3.
    TStyle and E-commerce.
 3. Smith does not patch platform faults; they come to us as incidents.
 4. A cost ceiling per app build for the engineer's sessions.
+
+## 11. Status
+
+### 2026-10-10 — step 1, on `smithv4` (not deployed)
+
+- **Workbench contract** (`services/workbench.py`): the one door; proves
+  installed (marker + readable lockfile), schema, seeded (a login exists),
+  then — as the server starts — that it answers and the seeded administrator
+  signs in through the form. A precondition that cannot be established is a
+  `PlatformFault`, recorded once as a platform issue with its precondition;
+  the statements say "could not be tried" with it, the handover says it is
+  ours to fix. The review server, Smith's trials (through it), the Preview
+  tab and the statements all use it. The data gate runs on the apps server
+  where there is no Docker. A Workbench server never reports crashes as the
+  app.
+- **Production build measured and adopted for proofs.** ToroCommerce:
+  `next build` compiles in 17 s; `next start` ready in 0.3 s, a page in
+  8–110 ms, 264 MB — against a dev server at 2.5 GB that Next restarts at 80%
+  of its heap. The statements and their runner run on the assemble step's
+  own build (`.next-verify`, stamped with what it was made from, rebuilt only
+  when a source changed). Smith's bench and page looks stay on dev mode for
+  now; sizing that server is the open piece of step 1.
+- **Safe defaults:** sign-up takes a role only from the choice the app
+  offers; the shared form calls `onDone` on success only and `onRefused`
+  otherwise; the engine offers `set_password` (own password, current one
+  checked, hashed as sign-up does), the declarer and step author are told,
+  and the credential-write refusal points at it. A reset-by-email flow is
+  not built.
+- Verified against the full suite: nothing fails on the branch that does
+  not fail at the base commit in the same environment.
+
+Open in step 1: the kept-warm, host-sized dev server for change loops; the
+preview on the production build. Step 2 (the engineer on copies of TStyle
+and E-commerce) not started.
