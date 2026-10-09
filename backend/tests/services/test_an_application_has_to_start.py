@@ -144,3 +144,19 @@ def test_the_tree_is_ended_even_when_npm_has_already_exited():
     assert "_kill_tree()" in tail
     assert "if proc.poll() is None" not in tail, (
         "the cleanup must not be conditional on npm still running")
+
+
+def test_the_first_request_is_given_the_time_a_compile_takes():
+    """Lifestyle App (forge-v3, 2026-10-09) listened, then its first page —
+    compiled on demand by `next dev` on a host building two other apps — took
+    longer than 60 s, and a working app's build ended "did not answer: timed
+    out". The first request gets a compile's time and one more try while the
+    process lives; a refusal or a dead process still fails at once."""
+    import inspect
+
+    from services.blueprint import assembly
+
+    assert assembly.FIRST_COMPILE_S >= 180
+    src = inspect.getsource(assembly.verify_boot)
+    assert "timeout=FIRST_COMPILE_S" in src and "timeout=60)" not in src
+    assert "attempt == 1 and timed_out and proc.poll() is None" in src

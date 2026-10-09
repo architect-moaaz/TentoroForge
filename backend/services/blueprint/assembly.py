@@ -1082,6 +1082,11 @@ class BootFailed(RuntimeError):
     """The application compiles and will not start."""
 
 
+#: How long the first request may take: in `next dev` it is the entry page's
+#: compile, which a busy host stretches (see `verify_boot`).
+FIRST_COMPILE_S = 180
+
+
 def verify_boot(app_root: str | Path, *, entry: str = "/",
                 timeout: int = 120) -> dict[str, Any]:
     """Start the app and prove it serves its way in. Raise if it will not.
@@ -1191,14 +1196,29 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
                 + _last_error(_stop()))
 
         url = f"http://127.0.0.1:{port}{entry if entry.startswith('/') else '/' + entry}"
-        try:
-            with urllib.request.urlopen(url, timeout=60) as reply:
-                status = reply.status
-        except urllib.error.HTTPError as exc:
-            status = exc.code          # 4xx/5xx still means it routed
-        except Exception as exc:  # noqa: BLE001
-            raise BootFailed(
-                f"{url} did not answer: {exc}; " + _last_error(_stop())) from exc
+        # THE FIRST REQUEST IS THE COMPILE. `next dev` compiles a page when it
+        # is first asked for, and on a host compiling two other apps at once
+        # (load 10 on four cores) that took longer than the 60 s this allowed:
+        # Lifestyle App listened, compiled, and its build ended "did not
+        # answer: timed out" with nothing wrong in it (forge-v3, 2026-10-09).
+        # The compile gets FIRST_COMPILE_S, and a timeout is asked once more
+        # while the process is still alive; a refusal or a dead process is
+        # still the failure it always was.
+        status = None
+        for attempt in (1, 2):
+            try:
+                with urllib.request.urlopen(url, timeout=FIRST_COMPILE_S) as reply:
+                    status = reply.status
+                break
+            except urllib.error.HTTPError as exc:
+                status = exc.code          # 4xx/5xx still means it routed
+                break
+            except Exception as exc:  # noqa: BLE001
+                timed_out = isinstance(exc, TimeoutError) or "timed out" in str(exc)
+                if attempt == 1 and timed_out and proc.poll() is None:
+                    continue
+                raise BootFailed(
+                    f"{url} did not answer: {exc}; " + _last_error(_stop())) from exc
 
         return {"port": port, "entry": entry, "status": status,
                 "seconds": round(time.monotonic() - started, 1)}
