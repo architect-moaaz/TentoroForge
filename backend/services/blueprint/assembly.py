@@ -1307,13 +1307,21 @@ def _clear_unfinished_install(root: Path) -> bool:
     143 MB binary. The next build's install saw the package in place and moved
     on, and `next build` died on it with "Bus error (core dumped)". A linked
     tree (a local copy's `node_modules` pointing into another app) is never
-    removed."""
+    removed.
+
+    THE LOCKFILE IT WAS WRITING GOES WITH IT. npm rewrites `package-lock.json`
+    as it installs; TStyle's cut-off install left 29 of its entries empty
+    (`{}`), and every install after it died in five seconds on "Invalid
+    Version" while comparing them — the tree was thrown away and the broken
+    record of it kept (forge-v3, 2026-10-09). npm writes a new one from
+    `package.json`."""
     import shutil
 
     nm = root / "node_modules"
     if nm.is_symlink() or not nm.is_dir() or (nm / INSTALLED_MARK).exists():
         return False
     shutil.rmtree(nm, ignore_errors=True)
+    (root / "package-lock.json").unlink(missing_ok=True)
     return True
 
 

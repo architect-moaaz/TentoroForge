@@ -225,8 +225,13 @@ class RunningApp:
         try:
             return self._enter()
         except BaseException:
-            self._slot.release()
-            self._slot = None
+            # `_serve` gives the slot back itself when the server will not
+            # start (through `__exit__`); releasing it again here raised
+            # AttributeError over the reason, and Smith was told about None
+            # instead of a dev server that did not start (TStyle, 2026-10-09).
+            if self._slot is not None:
+                self._slot.release()
+                self._slot = None
             raise
 
     def _enter(self) -> "RunningApp":
