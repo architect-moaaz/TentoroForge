@@ -7,6 +7,7 @@ tokenizer and parser over every workflow condition and rule condition, so
 what it refuses is exactly what the engine would.
 """
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -200,3 +201,13 @@ def test_a_sentinel_in_braces_is_told_to_drop_them():
     details = [f["detail"] for f in template_findings(doc)]
     assert details == ["Create Case, step 'insert_log': {{$user.id}} — `$user.id` is a whole value, written "
                        "without braces: `\"$user.id\"`"]
+
+
+def test_null_is_a_literal_the_engine_reads():
+    """E-commerce (forge-v3, 2026-10-09): `{{primaryImage ?? null}}` was refused;
+    the engine's `??` reads `null` (`_LITERAL` in engine.ts)."""
+    doc = _wf([{"key": "insert_product", "type": "action", "config": {"actionType": "db_insert", "table": "products",
+                                                                       "values": {"image": "{{title ?? null}}"}}}])
+    assert template_findings(doc) == []
+    engine = (Path(__file__).resolve().parents[2] / "templates/runtime/workflows/engine.ts").read_text()
+    assert "(true|false|null)" in engine
