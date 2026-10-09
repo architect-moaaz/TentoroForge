@@ -160,3 +160,24 @@ def test_the_first_request_is_given_the_time_a_compile_takes():
     src = inspect.getsource(assembly.verify_boot)
     assert "timeout=FIRST_COMPILE_S" in src and "timeout=60)" not in src
     assert "attempt == 1 and timed_out and proc.poll() is None" in src
+
+
+def test_an_install_that_was_cut_off_is_thrown_away_not_built_on(tmp_path):
+    """TStyle (forge-v3, 2026-10-09): the install was killed mid-write, the
+    Next compiler was 62,976 bytes of 143 MB, the next install moved on over
+    it and `next build` died with a bus error."""
+    from services.blueprint.assembly import INSTALLED_MARK, _clear_unfinished_install, _mark_install_finished
+
+    nm = tmp_path / "node_modules" / "@next" / "swc"
+    nm.mkdir(parents=True)
+    (nm / "next-swc.node").write_bytes(b"x" * 10)
+    assert _clear_unfinished_install(tmp_path) and not (tmp_path / "node_modules").exists()
+    nm.mkdir(parents=True)
+    _mark_install_finished(tmp_path)
+    assert (tmp_path / "node_modules" / INSTALLED_MARK).exists()
+    assert not _clear_unfinished_install(tmp_path), "a finished install is kept"
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    (linked / "node_modules").symlink_to(tmp_path / "node_modules")
+    (tmp_path / "node_modules" / INSTALLED_MARK).unlink()
+    assert not _clear_unfinished_install(linked), "a linked tree is never removed"
