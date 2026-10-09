@@ -309,3 +309,16 @@ def test_an_entity_label_must_be_one_of_its_own_fields():
     doc = {"data": {"entities": [{"name": "BrandSuggestion", "labelField": "brandName"}]}}
     with pytest.raises(InvalidEntityFields):
         check_entity_fields(propose({"name": "BrandSuggestion", "fields": bad["fields"]}), doc)
+
+
+def test_a_finding_goes_to_the_node_of_its_agent_that_writes_its_section():
+    """Lifestyle App (forge-v3, 2026-10-09): `app_flows` is run by the agent
+    that writes the screens, and "PAGE-007 has no composed tree" was sent to
+    it to repair twice — it writes only `flows`."""
+    from services.blueprint.observer import Observation, _another_node_writes
+    flows = Observation(node="app_flows", agent="page_design", subjects=[""])
+    assert _another_node_writes(flows, "pages") and not _another_node_writes(flows, "flows")
+    assert not _another_node_writes(Observation(node="page_details", agent="page_design", subjects=[""]), "pages")
+    # A section no node of the agent writes stays where it always went.
+    assert not _another_node_writes(Observation(node="data_model", agent="data_model", subjects=[""]),
+                                    "data.relationships")

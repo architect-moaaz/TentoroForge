@@ -259,6 +259,26 @@ def _live(items: Any) -> list[dict]:
             and i.get("status") != "DEPRECATED"]
 
 
+def _covers(produced: str, section: str) -> bool:
+    return section == produced or section.startswith(produced + ".") or produced.startswith(section + ".")
+
+
+def _another_node_writes(obs: "Observation", section: str) -> bool:
+    """Whether a finding on `section` belongs to a different node run by the
+    same agent. The agent that writes the screens also writes the app's flows
+    (`app_flows`), and "PAGE-007 has no composed tree" was sent to the flows
+    node to repair twice — it writes no page and could not (Lifestyle App,
+    forge-v3, 2026-10-09). A section no node of this agent writes stays this
+    node's, as it always was."""
+    from services.blueprint.orchestrator import DAG
+
+    me = DAG.get(obs.node)
+    if me is None or not section or any(_covers(p, section) for p in me.produces):
+        return False
+    return any(n.key != obs.node and n.agent == obs.agent and any(_covers(p, section) for p in n.produces)
+               for n in DAG.values())
+
+
 def owned_sections(agent: str) -> tuple[str, ...]:
     """The sections §74 routes to this agent — what the critic may name."""
     return tuple(sorted(s for s, owner in SECTION_OWNER.items() if owner == agent))
@@ -553,7 +573,7 @@ class Observer:
     def _file(self, obs: Observation, f: Finding,
               subject_of: Callable[[str], str | None] | None = None) -> None:
         """Route one finding: this node's, per subject — or deferred."""
-        if SECTION_OWNER.get(f.section or "") != obs.agent:
+        if SECTION_OWNER.get(f.section or "") != obs.agent or _another_node_writes(obs, f.section or ""):
             obs.deferred.append(f)
             return
         if obs.subjects == [""]:
