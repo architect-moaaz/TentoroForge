@@ -396,7 +396,7 @@ function ProjectWorkspace({
   };
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full overflow-clip">
       {/* Project header bar */}
       <div className="absolute top-0 left-[220px] right-0 z-10 flex h-[70px] items-center justify-between border-b border-slate-200/80 bg-white/80 backdrop-blur-sm px-4 dark:bg-slate-900/80 dark:border-slate-800">
         <div className="flex items-center gap-3">
@@ -503,7 +503,9 @@ function ProjectWorkspace({
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 overflow-hidden pt-[70px] bg-background">
+      {/* `clip`: the panes scroll inside themselves; this box is never scrolled
+          by a focus or scrollIntoView, which would shift the columns up. */}
+      <div className="flex-1 overflow-clip pt-[70px] bg-background">
         {/*
           HIDDEN, NOT UNMOUNTED. Every other tab here is safe to tear down and
           rebuild from its query cache; the chat is not. Its transcript and its
