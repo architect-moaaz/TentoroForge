@@ -265,7 +265,14 @@ def item_findings(item: dict, page: dict, doc: dict) -> list[str]:
             out.append(f"{label!r}: a `process` fact says what it is `about` — the rule or the step")
         return out
 
-    return [f"{label!r}: unknown source kind {kind!r}"]
+    # SAID SO IT CAN BE MENDED. Authors wrote `{"type": "count", …}` — the
+    # word `newField` uses — and were told only "unknown source kind ''"
+    # (10 of 121 refusals on forge-v3, 2026-10-09).
+    if not kind and src.get("type"):
+        return [f"{label!r}: the source's key is `kind`, not `type` — write "
+                f"`\"kind\": \"{src.get('type')}\"`"]
+    kinds = "field, related, reverse, count, total, process, distance"
+    return [f"{label!r}: the source's `kind` is one of {kinds}" + (f" — not {kind!r}" if kind else "")]
 
 
 def content_findings(page: dict, doc: dict) -> list[str]:
