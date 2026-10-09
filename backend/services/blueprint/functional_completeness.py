@@ -852,7 +852,9 @@ def platform_write_findings(doc: dict) -> list[dict]:
                                           f"shipped table does not have, or stores a password the "
                                           f"login cannot verify. Drop it from `values` and let the "
                                           f"account be created through sign-up; write only what the "
-                                          f"Blueprint adds to {table!r}."})
+                                          f"Blueprint adds to {table!r}. To change the signed-in "
+                                          f"person's password, use an `action` with `actionType: "
+                                          f"set_password` (`currentPassword`, `newPassword`)."})
                 elif folded in synonyms:
                     out.append({"rule": "platform-column-renamed", "page": str(wf.get("id")),
                                 "detail": f"{where}: sets {column!r} on the platform's {table!r} "

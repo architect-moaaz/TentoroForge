@@ -39,6 +39,7 @@ export type ActionType =
   | "send_email"
   | "send_notification"
   | "set_variable"
+  | "set_password"
   | "transform"
   | "custom"
   | "generate_document"

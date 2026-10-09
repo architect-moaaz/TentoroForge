@@ -1408,6 +1408,46 @@ export function registerDefaultActions(): void {
              ...(items.length > limit ? { notice: `Only the first ${limit} of ${items.length} were processed.` } : {}) };
   });
 
+  // THE PLATFORM OWNS THE CREDENTIAL — SO IT IS THE PLATFORM THAT CHANGES IT.
+  // A process that changed a password wrote `passwordHash` on the account
+  // entity, was refused three times, and shipped with no steps behind a form
+  // that said "Password changed" (E-commerce, 2026-10-09). This is the one
+  // way: the signed-in person's own login row, the current password checked
+  // when the step names one, the new one hashed as sign-up hashes it, and a
+  // refusal in words — never a password column read or written by a step.
+  registerActionHandler("set_password", async (config, ctx) => {
+    const users = _resolveTable("users");
+    if (!users) return { error: "the users table is not in the schema" };
+    const uid = (ctx as any).user?.id;
+    if (!uid) return { refused: true, message: "Sign in to change your password." };
+    const cfg = config as any;
+    const next = String(_resolveRef(cfg.newPassword, ctx) ?? "");
+    if (next.length < 6) return { refused: true, message: "The new password must be at least 6 characters." };
+    try {
+      const bcrypt = (await import("bcryptjs")).default;
+      const [row] = await (db as any).select().from(users).where(eq((users as any).id, uid)).limit(1);
+      if (!row) return { refused: true, message: "Your login was not found." };
+      if (cfg.currentPassword !== undefined) {
+        const current = String(_resolveRef(cfg.currentPassword, ctx) ?? "");
+        if (!(await bcrypt.compare(current, String(row.password ?? "")))) {
+          return { refused: true, message: "The current password is not right." };
+        }
+      }
+      const hash = await bcrypt.hash(next, 12);
+      await (db as any).update(users).set({ password: hash }).where(eq((users as any).id, uid));
+      return { changed: true };
+    } catch (err) {
+      console.error("[workflow] set_password failed:", err);
+      reportFromError(err, {
+        kind: "workflow",
+        source_file: "src/lib/workflows/index.ts",
+        workflow_id: cfg?.__workflowId || (ctx as any)?.workflow?.id,
+        node_id: cfg?.__nodeId,
+      });
+      return { error: String(err) };
+    }
+  });
+
   registerActionHandler("db_update", async (config, ctx) => {
     const table = _resolveTable((config as any).table);
     if (!table) { console.warn("[workflow] db_update: unknown table", (config as any).table); return { error: "unknown table" }; }
