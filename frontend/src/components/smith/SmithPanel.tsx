@@ -385,6 +385,10 @@ export function SmithPanel({
   }, [messages.length, run.nodesDone, run.thoughts.length]);
 
   const busy = run.status === "running";
+  // WHAT IS RUNNING, SAID AS IT IS. A build streams its plan of steps; a
+  // reply does not. The input read "Building…" under every turn — a "Not now"
+  // included — so a slow answer looked like a build nobody had asked for.
+  const building = busy && (run.nodesTotal > 0 || run.nodes.some((n) => n.state === "running"));
 
   // Discovery already asked "what would you like to build?", so the workspace
   // does not ask again — it carries that answer in as the first turn. Guarded
@@ -1098,7 +1102,11 @@ export function SmithPanel({
             rows={2}
             disabled={busy}
             placeholder={
-              busy ? "Building…" : "Describe the application, or a change to it"
+              building
+                ? "Building…"
+                : busy
+                  ? "Smith is working on your last message…"
+                  : "Describe the application, or a change to it"
             }
             className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
           />
