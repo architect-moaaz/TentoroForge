@@ -727,7 +727,7 @@ def _check_score(doc: dict) -> str:
     return said
 
 
-def _build_complete_message(doc: dict | None) -> str | None:
+def _build_complete_message(doc: dict | None, *, scored: bool = True) -> str | None:
     """One line, in Smith's voice, saying the build finished — or ``None``
     when nothing was built to announce.
 
@@ -774,7 +774,7 @@ def _build_complete_message(doc: dict | None) -> str | None:
 
     # WHAT WAS PROVEN, NOT WHAT WAS WRITTEN. When the build used the app,
     # the message says how much of it worked, and names what did not.
-    score = _check_score(full)
+    score = _check_score(full) if scored else ""
     if score:
         lead = ("Your application is built. " if not unbuilt else
                 f"Your application is built — {served} of {planned} pages are served. ")
@@ -818,6 +818,38 @@ _LOOK_OFFER_TEXT = (
     "is it laid out well, does it read clearly, does it match what you asked for — and "
     "re-compose anything that's off."
 )
+
+
+def _announce_handover(doc: dict | None, emit, *, where: str = "") -> bool:
+    """THE APP IS HANDED OVER WHEN IT IS READY, NOT WHEN IT HAS BEEN CHECKED.
+    It was assembled about twelve minutes into ToroCommerce's build and said
+    "built" over an hour later, after every statement had been tried and
+    sent back (torob2, 2026-10-09). The person gets it now; what trying it
+    finds follows in its own message. True when it was announced."""
+    try:
+        done = _build_complete_message(doc, scored=False)
+        if not done:
+            return False
+        held = len([e for e in (doc or {}).get("expectations") or [] if isinstance(e, dict)])
+        if held:
+            done += (f"\n\nI'm now trying the {held} statements of what must happen, each as the people it is "
+                     f"about — use the app meanwhile; I'll tell you what holds when I'm done.")
+        emit("message", {"text": done})
+        return True
+    except Exception:  # noqa: BLE001 — never let the announcement fail the build
+        logger.warning("[blueprint] %s: could not announce the handover", where)
+        return False
+
+
+def _announce_checked(doc: dict | None, emit, *, where: str = "") -> None:
+    """What trying the handed-over application found, as its own message."""
+    try:
+        score = _check_score(doc or {})
+        if score:
+            emit("message", {"text": score.replace("I used the whole application before handing it over:",
+                                                   "I've finished trying your application:", 1)})
+    except Exception:  # noqa: BLE001
+        logger.warning("[blueprint] %s: could not say what the checks found", where)
 
 
 def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
@@ -2494,7 +2526,18 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             logger.info("[blueprint] %s: model drafted at %s", Path(output_dir).name,
                         svc.doc.get("state"))
         _gates.record_version(output_dir, _gates.PRODUCT_MODEL, svc.doc)
+    handed_over = settled_early = False
     if approved and phase not in ("define", "model") and not getattr(report, "paused_because", ""):
+        # HANDED OVER FIRST, CHECKED AFTER: the app is the person's the moment
+        # it is assembled; the huddles, the page repair and the statements run
+        # while they use it, and what they find is said when they are done.
+        from services.smith.smith import settle_state_after_build
+        early = ""
+        if announce_completion and (svc.doc.get("runtime") or {}).get("build"):
+            early = settle_state_after_build(svc, report)
+            settled_early = True
+            handed_over = _announce_handover(svc.doc, emit, where=Path(output_dir).name)
+            emit("state", {"state": early})
         _finish_unfinished_pages(svc, output_dir, app_root, report, emit)
     state = str(svc.doc.get("state") or "")
     if approved:
@@ -2505,7 +2548,9 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         # function `Smith.build` uses.
         from services.smith.smith import settle_state_after_build
 
-        state = settle_state_after_build(svc, report)
+        # Settled once: at the handover when there was one — a second walk
+        # would take a previewed app back through the rebuild states.
+        state = str(svc.doc.get("state") or "") if settled_early else settle_state_after_build(svc, report)
         logger.info("[blueprint] %s built: state=%s completed=%d failed=%s",
                     Path(output_dir).name, state, len(report.completed),
                     report.failed or "-")
@@ -2515,8 +2560,11 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         # gone by the time it landed. Best-effort: a completion that cannot be
         # worded must not fail a build that succeeded.
         if announce_completion and not getattr(report, "paused_because", ""):
-            _announce_build_complete(svc.doc, emit, offer_verify=approved,
-                                     where=Path(output_dir).name)
+            if handed_over:
+                _announce_checked(svc.doc, emit, where=Path(output_dir).name)
+            else:
+                _announce_build_complete(svc.doc, emit, offer_verify=approved,
+                                         where=Path(output_dir).name)
     counts = forecast(svc.doc)
     emit("forecast", counts)
     emit("usage", usage.summary())

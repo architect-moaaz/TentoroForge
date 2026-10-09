@@ -250,3 +250,31 @@ def test_no_review_is_offered_after_the_statements_were_tried():
            "runtime": {"expectations": {"statements": 2, "passed": 2, "fixed": [], "failing": [], "untried": []}}}
     _announce_build_complete(doc, lambda kind, data: said.append(data), offer_verify=True)
     assert said and not any(d.get("options") for d in said), "the build says what held; it does not offer a second pass"
+
+
+def test_the_app_is_handed_over_before_it_is_checked():
+    import inspect
+    from routers import blueprint_generate as bg
+    src = inspect.getsource(bg._run_dag)
+    assert src.index("_announce_handover(") < src.index("_finish_unfinished_pages("), \
+        "the person gets the app when it is assembled, not an hour later"
+    said: list[dict] = []
+    doc = {"pages": [{"id": "PAGE-001", "route": "/slots"}], "runtime": {"build": {"status": "ok"}},
+           "expectations": [{"id": "EXP-001"}, {"id": "EXP-002"}]}
+    assert bg._announce_handover(doc, lambda kind, data: said.append(data))
+    assert "Your application is built" in said[0]["text"]
+    assert "trying the 2 statements" in said[0]["text"] and "use the app meanwhile" in said[0]["text"]
+    assert "held" not in said[0]["text"], "nothing is claimed about checks that have not run"
+
+
+def test_what_the_checks_found_follows_in_its_own_message():
+    from routers import blueprint_generate as bg
+    said: list[dict] = []
+    doc = {"pages": [{"id": "PAGE-001", "route": "/slots"}],
+           "runtime": {"expectations": {"statements": 2, "passed": 1, "fixed": [], "failing": ["EXP-002"],
+                                        "untried": []},
+                       "issues": [{"kind": "expectation", "statement": "EXP-002", "says": "A patient books a slot.",
+                                   "detail": "Patient was told refusal"}]}}
+    bg._announce_checked(doc, lambda kind, data: said.append(data))
+    assert said[0]["text"].startswith("I've finished trying your application: 1 of 2 statements")
+    assert "A patient books a slot." in said[0]["text"]
