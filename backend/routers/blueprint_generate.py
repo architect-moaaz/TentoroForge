@@ -695,8 +695,20 @@ def _check_score(doc: dict) -> str:
                          f"showed what they saved")
     if held and held.get("statements"):
         n = int(held["statements"])
-        parts.append(f"{held.get('passed', 0)} of {n} statement{'' if n == 1 else 's'} of what must happen "
-                     f"held when tried as the people they are about")
+        untried = len(held.get("untried") or [])
+        tried = n - untried
+        # NOT TRIED IS NOT FAILED. E-commerce was told "0 of 46 statements
+        # held" when the browser never opened the app (it did not answer
+        # within 120 s on a loaded host) and not one was tried (forge-v3,
+        # 2026-10-09): a working app, reported as broken from end to end.
+        if tried <= 0:
+            parts.append(f"I could not try the {n} statement{'' if n == 1 else 's'} of what must happen — "
+                         f"the app did not open in my browser; that is my check failing, not your app. "
+                         f"Ask me to try them again")
+        else:
+            parts.append(f"{held.get('passed', 0)} of {tried} statement{'' if tried == 1 else 's'} of what "
+                         f"must happen held when tried as the people they are about"
+                         + (f" ({untried} could not be tried)" if untried else ""))
     said = "I used the whole application before handing it over: " + "; ".join(parts) + "."
     fixed = list((check or {}).get("fixed") or []) + list((held or {}).get("fixed") or [])
     if fixed:

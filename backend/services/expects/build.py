@@ -178,20 +178,31 @@ def _prove(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] | Non
     trial = trial or runner.run
     author = author or _author
 
-    def tried(ids: list[str]) -> list[dict]:
+    def tried_once(ids: list[str]) -> list[dict]:
         app = app_factory(Path(output_dir) / "app")
         try:
             running = app.__enter__()
             return list(trial(running, svc.doc, Path(output_dir), only=ids).get("results") or [])
-        except Exception as exc:  # noqa: BLE001 — a run that cannot happen is said, not fatal
-            logger.warning("[expects] the app could not be run: %s", exc)
-            return [{"id": sid, "verdict": "not_tried", "untried": [f"the app could not be started: {exc}"]}
-                    for sid in ids]
         finally:
             try:
                 app.__exit__(None, None, None)
             except Exception:  # noqa: BLE001
                 pass
+
+    def tried(ids: list[str]) -> list[dict]:
+        # A RUN THAT COULD NOT HAPPEN IS TRIED ONCE MORE, fresh. E-commerce's
+        # browser hung opening the app on a loaded host ("did not answer goto
+        # within 120s") and all 46 statements went untried (forge-v3,
+        # 2026-10-09): a new app and a new browser, once, before that is said.
+        last_exc: Exception | None = None
+        for attempt in (1, 2):
+            try:
+                return tried_once(ids)
+            except Exception as exc:  # noqa: BLE001 — a run that cannot happen is said, not fatal
+                last_exc = exc
+                logger.warning("[expects] the app could not be run (attempt %d): %s", attempt, exc)
+        return [{"id": sid, "verdict": "not_tried", "untried": [f"the app could not be started: {last_exc}"]}
+                for sid in ids]
 
     rows = [st for st in expectations(svc.doc) if not only or str(st.get("id")) in only]
     if not rows:

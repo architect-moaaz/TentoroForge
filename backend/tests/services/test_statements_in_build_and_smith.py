@@ -278,3 +278,29 @@ def test_what_the_checks_found_follows_in_its_own_message():
     bg._announce_checked(doc, lambda kind, data: said.append(data))
     assert said[0]["text"].startswith("I've finished trying your application: 1 of 2 statements")
     assert "A patient books a slot." in said[0]["text"]
+
+
+def test_a_run_that_could_not_happen_is_tried_again_and_never_said_as_failing(tmp_path):
+    """E-commerce (forge-v3, 2026-10-09): the browser hung opening the app,
+    every statement went untried, and the person was told "0 of 46 statements
+    held". A run that cannot happen is tried once more, fresh; if it still
+    cannot, that is said as the check failing, not the app."""
+    calls = []
+
+    def flaky(_app, _doc, _project, only=None):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("the browser did not answer goto within 120s")
+        return {"results": [_result(s, "passed") for s in only]}
+    svc = _Svc(DOC)
+    out = build._prove(svc, str(tmp_path), app_factory=lambda _r: _App(), trial=flaky, author=lambda *a: [])
+    assert len(calls) == 2 and out["passed"] == out["statements"] and not out["untried"]
+
+    def dead(_app, _doc, _project, only=None):
+        raise RuntimeError("the browser did not answer goto within 120s")
+    svc = _Svc(DOC)
+    out = build._prove(svc, str(tmp_path), app_factory=lambda _r: _App(), trial=dead, author=lambda *a: [])
+    assert len(out["untried"]) == out["statements"]
+    from routers.blueprint_generate import _check_score
+    said = _check_score(svc.doc)
+    assert "I could not try the" in said and "not your app" in said and "0 of" not in said
