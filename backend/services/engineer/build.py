@@ -1,0 +1,283 @@
+"""The engineer's build loop: feature by feature, each proven before the next.
+
+For every feature (`features.features`): the authoring nodes run for its
+part alone (`Scope`), the app is projected and built, the feature's
+statements of what must happen are tried on the Workbench, what fails is
+handed back to its author (the statements' own give-back) and then, if it
+still fails, to an unattended engineer turn with the failures in hand —
+bounded by rounds and by the run's time budget. Then the next feature. At
+the end every statement is tried once more, and what the run proved is what
+the caller says.
+
+The nodes, the executors, the checks and the observer are the build's own;
+what changes is the order of work and that nothing starts on a feature that
+has not been proven.
+"""
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any, Callable, Mapping
+
+from services.engineer.features import Feature, brief_for, features, statements_of, subjects_of
+from services.engineer.journal import Budget, Journal
+
+logger = logging.getLogger(__name__)
+
+#: The build-phase nodes that are one feature's at a time, in the graph's order.
+PER_FEATURE: tuple[str, ...] = (
+    "page_details", "content_fields", "workflows", "workflow_steps", "business_rules",
+    "analytics", "app_flows", "apis", "expectations", "page_layouts", "backend",
+    "page_code", "frontend", "integration", "assemble",
+)
+#: The build-phase nodes that run once, after every feature.
+LAST: tuple[str, ...] = ("memory", "verification")
+#: How many unattended fix turns a feature's failing statements get.
+FIX_ROUNDS = 2
+#: Steps an unattended fix turn may take.
+FIX_STEPS = 26
+#: Fix turns per round at most — the causes, not every statement.
+FIX_TURNS_PER_ROUND = 4
+
+
+class FeatureScope:
+    """`orchestrator.Scope` for one feature."""
+
+    def __init__(self, feature: Feature, *, first: bool):
+        self.feature, self.first = feature, first
+
+    def subjects(self, node: str, doc: Mapping[str, Any], pending: list[str]) -> list[str]:
+        return subjects_of(self.feature, node, doc, pending, first=self.first)
+
+    def brief(self, node: str, subject: str) -> str:
+        # A fan-out node's call is narrowed by its subject; a node that writes
+        # once for the app is told which feature this call is for.
+        return "" if subject else brief_for(self.feature, node, self._doc)
+
+    _doc: Mapping[str, Any] = {}
+
+    def on(self, doc: Mapping[str, Any]) -> "FeatureScope":
+        self._doc = doc
+        return self
+
+
+def build_nodes() -> tuple[list[str], list[str], list[str]]:
+    """``(once, per_feature, last)``: the build phase's nodes split by when
+    the engineer runs them, each in the graph's own order."""
+    from services.blueprint.orchestrator import levels
+    from services.smith.smith import domain_nodes, model_nodes
+    earlier = set(domain_nodes()) | set(model_nodes())
+    order = [k for lvl in levels() for k in lvl if k not in earlier]
+    per = [k for k in order if k in PER_FEATURE]
+    last = [k for k in order if k in LAST]
+    once = [k for k in order if k not in per and k not in last]
+    return once, per, last
+
+
+def fix_ask(feature: Feature, items: list[dict]) -> str:
+    """What the unattended engineer turn is asked about statements that
+    still do not hold after their authors had their look."""
+    lines = "\n".join(f"- \"{r.get('says')}\" — {' | '.join(r.get('failures') or [])[:300]}"
+                      for r in items[:6])
+    return (
+        f"While building {feature.label}, these statements of what must happen did not hold when "
+        f"tried as the people they are about:\n{lines}\n\n"
+        "Find the one cause and fix it where it lives — a process's steps, a screen's code or its "
+        "wiring, a field or record the data model lacks, a rule, who may open or start it. Then try "
+        "the statements again (`try_expectation`) and stop when they hold. Nobody is waiting to answer "
+        "questions: decide from the definition and act. A fault in the platform itself is not yours to "
+        "patch around: say so plainly and leave the statement failing."
+    )
+
+
+def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] | None = None,
+          description: str = "", budget_minutes: float = 0, app_name: str = "",
+          executor: Any = None, observer_agent: Any = None, observer: Any = None,
+          run: Callable[..., Any] | None = None, prove: Callable[..., dict] | None = None,
+          fix: Callable[[str, str], dict] | None = None) -> dict:
+    """Build the approved definition at `output_dir` feature by feature.
+    Returns what was done and proven: ``{features: [...], statements, state,
+    stopped}``. `run`, `prove` and `fix` are the orchestrator's `run`, the
+    statements' `prove_expectations` and an unattended Smith turn unless a
+    caller (a test) hands in its own."""
+    from services.blueprint.service import BlueprintService
+
+    say = emit or (lambda _e, _d: None)
+    svc = BlueprintService.load(output_dir=output_dir)
+    journal = Journal(output_dir)
+    journal.acquire()
+    try:
+        run = run or _orchestrator_run
+        prove = prove or _prove
+        fix = fix or _fix
+        if executor is None:
+            executor, observer_agent = _executor(svc, output_dir, say, observer_agent)
+        budget = Budget(budget_minutes)
+        plan = features(svc.doc)
+        earlier = journal.finished()
+        once, per, last = build_nodes()
+        journal.write("run:start", features=[f.id for f in plan], done_before=earlier,
+                      budget_minutes=budget_minutes)
+        say("message", {"text": _opening(plan, earlier, app_name)})
+        results: list[dict] = []
+        stopped = ""
+
+        if not earlier:
+            run(svc, executor, plan=once, commit=True, user_request=description, app_root=app_root,
+                observer=observer, observer_agent=observer_agent)
+            _reload(svc, output_dir)
+            journal.write("once:done", nodes=once)
+
+        for i, feature in enumerate(plan):
+            if feature.id in earlier:
+                continue
+            if budget.over():
+                stopped = f"out of time after {budget.spent():.0f} minutes"
+                journal.write("run:out_of_time", left=[f.id for f in plan[i:]])
+                break
+            journal.write("feature:start", feature=feature.id, name=feature.name,
+                          pages=feature.pages, requirements=feature.requirements)
+            say("message", {"text": f"Building {feature.label}: its screens, its processes, and the "
+                                    f"checks that say what must happen on them."})
+            scope = FeatureScope(feature, first=(i == 0)).on(svc.doc)
+            report = run(svc, executor, plan=per, commit=True, user_request=description,
+                         app_root=app_root, observer=observer, observer_agent=observer_agent,
+                         scope=scope)
+            _reload(svc, output_dir)
+            failed = list(getattr(report, "failed", []) or [])
+            if getattr(report, "paused_because", ""):
+                stopped = f"paused: {report.paused_because}"
+                journal.write("run:paused", feature=feature.id, why=report.paused_because)
+                break
+            proof = _prove_feature(svc, output_dir, feature, prove, fix, budget, journal, say)
+            row = {"feature": feature.id, "name": feature.name, "pages": feature.pages,
+                   "failed_nodes": failed, **proof}
+            results.append(row)
+            journal.write("feature:done", **row)
+            say("message", {"text": _said_feature(feature, proof)})
+
+        if not stopped:
+            run(svc, executor, plan=last, commit=True, user_request=description, app_root=app_root,
+                observer=observer, observer_agent=observer_agent)
+            _reload(svc, output_dir)
+            whole = prove(svc, output_dir) if statements_exist(svc.doc) else {}
+            journal.write("whole:done", passed=whole.get("passed"), statements=whole.get("statements"),
+                          failing=whole.get("failing"), untried=whole.get("untried"))
+        else:
+            whole = {}
+        out = {"features": results, "statements": whole, "stopped": stopped,
+               "state": str(svc.doc.get("state") or "")}
+        journal.write("run:end", **{k: v for k, v in out.items() if k != "features"})
+        return out
+    finally:
+        journal.release()
+
+
+def statements_exist(doc: Mapping[str, Any]) -> bool:
+    from services.expects.statements import expectations
+    return bool(expectations(dict(doc)))
+
+
+def _prove_feature(svc: Any, output_dir: str, feature: Feature, prove: Callable[..., dict],
+                   fix: Callable[[str, str], dict], budget: Budget, journal: Journal,
+                   say: Callable[[str, dict], None]) -> dict:
+    """The feature's statements, tried; what fails handed to its authors by
+    the statements' own give-back, then to the engineer's fix turns."""
+    from services.blueprint.repair_groups import by_cause
+
+    ids = statements_of(feature, svc.doc)
+    if not ids:
+        return {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": []}
+    out = prove(svc, output_dir, only=ids, give_back=True)
+    fixed: list[str] = list(out.get("fixed") or [])
+    for round_ in range(1, FIX_ROUNDS + 1):
+        failing = [r for r in out.get("results") or [] if r.get("verdict") == "failed"
+                   and str(r.get("id")) in set(out.get("failing") or [])]
+        if not failing or budget.over():
+            break
+        groups = by_cause(failing, lambda r: (r.get("failures") or [""])[0])[:FIX_TURNS_PER_ROUND]
+        for group in groups:
+            journal.write("fix:start", feature=feature.id, round=round_,
+                          statements=[str(r.get("id")) for r in group])
+            say("message", {"text": f"{feature.label}: {len(group)} statement{'s' if len(group) != 1 else ''} "
+                                    f"not holding — finding the cause and fixing it."})
+            try:
+                answer = fix(output_dir, fix_ask(feature, group))
+            except Exception as exc:  # noqa: BLE001 — one fix turn never ends the build
+                logger.warning("[engineer] fix turn failed: %s", exc)
+                answer = {"status": "failed", "answer": str(exc)}
+            journal.write("fix:end", feature=feature.id, round=round_,
+                          status=(answer or {}).get("status"), said=str((answer or {}).get("answer") or "")[:400])
+            _reload(svc, output_dir)
+        again = prove(svc, output_dir, only=[str(r.get("id")) for r in failing], give_back=False)
+        now_passing = [str(r.get("id")) for r in again.get("results") or [] if r.get("verdict") == "passed"]
+        fixed += [s for s in now_passing if s not in fixed]
+        merged = {str(r.get("id")): r for r in out.get("results") or []}
+        merged.update({str(r.get("id")): r for r in again.get("results") or []})
+        out = {**out, "results": list(merged.values()),
+               "failing": sorted(s for s, r in merged.items() if r.get("verdict") == "failed"),
+               "untried": sorted(s for s, r in merged.items() if r.get("verdict") == "not_tried"),
+               "passed": sum(1 for r in merged.values() if r.get("verdict") == "passed")}
+    return {"statements": len(ids), "passed": int(out.get("passed") or 0),
+            "failing": list(out.get("failing") or []), "untried": list(out.get("untried") or []),
+            "fixed": fixed}
+
+
+def _said_feature(feature: Feature, proof: dict) -> str:
+    n, held = proof.get("statements", 0), proof.get("passed", 0)
+    if not n:
+        return f"{feature.label} is built; it has no statements of its own to try."
+    untried = len(proof.get("untried") or [])
+    tried = n - untried
+    said = f"{feature.label}: {held} of {tried} statement{'s' if tried != 1 else ''} of what must happen hold"
+    if untried:
+        said += f" ({untried} could not be tried)"
+    if proof.get("fixed"):
+        said += f"; fixed while building: {', '.join(proof['fixed'][:6])}"
+    return said + "."
+
+
+def _opening(plan: list[Feature], earlier: list[str], app_name: str) -> str:
+    left = [f for f in plan if f.id not in earlier]
+    names = ", ".join(f.label for f in left)
+    head = f"Building {app_name or 'the application'} feature by feature"
+    if earlier:
+        head += f" — {len(earlier)} already proven, picking up from there"
+    return f"{head}: {names}. Each is tried as the people it is for before the next begins."
+
+
+def _reload(svc: Any, output_dir: str) -> None:
+    from services.blueprint.service import BlueprintService
+    try:
+        svc.doc = BlueprintService.load(output_dir=output_dir).doc
+    except Exception:  # noqa: BLE001
+        logger.warning("[engineer] could not reload the definition", exc_info=True)
+
+
+def _orchestrator_run(*args: Any, **kwargs: Any) -> Any:
+    from services.blueprint.orchestrator import run
+    return run(*args, **kwargs)
+
+
+def _prove(svc: Any, output_dir: str, **kwargs: Any) -> dict:
+    from services.expects.build import prove_expectations
+    return prove_expectations(svc, output_dir, **kwargs)
+
+
+def _fix(output_dir: str, ask: str) -> dict:
+    from services.smith4.platform import smith_result
+    return smith_result("", output_dir, ask, max_steps=FIX_STEPS, unattended=True)
+
+
+def _executor(svc: Any, output_dir: str, say: Callable[[str, dict], None], observer_agent: Any) -> tuple[Any, Any]:
+    from services.blueprint.executors import RunUsage, make_executor, tiered_router
+    from services.blueprint.observer import anthropic_observer
+    usage = RunUsage.for_app(svc)
+    router = tiered_router()
+    executor = make_executor(svc, router, usage=usage)
+    if observer_agent is None:
+        observer_agent = anthropic_observer(router, usage=usage, output_dir=output_dir, emit=say)
+    return executor, observer_agent
+
+
+__all__ = ["build", "build_nodes", "FeatureScope", "fix_ask", "PER_FEATURE", "LAST", "FIX_ROUNDS"]

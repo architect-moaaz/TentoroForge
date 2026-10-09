@@ -1126,6 +1126,24 @@ _SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
 # ---------------------------------------------------------------------------
 
 @dataclass
+class Scope:
+    """What of each node this run is for — one feature of the app.
+
+    The engineer builds the approved definition one feature at a time
+    (services/engineer): the same nodes, the same executors, the same checks,
+    but a node authors only the subjects that belong to the feature, and a
+    node that writes once for the whole app is told which feature this call
+    is for. Without a scope the scheduler runs every pending subject, as it
+    always has."""
+
+    def subjects(self, node: str, doc: Mapping[str, Any], pending: list[str]) -> list[str]:
+        return pending
+
+    def brief(self, node: str, subject: str) -> str:
+        return ""
+
+
+@dataclass
 class TaskSpec:
     """One unit of work handed to an agent."""
 
@@ -1283,6 +1301,7 @@ def run(
     app_root: str | None = None,
     observer: Callable[[dict], None] | None = None,
     observer_agent: Any = None,
+    scope: Scope | None = None,
 ) -> RunReport:
     """Execute a plan in dependency order.
 
@@ -1354,7 +1373,7 @@ def run(
         return _execute(svc, executor, order, in_plan, report, done, ledger,
                         max_attempts=max_attempts, commit=commit,
                         user_request=user_request, app_root=app_root,
-                        observer_agent=observer_agent)
+                        observer_agent=observer_agent, scope=scope)
     except BaseException as exc:
         # THE LINE THAT WAS MISSING. A run that raises out of here used to
         # leave nothing at all — the report died with the call, the registry
@@ -1381,6 +1400,7 @@ def _execute(
     user_request: str,
     app_root: str | None,
     observer_agent: Any = None,
+    scope: Scope | None = None,
 ) -> RunReport:
     """The scheduler. Split from `run` so the ledger can record a crash.
 
@@ -1560,6 +1580,7 @@ def _execute(
                 subject=subject,
                 feedback=state.feedback.get(subject, ""),
                 current=state.current.get(subject, ()),
+                brief=scope.brief(key, subject) if scope is not None else "",
             )
             leads = state.warm is not None and subject == state.leader and attempt == 1
             # After an outage, the re-send waits — on its worker, not here.
@@ -1589,6 +1610,8 @@ def _execute(
         # Only the subjects not already authored — a resume finishes the pages
         # a prior run dropped, not the ones it composed (see pending_subjects).
         subjects = pending_subjects(node, svc.doc)
+        if scope is not None:
+            subjects = scope.subjects(key, svc.doc, subjects)
         _note(ledger, "node_start", key, len(subjects))
         runs[key] = _NodeRun(subjects=subjects, pending=list(subjects),
                              queue=list(subjects))
