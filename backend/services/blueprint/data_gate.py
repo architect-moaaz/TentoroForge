@@ -91,8 +91,48 @@ def gate_server() -> tuple[str | None, str]:
 
 
 @contextmanager
+def _on_apps_server() -> Iterator[tuple[str | None, str]]:
+    """A throwaway database on the apps server — where the platform runs in
+    a container with no Docker (forge-v3), so the gate was skipped there for
+    23 of 24 apps and "skipped" counted as passed (2026-10-09)."""
+    from services import app_databases
+    name = f"gate_{uuid.uuid4().hex[:12]}"
+    try:
+        con = app_databases._connect()
+        try:
+            with con.cursor() as cur:
+                cur.execute(f'CREATE DATABASE "{name}"')
+        finally:
+            con.close()
+    except Exception as exc:  # noqa: BLE001 — said, and the gate is skipped as before
+        yield None, f"could not create a throwaway database on the apps server: {exc}"
+        return
+    try:
+        con = app_databases._connect(name)
+        try:
+            with con.cursor() as cur:
+                for ext in EXTENSIONS:
+                    cur.execute(f'CREATE EXTENSION IF NOT EXISTS "{ext}"')
+        finally:
+            con.close()
+        yield app_databases.url_for(name), ""
+    finally:
+        try:
+            app_databases.drop(name)
+        except Exception as exc:  # noqa: BLE001 — a leftover throwaway is not a failed gate
+            logger.warning("[data-gate] could not drop %s: %s", name, exc)
+
+
+@contextmanager
 def throwaway_database() -> Iterator[tuple[str | None, str]]:
-    """A fresh, empty database for one look; dropped afterwards."""
+    """A fresh, empty database for one look; dropped afterwards. On the apps
+    server when the platform has one; in the gate's own Docker Postgres
+    otherwise."""
+    from services import app_databases
+    if app_databases.server():
+        with _on_apps_server() as got:
+            yield got
+        return
     base, why = gate_server()
     if base is None:
         yield None, why

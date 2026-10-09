@@ -474,7 +474,7 @@ export interface FieldGroup<I> {
 
 export function WorkflowForm<I extends Json>({
   workflow, fields, initial, submitLabel, submitVariant = "primary", cancelHref, redirectTo, successMessage, columns = 2, className, onDone,
-  groups, steps = false, submitPlacement = "end",
+  onRefused, groups, steps = false, submitPlacement = "end",
 }: {
   workflow: Workflow<I>;
   fields: FieldMap<I>;
@@ -488,7 +488,10 @@ export function WorkflowForm<I extends Json>({
   successMessage?: string;
   columns?: 1 | 2;
   className?: string;
+  /** After the workflow SUCCEEDED — close the dialog, open what was made. */
   onDone?: (result: RunResult) => void;
+  /** After it was refused or failed; the form keeps what was typed. */
+  onRefused?: (result: RunResult) => void;
   /** Fields under headings, in order; a field in none joins the last group. */
   groups?: FieldGroup<I>[];
   /** Show the groups one at a time, with Back and Next — a long application. */
@@ -516,7 +519,13 @@ export function WorkflowForm<I extends Json>({
     // just saved still sitting in it read as "not saved yet". A form editing
     // a record (`initial`) keeps what it now holds.
     if (out.ok && !redirectTo && !initial) setValues({});
-    onDone?.(out);
+    // DONE MEANS DONE. `onDone` ran whether the workflow succeeded or not,
+    // and pages closed their dialog or showed "Order confirmed" over a
+    // refusal — E-commerce's checkout confirmed a failed order, TStyle's
+    // forms shut and lost what was typed (2026-10-09). Success only; a
+    // refusal goes to `onRefused`, with the form still holding the input.
+    if (out.ok) onDone?.(out);
+    else onRefused?.(out);
   };
 
   const field = (name: string) => {

@@ -702,9 +702,15 @@ def _check_score(doc: dict) -> str:
         # within 120 s on a loaded host) and not one was tried (forge-v3,
         # 2026-10-09): a working app, reported as broken from end to end.
         if tried <= 0:
+            # THE PLATFORM'S FAULT, NAMED. The Workbench could not get the app
+            # installed, seeded or signed in to: said as ours and reported,
+            # not as the check's bad luck.
+            fault = next((i for i in issues if i.get("kind") == "platform" and i.get("precondition")), None)
             parts.append(f"I could not try the {n} statement{'' if n == 1 else 's'} of what must happen — "
-                         f"the app did not open in my browser; that is my check failing, not your app. "
-                         f"Ask me to try them again")
+                         + (f"{str(fault.get('detail'))[:200]}; that is the platform's to fix, not your app, "
+                            f"and it has been reported" if fault else
+                            f"the app did not open in my browser; that is my check failing, not your app. "
+                            f"Ask me to try them again"))
         else:
             parts.append(f"{held.get('passed', 0)} of {tried} statement{'' if tried == 1 else 's'} of what "
                          f"must happen held when tried as the people they are about"
@@ -728,7 +734,7 @@ def _check_score(doc: dict) -> str:
         lines = "\n".join(f"- \"{i.get('says')}\" — {str(i.get('detail') or '').split(' | ')[0][:160]}"
                            for i in wrong[:8])
         said += f"\n\nNot doing what it must yet:\n{lines}"
-    platform = [i for i in issues if i.get("kind") == "platform"]
+    platform = [i for i in issues if i.get("kind") == "platform" and not i.get("precondition")]
     if platform:
         lines = "\n".join(f"- {str(i.get('detail'))[:160]} ({len(i.get('statements') or [])} statements)"
                            for i in platform[:5])

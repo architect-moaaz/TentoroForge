@@ -73,35 +73,20 @@ async def _ensure_database(output_dir: str) -> None:
 
     `next dev` alone read a DATABASE_URL nothing was listening on: a fresh
     build's preview showed empty dropdowns and saved nothing (Test4,
-    2026-09-28). The app's `start.sh --seed-only` is the one way it boots
-    its database (Docker Postgres on a free port, drizzle push, seed) and
-    rewrites .env.local to match; it runs here when the database does not
-    answer. A preview without Docker still starts, and says why it has no data.
+    2026-09-28). The Workbench is the one door (`services.workbench`): it
+    proves the app installed, its schema pushed and its rows seeded, and
+    re-establishes whichever is missing — on the apps server where the
+    platform has no Docker, through the app's own `start.sh --seed-only`
+    elsewhere. A preview still starts when it cannot, and the log says why.
     """
-    from services import app_databases
-    from services.blueprint.schema_push import database_exists, database_url
+    from services import workbench
 
-    if app_databases.server():
-        # No Docker in the platform's container: the apps server holds it.
-        try:
-            await asyncio.to_thread(app_databases.ensure, output_dir)
-        except Exception as exc:  # noqa: BLE001 — a preview still starts, and the log says why
-            logger.warning("[preview] %s: apps database not ready: %s", output_dir, exc)
-        return
-    script = Path(output_dir) / "start.sh"
-    if not script.is_file() or database_exists(database_url(output_dir)):
-        return
-    log = Path(output_dir) / ".forge-preview-db.log"
     try:
-        with open(log, "w") as out:
-            proc = await asyncio.create_subprocess_exec(
-                "bash", "start.sh", "--seed-only", cwd=output_dir,
-                stdin=asyncio.subprocess.DEVNULL, stdout=out, stderr=out)
-            code = await asyncio.wait_for(proc.wait(), timeout=300)
-        if code != 0:
-            logger.warning("[preview] %s: database did not come up (exit %s); see %s", output_dir, code, log)
-    except (OSError, asyncio.TimeoutError) as exc:
-        logger.warning("[preview] %s: database did not come up: %s", output_dir, exc)
+        await asyncio.to_thread(workbench.prepare, output_dir)
+    except workbench.PlatformFault as exc:
+        logger.warning("[preview] %s: %s", output_dir, exc)
+    except Exception as exc:  # noqa: BLE001 — a preview still starts, and the log says why
+        logger.warning("[preview] %s: the workbench could not prepare the app: %s", output_dir, exc)
 
 
 async def start_preview(project_id: str, output_dir: str) -> int:
@@ -124,17 +109,10 @@ async def start_preview(project_id: str, output_dir: str) -> int:
         raise RuntimeError("No available preview ports")
     port = random.choice(available)
 
-    # Ensure node_modules exist
-    node_modules = Path(output_dir) / "node_modules"
-    if not node_modules.exists():
-        install = await asyncio.create_subprocess_exec(
-            "npm", "install",
-            cwd=output_dir,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await install.wait()
-
+    # Installed, its schema pushed, its rows seeded — the Workbench's door
+    # (`_ensure_database`). It installs with the completion marker; an
+    # install made here without one was thrown away as cut off and made
+    # again at every door after this one.
     await _ensure_database(output_dir)
     await _stop_strays(output_dir)
     # ROOM FIRST. Each Preview grows to three gigabytes or more, and four

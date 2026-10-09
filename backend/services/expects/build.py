@@ -189,17 +189,29 @@ def _prove(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] | Non
             except Exception:  # noqa: BLE001
                 pass
 
+    faults: list = []
+
     def tried(ids: list[str]) -> list[dict]:
         # A RUN THAT COULD NOT HAPPEN IS TRIED ONCE MORE, fresh. E-commerce's
         # browser hung opening the app on a loaded host ("did not answer goto
         # within 120s") and all 46 statements went untried (forge-v3,
         # 2026-10-09): a new app and a new browser, once, before that is said.
+        # THE PLATFORM'S OWN FAULT IS SAID AS SUCH. The Workbench could not
+        # get the app installed, seeded or signed in to: not the app's
+        # failure, not the check's — the platform's, recorded once for every
+        # statement it kept from being tried, and not tried again now.
+        from services import workbench
         last_exc: Exception | None = None
         for attempt in (1, 2):
             try:
                 return tried_once(ids)
             except Exception as exc:  # noqa: BLE001 — a run that cannot happen is said, not fatal
                 last_exc = exc
+                fault = workbench.fault_of(exc)
+                if fault is not None:
+                    logger.warning("[expects] platform fault: %s", fault)
+                    faults.append(fault)
+                    return [{"id": sid, "verdict": "not_tried", "untried": [str(fault)]} for sid in ids]
                 logger.warning("[expects] the app could not be run (attempt %d): %s", attempt, exc)
         return [{"id": sid, "verdict": "not_tried", "untried": [f"the app could not be started: {last_exc}"]}
                 for sid in ids]
@@ -224,6 +236,9 @@ def _prove(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] | Non
                              "failure": (group[0].get("failures") or [""])[0][:300]})
         else:
             own += group
+    for fault in faults[:1]:
+        platform.append({"statements": [sid for sid, r in last.items() if str(fault) in (r.get("untried") or [])],
+                         "failure": str(fault)[:300], "precondition": fault.precondition})
 
     # EACH AUTHOR ONCE, with every finding of its part.
     def parts_of(results: list[dict]) -> dict[tuple[str, str], list[tuple[dict, dict]]]:
@@ -331,7 +346,8 @@ def _record(svc: Any, summary: dict, *, partial: bool) -> None:
                and str(r.get("id")) not in platform_ids]
     # One failure across several statements: the platform's, said once.
     issues = [i for i in issues if not (isinstance(i, dict) and i.get("kind") == "platform")]
-    issues += [{"kind": "platform", "statements": p["statements"], "detail": p["failure"]}
+    issues += [{"kind": "platform", "statements": p["statements"], "detail": p["failure"],
+                **({"precondition": p["precondition"]} if p.get("precondition") else {})}
                for p in summary.get("platform") or []]
     # What no screen may show, seen on the way, once per screen and finding.
     issues = [i for i in issues if not (isinstance(i, dict) and i.get("kind") == "screen")]

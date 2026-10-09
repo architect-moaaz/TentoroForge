@@ -188,6 +188,9 @@ def test_the_reviewer_never_shares_the_persons_build_or_database(monkeypatch, tm
         def wait(self, timeout=None): return 0
     monkeypatch.setattr(page_review.subprocess, "Popen", _P)
     monkeypatch.setattr(page_review.urllib.request, "urlopen", lambda *a, **k: None)
+    # The server answers; the Workbench's sign-in proof is not this test's.
+    from services import workbench
+    monkeypatch.setattr(workbench, "served", lambda *a, **k: {})
     monkeypatch.setattr(page_review.os, "killpg", lambda *a: None)
     monkeypatch.setattr(page_review.os, "getpgid", lambda pid: pid)
     with page_review.RunningApp(tmp_path):

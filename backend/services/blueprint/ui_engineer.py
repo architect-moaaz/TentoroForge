@@ -410,7 +410,7 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
    `useSignIn()` / `useSignUp()` give the same with your own inputs, if the design needs them.
 
 <WorkflowForm workflow={workflows.x} fields={{ …one entry per input… }} initial?={partial input}
-              submitLabel? cancelHref? redirectTo? successMessage? columns?={1 | 2} onDone?={(r) => …} />
+              submitLabel? cancelHref? redirectTo? successMessage? columns?={1 | 2} onDone?={(r) => … /* success only */} onRefused?={(r) => … /* refused or failed; the form keeps the input */} />
    The form marks the workflow's required inputs itself (an asterisk, and the browser holds an
    empty one back), shows the workflow's refusal, and clears after a create that stays on the
    page — do not add your own asterisks, required markers or reset logic.

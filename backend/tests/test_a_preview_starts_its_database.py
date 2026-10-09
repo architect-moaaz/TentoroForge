@@ -21,9 +21,13 @@ def test_the_app_boots_its_database_when_none_answers(tmp_path):
     assert (app / "ran.txt").read_text().strip() == "--seed-only"
 
 
-def test_a_database_that_answers_is_left_alone(tmp_path, monkeypatch):
+def test_the_apps_own_database_that_answers_is_left_alone(tmp_path, monkeypatch):
+    """Up means the app's own container serves its port (wz7a99ir: a Postgres
+    installed on the machine answered on 5432 and was taken for the app's)."""
+    from services.blueprint import page_review
     app = _app(tmp_path, "postgresql://postgres:postgres@localhost:5555/app")
-    monkeypatch.setattr("services.blueprint.schema_push.database_exists", lambda url: True)
+    monkeypatch.setattr(page_review, "_listening", lambda port: port == 5555)
+    monkeypatch.setattr(page_review, "_database_container", lambda port: "c1")
     asyncio.run(preview._ensure_database(str(app)))
     assert not (app / "ran.txt").exists()
 

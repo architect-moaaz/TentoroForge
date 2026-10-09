@@ -70,6 +70,9 @@ def test_the_review_uses_the_apps_server_when_there_is_one(monkeypatch, tmp_path
     monkeypatch.setenv(app_databases.SERVER_ENV, "postgresql://postgres:pw@apps-db:5432")
     calls = []
     monkeypatch.setattr(app_databases, "ensure", lambda root: calls.append(("ensure", Path(root).name)))
+    # The Workbench asks the database itself for its tables and a login.
+    monkeypatch.setattr(app_databases, "_has_tables", lambda name: True)
+    monkeypatch.setattr(app_databases, "_has_a_login", lambda name: True)
     monkeypatch.setattr(app_databases, "clone", lambda root: ("app_x_review_1", "postgresql://h/app_x_review_1"))
     monkeypatch.setattr(app_databases, "drop", lambda name: calls.append(("drop", name)))
     monkeypatch.setattr(app_databases, "query", lambda name, sql: [["row"]] if name == "app_x_review_1" else [])
@@ -95,6 +98,8 @@ def test_the_preview_uses_the_apps_server_when_there_is_one(monkeypatch, tmp_pat
     monkeypatch.setenv(app_databases.SERVER_ENV, "postgresql://postgres:pw@apps-db:5432")
     seen = []
     monkeypatch.setattr(app_databases, "ensure", lambda root: seen.append(str(root)))
+    monkeypatch.setattr(app_databases, "_has_tables", lambda name: True)
+    monkeypatch.setattr(app_databases, "_has_a_login", lambda name: True)
     asyncio.run(preview._ensure_database(str(tmp_path)))
     assert seen == [str(tmp_path)]
 
