@@ -139,15 +139,87 @@ def _finding(text: str) -> dict:
     return {"applied": False, "said": text, "finding": text, "touched": [], "version": 0}
 
 
+def _truthy(value: object, default: bool = True) -> bool:
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("false", "no", "0", "off")
+
+
+def use_template(ctx: Ctx, args: dict) -> dict:
+    """Start this application from the template it was made from.
+
+    `exact` makes the template's definition this project's, as it stands, and
+    leaves it at the product-model review: building it is the person's click,
+    and that build authors nothing (see `project_templates`). `adapt` writes a
+    NEW definition from what the person says is different, the template given
+    to the agents as a reference document — the same definition run a brief
+    gets, so it stops at the requirements review like any new application."""
+    from services import project_templates as templates
+
+    src = templates.pending(ctx.out)
+    if not src:
+        used = templates.source_of(ctx.out)
+        if used:
+            return _finding(f"The template “{used.get('name')}” was already used for this "
+                            f"project ({used.get('mode') or used.get('status')}); it cannot be "
+                            "used twice. Work with the application as it is now.")
+        return _finding("This project was not started from a template. Define it from what "
+                        "the person said instead (`define_application`).")
+    mode = str(args.get("mode") or "").strip().lower()
+    if mode not in (templates.MODE_EXACT, templates.MODE_ADAPT):
+        return _finding("Which way: the exact same app, or something like it but different? "
+                        "Ask them with those two choices; do not pick for them.")
+    try:
+        if mode == templates.MODE_EXACT:
+            out = templates.use_exact(ctx.out, app_name=ctx.app_name or "")
+            facts = out["summary"]
+            c = facts["counts"]
+            parts = [f"{c[k]} {label}" for k, label in (
+                ("pages", "screens"), ("entities", "kinds of record"),
+                ("workflows", "processes"), ("roles", "roles")) if c.get(k)]
+            copied = (f"This is now an exact copy of “{src.get('name')}”: "
+                      + (", ".join(parts) if parts else "its whole definition") + ". ")
+            if out.get("complete", True):
+                left = out.get("authoring_left") or []
+                said = copied + ("Nothing has been built yet — press Build app on the card to "
+                                 "build it exactly as it is. ")
+                said += ("Some of its screens were never written as code in the original, so "
+                         "the build writes those; everything else comes from the template as "
+                         "it is. " if "page_code" in left else
+                         "Everything is already worked out, so the build only assembles it. "
+                         if not left else "")
+                said += "If you want anything changed first, say so."
+            else:
+                said = copied + ("The template was saved before its screens and records were "
+                                 "worked out, so what is copied is its requirements. Review them "
+                                 "on the card; once you approve, the rest is worked out from "
+                                 "them as for any app.")
+            return {"applied": True, "said": said, "finding": "",
+                    "touched": [".forge/blueprint/current.json"],
+                    "version": int(out["doc"].get("version") or 1)}
+        changes = str(args.get("changes") or "").strip() or ctx.message.strip()
+        prepared = templates.prepare_adapt(ctx.out, app_name=ctx.app_name or "",
+                                           changes=changes,
+                                           keep_look=_truthy(args.get("keep_look"), True))
+    except templates.TemplateError as exc:
+        return _finding(str(exc))
+    from services.blueprint import documents as documents_mod
+    documents_mod.store(ctx.out, [prepared["document"]["text"]])
+    return define_application(ctx, {"brief": prepared["brief"]})
+
+
 def run(ctx: Ctx, name: str, args: dict) -> Outcome:
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
     if name == "open_decisions":
         return Outcome(status="read", said=open_decisions(ctx, args))
-    if name == "define_application":
-        out = define_application(ctx, args)
+    if name in ("define_application", "use_template"):
+        out = define_application(ctx, args) if name == "define_application" else use_template(ctx, args)
         return Outcome(status="resolved" if out["applied"] and not out["finding"] else "needs_user",
                        said=str(out["said"]), touched=list(out["touched"]), finding=str(out["finding"]))
     raise KeyError(name)
 
 
-__all__ = ["MAX_CLARIFY_TURNS", "brief_of", "define_application", "open_decisions", "run"]
+__all__ = ["MAX_CLARIFY_TURNS", "brief_of", "define_application", "open_decisions", "run",
+           "use_template"]
