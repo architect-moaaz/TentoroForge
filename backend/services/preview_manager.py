@@ -11,6 +11,11 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+def _app_env(output_dir: str) -> dict:
+    from preview import app_env
+    return app_env(output_dir)
+
 # Port ranges for generated project previews
 _PREVIEW_PORT_MIN = 3200
 _PREVIEW_PORT_MAX = 3299
@@ -67,7 +72,7 @@ async def start_project_environment(
             db_port = random.choice(available_db_ports)
 
             # Set the port in environment and start
-            env = os.environ.copy()
+            env = _app_env(output_dir)  # never the platform's own settings (see preview.app_env)
             env["DB_PORT"] = str(db_port)
             proc = await asyncio.create_subprocess_exec(
                 "docker", "compose", "up", "-d",
@@ -126,7 +131,7 @@ async def start_project_environment(
     # Run drizzle-kit push if schema exists and DB is up
     drizzle_config = Path(output_dir) / "drizzle.config.ts"
     if db_port and drizzle_config.exists():
-        env = os.environ.copy()
+        env = _app_env(output_dir)  # never the platform's own settings (see preview.app_env)
         env["DATABASE_URL"] = f"postgresql://postgres:postgres@localhost:{db_port}/{project_short_id}"
         # pgvector before push: an embedding column cannot be created without it.
         if (Path(output_dir) / "src" / "db" / "extensions.ts").exists():
@@ -160,7 +165,7 @@ async def start_project_environment(
             await seed.wait()
 
     # Start Next.js dev server
-    env = os.environ.copy()
+    env = _app_env(output_dir)  # never the platform's own settings (see preview.app_env)
     if db_port:
         env["DATABASE_URL"] = f"postgresql://postgres:postgres@localhost:{db_port}/{project_short_id}"
 
@@ -378,7 +383,7 @@ async def _restart_preview_server(project_short_id: str) -> bool:
             pass
 
     # Start new Next.js dev server on same port
-    env = os.environ.copy()
+    env = _app_env(output_dir)  # never the platform's own settings (see preview.app_env)
     if db_port:
         env["DATABASE_URL"] = f"postgresql://postgres:postgres@localhost:{db_port}/{project_short_id}"
 
