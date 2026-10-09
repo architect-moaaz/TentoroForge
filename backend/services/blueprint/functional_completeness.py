@@ -1827,7 +1827,10 @@ _TEMPLATE_RE = re.compile(r"\{\{\s*([\w.\[\]|:]+)\s*\}\}")
 _ANY_TEMPLATE_RE = re.compile(r"\{\{(.*?)\}\}")
 #: One side of `??`: a name the engine walks, or a literal.
 _NAME_RE = re.compile(r"[\w.\[\]]+")
-_LITERAL_RE = re.compile(r'"[^"]*"|\'[^\']*\'|-?\d+(\.\d+)?|true|false')
+#: The literals the engine's `??` reads (`_LITERAL` in runtime/workflows/
+#: engine.ts) — `null` with them: `{{primaryImage ?? null}}` was refused while
+#: the engine reads it (E-commerce, forge-v3, 2026-10-09).
+_LITERAL_RE = re.compile(r'"[^"]*"|\'[^\']*\'|-?\d+(\.\d+)?|true|false|null')
 _WRONG_ROOTS = {
     "now": "the sentinel `$now` as the whole value",
     "today": "the sentinel `$today` as the whole value",
@@ -1880,7 +1883,7 @@ def template_findings(doc: dict) -> list[dict]:
                             out.append({"rule": "template-unknown", "page": str(wf.get("id")),
                                         "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
                                                   f"{{{{{inner.strip()}}}}} — each side of `??` is a value the engine "
-                                                  f"holds or a literal (\"text\", a number, true/false); "
+                                                  f"holds or a literal (\"text\", a number, true/false/null); "
                                                   f"{', '.join(repr(s) for s in bad + unknown)} is neither"})
                         continue
                     if inner.strip().startswith("$"):
