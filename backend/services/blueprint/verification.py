@@ -90,6 +90,7 @@ SECTION_OWNER: dict[str, str] = {
     "apis": "api",
     "workflows": "workflow",
     "flows": "page_design",
+    "expectations": "testing",
     "businessRules": "business_rules",
     "integrations": "integration",
     "security": "security",

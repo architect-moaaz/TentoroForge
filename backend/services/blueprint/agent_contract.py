@@ -175,6 +175,13 @@ _READS: dict[str, set[str]] = {
 
     "integration": {"requirements"},
 
+    # What must happen when someone does something: written from the
+    # requirements and the rules, over the people, the screens, the records
+    # and the processes they name — and never the code that does it.
+    "testing": {"requirements", "businessRules", "data", "pages", "workflows",
+                "roles", "permissions", "security", "navigation", "integrations",
+                "product"},
+
     # Endpoints are derived, not authored, but the derivation reads all of this.
     "api": {"requirements", "data", "database", "workflows", "pages",
             "widgets", "permissions"},
@@ -288,9 +295,10 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # sends the ones that fall short back to the UI engineer, who rewrites
     # them. Writes nothing itself — the rewrite is the engineer's.
     "page_reviewer": _cap("page_reviewer", set(), may_set_status=True),
-    # §27's test agent. Registered because §27 names it; no node runs it now —
-    # the declarations it wrote were never written out or run (see the DAG).
-    "testing": _cap("testing", {"tests"}),
+    # §27's test agent. Its `tests` were declarations never written out or
+    # run (see the DAG); what it writes now is `expectations` — statements of
+    # what must happen, each tried in the running application as its person.
+    "testing": _cap("testing", {"tests", "expectations"}),
     "deployment": _cap(
         "deployment", {"deployment"},
         tools={"build:approved", "deploy:config", "vercel"},
@@ -735,6 +743,31 @@ def check_flows(result: "AgentResult", doc: dict | None) -> None:
     if problems:
         raise InvalidAppFlow("These flows name what the application does not have — mend each step:\n- "
                              + "\n- ".join(problems[:30]))
+
+
+class InvalidExpectation(AuthorRefusal):
+    """A statement names what the application does not have, checks nothing
+    it can look at, or the set leaves a requirement, a rule or a person's
+    arrival untried."""
+
+
+def check_expectations(result: "AgentResult", doc: dict | None) -> None:
+    """A STATEMENT THE RUNNER CAN TRY. Each proposed statement is checked as
+    the document would hold it — the records it gives, the screens it opens,
+    the people it is done as, what each check looks at — and the set for
+    what it leaves untried, so the writer mends the statement rather than
+    the runner finding at the end that it names nothing."""
+    from services.expects.statements import expectation_findings
+    proposals = [p.body for p in result.proposals if p.section == "expectations" and isinstance(p.body, dict)]
+    if not proposals or not doc:
+        return
+    # One call's part of the set is held to that part (`expect_subjects`); a
+    # statement added later — the person's words, a report — is held alone.
+    subject = getattr(result, "subject", None)
+    problems = expectation_findings(doc, proposals, subject=subject or None, whole=False)
+    if problems:
+        raise InvalidExpectation("These statements cannot be tried as written — mend each one:\n- "
+                                 + "\n- ".join(problems[:40]))
 
 
 def check_analytics(result: "AgentResult", doc: dict | None) -> None:
@@ -1317,6 +1350,7 @@ def apply_agent_result(
     check_navigation(result, svc.doc)
     check_analytics(result, svc.doc)
     check_flows(result, svc.doc)
+    check_expectations(result, svc.doc)
     check_security(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.

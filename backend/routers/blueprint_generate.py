@@ -671,32 +671,59 @@ def _failing_processes_line(doc: dict) -> str:
 
 
 def _check_score(doc: dict) -> str:
-    """What using the application found (`app_check`, `process_trials`),
-    as the sentence that opens the completion message — or "" when no check
-    ran (a build before it existed). "Built" stopped meaning "works" the day a
-    page could be on disk and broken; this says how many were proven to work."""
-    check = (doc.get("runtime") or {}).get("check")
-    if not isinstance(check, dict) or not check.get("pages"):
+    """What trying the application found, as the sentence that opens the
+    completion message — or "" when nothing was tried. "Built" stopped meaning
+    "works" the day a page could be on disk and broken; this says what was
+    proven. Read from the statements (`runtime.expectations`), and from the
+    page check of a build made before the statements replaced it."""
+    runtime = doc.get("runtime") or {}
+    check = runtime.get("check") if isinstance(runtime.get("check"), dict) else None
+    held = runtime.get("expectations") if isinstance(runtime.get("expectations"), dict) else None
+    if not (check and check.get("pages")) and not (held and held.get("statements")):
         return ""
-    from services.blueprint.process_trials import manual_workflows
-    pages, working = int(check.get("pages") or 0), int(check.get("working") or 0)
-    issues = [i for i in (doc.get("runtime") or {}).get("issues") or [] if isinstance(i, dict)]
-    flows = len(manual_workflows(doc))
-    stuck = [i for i in issues if i.get("kind") == "process"]
-    fixed = list(check.get("fixed") or [])
-    parts = [f"{working} of {pages} page{'' if pages == 1 else 's'} opened and worked for every kind of "
-             f"person they are for"]
-    if flows:
-        parts.append(f"{flows - len(stuck)} of {flows} process{'' if flows == 1 else 'es'} ran through and "
-                     f"showed what they saved")
+    issues = [i for i in runtime.get("issues") or [] if isinstance(i, dict)]
+    parts = []
+    if check and check.get("pages"):
+        from services.blueprint.process_trials import manual_workflows
+        pages, working = int(check.get("pages") or 0), int(check.get("working") or 0)
+        flows = len(manual_workflows(doc))
+        stuck = [i for i in issues if i.get("kind") == "process"]
+        parts.append(f"{working} of {pages} page{'' if pages == 1 else 's'} opened and worked for every kind of "
+                     f"person they are for")
+        if flows:
+            parts.append(f"{flows - len(stuck)} of {flows} process{'' if flows == 1 else 'es'} ran through and "
+                         f"showed what they saved")
+    if held and held.get("statements"):
+        n = int(held["statements"])
+        parts.append(f"{held.get('passed', 0)} of {n} statement{'' if n == 1 else 's'} of what must happen "
+                     f"held when tried as the people they are about")
     said = "I used the whole application before handing it over: " + "; ".join(parts) + "."
+    fixed = list((check or {}).get("fixed") or []) + list((held or {}).get("fixed") or [])
     if fixed:
         said += f" Fixed while checking: {', '.join(fixed[:6])}{' and more' if len(fixed) > 6 else ''}."
     failing = [i for i in issues if i.get("kind") == "page_check"]
     if failing:
         lines = "\n".join(f"- {i.get('route')} — {str(i.get('detail') or '').split(' | ')[0][:160]}"
                            for i in failing[:8])
-        said += f"\n\nStill not working:\n{lines}\nTell me to carry on and I will keep at it."
+        said += f"\n\nStill not working:\n{lines}"
+    unseen = [i for i in issues if i.get("kind") == "page_unchecked"]
+    if unseen:
+        said += (f"\n\nI could not look at {len(unseen)} page{'' if len(unseen) == 1 else 's'} — my own browser "
+                 f"check failed on {'it' if len(unseen) == 1 else 'them'}, not the app: "
+                 + ", ".join(str(i.get("route")) for i in unseen[:8]) + ".")
+    wrong = [i for i in issues if i.get("kind") == "expectation"]
+    if wrong:
+        lines = "\n".join(f"- \"{i.get('says')}\" — {str(i.get('detail') or '').split(' | ')[0][:160]}"
+                           for i in wrong[:8])
+        said += f"\n\nNot doing what it must yet:\n{lines}"
+    platform = [i for i in issues if i.get("kind") == "platform"]
+    if platform:
+        lines = "\n".join(f"- {str(i.get('detail'))[:160]} ({len(i.get('statements') or [])} statements)"
+                           for i in platform[:5])
+        said += (f"\n\nThe same fault showed up across the app — it is in the platform, not in what you "
+                 f"asked for, and it has been reported:\n{lines}")
+    if failing or wrong:
+        said += "\nTell me to carry on and I will keep at it."
     return said
 
 
@@ -813,7 +840,12 @@ def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
         if not done:
             return
         emit("message", {"text": done})
-        if offer_verify:
+        # NO SECOND CHECK OFFERED AFTER THE STATEMENTS. "Verify & fix" re-ran
+        # the page-by-page review and its repairs — the pass the statements
+        # replaced, at its cost. What did not hold is already in the message;
+        # "carry on" is how it gets fixed.
+        tried = isinstance(((doc or {}).get("runtime") or {}).get("expectations"), dict)
+        if offer_verify and not tried:
             checked = isinstance(((doc or {}).get("runtime") or {}).get("check"), dict)
             emit("message", {"text": _LOOK_OFFER_TEXT if checked else _VERIFY_OFFER_TEXT,
                              "options": list(_VERIFY_OFFER_OPTIONS),
@@ -2496,9 +2528,8 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
 
 def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: Any, emit) -> None:
     """Every page the build did not finish goes to Smith with why it failed,
-    to fix the cause and write it (`page_repair`); then every process is run
-    once and what fails is fixed the same way; then every page is used as
-    each role it is for (`app_check`). Only for a built tree —
+    to fix the cause and write it (`page_repair`); then every statement of
+    what must happen is tried (`expects.build`). Only for a built tree —
     there is nothing to run before assembly — and never fatal: what is still
     unfinished is recorded and said in the completion message."""
     # FIRST, WHAT ONE AGENT COULD NOT SETTLE ALONE: the owners of what it
@@ -2523,28 +2554,28 @@ def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: A
                         [t["route"] for t in out["left"]] or "-")
     except Exception:  # noqa: BLE001 — the build's own result stands
         logger.warning("[blueprint] %s: page repair failed", Path(output_dir).name, exc_info=True)
-    # THEN EVERY PROCESS IS RUN THROUGH, after the pages — a page's repair
-    # may have added the process it needed (`process_trials`).
+    # NO SEPARATE PROCESS TRIALS OR APP CHECK. Each ran after the build,
+    # sent every failure to Smith as its own open-ended repair, and could not
+    # tell the app's fault from the platform's or its own: on ToroCommerce
+    # (memg8iw6, 2026-10-09) they cost $3.92 against $7 of generation, nearly
+    # all of it on a seeder bug and a crash in the checker's own browser
+    # script. The statements below run every process from its page as its
+    # person and open every screen as each role, with the checks that are
+    # always wrong (a crash, "undefined", a raw id) inside each one.
+    # WHAT MUST HAPPEN IS TRIED — every statement the architect wrote
+    # (`expectations`), as the people it is about. What does not hold goes
+    # back once to the agent that wrote that part; what fails the same way
+    # across the app is said as the platform's fault; nothing is ground
+    # through repair turns here.
     try:
-        from services.blueprint.process_trials import prove_processes
-        out = prove_processes(svc, output_dir, emit=emit)
-        logger.info("[blueprint] %s: processes ran %d, fixed %s, still failing %s",
-                    Path(output_dir).name, len(out["passed"]), out["fixed"] or "-",
-                    [t["name"] for t in out["left"]] or "-")
+        from services.expects.build import prove_expectations
+        out = prove_expectations(svc, output_dir, emit=emit)
+        if out["statements"]:
+            logger.info("[blueprint] %s: statements holding %d of %d, fixed %s, failing %s, untried %s",
+                        Path(output_dir).name, out["passed"], out["statements"], out["fixed"] or "-",
+                        out["failing"] or "-", out["untried"] or "-")
     except Exception:  # noqa: BLE001
-        logger.warning("[blueprint] %s: process trials failed", Path(output_dir).name, exc_info=True)
-    # THEN THE WHOLE APPLICATION IS USED, as each kind of person it is for —
-    # every page opened, every control pressed, what it shows read — and
-    # what fails is fixed the same way (`app_check`). The build knew when a
-    # page was missing; only this knows when one is wrong.
-    try:
-        from services.blueprint.app_check import check_app
-        out = check_app(svc, output_dir, emit=emit)
-        logger.info("[blueprint] %s: pages working %d of %d, fixed %s, still failing %s",
-                    Path(output_dir).name, out["working"], out["pages"], out["fixed"] or "-",
-                    [t["route"] for t in out["left"]] or "-")
-    except Exception:  # noqa: BLE001
-        logger.warning("[blueprint] %s: the app check failed", Path(output_dir).name, exc_info=True)
+        logger.warning("[blueprint] %s: trying the statements failed", Path(output_dir).name, exc_info=True)
 
 
 def _approve_requirements(output_dir: str, app_root: str, *, emit, app_name: str = "",

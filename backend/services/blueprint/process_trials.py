@@ -332,6 +332,21 @@ def fault_ask(flow: dict, run: dict, said: str) -> str:
     )
 
 
+def fault_ask_many(group: list) -> str:
+    """Processes that failed the same way, as one repair."""
+    runs = "\n\n".join(
+        f"- {flow.get('name')} ({flow.get('id')}), as {run.get('as') or 'the administrator'}, with "
+        f"{json.dumps(run.get('input') or {}, default=str)[:600]}:\n{said[:1200]}"
+        for flow, run, said in group)
+    return (
+        f"The build ran these {len(group)} processes once each, and they failed the same way:\n\n{runs}\n\n"
+        "One cause is likely behind all of them. Find it and fix it where it lives — a step, a rule, the "
+        "data they start from, who may run them — once, not once per process. Then run each again and see "
+        "it finish and write what it says. Nobody is waiting to answer questions: decide from the "
+        "definition and act."
+    )
+
+
 def prove_processes(svc: Any, output_dir: str, *args: Any, **kwargs: Any) -> dict:
     """See `_prove_processes`; its model calls, and the Smith turns it starts, are the build's spend."""
     from services.build_usage import usage_scope
@@ -482,20 +497,30 @@ def _prove_processes(svc: Any, output_dir: str, *,
                 left = [{"workflow": str(f.get("id")), "name": str(f.get("name") or f.get("id")),
                          "reason": said.split("\n", 1)[0][:200] + " — " + said[-400:]} for f, _r, said in failing]
                 break
-            for flow, run, said in failing:
-                ledger.repair("process_trials", str(flow.get("id")), round_, rounds, said[:600])
-                say("message", {"text": f"{flow.get('name')} did not run through — fixing the cause and running it again."})
+            # ONE CAUSE, ONE REPAIR: processes that failed the same way go to
+            # Smith together (`repair_groups`).
+            from services.blueprint.repair_groups import by_cause, steps_for
+            for group in by_cause(failing, lambda item: _why(item[2])):
+                for flow, _run, said in group:
+                    ledger.repair("process_trials", str(flow.get("id")), round_, rounds, said[:600])
+                names = ", ".join(str(f.get("name") or f.get("id")) for f, _r, _s in group)
+                say("message", {"text": f"{names} did not run through — "
+                                        + ("they fail the same way; " if len(group) > 1 else "")
+                                        + "fixing the cause and running "
+                                        + ("them" if len(group) > 1 else "it") + " again."})
                 found = ""
+                ask = fault_ask(*group[0]) if len(group) == 1 else fault_ask_many(group)
                 try:
-                    turn = run_turn("", output_dir, fault_ask(flow, run, said), max_steps=STEPS,
+                    turn = run_turn("", output_dir, ask, max_steps=steps_for(STEPS, len(group)),
                                     unattended=True) or {}
                     found = str(turn.get("answer") or "")
                     if turn.get("edited_paths"):
-                        changed.add(str(flow.get("id")))
+                        changed.update(str(f.get("id")) for f, _r, _s in group)
                 except Exception as exc:  # noqa: BLE001 — one repair never ends the build
-                    logger.warning("[process-trials] %s: %s", flow.get("id"), exc)
-                lessons[str(flow.get("id"))] = (f"input {json.dumps(run.get('input') or {}, default=str)[:400]} -> "
-                                                f"{_why(said)}" + (f"; found: {found[:400]}" if found else ""))
+                    logger.warning("[process-trials] %s: %s", names, exc)
+                for flow, run, said in group:
+                    lessons[str(flow.get("id"))] = (f"input {json.dumps(run.get('input') or {}, default=str)[:400]} -> "
+                                                    f"{_why(said)}" + (f"; found: {found[:400]}" if found else ""))
                 reload()
             pending = [str(f.get("id")) for f, _r, _s in failing]
         for item in left:

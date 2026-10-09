@@ -349,12 +349,19 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
     def shoot(role: str) -> tuple[str, list[dict]]:
         batch = by_role[role]
         safe = re.sub(r"[^a-z0-9]+", "-", role.lower()).strip("-") or "role"
-        try:
-            shots = run_shots(app, _entries(app, doc, batch), out_dir / safe,
-                              probe=role != "signed out", states=role != "signed out")
-        except ReviewUnavailable as exc:
-            shots = [{"id": visit_id(v), "errors": [f"the page could not be opened: {exc}"]}
-                     for v in batch]
+        # THE CHECK FAILING IS NOT THE PAGE FAILING. A crash of the browser
+        # script is tried once more; what still could not be looked at is
+        # recorded as unchecked — never a finding, never sent to be repaired
+        # (memg8iw6, 2026-10-09: six customer pages went to Smith because the
+        # screenshot step crashed).
+        shots: list[dict] = []
+        for attempt in (1, 2):
+            try:
+                shots = run_shots(app, _entries(app, doc, batch), out_dir / safe,
+                                  probe=role != "signed out", states=role != "signed out")
+                break
+            except ReviewUnavailable as exc:
+                shots = [{"id": visit_id(v), "checkerError": str(exc)} for v in batch]
         return role, shots
 
     with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
@@ -368,6 +375,9 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
         for v in by_role[role]:
             page = report.setdefault(v["page"], {"name": v["name"], "route": v["route"], "findings": []})
             shot = by_id.get(visit_id(v))
+            if shot is not None and shot.get("checkerError"):
+                page.setdefault("unchecked", []).append((role, str(shot["checkerError"])[:300]))
+                continue
             if shot is None:
                 page["findings"].append((role, (f"{v['inside']}, " if v.get("inside") else "")
                                          + "it could not be opened at all — the browser reported nothing for it"))
@@ -514,9 +524,12 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
     for item in left:
         ledger_note = "; ".join(item["findings"][:3])[:600]
         logger.info("[app-check] still failing %s: %s", item["route"], ledger_note)
-    summary = {"pages": pages_total, "working": pages_total - len(left),
-               "fixed": sorted(set(fixed)), "left": left, "touched": touched}
-    _record(svc, last, left, fixed, pages_total, partial=only is not None)
+    unchecked = [{"page": pid, "name": item["name"], "route": item["route"],
+                  "why": "; ".join(f"as {w}: {f}" for w, f in item.get("unchecked", [])[:3])}
+                 for pid, item in last.items() if item.get("unchecked") and not item["findings"]]
+    summary = {"pages": pages_total, "working": pages_total - len(left) - len(unchecked),
+               "fixed": sorted(set(fixed)), "left": left, "touched": touched, "unchecked": unchecked}
+    _record(svc, last, left, fixed, pages_total, partial=only is not None, unchecked=unchecked)
     if only is not None:
         failing = list((svc.doc.get("runtime") or {}).get("check", {}).get("failing") or [t["route"] for t in left])
         summary["working"] = pages_total - len(failing)
@@ -524,7 +537,7 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
 
 
 def _record(svc: Any, last: dict[str, dict], left: list[dict], fixed: list[str], pages_total: int, *,
-            partial: bool) -> None:
+            partial: bool, unchecked: list[dict] | None = None) -> None:
     """Write what the check found. A check of some pages updates those pages
     and keeps what the last check said of the rest; without a whole check to
     build on it records the failures alone, never a count it did not see."""
@@ -536,10 +549,16 @@ def _record(svc: Any, last: dict[str, dict], left: list[dict], fixed: list[str],
                       and (not partial or str(i.get("page")) in checked))]
     issues += [{"kind": "page_check", "page": t["page"], "name": t["name"], "route": t["route"],
                 "detail": " | ".join(t["findings"])[:600]} for t in left]
+    # What the check could not look at is said as that — not as a broken page.
+    issues = [i for i in issues if not (isinstance(i, dict) and i.get("kind") == "page_unchecked"
+                                        and (not partial or str(i.get("page")) in checked))]
+    issues += [{"kind": "page_unchecked", "page": t["page"], "name": t["name"], "route": t["route"],
+                "detail": t["why"][:600]} for t in unchecked or []]
     runtime["issues"] = issues
     failing = sorted({str(i.get("route")) for i in issues if isinstance(i, dict) and i.get("kind") == "page_check"})
     if not partial or prior is not None:
-        runtime["check"] = {"pages": pages_total, "working": max(pages_total - len(failing), 0),
+        not_seen = {str(i.get("route")) for i in issues if isinstance(i, dict) and i.get("kind") == "page_unchecked"}
+        runtime["check"] = {"pages": pages_total, "working": max(pages_total - len(failing) - len(not_seen - set(failing)), 0),
                             "fixed": sorted(set(list((prior or {}).get("fixed") or []) + list(fixed)))
                             if partial else sorted(set(fixed)),
                             "failing": failing,

@@ -31,24 +31,29 @@ def handle(**kwargs: Any) -> Outcome:
 
 def _checked(output_dir: str, out: Outcome) -> Outcome:
     """A CHANGE IS CHECKED WHERE IT REACHES. Smith tries what it changed; the
-    pages it did not touch but did reach — a list of a record type whose
-    fields moved, a page that starts a process that changed — are opened as
-    the people they are for, and what broke is repaired once (`app_check`).
+    statements of what must happen that it reaches — on a screen it touched,
+    or one a changed record or process shows on — are tried as their people,
+    and what no longer holds is said (`expects.build`). The per-page check
+    and its repair turn are gone: they cost more than the change.
     Both chat paths come through `handle`; a turn the platform runs unattended
     is already inside a check and is not checked again."""
     if out.status != "resolved" or not out.touched:
         return out
-    try:
-        from services.blueprint.app_check import check_change
-        checked = check_change(output_dir, list(out.touched))
-    except Exception:  # noqa: BLE001 — the change landed; its check is a bonus
-        import logging
-        logging.getLogger(__name__).exception("[smith4] checking the pages a change reaches failed")
-        return out
-    if not checked:
-        return out
-    out.said = f"{out.said}\n\n{checked['said']}" if out.said else checked["said"]
-    out.touched = list(out.touched) + [t for t in checked["touched"] if t not in out.touched]
+    import logging
+    changed = list(out.touched)
+    # The pages the change reaches, opened as their people; then the
+    # statements of what must happen that it reaches, tried as theirs.
+    for what, check in (("the statements a change reaches", "services.expects.build"),):
+        try:
+            import importlib
+            checked = importlib.import_module(check).check_change(output_dir, changed)
+        except Exception:  # noqa: BLE001 — the change landed; its check is a bonus
+            logging.getLogger(__name__).exception("[smith4] checking %s failed", what)
+            continue
+        if not checked:
+            continue
+        out.said = f"{out.said}\n\n{checked['said']}" if out.said else checked["said"]
+        out.touched = list(out.touched) + [t for t in checked["touched"] if t not in out.touched]
     return out
 
 

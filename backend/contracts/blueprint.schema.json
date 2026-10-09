@@ -262,7 +262,7 @@
           },
           "subject": {
             "type": "string",
-            "pattern": "^(REQ|ROLE|PERM|MODULE|PAGE|CMP|ENTITY|FLOW|RULE|API|TEST|DEC|INT|DEP|WIDGET|JOURNEY)-\\d{3,}$",
+            "pattern": "^(REQ|ROLE|PERM|MODULE|PAGE|CMP|ENTITY|FLOW|RULE|API|TEST|DEC|INT|DEP|WIDGET|JOURNEY|EXP)-\\d{3,}$",
             "description": "Reference to any Blueprint artifact (§19)"
           },
           "action": {
@@ -1940,15 +1940,255 @@
       },
       "default": []
     },
-    "businessRules": {
+    "expectations": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string",
-            "pattern": "^RULE-\\d{3,}$",
-            "description": "Stable RULE identifier (§12)"
+            "pattern": "^EXP-\\d{3,}$",
+            "description": "Stable EXP identifier (§12)"
+          },
+          "says": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "arrival",
+              "reach",
+              "action",
+              "rule",
+              "cross-person",
+              "journey",
+              "first-use",
+              "recovery",
+              "background"
+            ]
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^RULE-\\d{3,}$",
+              "description": "Stable RULE identifier (§12)"
+            },
+            "default": []
+          },
+          "given": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ref": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "entity": {
+                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                },
+                "values": {
+                  "type": "object",
+                  "additionalProperties": {},
+                  "default": {}
+                },
+                "as": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/properties/roles/items/properties/id"
+                    },
+                    {
+                      "type": "string",
+                      "const": "guest"
+                    }
+                  ]
+                },
+                "who": {
+                  "type": "string"
+                },
+                "self": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "ref",
+                "entity"
+              ],
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "as": {
+                  "$ref": "#/properties/expectations/items/properties/given/items/properties/as"
+                },
+                "who": {
+                  "type": "string"
+                },
+                "act": {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "do",
+                    "sign_in",
+                    "sign_out",
+                    "reload",
+                    "come_back",
+                    "wait"
+                  ]
+                },
+                "page": {
+                  "$ref": "#/properties/modules/items/properties/pages/items",
+                  "description": "Stable PAGE identifier (§12)"
+                },
+                "record": {
+                  "type": "string"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "what": {
+                  "type": "string",
+                  "default": ""
+                },
+                "workflow": {
+                  "$ref": "#/properties/pages/items/properties/requires/properties/producedBy",
+                  "description": "Stable FLOW identifier (§12)"
+                }
+              },
+              "required": [
+                "as",
+                "act"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1
+          },
+          "then": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "check": {
+                  "type": "string",
+                  "enum": [
+                    "on",
+                    "sees",
+                    "not_sees",
+                    "told",
+                    "gets",
+                    "stored",
+                    "not_stored",
+                    "sent"
+                  ]
+                },
+                "as": {
+                  "$ref": "#/properties/expectations/items/properties/given/items/properties/as"
+                },
+                "who": {
+                  "type": "string"
+                },
+                "page": {
+                  "$ref": "#/properties/modules/items/properties/pages/items",
+                  "description": "Stable PAGE identifier (§12)"
+                },
+                "record": {
+                  "type": "string"
+                },
+                "address": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "told": {
+                  "type": "string",
+                  "enum": [
+                    "success",
+                    "refusal",
+                    "error"
+                  ]
+                },
+                "gets": {
+                  "type": "string",
+                  "enum": [
+                    "shown",
+                    "not_found",
+                    "sign_in_asked",
+                    "not_allowed"
+                  ]
+                },
+                "entity": {
+                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                  "description": "Stable ENTITY identifier (§12)"
+                },
+                "values": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "check"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1
+          },
+          "question": {
+            "type": "string"
+          },
+          "assumed": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "requirements",
+              "person",
+              "report"
+            ],
+            "default": "requirements"
+          },
+          "status": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/status"
+          },
+          "requirements": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/requirements"
+          },
+          "decisions": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/decisions"
+          },
+          "confidence": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/confidence"
+          },
+          "syncNote": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          }
+        },
+        "required": [
+          "id",
+          "says",
+          "kind",
+          "steps",
+          "then"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "businessRules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/properties/expectations/items/properties/rules/items"
           },
           "name": {
             "type": "string"
@@ -3867,6 +4107,46 @@
           "required": [
             "pages",
             "working"
+          ],
+          "additionalProperties": false
+        },
+        "expectations": {
+          "type": "object",
+          "properties": {
+            "statements": {
+              "type": "number"
+            },
+            "passed": {
+              "type": "number"
+            },
+            "fixed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "failing": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "untried": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "version": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "statements",
+            "passed"
           ],
           "additionalProperties": false
         }

@@ -42,6 +42,7 @@ export const ID_PREFIXES = [
   "DEP", // deployment  (§90 shows DEP-001)
   "WIDGET", // a placed, data-bound display on a page (§35)
   "JOURNEY", // a path a person takes through the application (`flows`)
+  "EXP", // what must happen when someone does something (`expectations`)
 ] as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[number];
@@ -65,6 +66,8 @@ export const EntityId = idSchema("ENTITY");
 export const WorkflowId = idSchema("FLOW");
 /** A person's path through the application (`flows`) — not a workflow. */
 export const JourneyId = idSchema("JOURNEY");
+/** A statement of what must happen (`expectations`) — tried, not read. */
+export const ExpectationId = idSchema("EXP");
 export const RuleId = idSchema("RULE");
 export const ApiId = idSchema("API");
 export const TestId = idSchema("TEST");
