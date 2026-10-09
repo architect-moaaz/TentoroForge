@@ -97,6 +97,7 @@ ID_PREFIXES: tuple[str, ...] = (
     "DEP",
     "WIDGET",
     "JOURNEY",
+    "EXP",
 )
 
 _ID_RE = re.compile(rf"^({'|'.join(ID_PREFIXES)})-(\d{{3,}})$")
@@ -273,6 +274,9 @@ def natural_key_for(
         return workflow_key(text("name")) if text("name") else None
     if section == "flows":
         return journey_key(text("name")) if text("name") else None
+    if section == "expectations":
+        # A statement is what it says: the same sentence is the same statement.
+        return prose_key("EXP", text("says")) if text("says") else None
     if section == "widgets":
         # ``page`` holds a PAGE id and :func:`widget_key` wants the route
         # behind it, so a widget cannot be keyed without the document.

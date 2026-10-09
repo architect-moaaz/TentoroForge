@@ -156,7 +156,7 @@ def test_a_failing_page_goes_to_smith_and_is_checked_again(monkeypatch, tmp_path
                        run_turn=lambda pid, od, ask, **k: asks.append((ask, k)) or {"answer": "fixed"})
     assert rounds == [["/dashboard", "/slots"], ["/slots"]]          # only the repaired page again
     assert len(asks) == 1 and "as Parent: slots show dates in 2001" in asks[0][0] and asks[0][1]["unattended"]
-    assert out == {"pages": 2, "working": 2, "fixed": ["/slots"], "left": [], "touched": []}
+    assert out == {"pages": 2, "working": 2, "fixed": ["/slots"], "left": [], "touched": [], "unchecked": []}
     assert svc.doc["runtime"]["check"] == {"pages": 2, "working": 2, "fixed": ["/slots"], "failing": [],
                                            "version": 0}
 
@@ -181,11 +181,14 @@ def test_the_record_of_the_check_is_declared_in_the_contract():
     jsonschema.validate({"check": {"pages": 3, "working": 2, "fixed": ["/a"], "failing": ["/b"]}}, runtime)
 
 
-def test_the_build_uses_the_app_after_its_processes_run():
+def test_the_build_no_longer_runs_the_page_check_the_statements_replaced():
+    """Retired from the build on 2026-10-09: it cost more than generation and
+    repaired one page at a time; the statements open every screen as each role
+    (`services/expects`). `check_app` stays for a review asked for by name."""
     src = (Path(__file__).resolve().parents[2] / "routers/blueprint_generate.py").read_text()
     body = src[src.index("def _finish_unfinished_pages"):]
     body = body[:body.index("\ndef ")]
-    assert body.index("prove_processes(") < body.index("check_app(")
+    assert "check_app(" not in body and "prove_processes(" not in body and "prove_expectations(" in body
 
 
 # --- found on F&B's copy, 2026-10-03 -------------------------------------------------

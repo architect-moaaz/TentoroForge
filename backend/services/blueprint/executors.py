@@ -1536,11 +1536,12 @@ NODE_TASKS: dict[str, str] = {
         "precondition: a list is a list whether or not anything has happened "
         "yet, and declaring one a page does not have makes it unreviewable "
         "for no reason.\n\n"
-        "When a page starts a business process, name it in `dispatches`: the "
-        "page that opens the drop-off wizard declares the intake workflow, so "
-        "its form can submit into it. Nothing downstream can work this out — "
-        "an intake that registers the customer first looks, by its steps, like "
-        "a Customer workflow rather than the one /jobs/new starts.\n\n"
+        "When a page starts a business process that is already declared (its "
+        "`FLOW-` id is in the workflows you are shown), name it in `dispatches`: "
+        "the page that opens the drop-off wizard declares the intake workflow, "
+        "so its form can submit into it. While no workflows are declared, leave "
+        "`dispatches` out — the processes, declared next, name the pages that "
+        "start them. Never put any other kind of id there.\n\n"
         "Say how the pages connect, not just which exist. Each page lists the "
         "pages reachable from it in `navigatesTo`, by id — that is the arrow a "
         "breadcrumb follows and the reason a list page and its detail belong to "
@@ -1626,6 +1627,8 @@ NODE_TASKS: dict[str, str] = {
     ),
     # The paths people take; the text lives with what reads the flows.
     "app_flows": __import__("services.blueprint.app_flows", fromlist=["FLOWS_PROMPT"]).FLOWS_PROMPT,
+    # What must happen; the text lives with what reads the statements.
+    "expectations": __import__("services.expects.statements", fromlist=["EXPECT_PROMPT"]).EXPECT_PROMPT,
     "analytics": (
         "Design the analytics of this application: the KPIs, charts and "
         "breakdowns each page carries, written as `widgets`. Every page and "
@@ -2328,6 +2331,24 @@ def build_prompt(
         if doc.get("flows"):
             user += ("\n\nThe flows as they stand — keep each one's `name` when you change it:\n```json\n"
                      + json.dumps(doc.get("flows"), indent=1, default=str)[:20000] + "\n```")
+        if brief:
+            user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
+        if feedback:
+            user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+        return system, user
+
+    if node == "expectations":
+        # The requirements, the rules, the people and what each screen and
+        # process is — what a statement is written in — not the whole slice.
+        from services.expects.statements import expect_brief, subject_ask
+        user = ("What the statements are written from:\n\n```json\n"
+                + json.dumps(expect_brief(doc), indent=1, default=str) + "\n```")
+        ask = subject_ask(doc, subject) if subject else ""
+        if ask:
+            user += "\n\n" + ask
+        if doc.get("expectations"):
+            user += ("\n\nThe statements as they stand — keep each one's `says` when you keep it:\n```json\n"
+                     + json.dumps(doc.get("expectations"), indent=1, default=str)[:30000] + "\n```")
         if brief:
             user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
         if feedback:
@@ -3126,6 +3147,61 @@ def _page_details_prompt(doc: dict, system: str, subject: str,
     return system, user
 
 
+def drop_unknown_dispatches(result: AgentResult, doc: dict, subject: str = "") -> list[str]:
+    """A page's `dispatches` that names no process the application has is
+    left out. The page details are written before the processes are declared,
+    and the processes then say which pages start them (`launchedFrom`) — so a
+    `dispatches` written early can only be a guess. ToroCommerce's checkout
+    guessed `JOURNEY-006`, the whole document failed its contract, and every
+    page of the checkout feature lost its details (torob1, 2026-10-09).
+    Returns what was dropped, for the log."""
+    live = {str(w.get("id")) for w in doc.get("workflows") or [] if isinstance(w, dict) and w.get("id")}
+    dropped: list[str] = []
+    for proposal in getattr(result, "proposals", None) or []:
+        body = getattr(proposal, "body", None)
+        if getattr(proposal, "section", "") != "pages" or not isinstance(body, dict):
+            continue
+        named = body.get("dispatches")
+        if named and str(named) not in live:
+            body.pop("dispatches", None)
+            dropped.append(f"{body.get('route') or body.get('id')}: {named}")
+    for d in dropped:
+        logger.info("[page_details] %s: dropped a dispatches no process answers to — %s", subject, d)
+    return dropped
+
+
+def drop_values_no_list_allows(result: AgentResult, subject: str = "") -> list[str]:
+    """A page field that is a list of closed values (`states`) keeps only the
+    values the contract allows. ToroCommerce's checkout invented a
+    `noSelection` state, the whole document failed its contract, and every
+    page of the checkout feature lost its details — twice (torob2,
+    2026-10-09). One invented value costs that value, not the feature.
+    The allowed values are read from the contract itself."""
+    import json as _json
+    from services.blueprint.service import CONTRACT_PATH
+    try:
+        props = _json.loads(Path(CONTRACT_PATH).read_text("utf-8"))["properties"]["pages"]["items"]["properties"]
+    except Exception:  # noqa: BLE001 — no contract to read, nothing to drop
+        return []
+    closed = {k: set(v["items"]["enum"]) for k, v in props.items()
+              if v.get("type") == "array" and isinstance(v.get("items"), dict) and v["items"].get("enum")}
+    dropped: list[str] = []
+    for proposal in getattr(result, "proposals", None) or []:
+        body = getattr(proposal, "body", None)
+        if getattr(proposal, "section", "") != "pages" or not isinstance(body, dict):
+            continue
+        for key, allowed in closed.items():
+            values = body.get(key)
+            if isinstance(values, list):
+                bad = [v for v in values if v not in allowed]
+                if bad:
+                    body[key] = [v for v in values if v in allowed]
+                    dropped.append(f"{body.get('route') or body.get('id')}: {key} {bad}")
+    for d in dropped:
+        logger.info("[page_details] %s: dropped values the contract does not allow — %s", subject, d)
+    return dropped
+
+
 def pin_page_identity(svc: Any, subject: str, result: AgentResult) -> None:
     """Make the contract author's reply update the declared pages, and only
     those.
@@ -3606,6 +3682,11 @@ EFFORT_BY_NODE: dict[str, str] = {
     # costs a subject its correctness.
     "page_details": "medium",
     "workflow_steps": "medium",
+    # Statements over requirements, rules and screens already decided, in a
+    # shape the contract checks field by field; one group of requirements a
+    # call. At `high` one call reasoned through 32,000 tokens and answered
+    # nothing (TCommerce, 2026-10-08). A refused reply retries at `high`.
+    "expectations": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     # A short list of named third parties.
     "integrations": "low",
@@ -4153,6 +4234,8 @@ def make_executor(
         elif spec.node == "page_details":
             with svc.lock:
                 pin_page_identity(svc, spec.subject, result)
+                drop_unknown_dispatches(result, svc.doc, spec.subject)
+                drop_values_no_list_allows(result, spec.subject)
         elif spec.node == "data_model":
             pin_entity_set(result)
         elif spec.node == "entity_fields":
@@ -4405,6 +4488,8 @@ def make_executor(
             elif spec.node == "page_details":
                 with svc.lock:
                     pin_page_identity(svc, spec.subject, parsed)
+                    drop_unknown_dispatches(parsed, svc.doc, spec.subject)
+                    drop_values_no_list_allows(parsed, spec.subject)
                     if spec.attempt >= 2:
                         # The last attempt keeps the facts that resolve: a
                         # content plan with one bad source must not cost the
@@ -4417,6 +4502,9 @@ def make_executor(
             elif spec.node == "entity_fields":
                 with svc.lock:
                     pin_entity_identity(svc, spec.subject, parsed)
+            elif spec.node == "expectations":
+                # Each call is held to its own part of the statements.
+                parsed.subject = spec.subject  # type: ignore[attr-defined]
             return parsed
 
         if isinstance(last, Truncated):

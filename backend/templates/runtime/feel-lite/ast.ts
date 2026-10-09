@@ -66,7 +66,7 @@ export interface ComparisonExpression {
 
 export interface LogicalExpression {
   type: "LogicalExpression";
-  operator: "and" | "or";
+  operator: "and" | "or" | "??";
   left: ASTNode;
   right: ASTNode;
 }

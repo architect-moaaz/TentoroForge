@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { AgentCharacter } from "./AgentCharacter";
-import { OFFICE_LAYOUT } from "./layout";
+import { OFFICE_LAYOUT, huddleSeats } from "./layout";
 import { findPath, buildWalkableGrid } from "./Pathfinder";
 import {
   AGENT_REGISTRY,
@@ -26,6 +26,9 @@ import {
   type PhaseStartEvent,
   type PhaseCompleteEvent,
   type CreditsExhaustedEvent,
+  type HuddleStartEvent,
+  type HuddleSayEvent,
+  type HuddleEndEvent,
   type Position,
 } from "./types";
 
@@ -43,6 +46,23 @@ export interface Delivery {
 }
 
 // ── Store Interface ─────────────────────────────────────────────────────────
+
+export interface OfficeHuddle {
+  id: string;
+  kind: "review" | "deadlock";
+  topic: string;
+  chair: string;
+  participants: string[];
+  status: "open" | "decided" | "deadlock";
+  decision: string;
+}
+
+/** How long the decision stays above the table before everyone walks back. */
+const HUDDLE_LINGER_MS = 4500;
+
+function short(text: string, n = 60): string {
+  return text.length > n ? `${text.slice(0, n - 1)}…` : text;
+}
 
 export interface OfficeStore {
   // State
@@ -89,6 +109,9 @@ export interface OfficeStore {
    *  Stays false for the legacy relay, which never sends a roster, so that
    *  path keeps behaving exactly as it did. */
   runActive: boolean;
+  /** The huddle at the table now, if any — who is in it, what about, and
+   *  once decided, what was decided. */
+  huddle: OfficeHuddle | null;
 
   // Actions
   initialize: () => void;
@@ -182,6 +205,7 @@ export const useOfficeStore = create<OfficeStore>((set, get) => ({
   deliveries: [],
   party: null,
   runActive: false,
+  huddle: null,
 
   // ── Actions ─────────────────────────────────────────────────────────────
 
@@ -379,6 +403,63 @@ export const useOfficeStore = create<OfficeStore>((set, get) => ({
             : 0,
           events: updatedEvents,
         });
+        break;
+      }
+
+      case "huddle_start": {
+        // The agents the question touches walk to the Huddle Room; the
+        // observer takes the head of the table and says what it is about.
+        const e = event as HuddleStartEvent;
+        const { chair, seats } = huddleSeats();
+        const people = [e.chair, ...e.participants.filter((p) => p !== e.chair)];
+        people.forEach((id, i) => {
+          const agent = agents.get(id);
+          if (!agent) return;
+          const seat = id === e.chair ? chair : seats[(i - 1) % seats.length];
+          navigateAgent(agent, seat, () => {
+            agent.setSpeechBubble(id === e.chair ? `Huddle: ${short(e.topic)}` : "…", "normal");
+          });
+        });
+        set({
+          huddle: { id: e.huddleId, kind: e.kind, topic: e.topic, chair: e.chair,
+                    participants: e.participants, status: "open", decision: "" },
+          events: updatedEvents,
+        });
+        break;
+      }
+
+      case "huddle_say": {
+        const e = event as HuddleSayEvent;
+        agents.get(e.agent)?.setSpeechBubble(short(e.text, 90), "normal");
+        set({ events: updatedEvents });
+        break;
+      }
+
+      case "huddle_end": {
+        // The chair says the decision — or the question for the person —
+        // and after a moment everyone walks back to their desk.
+        const e = event as HuddleEndEvent;
+        const chairAgent = agents.get(e.chair);
+        chairAgent?.setSpeechBubble(
+          e.status === "decided" ? `Decided: ${short(e.decision, 90)}` : `To ask: ${short(e.decision, 90)}`,
+          e.status === "decided" ? "success" : "error",
+        );
+        const current = get().huddle;
+        set({
+          huddle: current && current.id === e.huddleId
+            ? { ...current, status: e.status, decision: e.decision } : current,
+          events: updatedEvents,
+        });
+        setTimeout(() => {
+          for (const id of [e.chair, ...e.participants]) {
+            const agent = get().agents.get(id);
+            const info = AGENT_REGISTRY.find((a) => a.id === id);
+            if (!agent || !info) continue;
+            navigateAgent(agent, getDeskPosition(id, info.room), () => agent.goIdle());
+          }
+          const now = get().huddle;
+          if (now && now.id === e.huddleId) set({ huddle: null });
+        }, HUDDLE_LINGER_MS);
         break;
       }
 
@@ -714,6 +795,7 @@ export const useOfficeStore = create<OfficeStore>((set, get) => ({
       deliveries: [],
       party: null,
       runActive: false,
+      huddle: null,
     });
   },
 

@@ -71,7 +71,8 @@ ANSWER_CHANGES_NOTHING = (
 #: blamed a field it misread, and never pressed the button (2026-10-07).
 REPRODUCE_FIRST = (
     "Nothing has been tried this turn. If they said something does not work, use it first — the "
-    "screen they used, as them (`open_page`, `try_workflow`, `try_request`) — so the change answers "
+    "screen they used, as them (`try_expectation` when a statement covers it, `open_page`, `try_workflow`, "
+    "`try_request`) — so the change answers "
     "what happens, not what the code seems to say. If this IS the change they asked for (not a report "
     "that something is broken), call it again with `requested: true`.")
 #: What an answer hears on a turn that has tried nothing.
@@ -208,7 +209,7 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
 
 def _trial_key(o: Observation) -> str:
     a = o.args or {}
-    return "|".join([o.tool, str(a.get("workflow") or a.get("path") or a.get("route") or ""),
+    return "|".join([o.tool, str(a.get("workflow") or a.get("path") or a.get("route") or a.get("statement") or ""),
                      str(a.get("method") or ""), str(a.get("as") or "").lower()])
 
 
@@ -250,6 +251,11 @@ def _failed_alike(before: str, after: str) -> bool:
     2026-10-07). Anything else fails as it did when both runs fail."""
     if not (trials.failed(before) and trials.failed(after)):
         return False
+    if trials.EXPECTATION_HEAD.match(after.split("\n", 1)[0]):
+        # A statement fails by its checks: the same check failing again is
+        # "still", a different one is what the change broke or uncovered.
+        seen = lambda s: {l.strip() for l in s.splitlines() if l.startswith("  - ")}  # noqa: E731
+        return bool(seen(before) & seen(after))
     b, a = _broken_controls(before), _broken_controls(after)
     if b and a is not None:
         head = lambda s: s.split("\n", 1)[0]

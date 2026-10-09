@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import concurrent.futures as cf
 import json
+import re
 import logging
 import os
 import shutil
@@ -406,10 +407,19 @@ def run_shots(app: RunningApp, pages: list[dict], out_dir: Path, *, probe: bool 
     proc = subprocess.run(["node", str(script), str(cfg)], cwd=work, capture_output=True,
                           text=True, timeout=180 + 240 * len(pages), env=env)
     line = next((l for l in reversed(proc.stdout.splitlines()) if l.startswith("[") or l.startswith("{")), "")
-    result = json.loads(line) if line else {"error": proc.stderr[-400:]}
+    result = json.loads(line) if line else {"error": _what_failed(proc.stderr)}
     if isinstance(result, dict):
         raise ReviewUnavailable(f"screenshots failed: {result.get('error')}")
     return result
+
+
+def _what_failed(stderr: str) -> str:
+    """The error a crashed script printed, from its first line: the tail of a
+    Node stack is file paths, and that was all a failed check ever said."""
+    lines = [l.strip() for l in (stderr or "").splitlines() if l.strip()]
+    head = next((l for l in lines if re.search(r"\b\w*Error\b|error:", l)), lines[0] if lines else "")
+    at = next((l for l in lines if l.startswith("at ")), "")
+    return (head[:300] + (f" ({at[:160]})" if at else "")) or "the browser script stopped without saying why"
 
 
 #: What a control did that means it does not work.

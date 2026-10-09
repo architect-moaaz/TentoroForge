@@ -26,6 +26,8 @@ for a widget the new code does not draw.
 """
 from __future__ import annotations
 
+import json
+
 import logging
 from pathlib import Path
 from typing import Any
@@ -491,6 +493,64 @@ WRITES = WRITES + (
      "steps, a page's access, a field, a landing page, a rule; the verbs remain for larger changes.",
      {"section": "string", "find": "string", "replace": "string", "why": "string"}),
 )
+#: WHAT MUST HAPPEN, SAID BEFORE IT IS MADE TO. A report or a request for a
+#: behaviour is recorded as a statement first (`expectations`); it fails
+#: until the app does it, and the turn is done when it holds.
+WRITES = WRITES + (
+    ("add_expectation",
+     "Record a new statement of what must happen — what the person said must happen, or the fault they "
+     "reported, as what should happen instead — so it can be tried now (`try_expectation`) and after every "
+     "change from now on. `statement` is one statement as the build writes them: `says` (one plain "
+     "sentence), `kind`, `given` (records that exist first, each with `ref`, `entity` and `values`; `@ref` "
+     "for a record's id), `steps` (`as` a role id or `guest`; `act` open/do/sign_in/sign_out/reload/"
+     "come_back/wait; `page`, `record`, `address`, `what`), `then` (`check` on/sees/not_sees/told/gets/"
+     "stored/not_stored with what it needs), `requirements`. `from`: person (they asked for it) or report "
+     "(they said something does not work). Statements already there are never changed here.",
+     {"statement": "object", "from": "string"}),
+)
+
+
+def add_expectation(output_dir: str, statement: Any, origin: str = "report") -> dict:
+    """A new statement, checked as the build checks one and recorded with
+    where it came from. One that would change or repeat an existing
+    statement is refused: what must happen is changed by the person."""
+    from services.blueprint.agent_contract import ArtifactProposal
+    from services.blueprint.service import BlueprintService
+    from services.expects.statements import expectations, statement_findings
+    from services.smith.section_change import apply
+
+    if isinstance(statement, str):
+        try:
+            statement = json.loads(statement)
+        except ValueError:
+            return _finding("`statement` must be one statement as an object.")
+    if not isinstance(statement, dict) or not str(statement.get("says") or "").strip():
+        return _finding("`statement` needs at least `says`, `kind`, `steps` and `then`.")
+    try:
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except FileNotFoundError:
+        return _finding("This project has no definition yet.")
+    body = {k: v for k, v in statement.items() if k not in ("id", "status")}
+    body["origin"] = "person" if str(origin).strip().lower() == "person" else "report"
+    said = " ".join(str(body["says"]).lower().split())
+    same = next((st for st in expectations(svc.doc) if " ".join(str(st.get("says")).lower().split()) == said), None)
+    if same is not None:
+        return _finding(f"{same.get('id')} already says that — try it with `try_expectation` {same.get('id')}. "
+                        "Statements already there are not changed here.")
+    problems = statement_findings(svc.doc, body)
+    if problems:
+        return _finding("That statement cannot be tried as written:\n- " + "\n- ".join(problems[:12]))
+    out, refusal = apply(svc, f"add the statement: {body['says']}", [ArtifactProposal("expectations", str(body["says"]), body)],
+                         interpretation="a statement of what must happen", agent="testing", app_root=None)
+    if refusal:
+        return _finding(f"The statement was not recorded: {refusal}")
+    svc = BlueprintService.load(output_dir=str(output_dir))
+    new = next((st for st in expectations(svc.doc) if " ".join(str(st.get("says")).lower().split()) == said), {})
+    sid = new.get("id") or "the statement"
+    text = f"Recorded {sid}: \"{body['says']}\". Try it now with `try_expectation` {sid}."
+    return {"applied": True, "said": text, "finding": text, "touched": [], "version": int(svc.doc.get("version") or 0)}
+
+
 #: `requested`, on every write that changes code or the definition: true only
 #: when the person asked for this change itself. Until a try has run in the
 #: turn, a write without it is sent to reproduce first (`smith4.turn`).
@@ -612,6 +672,8 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
         return edit_definition(output_dir, str(args.get("section") or ""), str(args.get("find") or ""),
                                str(args.get("replace") if args.get("replace") is not None else ""),
                                str(args.get("why") or ""))
+    if name == "add_expectation":
+        return add_expectation(output_dir, args.get("statement"), str(args.get("from") or "report"))
     if name == "write_section":
         return write_section(output_dir, str(args.get("section") or ""), str(args.get("brief") or ""),
                              subject=str(args.get("subject") or ""), reasoning=reasoning)

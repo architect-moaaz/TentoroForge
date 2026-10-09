@@ -433,6 +433,15 @@ def edit_definition(output_dir: str, section: str, find: str, replace: str, why:
         svc = BlueprintService.load(output_dir=str(output_dir))
     except FileNotFoundError:
         return {"applied": False, "said": "", "touched": [], "finding": "This project has no definition yet."}
+    if section.split(".", 1)[0] == "expectations":
+        # WHAT MUST HAPPEN IS NOT WHAT GETS FIXED. A statement the app fails
+        # is the fault's description; editing it until it passes would be
+        # the fixer grading its own work. A new one is `add_expectation`.
+        return {"applied": False, "said": "", "touched": [],
+                "finding": ("The statements of what must happen are not edited to fit the app — fix the app "
+                            "until they hold. Changing what must happen is a change to the requirements: say "
+                            "so to the person. A new statement, from what they said or reported, is "
+                            "`add_expectation`.")}
     parent, key, node = _locate(svc.doc, section)
     if node is None or parent is None:
         return {"applied": False, "said": "", "touched": [],

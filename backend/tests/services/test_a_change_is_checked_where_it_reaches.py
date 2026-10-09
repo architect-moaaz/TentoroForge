@@ -141,10 +141,12 @@ def test_a_smith_turn_that_changed_the_app_reports_its_check(monkeypatch, tmp_pa
     monkeypatch.setattr(handle_mod, "_handle", lambda **k: Outcome(status="resolved", said="Added a phone field.",
                                                                   touched=["app/src/db/schema/child.ts"]))
     seen = []
-    monkeypatch.setattr("services.blueprint.app_check.check_change",
+    # The statements a change reaches are tried after a chat turn (the page
+    # check and its repair turn were retired, 2026-10-09).
+    monkeypatch.setattr("services.expects.build.check_change",
                         lambda output_dir, touched: seen.append(list(touched)) or {
                             "said": "I then opened the 3 pages this change reaches … they work.",
-                            "touched": ["app/src/fix.ts"], "left": [], "fixed": [], "checked": []})
+                            "touched": ["app/src/fix.ts"], "failing": [], "fixed": [], "tried": []})
     out = handle_mod.handle(project_id="p1", output_dir=str(tmp_path), message="add a phone to child")
     assert seen == [["app/src/db/schema/child.ts"]]
     assert out.said == "Added a phone field.\n\nI then opened the 3 pages this change reaches … they work."

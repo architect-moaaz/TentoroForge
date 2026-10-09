@@ -110,6 +110,7 @@ def blueprint_to_context(
     accounts = _render_accounts(bp)
     flows = _render_flows(bp)
     looks = _render_looks(bp)
+    expected = _render_expectations(bp)
     decisions = _render_design_decisions(bp)
 
     # WHAT SURVIVES A SMALL BUDGET is what Smith answers and edits from: the
@@ -117,12 +118,12 @@ def blueprint_to_context(
     # the decisions are shortened first — the cap used to cut the END, which
     # was the pages and integrations.
     sections = [header, domain, requirements, entities, rules, workflows, pages, integrations, decisions, accounts,
-                flows, looks]
+                flows, looks, expected]
     keep_whole = {id(header), id(entities), id(workflows), id(pages), id(integrations), id(accounts), id(flows),
                   id(looks)}
     over = sum(len(x) for x in sections if x) - (budget.max_chars - 200)
     if over > 0:
-        for i in (8, 2, 4, 1):          # decisions, requirements, rules, domain
+        for i in (8, 12, 2, 4, 1):      # decisions, statements, requirements, rules, domain
             if over <= 0:
                 break
             text = sections[i]
@@ -408,6 +409,15 @@ def _render_flows(bp: Blueprint) -> str:
         return ""
     return "## App flows (the paths people take — `go`: taken there, `offer`: shown the way, `menu`: by themselves)\n" \
         + "\n".join(f"- {x}" for x in lines)
+
+
+def _render_expectations(bp: Blueprint) -> str:
+    """The statements of what must happen, with how each last went."""
+    lines = [str(x) for x in getattr(bp, "expectations", None) or [] if x]
+    if not lines:
+        return ""
+    return ("## What must happen (statements the app is tried against — `try_expectation` tries one; "
+            "they are fixed by fixing the app, never by editing them)\n" + "\n".join(f"- {x}" for x in lines))
 
 
 def _render_accounts(bp: Blueprint) -> str:

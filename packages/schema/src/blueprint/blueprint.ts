@@ -32,6 +32,7 @@ import {
   WidgetId,
   WorkflowId,
   JourneyId,
+  ExpectationId,
   artifactBase,
   ArtifactStatus,
 } from "./ids";
@@ -101,6 +102,13 @@ export const ApplicationMeta = z.object({
    * nothing to offer.
    */
   designLanguage: DesignLanguageSource.optional(),
+  /**
+   * Whether the application's agents huddle — meet over a big decision or a
+   * deadlock one of them cannot settle, chaired by the observer
+   * (docs/plans/2026-10-08-huddle-room.md). Absent means yes; `false` turns
+   * them off for this application, to measure a build without them.
+   */
+  huddles: z.boolean().optional(),
 });
 
 // ===========================================================================
@@ -2461,7 +2469,8 @@ export const Decision = z.object({
   id: DecisionId,
   decision: z.string(),
   reason: z.string().default(""),
-  source: z.enum(["user", "smith_recommendation", "domain_default", "figma", "uxpilot"]),
+  /** `huddle` — decided by the agents that own the parts it touches, chaired by the observer (`.forge/huddles`). */
+  source: z.enum(["user", "smith_recommendation", "domain_default", "figma", "uxpilot", "huddle"]),
   approvedBy: z.enum(["user", "smith"]).default("smith"),
   version: z.number().default(1),
   supersedes: DecisionId.optional(),
@@ -2661,6 +2670,23 @@ export const Runtime = z.object({
       version: z.number().optional(),
     })
     .optional(),
+  /**
+   * The statements of what must happen (`expectations`) as last tried in the
+   * running application (`services/expects`): how many there are, how many
+   * held, which were made to hold by a repair, which still fail and which
+   * could not be set up to try. Each statement's own result, with what was
+   * seen, is kept beside the application (`.forge/expects/results.json`).
+   */
+  expectations: z
+    .object({
+      statements: z.number(),
+      passed: z.number(),
+      fixed: z.array(z.string()).default([]),
+      failing: z.array(z.string()).default([]),
+      untried: z.array(z.string()).default([]),
+      version: z.number().optional(),
+    })
+    .optional(),
 });
 
 export const Database = z.object({
@@ -2816,6 +2842,127 @@ export const AppFlow = z.object({
   ...artifactBase,
 });
 
+// ===========================================================================
+// Expectations — what must happen, said by the architect, tried as the person
+// ===========================================================================
+
+/**
+ * Who a step or a check is done as: a role (`ROLE-…`) or `guest`, someone
+ * signed out. `who` tells two people of one role apart — "another shopper"
+ * must not see the first one's bag.
+ */
+export const ExpectPerson = z.union([RoleId, z.literal("guest")]);
+
+/**
+ * A record that exists before the statement starts, made through the app as
+ * its owner. `ref` is the name the statement calls it by; a value written
+ * `@ref` is that record's id ("productId": "@shirt").
+ */
+export const ExpectGiven = z.object({
+  ref: z.string().min(1),
+  entity: EntityId,
+  values: z.record(z.string(), z.unknown()).default({}),
+  /** Whose it is — the person who makes it; the administrator when left out. */
+  as: ExpectPerson.optional(),
+  who: z.string().optional(),
+  /**
+   * The person `as` themselves: their own account record, which exists
+   * already, holds `values` (a disabled account, a profile filled in). A
+   * statement about the signed-in person's own state says it here — a second
+   * record of the same type is someone else.
+   */
+  self: z.boolean().optional(),
+});
+
+/**
+ * One thing the person does. `do` is said in words — "choose size M and add
+ * it to the bag" — and the runner finds the controls on the screen that do
+ * it, the way a person would; no selector is written here.
+ */
+export const ExpectStep = z.object({
+  as: ExpectPerson,
+  who: z.string().optional(),
+  act: z.enum(["open", "do", "sign_in", "sign_out", "reload", "come_back", "wait"]),
+  /** `open`: the screen; `sign_in`: where the sign-in starts from (its form when left out). */
+  page: PageId.optional(),
+  /** `open`: the given record the screen opens on (`@ref`). */
+  record: z.string().optional(),
+  /** `open`: an address as typed, with `@ref` for a record's id — "by its address". */
+  address: z.string().optional(),
+  /** `do`: what they do, in their words; `wait`: what for. */
+  what: z.string().default(""),
+  /**
+   * `do`: the process doing it starts, when it starts one. Every process the
+   * application has is started by some statement's step — the runner checks
+   * the step really started it — so no process goes untried.
+   */
+  workflow: WorkflowId.optional(),
+});
+
+/**
+ * What must be true afterwards. Each is judged by code from what the browser
+ * and the database report — where the person is, what the screen shows,
+ * what the app answered, what was stored — never by a model.
+ */
+export const ExpectCheck = z.object({
+  check: z.enum(["on", "sees", "not_sees", "told", "gets", "stored", "not_stored", "sent"]),
+  /** Whose view; the last step's person when left out. */
+  as: ExpectPerson.optional(),
+  who: z.string().optional(),
+  /** `on`: the screen they are on; `sees`/`not_sees`: the screen opened to look (where they are, when left out); `gets`: the screen they try to open. */
+  page: PageId.optional(),
+  /** `sees`/`not_sees`/`gets`/`stored`: a given record (`@ref`). */
+  record: z.string().optional(),
+  /** `gets`: an address as typed, with `@ref` for a record's id. */
+  address: z.string().optional(),
+  /** `sees`/`not_sees`: text on the screen; `told`/`sent`: what it is about, for the person reading the result. */
+  text: z.string().optional(),
+  /** `told`: the kind of answer. */
+  told: z.enum(["success", "refusal", "error"]).optional(),
+  /** `gets`: what opening the screen gives them. */
+  gets: z.enum(["shown", "not_found", "sign_in_asked", "not_allowed"]).optional(),
+  /** `stored`/`not_stored`/`sent`: the record type. */
+  entity: EntityId.optional(),
+  /** `stored`/`not_stored`: field values the record has (`@ref` for an id); `sent`: who it goes to. */
+  values: z.record(z.string(), z.unknown()).optional(),
+});
+
+/**
+ * A statement of what must happen when someone does something — the
+ * architect's, written from the requirements and the rules before any screen
+ * is coded, and tried in the running application as the person.
+ *
+ * THE APP DID WHAT NOBODY SAID AND NOBODY TRIED IT. TCommerce's definition
+ * said shoppers only ever see active products, that a shopper can add to the
+ * cart, that the admin starts on the admin console; the app showed an
+ * inactive product, refused Add to Cart and landed the admin on the home
+ * page (forge-v3, 2026-10-07). Each requirement carried acceptance criteria
+ * in prose that only a review screen read. Every check asked whether the app
+ * was broken — none knew what right was. A statement is the answer key: one
+ * runner tries every statement as its person, and one that fails goes to
+ * whoever owns the fault. The fixer may not change a statement; changing
+ * what must happen is a change to the requirements, said to the person.
+ */
+export const Expectation = z.object({
+  id: ExpectationId,
+  /** The statement in one plain sentence — what the review shows. */
+  says: z.string().min(1),
+  kind: z.enum(["arrival", "reach", "action", "rule", "cross-person", "journey",
+                "first-use", "recovery", "background"]),
+  /** The business rules it proves (the requirements are `requirements`). */
+  rules: z.array(RuleId).default([]),
+  given: z.array(ExpectGiven).default([]),
+  steps: z.array(ExpectStep).min(1),
+  then: z.array(ExpectCheck).min(1),
+  /** What the requirements left undecided, asked at the review … */
+  question: z.string().optional(),
+  /** … and the answer this statement takes until the person gives theirs. */
+  assumed: z.string().optional(),
+  /** Where it came from: the requirements, the person's own words, or a report of a fault. */
+  origin: z.enum(["requirements", "person", "report"]).default("requirements"),
+  ...artifactBase,
+});
+
 export const Blueprint = z.object({
   schemaVersion: z.literal(BLUEPRINT_SCHEMA_VERSION),
   /** Bumped on every accepted change (§91). Indexes into changeHistory. */
@@ -2837,6 +2984,8 @@ export const Blueprint = z.object({
   workflows: z.array(Workflow).default([]),
   /** The paths people take through the application (`AppFlow`). */
   flows: z.array(AppFlow).default([]),
+  /** What must happen when someone does something, tried as them (`Expectation`). */
+  expectations: z.array(Expectation).default([]),
   businessRules: z.array(BusinessRule).default([]),
   apis: z.array(ApiEndpoint).default([]),
   integrations: z.array(Integration).default([]),

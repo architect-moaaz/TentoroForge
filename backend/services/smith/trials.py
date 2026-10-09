@@ -79,6 +79,17 @@ TRIALS = TRIALS + (
      {"kind": "string", "as": "string"}),
 )
 
+TRIALS = TRIALS + (
+    ("try_expectation",
+     "Try one of the application's statements of what must happen (`statement`: its `EXP-…` id, "
+     "listed under \"What must happen\") the way the build does: its records made, each step done in "
+     "a browser as its person, each check judged from what the app showed and stored. Shows whether it "
+     "holds and, when it does not, what was seen instead. When a statement covers what someone says "
+     "does not work, try it before changing anything; after a change, try it again to show it holds. "
+     "On a copy of the data, put back as it was afterwards.",
+     {"statement": "string"}),
+)
+
 TRIAL_NAMES: frozenset[str] = frozenset(name for name, _d, _a in TRIALS)
 
 #: A 1×1 PNG and a one-page PDF: the smallest files each picker accepts.
@@ -696,6 +707,8 @@ def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
         if name == "open_page":
             sign_in = str(args.get("sign_in") or "").strip().lower() in ("true", "1", "yes")
             return open_page(bench, doc, str(args.get("route") or ""), as_, sign_in=sign_in)
+        if name == "try_expectation":
+            return try_expectation(bench, doc, str(args.get("statement") or ""))
     except TrialUnavailable as exc:
         return str(exc)
     except ValueError as exc:
@@ -706,12 +719,40 @@ def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
     raise KeyError(name)
 
 
+#: The first line of a statement tried (`expects.build.observation`).
+EXPECTATION_HEAD = re.compile(r"^EXP-\d+ (holds|does not hold|could not be tried) — ")
+
+
+def try_expectation(bench: Bench, doc: dict, ref: str) -> str:
+    """One statement, tried on the turn's running copy and put back after."""
+    from services.expects.build import observation
+    from services.expects.runner import run as run_statements
+    from services.expects.statements import expectations
+    rows = {str(st.get("id")): st for st in expectations(doc)}
+    want = ref.strip().upper()
+    if want not in rows:
+        listed = ", ".join(list(rows)[:30]) or "none"
+        return f"There is no statement {ref!r} to try. The statements are: {listed}."
+    report = run_statements(bench.app(), doc, Path(bench.output_dir), only=[want], restore=True)
+    got = (report.get("results") or [None])[0]
+    if got is None:
+        return f"{want} could not be tried — the runner returned nothing"
+    said = observation(got)
+    server = bench.server_said()
+    if server:
+        said += "\nthe server printed:\n" + "\n".join(f"  {l}" for l in server[-12:])
+    return scrub(said)
+
+
 def failed(said: str) -> bool:
     """Whether a trial's observation shows something not working: an HTTP
     error, a step that failed, a browser error, a control that does not work,
     or the server printing an error."""
     from services.blueprint.page_review import BROKEN_OUTCOMES
     head = said.split("\n", 1)[0]
+    m = EXPECTATION_HEAD.match(head)
+    if m:
+        return m.group(1) != "holds"
     m = re.search(r"HTTP (\d{3})", head)
     if m and int(m.group(1)) >= 400:
         return True
@@ -723,4 +764,4 @@ def failed(said: str) -> bool:
 
 
 __all__ = ["TRIALS", "TRIAL_NAMES", "Bench", "TrialUnavailable", "run", "failed",
-           "try_workflow", "try_request", "open_page"]
+           "try_workflow", "try_request", "open_page", "try_expectation"]

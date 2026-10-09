@@ -421,6 +421,14 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # on rules but `integration` and `memory`, so this costs no time.
     _n("business_rules", "business_rules", ("entity_fields", "workflows"), ("businessRules",),
        note="§107 step 16; not a distinct box in §28"),
+    # WHAT MUST HAPPEN, SAID BEFORE ANY SCREEN IS CODED. With the screens,
+    # the processes, the people and the rules declared, the statements the
+    # finished application is tried against — written from the requirements,
+    # so they say what is right rather than what the code happens to do.
+    # Nothing waits on them while the pages are written.
+    _n("expectations", "testing", ("page_details", "workflows", "security", "business_rules"),
+       ("expectations",), fanout="expectation_groups", optional=True,
+       note="what must happen when someone does something, tried as the person"),
     _n("security", "security", ("entity_fields",), ("security", "roles", "permissions"),
        note="§100; placed after the data model because permissions guard entities"),
     _n("integrations", "integration", ("application_model",), ("integrations",)),
@@ -431,7 +439,8 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        (), kind="projection"),
     # NO `testing` NODE. It declared tests — names and file paths — that were
     # never written and never run; the one reader counted them against the
-    # requirements. About a tenth of a build's spend for a number. Behaviour
+    # requirements. About a tenth of a build's spend for a number. (The
+    # testing agent writes `expectations` now, above, and every one is run.) Behaviour
     # is proven where it can be: the compiler on every coded page, the dry
     # run of every control's workflow, the build, the boot, and the page
     # review looking at each page as it renders.
@@ -500,6 +509,9 @@ FANOUT: dict[str, Any] = {
     # belongs to no entity (a dashboard, a sign-in, a drawn screen with no
     # primary record) on its own.
     "page_features": lambda doc: page_features(doc),
+    # The people, then the requirements in groups with their rules.
+    "expectation_groups": lambda doc: list(
+        __import__("services.expects.statements", fromlist=["expect_subjects"]).expect_subjects(doc)),
 }
 
 
@@ -783,6 +795,8 @@ INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "data.constraints", "apis", "workflows", "businessRules", "tests",
     # The paths between the screens follow the screens and the processes.
     "flows",
+    # What must happen follows the screens, the processes and the rules.
+    "expectations",
     "codeMap", "database", "runtime", "roles", "permissions", "security",
 })
 
@@ -1102,6 +1116,8 @@ _SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
     "workflows": _steps_present,
     "page_features": _contracts_present,
     "entities": _fields_present,
+    "expectation_groups": lambda doc, subject: __import__(
+        "services.expects.statements", fromlist=["subject_written"]).subject_written(dict(doc), subject),
 }
 
 
@@ -1715,13 +1731,14 @@ def _execute(
             return
         _record_observation(report, ledger, obs)
         from services.blueprint.observer import CRITIC_EDGE as _CRITIC_EDGE
+        from services.blueprint.observer import HUDDLE_EDGE as _HUDDLE_EDGE
         # WHAT THIS NODE CANNOT FIX, SAID ONCE AND KEPT. Deferred findings
         # used to be counted and dropped. The ones the critic raised are the
         # useful kind — "no Patient entity is defined" — so they travel as
         # change requests to the report, where Smith and a person can read
         # them, instead of burning repair rounds on an author that cannot act.
         for f in getattr(obs, "deferred", ()) or ():
-            if getattr(f, "edge", "") != _CRITIC_EDGE:
+            if getattr(f, "edge", "") not in (_CRITIC_EDGE, _HUDDLE_EDGE):
                 continue
             key_ = (key, f.section, f.detail)
             if key_ in w.deferred_seen:

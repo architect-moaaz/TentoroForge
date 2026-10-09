@@ -174,6 +174,14 @@ edit — a screen laid out again, a redesign. A fix made around a fault instead
 of at it (filtering in a page what the query returns wrong) leaves the fault
 for the next screen: fix where it is.
 
+WHAT MUST HAPPEN IS WRITTEN DOWN AND TRIED. The statements under "What must
+happen" are the app's answer key. When what someone reports is one of them,
+`try_expectation` it to see it fail; when it is not, `add_expectation` it —
+what should happen instead — then try it. Fix the app until it holds and try
+it again: a turn about behaviour is done when its statement holds. Never make
+a statement agree with the app; changing what must happen is the person's
+call, said to them.
+
 A CHANGE TO RECORDS IS A WORKFLOW, AND IT COMES FIRST. Adding, deleting,
 approving or updating records happens only through a workflow; a page's code
 cannot do it on its own. When the ask needs one the application does not have
