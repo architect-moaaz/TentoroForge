@@ -218,10 +218,21 @@ def item_findings(item: dict, page: dict, doc: dict) -> list[str]:
                        f"record — use `of` to count against the record it points at")
         out.extend(_where_findings(label, ent, src, doc=doc, ents=ents))
         if kind == "total":
+            # A TOTAL OF ROWS IS THEIR COUNT. "Total Registered" — how many
+            # people — came as a `total` naming no `fn` and no `field`; the
+            # refusal named only `fn`, the author missed it twice, and a
+            # data-entry build stopped there (forge-v3, 2026-10-09). With
+            # neither named there is nothing to apply a function to: it is a
+            # `count`, and is written as one.
+            if not src.get("fn") and not src.get("field"):
+                src["kind"] = "count"
+                return out
             if src.get("fn") not in ("sum", "avg", "min", "max"):
-                out.append(f"{label!r}: a total names `fn` (sum, avg, min, max)")
+                out.append(f"{label!r}: a total names `fn` (sum, avg, min, max) — to show how many rows "
+                           "there are, use kind `count`")
             if _field(ent, str(src.get("field") or "")) is None:
-                out.append(f"{label!r}: a total names the numeric `field` of {ent.get('name')}")
+                out.append(f"{label!r}: a total names the numeric `field` of {ent.get('name')} it adds up "
+                           f"(it has: {_names(ent)}) — to show how many rows there are, use kind `count`")
         return out
 
     if kind == "distance":
