@@ -1,7 +1,7 @@
 # One engineer per app: building by proof instead of by assembly
 
 Date: 2026-10-09
-Status: agreed 2026-10-10 (self-heal stays); steps 1–5 built on `smithv4`, not yet deployed — see §11
+Status: agreed 2026-10-10 (self-heal stays); steps 1–5 built, deployed to forge-v3 and run live — see §11
 
 ## 1. Why this proposal exists
 
@@ -572,3 +572,32 @@ early handover after the first features (it hands over at the end). The
 preview's route reaches the report only when the frame is same-origin.
 
 Measured locally only by tests; the first live run is the deploy's.
+
+### 2026-10-09/10 — deployed to forge-v3, first live runs
+
+e53a6a9c cut over at 20:08 UTC with every smoke check passing. First build
+through the engineer, **Crumb** (a bakery pre-order app, project a42b9bb1):
+define 34 s, model 4 min, then four modules built in order of dependence
+(Menu, Orders, Baker Order Management, Baker Catalog Management), 11 of 11
+feature statements held, 12 of 13 at the whole-app pass; 48 minutes, $6.30
+for 159 model calls (ToroCommerce under the graph: $8.79–10.19); lowest free
+memory 8.8 GB. The decisions it made unprompted: GBP in en-GB, Europe/London
+as the app's time, an order life cycle pending → ready → collected moved by
+the Baker only, customers may self-register.
+
+What the run found, fixed the same evening (e9d1a7e5, 8a9ffe6b):
+- the build entry saved its own stale copy of the definition over the
+  engineer's at the end (v27 over v62), so the handover said "0 of 4 pages
+  ready" over an app whose pages all worked — the engineer now works on the
+  entry's document;
+- a node that failed for a feature (assemble: "needs a workflow that does not
+  exist yet") was not mended — a fix turn with the reason, then the nodes run
+  again;
+- the whole-app pass found a statement a later feature had broken (the
+  customer landed on /orders, not /menu) and fixed nothing — it fixes as a
+  feature does;
+- a resumed build left the state at IMPLEMENTATION — it counts what was
+  complete before it.
+
+Crumb resumed on the fixed platform: two fix rounds at the whole-app pass,
+then "6 pages ready … Customer lands on /menu … 13 of 13 statements held".
