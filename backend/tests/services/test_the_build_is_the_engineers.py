@@ -53,6 +53,7 @@ def test_an_approved_build_goes_to_the_engineer_and_nothing_is_repaired_after(pr
                           emit=lambda kind, data: said.append((kind, data)), app_name="Shop")
     assert calls["output_dir"] == str(tmp_path) and calls["description"] == "build it"
     assert calls["app_name"] == "Shop" and "done_nodes" in calls and calls["observer"] is not None
+    assert calls["svc"] is not None and calls["svc"].doc.get("application"), "the entry's own document is the engineer's"
     assert out["phase"] == "build" and out["state"]
     texts = [d.get("text", "") for k, d in said if k == "message"]
     assert any("Your application is built" in t for t in texts), "handed over"

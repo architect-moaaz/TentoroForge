@@ -166,7 +166,8 @@ def test_the_engineer_builds_each_feature_and_proves_it_before_the_next(tmp_path
     assert proofs[0] == (["EXP-001"], True), "the first feature's own statements, with the authors' look"
     assert (["EXP-013"], True) in proofs and (["EXP-013"], False) in proofs, "then the fix turn's result is tried again"
     assert len(fixes) == 1 and "Cart & Checkout" in fixes[0] and "nothing was sent" in fixes[0]
-    assert proofs[-1] == (None, None), "every statement once more at the end"
+    assert sorted(proofs[-1][0]) == ["EXP-001", "EXP-013", "EXP-027"] and proofs[-1][1] is True, \
+        "every statement once more at the end, with its authors' look"
     assert [f["feature"] for f in out["features"]] == ["MODULE-001", "MODULE-003", "MODULE-002"]
     cart = out["features"][2]
     assert cart["passed"] == 1 and cart["fixed"] == ["EXP-013"] and cart["failing"] == []
@@ -244,3 +245,75 @@ def test_the_scheduler_runs_only_the_scoped_subjects(tmp_path, monkeypatch):
     report = orchestrator.run(svc, author, plan=["entity_fields"], commit=True, scope=OnlyBooking())
     assert asked == [("ENTITY-002", "for the booking feature")]
     assert "entity_fields" in report.completed
+
+
+def test_the_engineer_works_on_the_callers_document(tmp_path):
+    """Crumb (forge-v3, 2026-10-09): the build entry kept its own copy of the
+    definition while the engineer loaded another; the state-settling save at
+    the end wrote the model-phase document (v27) over the built one (v62)."""
+    svc = _project(tmp_path)
+    seen = []
+    run = lambda s, executor, *, plan, scope=None, **kw: (seen.append(s), SimpleNamespace(failed=[], paused_because=""))[1]
+    prove = lambda s, od, **kw: {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": [], "results": []}
+    build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=lambda od, ask: {}, svc=svc)
+    assert seen and all(s is svc for s in seen), "every run is on the one document the caller holds"
+
+
+def test_a_node_that_failed_for_a_feature_is_mended_and_run_again(tmp_path):
+    """Crumb's assemble refused /baker/items — "needs a workflow that does not
+    exist yet: unmark an item as sold out" — and the engineer went on to try
+    the feature as if it had built (2026-10-09)."""
+    _project(tmp_path)
+    plans: list[tuple[list[str], str | None]] = []
+    fixes: list[str] = []
+    calls = {"n": 0}
+
+    def run(svc, executor, *, plan, scope=None, **kw):
+        plans.append((list(plan), scope.feature.id if scope else None))
+        calls["n"] += 1
+        if scope and scope.feature.id == "MODULE-001" and "page_details" in plan:
+            return SimpleNamespace(failed=["assemble", "page_code:PAGE-001"], paused_because="",
+                                   failed_because={"assemble": "NeedsWorkflow: needs a workflow that does not exist yet: unmark an item"})
+        return SimpleNamespace(failed=[], paused_because="")
+    prove = lambda svc, od, **kw: {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": [], "results": []}
+
+    def fix(od, ask):
+        fixes.append(ask)
+        return {"status": "resolved", "answer": "declared Mark Available and wrote the screen"}
+    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix)
+    assert len(fixes) == 1 and "While building Catalogue, the build could not finish" in fixes[0]
+    assert "assemble: NeedsWorkflow" in fixes[0] and "report_platform_fault" in fixes[0]
+    mend = [p for p, f in plans if f == "MODULE-001" and "page_details" not in p]
+    assert mend == [["page_code", "assemble"]], "the failed nodes run again, assembly last"
+    assert out["features"][0]["failed_nodes"] == [], "and the feature records what still failed: nothing"
+
+
+def test_the_whole_app_pass_fixes_what_a_later_feature_broke(tmp_path):
+    """Crumb's customer landed on /orders once the Orders feature existed; the
+    first feature's statement failed at the end with nobody sent to mend it."""
+    _project(tmp_path)
+    proofs: list = []
+    fixes: list[str] = []
+    def run(svc, executor, *, plan, scope=None, **kw):
+        return SimpleNamespace(failed=[], paused_because="")
+
+    def prove(svc, od, only=None, give_back=None, **kw):
+        proofs.append((only, give_back))
+        rows = []
+        for sid in only or []:
+            # EXP-001 holds in its own feature and fails once the whole app
+            # is tried (a later feature moved the landing), until a fix lands.
+            ok = not (sid == "EXP-001" and len(only or []) > 1 and not fixes)
+            rows.append({"id": sid, "says": sid, "verdict": "passed" if ok else "failed",
+                         "failures": [] if ok else ["Customer is on /orders, not /menu"]})
+        return {"statements": len(rows), "passed": sum(r["verdict"] == "passed" for r in rows),
+                "failing": [r["id"] for r in rows if r["verdict"] == "failed"], "untried": [], "fixed": [], "results": rows}
+
+    def fix(od, ask):
+        fixes.append(ask)
+        return {"status": "resolved", "answer": "set the customer's landing to the menu"}
+    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix)
+    assert sorted(proofs[-2][0]) == ["EXP-001", "EXP-013", "EXP-027"], "the whole-app pass tries every statement"
+    assert proofs[-1][0] == ["EXP-001"] and proofs[-1][1] is False, "then what the fix changed is tried again"
+    assert len(fixes) == 1 and "While building the whole application" in fixes[0] and "/orders, not /menu" in fixes[0]
+    assert out["statements"]["fixed"] == ["EXP-001"] and out["statements"]["failing"] == []

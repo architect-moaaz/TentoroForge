@@ -114,7 +114,7 @@ def merged(reports: list[Any]) -> Any:
 def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] | None = None,
           description: str = "", budget_minutes: float = 0, app_name: str = "",
           executor: Any = None, observer_agent: Any = None, observer: Any = None,
-          done_nodes: set[str] | None = None,
+          done_nodes: set[str] | None = None, svc: Any = None,
           run: Callable[..., Any] | None = None, prove: Callable[..., dict] | None = None,
           fix: Callable[[str, str], dict] | None = None) -> dict:
     """Build the approved definition at `output_dir` feature by feature.
@@ -127,7 +127,12 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
     from services.blueprint.service import BlueprintService
 
     say = emit or (lambda _e, _d: None)
-    svc = BlueprintService.load(output_dir=output_dir)
+    # ONE DOCUMENT. The caller's service, when it has one: Crumb's build
+    # entry kept its own copy of the definition while the engineer worked on
+    # another, and the state-settling save at the end wrote the model-phase
+    # document (v27) over the built one (v62) — no page code, no statements,
+    # no policies in what the person was shown (forge-v3, 2026-10-09).
+    svc = svc if svc is not None else BlueprintService.load(output_dir=output_dir)
     journal = Journal(output_dir)
     journal.acquire()
     try:
@@ -173,11 +178,13 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
                          scope=scope)
             reports.append(report)
             _reload(svc, output_dir)
-            failed = list(getattr(report, "failed", []) or [])
             if getattr(report, "paused_because", ""):
                 stopped = f"paused: {report.paused_because}"
                 journal.write("run:paused", feature=feature.id, why=report.paused_because)
                 break
+            failed = _mend_failed_nodes(svc, output_dir, app_root, feature, report, per, run, fix, budget,
+                                        journal, say, executor=executor, description=description,
+                                        observer=observer, observer_agent=observer_agent, scope=scope)
             proof = _prove_feature(svc, output_dir, feature, prove, fix, budget, journal, say)
             row = {"feature": feature.id, "name": feature.name, "pages": feature.pages,
                    "failed_nodes": failed, **proof}
@@ -189,9 +196,18 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             reports.append(run(svc, executor, plan=last, commit=True, user_request=description,
                                app_root=app_root, observer=observer, observer_agent=observer_agent))
             _reload(svc, output_dir)
-            whole = prove(svc, output_dir) if statements_exist(svc.doc) else {}
+            # EVERY STATEMENT ONCE MORE, AND WHAT A LATER FEATURE BROKE IS
+            # FIXED: Crumb's customer landed on /orders once the Orders
+            # feature existed, and the statement from the first feature failed
+            # at the end with nobody sent to mend it (2026-10-09).
+            whole_feature = Feature(id="APP", name="the whole application",
+                                    pages=[str(p.get("id")) for p in plan_pages(svc.doc)],
+                                    requirements=[str(r.get("id")) for r in svc.doc.get("requirements") or []
+                                                  if isinstance(r, dict) and r.get("id")])
+            whole = (_prove_feature(svc, output_dir, whole_feature, prove, fix, budget, journal, say, ids=None)
+                     if statements_exist(svc.doc) else {})
             journal.write("whole:done", passed=whole.get("passed"), statements=whole.get("statements"),
-                          failing=whole.get("failing"), untried=whole.get("untried"))
+                          failing=whole.get("failing"), untried=whole.get("untried"), fixed=whole.get("fixed"))
         else:
             whole = {}
         out = {"features": results, "statements": whole, "stopped": stopped,
@@ -202,19 +218,77 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
         journal.release()
 
 
+def node_failure_ask(feature: Feature, failures: dict[str, str]) -> str:
+    """What the unattended turn is asked when a build node failed for a
+    feature — Crumb's assemble refused /baker/items: "needs a workflow that
+    does not exist yet: unmark an item as sold out" (2026-10-09)."""
+    lines = "\n".join(f"- {node}: {why[:400]}" for node, why in failures.items())
+    return (
+        f"While building {feature.label}, the build could not finish:\n{lines}\n\n"
+        "Fix the cause where it lives — declare the process a screen needs and write its steps, "
+        "mend the screen so it uses what exists, add the field or record the data model lacks — then "
+        "write the screen again if it was the screen. Nobody is waiting to answer questions: decide "
+        "from the definition and act. A fault in the platform itself is reported with "
+        "`report_platform_fault`, not patched around."
+    )
+
+
+def _mend_failed_nodes(svc: Any, output_dir: str, app_root: str, feature: Feature, report: Any, per: list[str],
+                       run: Callable[..., Any], fix: Callable[[str, str], dict], budget: Budget,
+                       journal: Journal, say: Callable[[str, dict], None], **run_kw: Any) -> list[str]:
+    """A node that failed for this feature goes to a fix turn with its
+    reason, and the failed nodes run once more. Returns what still failed."""
+    failed = [f for f in (getattr(report, "failed", None) or [])]
+    if not failed or budget.over():
+        return failed
+    because = getattr(report, "failed_because", None) or {}
+    nodes = sorted({str(f).split(":", 1)[0] for f in failed})
+    reasons = {n: "; ".join(str(because.get(f) or "") for f in failed if str(f).split(":", 1)[0] == n)
+               or "it failed" for n in nodes}
+    journal.write("mend:start", feature=feature.id, nodes=nodes, reasons=reasons)
+    say("message", {"text": f"{feature.label}: {', '.join(nodes)} did not finish — finding the cause and "
+                            f"fixing it before trying the feature."})
+    try:
+        answer = fix(output_dir, node_failure_ask(feature, reasons))
+    except Exception as exc:  # noqa: BLE001 — one fix turn never ends the build
+        logger.warning("[engineer] mend turn failed: %s", exc)
+        answer = {"status": "failed", "answer": str(exc)}
+    journal.write("mend:end", feature=feature.id, status=(answer or {}).get("status"),
+                  said=str((answer or {}).get("answer") or "")[:400])
+    _reload(svc, output_dir)
+    again = run(svc, run_kw.get("executor"), plan=[k for k in per if k in nodes or k in ("assemble",)],
+                commit=True, user_request=run_kw.get("description", ""), app_root=app_root,
+                observer=run_kw.get("observer"), observer_agent=run_kw.get("observer_agent"),
+                scope=run_kw.get("scope"))
+    _reload(svc, output_dir)
+    still = list(getattr(again, "failed", None) or [])
+    journal.write("mend:done", feature=feature.id, still=still)
+    return still
+
+
 def statements_exist(doc: Mapping[str, Any]) -> bool:
     from services.expects.statements import expectations
     return bool(expectations(dict(doc)))
 
 
+def plan_pages(doc: Mapping[str, Any]) -> list[dict]:
+    return [p for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("id")
+            and p.get("status") != "DEPRECATED"]
+
+
 def _prove_feature(svc: Any, output_dir: str, feature: Feature, prove: Callable[..., dict],
                    fix: Callable[[str, str], dict], budget: Budget, journal: Journal,
-                   say: Callable[[str, dict], None]) -> dict:
+                   say: Callable[[str, dict], None], ids: list[str] | None = ...) -> dict:
     """The feature's statements, tried; what fails handed to its authors by
-    the statements' own give-back, then to the engineer's fix turns."""
+    the statements' own give-back, then to the engineer's fix turns. `ids`
+    None means every statement (the whole-app pass)."""
     from services.blueprint.repair_groups import by_cause
+    from services.expects.statements import expectations
 
-    ids = statements_of(feature, svc.doc)
+    if ids is ...:
+        ids = statements_of(feature, svc.doc)
+    if ids is None:
+        ids = [str(e.get("id")) for e in expectations(dict(svc.doc))]
     if not ids:
         return {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": []}
     out = prove(svc, output_dir, only=ids, give_back=True)
