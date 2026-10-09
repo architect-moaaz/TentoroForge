@@ -318,6 +318,31 @@ def _label(st: dict) -> str:
     return str(st.get("id") or "") or repr(str(st.get("says") or "")[:60])
 
 
+def named_through(given: list[dict], ref: str, seen: set[str] | None = None) -> str:
+    """The name a given record is found by on a screen: its own, else that of
+    a record it points at — a cart line shows its product's name, and has no
+    name field to give (torob2, 2026-10-09). "" when there is none."""
+    seen = seen or set()
+    if ref in seen:
+        return ""
+    seen.add(ref)
+    g = next((x for x in given if isinstance(x, dict) and str(x.get("ref")) == ref), None)
+    if g is None:
+        return ""
+    values = g.get("values") or {}
+    own = next((v for v in values.values() if isinstance(v, str) and v.strip() and not v.startswith("@")
+                and not _VALUE_REF.match(v.strip())), "")
+    if own:
+        return own
+    for v in values.values():
+        m = _VALUE_REF.match(v.strip()) if isinstance(v, str) else None
+        if m:
+            found = named_through(given, m.group(1), seen)
+            if found:
+                return found
+    return ""
+
+
 def given_order(given: list[dict]) -> list[dict] | None:
     """The given records in an order each one's `@ref`s are made before it;
     None when they point at each other in a loop."""
@@ -405,6 +430,15 @@ def statement_findings(doc: dict, st: dict) -> list[str]:
             kinds = {str(f.get("name")): str(f.get("type") or "").lower() for f in ent.get("fields") or []
                      if isinstance(f, dict)}
             filled = stamped(doc, ent)
+            # A RECORD THAT BELONGS TO SOMEONE is made as them. The admin's
+            # orders were refused, and nothing could say whose they were
+            # (torob2, 2026-10-09).
+            user_cols, _guest_cols = stamp_columns(doc, ent)
+            owner_required = any(f.get("required") for f in ent.get("fields") or []
+                                 if isinstance(f, dict) and str(f.get("name")) in user_cols)
+            if owner_required and not g.get("self") and str(g.get("as") or GUEST) == GUEST:
+                out.append(f"{me}: the given {ref!r} is a {ent.get('name')}, which belongs to someone — give it "
+                           f"`as` the role of the person it belongs to")
             needed = [str(f.get("name")) for f in ent.get("fields") or [] if isinstance(f, dict)
                       and f.get("required") and str(f.get("type") or "").lower() == "uuid"
                       and str(f.get("name")) not in ("id", *filled) and str(f.get("name")) not in (g.get("values") or {})]
@@ -519,11 +553,9 @@ def statement_findings(doc: dict, st: dict) -> list[str]:
             if not (c.get("record") or str(c.get("text") or "").strip()):
                 out.append(f"{me}: {where} looks for nothing — give it a given `record` or `text`")
             elif c.get("record"):
-                g = refs.get(str(c["record"]).lstrip("@")) or {}
-                if g and not any(isinstance(v, str) and v.strip() and not v.startswith("@")
-                                 for v in (g.get("values") or {}).values()):
-                    out.append(f"{me}: {where} looks for {c['record']!r} on a screen, and it has no name or "
-                               f"title to be found by — give it one")
+                if not named_through(st.get("given") or [], str(c["record"]).lstrip("@")):
+                    out.append(f"{me}: {where} looks for {c['record']!r} on a screen, and neither it nor a record "
+                               f"it points at has a name or title to be found by — give one of them one")
         if kind == "told" and c.get("told") not in ("success", "refusal", "error"):
             out.append(f"{me}: {where} is `told` without saying which: success, refusal or error")
         if kind == "gets" and c.get("page") and str(c["page"]) in pages_by_id:

@@ -61,3 +61,13 @@ def test_a_page_that_names_no_process_it_could_start_keeps_its_details():
     assert dropped == ["/checkout: JOURNEY-006"]
     assert "dispatches" not in result.proposals[0].body, "a guess at a process is left out, not fatal to the feature"
     assert result.proposals[1].body["dispatches"] == "FLOW-001"
+
+
+def test_one_invented_page_state_costs_that_state_not_the_feature():
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal
+    from services.blueprint.executors import drop_values_no_list_allows
+    result = AgentResult(task_id="t", agent="page_design", proposals=[
+        ArtifactProposal("pages", "/checkout", {"id": "PAGE-004", "route": "/checkout",
+                                                "states": ["loading", "noSelection", "populated"]})])
+    assert drop_values_no_list_allows(result) == ["/checkout: states ['noSelection']"]
+    assert result.proposals[0].body["states"] == ["loading", "populated"]

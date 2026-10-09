@@ -3159,6 +3159,38 @@ def drop_unknown_dispatches(result: AgentResult, doc: dict, subject: str = "") -
     return dropped
 
 
+def drop_values_no_list_allows(result: AgentResult, subject: str = "") -> list[str]:
+    """A page field that is a list of closed values (`states`) keeps only the
+    values the contract allows. ToroCommerce's checkout invented a
+    `noSelection` state, the whole document failed its contract, and every
+    page of the checkout feature lost its details — twice (torob2,
+    2026-10-09). One invented value costs that value, not the feature.
+    The allowed values are read from the contract itself."""
+    import json as _json
+    from services.blueprint.service import CONTRACT_PATH
+    try:
+        props = _json.loads(Path(CONTRACT_PATH).read_text("utf-8"))["properties"]["pages"]["items"]["properties"]
+    except Exception:  # noqa: BLE001 — no contract to read, nothing to drop
+        return []
+    closed = {k: set(v["items"]["enum"]) for k, v in props.items()
+              if v.get("type") == "array" and isinstance(v.get("items"), dict) and v["items"].get("enum")}
+    dropped: list[str] = []
+    for proposal in getattr(result, "proposals", None) or []:
+        body = getattr(proposal, "body", None)
+        if getattr(proposal, "section", "") != "pages" or not isinstance(body, dict):
+            continue
+        for key, allowed in closed.items():
+            values = body.get(key)
+            if isinstance(values, list):
+                bad = [v for v in values if v not in allowed]
+                if bad:
+                    body[key] = [v for v in values if v in allowed]
+                    dropped.append(f"{body.get('route') or body.get('id')}: {key} {bad}")
+    for d in dropped:
+        logger.info("[page_details] %s: dropped values the contract does not allow — %s", subject, d)
+    return dropped
+
+
 def pin_page_identity(svc: Any, subject: str, result: AgentResult) -> None:
     """Make the contract author's reply update the declared pages, and only
     those.
@@ -4192,6 +4224,7 @@ def make_executor(
             with svc.lock:
                 pin_page_identity(svc, spec.subject, result)
                 drop_unknown_dispatches(result, svc.doc, spec.subject)
+                drop_values_no_list_allows(result, spec.subject)
         elif spec.node == "data_model":
             pin_entity_set(result)
         elif spec.node == "entity_fields":
@@ -4443,6 +4476,7 @@ def make_executor(
                 with svc.lock:
                     pin_page_identity(svc, spec.subject, parsed)
                     drop_unknown_dispatches(parsed, svc.doc, spec.subject)
+                    drop_values_no_list_allows(parsed, spec.subject)
                     if spec.attempt >= 2:
                         # The last attempt keeps the facts that resolve: a
                         # content plan with one bad source must not cost the

@@ -260,6 +260,10 @@ export function evaluate(node: ASTNode, ctx: Context): unknown {
 
     case "LogicalExpression": {
       const left = evaluate(node.left, ctx);
+      if (node.operator === "??") {
+        // Empty is null, undefined or "": a field never filled reads as "".
+        return left === null || left === undefined || left === "" ? evaluate(node.right, ctx) : left;
+      }
       if (node.operator === "or") {
         return Boolean(left) || Boolean(evaluate(node.right, ctx));
       }

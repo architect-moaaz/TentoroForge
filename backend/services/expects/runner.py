@@ -555,8 +555,38 @@ class Trial:
         for f in (ent.get("labelField"), "name", "title", "label"):
             if f and isinstance(values.get(f), str) and values[f].strip():
                 return values[f]
-        return next((v for v in (g.get("values") or {}).values()
-                     if isinstance(v, str) and v.strip() and not v.startswith("@")), "")
+        ids = {str(x.get("id")) for x in self.given.values()}
+        own = next((v for v in (g.get("values") or {}).values()
+                    if isinstance(v, str) and v.strip() and not v.startswith("@") and v not in ids
+                    and not re.fullmatch(r"[0-9a-f-]{36}", v.strip())), "")
+        if own:
+            return own
+        # A record with no name of its own is shown by the one it points at:
+        # a cart line by its product's name — the nearest name or title along
+        # what it points at, before any other value.
+        return self._name_along(g) or ""
+
+    def _name_along(self, g: dict) -> str:
+        seen: set[int] = {id(g)}
+        frontier = [g]
+        fallback = ""
+        while frontier:
+            nxt = []
+            for cur in frontier:
+                for v in (cur.get("values") or {}).values():
+                    pointed = next((x for x in self.given.values() if id(x) not in seen and x.get("id") == v), None)
+                    if pointed is None:
+                        continue
+                    seen.add(id(pointed))
+                    vals = {**(pointed.get("row") or {}), **(pointed.get("values") or {})}
+                    for f in ("name", "title", "fullName", "label"):
+                        if isinstance(vals.get(f), str) and vals[f].strip():
+                            return vals[f]
+                    fallback = fallback or next((x for x in (pointed.get("values") or {}).values()
+                                                 if isinstance(x, str) and x.strip() and not x.startswith("@")), "")
+                    nxt.append(pointed)
+            frontier = nxt
+        return fallback
 
     # ── addresses ──────────────────────────────────────────────────────────
 
@@ -701,6 +731,10 @@ class Trial:
 
     def do(self, p: Person, st: dict, i: int, what: str) -> None:
         says = str(st.get("says") or "")
+        if not p.url or p.url.startswith("about:"):
+            # Someone who acts before opening anything starts where anyone
+            # arriving does: the application's front page.
+            self.goto(p, "/")
         self.where = self.page_at(p.url) or self.where
         key = resolve.Recipes.key(str(st.get("id") or says[:40]), i, what)
         recipe = self.recipes.get(key)

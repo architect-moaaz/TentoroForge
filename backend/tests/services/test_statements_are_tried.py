@@ -130,7 +130,7 @@ def test_an_email_is_not_a_record_reference():
 def test_a_record_looked_for_on_a_screen_needs_a_name():
     e = copy.deepcopy(BOOKS)
     e["given"][0]["values"] = {"isOpen": True}
-    assert any("no name or title" in f for f in st.statement_findings(_doc(), e))
+    assert any("has a name or title to be found by" in f for f in st.statement_findings(_doc(), e))
 
 
 # --------------------------------------------------------------------------- #
@@ -366,3 +366,27 @@ def test_text_looked_for_on_a_screen_comes_from_a_record_or_the_requirements():
     for fine in ("Tuesday 10:00", "book an open slot", "19.99"):
         e["then"][0]["text"] = fine
         assert st.statement_findings(_doc(), e) == [], fine
+
+
+def test_a_record_with_no_name_is_found_by_what_it_points_at():
+    t = _trial()
+    t.given["shirt"] = {"id": "p1", "entity": "ENTITY-001", "values": {"name": "Linen Shirt"}, "row": {}}
+    t.given["size"] = {"id": "v1", "entity": "ENTITY-001", "values": {"productId": "p1", "size": "M"}, "row": {}}
+    t.given["line"] = {"id": "c1", "entity": "ENTITY-002", "values": {"variantId": "v1", "quantity": 2}, "row": {}}
+    assert t.label("line") == "Linen Shirt", "a cart line is shown by its product's name"
+    e = copy.deepcopy(BOOKS)
+    e["given"] = [{"ref": "ten", "entity": "ENTITY-001", "values": {"label": "Tuesday 10:00"}},
+                  {"ref": "visit", "entity": "ENTITY-002", "values": {"slotId": "@ten"}}]
+    e["then"] = [{"check": "sees", "page": "PAGE-003", "record": "visit"}]
+    assert st.statement_findings(_doc(), e) == [], "found by the slot it points at, no name field needed"
+
+
+def test_a_record_that_belongs_to_someone_is_made_as_them():
+    doc = _doc()
+    doc["security"] = {"ownershipRules": [{"entity": "Visit", "column": "patientId", "kind": "scope", "scope": "user"}]}
+    doc["data"]["entities"][1]["fields"].append({"name": "patientId", "type": "uuid", "required": True})
+    e = copy.deepcopy(BOOKS)
+    e["given"].append({"ref": "v", "entity": "ENTITY-002", "values": {"slotId": "@ten"}})
+    assert any("belongs to someone" in f for f in st.statement_findings(doc, e)), "made by the admin, it is nobody's"
+    e["given"][-1]["as"] = "ROLE-001"
+    assert not any("belongs to someone" in f for f in st.statement_findings(doc, e))
