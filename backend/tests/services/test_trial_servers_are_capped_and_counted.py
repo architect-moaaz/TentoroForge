@@ -25,7 +25,8 @@ def test_every_dev_server_runs_with_the_heap_cap():
     assert added["NODE_OPTIONS"].startswith("--enable-source-maps --max-old-space-size=")
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
-    assert "env=_capped({" in (root / "services/blueprint/page_review.py").read_text()
+    review = (root / "services/blueprint/page_review.py").read_text()
+    assert "env = _capped({" in review and "start_new_session=True, env=env)" in review
     assert "env=_capped_env({" in (root / "services/blueprint/assembly.py").read_text()
     assert (root / "services/preview_manager.py").read_text().count("env=_capped_env(env)") == 2
 
