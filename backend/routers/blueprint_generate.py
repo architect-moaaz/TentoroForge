@@ -2530,9 +2530,26 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     if approved and phase not in ("define", "model"):
         from services.blueprint import approval as _approval
         svc._carry_gates = [g for g in ("blueprint", "plan") if _approval.state_of(svc.doc, g) == "approved"]
-    report = run(svc, executor, plan=plan, commit=True,
-                 user_request=description, app_root=app_root,
-                 observer=progress, observer_agent=watcher)
+    engineered = approved and phase not in ("define", "model")
+    if engineered:
+        # THE ENGINEER BUILDS IT: one feature at a time, each projected,
+        # built and tried as the people it is for before the next begins
+        # (services/engineer; docs/plans/2026-10-09-engineer-owned-build.md).
+        # The same nodes, executors and checks, in the order of proof — and
+        # the statements are tried as it goes, so nothing is repaired after.
+        from services.engineer.build import build as engineer_build, build_nodes
+        from services.engineer.features import features as _features
+        once, per, last = build_nodes()
+        progress = Progress(emit, total=len([k for k in once if k in plan]) + len(per) * len(_features(svc.doc))
+                            + len([k for k in last if k in plan]))
+        built = engineer_build(output_dir, app_root, emit=emit, description=description, app_name=app_name,
+                               executor=executor, observer_agent=watcher, observer=progress,
+                               done_nodes=set(already))
+        report = built["report"]
+    else:
+        report = run(svc, executor, plan=plan, commit=True,
+                     user_request=description, app_root=app_root,
+                     observer=progress, observer_agent=watcher)
     _carry_approvals(svc, "the approved build wrote it")
     # DEFECT-B-07: a define run left the state at DISCOVERY (the DAG never calls
     # transition()), so GET /blueprint reported DISCOVERY forever and the
@@ -2564,7 +2581,8 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             settled_early = True
             handed_over = _announce_handover(svc.doc, emit, where=Path(output_dir).name)
             emit("state", {"state": early})
-        _finish_unfinished_pages(svc, output_dir, app_root, report, emit)
+        if not engineered:
+            _finish_unfinished_pages(svc, output_dir, app_root, report, emit)
     state = str(svc.doc.get("state") or "")
     if approved:
         # THE BUILD USED TO LEAVE THE STATE WHERE THE DEFINITION LEFT IT. This

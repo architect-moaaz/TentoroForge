@@ -90,14 +90,38 @@ def fix_ask(feature: Feature, items: list[dict]) -> str:
     )
 
 
+def merged(reports: list[Any]) -> Any:
+    """One run report over the engineer's several runs: what every run
+    completed, failed, blocked, repaired or left unrepaired, and the last
+    reason it paused — the shape the build's callers read."""
+    from services.blueprint.orchestrator import RunReport
+    out = RunReport()
+    for r in reports:
+        for name in ("completed", "skipped", "failed", "blocked", "artifacts", "repaired", "change_requests",
+                     "corrections"):
+            for x in getattr(r, name, None) or []:
+                if x not in getattr(out, name):
+                    getattr(out, name).append(x)
+        for name in ("skipped_because", "failed_because", "blocked_because", "degraded", "observed", "unrepaired"):
+            getattr(out, name).update(getattr(r, name, None) or {})
+        if getattr(r, "paused_because", ""):
+            out.paused_because = str(r.paused_because)
+    # A node that failed in one feature and completed in another completed.
+    out.failed = [f for f in out.failed if f not in out.completed]
+    return out
+
+
 def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] | None = None,
           description: str = "", budget_minutes: float = 0, app_name: str = "",
           executor: Any = None, observer_agent: Any = None, observer: Any = None,
+          done_nodes: set[str] | None = None,
           run: Callable[..., Any] | None = None, prove: Callable[..., dict] | None = None,
           fix: Callable[[str, str], dict] | None = None) -> dict:
     """Build the approved definition at `output_dir` feature by feature.
     Returns what was done and proven: ``{features: [...], statements, state,
-    stopped}``. `run`, `prove` and `fix` are the orchestrator's `run`, the
+    stopped, report}``. `done_nodes` are the build-phase nodes an earlier run
+    completed (a resumed build): the once-and-last nodes among them are not
+    run again. `run`, `prove` and `fix` are the orchestrator's `run`, the
     statements' `prove_expectations` and an unattended Smith turn unless a
     caller (a test) hands in its own."""
     from services.blueprint.service import BlueprintService
@@ -116,15 +140,19 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
         plan = features(svc.doc)
         earlier = journal.finished()
         once, per, last = build_nodes()
+        skip = set(done_nodes or ())
+        once = [k for k in once if k not in skip]
+        last = [k for k in last if k not in skip]
+        reports: list[Any] = []
         journal.write("run:start", features=[f.id for f in plan], done_before=earlier,
                       budget_minutes=budget_minutes)
         say("message", {"text": _opening(plan, earlier, app_name)})
         results: list[dict] = []
         stopped = ""
 
-        if not earlier:
-            run(svc, executor, plan=once, commit=True, user_request=description, app_root=app_root,
-                observer=observer, observer_agent=observer_agent)
+        if not earlier and once:
+            reports.append(run(svc, executor, plan=once, commit=True, user_request=description,
+                               app_root=app_root, observer=observer, observer_agent=observer_agent))
             _reload(svc, output_dir)
             journal.write("once:done", nodes=once)
 
@@ -143,6 +171,7 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             report = run(svc, executor, plan=per, commit=True, user_request=description,
                          app_root=app_root, observer=observer, observer_agent=observer_agent,
                          scope=scope)
+            reports.append(report)
             _reload(svc, output_dir)
             failed = list(getattr(report, "failed", []) or [])
             if getattr(report, "paused_because", ""):
@@ -156,9 +185,9 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             journal.write("feature:done", **row)
             say("message", {"text": _said_feature(feature, proof)})
 
-        if not stopped:
-            run(svc, executor, plan=last, commit=True, user_request=description, app_root=app_root,
-                observer=observer, observer_agent=observer_agent)
+        if not stopped and last:
+            reports.append(run(svc, executor, plan=last, commit=True, user_request=description,
+                               app_root=app_root, observer=observer, observer_agent=observer_agent))
             _reload(svc, output_dir)
             whole = prove(svc, output_dir) if statements_exist(svc.doc) else {}
             journal.write("whole:done", passed=whole.get("passed"), statements=whole.get("statements"),
@@ -166,8 +195,8 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
         else:
             whole = {}
         out = {"features": results, "statements": whole, "stopped": stopped,
-               "state": str(svc.doc.get("state") or "")}
-        journal.write("run:end", **{k: v for k, v in out.items() if k != "features"})
+               "state": str(svc.doc.get("state") or ""), "report": merged(reports)}
+        journal.write("run:end", **{k: v for k, v in out.items() if k not in ("features", "report")})
         return out
     finally:
         journal.release()
