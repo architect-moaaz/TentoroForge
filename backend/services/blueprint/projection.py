@@ -1244,6 +1244,9 @@ def project_policies(doc: dict, app_root: str | Path) -> dict[str, Any]:
     locale), life cycles (the engine refuses any other move), time."""
     pol = doc.get("policies") if isinstance(doc.get("policies"), dict) else {}
     ents = {str(e.get("id")): e for e in _live((doc.get("data") or {}).get("entities")) if e.get("id")}
+    # Roles by NAME: the session carries the role's name, and the engine
+    # compares the mover against it.
+    roles = {str(r.get("id")): str(r.get("name") or r.get("id")) for r in _live(doc.get("roles")) if r.get("id")}
     lifecycles = []
     for lc in pol.get("lifecycles") or []:
         if not isinstance(lc, dict):
@@ -1255,7 +1258,7 @@ def project_policies(doc: dict, app_root: str | Path) -> dict[str, Any]:
                            "entity": str(ent.get("name") or ""), "field": str(lc.get("field") or ""),
                            "initial": str(lc.get("initial") or ""),
                            "moves": [{"from": str(m.get("from")), "to": str(m.get("to")),
-                                      "by": [str(r) for r in m.get("by") or []]}
+                                      "by": [roles.get(str(r), str(r)) for r in m.get("by") or []]}
                                      for m in lc.get("moves") or [] if isinstance(m, dict)]})
     money = pol.get("money") if isinstance(pol.get("money"), dict) else {}
     body = {"money": {"currency": str(money.get("currency") or ""),

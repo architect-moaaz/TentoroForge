@@ -5,6 +5,7 @@
 // here, and the encoding follows from the query's own shape, so a chart
 // cannot be drawn against columns its data does not have.
 
+import { localeOf, money } from "./money";
 import * as React from "react";
 import { Table2, BarChart3 } from "lucide-react";
 import { Chart, MetricTile, Gauge, DataGrid, type ChartSelection } from "@tentoroforge/library";
@@ -37,9 +38,11 @@ function humanize(key: string): string {
 function formatCell(v: unknown, format: Format, currency: string): string {
   if (v === null || v === undefined || v === "") return "—";
   if (typeof v !== "number") return String(v);
-  if (format === "currency") return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 2 }).format(v);
-  if (format === "percent") return new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 }).format(v);
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(v);
+  // The application's one currency and locale (`@/sdk/money`); a widget that
+  // names a currency of its own is the multi-currency exception.
+  if (format === "currency") return money(v, { currency: currency || undefined });
+  if (format === "percent") return new Intl.NumberFormat(localeOf(), { style: "percent", maximumFractionDigits: 1 }).format(v);
+  return new Intl.NumberFormat(localeOf(), { maximumFractionDigits: 2 }).format(v);
 }
 
 /** The Chart props a query-backed widget draws with. */

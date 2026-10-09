@@ -128,7 +128,7 @@ def test_the_policies_reach_the_app_as_a_contract(tmp_path):
                              "rules": [{"name": "Flat shipping", "applies": "shipping", "formula": "6.99"}]}
     lc = body["lifecycles"][0]
     assert lc["table"] == "orders" and lc["field"] == "status" and lc["initial"] == "pending"
-    assert {"from": "pending", "to": "processing", "by": ["ROLE-002"]} in lc["moves"]
+    assert {"from": "pending", "to": "processing", "by": ["Merchant"]} in lc["moves"], "roles by name, as the session has them"
     empty = project_policies(DOC, tmp_path / "bare")
     assert json.loads((tmp_path / "bare" / "src" / "contracts" / "policies.json").read_text())["lifecycles"] == []
 

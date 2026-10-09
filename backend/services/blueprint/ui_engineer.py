@@ -458,7 +458,7 @@ const t = useT();  t({ en: "Orders", hi: "ऑर्डर" })
    A page that takes a picture or reads a code uses these: never a placeholder frame standing in for a
    camera, and never a file picker labelled as one.
 
-<WidgetView widget={widgets.x} data={props.x} height?={260} currency?="GBP" action?={<Link …/>} title?={false}
+<WidgetView widget={widgets.x} data={props.x} height?={260} action?={<Link …/>} title?={false}
             onSelect?={(s) => router.push(href(pages.list, {}, { status: s.category }))} />
    Draws a declared widget as its card: a KPI tile, a gauge, a chart with a table toggle, or a list.
    The card shows the widget's own label and description as its title. Say a chart's name ONCE:
@@ -484,7 +484,7 @@ Every one of these renders on its own with plain props; pass resolved data, neve
                    | "sunburst" | "graph" | "map"
          data={rows} xKey="placedAt" series={[{ name: "Revenue", dataKey: "revenue" }]}
          colorKey?="region" yKey? valueKey? sizeKey? labelKey? format?="number" | "currency" | "percent" | "duration"
-         currency?="GBP" encoding?={{ stacked?, horizontal?, sorted?: "asc" | "desc", topN?, valueLabels? }}
+         encoding?={{ stacked?, horizontal?, sorted?: "asc" | "desc", topN?, valueLabels? }}
          height={260} onSelect?={(s: ChartSelection) => …} />
       ECharts, themed from the app's tokens; colours come from a validated palette — do not pass them.
       Rows are QueryRow[] from `query()` (or SeriesPoint[] with xKey="label", dataKey "value").
@@ -512,7 +512,8 @@ Every one of these renders on its own with plain props; pass resolved data, neve
   <PersonCard name="Maya Patel" role="Case manager" email="maya@hotel.test" />
   <ApprovalStepper steps={[{ id: "a", label: "Submitted", status: "complete" | "current" | "pending" | "rejected" }]} />
   <KeyValueList items={[{ label: "Folio", value: "RSV-88037" }]} />      (value is text)
-  <MoneyDisplay value={1240.5} currency="GBP" />
+  <Money value={1240.5} />  and  money(1240.5)   — from "@/sdk/money": the application's one
+                                                   currency and locale, decided in its definition
   <Tag label="Urgent" variant="default" | "primary" | "success" | "warning" | "danger" />
 
 The library's props are typed loosely; the shapes above are the contract. Nothing else the
@@ -602,9 +603,9 @@ What a finished page looks like:
   (and offers the action). Every record page handles a missing optional field with
   a quiet em dash, not "null". Long text truncates with a title attribute.
 - NUMBERS WITH CONTEXT. A figure is a label, a number and, where the data allows, a
-  comparison or a sparkline, laid out as the rhythm's `figures` says. Money is
-  formatted with its currency; dates with
-  Intl.DateTimeFormat (en-GB unless the app says otherwise); relative times for
+  comparison or a sparkline, laid out as the rhythm's `figures` says. Money through
+  `money()` / `<Money>` from "@/sdk/money"; dates with Intl.DateTimeFormat in the
+  application's locale (the brief's `policies.money.locale`); relative times for
   recent events.
 - STATUS AS A SYSTEM. Map each enum value to one tone once (a Record<Enum, string> of
   classes) and use it everywhere on the page: bg-success-subtle text-success-subtle-foreground,
@@ -618,9 +619,12 @@ What a finished page looks like:
   and a real image on its record — never the id. The list of an entity that is
   "Findable by likeness" offers "Find similar": <ImageSearch /> beside the search
   box, and while ?image= (or ?q=) is set, the rows are similar()'s, closest first.
-- MONEY SAYS ITS CURRENCY. A price is shown in the currency its record carries
-  (Intl.NumberFormat with that currency), never a fixed symbol; amounts in different
-  currencies are never added, compared or put in one range — group them by currency.
+- MONEY IS THE APPLICATION'S CURRENCY. Every amount goes through `money(value)` or
+  `<Money value />` from "@/sdk/money", which formats it in the one currency decided for
+  the application (the brief's `policies.money`); never Intl.NumberFormat with a currency,
+  never a currency literal or symbol in the page. A record that carries its own currency
+  field is the one exception: pass it (`money(row.amount, { currency: row.currency })`),
+  and amounts in different currencies are never added, compared or put in one range.
 - NOTHING HIDES UNDER THE APP'S OWN BARS. On a phone the application's tab bar may sit on the
   bottom edge. A bar the page fixes to the bottom (a sticky primary action) sits above it —
   `bottom-[var(--app-bottom-inset,0px)]`, never `bottom-0` — and the page leaves that room under
@@ -878,6 +882,40 @@ summarises through `onSelect`. You may add a chart the brief does not list when 
 Reply with the rationale and the full contents of both files."""
 
 
+def page_policies(doc: dict, page: dict) -> dict:
+    """The decisions this page binds to: the currency and locale every amount
+    is shown in, the life cycles of the records it shows (their states, the
+    moves, who makes them — what its filters and badges are over), and
+    whether a quantity its processes record adds or replaces."""
+    pol = doc.get("policies") if isinstance(doc.get("policies"), dict) else {}
+    if not pol:
+        return {}
+    ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []
+            if isinstance(e, dict) and e.get("id")}
+    data = page.get("data") or {}
+    shown = {str(x) for x in [data.get("primaryEntity"), *(data.get("supportingEntities") or [])] if x}
+    launched = {str(w.get("id")) for w in doc.get("workflows") or []
+                if isinstance(w, dict) and str(page.get("id")) in [str(x) for x in (w.get("launchedFrom") or [])]}
+    roles = {str(r.get("id")): str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    out: dict = {}
+    money = pol.get("money") if isinstance(pol.get("money"), dict) else {}
+    if money.get("currency") or money.get("locale"):
+        out["money"] = {k: money.get(k) for k in ("currency", "locale") if money.get(k)}
+    lifecycles = [{"entity": (ents.get(str(lc.get("entity"))) or {}).get("name"), "field": lc.get("field"),
+                   "initial": lc.get("initial"),
+                   "moves": [{"from": m.get("from"), "to": m.get("to"),
+                              **({"by": [roles.get(str(r), str(r)) for r in m.get("by")]} if m.get("by") else {})}
+                             for m in lc.get("moves") or [] if isinstance(m, dict)]}
+                  for lc in pol.get("lifecycles") or [] if isinstance(lc, dict) and str(lc.get("entity")) in shown]
+    if lifecycles:
+        out["lifecycles"] = lifecycles
+    quantities = [{"workflow": q.get("workflow"), "mode": q.get("mode")}
+                  for q in pol.get("quantities") or [] if isinstance(q, dict) and str(q.get("workflow")) in launched]
+    if quantities:
+        out["quantities"] = quantities
+    return out
+
+
 def _page_brief(doc: dict, page: dict) -> dict:
     from services.blueprint.page_usage import page_requirements
     pages = {str(p.get("id")): p for p in doc.get("pages") or []}
@@ -938,7 +976,15 @@ def _page_brief(doc: dict, page: dict) -> dict:
                     for t in (str(x) for x in page.get("navigatesTo") or []) if t in pages],
         "workflowsLaunchedHere": [{"sdkKey": wkeys.get(str(w.get("id"))), "name": w.get("name"),
                                    "purpose": w.get("purpose"),
-                                   "trigger": (w.get("trigger") or {}).get("detail")} for w in launched],
+                                   "trigger": (w.get("trigger") or {}).get("detail"),
+                                   # WHAT IT WRITES, so the page reads the stored total and the
+                                   # states the process puts records in instead of recomputing
+                                   # or guessing them (E-commerce's £6.99 shown and 0 stored).
+                                   **({"writes": [{"entity": (ents.get(str(x.get("entity"))) or {}).get("name"),
+                                                   "fields": x.get("fields"), "states": x.get("states")}
+                                                  for x in w.get("writes") or [] if isinstance(x, dict)]}
+                                      if w.get("writes") else {})} for w in launched],
+        **({"policies": pol} if (pol := page_policies(doc, page)) else {}),
         "roles": [r.get("name") for r in doc.get("roles") or [] if r.get("id") in (page.get("users") or [])],
         "widgets": page_widget_brief(doc, page),
         # WHAT IT ANSWERS TO: the requirements of its module, of the processes
@@ -1289,6 +1335,24 @@ def _function_bodies(src: str) -> list[str]:
     return bodies
 
 
+#: A currency named in a page: an Intl formatter in currency style, or a
+#: three-letter code passed as one.
+_NAMED_CURRENCY = re.compile(r'style:\s*["\']currency["\']|\bcurrency\s*[:=]\s*\{?\s*["\'][A-Z]{3}["\']')
+
+
+def _hard_coded_money(view: str) -> list[str]:
+    """A page that formats money in a currency of its own.
+
+    E-commerce showed GBP on the catalogue, US$ in the cart and $ at the
+    checkout (2026-10-09): each page had guessed. The currency is the
+    application's one decision; the SDK formats every amount in it."""
+    if _NAMED_CURRENCY.search(view):
+        return ["view.tsx: names a currency (Intl.NumberFormat in currency style, or a currency code). "
+                "Money is the application's one decision: format every amount with `money(value)` or "
+                "`<Money value />` from \"@/sdk/money\"; pass a currency only from a field the record carries."]
+    return []
+
+
 def _simulated_writes(view: str) -> list[str]:
     """A change to records the page only pretends to make.
 
@@ -1567,7 +1631,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         parts = {k: _use_client_first(v) for k, v in parts.items()}
         whole = "\n".join([view, *parts.values()])            # what the screen does, parts and all
         design = _design_findings(doc, page, whole)
-        errors = (_static_findings(load, view) + _simulated_writes(whole) + _unwired_actions(doc, page, whole)
+        errors = (_static_findings(load, view) + _simulated_writes(whole) + _hard_coded_money(view)
+                  + _unwired_actions(doc, page, whole)
                   + _unfollowed_flows(doc, page, whole)
                   + _unread_handoffs(doc, page, load, whole)
                   + typecheck(doc, app_root, str(page.get("id")), load, view, parts=parts))
@@ -1816,7 +1881,7 @@ def _write_part(doc: dict, page: dict, part: dict, app_root: Path, call: Any, wr
             continue
         code = _use_client_first(str(body.get("code") or ""))
         own = [e.replace("view.tsx", f"parts/{part['key']}.tsx") for e in _static_findings("", code)
-               if not e.startswith("load.ts:")] + _simulated_writes(code)
+               if not e.startswith("load.ts:")] + _simulated_writes(code) + _hard_coded_money(code)
         compiled = typecheck(doc, app_root, pid, load, view, parts={**siblings, part["key"]: code})
         errors = own + [e for e in compiled if e.startswith(f"parts/{part['key']}.tsx")]
         if not errors:
