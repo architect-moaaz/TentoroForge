@@ -187,6 +187,11 @@ def _listening(port: int | None) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def _capped(env: dict) -> dict:
+    from services.dev_servers import capped_env
+    return capped_env(env)
+
+
 class RunningApp:
     """The generated app, its database up and its dev server serving — beside
     whatever the person is already running, never over it."""
@@ -208,6 +213,23 @@ class RunningApp:
         self._sink: Any = None
 
     def __enter__(self) -> "RunningApp":
+        # ONE OF A FEW AT ONCE (`dev_servers.TrialSlot`): two trial servers
+        # beside each other filled the host (forge-v3, 2026-10-09).
+        from services import dev_servers
+        self._slot = dev_servers.TrialSlot()
+        try:
+            self._slot.acquire()
+        except dev_servers.SlotUnavailable as exc:
+            self._slot = None
+            raise ReviewUnavailable(str(exc)) from exc
+        try:
+            return self._enter()
+        except BaseException:
+            self._slot.release()
+            self._slot = None
+            raise
+
+    def _enter(self) -> "RunningApp":
         from services import app_databases
         if app_databases.server():
             # NO DOCKER IN THE PLATFORM'S CONTAINER (forge-v3): the app's
@@ -254,13 +276,13 @@ class RunningApp:
             ["npx", "next", "dev", "--port", str(self.port)], cwd=self.root,
             stdout=sink, stderr=subprocess.STDOUT if self.log is not None else subprocess.DEVNULL,
             start_new_session=True,
-            env={**os.environ, "BROWSER": "none",
+            env=_capped({**os.environ, "BROWSER": "none",
                  # The preview secret, so a session minted for a role the
                  # administrator does not hold is a session this server accepts.
                  **boot_env(self.base),
                  # Also what the SDK's empty state answers to: only this server
                  # builds into `.next-review`.
-                 "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2]})
+                 "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2]}))
         from services import dev_servers
         dev_servers.track(self.proc.pid, port=self.port, root=self.root, kind="review")
         deadline = time.monotonic() + 180
@@ -274,6 +296,15 @@ class RunningApp:
         raise ReviewUnavailable("the dev server did not start within 180s")
 
     def __exit__(self, *exc: Any) -> None:
+        try:
+            self._stop()
+        finally:
+            slot = getattr(self, "_slot", None)
+            if slot is not None:
+                slot.release()
+                self._slot = None
+
+    def _stop(self) -> None:
         if self.proc is not None:
             from services import dev_servers
             dev_servers.forget(self.proc.pid)

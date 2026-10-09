@@ -53,6 +53,77 @@ TOMBSTONE_S = 24 * 3600
 REAP_EVERY_S = 60
 
 
+#: The heap every app dev server runs with, in MB. A generated app's page pulls
+#: ~6,700 modules and `next dev` keeps every page it has compiled: a trial
+#: server reached 7.5 GB, a backend worker missed its health ping, and the
+#: kernel killed the server (forge-v3, 2026-10-09 12:42). Capped, a runaway
+#: server fails on its own instead of taking the host and everyone's turns.
+HEAP_MB = int(os.environ.get("FORGE_DEV_SERVER_HEAP_MB") or 2560)
+
+#: How many dev servers for trying an app — the statements, Smith's trials,
+#: the page review — may run at once. More wait for a slot.
+MAX_TRIALS = int(os.environ.get("FORGE_MAX_TRIAL_SERVERS") or 2)
+
+#: How long a trial waits for a slot before it is said to be unavailable.
+SLOT_WAIT_S = float(os.environ.get("FORGE_TRIAL_SLOT_WAIT_S") or 900)
+
+
+def capped_env(env: dict[str, str]) -> dict[str, str]:
+    """`env` with the dev server's heap cap in `NODE_OPTIONS` (one already
+    there is kept)."""
+    opts = str(env.get("NODE_OPTIONS") or "")
+    if "--max-old-space-size" in opts or HEAP_MB <= 0:
+        return dict(env)
+    return {**env, "NODE_OPTIONS": f"{opts} --max-old-space-size={HEAP_MB}".strip()}
+
+
+class SlotUnavailable(RuntimeError):
+    """Every slot for trying an app stayed taken for the whole wait."""
+
+
+class TrialSlot:
+    """One of `MAX_TRIALS` places to run an app's dev server for a trial.
+
+    A lock file per slot in the directory every worker shares, held with
+    `flock`: released when it is let go, and by the kernel when the process
+    holding it dies — a worker killed mid-trial never strands a slot."""
+
+    def __init__(self, *, wait_s: float | None = None, slots: int | None = None):
+        self.wait_s = SLOT_WAIT_S if wait_s is None else wait_s
+        self.slots = max(1, MAX_TRIALS if slots is None else slots)
+        self._fh: Any = None
+
+    def acquire(self) -> int:
+        import fcntl
+
+        DIR.mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + self.wait_s
+        while True:
+            for i in range(self.slots):
+                fh = open(DIR / f"trial-slot-{i}.lock", "a+")  # noqa: SIM115 — held until release
+                try:
+                    fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    fh.close()
+                    continue
+                self._fh = fh
+                return i
+            if time.monotonic() >= deadline:
+                raise SlotUnavailable(f"{self.slots} apps were already being tried for the whole "
+                                      f"{self.wait_s:.0f}s wait")
+            time.sleep(2)
+
+    def release(self) -> None:
+        import fcntl
+
+        if self._fh is not None:
+            try:
+                fcntl.flock(self._fh, fcntl.LOCK_UN)
+            finally:
+                self._fh.close()
+                self._fh = None
+
+
 def _path(pgid: int) -> Path:
     return DIR / f"{int(pgid)}.json"
 

@@ -170,7 +170,7 @@ async def start_project_environment(
     proc = await asyncio.create_subprocess_exec(
         "npx", "next", "dev", "--port", str(port),
         cwd=output_dir,
-        env=env,
+        env=_capped_env(env),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         preexec_fn=os.setsid,
@@ -256,6 +256,12 @@ async def stop_project_environment(project_short_id: str) -> bool:
 
     return True
 
+
+
+def _capped_env(env: dict) -> dict:
+    """The dev server's heap cap (`dev_servers.HEAP_MB`)."""
+    from services.dev_servers import capped_env
+    return capped_env(env)
 
 def get_environment_status(project_short_id: str) -> dict | None:
     """Return the port info for a running environment, or None."""
@@ -385,7 +391,7 @@ async def _restart_preview_server(project_short_id: str) -> bool:
     new_proc = await asyncio.create_subprocess_exec(
         "npx", "next", "dev", "--port", str(port),
         cwd=output_dir,
-        env=env,
+        env=_capped_env(env),
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
         preexec_fn=os.setsid,
