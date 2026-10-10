@@ -313,6 +313,20 @@ async def _start_timer_scheduler():
 
 
 @app.on_event("startup")
+async def _close_orphaned_ledgers():
+    """A run ledger left open by the process before this one is closed, so
+    the panel does not read a killed build as running (`run_registry`)."""
+    import logging
+
+    from services import run_registry
+    from services.project_paths import OUTPUT_ROOT
+    closed = run_registry.close_orphaned_ledgers(OUTPUT_ROOT)
+    if closed:
+        logging.getLogger("forge.startup").info("[ledgers] closed %d left open by the last process: %s",
+                                                len(closed), ", ".join(closed[:6]))
+
+
+@app.on_event("startup")
 async def _start_dev_server_reaper():
     """Ends the app servers nobody is using — see `services.dev_servers`."""
     from services import dev_servers

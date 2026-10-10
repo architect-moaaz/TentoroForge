@@ -23,6 +23,8 @@ which did, and survives to be audited afterwards. This answers one question —
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -217,6 +219,41 @@ def ledger_snapshot(output_dir: str | Path, *, turns: bool = True) -> dict[str, 
             out["elapsedMs"] = going.get("elapsedMs", out.get("elapsedMs"))
             return out
     return newest
+
+
+def close_orphaned_ledgers(root: str | Path) -> list[str]:
+    """A RESTART CLOSES WHAT IT KILLED. Every ledger is written by this
+    process; one still open when the process starts belonged to the one
+    before, and nothing it recorded is going to end. Left open, the panel
+    read a killed engineer build as "Building…" for three minutes after
+    the restart and took no Build press (Ecom L1, 2026-10-11). Each is
+    closed with `run:crashed`, which is what a poll would have found later.
+    Returns the ids closed."""
+    closed: list[str] = []
+    root = Path(root)
+    if not root.is_dir():
+        return closed
+    for runs in root.glob("*/.forge/runs"):
+        for path in runs.glob("*.jsonl"):
+            try:
+                with path.open("rb") as fh:
+                    fh.seek(0, os.SEEK_END)
+                    size = fh.tell()
+                    fh.seek(max(0, size - 4096))
+                    tail = fh.read().decode("utf-8", "replace").strip().splitlines()
+                last = json.loads(tail[-1]) if tail else None
+            except (OSError, ValueError):
+                continue
+            if not last or str(last.get("event") or "") in ("run:end", "run:crashed"):
+                continue
+            try:
+                with path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"event": "run:crashed", "error": "the platform restarted while it ran",
+                                         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}) + "\n")
+                closed.append(path.stem)
+            except OSError:
+                continue
+    return closed
 
 
 def _is_turn(path: str | Path) -> bool:
