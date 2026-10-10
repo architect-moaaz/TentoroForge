@@ -26,7 +26,6 @@ between the first feature node and the last.
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -90,39 +89,36 @@ class _Pulse:
 
 logger = logging.getLogger(__name__)
 
-#: The build-phase nodes that are one feature's at a time. The slice is
-#: closed by `build_nodes`: a node between two of these (`apis`) is a
-#: feature node too, or the graph's order is broken.
+#: The build-phase nodes that LAND the application in the tree: the
+#: layouts, the code, the projections, the build. Everything else — the
+#: contracts, the processes and their steps, the rules, the analytics, the
+#: flows, the statements — is authored once, for the whole application, in
+#: the opening, the graph's way.
 #:
-#: WHAT IS WRITTEN ONCE IS WRITTEN ONCE. The contracts, the processes, the
-#: rules, the analytics, the flows and the statements were authored per
-#: feature, each call carrying the whole section and returning it unchanged:
-#: seven features, seven calls where the graph made one, each bigger than
-#: the last — ecom v2 cost $15.76 for three of seven features where the
-#: graph built a whole e-commerce app for $11.62 (forge-v3, 2026-10-10).
-#: They are authored once more for the whole application, in the opening,
-#: the graph's way; what is a feature's is what lands it: its processes'
-#: steps, its screens' layouts and code, the projections, the build — then
-#: its proof, before the next feature's code is written.
-PER_FEATURE: tuple[str, ...] = (
-    "workflow_steps", "page_layouts", "backend", "page_code", "frontend", "integration", "assemble",
-)
-#: The feature nodes that LAND the feature in the tree — the layouts, the
-#: code, the projections, the build. They wait for the previous feature's
-#: proof; the others — the authoring, which writes the definition and calls
-#: the model — run ahead for the next feature while this one is on the
-#: Workbench (`OVERLAP`). One tree, one build, one trial at a time; the
-#: writing need not wait for them.
-LANDING: tuple[str, ...] = ("page_layouts", "backend", "page_code", "frontend", "integration", "assemble")
-#: Whether the next feature is authored while the current one lands and is proven.
-OVERLAP = True
+#: LANDED ONCE, PROVEN FEATURE BY FEATURE. Each feature was landed and
+#: proven in turn: a production build and a trial run per feature, seven
+#: builds for seven features, and the shared sections authored seven times
+#: (ecom v2: $15.76 and 85 minutes for three of seven features; the graph
+#: built a whole e-commerce app for $11.62 in 35). Now every screen and
+#: process is written and built in one pass, as the graph did, and the
+#: features are the order of PROVING and fixing: each tried as the people it
+#: is for, what fails handed to its authors and then to Smith, before the
+#: next feature's statements are tried. One build, one tree; a fix that
+#: changes code rebuilds once.
+PER_FEATURE: tuple[str, ...] = ("page_layouts", "backend", "page_code", "frontend", "integration", "assemble")
+#: What runs after the landing and the proofs: what the build remembers and
+#: the check of the definition against itself.
+LAST: tuple[str, ...] = ("memory", "verification")
 #: A feature node that writes once for the whole application and is not
 #: written again for the next feature: the section it writes, once present.
 ONCE_WRITTEN: dict[str, str] = {"ui_direction": "composition"}
-#: How many unattended fix turns a feature's failing statements get.
-FIX_ROUNDS = 2
-#: Steps an unattended fix turn may take.
-FIX_STEPS = 26
+#: How many unattended fix turns a feature's failing statements get: one.
+#: Its authors have had their look first (the statements' own give-back);
+#: a second Smith round rarely found what the first did not, and cost the same.
+FIX_ROUNDS = 1
+#: Steps an unattended fix turn may take: reproduce, find the cause, change
+#: it, try it. What needs more than that is reported, not chased.
+FIX_STEPS = 15
 #: Fix turns per round at most — the causes, not every statement.
 FIX_TURNS_PER_ROUND = 4
 
@@ -166,7 +162,7 @@ def build_nodes() -> tuple[list[str], list[str], list[str]]:
     for k in PER_FEATURE:
         below |= descendants(k)
     per = [k for k in order if k in per_set or (k in below and descendants(k) & per_set)]
-    last = [k for k in order if k not in per and k in below]
+    last = [k for k in order if k not in per and (k in below or k in LAST)]
     once = [k for k in order if k not in per and k not in last]
     return once, per, last
 
@@ -191,52 +187,6 @@ def first_nodes(plan: list[str], doc: Mapping[str, Any] | None = None) -> tuple[
             f"behind a login. Keep it on the one people sign up as; make the other a record linked to it "
             f"(a `userId` reference to that entity) or a role of it. Keep every other entity as declared.")
     return [k for lvl in levels() for k in lvl if k in asked and k not in per and k not in last], scope
-
-
-def pending_feature_nodes(doc: Mapping[str, Any], per: list[str],
-                          plan: list[Feature]) -> tuple[list[str], dict[str, list[str]]]:
-    """Once every feature has run: the feature nodes with pending subjects
-    no feature claimed (a process nothing launches, a statement group about
-    no feature's requirements), with the services and projections of the
-    slice after them — and, per node, the unclaimed subjects, so the sweep
-    writes those and nothing a feature already owns. Empty when every
-    pending subject is some feature's."""
-    from services.blueprint.orchestrator import DAG, pending_subjects
-    unclaimed: dict[str, list[str]] = {}
-    for k in per:
-        node = DAG.get(k)
-        if node is None or node.kind != "agent" or not node.fanout:
-            continue
-        pending = pending_subjects(node, dict(doc))
-        if not pending:
-            continue
-        claimed: set[str] = set()
-        for i, f in enumerate(plan):
-            claimed |= set(subjects_of(f, k, doc, pending, first=(i == 0)))
-        left = [s for s in pending if s not in claimed]
-        if left:
-            unclaimed[k] = left
-    if not unclaimed:
-        return [], {}
-    first = min(per.index(k) for k in unclaimed)
-    return [k for i, k in enumerate(per) if k in unclaimed or (i > first and DAG[k].kind != "agent")], unclaimed
-
-
-class _Unclaimed:
-    """`orchestrator.Scope` for the sweep: a node authors only the subjects
-    no feature claimed; a service or projection runs whole."""
-
-    feature = Feature(id="SWEEP", name="what no feature claimed")
-
-    def __init__(self, subjects: dict[str, list[str]]):
-        self._subjects = subjects
-
-    def subjects(self, node: str, doc: Mapping[str, Any], pending: list[str]) -> list[str]:
-        mine = self._subjects.get(node)
-        return pending if mine is None else [s for s in pending if s in set(mine)]
-
-    def brief(self, node: str, subject: str) -> str:
-        return ""
 
 
 def incomplete_nodes(doc: Mapping[str, Any], output_dir: str) -> list[str]:
@@ -284,18 +234,12 @@ def merged(reports: list[Any]) -> Any:
     return out
 
 
-def split_feature_nodes(per: list[str]) -> tuple[list[str], list[str]]:
-    """``(authoring, landing)``: the feature nodes that write the definition,
-    and the ones that land it in the tree, each in the graph's order."""
-    return [k for k in per if k not in LANDING], [k for k in per if k in LANDING]
-
-
 def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] | None = None,
           description: str = "", budget_minutes: float = 0, app_name: str = "",
           executor: Any = None, observer_agent: Any = None, observer: Any = None,
           done_nodes: set[str] | None = None, svc: Any = None, plan: list[str] | None = None,
           run: Callable[..., Any] | None = None, prove: Callable[..., dict] | None = None,
-          fix: Callable[[str, str], dict] | None = None, overlap: bool | None = None) -> dict:
+          fix: Callable[[str, str], dict] | None = None) -> dict:
     """Build the approved definition at `output_dir` feature by feature.
     Returns what was done and proven: ``{features: [...], statements, state,
     stopped, report}``. `plan` is the graph's nodes still to run (the build
@@ -320,10 +264,6 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
     journal = Journal(output_dir)
     journal.acquire()
     pulse: _Pulse | None = None
-    overlap = OVERLAP if overlap is None else overlap
-    ahead: Any = None                      # the next feature's authoring, in flight
-    ahead_for: str = ""
-    pool: ThreadPoolExecutor | None = None
     try:
         pulse = _Pulse(output_dir)
         run = run or _orchestrator_run
@@ -378,17 +318,31 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
         stopped = ""
         pulse.plan([f for f in plan_features if f.id not in earlier])
 
-        authoring, landing = split_feature_nodes(per)
-        left = [f for f in plan_features if f.id not in earlier]
+        # LAND ONCE: every screen's layout and code, the projections, the
+        # build — one pass, one tree, as the graph did. A node that fails for
+        # some subject goes to a fix turn and runs once more.
+        if per:
+            journal.write("land:start", nodes=per)
+            say("message", {"text": "Writing every screen and building the application."})
+            landed = run(svc, executor, plan=per, commit=True, user_request=description,
+                         app_root=app_root, observer=observer, observer_agent=observer_agent)
+            reports.append(landed)
+            _reload(svc, output_dir)
+            if getattr(landed, "paused_because", ""):
+                stopped = f"paused: {landed.paused_because}"
+                journal.write("run:paused", feature="APP", why=landed.paused_because)
+            else:
+                whole_app = Feature(id="APP", name="the application")
+                unfinished = _mend_failed_nodes(svc, output_dir, app_root, whole_app, landed, per, run, fix, budget,
+                                                journal, say, executor=executor, description=description,
+                                                observer=observer, observer_agent=observer_agent, scope=None)
+                journal.write("land:done", failed=unfinished)
 
-        def author(feature: Feature, *, first: bool) -> Any:
-            """The feature's definition: contracts, processes, rules, statements."""
-            scope = FeatureScope(feature, first=first).on(svc.doc)
-            return run(svc, executor, plan=authoring, commit=True, user_request=description,
-                       app_root=app_root, observer=observer, observer_agent=observer_agent, scope=scope)
-
-        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="forge-engineer-ahead")
+        # PROVEN FEATURE BY FEATURE, in order of dependence: each tried as
+        # the people it is for, fixed where it fails, before the next.
         for i, feature in enumerate(plan_features):
+            if stopped:
+                break
             if feature.id in earlier:
                 continue
             if budget.over():
@@ -398,46 +352,7 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             journal.write("feature:start", feature=feature.id, name=feature.name,
                           pages=feature.pages, requirements=feature.requirements)
             pulse.start(feature)
-            say("message", {"text": f"Building {feature.label}: its screens, its processes, and the "
-                                    f"checks that say what must happen on them."})
-            scope = FeatureScope(feature, first=(i == 0)).on(svc.doc)
-            # THE DEFINITION FIRST — written ahead while the previous feature
-            # was on the Workbench, or now.
-            if ahead is not None and ahead_for == feature.id:
-                authored = ahead.result()
-                ahead, ahead_for = None, ""
-                journal.write("ahead:used", feature=feature.id)
-            else:
-                authored = author(feature, first=(i == 0))
-            reports.append(authored)
-            _reload(svc, output_dir)
-            if getattr(authored, "paused_because", ""):
-                stopped = f"paused: {authored.paused_because}"
-                journal.write("run:paused", feature=feature.id, why=authored.paused_because)
-                break
-            # THE NEXT FEATURE IS WRITTEN WHILE THIS ONE LANDS AND IS PROVEN.
-            # The build, the trials and the fix turns are minutes of waiting on
-            # the tree and the browser; the model has nothing to do in them.
-            # Writing the definition does not touch the tree, and one feature
-            # writes at a time, so the shared sections are never written twice
-            # at once. Only the landing waits.
-            after = next((f for f in left[left.index(feature) + 1:]), None) if feature in left else None
-            if overlap and after is not None and not budget.over():
-                journal.write("ahead:start", feature=after.id, name=after.name, while_=feature.id)
-                ahead, ahead_for = pool.submit(author, after, first=False), after.id
-            landed = run(svc, executor, plan=landing, commit=True, user_request=description,
-                         app_root=app_root, observer=observer, observer_agent=observer_agent,
-                         scope=scope)
-            reports.append(landed)
-            _reload(svc, output_dir)
-            report = merged([authored, landed])
-            if getattr(landed, "paused_because", ""):
-                stopped = f"paused: {landed.paused_because}"
-                journal.write("run:paused", feature=feature.id, why=landed.paused_because)
-                break
-            failed = _mend_failed_nodes(svc, output_dir, app_root, feature, report, per, run, fix, budget,
-                                        journal, say, executor=executor, description=description,
-                                        observer=observer, observer_agent=observer_agent, scope=scope)
+            say("message", {"text": f"Trying {feature.label} as the people it is for."})
             # NOT BUILT IS NOT DONE. A feature whose screens have no code and
             # no layout, or whose processes have no steps, is not proven by
             # trying statements about it: it is recorded as unbuilt, and the
@@ -446,7 +361,7 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             proof = (_prove_feature(svc, output_dir, feature, prove, fix, budget, journal, say)
                      if not unbuilt else {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": []})
             row = {"feature": feature.id, "name": feature.name, "pages": feature.pages,
-                   "failed_nodes": failed, "unbuilt": unbuilt, **proof}
+                   "failed_nodes": [], "unbuilt": unbuilt, **proof}
             results.append(row)
             journal.write("feature:done", **row)
             pulse.done(feature)
@@ -454,34 +369,7 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             if unbuilt:
                 stopped = f"{feature.label} is not built: " + "; ".join(unbuilt[:6])
                 break
-
-        if ahead is not None:
-            # A build that stopped mid-loop lets the writing ahead finish: what
-            # it wrote stays in the definition for the resume. Its report is
-            # kept; nothing of it is proven.
-            try:
-                reports.append(ahead.result())
-            except Exception:  # noqa: BLE001 — the stop stands either way
-                logger.warning("[engineer] the authoring ahead failed", exc_info=True)
-            ahead, ahead_for = None, ""
-            _reload(svc, output_dir)
-        pool.shutdown(wait=True)
         whole: dict = {}
-        if not stopped:
-            # WHAT NO FEATURE CLAIMED IS WRITTEN BEFORE THE END. A process
-            # nothing launches and no record of a feature's names (a scheduled
-            # clean-up) was declared in one feature's run and written in none
-            # (Ecommerce1's "Abandon Inactive Carts", forge-v3, 2026-10-10):
-            # every feature node with pending subjects runs once more, unscoped,
-            # with the projections after it.
-            sweep, unclaimed = pending_feature_nodes(svc.doc, per, plan_features)
-            if sweep:
-                journal.write("sweep:start", nodes=sweep, subjects=unclaimed)
-                reports.append(run(svc, executor, plan=sweep, commit=True, user_request=description,
-                                   app_root=app_root, observer=observer, observer_agent=observer_agent,
-                                   scope=_Unclaimed(unclaimed)))
-                _reload(svc, output_dir)
-                journal.write("sweep:done", nodes=sweep)
         if not stopped and last:
             reports.append(run(svc, executor, plan=last, commit=True, user_request=description,
                                app_root=app_root, observer=observer, observer_agent=observer_agent))
@@ -509,11 +397,9 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
                 journal.write("whole:mend", status=(answer or {}).get("status"),
                               said=str((answer or {}).get("answer") or "")[:400])
                 _reload(svc, output_dir)
-                sweep, unclaimed = pending_feature_nodes(svc.doc, per, plan_features)
-                again = sweep or [k for k in per if k in ("integration", "assemble")]
-                reports.append(run(svc, executor, plan=again, commit=True, user_request=description,
-                                   app_root=app_root, observer=observer, observer_agent=observer_agent,
-                                   scope=_Unclaimed(unclaimed) if sweep else None))
+                # What the fix wrote is landed and built once more.
+                reports.append(run(svc, executor, plan=per, commit=True, user_request=description,
+                                   app_root=app_root, observer=observer, observer_agent=observer_agent))
                 _reload(svc, output_dir)
                 missing = app_unbuilt(svc.doc)
             if missing:
@@ -545,8 +431,6 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             pulse.end(error=exc)
         raise
     finally:
-        if pool is not None:
-            pool.shutdown(wait=False)
         journal.release()
 
 
@@ -792,13 +676,13 @@ def _said_feature(feature: Feature, proof: dict, unbuilt: list[str] | None = Non
 def _opening(plan: list[Feature], earlier: list[str], app_name: str) -> str:
     left = [f for f in plan if f.id not in earlier]
     names = ", ".join(f.label for f in left)
-    head = f"Building {app_name or 'the application'} feature by feature"
+    head = f"Building {app_name or 'the application'}, then trying it feature by feature"
     if earlier and not left:
         return (f"Every feature of {app_name or 'the application'} is already proven ({len(earlier)}); "
-                f"trying the whole application once more and finishing it.")
+                f"trying what is left once more and finishing it.")
     if earlier:
         head += f" — {len(earlier)} already proven, picking up from there"
-    return f"{head}: {names}. Each is tried as the people it is for before the next begins."
+    return f"{head}: {names}. Each is tried as the people it is for, and fixed, before the next."
 
 
 def _reload(svc: Any, output_dir: str) -> None:
@@ -843,6 +727,5 @@ def _executor(svc: Any, output_dir: str, say: Callable[[str, dict], None], obser
     return executor, observer_agent
 
 
-__all__ = ["build", "build_nodes", "first_nodes", "incomplete_nodes", "pending_feature_nodes", "proven_before",
-           "split_feature_nodes", "FeatureScope", "LANDING", "OVERLAP",
+__all__ = ["build", "build_nodes", "first_nodes", "incomplete_nodes", "proven_before", "FeatureScope",
            "fix_ask", "PER_FEATURE", "FIX_ROUNDS"]

@@ -131,37 +131,24 @@ def test_a_node_that_writes_once_is_told_which_feature_this_call_is_for():
 
 
 def test_the_build_phase_is_split_into_once_per_feature_and_last():
-    """Ecommerce1 (forge-v3, 2026-10-10): `auth_pages` and `ui_direction`
-    ran once, before any page existed — they depend on `page_details`, and
-    `page_layouts` and `page_code` depend on them. The slice is the graph's."""
-    from services.blueprint.orchestrator import DAG, descendants
+    """LANDED ONCE, PROVEN FEATURE BY FEATURE (ecom v2, 2026-10-10: $15.76
+    and 85 minutes for three of seven features when each was authored,
+    landed and proven in turn). Everything that writes the definition is
+    written once, in the opening; the landing is one pass; the features are
+    the order of proving."""
+    from services.blueprint.orchestrator import DAG
     once, per, last = build_nodes()
-    assert "install" in once and "decisions" in once and "design_system" in once
-    # WRITTEN ONCE, FOR THE WHOLE APPLICATION: the contracts, the processes,
-    # the rules, the analytics, the flows, the statements (ecom v2: $15.76
-    # for three of seven features when they were written per feature).
-    for k in ("page_details", "auth_pages", "ui_direction", "workflows", "business_rules", "analytics",
-              "app_flows", "expectations", "content_fields"):
-        assert k in once, f"{k} is written once"
-    assert per == ["workflow_steps", "apis", "page_layouts", "backend", "page_code", "frontend", "integration", "assemble"], \
-        "what lands a feature: its processes' steps, its screens' layouts and code, the projections, the build"
-    assert "apis" in per, "between two feature nodes is a feature node"
+    for k in ("install", "decisions", "design_system", "page_details", "auth_pages", "ui_direction", "workflows",
+              "workflow_steps", "business_rules", "analytics", "app_flows", "expectations", "content_fields", "apis"):
+        assert k in once, f"{k} is written once, before the landing"
+    assert per == ["page_layouts", "backend", "page_code", "frontend", "integration", "assemble"], \
+        "the landing: the layouts, the code, the projections, the build"
     assert last == ["memory", "verification"]
     assert not set(once) & set(per) and not set(per) & set(last)
     for k in once:
         assert not any(d in per or d in last for d in DAG[k].depends_on), f"{k} runs once but depends on a later node"
     for k in per:
-        assert not any(d in last for d in DAG[k].depends_on), f"{k} is a feature node but depends on a last node"
-    for k in last:
-        assert not (descendants(k) & set(per)), f"{k} runs last but a feature node depends on it"
-
-
-@pytest.fixture(autouse=True)
-def _one_feature_at_a_time(monkeypatch):
-    """The order of runs is what these tests read; the overlap (the next
-    feature authored on a thread while this one lands) has its own test."""
-    from services.engineer import build as B
-    monkeypatch.setattr(B, "OVERLAP", False)
+        assert not any(d in last for d in DAG[k].depends_on), f"{k} lands but depends on a last node"
 
 
 def _project(tmp_path):
@@ -208,16 +195,13 @@ def test_the_engineer_builds_each_feature_and_proves_it_before_the_next(tmp_path
 
     out = build(str(tmp_path), str(tmp_path / "app"), emit=lambda k, d: said.append(d.get("text", "")),
                 executor=object(), run=run, prove=prove, fix=fix)
-    assert [r[1] for r in runs] == [None, "MODULE-001", "MODULE-001", "MODULE-003", "MODULE-003",
-                                    "MODULE-002", "MODULE-002", None], "each feature: its definition, then its landing"
+    assert [r[1] for r in runs] == [None, None, None], "the opening, one landing, the last — nothing per feature"
     once, per, last = build_nodes()
-    assert {"install", "decisions", "design_system"} <= set(runs[0][0]) and not set(runs[0][0]) & set(per), \
-        "the opening run is everything pending above the features, and no feature node"
-    from services.engineer.build import split_feature_nodes
-    authoring, landing = split_feature_nodes(per)
-    assert runs[1][0] == authoring and runs[2][0] == landing and runs[-1][0] == last
-    assert authoring + landing == per and landing[-1] == "assemble" and authoring == ["workflow_steps", "apis"]
-    assert "page_details" in runs[0][0], "the contracts are written once, before the first feature"
+    assert {"install", "decisions", "design_system", "page_details"} <= set(runs[0][0]) and not set(runs[0][0]) & set(per), \
+        "the opening run is everything pending above the landing: the contracts and statements included"
+    assert runs[1][0] == per and runs[-1][0] == last and per[-1] == "assemble"
+    assert [p[0] for p in proofs[:4]] == [["EXP-001"], ["EXP-027"], ["EXP-013"], ["EXP-013"]], \
+        "then each feature is proven in order of dependence; the cart's failing statement is tried again after the fix"
     assert proofs[0] == (["EXP-001"], True), "the first feature's own statements, with the authors' look"
     assert (["EXP-013"], True) in proofs and (["EXP-013"], False) in proofs, "then the fix turn's result is tried again"
     assert len(fixes) == 1 and "Cart & Checkout" in fixes[0] and "nothing was sent" in fixes[0]
@@ -238,16 +222,21 @@ def test_a_run_picks_up_where_the_last_one_stopped_and_stops_on_its_budget(tmp_p
     j = Journal(tmp_path)
     j.write("feature:done", feature="MODULE-001", pages=["PAGE-001", "PAGE-002", "PAGE-005"], statements=1)
     runs = []
+    proofs: list = []
 
     def run(svc, executor, *, plan, scope=None, **kw):
         runs.append(scope.feature.id if scope else None)
         return SimpleNamespace(failed=[], paused_because="")
-    prove = lambda svc, od, **kw: {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": [], "results": []}
+
+    def prove(svc, od, only=None, **kw):
+        proofs.append(list(only or []))
+        return {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": [], "results": []}
     from services.engineer import build as B
-    monkeypatch.setattr(B.Budget, "over", lambda self: len(runs) >= 2)   # time runs out after one feature
+    monkeypatch.setattr(B.Budget, "over", lambda self: len(proofs) >= 1)   # time runs out after one feature is proven
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove,
                 fix=lambda od, ask: {}, budget_minutes=1)
-    assert runs == [None, "MODULE-003", "MODULE-003"], "what is pending above the features runs again; the finished feature does not"
+    assert runs == [None, None], "what is pending above the landing runs again, and the landing; nothing per feature"
+    assert proofs == [["EXP-027"]], "the finished feature is not proven again; the next one is"
     assert out["stopped"].startswith("out of time") and out["statements"] == {}
     assert j.finished() == ["MODULE-001", "MODULE-003"]
     assert j.last("run:out_of_time")["left"] == ["MODULE-002"]
@@ -345,7 +334,7 @@ def test_a_node_that_failed_for_a_feature_is_mended_and_run_again(tmp_path):
     def run(svc, executor, *, plan, scope=None, **kw):
         plans.append((list(plan), scope.feature.id if scope else None))
         calls["n"] += 1
-        if scope and scope.feature.id == "MODULE-001" and "workflow_steps" in plan:
+        if calls["n"] == 2 and "page_code" in plan:           # the landing
             return SimpleNamespace(failed=["assemble", "page_code:PAGE-001"], paused_because="",
                                    failed_because={"assemble": "NeedsWorkflow: needs a workflow that does not exist yet: unmark an item"})
         return SimpleNamespace(failed=[], paused_because="")
@@ -355,11 +344,12 @@ def test_a_node_that_failed_for_a_feature_is_mended_and_run_again(tmp_path):
         fixes.append(ask)
         return {"status": "resolved", "answer": "declared Mark Available and wrote the screen"}
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix)
-    assert len(fixes) == 1 and "While building Catalogue, the build could not finish" in fixes[0]
+    from services.engineer.journal import Journal
+    assert len(fixes) == 1 and "While building the application, the build could not finish" in fixes[0]
     assert "assemble: NeedsWorkflow" in fixes[0] and "report_platform_fault" in fixes[0]
-    mend = [p for p, f in plans if f == "MODULE-001" and p == ["page_code", "assemble"]]
+    mend = [p for p, f in plans if p == ["page_code", "assemble"]]
     assert len(mend) == 1, "the failed nodes run again, assembly last"
-    assert out["features"][0]["failed_nodes"] == [], "and the feature records what still failed: nothing"
+    assert not out["stopped"] and Journal(tmp_path).last("land:done")["failed"] == [], "and nothing still failed"
 
 
 def test_the_whole_app_pass_fixes_what_a_later_feature_broke(tmp_path):
@@ -397,7 +387,7 @@ def test_the_opening_says_when_everything_is_already_proven():
     from services.engineer.build import _opening
     plan = F.features(DOC)
     assert _opening(plan, [f.id for f in plan], "Crumb") == \
-        "Every feature of Crumb is already proven (3); trying the whole application once more and finishing it."
+        "Every feature of Crumb is already proven (3); trying what is left once more and finishing it."
     assert "picking up from there: Accounts, Cart & Checkout" in _opening(plan, ["MODULE-001"], "Crumb")
 
 
@@ -471,7 +461,8 @@ def test_the_model_is_finished_first_on_a_resumed_build_too(tmp_path):
     build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=lambda *a: {},
           plan=["entity_fields", "security", "install", "page_details", "page_code", "assemble", "memory"])
     assert plans[0][1] is None and {"entity_fields", "security"} <= set(plans[0][0]), "the model nodes run first"
-    assert [f for _, f in plans[1:5]] == ["MODULE-003", "MODULE-003", "MODULE-002", "MODULE-002"]
+    assert [f for _, f in plans] == [None, None, None] and "assemble" in plans[1][0], "then one landing, then the last"
+    assert [r["feature"] for r in Journal(tmp_path).finished_rows()] == ["MODULE-001", "MODULE-003", "MODULE-002"]
 
 
 def test_a_stale_journal_row_is_not_a_proven_feature(tmp_path):
@@ -508,7 +499,7 @@ def test_a_feature_whose_screens_are_not_built_stops_the_build(tmp_path):
     said: list[str] = []
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=lambda *a: {},
                 emit=lambda k, d: said.append(d.get("text", "")))
-    assert runs == [None, "MODULE-001", "MODULE-001"], "nothing is built on an unbuilt feature"
+    assert runs == [None, None], "the opening and the landing; nothing more is built on an unbuilt feature"
     assert proofs == [], "and nothing is tried on it"
     assert out["stopped"].startswith("Catalogue is not built: 2 screens have no code and no layout: /, /products")
     assert out["report"].paused_because == out["stopped"]
@@ -529,24 +520,6 @@ def test_a_feature_is_not_proven_while_its_statements_are_unwritten():
     assert F.unbuilt_of(bare, cat) == ["the statements about Catalogue are not written (REQ-001)"]
     whole = F.features({**DOC, "modules": []})[0]
     assert whole.requirements == ["REQ-001", "REQ-002", "REQ-004", "REQ-008"], "the whole application's are every one"
-
-
-def test_what_no_feature_claimed_is_written_before_the_end():
-    """"Abandon Inactive Carts" — launched by nothing, naming no feature's
-    records — was declared in one feature's run and written in none."""
-    from services.engineer.build import _Unclaimed, build_nodes, pending_feature_nodes
-    once, per, last = build_nodes()
-    assert pending_feature_nodes(DOC, per, F.features(DOC)) == ([], {}), "every pending subject is some feature's"
-    doc = {**DOC, "workflows": DOC["workflows"] + [{"id": "FLOW-020", "name": "Abandon Inactive Carts",
-                                                    "trigger": {"kind": "scheduled"}, "inputs": [], "steps": []}]}
-    sweep, unclaimed = pending_feature_nodes(doc, per, F.features(doc))
-    assert unclaimed == {"workflow_steps": ["FLOW-020"]}
-    assert sweep[0] == "workflow_steps" and "page_details" not in sweep and "workflows" not in sweep
-    assert {"integration", "assemble", "frontend", "backend"} <= set(sweep), "the projections after it"
-    assert "page_code" not in sweep, "an agent node with nothing unclaimed is not run"
-    scope = _Unclaimed(unclaimed)
-    assert scope.subjects("workflow_steps", doc, ["FLOW-001", "FLOW-020"]) == ["FLOW-020"]
-    assert scope.subjects("assemble", doc, [""]) == [""]
 
 
 def test_what_is_missing_at_the_end_is_the_engineers_to_finish(tmp_path):
@@ -576,9 +549,9 @@ def test_what_is_missing_at_the_end_is_the_engineers_to_finish(tmp_path):
     said: list[str] = []
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix,
                 emit=lambda k, d: said.append(d.get("text", "")))
-    sweeps = [p for p, f in plans if f == "SWEEP"]
-    assert sweeps and sweeps[0][0] == "workflow_steps", "the orphan process is written in the sweep first"
-    assert not fixes or "Abandon Inactive Carts" in fixes[0], "and only what the sweep could not finish goes to a fix turn"
+    assert "workflow_steps" in plans[0][0], "the process's steps are written in the opening, with every other"
+    assert len(fixes) == 1 and "Abandon Inactive Carts" in fixes[0], "what is still missing at the end goes to one fix turn"
+    assert plans[-1][0] == build_nodes()[1], "and what it wrote is landed and built once more"
     assert not out["stopped"] and out["statements"]["passed"] == 2, "then the whole application is tried and handed over"
     assert not any("Build again" in s for s in said)
 
@@ -606,105 +579,3 @@ def test_a_second_login_entity_sends_the_declaration_back_to_its_author(tmp_path
     assert scope.brief("entity_fields", "ENTITY-001") == ""
     nodes, scope = first_nodes(["entity_fields"], {"data": {"entities": [{"id": "E1", "name": "Customer", "account": True}]}})
     assert nodes == ["entity_fields"] and scope is None
-
-
-def test_the_next_feature_is_written_while_this_one_lands_and_is_proven(tmp_path):
-    """ecom v2 (forge-v3, 2026-10-10): each feature took 18–25 minutes, five
-    to eight of them the build and the browser with nothing for the model to
-    do. The next feature's definition is written in that time; only its
-    landing waits for this one's proof."""
-    import threading
-    from services.engineer.build import split_feature_nodes
-    _project(tmp_path)
-    once, per, last = build_nodes()
-    authoring, landing = split_feature_nodes(per)
-    seen: list[tuple[str, str | None, str]] = []
-    m3_authored = threading.Event()
-    m1_landing = threading.Event()
-    lock = threading.Lock()
-
-    def run(svc, executor, *, plan, scope=None, **kw):
-        fid = scope.feature.id if scope else None
-        kind = "author" if plan == authoring else "land" if plan == landing else "other"
-        with lock:
-            seen.append((kind, fid, threading.current_thread().name))
-        if kind == "land" and fid == "MODULE-001":
-            m1_landing.set()
-            assert m3_authored.wait(5), "the next feature's definition is being written while this one lands"
-        if kind == "author" and fid == "MODULE-003":
-            assert m1_landing.wait(5), "and it started once this one's definition was done"
-            m3_authored.set()
-        return SimpleNamespace(failed=[], paused_because="")
-    prove = lambda svc, od, only=None, **kw: {"statements": len(only or []), "passed": len(only or []), "failing": [],
-                                             "untried": [], "fixed": [], "results": [{"id": i, "verdict": "passed"} for i in only or []]}
-    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=lambda *a: {},
-                overlap=True)
-    assert not out["stopped"] and [f["feature"] for f in out["features"]] == ["MODULE-001", "MODULE-003", "MODULE-002"]
-    kinds = [(k, f) for k, f, _ in seen]
-    assert kinds.index(("author", "MODULE-003")) < kinds.index(("land", "MODULE-003"))
-    assert kinds.index(("author", "MODULE-002")) < kinds.index(("land", "MODULE-002"))
-    assert kinds.index(("land", "MODULE-001")) < kinds.index(("land", "MODULE-003")) < kinds.index(("land", "MODULE-002")), \
-        "the landings stay in order: one tree, one build, one proof at a time"
-    ahead_threads = {t for k, f, t in seen if k == "author" and f != "MODULE-001"}
-    assert all("forge-engineer-ahead" in t for t in ahead_threads), "written ahead on the engineer's own thread"
-    from services.engineer.journal import Journal
-    rows = [r for r in Journal(tmp_path).rows() if r["event"].startswith("ahead:")]
-    assert [(r["event"], r["feature"]) for r in rows] == [("ahead:start", "MODULE-003"), ("ahead:used", "MODULE-003"),
-                                                         ("ahead:start", "MODULE-002"), ("ahead:used", "MODULE-002")]
-
-
-def test_a_stop_waits_for_the_writing_ahead_and_keeps_it(tmp_path):
-    _project(tmp_path)
-    from services.engineer.build import split_feature_nodes
-    once, per, last = build_nodes()
-    authoring, landing = split_feature_nodes(per)
-    seen: list = []
-
-    def run(svc, executor, *, plan, scope=None, **kw):
-        fid = scope.feature.id if scope else None
-        seen.append((plan == authoring, fid))
-        if plan == landing and fid == "MODULE-001":
-            return SimpleNamespace(failed=[], paused_because="the API credit ran out")
-        return SimpleNamespace(failed=[], paused_because="")
-    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=lambda *a, **k: {},
-                fix=lambda *a: {}, overlap=True)
-    assert out["stopped"].startswith("paused: the API credit ran out")
-    assert (True, "MODULE-003") in seen, "the feature written ahead finished and is kept for the resume"
-    assert (False, "MODULE-003") not in seen, "and was not landed"
-
-
-def test_the_end_tries_what_did_not_hold_and_what_no_feature_covered():
-    from services.engineer.build import untried_or_failing
-    plan = F.features(DOC)
-    rows = [{"feature": "MODULE-001", "failing": [], "untried": []},
-            {"feature": "MODULE-002", "failing": ["EXP-013"], "untried": []}]
-    assert untried_or_failing(DOC, plan, rows) == ["EXP-013", "EXP-001", "EXP-030"], \
-        "the one that failed, the arrival, and the one no feature's proof covered — not the ones that held"
-    assert untried_or_failing(DOC, plan, [{"failing": ["EXP-013"], "untried": ["EXP-013", "EXP-999"]}]) == ["EXP-013", "EXP-001", "EXP-030"]
-
-
-def test_a_fix_round_that_changed_nothing_is_the_last(tmp_path):
-    _project(tmp_path)
-    fixes: list[str] = []
-    proofs: list = []
-
-    def run(svc, executor, *, plan, scope=None, **kw):
-        return SimpleNamespace(failed=[], paused_because="")
-
-    def prove(svc, od, only=None, give_back=None, **kw):
-        proofs.append(list(only or []))
-        rows = [{"id": sid, "says": sid, "verdict": "failed" if sid == "EXP-013" else "passed",
-                 "failures": ["nothing was sent"] if sid == "EXP-013" else []} for sid in only or []]
-        return {"statements": len(rows), "passed": sum(r["verdict"] == "passed" for r in rows),
-                "failing": [r["id"] for r in rows if r["verdict"] == "failed"], "untried": [], "fixed": [], "results": rows}
-
-    def fix(od, ask):
-        fixes.append(ask)
-        return {"status": "no_op", "answer": "Nothing needed doing."}
-    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix)
-    assert sum("While building Cart & Checkout" in f for f in fixes) == 1, "one fix turn that changed nothing, no second round"
-    assert sum("While building the whole application" in f for f in fixes) == 1, "the end gives it one more look"
-    cart = next(f for f in out["features"] if f["feature"] == "MODULE-002")
-    assert cart["failing"] == ["EXP-013"]
-    assert sorted(proofs[-1]) == ["EXP-001", "EXP-013", "EXP-030"], "the end tries what failed, the arrivals and what no feature covered"
-    assert not any(sorted(p) == ["EXP-001", "EXP-013", "EXP-027", "EXP-030"] for p in proofs), "never every statement again"

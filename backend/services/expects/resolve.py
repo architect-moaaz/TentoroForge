@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import logging
 import re
 from pathlib import Path
@@ -122,10 +123,22 @@ class Recipes:
     def get(self, key: str) -> list[dict] | None:
         return self.rows.get(key)
 
+    _lock = threading.Lock()
+
     def put(self, key: str, actions: list[dict]) -> None:
-        self.rows[key] = actions
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.rows, indent=1))
+        # ONE WRITER, AND WHAT THE OTHER BENCH WROTE IS KEPT: two runners
+        # resolve statements side by side (`expects.build.BENCHES`).
+        with self._lock:
+            self.rows[key] = actions
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps({**self._on_disk(), **self.rows}, indent=1))
+
+    def _on_disk(self) -> dict:
+        try:
+            rows = json.loads(self.path.read_text())
+            return rows if isinstance(rows, dict) else {}
+        except (OSError, ValueError):
+            return {}
 
     def drop(self, key: str) -> None:
         if self.rows.pop(key, None) is not None:

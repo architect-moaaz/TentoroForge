@@ -461,6 +461,9 @@ class JournalNarrator:
             left = [f for f in self._features if f not in done]
             return [pipeline_stage_event("build", f"Building {len(left)} feature{'s' if len(left) != 1 else ''}, "
                                          f"each proven before the next", features=self._features, done=done)]
+        if ev == "land:start":
+            return [pipeline_stage_event("build", "Writing every screen and building the application",
+                                         nodes=[str(n) for n in row.get("nodes") or []])]
         if ev == "feature:start":
             fid = str(row.get("feature") or "")
             self._names[fid] = str(row.get("name") or fid)

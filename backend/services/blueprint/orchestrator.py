@@ -37,6 +37,8 @@ placements are marked and are the parts to argue with.
 """
 from __future__ import annotations
 
+import os
+
 import copy
 import json
 import re
@@ -2568,7 +2570,7 @@ def accumulate_refusals(previous: str, attempt: int, reason: str) -> str:
 #: next subject only when fewer than this many are in flight, so a waiting
 #: subject waits in the node's own queue and never occupies one of the run's
 #: worker threads doing nothing.
-FANOUT_CONCURRENCY = 12
+FANOUT_CONCURRENCY = max(1, int(os.environ.get("FORGE_FANOUT") or 16))
 
 #: Seconds between ledger heartbeats while a run is alive. Short enough that a
 #: status poll or a restart guard checking a ~90s freshness window always sees a

@@ -23,6 +23,8 @@ change to the requirements, said to the person.
 """
 from __future__ import annotations
 
+import os
+
 import json
 import logging
 import re
@@ -158,6 +160,10 @@ def prove_expectations(svc: Any, output_dir: str, *args: Any, **kwargs: Any) -> 
         return _prove(svc, output_dir, *args, **kwargs)
 
 
+#: Running copies the statements are tried on at once (`FORGE_TRIAL_BENCHES`).
+BENCHES = max(1, int(os.environ.get("FORGE_TRIAL_BENCHES") or 2))
+
+
 def _prove(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] | None = None,
            app_factory: Callable[[Path], Any] | None = None,
            trial: Callable[..., dict] | None = None,
@@ -184,15 +190,42 @@ def _prove(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] | Non
     author = author or _author
 
     def tried_once(ids: list[str]) -> list[dict]:
-        app = app_factory(Path(output_dir) / "app")
+        # TWO BENCHES. The statements are tried in series on one copy of the
+        # app, ten seconds each: 45 of them were eight minutes of a build
+        # waiting on the browser (ecom v2, 2026-10-10). A second running copy
+        # with its own database clone takes half of them; the production
+        # build is made once, by the first, and served by both. When a second
+        # cannot be started — no slot, no memory — one bench does it all.
+        from concurrent.futures import ThreadPoolExecutor
+        apps: list = []
         try:
-            running = app.__enter__()
-            return list(trial(running, svc.doc, Path(output_dir), only=ids).get("results") or [])
+            first = app_factory(Path(output_dir) / "app")
+            running = [first.__enter__()]
+            apps.append(first)
+            if BENCHES > 1 and len(ids) > 1:
+                try:
+                    second = app_factory(Path(output_dir) / "app")
+                    running.append(second.__enter__())
+                    apps.append(second)
+                except Exception as exc:  # noqa: BLE001 — one bench, then
+                    logger.info("[expects] one bench: a second could not be started: %s", exc)
+            if len(running) == 1:
+                return list(trial(running[0], svc.doc, Path(output_dir), only=ids).get("results") or [])
+            parts = [ids[i::len(running)] for i in range(len(running))]
+            with ThreadPoolExecutor(max_workers=len(running), thread_name_prefix="forge-bench") as pool:
+                futures = [pool.submit(trial, r, svc.doc, Path(output_dir), only=part, bench=n)
+                           for n, (r, part) in enumerate(zip(running, parts)) if part]
+                out: list[dict] = []
+                for fut in futures:
+                    out += list(fut.result().get("results") or [])
+            by_id = {str(r.get("id")): r for r in out}
+            return [by_id[i] for i in ids if i in by_id]
         finally:
-            try:
-                app.__exit__(None, None, None)
-            except Exception:  # noqa: BLE001
-                pass
+            for app in apps:
+                try:
+                    app.__exit__(None, None, None)
+                except Exception:  # noqa: BLE001
+                    pass
 
     faults: list = []
 

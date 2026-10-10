@@ -23,6 +23,7 @@ Nothing here knows what any application is for.
 from __future__ import annotations
 
 import json
+import threading
 import logging
 import re
 import time
@@ -1234,8 +1235,13 @@ def _office(project_dir: Path) -> Callable[..., None]:
     return show
 
 
+#: One writer of the results file and the recipes at a time: two benches
+#: try statements side by side (`expects.build.BENCHES`).
+_WRITE = threading.Lock()
+
+
 def run(app: Any, doc: dict, project_dir: Path, *, only: list[str] | None = None,
-        emit: Callable[[dict], None] | None = None, restore: bool = False) -> dict:
+        emit: Callable[[dict], None] | None = None, restore: bool = False, bench: int = 0) -> dict:
     """Every statement (or `only` those ids) tried on the running copy. With
     `restore`, the copy is put back as it was afterwards — a turn's trials
     share it. The results file keeps each statement's latest result: a run of
@@ -1252,7 +1258,7 @@ def run(app: Any, doc: dict, project_dir: Path, *, only: list[str] | None = None
     show = _office(project_dir)
     try:
         sessions: dict = {}
-        with Browser(project_dir / ".forge" / "expects" / "browser") as b:
+        with Browser(project_dir / ".forge" / "expects" / ("browser" if not bench else f"browser-{bench}")) as b:
             for n, st in enumerate(rows):
                 if n:
                     fresh.reset()
@@ -1273,16 +1279,17 @@ def run(app: Any, doc: dict, project_dir: Path, *, only: list[str] | None = None
     report = {"summary": summary, "results": results, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     path = project_dir / ".forge" / "expects" / "results.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    kept: dict[str, dict] = {}
-    if only:
-        try:
-            kept = {str(r.get("id")): r for r in json.loads(path.read_text()).get("results") or []}
-        except (OSError, ValueError):
-            kept = {}
-    kept.update({str(r["id"]): r for r in results})
-    live = {str(st.get("id")) for st in expectations(doc)}
-    path.write_text(json.dumps({**report, "results": [r for k, r in kept.items() if k in live]},
-                               indent=1, default=str))
+    with _WRITE:
+        kept: dict[str, dict] = {}
+        if only:
+            try:
+                kept = {str(r.get("id")): r for r in json.loads(path.read_text()).get("results") or []}
+            except (OSError, ValueError):
+                kept = {}
+        kept.update({str(r["id"]): r for r in results})
+        live = {str(st.get("id")) for st in expectations(doc)}
+        path.write_text(json.dumps({**report, "results": [r for k, r in kept.items() if k in live]},
+                                   indent=1, default=str))
     return report
 
 

@@ -2606,9 +2606,8 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         # The same nodes, executors and checks, in the order of proof — and
         # the statements are tried as it goes, so nothing is repaired after.
         from services.engineer.build import build as engineer_build, build_nodes
-        from services.engineer.features import features as _features
         once, per, last = build_nodes()
-        progress = Progress(emit, total=len([k for k in once if k in plan]) + len(per) * len(_features(svc.doc))
+        progress = Progress(emit, total=len([k for k in once if k in plan]) + len(per)
                             + len([k for k in last if k in plan]))
         built = engineer_build(output_dir, app_root, emit=emit, description=description, app_name=app_name,
                                executor=executor, observer_agent=watcher, observer=progress,
