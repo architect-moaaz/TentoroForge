@@ -50,6 +50,12 @@ PART_NODE: dict[str, str] = {
     "records": "data_model",
     "screens": "page_contracts",
     "roles": "security",
+    # WHO MAY DO WHAT: roles, permissions and who reaches which rows and
+    # screens. Named "access" because "roles" read as the list of role names
+    # alone: told "vendors must only see and manage their own products", the
+    # interpreter filed a requirement and briefed no part, the gate said
+    # "Done.", and the security section kept its prose (Ecom L1, 2026-10-11).
+    "access": "security",
     "connections": "integrations",
 }
 
@@ -385,10 +391,12 @@ _WHAT = {
                     "too). Move screens between modules with `move`; merging two modules is moving "
                     "every screen of one into the other and retiring the empty one. Rename with "
                     "`rename`. Anything added or reworded goes in `brief`, with `parts` naming "
-                    "which parts it touches. When the change adds behaviour none of the approved "
-                    "requirements states, add it to `newRequirements`. When it rewords or retires "
-                    "an approved requirement, put the new wording in `reword` (or a retirement in "
-                    "`remove`), and put what it means for the model in `brief` and `parts`."),
+                    "which parts it touches. Who may do what — a role, a permission, who reaches "
+                    "which records or screens — is the `access` part. When the change adds behaviour "
+                    "none of the approved requirements states, add it to `newRequirements`. When it "
+                    "rewords or retires an approved requirement, put the new wording in `reword` "
+                    "(or a retirement in `remove`). A new or reworded requirement never stands "
+                    "alone: `brief` and `parts` always say what the model must do for it."),
 }
 
 
@@ -643,7 +651,17 @@ _REVISE_PART = {
                 "Return only the modules this change adds or rewords, and the navigation as it "
                 "should be after it."),
     "roles": ("The person is reviewing the product model and asked for this change:\n\n{brief}\n\n"
-              "Return only the roles and permissions this change adds or rewords."),
+              "Return the roles, permissions and security as they should be AFTER the change, "
+              "keeping every role, permission and rule the change does not touch exactly as it is, "
+              "under its existing name. Who reaches which rows is said as `ownershipRules` OBJECTS "
+              "(entity, column, and `through` where the row carries another record's id) — the "
+              "data engine applies objects and ignores prose, so a prose rule is not a change."),
+    "access": ("The person is reviewing the product model and asked for this change:\n\n{brief}\n\n"
+              "Return the roles, permissions and security as they should be AFTER the change, "
+              "keeping every role, permission and rule the change does not touch exactly as it is, "
+              "under its existing name. Who reaches which rows is said as `ownershipRules` OBJECTS "
+              "(entity, column, and `through` where the row carries another record's id) — the "
+              "data engine applies objects and ignores prose, so a prose rule is not a change."),
     "connections": ("The person is reviewing the product model and asked for this change:\n\n{brief}\n\n"
                     "Return only the integrations this change adds or rewords."),
 }
@@ -654,6 +672,7 @@ _PART_SECTIONS: dict[str, tuple[str, ...]] = {
     "screens": ("pages",),
     "modules": ("modules", "navigation"),
     "roles": ("roles", "permissions", "security"),
+    "access": ("roles", "permissions", "security"),
     "connections": ("integrations",),
 }
 
@@ -732,7 +751,7 @@ def revise_model(svc: Any, turn: Mapping[str, Any], *, request: str = "", execut
     row = record_version(output_dir, PRODUCT_MODEL, svc.doc, request=request)
     return {"version": int(row["version"]), "diff": change, "requirements": added_reqs,
             "reworded": reworded, "retired": retired, "moved": moved, "renamed": renamed,
-            "wrote": wrote}
+            "wrote": wrote, "parts": parts}
 
 
 # ---------------------------------------------------------------------------
@@ -807,13 +826,29 @@ def say_model_change(out: Mapping[str, Any]) -> str:
     ints = change.get("integrations") or {}
     if ints.get("added"):
         bits.append(_count(len(ints["added"]), "new connection"))
+    # WHAT THE VIEW DOES NOT SHOW is still said: who may do what is not a
+    # module or a screen, and a change to it left the line at "Done."
+    if out.get("wrote") and any(p in ("access", "roles") for p in out.get("parts") or []):
+        bits.append("re-decided who may do what")
     rq = (out.get("reworded") or {}).get("diff") or {}
     rq_bits = [f"{k} {len(rq[k])}" for k in ("added", "removed", "changed") if rq.get(k)]
     if not bits and not out.get("requirements") and not rq_bits:
         return ("I looked again and nothing in the model needed to change for that — say which "
                 "module or screen you mean if I missed it.\n\n" + ask_line(PRODUCT_MODEL))
-    text = (f"Done — model v{out.get('version')}: " + "; ".join(bits) + "." if bits
-            else "Done.")
+    if not bits and not out.get("wrote"):
+        # A REQUIREMENT WRITTEN DOWN IS NOT A CHANGE MADE. "Done." over a
+        # new requirement and an untouched model read as the thing being
+        # done (Ecom L1, 2026-10-11: vendor scoping, twice). A reworded
+        # requirement the model needed nothing for is said as that.
+        if out.get("requirements"):
+            return (f"I wrote that down ({', '.join(out['requirements'])}) but changed nothing in "
+                    "the model for it — say which part should follow it: the screens, the "
+                    "records, the processes, the connections, or who may do what.\n\n"
+                    + ask_line(PRODUCT_MODEL))
+        text = "Nothing in the model needed to change for that."
+    else:
+        text = (f"Done — model v{out.get('version')}: " + "; ".join(bits) + "." if bits
+                else "Done.")
     if rq_bits:
         text += (f"\n\nThe requirements changed with it (v{out['reworded']['version']}: "
                  + ", ".join(rq_bits) + ") and stay approved — you asked for it.")

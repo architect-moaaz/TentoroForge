@@ -561,3 +561,27 @@ def test_a_reworded_requirement_keeps_its_id_and_is_not_restated_beside_itself(s
     from services.blueprint.ids import IdAllocator, natural_key_for
     alloc = IdAllocator.load(output_dir=svc.output_dir)
     assert alloc.lookup(natural_key_for("requirements", {"description": reqs["REQ-001"]})) == "REQ-001"
+
+
+def test_who_may_do_what_is_a_part_of_the_model_briefed_to_security(svc):
+    """Ecom L1 (2026-10-11): "vendors must only see and manage their own
+    products" was filed as a requirement, no owner was briefed, and the gate
+    said "Done." over a security section whose vendor rules were prose."""
+    assert "access" in gates.TURN_SCHEMA["properties"]["parts"]["items"]["enum"]
+    run = _executor({"security": [("roles", "Vendor", {"name": "Vendor", "description": "Sells"})]})
+    out = gates.revise_model(svc, {"kind": "change", "brief": "vendors see only their own products",
+                                   "parts": ["access"], "remove": [], "move": [], "rename": [],
+                                   "newRequirements": []}, executor=run)
+    assert [s.node for s in run.asked] == ["security"]
+    assert "ownershipRules" in run.asked[0].brief and "prose" in run.asked[0].brief
+    assert "who may do what" in gates.say_model_change(out)
+
+
+def test_a_requirement_written_down_with_no_part_briefed_is_not_done(svc):
+    approval.record(svc, "understanding")
+    out = gates.revise_model(svc, {"kind": "change", "brief": "", "parts": [], "remove": [], "move": [],
+                                   "rename": [], "newRequirements": [
+                                       {"description": "Vendors see only their own products.", "area": "Vendors"}]},
+                             executor=_executor({}))
+    said = gates.say_model_change(out)
+    assert "Done" not in said and "changed nothing in the model" in said and out["requirements"][0] in said
