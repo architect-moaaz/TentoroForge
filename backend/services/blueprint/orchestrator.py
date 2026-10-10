@@ -2588,8 +2588,10 @@ _HEARTBEAT_SECONDS = 20.0
 #:
 #: The name predates the event-driven scheduler: there are no waves now, and
 #: this is the size of the run's worker pool. Kept because callers and tests
-#: import it by this name.
-WAVE_CONCURRENCY = 14
+#: import it by this name. Never below the fan-out: the pool is what a
+#: fan-out runs in, and a pool of 14 under a fan-out of 16 was two pages
+#: of every wave waiting on nothing (caught by the lone-fan-out test).
+WAVE_CONCURRENCY = max(14, FANOUT_CONCURRENCY)
 
 
 @dataclass

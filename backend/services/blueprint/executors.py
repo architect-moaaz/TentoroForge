@@ -1963,7 +1963,7 @@ NODE_TASKS: dict[str, str] = {
 WITHHELD_FIELDS = frozenset({"id", "decisions"})
 
 
-def writable_shapes(agent: str) -> dict[str, Any]:
+def writable_shapes(agent: str, sections: Sequence[str] | None = None) -> dict[str, Any]:
     """The contract slice describing what this agent is allowed to produce.
 
     Without this an agent knows *which* sections it may write but not what an
@@ -1979,7 +1979,8 @@ def writable_shapes(agent: str) -> dict[str, Any]:
     contract = _json.loads(CONTRACT_PATH.read_text("utf-8"))
     props = contract.get("properties", {})
     out: dict[str, Any] = {}
-    for section in sorted(capability_for(agent).writes):
+    for section in (sorted(sections) if sections is not None
+                    else sorted(capability_for(agent).writes)):
         top = section.split(".")[0]
         node = props.get(top)
         if node is None:
@@ -2170,6 +2171,25 @@ def _conventions_addendum(doc: dict) -> str:
     )
 
 
+def call_writes(node: str, agent: str) -> list[str]:
+    """THE CALL IS TOLD THE NODE'S SECTIONS, NOT ITS AGENT'S. The reply is
+    held to the node's sections (`check_node_sections`), so a prompt that
+    lists the agent's whole grant asks for what will be refused: told it may
+    write `product` and `requirements`, the `requirements` call wrote both,
+    was refused, and paid an edit turn to drop the product frame that
+    `application_model` writes next (Ecom L1, 2026-10-11). An agent's grant
+    wider than the node is narrowed to the node; a service node, or a node
+    the grant does not cover at all, keeps the grant."""
+    from services.blueprint.agent_contract import node_sections
+    sections = sorted(capability_for(agent).writes)
+    spec = DAG.get(node)
+    if spec is None or spec.kind != "agent":
+        return sections
+    owned = node_sections(node)
+    narrowed = [s for s in sections if s.split(".")[0] in owned]
+    return narrowed or sections
+
+
 def build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
     subject: str = "", feedback: str = "", references: Sequence[Path] = (),
@@ -2198,16 +2218,16 @@ def build_prompt(
     """
     spec = DAG[node]
     agent = agent or spec.agent
-    cap = capability_for(agent)
+    writes = call_writes(node, agent)
     system = SYSTEM.format(
         agent=agent,
-        writes="\n".join(f"  - {s}" for s in sorted(cap.writes)) or "  (none)",
+        writes="\n".join(f"  - {s}" for s in writes) or "  (none)",
         reply_rules=(DATA_MODEL_REPLY_RULES if node in SCHEMA_BY_NODE
                      else ENVELOPE_RULES),
         task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns."),
     )
     if inline_shapes:
-        shapes = writable_shapes(agent)
+        shapes = writable_shapes(agent, writes)
         if shapes:
             system += SHAPE_ADDENDUM.format(
                 shapes=json.dumps(shapes, indent=2)[:12000]

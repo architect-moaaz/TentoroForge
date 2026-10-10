@@ -96,3 +96,18 @@ def test_the_module_is_asked_of_the_declaration_only():
     check_page_modules(bare, MODULED), "a contract edits a declared page; the module was decided"
     bare.node = ""
     check_page_modules(bare, MODULED), "Smith's seams declare pages their own way"
+
+
+def test_the_prompt_lists_the_nodes_sections_not_the_agents(tmp_path):
+    """Told it could write `product`, the requirements call did, was refused
+    and paid an edit turn (Ecom L1, 2026-10-11): the prompt and the check
+    must name the same sections."""
+    from services.blueprint.executors import build_prompt, call_writes
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="shop", name="Shop", domain="retail")
+    assert call_writes("requirements", "requirement") == ["requirements"]
+    assert call_writes("application_model", "product_analysis") == ["product"]
+    system, _ = build_prompt(svc.doc, "requirements")
+    boundary = system.split("You may write ONLY")[1].split("If the")[0]
+    assert "requirements" in boundary and "product" not in boundary
+    assert '"product": {' not in system, "no shape for a section the call may not write"
