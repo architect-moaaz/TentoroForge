@@ -31,34 +31,26 @@ def repair(svc: Any, node: str, feedback_by_subject: dict[str, str], *, usage: A
     from services.blueprint.orchestrator import DAG, TaskSpec
     from services.blueprint.service import BlueprintInvalid
 
-    from concurrent.futures import ThreadPoolExecutor
-
     execute = make_executor(svc, tiered_router(), usage=usage)
     repaired: list[str] = []
     logger.info("[build-repair] %s: asking about %d subject(s): %s", node, len(feedback_by_subject),
                 ", ".join(str(k) for k in feedback_by_subject)[:200])
-
-    # EACH SUBJECT AT ONCE, as the build's own fan-out runs them: seven
-    # entities asked one after another, twice, with a production build
-    # between the rounds, were ten silent minutes (Ecom L1, 2026-10-11).
-    def one(subject: str, feedback: str) -> str | None:
+    # ONE AFTER ANOTHER, ON THIS THREAD. The assemble step holds the
+    # Blueprint's lock while the gate runs; a repair on another thread waits
+    # for it for ever (Ecom L1, 2026-10-11: six threads, seven minutes).
+    for subject, feedback in feedback_by_subject.items():
         spec = TaskSpec(task_id=f"TASK-{node}-build-repair-{subject or 'all'}", node=node,
                         agent=DAG[node].agent, subject=subject, attempt=2, feedback=feedback)
         try:
             result = execute(spec)
-            with svc.lock:
-                application = apply_agent_result(svc, result, commit=True)
-            return subject if application.applied else None
+            application = apply_agent_result(svc, result, commit=True)
+            if application.applied:
+                repaired.append(subject)
+                logger.info("[build-repair] %s:%s repaired", node, subject)
         except (AuthorRefusal, ContractViolation, BlueprintInvalid) as exc:
             logger.warning("[build-repair] %s:%s refused: %s", node, subject, exc)
         except Exception as exc:  # noqa: BLE001 — a repair that breaks leaves the issue recorded
             logger.warning("[build-repair] %s:%s failed: %s", node, subject, exc)
-        return None
-
-    with ThreadPoolExecutor(max_workers=8, thread_name_prefix="forge-build-repair") as pool:
-        for done in pool.map(lambda kv: one(*kv), list(feedback_by_subject.items())):
-            if done is not None:
-                repaired.append(done)
     return repaired
 
 
