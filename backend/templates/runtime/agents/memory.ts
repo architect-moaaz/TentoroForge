@@ -92,6 +92,8 @@ export async function loadHistory(
   }
   turns.forEach((m, i) => {
     if (replay.has(i)) out.push(...withToolResults(m, i));
+    // A person on the team wrote this while the conversation was theirs: the assistant sees it as said, not as its own.
+    else if (m.role === "human") out.push({ role: "assistant", content: `[A person on the team wrote: ${m.content}]` });
     else out.push({ role: m.role, content: m.content });
   });
   return out;

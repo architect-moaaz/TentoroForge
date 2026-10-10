@@ -31,9 +31,10 @@ AGENT_DEFS_DIR = "agent-definitions"  # the builder's graphs, at the project roo
 _TEMPLATES = Path(__file__).resolve().parent.parent / "templates" / "runtime"
 _TOOL_MARKER = "// forge-agent-tool"
 _LAYOUT_MARK = "forge-agent"
+_NAV_MARK = "forge-handoffs-nav"
 
 #: runtime template -> destination, relative to the app root
-_CORE = ("types", "guardrails", "memory", "tools", "runtime", "io", "store", "handoff", "handoff-store")
+_CORE = ("types", "guardrails", "memory", "tools", "runtime", "io", "store", "handoff", "handoff-store", "handoff-nav")
 
 
 def resolve_roots(path: str | Path) -> tuple[Path, Path]:
@@ -87,30 +88,59 @@ def _barrel_export(schema_dir: Path, line: str, needle: str) -> None:
 
 
 def _patch_layout(app_root: Path) -> bool:
-    """Mount the floating widget in the dashboard shell. Returns True when it is mounted
-    (already or now); False when the layout has no place we recognise."""
+    """Mount the floating widget in the dashboard shell, and add the "Handoffs" menu link. Returns True when the
+    widget is mounted (already or now); False when the layout has no place we recognise."""
     layout = app_root / "src" / "app" / "(dashboard)" / "layout.tsx"
     if not layout.is_file():
         return False
     txt = layout.read_text(encoding="utf-8")
-    if _LAYOUT_MARK in txt:
-        return True
     imp_anchor = 'import { schemas } from "@/schemas/registry";'
     el_anchor = "      {children}\n      {mobileTabs.length > 0 && ("
-    if imp_anchor not in txt or el_anchor not in txt:
-        return False
-    txt = txt.replace(
-        imp_anchor,
-        imp_anchor + f'\nimport {{ ChatWidget }} from "@/components/agents/ChatWidget"; // {_LAYOUT_MARK}',
-        1,
-    )
-    txt = txt.replace(
-        el_anchor,
-        f"      {{children}}\n      <ChatWidget />{{/* {_LAYOUT_MARK} */}}\n      {{mobileTabs.length > 0 && (",
-        1,
-    )
+    mounted = "@/components/agents/ChatWidget" in txt
+    if not mounted and imp_anchor in txt and el_anchor in txt:
+        txt = txt.replace(
+            imp_anchor,
+            imp_anchor + f'\nimport {{ ChatWidget }} from "@/components/agents/ChatWidget"; // {_LAYOUT_MARK}',
+            1,
+        )
+        txt = txt.replace(
+            el_anchor,
+            f"      {{children}}\n      <ChatWidget />{{/* {_LAYOUT_MARK} */}}\n      {{mobileTabs.length > 0 && (",
+            1,
+        )
+        mounted = True
+    # A "Handoffs" menu link for the people who work the inbox. Best-effort and separate from the widget: a layout
+    # without the anchors keeps its menu as it is (the bell still opens the inbox).
+    nav_anchor = "  navProps.groups = visibleTo(navProps.groups, role);"
+    if _NAV_MARK not in txt and nav_anchor in txt and imp_anchor in txt:
+        txt = txt.replace(
+            imp_anchor,
+            imp_anchor + f'\nimport {{ withHandoffsLink }} from "@/lib/agents/handoff-nav"; // {_NAV_MARK}',
+            1,
+        )
+        txt = txt.replace(
+            nav_anchor,
+            nav_anchor + f"\n  navProps.groups = withHandoffsLink(navProps.groups, session.user); // {_NAV_MARK}",
+            1,
+        )
     layout.write_text(txt, encoding="utf-8")
-    return True
+    return mounted
+
+
+def _refresh_bell(app_root: Path, written: list[str]) -> None:
+    """Give an app generated before handoffs the bell that opens them. Only the stock bell is replaced: one the
+    app changed is left alone."""
+    bell = app_root / "src" / "app" / "(dashboard)" / "NotificationBell.tsx"
+    source = _TEMPLATES.parent / "app-foundation" / "src" / "app" / "(dashboard)" / "NotificationBell.tsx"
+    if not bell.is_file() or not source.is_file():
+        return
+    try:
+        current = bell.read_text(encoding="utf-8")
+        if "/handoffs" in current or "forge:workflow-done" not in current:
+            return
+        _copy(source, bell, written, app_root)
+    except OSError:
+        logger.warning("[agents] could not refresh the notification bell", exc_info=True)
 
 
 def _merge_manifest(app_root: Path, paths: list[str]) -> None:
@@ -263,6 +293,8 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
     written.append("src/agents/registry.ts")
 
     _ensure_deps(app_root)
+    if any(c.config.get("handoff") for c in compiled):
+        _refresh_bell(app_root, written)
     mounted = _patch_layout(app_root)
     if not mounted:
         warnings.append("the dashboard layout was not recognised — the floating widget is not mounted "

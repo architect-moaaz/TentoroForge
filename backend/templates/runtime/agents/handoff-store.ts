@@ -8,7 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { db } from "@/db";
 import { forgeAgentHandoffs } from "@/db/schema/_forge_agent_handoffs";
-import { forgeAgentMessages } from "@/db/schema/_forge_agent";
+import { forgeAgentConversations, forgeAgentMessages } from "@/db/schema/_forge_agent";
 import { forgeNotifications } from "@/db/schema/_forge_notifications";
 import { and, asc, count, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { HandoffDeps, HandoffRecord, HandoffStatus, HandoffStore, Person, StoredMessage } from "./types";
@@ -181,10 +181,60 @@ export async function transcript(conversationId: string): Promise<StoredMessage[
     .where(eq(forgeAgentMessages.conversationId, conversationId))
     .orderBy(asc(forgeAgentMessages.createdAt));
   return rows.map((r: any) => ({
-    role: r.role === "assistant" ? "assistant" : "user",
+    role: r.role === "assistant" ? "assistant" : r.role === "human" ? "human" : "user",
     content: r.content,
     createdAt: r.createdAt,
   }));
+}
+
+/** A person on the team writes into the conversation. It lands where the assistant's messages do, so the person who
+ *  asked sees it in their own chat. */
+export async function sendReply(h: HandoffRecord, text: string): Promise<void> {
+  await db.insert(forgeAgentMessages).values({ conversationId: h.conversationId, role: "human", content: text });
+  await db.update(forgeAgentConversations).set({ updatedAt: new Date() }).where(eq(forgeAgentConversations.id, h.conversationId));
+}
+
+/** One bell notification, unless the same person already has an unread one of this kind for this handoff:
+ *  a back-and-forth must not bury anyone in alerts. */
+async function ring(userId: string, kind: "handoff" | "handoff_reply", h: HandoffRecord, title: string, message: string) {
+  const unread = await db
+    .select({ id: forgeNotifications.id })
+    .from(forgeNotifications)
+    .where(
+      and(
+        eq(forgeNotifications.userId, userId),
+        eq(forgeNotifications.type, kind),
+        eq(forgeNotifications.entityId, h.id),
+        eq(forgeNotifications.read, false),
+        sql`${forgeNotifications.title} LIKE 'New message%'`,
+      ),
+    )
+    .limit(1);
+  if (unread.length) return;
+  await db.insert(forgeNotifications).values({ title, message, userId, type: kind, entityId: h.id });
+}
+
+/** The person wrote while a team member has the conversation: ring that team member. Best-effort. */
+export async function customerWrote(h: HandoffRecord, text: string): Promise<void> {
+  if (h.status !== "claimed" || !h.assignedToId) return;
+  await ring(
+    h.assignedToId,
+    "handoff",
+    h,
+    `New message from ${h.requestedByName ?? "the customer"} (${h.ref})`,
+    text.slice(0, 200),
+  );
+}
+
+/** A team member wrote: ring the person who asked, in case their chat is closed. Best-effort. */
+export async function teamWrote(h: HandoffRecord, text: string): Promise<void> {
+  await ring(
+    h.requestedById,
+    "handoff_reply",
+    h,
+    `New message from ${h.assignedToName ?? "the team"} (${h.ref})`,
+    text.slice(0, 200),
+  );
 }
 
 export type HandoffAction =

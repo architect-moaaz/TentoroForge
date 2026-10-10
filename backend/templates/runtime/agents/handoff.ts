@@ -39,7 +39,7 @@ export function pickAssignee(spec: HandoffSpec, candidates: Person[], openCounts
 /** What the person is told when they write to a conversation that is with a person now. */
 export function handoffNotice(h: Pick<HandoffRecord, "ref" | "status" | "assignedToName">): string {
   const who = h.status === "claimed" && h.assignedToName ? `${h.assignedToName} is looking at it. ` : "";
-  return `This conversation is with a person on the team now (reference ${h.ref}). ${who}They will pick it up from here; nothing more is needed from you, and you can add details here if you like.`;
+  return `This conversation is with a person on the team now (reference ${h.ref}). ${who}They will pick it up from here: their replies appear right here in this chat, and the bell at the top of the page will tell you too. Nothing more is needed from you, and you can add details here if you like.`;
 }
 
 function unique(people: Person[]): Person[] {
@@ -158,7 +158,10 @@ export async function requestHandoff(
     ok: true,
     ref: record.ref,
     status: "open",
-    message: `Recorded and passed to the team. Give the person the reference ${record.ref}. Do not promise a time.`,
+    message:
+      `Recorded and escalated to the team. Tell the person, in your own words: it has been escalated (reference ${record.ref}); ` +
+      `a person will contact them shortly; and where to look: that person's replies will appear right here in this chat, and a ` +
+      `notification will show on the bell at the top of the page. Do not promise a time.`,
     notified: told.inApp > 0 || told.emailed > 0 ? { inApp: told.inApp, emailed: told.emailed } : { inApp: 0, emailed: 0 },
     ...(told.emailNote ? { emailNote: told.emailNote } : {}),
   };
