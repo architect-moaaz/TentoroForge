@@ -77,13 +77,16 @@ def _pages(*bodies: dict) -> AgentResult:
 MODULED = {"modules": [{"id": "MODULE-001", "name": "Catalogue"}, {"id": "MODULE-002", "name": "Cart"}]}
 
 
-def test_every_declared_screen_names_its_module():
-    check_page_modules(_pages({"route": "/products", "module": "MODULE-001"},
+def test_a_declared_screens_module_is_one_the_application_has():
+    """A screen in no module is allowed (ecom v4's /account cost two
+    five-minute page sets when it was not, 2026-10-10); a screen naming a
+    module the application does not have is refused."""
+    check_page_modules(_pages({"route": "/products", "module": "MODULE-001"}, {"route": "/account"},
                               {"route": "/login", "pattern": "auth"}), MODULED)
-    with pytest.raises(PageWithoutAModule, match="one of: MODULE-001 \\(Catalogue\\), MODULE-002 \\(Cart\\)") as exc:
+    with pytest.raises(PageWithoutAModule, match="MODULE-001 \\(Catalogue\\), MODULE-002 \\(Cart\\) — or left out") as exc:
         check_page_modules(_pages({"route": "/products", "module": "MODULE-001"}, {"route": "/cart"},
                                   {"route": "/orders", "module": "MODULE-009"}), MODULED)
-    assert "/cart: no `module`" in str(exc.value) and "/orders: `module` 'MODULE-009' is not one" in str(exc.value)
+    assert "/orders: `module` 'MODULE-009' is not one" in str(exc.value) and "/cart" not in str(exc.value)
 
 
 def test_the_module_is_asked_of_the_declaration_only():

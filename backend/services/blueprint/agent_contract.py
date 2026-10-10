@@ -530,12 +530,13 @@ class PageWithoutAModule(AuthorRefusal):
 
 
 def check_page_modules(result: AgentResult, doc: dict | None) -> None:
-    """EVERY DECLARED SCREEN NAMES ITS MODULE. The modules are what the person
-    approved and what the engineer builds one at a time; a screen in none
-    falls to "the rest of the application", and an application whose every
-    screen fell there was built as one 33-screen feature (Ecommerce1,
-    forge-v3, 2026-10-10). Held at the declaration, where the module is
-    decided — a contract or an edit to a declared page is not asked again."""
+    """A DECLARED SCREEN'S MODULE IS ONE THE APPLICATION HAS. The modules are
+    what the person approved and the order the engineer proves in; a screen
+    naming a module that does not exist is a slip the declaration mends. A
+    screen naming none is allowed — an account page, a settings page — and
+    is proven with the screens about the same record (`features.features`);
+    refusing it cost ecom v4 a five-minute page set twice (forge-v3,
+    2026-10-10). Held at the declaration only."""
     if str(getattr(result, "node", "") or "") != "page_contracts" or not doc:
         return
     modules = [m for m in doc.get("modules") or [] if isinstance(m, dict) and m.get("id")
@@ -550,14 +551,13 @@ def check_page_modules(result: AgentResult, doc: dict | None) -> None:
         if str(p.body.get("pattern") or "") == "auth":
             continue
         module = str(p.body.get("module") or "")
-        if module not in ids:
+        if module and module not in ids:
             what = str(p.body.get("route") or p.body.get("name") or p.body.get("id") or "a page")
-            missing.append(f"{what}: `module` {module!r} is not one of the application's modules"
-                           if module else f"{what}: no `module`")
+            missing.append(f"{what}: `module` {module!r} is not one of the application's modules")
     if missing:
         named = ", ".join(f"{m['id']} ({m['name']})" if m.get("name") else str(m["id"]) for m in modules)
         raise PageWithoutAModule(
-            "Every page names the module it belongs to — one of: " + named + ". "
+            "A page's `module` is one of the application's — " + named + " — or left out. "
             + _all_of(missing))
 
 
