@@ -7,6 +7,8 @@
  * reads it and runs the loop; there is no per-agent code to generate.
  */
 
+import type { UsageStore } from "./limits";
+
 export type ToolKind = "data" | "api" | "workflow" | "mcp" | "ai_action" | "function" | "handoff";
 
 export type DataOperation = "list" | "get" | "create" | "update" | "delete";
@@ -26,6 +28,8 @@ export interface AgentToolSpec {
   inputSchema: JsonSchemaObject;
   /** The person must be signed in for this tool to run. Default true. */
   requireAuth?: boolean;
+  /** This tool changes data: it is held until the person has agreed (see confirm.ts). Set by the compiler. */
+  confirm?: boolean;
   /** "10/min" | "5/hour" | "2/sec" — per person, per tool. */
   rateLimit?: string;
   /** Keep only these keys of the result (applied to arrays element-wise). */
@@ -80,10 +84,34 @@ export interface OutputRule {
   message?: string;
 }
 
+/** How much one person may use the assistants. 0 = no limit; anything left out takes the default (limits.ts). */
+export interface Limits {
+  perMinute: number;
+  perHour: number;
+  tokensPerDay: number;
+}
+
 export interface GuardrailSpec {
   input: InputGuardrails;
   output: OutputGuardrails;
   outputRules: OutputRule[];
+  limits?: Partial<Limits>;
+}
+
+/** An action waiting for the person's yes: made on `turn`, released only on the turn after. */
+export interface Hold {
+  tool: string;
+  key: string;
+  summary: string;
+  at: number;
+  turn: number;
+}
+
+/** What a conversation remembers between requests about changes it has held back. */
+export interface ConfirmState {
+  /** How many messages the person has sent here (this one included, once counted). */
+  turn: number;
+  holds: Hold[];
 }
 
 export interface MemorySpec {
@@ -214,6 +242,9 @@ export interface ConversationStore {
   listMessages(conversationId: string): Promise<StoredMessage[]>;
   saveMessage(conversationId: string, msg: StoredMessage): Promise<void>;
   setSummary(conversationId: string, summary: string, dropMessageIds: string[]): Promise<void>;
+  /** Held changes and the turn count. Optional: a store without them can never release a held change. */
+  getState?(conversationId: string): Promise<ConfirmState>;
+  setState?(conversationId: string, state: ConfirmState): Promise<void>;
 }
 
 // ── model ─────────────────────────────────────────────────────────────────
@@ -296,6 +327,8 @@ export interface AgentDeps {
     /** The person wrote to a conversation that is with someone: tell them (best-effort, may be absent). */
     customerWrote?(handoff: HandoffRecord, text: string): Promise<void>;
   };
+  /** Usage counts for the limits. Absent (or failing: no table yet) → not limited. */
+  usage?: UsageStore;
   /** FEEL-lite. Absent → output rules are skipped. */
   evalExpression?: (expression: string, scope: Record<string, unknown>) => unknown;
   now?: () => number;

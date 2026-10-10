@@ -90,6 +90,8 @@ export interface ToolConfig {
   mcp_server_id?: string;
   mcp_tool_name?: string;
   args_mapping?: Record<string, string>;
+  // Hold this tool until the person has agreed to what it will do. Unset = on for tools that change data.
+  confirm?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +118,10 @@ export interface GuardrailConfig {
   guardrail_type?: GuardrailType;
   rules?: GuardrailRule[];
   custom_expression?: string;
+  // How much one person may use the assistant. Unset = the default; 0 = no limit.
+  max_messages_per_minute?: number;
+  max_messages_per_hour?: number;
+  max_tokens_per_day?: number;
 }
 
 export type MemoryType = "conversation" | "vector" | "key_value";

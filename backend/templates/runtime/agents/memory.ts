@@ -5,7 +5,7 @@
  * Pure helpers over a `ConversationStore`; the drizzle-backed store lives in
  * store.ts so these can be exercised with an in-memory one.
  */
-import type { ConversationStore, MemorySpec, ModelMessage, StoredMessage } from "./types";
+import type { ConfirmState, ConversationStore, MemorySpec, ModelMessage, StoredMessage } from "./types";
 
 /**
  * How many of the most recent assistant turns are replayed WITH what their tools returned.
@@ -136,6 +136,7 @@ export async function summarizeIfNeeded(
 export function memoryStore(): ConversationStore & { dump(): Record<string, StoredMessage[]> } {
   const convs = new Map<string, { id: string; agentId: string; userId: string; summary: string | null }>();
   const msgs = new Map<string, StoredMessage[]>();
+  const states = new Map<string, ConfirmState>();
   let n = 0;
   return {
     async getConversation(id, userId) {
@@ -155,6 +156,13 @@ export function memoryStore(): ConversationStore & { dump(): Record<string, Stor
       const list = msgs.get(id) ?? [];
       list.push({ ...msg, id: msg.id ?? `m-${++n}` });
       msgs.set(id, list);
+    },
+    async getState(id) {
+      const s = states.get(id);
+      return s ? { turn: s.turn, holds: [...s.holds] } : { turn: 0, holds: [] };
+    },
+    async setState(id, state) {
+      states.set(id, { turn: state.turn, holds: [...state.holds] });
     },
     async setSummary(id, summary, drop) {
       const c = convs.get(id);

@@ -13,8 +13,10 @@
  * failure is an `error` event, because a half-streamed answer has nowhere to
  * throw to.
  */
+import { gate } from "./confirm";
 import { checkOutputRules, validateInput, validateOutput } from "./guardrails";
 import { handoffNotice } from "./handoff";
+import { checkLimits, limitsOf } from "./limits";
 import { loadHistory, summarizeIfNeeded } from "./memory";
 import { toModelTools } from "./tools";
 import type {
@@ -23,6 +25,7 @@ import type {
   AgentRunInput,
   AgentRuntimeConfig,
   AgentToolSpec,
+  ConfirmState,
   ModelBlock,
   ModelMessage,
   ToolCallRecord,
@@ -64,16 +67,30 @@ export async function runAgent(
       if (!existing) conversationId = null;
       else summary = existing.summary;
     }
+
+    // A conversation that is with a person is not answered by the assistant: what the person writes is kept for
+    // whoever has it, and they are told so. Resolved, it is the assistant's again. A lookup that fails (no handoff
+    // table in this app) means "not handed over", never an error.
+    const handed = conversationId ? await deps.handoffs?.openFor(conversationId).catch(() => null) : null;
+
+    // The person's own limits, before anything is created, saved or paid for. Talking to a person on the team costs
+    // nothing, so it is never limited. Counts that cannot be read (no table yet) mean "not limited".
+    if (!handed && deps.usage && input.user) {
+      const used = await deps.usage.read(input.user.id).catch(() => null);
+      const over = used ? checkLimits(limitsOf(config.guardrails.limits), used) : null;
+      if (over) {
+        emit({ type: "blocked", stage: "input", reason: over.reason ?? "Limit reached." });
+        return;
+      }
+      await deps.usage.add(input.user.id, { messages: 1 }).catch(() => {});
+    }
+
     if (!conversationId) conversationId = await deps.store.createConversation(config.id, userId);
 
     const history = await loadHistory(deps.store, conversationId, summary, config.memory, new Set(config.tools.map((t) => t.name)));
     const messages: ModelMessage[] = [...history, { role: "user", content: input.message }];
     await deps.store.saveMessage(conversationId, { role: "user", content: input.message });
 
-    // A conversation that is with a person is not answered by the assistant: what the person writes is kept for
-    // whoever has it, and they are told so. Resolved, it is the assistant's again. A lookup that fails (no handoff
-    // table in this app) means "not handed over", never an error.
-    const handed = await deps.handoffs?.openFor(conversationId).catch(() => null);
     if (handed) {
       // The person is told once. After that (or once a person has written back) what they add simply reaches
       // whoever has it; repeating the notice on every message would drown a real conversation.
@@ -91,6 +108,13 @@ export async function runAgent(
       emit({ type: "done", conversationId, tokens, turns: 0 });
       return;
     }
+
+    // The changes this conversation is holding back until the person agrees (confirm.ts). A store that cannot keep
+    // them still works: nothing it holds can be released, so every change is asked about, never skipped.
+    const confirmState: ConfirmState = (await deps.store.getState?.(conversationId).catch(() => null)) ?? { turn: 0, holds: [] };
+    confirmState.turn += 1;
+    const saveConfirmState = () => deps.store.setState?.(conversationId as string, confirmState).catch(() => {});
+    await saveConfirmState();
 
     // 3 ── the model ⇄ tools loop
     const specs = new Map<string, AgentToolSpec>(config.tools.map((t) => [t.name, t]));
@@ -150,6 +174,21 @@ export async function runAgent(
           toolResults.push({ type: "tool_result", tool_use_id: use.id, content: msg, is_error: true });
           continue;
         }
+        const verdict = gate(confirmState, spec, use.input, { now: (deps.now ?? Date.now)(), reply: input.message });
+        if (!verdict.run) {
+          await saveConfirmState();
+          if ("held" in verdict) {
+            calls.push({ name: use.name, input: use.input, result: verdict.held });
+            emit({ type: "tool_result", id: use.id, tool: use.name, ok: true, result: verdict.held });
+            toolResults.push({ type: "tool_result", tool_use_id: use.id, content: JSON.stringify(verdict.held) });
+          } else {
+            calls.push({ name: use.name, input: use.input, error: verdict.refused });
+            emit({ type: "tool_result", id: use.id, tool: use.name, ok: false, error: verdict.refused });
+            toolResults.push({ type: "tool_result", tool_use_id: use.id, content: `Error: ${verdict.refused}`, is_error: true });
+          }
+          continue;
+        }
+        await saveConfirmState();
         try {
           const out = await deps.runTool(
             spec,
@@ -200,6 +239,7 @@ export async function runAgent(
       toolCalls: calls.length ? calls : null,
       tokenCount: tokens.input + tokens.output,
     });
+    if (deps.usage && input.user) await deps.usage.add(input.user.id, { tokens: tokens.input + tokens.output }).catch(() => {});
     try {
       await summarizeIfNeeded(deps.store, conversationId, summary, config.memory, async (transcript) => {
         const r = await deps.callModel(
