@@ -297,12 +297,27 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             _reload(svc, output_dir)
             failed = _required_failures(opening)
             if failed:
-                because = getattr(opening, "failed_because", None) or {}
+                # ONCE MORE, WITH WHAT WENT WRONG IN HAND. A writer refused
+                # twice for its output's shape (ecom v3's `decisions`,
+                # forge-v3, 2026-10-10) had the refusal's words to go on; the
+                # person was asked to press Build again instead. The failed
+                # nodes run once more before anyone is asked anything.
+                nodes = sorted({str(f).split(":", 1)[0] for f in failed})
+                journal.write("first:again", nodes=nodes)
+                say("message", {"text": ", ".join(nodes) + " did not finish — trying once more."})
+                again = run(svc, executor, plan=nodes, commit=True, user_request=description, app_root=app_root,
+                            observer=observer, observer_agent=observer_agent, scope=model_scope)
+                reports.append(again)
+                _reload(svc, output_dir)
+                failed = _required_failures(again)
+            if failed:
+                because = {**(getattr(opening, "failed_because", None) or {}),
+                           **(getattr(reports[-1], "failed_because", None) or {})}
                 why = "; ".join(f"{f}: {str(because.get(f) or 'it failed')[:300]}" for f in failed)
                 journal.write("first:failed", failed=failed, why=why)
-                stopped = f"the product model could not be finished: {why}"
-                say("message", {"text": "I could not finish the product model, so I have not built on it — "
-                                        + why[:700] + ". Tell me what to change, or Build again once it is mended."})
+                stopped = f"the application could not be defined: {why}"
+                say("message", {"text": "I could not finish defining the application, so I have not built it — "
+                                        + why[:700] + ". I will look into it; tell me if you know what is wrong."})
                 out = _stopped(journal, svc, reports, stopped, features=[])
                 pulse.end(out["report"])
                 return out

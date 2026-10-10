@@ -436,12 +436,12 @@ def test_the_engineer_finishes_the_model_first_and_stops_when_it_cannot(tmp_path
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run,
                 prove=lambda *a, **k: {}, fix=lambda *a: {}, emit=lambda k, d: said.append(d.get("text", "")),
                 plan=["entity_fields", "page_contracts", "security", "install", "page_details", "assemble"])
-    assert len(plans) == 1 and "assemble" not in plans[0], \
-        "one opening run of what is pending above the features, and nothing built after it fails"
+    assert len(plans) == 2 and "assemble" not in plans[0] and plans[1] == ["entity_fields"], \
+        "one opening run of what is pending above the features, the failed node once more, and nothing built after"
     assert [k for k in plans[0] if k != "install"] == ["entity_fields", "page_contracts", "security", "page_details"]
-    assert out["stopped"].startswith("the product model could not be finished") and out["features"] == []
+    assert out["stopped"].startswith("the application could not be defined") and out["features"] == []
     assert out["report"].paused_because == out["stopped"], "the entry reads it and does not hand over"
-    assert any("I could not finish the product model" in s and "already on Vendor" in s for s in said)
+    assert any("I could not finish defining the application" in s and "already on Vendor" in s for s in said)
 
 
 def test_the_model_is_finished_first_on_a_resumed_build_too(tmp_path):

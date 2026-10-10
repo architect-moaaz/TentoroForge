@@ -141,3 +141,18 @@ def test_a_process_declares_what_it_writes(tmp_path):
                              "writes": [{"entity": "ENTITY-005", "fields": ["status", "total"], "states": ["pending"]}]}]
     svc.validate()
     assert svc.doc["workflows"][0]["writes"][0]["states"] == ["pending"]
+
+
+def test_a_decision_is_an_object_with_about_and_decided():
+    """ecom v3 (forge-v3, 2026-10-10): the writer sent plain sentences, then
+    {note: …}; the schema's error sent it round again no wiser."""
+    bad = json.loads(json.dumps(POLICIES))
+    bad["decisions"] = ["Checkout always creates one Order per vendor.", {"note": "USD everywhere"},
+                        {"about": "", "decided": "x"}, {"about": "rounding", "decided": "half up", "why": "tax law"}]
+    with pytest.raises(InvalidPolicies) as e:
+        check_policies(_result(bad), DOC)
+    said = str(e.value)
+    assert "decisions[0] is str, not an object" in said and '"about"' in said
+    assert "decisions[1]: needs about, decided; has no note" in said
+    assert "decisions[2]: needs about" in said
+    assert "decisions[3]" not in said

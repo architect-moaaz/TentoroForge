@@ -1904,9 +1904,11 @@ NODE_TASKS: dict[str, str] = {
         "or owned by their guest session — never a button anyone can press that "
         "only a signed-in person can use); `selfRegistration` (the roles a person "
         "may sign up as — empty means the default role only); and `decisions` for "
-        "any other fact two writers could otherwise read differently. Decide from "
-        "the domain as its practitioners would; do not ask. Name only entities, "
-        "fields, states, roles and processes the document has."
+        "any other fact two writers could otherwise read differently, each an object "
+        "{\"about\": the fact, \"decided\": what was decided, \"why\": one line} and "
+        "nothing else — never a bare sentence. Decide from the domain as its "
+        "practitioners would; do not ask. Name only entities, fields, states, roles "
+        "and processes the document has."
     ),
     "security": (
         "Define roles and the permissions that guard entities and endpoints. "

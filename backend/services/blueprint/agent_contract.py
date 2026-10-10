@@ -1068,6 +1068,22 @@ def check_policies(result: "AgentResult", doc: dict | None) -> None:
     problems: list[str] = []
     for p in proposals:
         body = p.body
+        # A DECISION IS {about, decided, why}. ecom v3's writer sent plain
+        # sentences, then {note: …}, and the schema's "'about' is a required
+        # property" ×27 sent it round again no wiser (forge-v3, 2026-10-10).
+        for i, d in enumerate(body.get("decisions") or []):
+            if not isinstance(d, dict):
+                problems.append(f"decisions[{i}] is {type(d).__name__}, not an object: write each decision as "
+                                "{\"about\": the fact two writers could read differently, \"decided\": what was "
+                                "decided, \"why\": optional}")
+                continue
+            missing = [k for k in ("about", "decided") if not str(d.get(k) or "").strip()]
+            extra = sorted(k for k in d if k not in ("about", "decided", "why"))
+            if missing or extra:
+                problems.append(f"decisions[{i}]: " + "; ".join(
+                    ([f"needs {', '.join(missing)}"] if missing else [])
+                    + ([f"has no {', '.join(extra)}"] if extra else []))
+                    + " — a decision is {\"about\": …, \"decided\": …, \"why\": …} and nothing else")
         for lc in body.get("lifecycles") or []:
             if not isinstance(lc, dict):
                 continue

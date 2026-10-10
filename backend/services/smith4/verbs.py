@@ -708,7 +708,12 @@ def rebuild(ctx: Ctx, u: dict) -> Outcome:
     # card to press for a whole rebuild — then, asked "can I republish?", the
     # next turn said yes, the fix is in place (aszjcc2k, 2026-09-27). Both
     # cannot be true; the second was. Say it the first time.
-    if ctx.applied:
+    # ONLY WHEN THERE IS A BUILT APPLICATION FOR IT TO BE IN. Said after the
+    # definition was written and nothing had been built yet, it told a
+    # person at the requirements gate to "launch the preview" (ecom v3,
+    # forge-v3, 2026-10-10); the definition is agreed to below, not launched.
+    built = bool(((ctx.doc() or {}).get("runtime") or {}).get("build"))
+    if ctx.applied and built:
         return Outcome(status="resolved", said=(
             "That change is already in the application — nothing needs rebuilding. "
             "Launch the preview to try it, or Publish to put it live."))
