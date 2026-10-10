@@ -98,7 +98,14 @@ function OrgLayout({
     : "?";
 
   return (
-    <div className="flex h-screen bg-slate-50 dark:bg-slate-950">
+    // THE FRAME IS THE WINDOW, AND IT NEVER SCROLLS. It was `h-screen` with
+    // nothing clipped, so anything inside that reached past the window — an
+    // absolutely placed element, a focused field, a long review — made the
+    // DOCUMENT scrollable: scrolling at the bottom slid the whole app up and
+    // left white below it (forge-v3, 2026-10-09). Pinned to the viewport and
+    // clipped (`clip`, not `hidden`: a hidden box can still be scrolled by
+    // focus or scrollIntoView), every page scrolls inside `main` instead.
+    <div className="fixed inset-0 flex overflow-clip bg-slate-50 dark:bg-slate-950">
       {/* Sidebar */}
       <aside className="flex w-[220px] flex-col bg-white border-r border-slate-200/80 dark:bg-slate-900 dark:border-slate-800">
         {/* Org header */}
