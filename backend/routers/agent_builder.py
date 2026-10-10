@@ -117,6 +117,25 @@ async def suggest_agent_definition(
     return suggest_agent(doc)
 
 
+@router.post("/api/projects/{project_id}/agent-definitions/check")
+async def check_agent_definition(
+    project_id: uuid.UUID,
+    req: AgentDefinitionSave,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """What is wrong with this agent, before Apply: the compiler's notes and the app's own rules, each pinned
+    to the box it is about. Nothing is saved or installed."""
+    from services.agent_check import check_agent
+    from services.agent_runtime_install import resolve_roots
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        raise HTTPException(status_code=400, detail="No output directory")
+    _, app_root = resolve_roots(project.output_dir)
+    return check_agent(req.model_dump(), app_root)
+
+
 @router.post("/api/projects/{project_id}/agent-definitions", status_code=201)
 async def save_agent_definition(
     project_id: uuid.UUID,

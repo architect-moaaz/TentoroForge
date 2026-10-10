@@ -276,3 +276,17 @@ export interface AgentTestResult {
   total_tokens: number;
   total_duration_ms: number;
 }
+
+// ---------------------------------------------------------------------------
+// Checks — what is wrong with an agent, said before Apply
+// ---------------------------------------------------------------------------
+
+export type FindingSeverity = "error" | "warning" | "info";
+
+export interface AgentFinding {
+  severity: FindingSeverity;
+  code: string;
+  message: string;
+  /** The box on the canvas this is about, when it is about one. */
+  nodeId: string | null;
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Node as RFNode, Edge as RFEdge } from "@xyflow/react";
 import {
@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import { useAgentBuilderStore } from "@/stores/agent-builder";
 import { AgentCanvas } from "./AgentCanvas";
+import { AgentChecksBar } from "./AgentChecksBar";
 import { AgentNodePalette } from "./AgentNodePalette";
 import { AgentNodeProperties } from "./AgentNodeProperties";
 import { AgentTemplateSelector } from "./AgentTemplateSelector";
@@ -26,6 +27,7 @@ import { AgentTestConsole } from "./AgentTestConsole";
 import { AgentIOSchemaEditor } from "./config/AgentIOSchemaEditor";
 import type {
   AgentDefinition,
+  AgentFinding,
   AgentIOField,
   AgentListItem,
   AgentNodeSerialized,
@@ -56,6 +58,10 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   const [applyStatus, setApplyStatus] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
+  // What is wrong with the agent as drawn, kept current while it is edited.
+  const [findings, setFindings] = useState<AgentFinding[]>([]);
+  const [appChecked, setAppChecked] = useState(true);
+  const [confirmingApply, setConfirmingApply] = useState(false);
   const [showTestConsole, setShowTestConsole] = useState(false);
 
   // Fetch agent list
@@ -164,6 +170,62 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     }
   }, [projectId, setCurrentAgent, setSelectedNodeId]);
 
+  // Ask the platform what is wrong with the agent as drawn. Nothing is saved or installed.
+  const runCheck = useCallback(async (): Promise<AgentFinding[]> => {
+    if (!currentAgent) return [];
+    const res = await api.post<{ findings?: AgentFinding[]; appChecked?: boolean }>(
+      `/api/projects/${projectId}/agent-definitions/check`,
+      {
+        id: currentAgent.id,
+        name: editName,
+        description: editDescription || undefined,
+        nodes,
+        edges,
+        config: currentAgent.config,
+      },
+    );
+    const list = Array.isArray(res?.findings) ? res.findings : [];
+    setFindings(list);
+    setAppChecked(res?.appChecked !== false);
+    return list;
+  }, [currentAgent, editName, editDescription, nodes, edges, projectId]);
+
+  // Re-check a moment after the drawing stops changing. Keyed on what the check READS (not on
+  // selection or box positions, which change on every click and drag).
+  const checkKey = useMemo(
+    () =>
+      JSON.stringify([
+        currentAgent?.id,
+        nodes.map((n) => [n.id, n.data]),
+        edges.map((e) => [e.source, e.target]),
+      ]),
+    [currentAgent?.id, nodes, edges],
+  );
+  useEffect(() => {
+    if (!currentAgent) {
+      setFindings([]);
+      setConfirmingApply(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      runCheck().catch(() => {
+        /* a failed check is not a problem with the agent: the bar keeps what it had */
+      });
+    }, 800);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkKey]);
+
+  // Boxes with something wrong, for the canvas: the worst thing said about each.
+  const problems = useMemo(() => {
+    const out: Record<string, "error" | "warning"> = {};
+    for (const f of findings) {
+      if (!f.nodeId || f.severity === "info") continue;
+      if (f.severity === "error" || !out[f.nodeId]) out[f.nodeId] = f.severity;
+    }
+    return out;
+  }, [findings]);
+
   // Save current agent
   const saveAgent = useCallback(async () => {
     if (!currentAgent) return;
@@ -206,8 +268,9 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   );
 
   // Apply agent to generated app
-  const applyAgent = useCallback(async () => {
+  const applyAgent = useCallback(async (force = false) => {
     if (!currentAgent) return;
+    setConfirmingApply(false);
     try {
       await saveAgent();
     } catch (e) {
@@ -215,6 +278,21 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       // surfaced as an uncaught "Runtime ApiError" overlay with no way forward.
       setApplyStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
       return;
+    }
+
+    // BEFORE anything is installed: a problem that will stop a tool working is shown and asked about,
+    // not discovered afterwards in a log. A check that itself fails never blocks Apply.
+    if (!force) {
+      try {
+        const list = await runCheck();
+        if (list.some((f) => f.severity === "error")) {
+          setConfirmingApply(true);
+          setApplyStatus(null);
+          return;
+        }
+      } catch {
+        /* apply as before */
+      }
     }
 
     setIsApplying(true);
@@ -442,7 +520,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
           </Button>
           <Button
             size="sm"
-            onClick={applyAgent}
+            onClick={() => applyAgent(false)}
             disabled={isApplying}
           >
             {isApplying ? (
@@ -477,6 +555,15 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
         </div>
       )}
 
+      <AgentChecksBar
+        findings={findings}
+        appChecked={appChecked}
+        confirming={confirmingApply}
+        onSelectNode={(id) => setSelectedNodeId(id)}
+        onApplyAnyway={() => applyAgent(true)}
+        onCancel={() => setConfirmingApply(false)}
+      />
+
       {/* Agent-level I/O contract — what a caller must supply + what the agent
           returns. Collapsible so it stays out of the way when authoring nodes. */}
       <AgentIOSchemaEditor
@@ -509,6 +596,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             <AgentCanvas
               initialNodes={nodes}
               initialEdges={edges}
+              problems={problems}
               onNodesChange={(rf: RFNode[]) =>
                 setNodes(
                   rf.map((n) => ({
