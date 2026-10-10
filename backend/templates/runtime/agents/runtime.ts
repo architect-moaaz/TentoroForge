@@ -14,6 +14,7 @@
  * throw to.
  */
 import { checkOutputRules, validateInput, validateOutput } from "./guardrails";
+import { handoffNotice } from "./handoff";
 import { loadHistory, summarizeIfNeeded } from "./memory";
 import { toModelTools } from "./tools";
 import type {
@@ -68,6 +69,19 @@ export async function runAgent(
     const history = await loadHistory(deps.store, conversationId, summary, config.memory, new Set(config.tools.map((t) => t.name)));
     const messages: ModelMessage[] = [...history, { role: "user", content: input.message }];
     await deps.store.saveMessage(conversationId, { role: "user", content: input.message });
+
+    // A conversation that is with a person is not answered by the assistant: what the person writes is kept for
+    // whoever has it, and they are told so. Resolved, it is the assistant's again. A lookup that fails (no handoff
+    // table in this app) means "not handed over", never an error.
+    const handed = await deps.handoffs?.openFor(conversationId).catch(() => null);
+    if (handed) {
+      const notice = handoffNotice(handed);
+      emit({ type: "text", content: notice });
+      emit({ type: "handoff", ref: handed.ref, status: handed.status });
+      await deps.store.saveMessage(conversationId, { role: "assistant", content: notice });
+      emit({ type: "done", conversationId, tokens, turns: 0 });
+      return;
+    }
 
     // 3 ── the model ⇄ tools loop
     const specs = new Map<string, AgentToolSpec>(config.tools.map((t) => [t.name, t]));
@@ -131,7 +145,14 @@ export async function runAgent(
           const out = await deps.runTool(
             spec,
             use.input,
-            { user: input.user, cookie: input.cookie, origin: input.origin },
+            {
+              user: input.user,
+              cookie: input.cookie,
+              origin: input.origin,
+              conversationId: conversationId as string,
+              agentId: config.id,
+              handoff: config.handoff ?? null,
+            },
             scope,
           );
           scope[spec.name] = out;

@@ -163,13 +163,13 @@ def test_the_prompt_says_what_the_app_is_its_rules_and_that_it_cannot_hand_off()
     assert "Use the id of a record you already have from earlier in this conversation" in prompt
     assert "before you act on it" not in prompt, "the old rule forced a fresh lookup before every change"
     assert "a rating" not in prompt, "the generic prompt is not about any one app"
-    assert "cannot transfer anyone to a person" in prompt
+    assert "cannot transfer" not in prompt, "a handoff box is drawn, so the agent is told how to hand over, not that it cannot"
     assert "- Admin: Manages the catalog." in prompt
 
 
-def test_no_box_that_does_nothing_is_drawn():
+def test_every_box_drawn_is_one_that_runs():
     kinds = {n["type"] for n in suggest_agent(blueprint())["nodes"]}
-    assert kinds == {"system_prompt", "tool", "guardrail", "memory"}
+    assert kinds == {"system_prompt", "tool", "guardrail", "memory", "human_handoff"}, "no router: it does not run"
 
 
 def test_every_node_is_wired_to_the_prompt_and_ids_are_unique():
@@ -249,3 +249,24 @@ def test_an_id_pointer_reads_correctly_for_a_word_that_starts_with_a_vowel():
     t = tools_of(suggest_agent(doc))
     assert "orderId is the id of an order" in t["list_ratings"]["description"]
     assert "is the id of a user" in t["list_movies"]["description"], "'a user', not 'an user'"
+
+
+def test_a_handoff_box_is_drawn_for_the_apps_admin_like_roles():
+    handoff = next(n for n in suggest_agent(blueprint())["nodes"] if n["type"] == "human_handoff")["data"]["config"]
+    assert handoff["handlers"] == {"roles": ["Admin"], "people": []}
+    assert handoff["assignment"] == "queue" and handoff["notify"] == {"in_app": True, "email": False, "email_urgent_only": True}
+
+
+def test_with_no_admin_like_role_every_role_may_handle_handoffs():
+    doc = blueprint()
+    doc["roles"] = [{"id": "ROLE-001", "name": "Agent"}, {"id": "ROLE-002", "name": "Clerk"}]
+    handoff = next(n for n in suggest_agent(doc)["nodes"] if n["type"] == "human_handoff")["data"]["config"]
+    assert handoff["handlers"]["roles"] == ["Agent", "Clerk"]
+
+
+def test_the_suggestion_compiles_into_a_working_handoff():
+    from services.agent_runtime_config import compile_agent
+    c = compile_agent(suggest_agent(blueprint()))
+    assert c.warnings == [], c.warnings
+    assert any(t["name"] == "request_human" and t["kind"] == "handoff" for t in c.config["tools"])
+    assert "request_human" in c.config["systemPrompt"] and "ONLY after request_human succeeds" in c.config["systemPrompt"]

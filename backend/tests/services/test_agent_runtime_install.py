@@ -200,14 +200,10 @@ def test_memory_defaults_and_unsupported_kinds_degrade_loudly():
     assert c.config["memory"] == {"type": "conversation", "maxMessages": 8, "summarizeAfter": 18}
 
 
-def test_router_and_handoff_are_carried_but_flagged_as_not_executed():
-    c = compile_agent(graph(
-        node("r", "router", "R", {"strategy": "fallback"}),
-        node("h", "human_handoff", "H", {"target": {"type": "email", "value": "a@b.c"}}),
-    ))
+def test_a_router_is_carried_but_flagged_as_not_executed():
+    c = compile_agent(graph(node("r", "router", "R", {"strategy": "fallback"})))
     assert c.config["router"] == {"strategy": "fallback"}
-    assert c.config["handoff"]["target"]["value"] == "a@b.c"
-    assert any("not executed yet" in w for w in c.warnings)
+    assert any("router nodes are carried" in w and "not executed yet" in w for w in c.warnings)
 
 
 def test_turns_are_capped_and_the_ui_has_a_welcome_line():
@@ -423,13 +419,98 @@ def test_the_build_installs_what_a_draft_saved(tmp_path):
 
 
 
-def test_an_agent_with_a_handoff_node_is_not_told_it_can_hand_off():
-    """Handoff is not executed yet: a prompt that lets the agent say 'passing you to support'
-    makes a promise nothing keeps (Movie Review, 2026-10-10)."""
+def test_a_handoff_box_gives_the_agent_a_real_way_to_hand_over_and_forbids_promising_it_early():
+    """Before the box ran, a prompt that let the agent say 'passing you to support' made a promise nothing
+    kept (Movie Review, 2026-10-10). Now there IS a tool; the rule is that nothing is claimed before it succeeds."""
     c = compile_agent(graph(
         node("sp", "system_prompt", "P", {"prompt": "You help."}),
-        node("h", "human_handoff", "Escalate", {"target": {"type": "queue", "value": "support-queue"}}),
+        node("h", "human_handoff", "Escalate", {"handlers": {"roles": ["Manager"]}}),
     ))
-    assert "cannot transfer anyone to a human" in c.config["systemPrompt"]
-    assert c.config["handoff"]["target"]["value"] == "support-queue"
+    prompt = c.config["systemPrompt"]
+    assert "request_human" in prompt and "ONLY after request_human succeeds" in prompt and "reference" in prompt
+    assert "cannot transfer" not in prompt
+    t = next(t for t in c.config["tools"] if t["name"] == "request_human")
+    assert t["kind"] == "handoff" and t["inputSchema"]["required"] == ["reason"]
+    assert t["inputSchema"]["properties"]["urgency"]["enum"] == ["low", "normal", "urgent"] and t["rateLimit"] == "3/min"
+    assert c.warnings == []
     assert "cannot transfer" not in compile_agent(graph(node("sp", "system_prompt", "P", {"prompt": "You help."}))).config["systemPrompt"]
+
+
+def handoff_of(**cfg):
+    return compile_agent(graph(node("h", "human_handoff", "H", cfg)))
+
+
+def test_a_handoff_box_with_nothing_filled_in_still_compiles_into_a_working_handoff():
+    c = handoff_of()
+    h = c.config["handoff"]
+    assert h["handlers"] == {"roles": [], "people": []} and h["assignment"] == "queue"
+    assert h["notify"] == {"inApp": True, "email": False, "emailUrgentOnly": True}
+    assert h["questions"] == ["Why do you need a person?", "How urgent is it?", "How can we reach you?"]
+    assert any("names no one to handle it" in w for w in c.warnings)
+    assert any(t["name"] == "request_human" for t in c.config["tools"])
+
+
+def test_handlers_assignment_questions_and_notification_are_read_from_the_box():
+    c = handoff_of(handlers={"roles": ["Manager", " ", "Agent"], "people": [{"id": "u1", "name": "Maya"}, "u2", {"name": "no id"}]},
+                   assignment="round_robin", questions=["What is wrong?", "Phone number?"],
+                   notify={"in_app": False, "email": True, "email_urgent_only": False},
+                   conditions={"keyword_triggers": ["human", "speak to someone"]})
+    h = c.config["handoff"]
+    assert h["handlers"] == {"roles": ["Manager", "Agent"], "people": [{"id": "u1", "name": "Maya"}, {"id": "u2"}]}
+    assert h["assignment"] == "round_robin" and h["questions"] == ["What is wrong?", "Phone number?"]
+    assert h["notify"] == {"inApp": False, "email": True, "emailUrgentOnly": False}
+    assert "What is wrong?" in c.config["systemPrompt"] and '"human"' in c.config["systemPrompt"]
+    assert not any("handoff" in w for w in c.warnings), "a fully filled-in box has nothing to warn about"
+
+
+def test_a_handoff_assignment_that_cannot_work_falls_back_to_the_queue_and_says_so():
+    c = handoff_of(handlers={"roles": ["M"]}, assignment="owner")
+    assert c.config["handoff"]["assignment"] == "queue" and any("no owner is chosen" in w for w in c.warnings)
+    c = handoff_of(handlers={"roles": ["M"]}, assignment="owner", owner_id="u9")
+    assert c.config["handoff"]["assignment"] == "owner" and c.config["handoff"]["ownerId"] == "u9"
+    c = handoff_of(handlers={"roles": ["M"]}, assignment="by_astrology")
+    assert c.config["handoff"]["assignment"] == "queue" and any("by_astrology" in w for w in c.warnings)
+
+
+def test_at_most_five_questions_are_asked():
+    assert len(handoff_of(handlers={"roles": ["M"]}, questions=[f"q{i}?" for i in range(9)]).config["handoff"]["questions"]) == 5
+
+
+def handoff_graph() -> dict:
+    return graph(node("sp", "system_prompt", "P", {"prompt": "You help."}),
+                 node("h", "human_handoff", "Hand over", {"handlers": {"roles": ["Manager"]}}))
+
+
+def test_an_agent_with_a_handoff_box_gets_the_inbox_the_route_and_the_table(tmp_path):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[handoff_graph()])
+    for rel in ("src/lib/agents/handoff.ts", "src/lib/agents/handoff-store.ts", "src/db/schema/_forge_agent_handoffs.ts",
+                "src/app/api/agent/handoffs/route.ts", "src/app/(dashboard)/handoffs/page.tsx"):
+        assert (app / rel).is_file(), rel
+    barrel = (app / "src" / "db" / "schema" / "index.ts").read_text()
+    assert "_forge_agent_handoffs" in barrel and "./_forge_agent\"" in barrel, "both tables are exported"
+    cfg = json.loads((app / "src" / "agents" / "definitions" / "support.json").read_text())
+    assert any(t["kind"] == "handoff" and t["name"] == "request_human" for t in cfg["tools"])
+    manifest = json.loads((app / "contracts" / "runtime-injection-manifest.json").read_text())
+    listed = json.dumps(manifest)
+    assert "api/agent/handoffs/route.ts" in listed and "handoffs/page.tsx" in listed, "prune keeps them"
+
+
+def test_an_agent_without_one_gets_no_inbox_but_the_build_still_finds_the_store(tmp_path):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[sample_graph()])
+    assert not (app / "src" / "app" / "api" / "agent" / "handoffs").exists()
+    assert not (app / "src" / "app" / "(dashboard)" / "handoffs").exists()
+    # io.ts loads the store on demand, and the build resolves that import whether or not it is ever used
+    assert (app / "src" / "lib" / "agents" / "handoff-store.ts").is_file()
+    assert (app / "src" / "db" / "schema" / "_forge_agent_handoffs.ts").is_file()
+
+
+def test_installing_a_handoff_agent_twice_changes_nothing(tmp_path):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[handoff_graph()])
+    before = {str(p.relative_to(app)): p.read_bytes() for p in app.rglob("*") if p.is_file() and "node_modules" not in p.parts}
+    install_agent_runtime(project)
+    after = {str(p.relative_to(app)): p.read_bytes() for p in app.rglob("*") if p.is_file() and "node_modules" not in p.parts}
+    assert before == after
+    assert (app / "src" / "db" / "schema" / "index.ts").read_text().count("_forge_agent_handoffs") == 1

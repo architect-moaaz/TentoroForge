@@ -76,6 +76,24 @@ async def list_agent_definitions(
     return items
 
 
+@router.get("/api/projects/{project_id}/agent-definitions/handoff-options")
+async def get_handoff_options(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The roles and people the human-handoff box can name, from this app. Declared BEFORE the `{agent_id}` route,
+    which would otherwise read "handoff-options" as an agent's id."""
+    import asyncio
+
+    from services.agent_handoff_options import handoff_options
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        return {"roles": [], "people": [], "peopleNote": "No output directory."}
+    return await asyncio.to_thread(handoff_options, project.output_dir)
+
+
 @router.get("/api/projects/{project_id}/agent-definitions/{agent_id}")
 async def get_agent_definition(
     project_id: uuid.UUID,

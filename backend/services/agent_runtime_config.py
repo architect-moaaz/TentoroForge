@@ -275,6 +275,87 @@ def render_tool_module(name: str, code: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# human handoff
+# ---------------------------------------------------------------------------
+
+HANDOFF_TOOL = "request_human"
+DEFAULT_HANDOFF_QUESTIONS = ["Why do you need a person?", "How urgent is it?", "How can we reach you?"]
+_ASSIGNMENTS = ("queue", "round_robin", "owner")
+
+
+def _str_list(value: Any, limit: int = 20) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(v).strip() for v in value if isinstance(v, (str, int)) and str(v).strip()][:limit]
+
+
+def _compile_handoff(cfg: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
+    """The human-handoff box as the runtime reads it. Everything has a default, so a box with nothing filled in
+    still compiles into a handoff that works: it lands in the inbox, unassigned."""
+    handlers_in = cfg.get("handlers") if isinstance(cfg.get("handlers"), dict) else {}
+    roles = _str_list(handlers_in.get("roles"))
+    people = []
+    for p in handlers_in.get("people") or []:
+        if isinstance(p, dict) and str(p.get("id") or "").strip():
+            people.append({"id": str(p["id"]).strip(), **({"name": str(p["name"]).strip()} if p.get("name") else {})})
+        elif isinstance(p, str) and p.strip():
+            people.append({"id": p.strip()})
+    assignment = str(cfg.get("assignment") or "queue")
+    if assignment not in _ASSIGNMENTS:
+        warnings.append(f"handoff assignment '{assignment}' is not one of queue, round_robin, owner — queue is used")
+        assignment = "queue"
+    owner = str(cfg.get("owner_id") or "").strip()
+    if assignment == "owner" and not owner:
+        warnings.append("handoff assignment is a named owner but no owner is chosen — handoffs go to the queue")
+        assignment = "queue"
+    questions = _str_list(cfg.get("questions"), 5) or list(DEFAULT_HANDOFF_QUESTIONS)
+    notify = cfg.get("notify") if isinstance(cfg.get("notify"), dict) else {}
+    keywords = _str_list((cfg.get("conditions") or {}).get("keyword_triggers") if isinstance(cfg.get("conditions"), dict) else [])
+    if not roles and not people:
+        warnings.append("the human-handoff box names no one to handle it — handoffs are saved in the inbox but nobody is notified")
+    return {
+        "handlers": {"roles": roles, "people": people},
+        "assignment": assignment,
+        **({"ownerId": owner} if owner else {}),
+        "questions": questions,
+        "notify": {
+            "inApp": notify.get("in_app") is not False,
+            "email": notify.get("email") is True,
+            "emailUrgentOnly": notify.get("email_urgent_only") is not False,
+        },
+        "keywords": keywords,
+    }
+
+
+def _handoff_tool(handoff: dict[str, Any]) -> dict[str, Any]:
+    asks = " ".join(f"{q.rstrip('?').rstrip()}?" for q in handoff["questions"])
+    return {
+        "name": HANDOFF_TOOL,
+        "kind": "handoff",
+        "description": ("Hand this conversation to a person on the team. Use it when the person asks for a human, or when "
+                        "you cannot help them. Ask them first (only what they have not already told you): " + asks
+                        + " Then call this with their answers."),
+        "inputSchema": _obj({
+            "reason": {"type": "string", "description": "Why a person is needed, in a sentence."},
+            "urgency": {"type": "string", "enum": ["low", "normal", "urgent"], "description": "How urgent it is."},
+            "contact": {"type": "string", "description": "How the team can reach them, if they gave a way."},
+        }, ["reason"]),
+        "rateLimit": "3/min",
+    }
+
+
+def _handoff_prompt(handoff: dict[str, Any]) -> str:
+    asks = "; ".join(handoff["questions"])
+    text = ("\n\nHuman handoff: if the person asks for a human, or you cannot help them, ask them (only what they have not "
+            f"already told you): {asks} Then use {HANDOFF_TOOL} with their answers. Say you have passed them to the team ONLY "
+            f"after {HANDOFF_TOOL} succeeds, and give them the reference it returns. If it fails, say so plainly and suggest "
+            "contacting the app's administrator.")
+    if handoff["keywords"]:
+        text += " Treat words like " + ", ".join(f'"{k}"' for k in handoff["keywords"][:6]) + " as a request for a person."
+    return text
+
+
+# ---------------------------------------------------------------------------
 # guardrails / memory / ui
 # ---------------------------------------------------------------------------
 
@@ -435,8 +516,8 @@ def compile_agent(agent_data: dict[str, Any]) -> CompiledAgent:
     if len(memory_nodes) > 1:
         warnings.append("more than one memory node — the first is used")
     routers, handoffs = of("router"), of("human_handoff")
-    if routers or handoffs:
-        warnings.append("router and human-handoff nodes are carried in the definition but not executed yet")
+    if routers:
+        warnings.append("router nodes are carried in the definition but not executed yet")
 
     max_turns = config_in.get("max_turns")
     turns = int(max_turns) if isinstance(max_turns, (int, float)) and max_turns > 0 else _DEFAULT_MAX_TURNS
@@ -457,16 +538,13 @@ def compile_agent(agent_data: dict[str, Any]) -> CompiledAgent:
         config["description"] = str(description)
     if routers:
         config["router"] = ((routers[0].get("data") or {}).get("config")) or {}
+    if len(handoffs) > 1:
+        warnings.append("more than one human-handoff box — the first is used")
     if handoffs:
-        config["handoff"] = ((handoffs[0].get("data") or {}).get("config")) or {}
-        # A handoff node is drawn but nothing carries the person to anyone yet. An agent that
-        # believes it can ("passing you to the support queue") tells a person help is coming
-        # when it is not (Movie Review, 2026-10-10) — so until the runtime executes handoffs,
-        # the prompt says the truth.
-        config["systemPrompt"] = (str(config["systemPrompt"]).rstrip()
-                                  + "\n\nYou cannot transfer anyone to a human or a support queue from here — "
-                                    "nothing would receive them. If someone asks for a person, say so plainly, "
-                                    "and suggest they contact the app's administrator.")
+        handoff = _compile_handoff(((handoffs[0].get("data") or {}).get("config")) or {}, warnings)
+        config["handoff"] = handoff
+        config["tools"] = [*config["tools"], _handoff_tool(handoff)]
+        config["systemPrompt"] = str(config["systemPrompt"]).rstrip() + _handoff_prompt(handoff)
 
     return CompiledAgent(id=agent_id, config=config, tool_files=tool_files, warnings=warnings)
 

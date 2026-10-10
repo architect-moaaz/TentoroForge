@@ -207,7 +207,6 @@ def suggest_agent(doc: dict[str, Any]) -> dict[str, Any]:
         "- Keep answers short. Use a short list for several records, one line each.",
         "- Refer to people and records by name, never by id. Results carry the name beside each id, in a field "
         "ending in Label (customerIdLabel, for example); show an id only if the person asks for it.",
-        "- You cannot transfer anyone to a person; if asked, say so and suggest contacting the app's administrator.",
     ]
     if rules:
         lines += ["", "Rules of this app (the app enforces them; explain them if you are asked or refused):",
@@ -229,7 +228,17 @@ def suggest_agent(doc: dict[str, Any]) -> dict[str, Any]:
                   {"id": "r2", "name": "No personal data out", "type": "pii_redaction"}]})
     memory = _node("mem_1", "memory", "Conversation memory", 800, 240,
                    {"memory_type": "conversation", "capacity": 20})
-    nodes = [sp, *tools, guard, memory]
+    # WHO TAKES A HANDOFF: the app's admin-like roles, or every role when none looks like one. A named person is a
+    # choice for the builder; a role is something the Blueprint already says exists.
+    names = [str(r["name"]) for r in roles]
+    admins = [n for n in names if re.search(r"admin|manag|owner|supervis|lead", n, re.I)]
+    handoff = _node("handoff_1", "human_handoff", "Hand over to a person", 800, 440, {
+        "handlers": {"roles": admins or names, "people": []},
+        "assignment": "queue",
+        "notify": {"in_app": True, "email": False, "email_urgent_only": True},
+        "conditions": {"explicit_request": True, "keyword_triggers": ["human", "real person", "speak to someone"]},
+    })
+    nodes = [sp, *tools, guard, memory, handoff]
     edges = [{"id": f"e_sp_1_{n['id']}", "source": "sp_1", "target": n["id"], "data": {"edgeType": "default"}}
              for n in nodes[1:]]
     return {

@@ -56,6 +56,12 @@ def _classify_compile_warning(text: str) -> tuple[str, str] | None:
     t = text.lower()
     if "not executed yet" in t:
         return None  # said once per box below, in words that fit the box
+    if "human-handoff box names no one" in t:
+        return "warning", "handoff_no_handlers"
+    if "handoff assignment" in t:
+        return "warning", "handoff_assignment"
+    if "more than one human-handoff box" in t:
+        return "warning", "handoff_many"
     if "no system prompt" in t:
         return "warning", "no_system_prompt"
     if "dropped" in t:
@@ -101,20 +107,16 @@ def check_agent(graph: dict[str, Any], app_root: Path | None = None) -> dict[str
             node_id = next((str(n.get("id")) for n in nodes if _kind(n) == "memory"), None)
         elif code == "custom_filter":
             node_id = next((str(n.get("id")) for n in nodes if _kind(n) == "guardrail"), None)
+        elif code.startswith("handoff_"):
+            node_id = next((str(n.get("id")) for n in nodes if _kind(n) == "human_handoff"), None)
         findings.append(_finding(severity, code, _friendly(w), node_id))
 
-    # 2 — boxes that are saved but do nothing yet
+    # 2 — boxes that are saved but do nothing yet (human handoff is real now; the router is not)
     for n in nodes:
-        kind, nid = _kind(n), str(n.get("id"))
-        if kind == "human_handoff":
-            findings.append(_finding(
-                "info", "handoff_not_running",
-                "Human handoff is saved but does not run yet. If someone asks for a person, the assistant will say "
-                "it cannot transfer them and suggest contacting the app's administrator.", nid))
-        elif kind == "router":
+        if _kind(n) == "router":
             findings.append(_finding(
                 "info", "router_not_running",
-                "The router is saved but does not run yet: one agent handles every message.", nid))
+                "The router is saved but does not run yet: one agent handles every message.", str(n.get("id"))))
 
     # 3 — the agent as a whole
     tools = compiled.config.get("tools") or []
@@ -159,12 +161,29 @@ def check_agent(graph: dict[str, Any], app_root: Path | None = None) -> dict[str
                         f"Tool '{t.get('name')}' reads or writes '{t.get('entity')}', and this app has no table with that name.",
                         node_id))
 
+        # human handoff, against the app: the roles it names must exist; email is optional and never required
+        handoff = compiled.config.get("handoff")
+        handoff_id = next((str(n.get("id")) for n in nodes if _kind(n) == "human_handoff"), None)
+        if handoff:
+            known = {r.lower() for rules in access.values() for r in (rules.get("read", []) + rules.get("write", []))}
+            for role in handoff["handlers"]["roles"]:
+                if known and role.lower() not in known:
+                    findings.append(_finding(
+                        "error", "handoff_unknown_role",
+                        f"The human-handoff box names the role '{role}', and this app has no such role, so nobody would "
+                        "be notified or allowed to handle those handoffs.", handoff_id))
+
         env = ""
         for name in (".env.local", ".env"):
             try:
                 env += (root / name).read_text(encoding="utf-8") + "\n"
             except OSError:
                 pass
+        if handoff and handoff["notify"]["email"] and not re.search(r"^(SMTP_HOST|RESEND_API_KEY)=\S+", env, re.M):
+            findings.append(_finding(
+                "warning", "handoff_email_not_set_up",
+                "Email is turned on for handoffs, but this app has no email set up (no SMTP_HOST or RESEND_API_KEY). "
+                "Handoffs still work: they are saved in the inbox and the bell notifies people; no email is sent.", handoff_id))
         if not re.search(r"^ANTHROPIC_API_KEY=\S+", env, re.M):
             findings.append(_finding(
                 "warning", "no_ai_key",

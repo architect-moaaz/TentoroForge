@@ -128,12 +128,23 @@ export interface MemoryConfig {
   similarity_threshold?: number;
 }
 
+export type HandoffAssignment = "queue" | "round_robin" | "owner";
+
 export interface HumanHandoffConfig {
   conditions?: {
     sentiment_threshold?: number;
     keyword_triggers?: string[];
     explicit_request?: boolean;
   };
+  /** Who handles handoffs: anyone holding a role, or named people (the app's own users). */
+  handlers?: { roles?: string[]; people?: Array<{ id: string; name?: string }> };
+  assignment?: HandoffAssignment;
+  owner_id?: string;
+  /** What the assistant asks first (at most five). */
+  questions?: string[];
+  /** The bell is on unless switched off; email is optional and only goes out if the app has it set up. */
+  notify?: { in_app?: boolean; email?: boolean; email_urgent_only?: boolean };
+  /** Older settings, kept so an agent saved before the form existed still opens. Not used any more. */
   target?: {
     type?: "queue" | "email" | "webhook";
     value?: string;

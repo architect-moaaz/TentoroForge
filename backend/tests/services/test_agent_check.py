@@ -57,13 +57,9 @@ def test_names_are_matched_even_when_two_boxes_share_one():
     assert nodes == {"a", "b"}, "the second 'lookup' is compiled as lookup_2 and still points at its own box"
 
 
-def test_boxes_that_do_nothing_yet_say_so():
-    g = graph(PROMPT,
-              node("h", "human_handoff", "Escalate", {"target": {"type": "queue", "value": "q"}}),
-              node("r", "router", "Route", {"strategy": "intent_classification"}))
-    r = check_agent(g)
-    handoff, router = by_code(r, "handoff_not_running")[0], by_code(r, "router_not_running")[0]
-    assert handoff["nodeId"] == "h" and handoff["severity"] == "info" and "cannot transfer" in handoff["message"]
+def test_a_router_says_it_does_nothing_yet():
+    r = check_agent(graph(PROMPT, node("r", "router", "Route", {"strategy": "intent_classification"})))
+    router = by_code(r, "router_not_running")[0]
     assert router["nodeId"] == "r" and router["severity"] == "info"
     assert not by_code(r, "compile"), "the compiler's generic line is not said a second time"
 
@@ -134,7 +130,7 @@ def test_a_missing_ai_key_is_a_warning_and_a_present_one_is_not(tmp_path):
 
 def test_findings_come_errors_first():
     g = graph(PROMPT, tool("a", "orphan", tool_type="data_engine", operation="list"),
-              tool("b", "stub", tool_type="function"), node("h", "human_handoff", "H", {}))
+              tool("b", "stub", tool_type="function"), node("r", "router", "R", {}))
     order = [f["severity"] for f in check_agent(g)["findings"]]
     assert order == sorted(order, key=["error", "warning", "info"].index) and order[0] == "error" and order[-1] == "info"
 
@@ -164,3 +160,43 @@ async def test_the_endpoint_checks_the_graph_it_is_given_and_saves_nothing(tmp_p
     out = await check_agent_definition(proj.id, AgentDefinitionSave(**g), SimpleNamespace(id="u"), None)
     assert out["appChecked"] is True and by_code(out, "tool_unimplemented")[0]["nodeId"] == "tool_x"
     assert not (project / "agent-definitions").exists(), "a check is not a save"
+
+
+def handoff_box(**cfg):
+    return node("h", "human_handoff", "Hand over", {"handlers": {"roles": ["Admin"]}, **cfg})
+
+
+def test_a_handoff_that_names_no_one_is_a_warning_on_its_box():
+    f = by_code(check_agent(graph(PROMPT, node("h", "human_handoff", "Hand over", {}))), "handoff_no_handlers")
+    assert len(f) == 1 and f[0]["nodeId"] == "h" and f[0]["severity"] == "warning" and "nobody is notified" in f[0]["message"]
+
+
+def test_a_sound_handoff_has_nothing_to_report(tmp_path):
+    app = clean_app(tmp_path)
+    r = check_agent(graph(PROMPT, data_tool("t1", "list_movies", "movies", "list"), handoff_box()), app)
+    assert [f for f in r["findings"] if f["code"].startswith("handoff_")] == []
+
+
+def test_a_handoff_assignment_that_cannot_work_says_so():
+    f = by_code(check_agent(graph(PROMPT, handoff_box(assignment="owner"))), "handoff_assignment")
+    assert len(f) == 1 and f[0]["nodeId"] == "h" and "queue" in f[0]["message"]
+
+
+def test_a_handoff_role_the_app_does_not_have_is_an_error(tmp_path):
+    app = clean_app(tmp_path)
+    g = graph(PROMPT, node("h", "human_handoff", "Hand over", {"handlers": {"roles": ["Admin", "Janitor"]}}))
+    f = by_code(check_agent(g, app), "handoff_unknown_role")
+    assert len(f) == 1 and f[0]["severity"] == "error" and "Janitor" in f[0]["message"] and f[0]["nodeId"] == "h"
+
+
+def test_email_for_handoffs_is_optional_and_a_missing_setup_is_only_a_warning(tmp_path):
+    _, app = make_app(tmp_path)
+    lay_down(app)
+    (app / ".env.local").write_text("ANTHROPIC_API_KEY=sk-ant-test\n", encoding="utf-8")
+    g = graph(PROMPT, handoff_box(notify={"email": True}))
+    f = by_code(check_agent(g, app), "handoff_email_not_set_up")
+    assert len(f) == 1 and f[0]["severity"] == "warning" and "Handoffs still work" in f[0]["message"]
+    (app / ".env.local").write_text("ANTHROPIC_API_KEY=sk-ant-test\nSMTP_HOST=smtp.example.test\n", encoding="utf-8")
+    assert not by_code(check_agent(g, app), "handoff_email_not_set_up")
+    (app / ".env.local").write_text("ANTHROPIC_API_KEY=sk-ant-test\n", encoding="utf-8")
+    assert not by_code(check_agent(graph(PROMPT, handoff_box(notify={"email": False})), app), "handoff_email_not_set_up")
