@@ -249,14 +249,36 @@ console.log("the assistant stops answering a conversation that is with a person"
   const kept = (await store.listMessages(cid)).map((m: any) => [m.role, m.content.slice(0, 22)]);
   ok(kept.some((m: any) => m[0] === "user" && m[1] === "are you there?"), "what they wrote is kept for whoever has it");
 
-  state.handed = { ...open, status: "claimed", assignedToName: "Maya" };
+  // The person is told once. After that what they add reaches whoever has it, without the notice on every line.
+  state.handed = { ...open, status: "claimed", assignedToName: "Maya", assignedToId: "m1" };
+  const heard: any[] = [];
+  deps.handoffs.customerWrote = async (h: any, text: string) => { heard.push([h.assignedToName, text]); };
   const claimed = await run(baseConfig(), "hello?", deps, cid);
-  ok(claimed[0].content.includes("Maya is looking at it"), "once someone claims it, the person is told who");
+  eqJson(claimed.map((e: any) => e.type), ["handoff", "done"], "told once already: no second notice, and the status goes to the chat");
+  eqJson(claimed[0].status, "claimed", "the chat learns it is claimed");
+  eqJson(heard, [["Maya", "hello?"]], "whoever has it is told the person wrote");
+  eqJson(modelCalls, 1, "and the assistant still does not answer");
+
+  // A person on the team writes into the conversation; the person answers; still no notice, still no assistant.
+  await store.saveMessage(cid, { role: "human", content: "Hi, Maya here. Which order?" });
+  const replied = await run(baseConfig(), "order 12", deps, cid);
+  eqJson(replied.map((e: any) => e.type), ["handoff", "done"], "after a team member wrote, no notice either");
+  eqJson(heard.at(-1), ["Maya", "order 12"], "and they hear this one too");
+
+  // A bell that cannot be written never fails the chat.
+  deps.handoffs.customerWrote = async () => { throw new Error("notifications table missing"); };
+  const broken = await run(baseConfig(), "still there?", deps, cid);
+  ok(broken.at(-1).type === "done" && !broken.some((e: any) => e.type === "error"), "a failing alert leaves the chat working");
 
   state.handed = null;
   const after = await run(baseConfig(), "thanks, one more thing", deps, cid);
   eqJson(modelCalls, 2, "resolved, the conversation is the assistant's again");
   ok(after.some((e: any) => e.type === "text" && e.content === "Hello"), "and it answers");
+  // It reads what the person on the team wrote as something said in the conversation, not as its own words.
+  const { loadHistory } = await import("../agents/memory.ts");
+  const replay = await loadHistory(store, cid, null, { type: "conversation", maxMessages: 20, summarizeAfter: 50 } as any);
+  ok(replay.some((m: any) => m.role === "assistant" && String(m.content).startsWith("[A person on the team wrote: Hi, Maya here")), "the assistant is shown the team member's words, marked as theirs");
+  ok(replay.every((m: any) => m.role === "user" || m.role === "assistant"), "and the model is only ever given the roles it knows");
 }
 
 console.log("an app with no handoff table is never 'handed over'");
@@ -291,4 +313,13 @@ console.log("the tool is given the conversation, the agent and the handoff setti
 }
 
 eqJson(handoffNotice({ ref: "HO-1", status: "open", assignedToName: null }).includes("HO-1"), true, "the notice names the reference");
+
+console.log("the person is told it is escalated, that someone will contact them, and where to look");
+{
+  const out: any = await requestHandoff(fakeDeps(), ctxFor(spec()), { reason: "x" });
+  ok(/escalated/i.test(out.message) && /contact them shortly/.test(out.message), "the assistant is told to say it is escalated and a person will contact them");
+  ok(/right here in this chat/.test(out.message) && /bell/.test(out.message), "and that replies appear in the chat and on the bell");
+  const notice = handoffNotice({ ref: "HO-1", status: "open", assignedToName: null });
+  ok(/right here in this chat/.test(notice) && /bell/.test(notice), "the standing notice says the same");
+}
 done("human handoff");

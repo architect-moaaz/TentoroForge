@@ -38,7 +38,7 @@ export const drizzleStore: ConversationStore = {
     return rows.map(
       (r): StoredMessage => ({
         id: r.id,
-        role: r.role === "assistant" ? "assistant" : "user",
+        role: r.role === "assistant" ? "assistant" : r.role === "human" ? "human" : "user",
         content: r.content,
         toolCalls: (r.toolCalls as StoredMessage["toolCalls"]) ?? null,
         tokenCount: r.tokenCount,

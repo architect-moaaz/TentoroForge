@@ -75,10 +75,19 @@ export async function runAgent(
     // table in this app) means "not handed over", never an error.
     const handed = await deps.handoffs?.openFor(conversationId).catch(() => null);
     if (handed) {
-      const notice = handoffNotice(handed);
-      emit({ type: "text", content: notice });
+      // The person is told once. After that (or once a person has written back) what they add simply reaches
+      // whoever has it; repeating the notice on every message would drown a real conversation.
+      const last = history[history.length - 1];
+      const lastText = last && typeof last.content === "string" ? last.content : "";
+      const told = last?.role === "assistant" && (lastText.startsWith("This conversation is with a person") || lastText.startsWith("[A person on the team wrote"));
+      if (!told) {
+        const notice = handoffNotice(handed);
+        emit({ type: "text", content: notice });
+        await deps.store.saveMessage(conversationId, { role: "assistant", content: notice });
+      }
       emit({ type: "handoff", ref: handed.ref, status: handed.status });
-      await deps.store.saveMessage(conversationId, { role: "assistant", content: notice });
+      // Whoever has it hears that the person wrote. A failure here never touches the chat.
+      await deps.handoffs?.customerWrote?.(handed, input.message).catch(() => {});
       emit({ type: "done", conversationId, tokens, turns: 0 });
       return;
     }

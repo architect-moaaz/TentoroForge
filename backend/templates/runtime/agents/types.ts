@@ -191,7 +191,8 @@ export interface HandoffDeps {
 
 export interface StoredMessage {
   id?: string;
-  role: "user" | "assistant";
+  /** "human" is a person on the team writing into a conversation that was handed to them. */
+  role: "user" | "assistant" | "human";
   content: string;
   toolCalls?: ToolCallRecord[] | null;
   tokenCount?: number | null;
@@ -290,7 +291,11 @@ export interface AgentDeps {
   ): Promise<unknown>;
   store: ConversationStore;
   /** Absent in an app with no handoff table: nothing is ever "handed over" there. */
-  handoffs?: { openFor(conversationId: string): Promise<HandoffRecord | null> };
+  handoffs?: {
+    openFor(conversationId: string): Promise<HandoffRecord | null>;
+    /** The person wrote to a conversation that is with someone: tell them (best-effort, may be absent). */
+    customerWrote?(handoff: HandoffRecord, text: string): Promise<void>;
+  };
   /** FEEL-lite. Absent → output rules are skipped. */
   evalExpression?: (expression: string, scope: Record<string, unknown>) => unknown;
   now?: () => number;

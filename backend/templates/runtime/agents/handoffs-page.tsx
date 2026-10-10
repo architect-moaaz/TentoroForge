@@ -3,8 +3,10 @@
  * The handoff inbox — conversations an AI agent passed to a person. Forge runtime — do not remove.
  *
  * Whoever the agent's human-handoff settings name can open it, see why someone asked for a person, how to
- * reach them and the conversation so far, then claim it, hand it back, or resolve it with a note. The person who
- * asked sees the status in their chat. Colours come from the app's own design tokens.
+ * reach them and the conversation so far, then claim it, hand it back, or resolve it with a note. They can also
+ * write to the person: the message appears in the person's own chat, where the assistant spoke, and what the
+ * person writes back appears here (this page checks every few seconds while a conversation is open).
+ * Colours come from the app's own design tokens.
  */
 import * as React from "react";
 
@@ -24,7 +26,7 @@ type Handoff = {
   resolutionNote?: string | null;
   createdAt: string;
 };
-type Message = { role: "user" | "assistant"; content: string };
+type Message = { role: "user" | "assistant" | "human"; content: string };
 
 const BASE = (process.env.NEXT_PUBLIC_BASE_PATH ?? "") as string;
 const tok = (name: string, fallback: string) => `hsl(var(--${name}, ${fallback}))`;
@@ -66,7 +68,15 @@ export default function HandoffsPage() {
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [detail, setDetail] = React.useState<{ handoff: Handoff; messages: Message[] } | null>(null);
   const [note, setNote] = React.useState("");
+  const [reply, setReply] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const endRef = React.useRef<HTMLDivElement>(null);
+
+  // A bell notification links here with ?id=<handoff>: open that one straight away.
+  React.useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("id");
+    if (id) setOpenId(id);
+  }, []);
 
   const load = React.useCallback(async () => {
     try {
@@ -86,12 +96,48 @@ export default function HandoffsPage() {
     return () => clearInterval(t);
   }, [load]);
 
-  React.useEffect(() => {
-    if (!openId) return setDetail(null);
-    api(`?id=${encodeURIComponent(openId)}`)
+  const loadDetail = React.useCallback(() => {
+    if (!openId) return Promise.resolve();
+    return api(`?id=${encodeURIComponent(openId)}`)
       .then(setDetail)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [openId, rows]);
+  }, [openId]);
+
+  React.useEffect(() => {
+    if (!openId) return setDetail(null);
+    loadDetail();
+  }, [openId, rows, loadDetail]);
+
+  // What the person writes back shows up without a refresh: look again every few seconds while one is open.
+  React.useEffect(() => {
+    if (!openId || detail?.handoff.status === "resolved") return;
+    const t = setInterval(loadDetail, 4000);
+    return () => clearInterval(t);
+  }, [openId, detail?.handoff.status, loadDetail]);
+
+  React.useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [detail?.messages.length, openId]);
+
+  async function send() {
+    const text = reply.trim();
+    if (!detail || !text) return;
+    setBusy(true);
+    try {
+      await api("", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: detail.handoff.id, action: "reply", text }),
+      });
+      setReply("");
+      setError(null);
+      await Promise.all([loadDetail(), load()]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function act(action: "claim" | "release" | "resolve") {
     if (!detail) return;
@@ -207,13 +253,22 @@ export default function HandoffsPage() {
                   <div key={i} className={m.role === "user" ? "flex justify-start" : "flex justify-end"}>
                     <div
                       className="max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-1.5 text-sm"
-                      style={m.role === "user" ? { background: C.muted } : { background: C.primary, color: C.onPrimary }}
+                      style={
+                        m.role === "user"
+                          ? { background: C.muted }
+                          : m.role === "human"
+                            ? { background: C.primary, color: C.onPrimary }
+                            : { background: C.card, border: `1px solid ${C.border}` }
+                      }
                     >
-                      <div className="text-[10px] opacity-70">{m.role === "user" ? detail.handoff.requestedByName ?? "Customer" : "Assistant"}</div>
+                      <div className="text-[10px] opacity-70">
+                        {m.role === "user" ? detail.handoff.requestedByName ?? "Customer" : m.role === "human" ? detail.handoff.assignedToName ?? "Team" : "Assistant"}
+                      </div>
                       {bold(m.content)}
                     </div>
                   </div>
                 ))}
+                <div ref={endRef} />
               </div>
 
               {detail.handoff.status !== "resolved" && (
@@ -234,6 +289,26 @@ export default function HandoffsPage() {
                         Hand it back to the queue
                       </button>
                     )}
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <textarea
+                      value={reply}
+                      onChange={(e) => setReply(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          send();
+                        }
+                      }}
+                      placeholder={mine || detail.handoff.status === "open" ? "Write to them. They see it in their chat." : "Take it over to write to them."}
+                      aria-label="Message to the person"
+                      disabled={detail.handoff.status === "claimed" && !mine}
+                      className="min-h-[56px] w-full rounded-lg border bg-transparent px-3 py-2 text-sm disabled:opacity-50"
+                      style={{ borderColor: C.border }}
+                    />
+                    <button type="button" disabled={busy || !reply.trim() || (detail.handoff.status === "claimed" && !mine)} onClick={send} className="rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50" style={{ background: C.primary, color: C.onPrimary }}>
+                      Send
+                    </button>
                   </div>
                   <textarea
                     value={note}
