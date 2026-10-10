@@ -37,6 +37,10 @@ def opening(project_id: str, output_dir: str, ask: str, *, brief: str = "") -> s
     what the person has said so far IS the application, and the moves that
     apply are `open_decisions` and `define_application`, not the verbs."""
     if not defined(output_dir):
+        from services import project_templates
+        staged = project_templates.pending(output_dir)
+        if staged:
+            return template_page(staged, brief)
         return ("THERE IS NO APPLICATION YET. Nothing is defined, so there is nothing to "
                 "change, read or compose: the verbs below do not apply. What the person has "
                 "said so far is the brief:\n\n" + (brief.strip() or "(nothing yet)")
@@ -54,4 +58,46 @@ def opening(project_id: str, output_dir: str, ask: str, *, brief: str = "") -> s
     return page
 
 
-__all__ = ["defined", "opening"]
+def template_page(staged: dict, brief: str = "") -> str:
+    """What the loop sees for a project started from a template, before it is used.
+
+    The person picked a template in the gallery; the one thing that must be
+    settled before anything is defined is whether they want THAT application
+    again or something like it. The template's facts are on the page so the
+    question, and the answer to "what's in it?", come from what it holds."""
+    facts = staged.get("summary") or {}
+    counts = facts.get("counts") or {}
+    from services.project_templates import counted
+    held = counted(counts, ("pages", "entities", "workflows", "roles", "requirements"))
+    lines = [
+        f"THIS PROJECT WAS STARTED FROM THE TEMPLATE “{staged.get('name')}”, and the template "
+        "has not been used yet. Nothing is defined, so the change verbs do not apply.",
+        f"What the template is: {(staged.get('description') or facts.get('description') or '')[:500]}",
+        f"It holds: {held or 'a definition'}.",
+    ]
+    for key, label in (("pages", "Screens"), ("entities", "Records"), ("workflows", "Processes"),
+                       ("roles", "Roles")):
+        if facts.get(key):
+            lines.append(f"{label}: " + ", ".join(str(x) for x in facts[key][:16]))
+    lines += [
+        "",
+        "What the person has said so far:",
+        brief.strip() or "(nothing yet)",
+        "",
+        "Settle ONE thing: do they want the exact same app, or something like it but different?",
+        "- They have not said → `ask_user` with exactly these options: "
+        "\"The exact same app\", \"Something like it, but different\".",
+        "- The same app (or the same with small edits like a name, a field or a screen) → "
+        "`use_template` with mode \"exact\". Small edits are made after, with the change verbs.",
+        "- Something different (another business, other records or processes) → if they have "
+        "already said WHAT is different, `use_template` with mode \"adapt\" and `changes` in "
+        "their words; if they only said \"something like it\", ask what should be different "
+        "(`ask_user`, no options needed).",
+        "- A new look as well → `keep_look` false.",
+        "Do not call `define_application` or `open_decisions` for this project: the template is "
+        "the starting point.",
+    ]
+    return "\n".join(lines)
+
+
+__all__ = ["defined", "opening", "template_page"]

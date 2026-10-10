@@ -8,6 +8,9 @@ import { useState } from "react";
 // so any browser-side crash reports to Forge's self-healing endpoint. The
 // module SSR-guards itself, so this is safe in a server component too.
 import "@/lib/error_reporter";
+// Side-effect import — the app's own `/api/...` requests go under the
+// Preview's base path (a no-op wherever there is none).
+import "@/lib/base_path_fetch";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(

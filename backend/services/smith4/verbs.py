@@ -681,6 +681,31 @@ def records_out(ctx: Ctx, u: dict) -> Outcome:
     return Outcome(status="resolved", said=str(out.get("diff_summary") or ""))
 
 
+def save_as_template(ctx: Ctx, u: dict) -> Outcome:
+    """Keep this application as a template for the organisation. Writes
+    nothing in the application itself; the template is a copy of its
+    definition (see `services.project_templates`)."""
+    from services import project_templates as templates
+    facts = templates.project_facts(str(ctx.project_id))
+    if not facts:
+        return Outcome(status="needs_user", said=(
+            "I could not find which organisation this project belongs to, so I have not saved "
+            "a template. Use “Save as template” at the top of the project instead."))
+    try:
+        meta = templates.save(output_dir=ctx.out, org_id=facts["org_id"],
+                              created_by=facts["owner_id"], created_by_name=facts["owner_name"],
+                              source_project_id=str(ctx.project_id),
+                              name=_s(u, "new_value") or "")
+    except templates.TemplateError as exc:
+        return Outcome(status="needs_user", said=str(exc))
+    held = templates.counted((meta.get("summary") or {}).get("counts") or {},
+                             ("pages", "entities", "workflows"))
+    return Outcome(status="resolved", said=(
+        f"Saved “{meta['name']}” to Templates" + (f" — {held}" if held else "") + ". Anyone in "
+        "your organisation can start a new app from it there: the exact same app again, or "
+        "one like it. This application is unchanged."))
+
+
 def rebuild(ctx: Ctx, u: dict) -> Outcome:
     """A chat turn cannot start a run, so it must not imply that it can."""
     stale = ""
@@ -839,7 +864,7 @@ PERFORM: dict[str, Perform] = {
     "refresh_sample_data": refresh_sample_data,
     "import_data": import_data, "export_data": export_data,
     "add_login": accounts, "remove_login": accounts, "reset_login": accounts,
-    "explain_crash": incident, "explain_slowness": incident, "back_up": records_out,
+    "explain_crash": incident, "explain_slowness": incident, "back_up": records_out, "save_as_template": save_as_template,
     "rebuild": rebuild,
     "add_section": screen, "edit_section": screen, "remove_section": screen, "reorder_sections": screen,
     "move_section": screen, "merge_screens": screen, "split_section": screen,

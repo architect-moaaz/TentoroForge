@@ -92,9 +92,25 @@ def labelled(documents: Iterable[str]) -> str:
     return "\n".join(parts)
 
 
+#: A template the person chose to start from, written out by
+#: `services.project_templates.reference_document`. It begins with this line.
+TEMPLATE_MARK = "# Reference application:"
+#: The nodes that design what an application is MADE of. They read the
+#: template a new application is being adapted from — and only that, not every
+#: attached document: the records, screens and processes of the reference are
+#: what "something like it" keeps, and the rest of what was attached already
+#: reached them through the requirements.
+READS_TEMPLATE = frozenset({"data_model", "page_contracts", "workflows"})
+
+
 def addendum(output_dir: str | Path | None, node: str) -> str:
     """The labelled block for `node`, or "" when it reads none or none exist."""
-    if not output_dir or node not in READS_DOCUMENTS:
+    if not output_dir:
         return ""
-    block = labelled(texts(output_dir))
+    if node in READS_DOCUMENTS:
+        block = labelled(texts(output_dir))
+    elif node in READS_TEMPLATE:
+        block = labelled([t for t in texts(output_dir) if t.startswith(TEMPLATE_MARK)])
+    else:
+        return ""
     return f"\n\n{block}" if block else ""

@@ -57,6 +57,7 @@ from routers.verify import router as verify_router
 from routers.generate import router as generate_router
 from routers.blueprint_generate import router as blueprint_generate_router
 from routers.templates import router as templates_router
+from routers.project_templates import router as project_templates_router
 from routers.discovery import router as discovery_router
 from routers.data_model import router as data_model_router
 from routers.rules import router as rules_router
@@ -184,6 +185,7 @@ app.include_router(generate_router)
 # one is proven and a caller can see from the URL which engine it asked for.
 app.include_router(blueprint_generate_router)
 app.include_router(templates_router)
+app.include_router(project_templates_router)
 app.include_router(discovery_router)
 app.include_router(data_model_router)
 app.include_router(rules_router)

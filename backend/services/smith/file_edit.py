@@ -43,7 +43,7 @@ PATCHES_FILE = "patches.json"
 REGISTRY_DIR = "_platform_patches"
 
 #: Directories under `app/` that are built or installed, never edited.
-_NEVER = ("node_modules/", ".next/", ".next-review/", ".next-verify/", ".forge-check/", ".turbo/")
+_NEVER = ("node_modules/", ".next/", ".next-review/", ".next-preview/", ".next-verify/", ".forge-check/", ".turbo/")
 
 #: Files written from the definition, and the section that writes each.
 _DEFINITION = (
