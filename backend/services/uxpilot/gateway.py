@@ -14,7 +14,7 @@ can do unless it was opened with ``may_generate=True``.
 ``may_generate`` is set by exactly one caller: the page-layouts node, for a
 run whose application says ``uiDesigner: uxpilot`` — the user picked UX Pilot
 at the approval gate knowing it spends their credits. It admits
-:data:`GENERATION_TOOLS`, which is ``generate_design`` and nothing else:
+:data:`GENERATION_TOOLS`, which is ``start_design_agent`` and nothing else:
 importing, publishing, prototyping and multi-screen flows spend credits for
 things this pipeline never asked for. A gateway opened for reading a page a
 person drew is never opened with it, so importing stays read-only exactly as
@@ -55,12 +55,15 @@ ALLOWED_TOOLS = frozenset({
     "list_design_collections", "get_design_collection",
     "list_themes", "get_theme", "list_symbols", "get_symbol",
     "list_diagrams",
+    # Progress of a generation already started: reading it costs nothing.
+    "get_agent_job", "get_generation_status",
 })
 
 #: The one credit-spending tool a run may use, and only when the gateway was
-#: opened with ``may_generate``. One screen from one prompt: the unit the
-#: page-layouts node works in.
-GENERATION_TOOLS = frozenset({"generate_design"})
+#: opened with ``may_generate``. UX Pilot's server has no one-shot "generate a
+#: screen"; its design agent starts a job from a prompt, and the job is polled
+#: with the readers above.
+GENERATION_TOOLS = frozenset({"start_design_agent"})
 
 #: Semantic argument → the property names a tool schema might use for it.
 _ARG_ALIASES: dict[str, tuple[str, ...]] = {
@@ -169,7 +172,7 @@ class UxPilotGateway:
         out: dict[str, Any] = {}
         for sem, value in semantic.items():
             for alias in _ARG_ALIASES.get(sem, (sem,)):
-                key = lowered.get(alias.replace("_", ""))
+                key = lowered.get(alias.lower().replace("_", "").replace("-", ""))
                 if key is not None:
                     out[key] = value
                     break

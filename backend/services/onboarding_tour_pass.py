@@ -230,7 +230,11 @@ def run(output_dir: str) -> dict[str, Any]:
     lib_dir = root / "src" / "lib"
     lib_dir.mkdir(parents=True, exist_ok=True)
     helper_file = lib_dir / "useTour.ts"
-    if not helper_file.exists() or helper_file.read_text(encoding="utf-8") != _USE_TOUR_TS:
+    try:
+        unchanged = helper_file.exists() and helper_file.read_text(encoding="utf-8") == _USE_TOUR_TS
+    except UnicodeDecodeError:
+        unchanged = False
+    if not unchanged:
         helper_file.write_text(_USE_TOUR_TS, encoding="utf-8")
     report["helper_written"] = True
 

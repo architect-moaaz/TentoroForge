@@ -710,13 +710,42 @@ def page_module(doc: dict, page: dict, row: dict) -> str:
     )
 
 
+#: Which skeleton a page pattern is drawn as while it loads (`PageSkeleton`).
+_SKELETON_BY_PATTERN = {
+    "entity_list": "list", "list": "list", "table": "list", "collection": "list", "queue": "list",
+    "dashboard": "dashboard", "analytics": "dashboard", "overview": "dashboard",
+    "record_workspace": "record", "master_detail": "record", "detail": "record", "profile": "record",
+    "form": "form", "wizard": "form", "settings": "form", "create": "form",
+}
+
+
+def skeleton_for(page: dict) -> str:
+    """The skeleton shape for a page: its pattern, else its route (a record route has a
+    ``[param]``), else the generic one."""
+    pattern = str(page.get("pattern") or "").lower()
+    if pattern in _SKELETON_BY_PATTERN:
+        return _SKELETON_BY_PATTERN[pattern]
+    return "record" if "[" in str(page.get("route") or "") else "default"
+
+
+def loading_module(page: dict) -> str:
+    """The page's own `loading.tsx`: a placeholder shaped like the page, rendered inside the
+    shell that wraps it, so a navigation shimmers the content area and leaves the rail alone."""
+    return (
+        f"{CODE_PAGE_MARKER} {page.get('id')} (loading)\n"
+        f"// {page.get('name') or page.get('id')} while its data is read.\n"
+        'import { PageSkeleton } from "@/components/PageSkeleton";\n\n'
+        f'export default function Loading() {{\n  return <PageSkeleton pattern="{skeleton_for(page)}" />;\n}}\n'
+    )
+
+
 def code_page_files(doc: dict, row: dict) -> dict[str, str]:
     """``{relative path: content}`` for one `pageCode` row."""
     page = next((p for p in _live(doc.get("pages")) if str(p.get("id")) == str(row.get("page"))), None)
     if page is None:
         return {}
     base = code_page_dir(page)
-    return {
+    files = {
         f"{base}/page.tsx": page_module(doc, page, row),
         f"{base}/load.ts": str(row.get("load") or ""),
         f"{base}/view.tsx": str(row.get("view") or ""),
@@ -724,6 +753,11 @@ def code_page_files(doc: dict, row: dict) -> dict[str, str]:
         **{f"{base}/parts/{key}.tsx": str(code or "")
            for key, code in (row.get("parts") or {}).items() if code},
     }
+    # The root page is rendered by the catch-all, which a `loading.tsx` beside it cannot
+    # reach; and a sign-in page has no shell to keep, so its own look is its loading state.
+    if base != ROOT_DIR and str(page.get("pattern") or "") != "auth":
+        files[f"{base}/loading.tsx"] = loading_module(page)
+    return files
 
 
 def page_code_text(row: dict) -> str:
@@ -786,7 +820,7 @@ def project_code_pages(doc: dict, app_root: str | Path) -> list[str]:
                 # with a real dash or quote in it existed at all.
                 continue
             if head.startswith(CODE_PAGE_MARKER):
-                for name in ("page.tsx", "load.ts", "view.tsx"):
+                for name in ("page.tsx", "load.ts", "view.tsx", "loading.tsx"):
                     (page_file.parent / name).unlink(missing_ok=True)
                 shutil.rmtree(page_file.parent / "parts", ignore_errors=True)
                 if page_file.parent == root / ROOT_DIR and _ROOT_STUB.exists():
@@ -815,5 +849,6 @@ def project_code_pages(doc: dict, app_root: str | Path) -> list[str]:
 
 
 __all__ = ["project_app_sdk", "project_code_pages", "code_page_files", "code_page_dir",
+           "loading_module", "skeleton_for",
            "sdk_files", "sdk_reference", "entity_type_names", "workflow_keys", "page_keys",
            "SDK_DIR", "CODE_PAGE_MARKER"]

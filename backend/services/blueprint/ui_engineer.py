@@ -25,6 +25,7 @@ has one — so a refused page is plainer, never missing.
 """
 from __future__ import annotations
 
+from services.proc_compat import tool
 import json
 import logging
 import os
@@ -962,10 +963,112 @@ def plan_prompt(doc: dict, page: dict, brief: str = "") -> str:
             "so decide here and write there.")
 
 
+#: How much of a design's markup the writer is shown. A page's structure fits in
+#: a fraction of this; the rest of a generated file is inline SVG, scripts and
+#: repeated rows, which cost the page its budget and decide nothing.
+REFERENCE_CHARS = 28000
+
+
+def reference_digest(html: str, limit: int = REFERENCE_CHARS) -> str:
+    """A design's markup reduced to what decides the page: no scripts, styles,
+    comments or head, inline SVG and data URIs folded to a stub, whitespace
+    collapsed, cut at ``limit`` on a tag boundary."""
+    text = str(html or "")
+    body = re.search(r"<body[^>]*>(.*)</body>", text, re.S | re.I)
+    if body:
+        text = body.group(1)
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    text = re.sub(r"<(script|style|noscript|head)\b.*?</\1>", "", text, flags=re.S | re.I)
+    text = re.sub(r"<svg\b.*?</svg>", "<svg/>", text, flags=re.S | re.I)
+    text = re.sub(r"data:[a-z/+.-]+;base64,[A-Za-z0-9+/=]+", "data:", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= limit:
+        return text
+    cut = text.rfind(">", 0, limit)
+    return text[: cut + 1 if cut > limit // 2 else limit] + " <!-- …the rest is the same kind of markup -->"
+
+
+#: A designer draws icons with an icon FONT (Font Awesome, Phosphor), loaded from
+#: a CDN the app never loads; the app's icons are `lucide-react`. The names that
+#: differ between the two, for the icons a page is most likely to use.
+_LUCIDE_NAMES = {
+    "plus": "Plus", "circle-plus": "CirclePlus", "xmark": "X", "times": "X", "x": "X", "close": "X",
+    "check": "Check", "circle-check": "CircleCheck", "check-circle": "CircleCheck",
+    "trash": "Trash2", "trash-can": "Trash2", "trash-alt": "Trash2", "pen": "Pencil", "pencil": "Pencil",
+    "pen-to-square": "SquarePen", "edit": "SquarePen", "magnifying-glass": "Search", "search": "Search",
+    "calendar": "Calendar", "calendar-days": "CalendarDays", "calendar-check": "CalendarCheck", "clock": "Clock",
+    "arrow-left": "ArrowLeft", "arrow-right": "ArrowRight", "chevron-right": "ChevronRight",
+    "chevron-left": "ChevronLeft", "chevron-down": "ChevronDown", "angle-down": "ChevronDown",
+    "star": "Star", "heart": "Heart", "bookmark": "Bookmark", "book": "Book", "book-open": "BookOpen",
+    "user": "User", "users": "Users", "gear": "Settings", "cog": "Settings", "bell": "Bell",
+    "house": "Home", "home": "Home", "list": "List", "list-check": "ListChecks", "filter": "Filter",
+    "sort": "ArrowUpDown", "ellipsis": "MoreHorizontal", "ellipsis-vertical": "MoreVertical",
+    "eye": "Eye", "link": "Link", "tag": "Tag", "flag": "Flag", "circle": "Circle", "folder": "Folder",
+    "file": "File", "download": "Download", "upload": "Upload", "envelope": "Mail", "lock": "Lock",
+    "right-from-bracket": "LogOut", "sign-out": "LogOut", "arrow-up-right-from-square": "ExternalLink",
+    "circle-info": "Info", "triangle-exclamation": "TriangleAlert", "chart-simple": "BarChart3",
+    "chart-line": "LineChart", "bolt": "Zap", "fire": "Flame", "sparkles": "Sparkles", "image": "Image",
+}
+_ICON_CLASS = re.compile(r"""\b(?:fa(?:-(?:solid|regular|light|thin|brands|duotone))?|ph(?:-(?:bold|fill|light|thin|duotone))?)\b[^"']*?\b(?:fa|ph)-([a-z0-9-]+)""")
+
+
+def icon_hints(html: str) -> list[tuple[str, str]]:
+    """``[(font icon, lucide icon)]`` for every icon a design draws with a font,
+    in the order it first draws them. The lucide name is the usual one; an icon
+    not in the table is shown as its own name in PascalCase, which the writer
+    checks exists in `lucide-react` before it imports it."""
+    out: dict[str, str] = {}
+    for m in _ICON_CLASS.finditer(str(html or "")):
+        name = m.group(1)
+        if name in ("solid", "regular", "light", "thin", "brands", "duotone", "bold", "fill", "fw", "lg", "xs", "sm"):
+            continue
+        out.setdefault(name, _LUCIDE_NAMES.get(name) or "".join(w.capitalize() for w in name.split("-")))
+    return list(out.items())[:24]
+
+
+def reference_block(reference: dict) -> str:
+    """The designer's page, and what the writer is told to do with it."""
+    preview = str(reference.get("previewUrl") or "").strip()
+    return (
+        "\n# A design for this page, drawn by a designer\n"
+        + (f"Preview: {preview}\n" if preview else "")
+        + "```html\n" + reference_digest(str(reference.get("html") or "")) + "\n```\n"
+        "THE DESIGN IS THE DECISION; ITS CODE IS NOT. Keep what it decided — its sections and their "
+        "order, the arrangement, spacing, density, type hierarchy and visual character — and write "
+        "the page as this application's own, under every rule above:\n"
+        "- Everything the design shows as data (numbers, rows, names, dates, statuses) is an invented "
+        "example. Read the real thing in `load.ts`; never copy a literal from the design.\n"
+        "- Every button or form that changes data is a workflow from the brief. A control the brief "
+        "has no workflow for is left out and named in `needs`.\n"
+        "- Links go through `href(pages.x)`. Colours are the app's token classes, not the design's.\n"
+        "- Leave out any sidebar, top bar or application shell the design drew: the application "
+        "provides them around every page.\n"
+        "- What the brief requires and the design lacks — a widget, an empty state, a filter — is "
+        "added, in the design's own style.\n"
+        + _icon_rule(str(reference.get("html") or ""))
+        + "- Keep the design's small touches that make it feel finished: icons beside buttons and "
+        "dates, a status told as a tinted pill with a dot (`Badge variant=\"success\"` / `\"warning\"` "
+        "/ `\"destructive\"`, plus a `<span className=\"h-1.5 w-1.5 rounded-full bg-current\" />`), "
+        "hover and focus states, a clear empty state. Drop one only when the brief has no data behind "
+        "it — a callout whose text the design made up is left out, and said in `needs` if it matters.\n"
+    )
+
+
+def _icon_rule(html: str) -> str:
+    icons = icon_hints(html)
+    if not icons:
+        return ""
+    return ("- ICONS ARE `lucide-react`, NEVER THE DESIGN'S ICON FONT (it is not loaded here). The "
+            "design draws: " + ", ".join(f"`{f}` → `{l}`" for f, l in icons)
+            + ". Import each from `lucide-react` (`h-4 w-4`, `currentColor`) where the design has it.\n")
+
+
 def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "",
                 current: dict | None = None, plan: dict | None = None,
-                relayout_of: dict | None = None) -> str:
+                relayout_of: dict | None = None, reference: dict | None = None) -> str:
     out = ["Write this page.\n\n```json\n" + json.dumps(_page_brief(doc, page), indent=2) + "\n```"]
+    if reference and not current:
+        out.append(reference_block(reference))
     if plan:
         # THE DECIDING IS DONE. Handed the plan it made a moment ago, the
         # writer has little left to weigh — which is the point: the budget
@@ -1084,7 +1187,7 @@ def _install_beside(modules: Path, specs: list[str]) -> None:
     import tempfile
     with tempfile.TemporaryDirectory(prefix="forge-sdk-pkg-") as tmp:
         (Path(tmp) / "package.json").write_text('{"name": "sdk-packages", "private": true}', encoding="utf-8")
-        proc = subprocess.run(["npm", "install", "--no-audit", "--no-fund", "--no-package-lock", *specs],
+        proc = subprocess.run([tool("npm"), "install", "--no-audit", "--no-fund", "--no-package-lock", *specs],
                               cwd=tmp, capture_output=True, text=True, timeout=300)
         if proc.returncode:
             logger.warning("installing %s failed: %s", specs, proc.stderr[-500:])
@@ -1411,10 +1514,18 @@ def _page_plan(doc: dict, page: dict, client: Any, system: str, spent: list[Any]
 def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                  feedback: str = "", brief: str = "", current: dict | None = None,
                  usage: Any = None, node: str = "page_code", critic: Any = None,
-                 on_look: Any = None, relayout_of: dict | None = None) -> tuple[dict, list[Any]]:
+                 on_look: Any = None, relayout_of: dict | None = None,
+                 reference: dict | None = None) -> tuple[dict, list[Any]]:
     """Author one page and compile it, returning the accepted `pageCode` body
     and the usage of every call. Raises CompileError when the last round still
     does not compile — the message carries the errors for the next attempt.
+
+    With a ``reference`` (``{"html", "previewUrl", "designId"}`` — a design a
+    designer drew for this page) the writer ADAPTS it rather than deciding the
+    page: the planning call is skipped (the design is the plan), the style
+    rules that would pull it back toward the house look do not apply, and the
+    look reviewer sends it back only for something broken, not for taste. The
+    compiler and every wiring check hold it exactly as they hold any page.
 
     With a ``critic``, a page that compiles is LOOKED AT before it is accepted
     (`page_look`): rendered and judged, and sent back once with the review
@@ -1454,15 +1565,19 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
     # DECIDE, THEN WRITE — in two calls, because one budget holds both and
     # the deciding will take all of it. Skipped on a repair (the decisions
     # were made and the code exists; what is wanted now is a fix).
-    plan = None if (current or feedback) else _page_plan(doc, page, client, system, spent,
-                                                         brief if relayout_of else "")
+    #: A page written from a designer's drawing, as opposed to one the model
+    #: decides: only a page being written for the first time has one.
+    seeded = bool(reference and str(reference.get("html") or "").strip()) \
+        and current is None and relayout_of is None
+    plan = None if (current or feedback or seeded) else _page_plan(doc, page, client, system, spent,
+                                                                   brief if relayout_of else "")
     # WITH THE DECIDING DONE, WRITING NEEDS LITTLE DELIBERATION AND NO ROOM
     # FOR IT. Measured on the page that failed four times: plan at `low` (15s),
     # then write at `low` in 24,000 — 64s, 12,655 characters. The same page
     # asked in one call at `high`/64,000 spent 758s, then 867s, and wrote
     # nothing at all. Without a plan the client is left as it was: that is the
     # old path, and it is what a repair round uses.
-    writer = _with(client, effort=WRITE_EFFORT, max_tokens=WRITE_MAX_TOKENS) if plan else client
+    writer = _with(client, effort=WRITE_EFFORT, max_tokens=WRITE_MAX_TOKENS) if (plan or seeded) else client
     # A look's rewrite has its own round: the compile rounds are for
     # compiling, and a page sent back by the reviewer on the last of them
     # would have nowhere to go.
@@ -1472,7 +1587,8 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         editing = current is not None
         reply = writer(system=system, user=user_prompt(doc, page, feedback=note, brief=brief,
                                                        current=current, plan=plan,
-                                                       relayout_of=relayout_of),
+                                                       relayout_of=relayout_of,
+                                                       reference=reference if seeded else None),
                        schema=edit_schema((current or {}).get("parts") or {}) if editing else PAGE_CODE_SCHEMA)
         text = getattr(reply, "text", reply)
         if getattr(reply, "usage", None) is not None:
@@ -1509,7 +1625,10 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         view = _use_client_first(view)
         parts = {k: _use_client_first(v) for k, v in parts.items()}
         whole = "\n".join([view, *parts.values()])            # what the screen does, parts and all
-        design = _design_findings(doc, page, whole)
+        # A DESIGNER'S PAGE IS NOT HELD TO THE HOUSE STYLE: those rules exist to
+        # keep the model's own pages from looking alike, and here they would
+        # push the rewrite back toward the look the design was chosen to replace.
+        design = [] if seeded else _design_findings(doc, page, whole)
         errors = (_static_findings(load, view) + _simulated_writes(whole) + _unwired_actions(doc, page, whole)
                   + _unread_handoffs(doc, page, load, whole)
                   + typecheck(doc, app_root, str(page.get("id")), load, view, parts=parts))
@@ -1559,6 +1678,9 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
                     # broken, or an issue the reviewer marks as the change's.
                     must_fix = (verdict.get("verdict") != "pass" and not changing) or (
                         changing and bool(verdict.get("broken") or page_look.caused_by_change(verdict)))
+                    if seeded:
+                        # Taste was the designer's call; only a broken page goes back.
+                        must_fix = bool(verdict.get("broken"))
                     if must_fix and looks_left and round_ < rounds:
                         # THE REVIEW IS A REFUSAL, NOT A WISH. Handed as the
                         # brief ("what is wanted of it now") the first trial's

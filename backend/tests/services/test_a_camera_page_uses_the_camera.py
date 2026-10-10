@@ -79,7 +79,7 @@ def test_packages_are_copied_in_never_installed_over_the_tree(tmp_path, monkeypa
     monkeypatch.setattr(ui_engineer.subprocess, "run", fake_run)
     ensure_sdk_packages(app, 'import { CameraCapture } from "@/sdk/camera";')
     (cmd, cwd), = calls
-    assert Path(cwd) != app and cmd[:2] == ["npm", "install"] and any(c.startswith("@zxing/browser@") for c in cmd)
+    assert Path(cwd) != app and [Path(cmd[0]).stem.lower(), cmd[1]] == ["npm", "install"] and any(c.startswith("@zxing/browser@") for c in cmd)
     mods = app / "node_modules"
     assert json.loads((mods / "@zxing/browser/package.json").read_text())["from"] == "scratch"
     assert json.loads((mods / "ts-custom-error/package.json").read_text())["from"] == "scratch"

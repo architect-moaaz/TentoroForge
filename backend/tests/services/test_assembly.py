@@ -297,6 +297,7 @@ def test_the_install_and_the_build_can_run_apart(tmp_path, monkeypatch):
     """`install` runs at second zero of a build and `preview` compiles at the
     end of it; each issues only its own command."""
     import subprocess
+    from pathlib import Path
 
     from services.blueprint import assembly
 
@@ -304,10 +305,13 @@ def test_the_install_and_the_build_can_run_apart(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess, "run",
                         lambda cmd, **kw: seen.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
     assert assembly.install_dependencies(tmp_path) == 0
-    assert [c[:2] for c in seen] == [["npm", "install"]]
+    # The first element is `npm` resolved (`shutil.which`, so a `.CMD` full
+    # path on Windows, not the bare string — see `_NPM`) — the name, not the
+    # literal, is what "only its own command" is actually asserting.
+    assert [(Path(c[0]).stem.lower(), c[1]) for c in seen] == [("npm", "install")]
     seen.clear()
     assembly.verify_build(tmp_path, install=False)
-    assert [c[:3] for c in seen] == [["npm", "run", "build"]]
+    assert [(Path(c[0]).stem.lower(), *c[1:3]) for c in seen] == [("npm", "run", "build")]
 
 
 def test_the_scaffold_is_filled_the_moment_it_is_laid_down(tmp_path):
@@ -417,7 +421,11 @@ def test_a_wire_that_would_refuse_fails_the_build_naming_the_control(tmp_path, m
         assert "WHERE id is empty" in msg
     else:
         raise AssertionError("a refusing wire must fail the build")
-    assert seen["cmd"] == ["npx", "tsx", assembly.DISPATCH_VERIFIER]
+    # `npx` resolved (`shutil.which`, so a `.CMD` full path on Windows — see
+    # `_NPX`), not the bare string; the name is what this is actually about.
+    from pathlib import Path
+    assert Path(seen["cmd"][0]).stem.lower() == "npx"
+    assert seen["cmd"][1:] == ["tsx", assembly.DISPATCH_VERIFIER]
     assert seen["env"]["DATABASE_URL"] == "postgres://u:p@localhost:5/x"   # the app's own
 
 

@@ -226,14 +226,21 @@ def tokenize(input_str: str) -> List[Token]:
             start = pos
             quote = ch
             pos += 1
+            chars: list[str] = []
             while pos < length and input_str[pos] != quote:
-                if input_str[pos] == "\\":
-                    pos += 1  # skip escaped char
+                if input_str[pos] == "\\" and pos + 1 < length:
+                    # A backslash is kept unless it escapes the quote or another backslash,
+                    # so `\\S` and `\\d` reach `matches` as written. The TypeScript engine
+                    # dropped every backslash; both now follow this one rule.
+                    nxt = input_str[pos + 1]
+                    chars.append(nxt if nxt in (quote, "\\") else "\\" + nxt)
+                    pos += 2
+                    continue
+                chars.append(input_str[pos])
                 pos += 1
             if pos < length:
                 pos += 1  # consume closing quote
-            raw = input_str[start + 1 : pos - 1]
-            tokens.append(Token(TokenType.String, raw, start))
+            tokens.append(Token(TokenType.String, "".join(chars), start))
             continue
 
         # Identifiers and keywords

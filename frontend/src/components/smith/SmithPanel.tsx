@@ -77,7 +77,9 @@ import {
   type RunEvent as RunEventT,
   type RunThought,
   type BlueprintRun,
+  type SecretField,
 } from "@/hooks/useBlueprintRun";
+import { SecretCard } from "./SecretCard";
 
 /** §107 step 1 — what Smith says before the user says anything. */
 type Greeting = {
@@ -172,6 +174,8 @@ interface Message {
   options?: string[];
   /** What the turn changed in the Blueprint, if anything. */
   diffSummary?: string;
+  /** A field to fill in the chat (an API key): shown as a masked box, never sent as a message. */
+  secret?: SecretField;
 }
 
 interface ArchitectTurn {
@@ -307,6 +311,7 @@ export function SmithPanel({
                     role: r.role === "user" ? ("user" as const) : ("smith" as const),
                     text: String(r.content ?? ""),
                     options: (meta.options as string[]) ?? undefined,
+                    secret: (meta.secret as SecretField) ?? undefined,
                     diffSummary: (meta.diffSummary as string) || undefined,
                     at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
                   };
@@ -473,6 +478,7 @@ export function SmithPanel({
               text: String(r.content ?? ""),
               at: r.created_at ? Date.parse(String(r.created_at)) : undefined,
               options: (meta.options as string[]) ?? undefined,
+              secret: (meta.secret as SecretField) ?? undefined,
               diffSummary: (meta.diffSummary as string) || undefined,
             };
           });
@@ -605,6 +611,7 @@ export function SmithPanel({
         role: "smith" as const,
         text: x.text,
         options: x.options,
+        secret: x.secret,
         diffSummary: x.diffSummary,
         at: Date.now(),
       })),
@@ -960,6 +967,12 @@ export function SmithPanel({
               <p className="mt-1 border-t border-current/15 pt-1 text-xs opacity-80">
                 {m.diffSummary}
               </p>
+            )}
+
+            {m.secret && i === messages.length - 1 && (
+              // A key typed here goes to the organisation's integrations, not into the transcript;
+              // only the last message offers it, so a reloaded history never shows a stale box.
+              <SecretCard field={m.secret} disabled={busy} onSaved={sendText} />
             )}
 
             {m.options && m.options.length > 0 && (
