@@ -29,10 +29,19 @@ def test_a_credential_column_is_refused_whatever_it_is_called(column):
     assert column in finding["detail"] and "sign-up" in finding["detail"]
 
 
-def test_a_folded_field_is_told_the_column_the_platform_ships():
-    [finding] = platform_write_findings({"workflows": [_wf({"fullName": "{{n}}"})]})
-    assert finding["rule"] == "platform-column-renamed"
-    assert "'name'" in finding["detail"]
+def test_a_folded_field_is_written_to_the_column_the_platform_ships():
+    """Ecom L1 (2026-10-11): refused for `displayName` ("write name"), then
+    refused for `name` ("User has no such field") — the build stopped at the
+    opening. The projector folds the field as it folds the table."""
+    from services.blueprint.functional_completeness import column_findings
+    from services.blueprint.projection import platform_columns
+    assert platform_write_findings({"workflows": [_wf({"fullName": "{{n}}"})]}) == []
+    assert platform_columns("users", {"displayName": "{{n}}", "phone": "{{p}}"}) == {"name": "{{n}}", "phone": "{{p}}"}
+    assert platform_columns("labs", {"displayName": "{{n}}"}) == {"displayName": "{{n}}"}
+    doc = {"data": {"entities": [{"id": "E1", "name": "User", "table": "users", "account": True,
+                                  "fields": [{"name": "id"}, {"name": "email"}, {"name": "displayName"}]}]},
+           "workflows": [_wf({"name": "{{n}}"}, action="db_update"), _wf({"displayName": "{{n}}"}, action="db_update")]}
+    assert column_findings(doc) == []
 
 
 def test_an_ordinary_table_is_not_the_platforms_business():

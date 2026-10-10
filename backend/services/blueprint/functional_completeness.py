@@ -823,9 +823,7 @@ _CREDENTIAL_COLUMNS = {"password", "passwordhash", "hashedpassword",
 
 
 def platform_write_findings(doc: dict) -> list[dict]:
-    from services.blueprint.projection import (
-        _PLATFORM_SYNONYMS, PLATFORM_TABLE_SOURCES,
-    )
+    from services.blueprint.projection import PLATFORM_TABLE_SOURCES
 
     out: list[dict] = []
     for wf in _live(doc.get("workflows")):
@@ -839,7 +837,6 @@ def platform_write_findings(doc: dict) -> list[dict]:
             if table not in PLATFORM_TABLE_SOURCES:
                 continue
             values = cfg.get("values") if isinstance(cfg.get("values"), dict) else {}
-            synonyms = _PLATFORM_SYNONYMS.get(table, {})
             where = f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}"
             for column in sorted(str(k) for k in values):
                 folded = column.lower().replace("_", "")
@@ -855,12 +852,9 @@ def platform_write_findings(doc: dict) -> list[dict]:
                                           f"Blueprint adds to {table!r}. To change the signed-in "
                                           f"person's password, use an `action` with `actionType: "
                                           f"set_password` (`currentPassword`, `newPassword`)."})
-                elif folded in synonyms:
-                    out.append({"rule": "platform-column-renamed", "page": str(wf.get("id")),
-                                "detail": f"{where}: sets {column!r} on the platform's {table!r} "
-                                          f"table, which the platform already stores as "
-                                          f"{synonyms[folded]!r} — the shipped table has that column "
-                                          f"and not this one. Write {synonyms[folded]!r}."})
+    # A field the platform stores under another name (`displayName` → `name`)
+    # is not refused: the projector writes the step against the column the
+    # shipped table has (`platform_columns`), as it does for the table itself.
     return out
 
 
@@ -2100,6 +2094,11 @@ def column_findings(doc: dict) -> list[dict]:
             fields = {str(f.get("name")) for f in entity.get("fields") or [] if f.get("name")}
             if not fields:                       # cannot judge without a field list
                 continue
+            # THE SHIPPED TABLE'S COLUMNS ARE THE ENTITY'S TOO: on a platform
+            # table the Blueprint's fields are folded onto the platform's
+            # (`name` for `displayName`), so a step naming either is right.
+            from services.blueprint.projection import reconcile_platform_table
+            fields |= {str(f.get("name")) for f in reconcile_platform_table(entity)[0] if f.get("name")}
             columns: set[str] = set()
             for key in ("values", "where"):
                 block = cfg.get(key)

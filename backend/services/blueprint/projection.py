@@ -2334,7 +2334,28 @@ def _step_config(step: dict, entity: dict, catalog: WorkflowNodeCatalog,
             values[col] = val
         if values:
             config["values"] = values
+    # THE COLUMN THE SHIPPED TABLE HAS. On a platform table the Blueprint's
+    # `displayName` is folded into the platform's `name`
+    # (reconcile_platform_table); a step that writes or filters the field
+    # under the Blueprint's name must reach the same column, as a page does.
+    # Refusing the author instead asked the impossible: one check said
+    # "write name", the next said "User has no field name" (Ecom L1,
+    # 2026-10-11), and the build stopped at the opening.
+    if ntype == "action" and config.get("actionType") in ("db_insert", "db_update", "db_delete", "db_query"):
+        for key in ("values", "where"):
+            block = config.get(key)
+            if isinstance(block, dict):
+                config[key] = platform_columns(str(config.get("table") or entity.get("table") or ""), block)
     return config
+
+
+def platform_columns(table: str, block: dict) -> dict:
+    """``block`` with each Blueprint field name that the platform stores under
+    another column (`displayName` → `name` on users) keyed by that column."""
+    synonyms = _PLATFORM_SYNONYMS.get(table, {}) if platform_table(table) else {}
+    if not synonyms:
+        return block
+    return {synonyms.get(re.sub(r"[^a-z]", "", str(k).lower()), k): v for k, v in block.items()}
 
 
 def _edges(chain: list[str], steps: list[dict], catalog: WorkflowNodeCatalog,
