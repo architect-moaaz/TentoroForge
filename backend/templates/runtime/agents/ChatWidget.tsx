@@ -21,6 +21,8 @@ type Ui = {
 type AgentInfo = { id: string; name: string; description: string | null; ui: Ui };
 type ToolNote = { id: string; tool: string; state: "running" | "ok" | "failed" };
 type Msg = { role: "user" | "assistant"; content: string; tools?: ToolNote[]; notice?: string };
+/** The conversation is with a person: where it stands, as the person who asked sees it. */
+type HandoffInfo = { ref: string; status: "open" | "claimed" | "resolved"; assignedToName?: string | null; resolutionNote?: string | null };
 
 const BASE = (process.env.NEXT_PUBLIC_BASE_PATH ?? "") as string;
 // The app's own design tokens (HSL triples, the same ones its pages use), each with a neutral
@@ -195,6 +197,7 @@ export function ChatWidget({
   const [input, setInput] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [conversationId, setConversationId] = React.useState<string | null>(null);
+  const [handoff, setHandoff] = React.useState<HandoffInfo | null>(null);
   const endRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -224,6 +227,7 @@ export function ChatWidget({
             if (!conv.messages?.length) return;
             setConversationId(conv.id);
             setMsgs(conv.messages.map(fromSaved));
+            refreshHandoff(conv.id);
           })
           .catch(() => {});
       })
@@ -237,11 +241,31 @@ export function ChatWidget({
     endRef.current?.scrollIntoView({ block: "end" });
   }, [msgs]);
 
+  const refreshHandoff = React.useCallback(async (id: string | null) => {
+    if (!id) return setHandoff(null);
+    try {
+      const res = await fetch(`${BASE}/api/agent/handoffs?conversation=${encodeURIComponent(id)}`, { credentials: "same-origin" });
+      if (!res.ok) return;
+      const body = (await res.json()) as { handoff: HandoffInfo | null };
+      setHandoff(body.handoff ?? null);
+    } catch {
+      /* the status line is a nicety: the chat works without it */
+    }
+  }, []);
+
+  // While a conversation is with a person, keep the status fresh: they may pick it up or resolve it.
+  React.useEffect(() => {
+    if (!conversationId || !handoff || handoff.status === "resolved") return;
+    const t = setInterval(() => refreshHandoff(conversationId), 15000);
+    return () => clearInterval(t);
+  }, [conversationId, handoff, refreshHandoff]);
+
   // Start over: forget this conversation here (it stays in the database) and show the welcome again.
   function newChat() {
     if (!agent || busy) return;
     writeFresh(agent.id);
     setConversationId(null);
+    setHandoff(null);
     setInput("");
     setMsgs(agent.ui.welcomeMessage ? [{ role: "assistant", content: agent.ui.welcomeMessage }] : []);
   }
@@ -271,6 +295,7 @@ export function ChatWidget({
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let handedOver = false;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -291,15 +316,22 @@ export function ChatWidget({
           if (e.type === "text") patchLast((m) => ({ ...m, content: m.content + e.content }));
           else if (e.type === "tool_call")
             patchLast((m) => ({ ...m, tools: [...(m.tools ?? []), { id: e.id, tool: e.tool, state: "running" }] }));
-          else if (e.type === "tool_result")
+          else if (e.type === "tool_result") {
+            if (e.ok && e.tool === "request_human") handedOver = true;
             patchLast((m) => ({
               ...m,
               tools: (m.tools ?? []).map((t) => (t.id === e.id ? { ...t, state: e.ok ? "ok" : "failed" } : t)),
             }));
+          }
           else if (e.type === "blocked")
             patchLast((m) => ({ ...m, content: e.replacement ?? e.reason, notice: e.stage === "input" ? undefined : e.reason }));
           else if (e.type === "error") patchLast((m) => ({ ...m, content: m.content || e.message }));
-          else if (e.type === "done") setConversationId(e.conversationId);
+          else if (e.type === "handoff") setHandoff({ ref: e.ref, status: e.status });
+          else if (e.type === "done") {
+            setConversationId(e.conversationId);
+            // The assistant just handed over (the tool ran and worked): ask where it stands.
+            if (handedOver) refreshHandoff(e.conversationId);
+          }
         }
       }
     } catch {
@@ -388,6 +420,20 @@ export function ChatWidget({
         )}
         <div ref={endRef} />
       </div>
+
+      {handoff && (
+        <div
+          role="status"
+          className="border-t px-3 py-1.5 text-xs"
+          style={{ borderColor: C.border, background: C.muted, color: C.text }}
+        >
+          {handoff.status === "resolved"
+            ? `A person resolved this (${handoff.ref})${handoff.resolutionNote ? `: ${handoff.resolutionNote}` : ""}. You are back with the assistant.`
+            : handoff.status === "claimed"
+              ? `${handoff.assignedToName ?? "Someone on the team"} is looking at this (${handoff.ref}).`
+              : `With the team (${handoff.ref}): waiting for someone to pick it up.`}
+        </div>
+      )}
 
       <form
         className="flex items-center gap-2 border-t px-3 py-2"

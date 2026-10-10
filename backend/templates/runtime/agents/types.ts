@@ -7,7 +7,7 @@
  * reads it and runs the loop; there is no per-agent code to generate.
  */
 
-export type ToolKind = "data" | "api" | "workflow" | "mcp" | "ai_action" | "function";
+export type ToolKind = "data" | "api" | "workflow" | "mcp" | "ai_action" | "function" | "handoff";
 
 export type DataOperation = "list" | "get" | "create" | "update" | "delete";
 
@@ -115,9 +115,76 @@ export interface AgentRuntimeConfig {
   /** The most model↔tool rounds one message may take. */
   maxTurns: number;
   ui: AgentUiSpec;
-  /** Carried through from router / human_handoff nodes. Not executed yet. */
+  /** Carried through from a router node. Not executed yet. */
   router?: Record<string, unknown> | null;
-  handoff?: Record<string, unknown> | null;
+  /** The human-handoff box: who handles it, how it is assigned, what is asked, who is told. */
+  handoff?: HandoffSpec | null;
+}
+
+// ── human handoff ─────────────────────────────────────────────────────────
+
+export type HandoffStatus = "open" | "claimed" | "resolved";
+export type HandoffUrgency = "low" | "normal" | "urgent";
+
+export interface HandoffSpec {
+  handlers: { roles: string[]; people: Array<{ id: string; name?: string }> };
+  assignment: "queue" | "round_robin" | "owner";
+  ownerId?: string;
+  /** What the assistant asks the person before it hands over. */
+  questions: string[];
+  /** In-app notification (the bell) is the default; email is optional and never required. */
+  notify: { inApp: boolean; email: boolean; emailUrgentOnly: boolean };
+  keywords: string[];
+}
+
+export interface Person {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  role?: string | null;
+}
+
+export interface HandoffRecord {
+  id: string;
+  /** Short, readable, quotable: HO-7K3Q2. */
+  ref: string;
+  conversationId: string;
+  agentId: string;
+  requestedById: string;
+  requestedByName?: string | null;
+  reason: string;
+  urgency: HandoffUrgency;
+  contact?: string | null;
+  /** The last few messages, so whoever takes it has the context without opening the chat. */
+  summary?: string | null;
+  status: HandoffStatus;
+  assignedToId?: string | null;
+  assignedToName?: string | null;
+  resolutionNote?: string | null;
+  createdAt: string | Date;
+  claimedAt?: string | Date | null;
+  resolvedAt?: string | Date | null;
+}
+
+export interface HandoffStore {
+  create(h: Omit<HandoffRecord, "id" | "ref" | "createdAt" | "status">): Promise<HandoffRecord>;
+  /** The conversation's handoff that is not resolved yet, if any. */
+  openFor(conversationId: string): Promise<HandoffRecord | null>;
+  /** How many unresolved handoffs each of these people holds. */
+  openCounts(userIds: string[]): Promise<Record<string, number>>;
+}
+
+/** Everything a handoff touches outside the loop. Each side effect after the record is saved is best-effort. */
+export interface HandoffDeps {
+  store: HandoffStore;
+  /** People who hold any of these roles. */
+  people(roles: string[]): Promise<Person[]>;
+  /** One in-app notification (the bell). A userId addresses a person; a role (no userId) addresses everyone in it. */
+  notify(n: { title: string; message: string; userId?: string | null; role?: string | null; entityId?: string }): Promise<void>;
+  /** Optional. `sent: false` with a reason is the normal answer from an app with no email set up. */
+  email?(to: string, subject: string, body: string): Promise<{ sent: boolean; reason?: string }>;
+  /** The last messages of the conversation, as text. Optional. */
+  snapshot?(conversationId: string): Promise<string>;
 }
 
 // ── conversation ──────────────────────────────────────────────────────────
@@ -194,11 +261,17 @@ export type AgentEvent =
   | { type: "tool_result"; id: string; tool: string; ok: boolean; result?: unknown; error?: string }
   /** `replacement` (output stage): text already streamed is to be replaced with it. */
   | { type: "blocked"; reason: string; stage: "input" | "output"; replacement?: string }
+  /** The conversation is with a person now (or was): `status` says where it stands. */
+  | { type: "handoff"; ref: string; status: HandoffStatus; note?: string | null }
   | { type: "done"; conversationId: string; tokens: { input: number; output: number }; turns: number }
   | { type: "error"; message: string };
 
 export interface ToolContext {
   user: AgentUser | null;
+  /** The conversation this call belongs to, the agent running it and its handoff settings (for request_human). */
+  conversationId?: string;
+  agentId?: string;
+  handoff?: HandoffSpec | null;
   /** The caller's session cookie, forwarded to the app's own routes so access
    *  control is the app's, not the agent's. */
   cookie: string;
@@ -216,6 +289,8 @@ export interface AgentDeps {
     scope: Record<string, unknown>,
   ): Promise<unknown>;
   store: ConversationStore;
+  /** Absent in an app with no handoff table: nothing is ever "handed over" there. */
+  handoffs?: { openFor(conversationId: string): Promise<HandoffRecord | null> };
   /** FEEL-lite. Absent → output rules are skipped. */
   evalExpression?: (expression: string, scope: Record<string, unknown>) => unknown;
   now?: () => number;

@@ -33,7 +33,7 @@ _TOOL_MARKER = "// forge-agent-tool"
 _LAYOUT_MARK = "forge-agent"
 
 #: runtime template -> destination, relative to the app root
-_CORE = ("types", "guardrails", "memory", "tools", "runtime", "io", "store")
+_CORE = ("types", "guardrails", "memory", "tools", "runtime", "io", "store", "handoff", "handoff-store")
 
 
 def resolve_roots(path: str | Path) -> tuple[Path, Path]:
@@ -203,6 +203,13 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
     dashboard = app_root / "src" / "app" / "(dashboard)"
     if dashboard.is_dir():
         _copy(_TEMPLATES / "agents" / "assistant-page.tsx", dashboard / "assistant" / "page.tsx", written, app_root)
+    # The inbox for handoffs: only where an agent has a human-handoff box. (The store and the table go in
+    # always, because io.ts loads the store on demand and the build must find it.)
+    if any(c.config.get("handoff") for c in compiled):
+        _copy(_TEMPLATES / "api-agent" / "handoffs-route.ts",
+              app_root / "src" / "app" / "api" / "agent" / "handoffs" / "route.ts", written, app_root)
+        if dashboard.is_dir():
+            _copy(_TEMPLATES / "agents" / "handoffs-page.tsx", dashboard / "handoffs" / "page.tsx", written, app_root)
 
     # ── conversation tables ──────────────────────────────────────────────
     schema_dir = app_root / "src" / "db" / "schema"
@@ -212,6 +219,12 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
             schema_dir,
             'export { forgeAgentConversations, forgeAgentMessages } from "./_forge_agent";',
             "_forge_agent",
+        )
+        _copy(_TEMPLATES / "db" / "forge-agent-handoffs.schema.ts", schema_dir / "_forge_agent_handoffs.ts", written, app_root)
+        _barrel_export(
+            schema_dir,
+            'export { forgeAgentHandoffs } from "./_forge_agent_handoffs";',
+            "_forge_agent_handoffs",
         )
     else:
         warnings.append("the app has no src/db/schema — conversation tables were not added")

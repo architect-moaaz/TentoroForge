@@ -208,6 +208,8 @@ export interface ToolIO {
     user: AgentUser | null,
   ): Promise<unknown>;
   runFunction(handler: string, input: Record<string, unknown>, ctx: ToolContext): Promise<unknown>;
+  /** `request_human`: hand the conversation to a person (see handoff.ts). */
+  requestHandoff(input: Record<string, unknown>, ctx: ToolContext): Promise<unknown>;
 }
 
 export type ToolErrorCode = "auth" | "rate_limit" | "invalid" | "unavailable" | "failed";
@@ -313,6 +315,9 @@ export function createToolRunner(io: ToolIO, limiter: RateLimiter = new RateLimi
       case "ai_action":
         if (!spec.aiAction) throw new ToolError(`${spec.name} names no AI action.`, "invalid");
         result = await io.runAi(spec.aiAction, spec.aiConfig ?? {}, input, ctx.user);
+        break;
+      case "handoff":
+        result = await io.requestHandoff(input, ctx);
         break;
       case "function":
         if (!spec.handler) {

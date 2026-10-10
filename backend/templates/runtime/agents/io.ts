@@ -151,6 +151,19 @@ export const toolIO: ToolIO = {
     const mod = await load();
     return mod.default(input, { user: ctx.user, cookie: ctx.cookie, origin: ctx.origin });
   },
+
+  async requestHandoff(input, ctx) {
+    // Loaded on demand: an app that was updated but not yet migrated has no handoff table, and that must read as
+    // "not set up" to the assistant, not as a crash.
+    let store: any;
+    try {
+      store = await import("./handoff-store");
+    } catch {
+      throw new ToolError("Handing over to a person is not set up in this app yet (it needs a database update).", "unavailable");
+    }
+    const { requestHandoff } = await import("./handoff");
+    return requestHandoff(store.handoffDeps(), ctx, input);
+  },
 };
 
 const limiter = new RateLimiter();
@@ -164,5 +177,13 @@ export async function realDeps(store: AgentDeps["store"]): Promise<AgentDeps> {
   } catch {
     /* no FEEL-lite in this app: output rules are skipped */
   }
-  return { callModel, runTool: createToolRunner(toolIO, limiter), store, evalExpression };
+  // Whether a conversation is with a person now. Absent when this app has no handoff table: nothing is handed over.
+  let handoffs: AgentDeps["handoffs"];
+  try {
+    const hs: any = await import("./handoff-store");
+    handoffs = { openFor: (conversationId: string) => hs.handoffStore.openFor(conversationId) };
+  } catch {
+    /* no handoff support installed */
+  }
+  return { callModel, runTool: createToolRunner(toolIO, limiter), store, evalExpression, handoffs };
 }
