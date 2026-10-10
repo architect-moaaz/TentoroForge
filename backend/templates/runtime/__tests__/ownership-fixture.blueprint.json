@@ -212,6 +212,29 @@
             "type": "timestamp"
           }
         ]
+      },
+      {
+        "name": "Listing",
+        "table": "listings",
+        "fields": [
+          {
+            "name": "id",
+            "type": "uuid",
+            "primaryKey": true
+          },
+          {
+            "name": "vendorId",
+            "type": "uuid"
+          },
+          {
+            "name": "title",
+            "type": "text"
+          },
+          {
+            "name": "createdAt",
+            "type": "timestamp"
+          }
+        ]
       }
     ]
   },
@@ -288,6 +311,16 @@
         "unscopedRoles": [
           "admin"
         ]
+      },
+      {
+        "entity": "Listing",
+        "column": "vendorId",
+        "scope": "user",
+        "reads": "everyone",
+        "unscopedRoles": [
+          "admin"
+        ],
+        "note": "A catalogue: everyone reads every listing; only its vendor changes it."
       }
     ]
   }

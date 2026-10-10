@@ -367,6 +367,7 @@ function scopeConditions(
   entity: { table: PgTableWithColumns<any> },
   ctx: DataEngineContext,
   depth = 0,
+  op: "read" | "write" = "write",
 ): SQL[] {
   // Tested for "not attribution" rather than "is scope" deliberately: a
   // manifest from an older projection carries no `kind`, and the safe reading
@@ -378,6 +379,11 @@ function scopeConditions(
   const cols = entity.table as any;
   const conds: SQL[] = [];
   for (const rule of rules) {
+    // EVERYONE READS, THE OWNER WRITES. A catalogue is browsed by visitors
+    // who hold no role at all; scoped to its vendor, a marketplace showed a
+    // guest no products and every category "0 products" (Ecom L1,
+    // 2026-10-11). `reads: "everyone"` lifts the rule from reads only.
+    if (op === "read" && rule.reads === "everyone") continue;
     if (role && (rule.unscopedRoles || []).includes(role)) continue;
     const col = cols[rule.column];
     if (col === undefined) {
@@ -394,7 +400,7 @@ function scopeConditions(
       // child is: `childId` must be one of the children this actor reaches
       // under Child's own rule. A target the actor reaches unscoped (no rule,
       // or a role the rule exempts) adds nothing.
-      const inner = throughConditions(rule, ctx, depth);
+      const inner = throughConditions(rule, ctx, depth, op);
       if (inner === null) {
         conds.push(sql`false`);
         continue;
@@ -430,6 +436,7 @@ function throughConditions(
   rule: OwnershipRule,
   ctx: DataEngineContext,
   depth: number,
+  op: "read" | "write" = "write",
 ): { table: PgTableWithColumns<any>; id: any; where: SQL | undefined } | null {
   const target = depth < 3 && rule.through ? getEntity(rule.through) : undefined;
   const id = (target?.table as any)?.id;
@@ -440,7 +447,7 @@ function throughConditions(
     );
     return null;
   }
-  return { table: target.table, id, where: allOf(scopeConditions(rule.through!, target, ctx, depth + 1)) };
+  return { table: target.table, id, where: allOf(scopeConditions(rule.through!, target, ctx, depth + 1, op)) };
 }
 
 /**
@@ -549,9 +556,10 @@ async function accessConditions(
   entityName: string,
   entity: { table: PgTableWithColumns<any> },
   ctx: DataEngineContext,
+  op: "read" | "write" = "write",
 ): Promise<SQL[]> {
   return [
-    ...scopeConditions(entityName, entity, ctx),
+    ...scopeConditions(entityName, entity, ctx, 0, op),
     ...(await rowAccessConditions(entityName, entity, ctx)),
   ];
 }
@@ -1113,7 +1121,7 @@ export async function findById(
   // does not exist from one they may not see, which is what stops a detail
   // route from being an existence oracle.
   const where = allOf([eq(entity.table.id, id),
-                       ...await accessConditions(entityName, entity, ctx)])!;
+                       ...await accessConditions(entityName, entity, ctx, "read")])!;
   const [record] = await db.select().from(entity.table).where(where).limit(1);
   if (!record) throw new NotFoundError(entityName, id);
 
@@ -1146,7 +1154,7 @@ export async function query(
   // form — .where(search) then .where(filters) — silently dropped the search
   // whenever a filter was also present. Collecting the conditions and applying
   // them once removes the failure mode rather than ordering around it.
-  const conditions: SQL[] = await accessConditions(entityName, entity, ctx);
+  const conditions: SQL[] = await accessConditions(entityName, entity, ctx, "read");
 
   // Search — the OR across search fields is ONE condition, so it ANDs with the
   // filters and with the ownership predicate instead of competing with them.
@@ -1221,7 +1229,7 @@ export async function stats(
 
   // Scoped like the list it summarises. An unscoped count is a row count of
   // everyone's data wearing a number badge.
-  const where = allOf(await accessConditions(entityName, entity, ctx));
+  const where = allOf(await accessConditions(entityName, entity, ctx, "read"));
   let q: any = db.select({ total: count() }).from(entity.table);
   if (where) q = q.where(where);
   const [result] = await q;
@@ -1303,7 +1311,7 @@ async function joinedCondition(column: any, spec: unknown, ctx: DataEngineContex
     if (tcols[k] === undefined) return null;
     tconds.push(eq(tcols[k], v as any));
   }
-  tconds.push(...(await accessConditions(targetName as string, target, ctx)));
+  tconds.push(...(await accessConditions(targetName as string, target, ctx, "read")));
   const _db = _testDb ?? db;
   const sub = (_db as any).select({ id: tcols.id }).from(target.table);
   return inArray(column, tconds.length ? sub.where(and(...tconds)) : sub);
@@ -1339,7 +1347,7 @@ async function computeSimple(
   // Accumulate WHERE conditions (ownership + window / explicit range + filters).
   // A KPI tile is a read like any other: "12 open invoices" computed over every
   // tenant's invoices is the same leak as listing them, one integer at a time.
-  const conds: SQL[] = await accessConditions(entityName, entity, ctx);
+  const conds: SQL[] = await accessConditions(entityName, entity, ctx, "read");
   const dateCol = cols[m.dateField || "createdAt"];
   const start = range ? range.start : windowStart(m.window);
   if (start && dateCol) conds.push(gte(dateCol, start));
@@ -1491,7 +1499,7 @@ export async function resolveSeries(
   // A chart is a read. A revenue-by-month series over every tenant's rows
   // leaks the same data a list would, aggregated into a shape that looks
   // harmless.
-  const scope = await accessConditions(source.entity, entity, ctx);
+  const scope = await accessConditions(source.entity, entity, ctx, "read");
 
   const fn = source.agg?.fn || "count";
 
@@ -1696,7 +1704,7 @@ export async function resolveQuery(
   const entity = getEntity(source.entity);
   if (!entity) return [];
   const cols = entity.table as any;
-  const conds: SQL[] = await accessConditions(source.entity, entity, ctx);
+  const conds: SQL[] = await accessConditions(source.entity, entity, ctx, "read");
 
   const measures = (source.measures || []).filter((m) =>
     m && m.key && (m.aggregation === "count" || (m.field && cols[m.field] !== undefined)));
@@ -1957,7 +1965,7 @@ export async function resolveSearch(
     // not read hands them the contents a snippet at a time.
     const conds: SQL[] = [
       sql`${vectorExpr} @@ ${tsq}`,
-      ...await accessConditions(entityName, entity, ctx),
+      ...await accessConditions(entityName, entity, ctx, "read"),
     ];
     for (const [k, v] of Object.entries(withReader(source.filter, ctx, cols))) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
@@ -2046,7 +2054,7 @@ export async function resolveSimilar(
   const literal = `[${vector.join(",")}]`;
   const distance = sql<number>`(${column} <=> ${literal}::vector)`;
   const where = allOf([sql`${column} IS NOT NULL`,
-                       ...await accessConditions(source.entity, entity, ctx)]);
+                       ...await accessConditions(source.entity, entity, ctx, "read")]);
   const limit = Math.min(Math.max(Number(source.limit) || _SIMILAR_DEFAULT_LIMIT, 1), _SIMILAR_MAX_LIMIT);
 
   const _db = _testDb ?? db;

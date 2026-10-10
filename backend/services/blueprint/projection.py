@@ -3616,6 +3616,10 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
         # guest token, which the engine reads from the `forge-guest` cookie.
         if item.get("guestColumn"):
             rule["guestColumn"] = str(item["guestColumn"])
+        # EVERYONE READS, THE OWNER WRITES: a catalogue, a listing, a public
+        # profile. The engine lifts the rule from reads and keeps it on writes.
+        if str(item.get("reads") or "") == "everyone":
+            rule["reads"] = "everyone"
         # OWNED THROUGH ANOTHER RECORD: `column` references a record of
         # `through`, and the row is reachable when that one is. Written as
         # the target's TABLE, which the engine's registry always resolves —
@@ -3679,6 +3683,9 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         "  /** For records a visitor makes before signing in: the column holding their\n"
         "   *  guest token — a signed-out visitor reaches the rows carrying theirs. */\n"
         "  guestColumn?: string;\n"
+        "  /** \"everyone\": anyone reads every row, signed in or not; the column still\n"
+        "   *  decides who may change or remove it. Absent: reads are scoped like writes. */\n"
+        '  reads?: "scoped" | "everyone";\n'
         "}\n\n"
         "export const OWNERSHIP_RULES: Record<string, OwnershipRule[]> = "
         f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"
