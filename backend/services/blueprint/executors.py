@@ -3911,6 +3911,9 @@ MAX_TOKENS_BY_NODE: dict[str, int] = {
     "business_rules": 64000,
     "analytics": 64000,
     "workflow_steps": 64000,
+    # Eight processes' statements: the model spent all 32,000 reasoning and
+    # wrote no answer, twice in one fan-out (Ecom L1, 2026-10-11).
+    "expectations": 64000,
     # One page's thinking plus two whole files — a record workspace's view
     # runs to several hundred lines — and a compile round re-sends the code.
     # 48k ran out on a fifteen-fact record page (0l133sp2); headroom is free.
