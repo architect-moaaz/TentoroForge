@@ -34,7 +34,8 @@ _LAYOUT_MARK = "forge-agent"
 _NAV_MARK = "forge-handoffs-nav"
 
 #: runtime template -> destination, relative to the app root
-_CORE = ("types", "guardrails", "memory", "tools", "runtime", "io", "store", "handoff", "handoff-store", "handoff-nav")
+_CORE = ("types", "guardrails", "memory", "tools", "runtime", "io", "store", "handoff", "handoff-store", "handoff-nav",
+         "confirm", "limits", "usage-store")
 
 
 def resolve_roots(path: str | Path) -> tuple[Path, Path]:
@@ -249,6 +250,12 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
             schema_dir,
             'export { forgeAgentConversations, forgeAgentMessages } from "./_forge_agent";',
             "_forge_agent",
+        )
+        _copy(_TEMPLATES / "db" / "forge-agent-usage.schema.ts", schema_dir / "_forge_agent_usage.ts", written, app_root)
+        _barrel_export(
+            schema_dir,
+            'export { forgeAgentUsage } from "./_forge_agent_usage";',
+            "_forge_agent_usage",
         )
         _copy(_TEMPLATES / "db" / "forge-agent-handoffs.schema.ts", schema_dir / "_forge_agent_handoffs.ts", written, app_root)
         _barrel_export(

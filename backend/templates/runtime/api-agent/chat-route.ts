@@ -21,6 +21,9 @@ import { drizzleStore } from "@/lib/agents/store";
 import { realDeps } from "@/lib/agents/io";
 import type { AgentEvent, AgentRuntimeConfig, AgentUser } from "@/lib/agents/types";
 
+/** A change the app is holding until the person agrees. Only this fact goes to the browser, never the result. */
+const isHeld = (result: unknown): boolean => !!result && typeof result === "object" && (result as { held?: unknown }).held === true;
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -85,7 +88,9 @@ export async function POST(req: Request): Promise<Response> {
         // has the app's own pages for it, and a stream of raw rows is one more place
         // for a column to leak.
         const wire: AgentEvent =
-          e.type === "tool_result" ? { type: "tool_result", id: e.id, tool: e.tool, ok: e.ok, error: e.error } : e;
+          e.type === "tool_result"
+            ? { type: "tool_result", id: e.id, tool: e.tool, ok: e.ok, error: e.error, ...(isHeld(e.result) ? { held: true } : {}) }
+            : e;
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(wire)}\n\n`));
         } catch {

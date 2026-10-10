@@ -149,6 +149,28 @@ def _mapped_inputs(args_mapping: Any, tool_names: set[str]) -> list[str]:
 # tools
 # ---------------------------------------------------------------------------
 
+def changes_data(spec: dict[str, Any]) -> bool:
+    """Whether a compiled tool changes anything: a create/update/delete, any call that is not a plain read, or a
+    workflow (which is an action). Such a tool is held until the person agrees. A function or MCP tool could be
+    either, so it is left to the person who builds the agent (the tool's "ask first" switch)."""
+    kind = spec.get("kind")
+    if kind == "data":
+        return spec.get("operation") in ("create", "update", "delete")
+    if kind == "api":
+        return str(spec.get("method") or "GET").upper() not in ("GET", "HEAD")
+    return kind == "workflow"
+
+
+def _mark_confirm(spec: dict[str, Any], cfg: dict[str, Any], warnings: list[str]) -> None:
+    """Hold a tool that changes data until the person has agreed, unless the builder said otherwise."""
+    override = cfg.get("confirm")
+    wants = override if isinstance(override, bool) else changes_data(spec)
+    if wants:
+        spec["confirm"] = True
+    elif override is False and changes_data(spec):
+        warnings.append(f"tool '{spec['name']}' changes data and was set to run without asking the person first")
+
+
 def _compile_tool(node_id: str, cfg: dict[str, Any], label: str, taken: set[str],
                   all_tool_names: set[str], warnings: list[str],
                   tool_files: dict[str, str]) -> dict[str, Any] | None:
@@ -344,6 +366,17 @@ def _handoff_tool(handoff: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _confirm_prompt() -> str:
+    """Said to an assistant that has tools which change data. The app holds each such change until the person has
+    agreed, and hands the assistant the wording to ask; an assistant that asks first as well asks twice."""
+    return (
+        "\n\nChanges are confirmed by the app, not by you. When the person asks for a change and you have what the tool "
+        "needs, call the tool straight away: the app holds the change and tells you exactly what to say to ask them to "
+        "confirm. Do not ask 'shall I go ahead?' first and then again. Only after they agree, call the tool again with "
+        "exactly the same input."
+    )
+
+
 def _handoff_prompt(handoff: dict[str, Any]) -> str:
     asks = "; ".join(handoff["questions"])
     text = ("\n\nHuman handoff: if the person asks for a human, or you cannot help them, ask them (only what they have not "
@@ -366,17 +399,27 @@ def _topics_to_pattern(expression: str) -> str | None:
     return r"\b(" + "|".join(re.escape(t) for t in topics) + r")\b"
 
 
+#: Guardrail-box settings -> the runtime's limits (0 = no limit; anything not set takes the runtime default).
+_LIMIT_KEYS = {"max_messages_per_minute": "perMinute", "max_messages_per_hour": "perHour",
+               "max_tokens_per_day": "tokensPerDay"}
+
+
 def _compile_guardrails(nodes: list[dict[str, Any]], warnings: list[str]) -> dict[str, Any]:
     input_block = list(_DEFAULT_INPUT_BLOCK)
     output_block: list[str] = []
     content_filter = "standard"
     output_rules: list[dict[str, Any]] = []
     max_length = 2000
+    limits: dict[str, int] = {}
 
     for node in nodes:
         cfg = (node.get("data") or {}).get("config") or {}
         label = (node.get("data") or {}).get("label") or node.get("id")
         gtype = str(cfg.get("guardrail_type") or "both")
+        for key, name in _LIMIT_KEYS.items():
+            v = cfg.get(key)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
+                limits[name] = int(v)
         rules = [r for r in (cfg.get("rules") or []) if isinstance(r, dict)]
         if cfg.get("custom_expression"):
             rules.append({"name": f"{label}", "type": "custom", "expression": cfg["custom_expression"]})
@@ -411,11 +454,14 @@ def _compile_guardrails(nodes: list[dict[str, Any]], warnings: list[str]) -> dic
             else:
                 warnings.append(f"guardrail rule '{rname}' has unknown type '{rtype}' — ignored")
 
-    return {
+    out: dict[str, Any] = {
         "input": {"maxLength": max_length, "blockPatterns": input_block, "requireAuth": True},
         "output": {"blockPatterns": output_block, "contentFilter": content_filter},
         "outputRules": output_rules,
     }
+    if limits:
+        out["limits"] = limits
+    return out
 
 
 def _compile_memory(node: dict[str, Any] | None, warnings: list[str]) -> dict[str, Any]:
@@ -502,6 +548,7 @@ def compile_agent(agent_data: dict[str, Any]) -> CompiledAgent:
         t = _compile_tool(str(n.get("id")), d.get("config") or {}, str(d.get("label") or ""),
                           taken, pre_names, warnings, tool_files)
         if t:
+            _mark_confirm(t, d.get("config") or {}, warnings)
             tools.append(t)
 
     max_tokens = sp_cfg.get("max_tokens")
@@ -545,6 +592,9 @@ def compile_agent(agent_data: dict[str, Any]) -> CompiledAgent:
         config["handoff"] = handoff
         config["tools"] = [*config["tools"], _handoff_tool(handoff)]
         config["systemPrompt"] = str(config["systemPrompt"]).rstrip() + _handoff_prompt(handoff)
+
+    if any(t.get("confirm") for t in config["tools"]):
+        config["systemPrompt"] = str(config["systemPrompt"]).rstrip() + _confirm_prompt()
 
     return CompiledAgent(id=agent_id, config=config, tool_files=tool_files, warnings=warnings)
 
