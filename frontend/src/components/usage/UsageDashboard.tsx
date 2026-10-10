@@ -14,6 +14,7 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/stores/auth";
 import { api, ApiError } from "@/lib/api";
+import { SpendPanel } from "./SpendPanel";
 
 type Row = {
   cost_usd: number;
@@ -111,6 +112,8 @@ export function UsageDashboard() {
           token counts × list price (no billed amount reported).</>
         )}
       </p>
+
+      <SpendPanel />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">

@@ -121,6 +121,31 @@ def estimate_cost_usd(model: str | None, usage: dict[str, Any] | None) -> float:
     return round(cost, 6)
 
 
+#: WHO IS SPENDING. The person whose request the calls serve and their
+#: organisation, stamped on every row written while it is set, so spend can
+#: be read per person and per organisation and not only per application
+#: (2026-10-10: a $100 top-up read $19 and the ledger could not say whose
+#: builds it was). Set by the request that starts the work (`acting`), and
+#: carried into a run by `RunUsage` at its creation, because the fan-out's
+#: worker threads do not inherit it.
+_ACTOR: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar("forge_usage_actor", default=None)
+
+
+@contextmanager
+def acting(*, user: str = "", org: str = ""):
+    """Every row written inside names `user` (an email) and `org` (an id)."""
+    token = _ACTOR.set({"user": str(user or ""), "org": str(org or "")})
+    try:
+        yield
+    finally:
+        _ACTOR.reset(token)
+
+
+def actor() -> dict[str, str]:
+    """Who is spending right now, or nobody."""
+    return dict(_ACTOR.get() or {})
+
+
 def record_usage(
     *,
     project: str,
@@ -132,6 +157,8 @@ def record_usage(
     num_turns: int | None = None,
     kind: str = "generation",
     phase: str = "",
+    user: str = "",
+    org: str = "",
 ) -> None:
     """Append one agent-phase usage entry. Fail-open: never raises.
 
@@ -146,12 +173,15 @@ def record_usage(
     """
     try:
         usage = usage if isinstance(usage, dict) else {}
+        who = actor()
         entry = {
             "ts": round(time.time(), 2),
             "project": str(project or "unknown"),
             "agent": str(agent or "agent"),
             "kind": kind,
             "phase": str(phase or ""),
+            "user": str(user or who.get("user") or ""),
+            "org": str(org or who.get("org") or ""),
             "model": model,
             "input_tokens": int(usage.get("input_tokens") or 0),
             "output_tokens": int(usage.get("output_tokens") or 0),
