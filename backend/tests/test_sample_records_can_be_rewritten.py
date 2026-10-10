@@ -213,3 +213,14 @@ def test_a_parent_whose_labels_repeat_files_no_sample_finding():
                     {"name": "cartId", "type": "uuid", "references": "C", "examples": ["cart-001", "cart-002"]}]},
     ]}}
     assert sample_findings(doc) == []
+
+
+def test_an_enum_fields_examples_say_which_demo_rows_are_live():
+    """Ecom L1 (2026-10-11): Product.status (enum, no examples read) cycled
+    draft/active/inactive/removed evenly — two live products of eight."""
+    from services.blueprint.projection import _seed_value
+    field = {"name": "status", "type": "enum", "values": ["draft", "active", "inactive", "removed"],
+             "examples": ["active", "active", "active", "draft", "active", "inactive"]}
+    assert [_seed_value(field, "Product", r) for r in range(1, 7)] == ["active", "active", "active", "draft", "active", "inactive"]
+    bare = {"name": "status", "type": "enum", "values": ["draft", "active"]}
+    assert [_seed_value(bare, "Product", r) for r in (1, 2)] == ["draft", "active"], "no examples: the even spread stays"
