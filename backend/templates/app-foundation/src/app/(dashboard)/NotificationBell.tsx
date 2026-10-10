@@ -8,7 +8,11 @@
 import * as React from "react";
 import { Bell, Check } from "lucide-react";
 
-type Note = { id: string; title: string; message: string; type: string; read: boolean; createdAt: string | null };
+type Note = { id: string; title: string; message: string; type: string; read: boolean; createdAt: string | null; entityId?: string | null };
+
+// A handoff notification is for someone who works the Handoffs inbox: clicking it opens that conversation there.
+const BASE = (process.env.NEXT_PUBLIC_BASE_PATH ?? "") as string;
+const opens = (n: Note): string | null => (n.type === "handoff" ? `${BASE}/handoffs${n.entityId ? `?id=${encodeURIComponent(n.entityId)}` : ""}` : null);
 
 function ago(iso: string | null): string {
   if (!iso) return "";
@@ -86,7 +90,7 @@ export function NotificationBell() {
             )}
             {notes.map((n) => (
               <li key={n.id}>
-                <button type="button" onClick={() => !n.read && void mark({ id: n.id })}
+                <button type="button" onClick={() => { if (!n.read) void mark({ id: n.id }); const to = opens(n); if (to) window.location.href = to; else if (n.type === "handoff_reply") { setOpen(false); window.dispatchEvent(new Event("forge:open-agent-chat")); } }}
                   className={"flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-muted " + (n.read ? "" : "bg-accent-subtle/60")}>
                   <span aria-hidden="true" className={"mt-1.5 h-2 w-2 shrink-0 rounded-full " + (n.read ? "bg-transparent" : "bg-accent")} />
                   <span className="min-w-0 flex-1">
@@ -98,6 +102,11 @@ export function NotificationBell() {
               </li>
             ))}
           </ul>
+          {notes.some((n) => n.type === "handoff") && (
+            <a href={`${BASE}/handoffs`} className="block border-t border-border px-4 py-2.5 text-center text-sm font-medium text-primary hover:bg-muted">
+              Open Handoffs
+            </a>
+          )}
         </div>
       )}
     </div>

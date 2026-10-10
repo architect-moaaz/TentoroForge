@@ -2,7 +2,9 @@
  * GET  /api/agent/handoffs?conversation=<id>   — the signed-in person's OWN handoff for one of their conversations.
  * GET  /api/agent/handoffs                     — the inbox: ?status=active (default) | resolved | all. Handlers only.
  * GET  /api/agent/handoffs?id=<uuid>           — one handoff with its conversation. Handlers only.
- * POST /api/agent/handoffs { id, action }      — claim | release | resolve (+ note) | assign (+ assigneeId, assigneeName).
+ * POST /api/agent/handoffs { id, action }      — claim | release | resolve (+ note) | assign (+ assigneeId, assigneeName)
+ *                                                  | reply (+ text): write to the person in their own chat. An unclaimed
+ *                                                  handoff is claimed by whoever replies; one someone else holds is not.
  *
  * "Handlers" are the people the agent's human-handoff settings name (by role or by person); with nobody named,
  * any signed-in person. A person never reads anyone else's handoff, and a handler only the agents they handle.
@@ -11,7 +13,7 @@
 import { auth } from "@/auth";
 import { AGENTS } from "@/agents/registry";
 import { canHandle } from "@/lib/agents/handoff";
-import { changeHandoff, getHandoff, handoffForConversation, listHandoffs, transcript } from "@/lib/agents/handoff-store";
+import { changeHandoff, getHandoff, handoffForConversation, listHandoffs, sendReply, teamWrote, transcript } from "@/lib/agents/handoff-store";
 import { drizzleStore } from "@/lib/agents/store";
 import type { AgentUser, HandoffRecord } from "@/lib/agents/types";
 
@@ -88,6 +90,20 @@ export async function POST(req: Request): Promise<Response> {
   try {
     const current = typeof body?.id === "string" ? await getHandoff(body.id) : null;
     if (!current || !handles(user, current)) return Response.json({ error: "No such handoff." }, { status: 404 });
+
+    if (body.action === "reply") {
+      const text = typeof body.text === "string" ? body.text.trim().slice(0, 4000) : "";
+      if (!text) return Response.json({ error: "Write something to send." }, { status: 400 });
+      if (current.status === "resolved") return Response.json({ error: "This one is resolved. The person is back with the assistant." }, { status: 409 });
+      if (current.status === "claimed" && current.assignedToId !== user.id) {
+        return Response.json({ error: `${current.assignedToName ?? "Someone else"} has this one. Take it over first.` }, { status: 409 });
+      }
+      const held = current.status === "claimed" ? current : await changeHandoff(current.id, { action: "claim", by: { id: user.id, name: user.name } });
+      if (!held) return Response.json({ error: "That is not possible: it may already be resolved." }, { status: 409 });
+      await sendReply(held, text);
+      await teamWrote(held, text).catch(() => {});
+      return Response.json({ handoff: held });
+    }
 
     let change;
     switch (body.action) {

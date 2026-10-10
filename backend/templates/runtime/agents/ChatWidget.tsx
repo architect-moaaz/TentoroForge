@@ -20,7 +20,8 @@ type Ui = {
 };
 type AgentInfo = { id: string; name: string; description: string | null; ui: Ui };
 type ToolNote = { id: string; tool: string; state: "running" | "ok" | "failed" };
-type Msg = { role: "user" | "assistant"; content: string; tools?: ToolNote[]; notice?: string };
+/** "human" is a person on the team who has taken the conversation over. */
+type Msg = { role: "user" | "assistant" | "human"; content: string; tools?: ToolNote[]; notice?: string };
 /** The conversation is with a person: where it stands, as the person who asked sees it. */
 type HandoffInfo = { ref: string; status: "open" | "claimed" | "resolved"; assignedToName?: string | null; resolutionNote?: string | null };
 
@@ -43,7 +44,7 @@ const HEADING = "var(--font-heading, inherit)";
 const label = (tool: string) => tool.replace(/[_-]+/g, " ");
 
 type SavedMessage = {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "human";
   content: string;
   toolCalls?: Array<{ name: string; error?: string | null }> | null;
 };
@@ -199,6 +200,14 @@ export function ChatWidget({
   const [conversationId, setConversationId] = React.useState<string | null>(null);
   const [handoff, setHandoff] = React.useState<HandoffInfo | null>(null);
   const endRef = React.useRef<HTMLDivElement>(null);
+  const savedCount = React.useRef(0); // how many saved messages the chat has drawn
+
+  // The bell's "New message from the team" opens this chat, so the reply is one click away.
+  React.useEffect(() => {
+    const show = () => setOpen(true);
+    window.addEventListener("forge:open-agent-chat", show);
+    return () => window.removeEventListener("forge:open-agent-chat", show);
+  }, []);
 
   React.useEffect(() => {
     let live = true;
@@ -226,6 +235,7 @@ export function ChatWidget({
             const conv = (await res.json()) as { id: string; messages?: SavedMessage[] };
             if (!conv.messages?.length) return;
             setConversationId(conv.id);
+            savedCount.current = conv.messages.length;
             setMsgs(conv.messages.map(fromSaved));
             refreshHandoff(conv.id);
           })
@@ -253,12 +263,32 @@ export function ChatWidget({
     }
   }, []);
 
-  // While a conversation is with a person, keep the status fresh: they may pick it up or resolve it.
+  // What the conversation holds now, as saved: a person on the team may have written into it.
+  const refreshMessages = React.useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`${BASE}/api/agent/conversations?id=${encodeURIComponent(id)}`, { credentials: "same-origin" });
+      if (!res.ok) return;
+      const conv = (await res.json()) as { messages?: SavedMessage[] };
+      const saved = conv.messages ?? [];
+      if (saved.length === savedCount.current) return;
+      savedCount.current = saved.length;
+      setMsgs(saved.map(fromSaved));
+    } catch {
+      /* the next look will catch up */
+    }
+  }, []);
+
+  // While a conversation is with a person, look for their messages and the status every few seconds (they may write,
+  // pick it up or resolve it). The look that sees "resolved" is also the last one. Never while an answer is streaming.
   React.useEffect(() => {
     if (!conversationId || !handoff || handoff.status === "resolved") return;
-    const t = setInterval(() => refreshHandoff(conversationId), 15000);
+    const t = setInterval(() => {
+      if (busy) return;
+      refreshHandoff(conversationId);
+      refreshMessages(conversationId);
+    }, 4000);
     return () => clearInterval(t);
-  }, [conversationId, handoff, refreshHandoff]);
+  }, [conversationId, handoff, busy, refreshHandoff, refreshMessages]);
 
   // Start over: forget this conversation here (it stays in the database) and show the welcome again.
   function newChat() {
@@ -266,6 +296,7 @@ export function ChatWidget({
     writeFresh(agent.id);
     setConversationId(null);
     setHandoff(null);
+    savedCount.current = 0;
     setInput("");
     setMsgs(agent.ui.welcomeMessage ? [{ role: "assistant", content: agent.ui.welcomeMessage }] : []);
   }
@@ -329,6 +360,11 @@ export function ChatWidget({
           else if (e.type === "handoff") setHandoff({ ref: e.ref, status: e.status });
           else if (e.type === "done") {
             setConversationId(e.conversationId);
+            // With a person, the assistant stays quiet: no empty bubble left behind.
+            setMsgs((p) => {
+              const l = p[p.length - 1];
+              return l && l.role === "assistant" && !l.content && !(l.tools?.length) ? p.slice(0, -1) : p;
+            });
             // The assistant just handed over (the tool ran and worked): ask where it stands.
             if (handedOver) refreshHandoff(e.conversationId);
           }
@@ -387,8 +423,19 @@ export function ChatWidget({
               className={
                 "max-w-[85%] rounded-2xl px-3 py-2 " + (m.role === "user" ? "whitespace-pre-wrap" : "")
               }
-              style={m.role === "user" ? { background: C.primary, color: C.onPrimary } : { background: C.muted, color: C.text }}
+              style={
+                m.role === "user"
+                  ? { background: C.primary, color: C.onPrimary }
+                  : m.role === "human"
+                    ? { background: C.card, color: C.text, border: `1px solid ${C.primary}` }
+                    : { background: C.muted, color: C.text }
+              }
             >
+              {m.role === "human" && (
+                <div className="mb-0.5 text-[11px] font-medium" style={{ color: C.primary }}>
+                  {handoff?.assignedToName ?? "Team member"}
+                </div>
+              )}
               {m.tools && m.tools.length > 0 && (
                 <div className="mb-1 flex flex-wrap gap-1">
                   {m.tools.map((t) => (
@@ -431,7 +478,7 @@ export function ChatWidget({
             ? `A person resolved this (${handoff.ref})${handoff.resolutionNote ? `: ${handoff.resolutionNote}` : ""}. You are back with the assistant.`
             : handoff.status === "claimed"
               ? `${handoff.assignedToName ?? "Someone on the team"} is looking at this (${handoff.ref}).`
-              : `With the team (${handoff.ref}): waiting for someone to pick it up.`}
+              : `Escalated to the team (${handoff.ref}). A person will contact you shortly: their reply will appear right here, and the bell at the top of the page will tell you too.`}
         </div>
       )}
 

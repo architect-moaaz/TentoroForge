@@ -181,7 +181,10 @@ export async function realDeps(store: AgentDeps["store"]): Promise<AgentDeps> {
   let handoffs: AgentDeps["handoffs"];
   try {
     const hs: any = await import("./handoff-store");
-    handoffs = { openFor: (conversationId: string) => hs.handoffStore.openFor(conversationId) };
+    handoffs = {
+      openFor: (conversationId: string) => hs.handoffStore.openFor(conversationId),
+      customerWrote: (h: any, text: string) => hs.customerWrote(h, text),
+    };
   } catch {
     /* no handoff support installed */
   }

@@ -514,3 +514,64 @@ def test_installing_a_handoff_agent_twice_changes_nothing(tmp_path):
     after = {str(p.relative_to(app)): p.read_bytes() for p in app.rglob("*") if p.is_file() and "node_modules" not in p.parts}
     assert before == after
     assert (app / "src" / "db" / "schema" / "index.ts").read_text().count("_forge_agent_handoffs") == 1
+
+
+# ---------------------------------------------------------------------------
+# the way to the inbox: a menu link, and a bell that opens the handoff
+# ---------------------------------------------------------------------------
+
+NAV_LAYOUT = LAYOUT.replace(
+    "  const body = (<>",
+    "  const session = await auth();\n  const role = '';\n  navProps.groups = visibleTo(navProps.groups, role);\n  const body = (<>",
+)
+STOCK_BELL = "// notifications\nwindow.addEventListener('forge:workflow-done', f);\n"
+
+
+def handoff_graph() -> dict:
+    return graph(
+        node("sp", "system_prompt", "P", {"prompt": "You help."}),
+        node("h", "human_handoff", "Escalate", {"handlers": {"roles": ["Manager"]}}),
+    )
+
+
+def test_the_menu_gets_a_handoffs_link_added_after_it_is_narrowed_to_the_person(tmp_path):
+    project, app = make_app(tmp_path, layout=NAV_LAYOUT)
+    install_agent_runtime(project, graphs=[handoff_graph()])
+    layout = (app / "src" / "app" / "(dashboard)" / "layout.tsx").read_text()
+    assert layout.count("withHandoffsLink(navProps.groups, session.user)") == 1
+    assert layout.index("visibleTo(navProps.groups, role)") < layout.index("withHandoffsLink(navProps.groups")
+    assert (app / "src" / "lib" / "agents" / "handoff-nav.ts").is_file()
+    install_agent_runtime(project)  # again: still one
+    layout = (app / "src" / "app" / "(dashboard)" / "layout.tsx").read_text()
+    assert layout.count("withHandoffsLink(navProps.groups") == 1 and layout.count("import { withHandoffsLink }") == 1
+
+
+def test_a_layout_without_the_menu_line_keeps_its_menu_and_still_gets_the_widget(tmp_path):
+    project, app = make_app(tmp_path)  # LAYOUT has no navProps line
+    r = install_agent_runtime(project, graphs=[handoff_graph()])
+    layout = (app / "src" / "app" / "(dashboard)" / "layout.tsx").read_text()
+    assert r["widget_mounted"] is True and "withHandoffsLink" not in layout
+
+
+def test_an_app_built_before_handoffs_gets_the_bell_that_opens_them(tmp_path):
+    project, app = make_app(tmp_path)
+    bell = app / "src" / "app" / "(dashboard)" / "NotificationBell.tsx"
+    bell.write_text(STOCK_BELL, encoding="utf-8")
+    install_agent_runtime(project, graphs=[handoff_graph()])
+    assert "/handoffs" in bell.read_text(encoding="utf-8")
+
+
+def test_a_bell_the_app_changed_is_left_alone(tmp_path):
+    project, app = make_app(tmp_path)
+    bell = app / "src" / "app" / "(dashboard)" / "NotificationBell.tsx"
+    bell.write_text("// my own bell\n", encoding="utf-8")
+    install_agent_runtime(project, graphs=[handoff_graph()])
+    assert bell.read_text(encoding="utf-8") == "// my own bell\n"
+
+
+def test_the_bell_is_not_touched_when_no_agent_hands_over(tmp_path):
+    project, app = make_app(tmp_path)
+    bell = app / "src" / "app" / "(dashboard)" / "NotificationBell.tsx"
+    bell.write_text(STOCK_BELL, encoding="utf-8")
+    install_agent_runtime(project, graphs=[sample_graph()])
+    assert bell.read_text(encoding="utf-8") == STOCK_BELL
