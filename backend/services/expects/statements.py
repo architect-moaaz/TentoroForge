@@ -228,15 +228,27 @@ PEOPLE = "people"
 #: and wrote none (TCommerce, 2026-10-08); an application ten times its size
 #: is the same call, ten times over.
 REQUIREMENTS_PER_SUBJECT = 4
+#: The most processes one call writes starting statements for. Ecom L1's
+#: 62 processes landed on the one requirement group there was, and the call
+#: was cut off at 32,000 output tokens twice, five minutes and $0.38 each
+#: time (2026-10-11).
+PROCESSES_PER_SUBJECT = 8
 
 
 def expect_subjects(doc: dict) -> dict[str, dict]:
     """``{subject: {"requirements": [...], "rules": [...]}}`` — the people,
-    then the requirements that carry acceptance criteria, an area's together,
-    in even groups of at most REQUIREMENTS_PER_SUBJECT, each with the rules
-    that name one of its requirements. A rule naming none goes with the last
-    group. A subject is called by its first requirement's id."""
-    reqs = [r for r in _live(doc.get("requirements")) if r.get("acceptanceCriteria") and r.get("id")]
+    then every requirement, an area's together, in even groups of at most
+    REQUIREMENTS_PER_SUBJECT, each with the rules that name one of its
+    requirements. A rule naming none goes with the last group. A subject is
+    called by its first requirement's id; a group carrying more than
+    PROCESSES_PER_SUBJECT processes hands the rest to further subjects, each
+    called by its first process's id.
+
+    EVERY REQUIREMENT, NOT ONLY THOSE WITH CRITERIA. A requirement is one
+    testable statement; its criteria, when written, say what the words
+    mean. Tried only when it carried criteria, Ecom L1's 43 requirements
+    gave two, and every process fell into that one call (2026-10-11)."""
+    reqs = [r for r in _live(doc.get("requirements")) if r.get("id")]
     # An area's requirements stay together, in the order the areas come.
     order: dict[str, int] = {}
     for r in reqs:
@@ -264,7 +276,19 @@ def expect_subjects(doc: dict) -> dict[str, dict]:
         named = {str(x) for x in (rule.get("requirements") or []) + (rule.get("appliesTo") or [])}
         home = next((k for k in groups if named & set(out[k]["requirements"])), groups[-1] if groups else PEOPLE)
         out[home]["rules"].append(str(rule.get("id")))
-    return out
+    final: dict[str, dict] = {}
+    for k, part in out.items():
+        procs = list(part.get("processes") or [])
+        if k == PEOPLE or len(procs) <= PROCESSES_PER_SUBJECT:
+            final[k] = part
+            continue
+        n = -(-len(procs) // PROCESSES_PER_SUBJECT)
+        size = -(-len(procs) // n)
+        chunks = [procs[i:i + size] for i in range(0, len(procs), size)]
+        final[k] = {**part, "processes": chunks[0]}
+        for chunk in chunks[1:]:
+            final[str(chunk[0])] = {"requirements": [], "rules": [], "processes": chunk}
+    return final
 
 
 def subject_ask(doc: dict, subject: str) -> str:
@@ -618,7 +642,7 @@ def statement_findings(doc: dict, st: dict) -> list[str]:
 
 
 def coverage_findings(doc: dict, statements: list[dict], subject: str | None = None) -> list[str]:
-    """What a set leaves untried: a requirement with acceptance criteria, a
+    """What a set leaves untried: a requirement, a
     rule, a person's arrival — of one subject's part, or of the whole
     application when `subject` is None."""
     from services.blueprint.account_model import landing_by_role
@@ -633,7 +657,7 @@ def coverage_findings(doc: dict, statements: list[dict], subject: str | None = N
     people = subject is None or subject == PEOPLE
     covered_reqs = {str(r) for st in statements for r in st.get("requirements") or []}
     covered_rules = {str(r) for st in statements for r in st.get("rules") or []}
-    out = [f"{r.get('id')} ({str(r.get('description') or '')[:80]}) has acceptance criteria and no statement tries them"
+    out = [f"{r.get('id')} ({str(r.get('description') or '')[:80]}) is a requirement no statement tries"
            for r in _live(doc.get("requirements"))
            if str(r.get("id")) in want_reqs and str(r.get("id")) not in covered_reqs]
     out += [f"{r.get('id')} ({r.get('name')}) is a rule no statement tries"

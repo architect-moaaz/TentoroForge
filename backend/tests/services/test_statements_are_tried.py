@@ -143,7 +143,21 @@ def test_the_people_and_the_requirements_are_written_in_parts(monkeypatch):
     assert list(parts) == [st.PEOPLE, "REQ-001", "REQ-003"], "an area's requirements stay together"
     assert parts["REQ-001"] == {"requirements": ["REQ-001", "REQ-002"], "rules": ["RULE-001"], "processes": []}
     assert parts["REQ-003"]["processes"] == ["FLOW-001"], "a process serving no part's requirement goes to the last"
-    assert "REQ-004" not in str(parts), "a requirement with no criteria (a recorded change) is not tried"
+    assert "REQ-004" in parts["REQ-003"]["requirements"], "a requirement without criteria is tried by its words"
+
+
+def test_a_group_with_many_processes_hands_the_rest_to_further_calls(monkeypatch):
+    """Ecom L1 (2026-10-11): 62 processes in one call, cut off at the output
+    cap twice."""
+    monkeypatch.setattr(st, "PROCESSES_PER_SUBJECT", 3)
+    doc = _doc()
+    doc["workflows"] = [{"id": f"FLOW-00{i}", "name": f"P{i}", "status": "ACTIVE", "trigger": {"kind": "manual"},
+                         "launchedFrom": ["PAGE-001"], "requirements": ["REQ-003"]} for i in range(1, 8)]
+    parts = st.expect_subjects(doc)
+    assert [len(p["processes"]) for p in parts.values()] == [0, 3, 3, 1]
+    assert list(parts)[2:] == ["FLOW-004", "FLOW-007"]
+    assert parts["FLOW-004"] == {"requirements": [], "rules": [], "processes": ["FLOW-004", "FLOW-005", "FLOW-006"]}
+    assert st.subject_ask(doc, "FLOW-004").count("FLOW-00") == 3
 
 
 def test_a_part_is_held_to_what_it_was_asked_to_cover(monkeypatch):
@@ -151,7 +165,8 @@ def test_a_part_is_held_to_what_it_was_asked_to_cover(monkeypatch):
     doc = _doc()
     assert any("REQ-002" in f for f in st.coverage_findings(doc, [BOOKS], "REQ-001"))
     assert st.coverage_findings(doc, [BOOKS], "REQ-003") == [
-        "REQ-003 (The admin closes a slot.) has acceptance criteria and no statement tries them",
+        "REQ-003 (The admin closes a slot.) is a requirement no statement tries",
+        "REQ-004 (Change the menu to a sidebar.) is a requirement no statement tries",
         "FLOW-001 (Book) is a process no statement starts — give a `do` step its id in `workflow`"]
     starts = copy.deepcopy(BOOKS)
     starts["steps"][1]["workflow"] = "FLOW-001"
