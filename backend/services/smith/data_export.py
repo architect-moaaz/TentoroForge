@@ -139,6 +139,18 @@ def to_csv(columns: list[str], rows: list[dict]) -> str:
 # reading the application's database
 # --------------------------------------------------------------------------- #
 
+def libpq_url(url: str) -> str:
+    """The URL as libpq reads it. The app's `DATABASE_URL` is SQLAlchemy's —
+    `postgresql+asyncpg://…` — and psycopg2 refused it ("invalid dsn: missing
+    '=' after …"), so Smith could not read a single row of any app on the
+    apps server (ecom v2, forge-v3, 2026-10-10). The driver suffix is
+    SQLAlchemy's business, not the database's."""
+    head, sep, rest = (url or "").partition("://")
+    if not sep:
+        return url
+    return head.split("+", 1)[0] + sep + rest
+
+
 def read_rows(url: str, table: str, columns: list[str],
               limit: int = MAX_ROWS) -> list[dict]:
     """`limit` rows of `table`, restricted to `columns`.
@@ -152,7 +164,7 @@ def read_rows(url: str, table: str, columns: list[str],
     import psycopg2
     from psycopg2 import sql as _sql
 
-    with psycopg2.connect(url) as conn:
+    with psycopg2.connect(libpq_url(url)) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 _sql.SQL("SELECT {cols} FROM {table} LIMIT %s").format(
@@ -169,7 +181,7 @@ def existing_columns(url: str, table: str) -> set[str]:
     with a Postgres error instead of exporting the other nine columns."""
     import psycopg2
 
-    with psycopg2.connect(url) as conn:
+    with psycopg2.connect(libpq_url(url)) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT column_name FROM information_schema.columns "
@@ -403,6 +415,6 @@ def run(output_dir: str, entity: str = "", *, project_id: str = "",
 __all__ = [
     "EXPORTS", "ExportRefused", "MAX_ROWS", "existing_columns",
     "exported_fields", "exports_dir", "link_for", "one_sheet", "path_of",
-    "produced", "read_rows", "run", "summary_of", "to_csv", "withheld",
+    "libpq_url", "produced", "read_rows", "run", "summary_of", "to_csv", "withheld",
     "write_backup", "write_sheet",
 ]
