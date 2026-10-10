@@ -78,6 +78,12 @@ def test_the_report_is_by_period_scope_agent_application_and_person():
     assert person["total"]["cost_usd"] == 4.0
     app = S.report(ROWS, period="day", at=T, project="ecom", projects=PROJECTS)
     assert app["by_day"] == [{"day": "2026-10-10", "cost_usd": 4.5}]
+    assert app["by_hour"] == [{"hour": "06:00", "cost_usd": 3.0}, {"hour": "07:00", "cost_usd": 1.5}], "a day is split by hour"
+    assert week["by_hour"] == [], "a week is not"
+    one = S.report(ROWS, period="year", at=T, agent="page_code", projects=PROJECTS)
+    assert one["total"]["cost_usd"] == 13.0 and [r["project"] for r in one["by_project"]] == ["shop", "hr", "ecom"], \
+        "the drill-down into one agent: its calls across applications"
+    assert S.report(ROWS, period="year", at=T, agent="page_code:ui_engineer", projects=PROJECTS)["total"]["cost_usd"] == 13.0
 
 
 def test_the_balance_is_credit_recorded_minus_spend_since(tmp_path, monkeypatch):

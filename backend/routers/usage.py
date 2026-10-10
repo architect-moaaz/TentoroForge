@@ -132,13 +132,14 @@ async def get_spend_report(
     org: str = "",
     person: str = "",
     project: str = "",
+    agent: str = "",
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """What was spent in the period containing `at` (today by default), for
     a scope — the platform, an organisation, a person (`me` or an email),
-    an application — split by agent, application, person, model, phase and
-    day."""
+    an application, one agent's calls — split by agent, application,
+    person, model, phase and day (hour, for a day)."""
     from services import spending
     from services.build_usage import read_ledger
     await _scope_allowed(user, db, org=org, person=person, project=project)
@@ -147,7 +148,7 @@ async def get_spend_report(
     projects, _names = await _projects_known(db)
     try:
         return spending.report(read_ledger(), period=period, at=spending.parse_at(at), org=org, user=person,
-                               project=project, projects=projects)
+                               project=project, agent=agent, projects=projects)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
