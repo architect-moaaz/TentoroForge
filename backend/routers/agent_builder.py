@@ -93,6 +93,30 @@ async def get_agent_definition(
     return json.loads(agent_file.read_text())
 
 
+@router.post("/api/projects/{project_id}/agent-definitions/suggest")
+async def suggest_agent_definition(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """An agent drawn from this app's own Blueprint (its tables, workflows, rules and who may do
+    what). Nothing is saved: the builder loads it onto the canvas to edit, save and Apply."""
+    from services.agent_suggest import suggest_agent
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        raise HTTPException(status_code=400, detail="No output directory")
+    path = Path(project.output_dir) / ".forge" / "blueprint" / "current.json"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise HTTPException(
+            status_code=409,
+            detail="This project has no Blueprint yet — build the app first, then suggest an agent for it.",
+        )
+    return suggest_agent(doc)
+
+
 @router.post("/api/projects/{project_id}/agent-definitions", status_code=201)
 async def save_agent_definition(
     project_id: uuid.UUID,

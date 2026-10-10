@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   Loader2,
   FlaskConical,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +54,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   const [edges, setEdges] = useState<AgentEdgeSerialized[]>([]);
   const [isApplying, setIsApplying] = useState(false);
   const [applyStatus, setApplyStatus] = useState<string | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
   const [showTestConsole, setShowTestConsole] = useState(false);
 
   // Fetch agent list
@@ -135,6 +138,31 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     },
     [setCurrentAgent, setSelectedNodeId],
   );
+
+  // An agent drawn from this app's own Blueprint (its tables, workflows, rules). Nothing is saved
+  // until the person saves it; the same id every time, so one agent per app.
+  const suggestFromApp = useCallback(async () => {
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const suggested = await api.post<AgentDefinition>(
+        `/api/projects/${projectId}/agent-definitions/suggest`,
+        {},
+      );
+      setCurrentAgent(suggested);
+      setEditName(suggested.name);
+      setEditDescription(suggested.description || "");
+      setNodes(suggested.nodes);
+      setEdges(suggested.edges);
+      setSelectedNodeId(null);
+      setShowTestConsole(false);
+      setApplyStatus(null);
+    } catch (e) {
+      setSuggestError(e instanceof Error ? e.message : "Could not suggest an agent for this app.");
+    } finally {
+      setSuggesting(false);
+    }
+  }, [projectId, setCurrentAgent, setSelectedNodeId]);
 
   // Save current agent
   const saveAgent = useCallback(async () => {
@@ -286,11 +314,26 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       <div className="flex h-full flex-col">
         <div className="flex items-center justify-between border-b px-4 py-3">
           <h2 className="text-sm font-semibold">AI Agents</h2>
-          <Button size="sm" onClick={createAgent}>
-            <Plus className="mr-1 h-3.5 w-3.5" />
-            New Agent
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={suggestFromApp} disabled={suggesting}>
+              {suggesting ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1 h-3.5 w-3.5" />
+              )}
+              Suggest from my app
+            </Button>
+            <Button size="sm" onClick={createAgent}>
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              New Agent
+            </Button>
+          </div>
         </div>
+        {suggestError && (
+          <div role="alert" className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
+            {suggestError}
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto">
           {isLoading ? (
@@ -305,7 +348,11 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
                   Create a custom AI agent or start from a template
                 </p>
               </div>
-              <AgentTemplateSelector onSelect={createFromTemplate} />
+              <AgentTemplateSelector
+                onSelect={createFromTemplate}
+                onSuggest={suggestFromApp}
+                suggesting={suggesting}
+              />
             </div>
           ) : (
             <div className="divide-y">
