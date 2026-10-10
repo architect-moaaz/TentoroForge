@@ -517,223 +517,231 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
     budget = Budget(TURN_MINUTES)
     out_of_time = False
     journaled = 0
-    for _step in range(1, max_steps + 1):
-        from services.smith4.definition import brief_of
-        for o in observations[journaled:]:
-            journal.write("turn:step", tool=o.tool, status=o.status, said=(o.said or "")[:300])
-        journaled = len(observations)
-        if budget.over():
-            out_of_time = True
-            break
-        t0 = _time.monotonic()
-        # WHO SAW IT, first: the person, the screen, the viewport the
-        # problem was reported from (`services.smith.reported`).
-        page = reported.block(ctx.report) + opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx))
-        t1 = _time.monotonic()
-        chosen = choose(ctx.ask, page, observations, history) or {}
-        t2 = _time.monotonic()
-        tool = str(chosen.get("tool") or "").strip()
-        # WHERE A TURN'S TIME GOES, ONE LINE A STEP. Turns ran seven to ten
-        # minutes with nothing saying whether the model, the page, or the step
-        # itself was slow (Test2, 2026-09-28).
-        logger.info("[smith-step] %d %s: page %.1fs (%d chars), choose %.1fs, seen %d chars, at %.0fs",
-                    _step, tool or "-", t1 - t0, len(page), t2 - t1,
-                    sum(len(o.said or "") for o in observations), t2 - turn_started)
-        args = chosen.get("args") if isinstance(chosen.get("args"), dict) else {}
-        args = {k: v for k, v in args.items() if v not in (None, "")}
+    # WHAT THE LAST STEP DID IS WRITTEN DOWN TOO. Steps were journaled at the
+    # start of the next one, so a one-step turn left no `turn:step` line
+    # at all (Ecom L1, 2026-10-11).
+    try:
+        for _step in range(1, max_steps + 1):
+            from services.smith4.definition import brief_of
+            for o in observations[journaled:]:
+                journal.write("turn:step", tool=o.tool, status=o.status, said=(o.said or "")[:300])
+            journaled = len(observations)
+            if budget.over():
+                out_of_time = True
+                break
+            t0 = _time.monotonic()
+            # WHO SAW IT, first: the person, the screen, the viewport the
+            # problem was reported from (`services.smith.reported`).
+            page = reported.block(ctx.report) + opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx))
+            t1 = _time.monotonic()
+            chosen = choose(ctx.ask, page, observations, history) or {}
+            t2 = _time.monotonic()
+            tool = str(chosen.get("tool") or "").strip()
+            # WHERE A TURN'S TIME GOES, ONE LINE A STEP. Turns ran seven to ten
+            # minutes with nothing saying whether the model, the page, or the step
+            # itself was slow (Test2, 2026-09-28).
+            logger.info("[smith-step] %d %s: page %.1fs (%d chars), choose %.1fs, seen %d chars, at %.0fs",
+                        _step, tool or "-", t1 - t0, len(page), t2 - t1,
+                        sum(len(o.said or "") for o in observations), t2 - turn_started)
+            args = chosen.get("args") if isinstance(chosen.get("args"), dict) else {}
+            args = {k: v for k, v in args.items() if v not in (None, "")}
 
-        if ctx.unattended and tool in ("ask_user", "propose_plan"):
-            observations.append(Observation(tool=tool, args=args, status="error", said=NOBODY_TO_ASK))
-            continue
-        if tool == "ask_user" and not any(o.status == "read" for o in observations) \
-                and not any(o.said == LOOK_FIRST for o in observations):
-            observations.append(Observation(tool=tool, args=args, status="error", said=LOOK_FIRST))
-            continue
-        if tool == "propose_plan":
-            return _plan(ctx, args, landed, touched)
-        # A QUESTION WITH NO WORDS IS NOT A QUESTION. `ask_user {}` ended a live
-        # turn with "Nothing needed doing" — the model meant to ask and sent
-        # nothing to ask. An error it can see, not a silent end.
-        if tool == "ask_user" and not str(args.get("question") or "").strip():
-            observations.append(Observation(tool=tool, args=args, status="error",
-                                            said="`ask_user` needs `question`. Say what you are asking, or end another way."))
-            continue
-        if tool == "answer" and not str(args.get("text") or "").strip():
-            observations.append(Observation(tool=tool, args=args, status="error",
-                                            said="`answer` needs `text`. Say it, or end with `done`."))
-            continue
-        if chosen.get("unreachable"):
-            # NOT "NOTHING NEEDED DOING". The model could not be reached (the
-            # account's credit ran out mid-test, 2026-10-02) and the turn said
-            # nothing needed doing — a false answer to "add a spice level".
-            return _finished(landed, touched, Outcome(status="no_op", said=(
-                "I could not reach my reasoning service just now, so I stopped here"
-                + (" — what is above is done and kept." if landed else " and nothing was changed.")
-                + " Please try again in a few minutes.")))
-        if tool == "answer" and not landed:
-            heard = [o.said or "" for o in observations if o.tool == "answer" and o.status == "error"]
-            if not any(tools.is_trial(o.tool) for o in observations):
-                # AN ANSWER ABOUT WHAT THE APP DOES COMES FROM USING IT. TCommerce's
-                # tester reported inactive products showing; Smith answered "Yes,
-                # that is exactly how it works" from the business rule, in two
-                # steps, having tried nothing (measured on a copy, 2026-10-07).
-                if not any(h.startswith(ANSWER_UNTRIED_HEAD) for h in heard):
-                    observations.append(Observation(tool=tool, args=args, status="error",
-                                                    said=answer_untried(ctx.ask or ctx.message or "")))
-                    continue
-            elif ANSWER_CHANGES_NOTHING not in heard:
+            if ctx.unattended and tool in ("ask_user", "propose_plan"):
+                observations.append(Observation(tool=tool, args=args, status="error", said=NOBODY_TO_ASK))
+                continue
+            if tool == "ask_user" and not any(o.status == "read" for o in observations) \
+                    and not any(o.said == LOOK_FIRST for o in observations):
+                observations.append(Observation(tool=tool, args=args, status="error", said=LOOK_FIRST))
+                continue
+            if tool == "propose_plan":
+                return _plan(ctx, args, landed, touched)
+            # A QUESTION WITH NO WORDS IS NOT A QUESTION. `ask_user {}` ended a live
+            # turn with "Nothing needed doing" — the model meant to ask and sent
+            # nothing to ask. An error it can see, not a silent end.
+            if tool == "ask_user" and not str(args.get("question") or "").strip():
                 observations.append(Observation(tool=tool, args=args, status="error",
-                                                said=ANSWER_CHANGES_NOTHING))
+                                                said="`ask_user` needs `question`. Say what you are asking, or end another way."))
                 continue
-        if tool == "done":
-            first = _before_done(observations, landed)
-            if first:
-                observations.append(Observation(tool=tool, args=args, status="error", said=first))
+            if tool == "answer" and not str(args.get("text") or "").strip():
+                observations.append(Observation(tool=tool, args=args, status="error",
+                                                said="`answer` needs `text`. Say it, or end with `done`."))
                 continue
-        if tool in tools.TERMINAL_NAMES or not tool:
-            ended = _ended(tool, args, landed, touched, last)
-            if tool != "answer" and ended.status not in ("asked",):
-                ended.said += _failing_note(observations)
-            return ended
-        if not tools.is_tool(tool):
-            observations.append(Observation(tool=tool, args=args, status="error", said=tools.unknown(tool)))
-            continue
-        if tools.is_trial(tool):
-            # THE SAME TRY AFTER A CHANGE IS A NEW TRY. Trying the workflow
-            # again once the fix landed is the whole point; trying it twice
-            # with nothing changed between is not reading the first answer.
-            same = [i for i, o in enumerate(observations) if tools.is_trial(o.tool)
-                    and loop_mod._identity(o.tool, o.args) == loop_mod._identity(tool, args)]
-            if same and not _changed_after(observations, same[-1]):
+            if chosen.get("unreachable"):
+                # NOT "NOTHING NEEDED DOING". The model could not be reached (the
+                # account's credit ran out mid-test, 2026-10-02) and the turn said
+                # nothing needed doing — a false answer to "add a spice level".
+                return _finished(landed, touched, Outcome(status="no_op", said=(
+                    "I could not reach my reasoning service just now, so I stopped here"
+                    + (" — what is above is done and kept." if landed else " and nothing was changed.")
+                    + " Please try again in a few minutes.")))
+            if tool == "answer" and not landed:
+                heard = [o.said or "" for o in observations if o.tool == "answer" and o.status == "error"]
+                if not any(tools.is_trial(o.tool) for o in observations):
+                    # AN ANSWER ABOUT WHAT THE APP DOES COMES FROM USING IT. TCommerce's
+                    # tester reported inactive products showing; Smith answered "Yes,
+                    # that is exactly how it works" from the business rule, in two
+                    # steps, having tried nothing (measured on a copy, 2026-10-07).
+                    if not any(h.startswith(ANSWER_UNTRIED_HEAD) for h in heard):
+                        observations.append(Observation(tool=tool, args=args, status="error",
+                                                        said=answer_untried(ctx.ask or ctx.message or "")))
+                        continue
+                elif ANSWER_CHANGES_NOTHING not in heard:
+                    observations.append(Observation(tool=tool, args=args, status="error",
+                                                    said=ANSWER_CHANGES_NOTHING))
+                    continue
+            if tool == "done":
+                first = _before_done(observations, landed)
+                if first:
+                    observations.append(Observation(tool=tool, args=args, status="error", said=first))
+                    continue
+            if tool in tools.TERMINAL_NAMES or not tool:
+                ended = _ended(tool, args, landed, touched, last)
+                if tool != "answer" and ended.status not in ("asked",):
+                    ended.said += _failing_note(observations)
+                return ended
+            if not tools.is_tool(tool):
+                observations.append(Observation(tool=tool, args=args, status="error", said=tools.unknown(tool)))
+                continue
+            if tools.is_trial(tool):
+                # THE SAME TRY AFTER A CHANGE IS A NEW TRY. Trying the workflow
+                # again once the fix landed is the whole point; trying it twice
+                # with nothing changed between is not reading the first answer.
+                same = [i for i, o in enumerate(observations) if tools.is_trial(o.tool)
+                        and loop_mod._identity(o.tool, o.args) == loop_mod._identity(tool, args)]
+                if same and not _changed_after(observations, same[-1]):
+                    observations.append(Observation(
+                        tool=tool, args=args, status="error",
+                        said="That exact try has already been made and nothing has changed since — "
+                             "read what it reported rather than repeating it."))
+                    continue
+                seen = trials.run(tool, args, bench=bench, doc=ctx.doc())
+                logger.info("[smith-try] %s %s -> %s", tool, args, " | ".join(seen.splitlines()[:6])[:600])
+                observations.append(Observation(tool=tool, args=args, status="read", said=seen))
+                continue
+            if loop_mod.already_done(tool, args, [o for o in observations if o.said not in _NOT_RUN]):
                 observations.append(Observation(
                     tool=tool, args=args, status="error",
-                    said="That exact try has already been made and nothing has changed since — "
-                         "read what it reported rather than repeating it."))
+                    said="That exact step has already been taken this turn — read what it "
+                         "reported rather than repeating it."))
                 continue
-            seen = trials.run(tool, args, bench=bench, doc=ctx.doc())
-            logger.info("[smith-try] %s %s -> %s", tool, args, " | ".join(seen.splitlines()[:6])[:600])
-            observations.append(Observation(tool=tool, args=args, status="read", said=seen))
-            continue
-        if loop_mod.already_done(tool, args, [o for o in observations if o.said not in _NOT_RUN]):
-            observations.append(Observation(
-                tool=tool, args=args, status="error",
-                said="That exact step has already been taken this turn — read what it "
-                     "reported rather than repeating it."))
-            continue
 
-        if tools.is_read(tool):
-            seen = reads.run(tool, args, output_dir=ctx.out, doc=ctx.doc())
-            observations.append(Observation(tool=tool, args=args, status="read", said=seen))
-            continue
-
-        if tools.is_web(tool):
-            seen = web.run(tool, args, said=web.person_said(ctx.ask, history), output_dir=ctx.out)
-            logger.info("[smith-web] %s %s -> %s", tool, args, " | ".join(seen.splitlines()[:2])[:300])
-            observations.append(Observation(tool=tool, args=args, status="read", said=seen))
-            continue
-
-        if tools.is_definition(tool):
-            from services.smith4 import definition as definition_mod
-            step = definition_mod.run(ctx, tool, args)
-            if step.status == "read":
-                observations.append(Observation(tool=tool, args=args, status="read", said=step.said))
+            if tools.is_read(tool):
+                seen = reads.run(tool, args, output_dir=ctx.out, doc=ctx.doc())
+                observations.append(Observation(tool=tool, args=args, status="read", said=seen))
                 continue
+
+            if tools.is_web(tool):
+                seen = web.run(tool, args, said=web.person_said(ctx.ask, history), output_dir=ctx.out)
+                logger.info("[smith-web] %s %s -> %s", tool, args, " | ".join(seen.splitlines()[:2])[:300])
+                observations.append(Observation(tool=tool, args=args, status="read", said=seen))
+                continue
+
+            if tools.is_definition(tool):
+                from services.smith4 import definition as definition_mod
+                step = definition_mod.run(ctx, tool, args)
+                if step.status == "read":
+                    observations.append(Observation(tool=tool, args=args, status="read", said=step.said))
+                    continue
+                observations.append(Observation(
+                    tool=tool, args=args, status="finding" if step.finding else step.status,
+                    said=step.finding or step.said, touched=list(step.touched)))
+                if step.said and not step.finding:
+                    landed.append(step.said)
+                    if step.touched and step.status == "resolved":
+                        ctx.applied.append(step.said)
+                touched += [p for p in step.touched if p not in touched]
+                last = step
+                if not step.done and not step.finding:
+                    return _finished(landed, touched, step)
+                continue
+
+            if tool in REPRODUCE_BEFORE:
+                # NOT PAST THE RULE BY ASKING TWICE. TCommerce's empty bag was held
+                # once, a second rewrite went through, and the shopper stopped being
+                # sent to the cart — a change nobody asked for, the bag never tried
+                # (measured on a copy, 2026-10-07). Until a try has run, a change
+                # runs only when the call says it is the change they asked for.
+                tried = [o for o in observations if tools.is_trial(o.tool)]
+                if ctx.unattended:
+                    # A TURN A CHECK STARTED IS A FAULT TO SEE, NOT A REQUEST. Nobody
+                    # asked for anything, so `requested` means nothing here, and a
+                    # change needs a try in this turn that fails: ToroCommerce's
+                    # after-change check flagged the plus button's refusal and its
+                    # repair rewrote a working workflow (measured, 2026-10-08).
+                    if not any(trials.failed(o.said or "") for o in tried):
+                        observations.append(Observation(tool=tool, args=args, status="error", said=FAULT_NOT_SEEN))
+                        continue
+                elif not tried or untried_as_reported(ctx.report, tried):
+                    claimed = str(args.get("requested") or "").strip().lower() in ("true", "1", "yes")
+                    if not claimed:
+                        said = REPRODUCE_FIRST if not tried else untried_as_reported(ctx.report, tried)
+                        observations.append(Observation(tool=tool, args=args, status="error", said=said))
+                        continue
+                    if not asked_for(ctx.message or ctx.ask or "", _change_said(tool, args)):
+                        observations.append(Observation(tool=tool, args=args, status="error", said=NOT_ASKED_FOR))
+                        continue
+                if tool == "edit_file":
+                    from services.smith import file_edit
+                    rel, _why = file_edit._app_rel(ctx.out, str(args.get("path") or ""))
+                    if rel and file_edit.classify(ctx.doc() or {}, rel)["kind"] == "platform" and not any(
+                            tools.is_trial(o.tool) and trials.failed(o.said or "") for o in observations):
+                        observations.append(Observation(tool=tool, args=args, status="error", said=PATCH_NEEDS_PROOF))
+                        continue
+            if tools.is_write(tool):
+                out = writes.run(tool, args, output_dir=ctx.out, reasoning=ctx.reasoning)
+                step = Outcome(status="resolved" if out.get("applied") and not out.get("finding") else "needs_user",
+                               said=str(out.get("said") or ""), touched=list(out.get("touched") or []),
+                               finding=str(out.get("finding") or ""))
+            else:
+                understanding = _understanding_for(ctx, tool, args)
+                gaps = missing_fields(understanding)
+                if gaps:
+                    # A GAP THE APPLICATION CAN LIST IS THE PERSON'S TO CHOOSE. "Which
+                    # record?" with the records as chips is a click; the model
+                    # guessing one is a guess. A gap with no known answers goes back
+                    # to the model, which may know it or may ask.
+                    from services.smith.slot_options import ask_for
+                    question, choices = ask_for(gaps, ctx.doc(), understanding)
+                    if choices:
+                        return _finished(landed, touched, Outcome(status="asked", said=question,
+                                                                  options=choices))
+                    observations.append(Observation(
+                        tool=tool, args=args, status="error",
+                        said=(f"`{tool}` needs {', '.join(gaps)}, and the call did not carry them "
+                              "and neither the message nor the application supplied them. Call it "
+                              f"again with them, or ask. Ask: {question}")))
+                    continue
+                try:
+                    step = perform(ctx, tool, understanding)
+                except Exception as exc:  # noqa: BLE001 — a step degrades, the turn does not crash
+                    logger.exception("smith4: %s failed", tool)
+                    step = Outcome(status="needs_user", said=f"`{tool}` failed: {type(exc).__name__}: {exc}",
+                                   finding=f"`{tool}` raised {type(exc).__name__}: {exc}")
+
             observations.append(Observation(
                 tool=tool, args=args, status="finding" if step.finding else step.status,
                 said=step.finding or step.said, touched=list(step.touched)))
-            if step.said and not step.finding:
+            logger.info("[smith-obs] %s %s -> %s: %s", tool, {k: str(v)[:80] for k, v in args.items()},
+                        observations[-1].status, " ".join((observations[-1].said or "").split())[:400])
+            if step.said and (not step.finding or (step.touched and step.said != step.finding)):
+                # PART OF IT LANDED: twelve screens laid out again and one refused
+                # is twelve screens changed — said, beside the one the loop is
+                # told about.
                 landed.append(step.said)
                 if step.touched and step.status == "resolved":
                     ctx.applied.append(step.said)
             touched += [p for p in step.touched if p not in touched]
             last = step
+            if bench.running and any("/db/" in p or p.startswith("db/") for p in step.touched):
+                # The copy was taken before the data model changed.
+                bench.reset()
             if not step.done and not step.finding:
                 return _finished(landed, touched, step)
-            continue
 
-        if tool in REPRODUCE_BEFORE:
-            # NOT PAST THE RULE BY ASKING TWICE. TCommerce's empty bag was held
-            # once, a second rewrite went through, and the shopper stopped being
-            # sent to the cart — a change nobody asked for, the bag never tried
-            # (measured on a copy, 2026-10-07). Until a try has run, a change
-            # runs only when the call says it is the change they asked for.
-            tried = [o for o in observations if tools.is_trial(o.tool)]
-            if ctx.unattended:
-                # A TURN A CHECK STARTED IS A FAULT TO SEE, NOT A REQUEST. Nobody
-                # asked for anything, so `requested` means nothing here, and a
-                # change needs a try in this turn that fails: ToroCommerce's
-                # after-change check flagged the plus button's refusal and its
-                # repair rewrote a working workflow (measured, 2026-10-08).
-                if not any(trials.failed(o.said or "") for o in tried):
-                    observations.append(Observation(tool=tool, args=args, status="error", said=FAULT_NOT_SEEN))
-                    continue
-            elif not tried or untried_as_reported(ctx.report, tried):
-                claimed = str(args.get("requested") or "").strip().lower() in ("true", "1", "yes")
-                if not claimed:
-                    said = REPRODUCE_FIRST if not tried else untried_as_reported(ctx.report, tried)
-                    observations.append(Observation(tool=tool, args=args, status="error", said=said))
-                    continue
-                if not asked_for(ctx.message or ctx.ask or "", _change_said(tool, args)):
-                    observations.append(Observation(tool=tool, args=args, status="error", said=NOT_ASKED_FOR))
-                    continue
-            if tool == "edit_file":
-                from services.smith import file_edit
-                rel, _why = file_edit._app_rel(ctx.out, str(args.get("path") or ""))
-                if rel and file_edit.classify(ctx.doc() or {}, rel)["kind"] == "platform" and not any(
-                        tools.is_trial(o.tool) and trials.failed(o.said or "") for o in observations):
-                    observations.append(Observation(tool=tool, args=args, status="error", said=PATCH_NEEDS_PROOF))
-                    continue
-        if tools.is_write(tool):
-            out = writes.run(tool, args, output_dir=ctx.out, reasoning=ctx.reasoning)
-            step = Outcome(status="resolved" if out.get("applied") and not out.get("finding") else "needs_user",
-                           said=str(out.get("said") or ""), touched=list(out.get("touched") or []),
-                           finding=str(out.get("finding") or ""))
-        else:
-            understanding = _understanding_for(ctx, tool, args)
-            gaps = missing_fields(understanding)
-            if gaps:
-                # A GAP THE APPLICATION CAN LIST IS THE PERSON'S TO CHOOSE. "Which
-                # record?" with the records as chips is a click; the model
-                # guessing one is a guess. A gap with no known answers goes back
-                # to the model, which may know it or may ask.
-                from services.smith.slot_options import ask_for
-                question, choices = ask_for(gaps, ctx.doc(), understanding)
-                if choices:
-                    return _finished(landed, touched, Outcome(status="asked", said=question,
-                                                              options=choices))
-                observations.append(Observation(
-                    tool=tool, args=args, status="error",
-                    said=(f"`{tool}` needs {', '.join(gaps)}, and the call did not carry them "
-                          "and neither the message nor the application supplied them. Call it "
-                          f"again with them, or ask. Ask: {question}")))
-                continue
-            try:
-                step = perform(ctx, tool, understanding)
-            except Exception as exc:  # noqa: BLE001 — a step degrades, the turn does not crash
-                logger.exception("smith4: %s failed", tool)
-                step = Outcome(status="needs_user", said=f"`{tool}` failed: {type(exc).__name__}: {exc}",
-                               finding=f"`{tool}` raised {type(exc).__name__}: {exc}")
-
-        observations.append(Observation(
-            tool=tool, args=args, status="finding" if step.finding else step.status,
-            said=step.finding or step.said, touched=list(step.touched)))
-        logger.info("[smith-obs] %s %s -> %s: %s", tool, {k: str(v)[:80] for k, v in args.items()},
-                    observations[-1].status, " ".join((observations[-1].said or "").split())[:400])
-        if step.said and (not step.finding or (step.touched and step.said != step.finding)):
-            # PART OF IT LANDED: twelve screens laid out again and one refused
-            # is twelve screens changed — said, beside the one the loop is
-            # told about.
-            landed.append(step.said)
-            if step.touched and step.status == "resolved":
-                ctx.applied.append(step.said)
-        touched += [p for p in step.touched if p not in touched]
-        last = step
-        if bench.running and any("/db/" in p or p.startswith("db/") for p in step.touched):
-            # The copy was taken before the data model changed.
-            bench.reset()
-        if not step.done and not step.finding:
-            return _finished(landed, touched, step)
-
+    finally:
+        for o in observations[journaled:]:
+            journal.write("turn:step", tool=o.tool, status=o.status, said=(o.said or "")[:300])
+        journaled = len(observations)
     if not landed:
         return _out_of_steps(ctx, choose, observations, history, touched=touched,
                              out_of_time=out_of_time, max_steps=max_steps)
