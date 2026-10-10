@@ -320,7 +320,7 @@ async def _stacks_on_signal():
     import faulthandler
     import signal
 
-    faulthandler.register(signal.SIGUSR1, all_threads=True, chain=True)
+    faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
 
 
 @app.on_event("startup")
