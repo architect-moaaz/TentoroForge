@@ -1308,8 +1308,30 @@ def ownership_findings(security: dict, doc: dict) -> list[str]:
                     return e
         return None
     rules = [r for r in (security.get("ownershipRules") or []) if isinstance(r, dict)]
-    scoped = {re.sub(r"[^a-z0-9]", "", str((find(r.get("entity") or "") or {}).get("name") or "").lower())
-              for r in rules if r.get("kind", "scope") != "attribution" and not r.get("through")}
+    def key_of(name: Any) -> str:
+        return re.sub(r"[^a-z0-9]", "", str((find(str(name or "")) or {}).get("name") or "").lower())
+    scoped = {key_of(r.get("entity")) for r in rules
+              if r.get("kind", "scope") != "attribution" and not r.get("through")}
+    # A CHAIN IS SCOPED WHEN IT ENDS AT A SCOPED RECORD. The engine walks
+    # `through` up to three records deep (throughConditions), so an order
+    # item is a vendor's through its vendor order, which is the vendor's
+    # through their profile. Asked for the target to be scoped "itself",
+    # the author of Ecom L1's marketplace was refused for exactly that
+    # chain, and the edit that answered dropped the rules for Product,
+    # ProductVariant, VendorOrder and OrderItem — every vendor then saw
+    # every vendor's listings and orders (2026-10-11).
+    through_of = {key_of(r.get("entity")): key_of(r.get("through"))
+                  for r in rules if r.get("kind", "scope") != "attribution" and r.get("through")}
+    def reaches_scope(start: str) -> bool:
+        seen, at = set(), start
+        for _ in range(3):
+            if at in scoped:
+                return True
+            if at in seen or at not in through_of:
+                return False
+            seen.add(at)
+            at = through_of[at]
+        return at in scoped
     problems: list[str] = []
     for r in rules:
         named, column = str(r.get("entity") or ""), str(r.get("column") or "")
@@ -1335,10 +1357,12 @@ def ownership_findings(security: dict, doc: dict) -> list[str]:
             if target is None:
                 problems.append(f"ownership rule for {entity.get('name')}: `through` names "
                                 f"{r['through']!r}, which the data model does not have")
-            elif re.sub(r"[^a-z0-9]", "", str(target.get("name") or "").lower()) not in scoped:
+            elif not reaches_scope(re.sub(r"[^a-z0-9]", "", str(target.get("name") or "").lower())):
                 problems.append(f"ownership rule for {entity.get('name')}: it is owned through "
-                                f"{target.get('name')}, which has no scope rule of its own — scope "
-                                f"{target.get('name')} first")
+                                f"{target.get('name')}, which has no scope rule of its own — add "
+                                f"a rule for {target.get('name')} naming the field that holds its owner "
+                                f"(or the record it is owned through, up to three records deep), and keep "
+                                f"this rule")
     return problems
 
 
