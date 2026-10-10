@@ -31,20 +31,34 @@ def repair(svc: Any, node: str, feedback_by_subject: dict[str, str], *, usage: A
     from services.blueprint.orchestrator import DAG, TaskSpec
     from services.blueprint.service import BlueprintInvalid
 
+    from concurrent.futures import ThreadPoolExecutor
+
     execute = make_executor(svc, tiered_router(), usage=usage)
     repaired: list[str] = []
-    for subject, feedback in feedback_by_subject.items():
+    logger.info("[build-repair] %s: asking about %d subject(s): %s", node, len(feedback_by_subject),
+                ", ".join(str(k) for k in feedback_by_subject)[:200])
+
+    # EACH SUBJECT AT ONCE, as the build's own fan-out runs them: seven
+    # entities asked one after another, twice, with a production build
+    # between the rounds, were ten silent minutes (Ecom L1, 2026-10-11).
+    def one(subject: str, feedback: str) -> str | None:
         spec = TaskSpec(task_id=f"TASK-{node}-build-repair-{subject or 'all'}", node=node,
                         agent=DAG[node].agent, subject=subject, attempt=2, feedback=feedback)
         try:
             result = execute(spec)
-            application = apply_agent_result(svc, result, commit=True)
-            if application.applied:
-                repaired.append(subject)
+            with svc.lock:
+                application = apply_agent_result(svc, result, commit=True)
+            return subject if application.applied else None
         except (AuthorRefusal, ContractViolation, BlueprintInvalid) as exc:
             logger.warning("[build-repair] %s:%s refused: %s", node, subject, exc)
         except Exception as exc:  # noqa: BLE001 — a repair that breaks leaves the issue recorded
             logger.warning("[build-repair] %s:%s failed: %s", node, subject, exc)
+        return None
+
+    with ThreadPoolExecutor(max_workers=8, thread_name_prefix="forge-build-repair") as pool:
+        for done in pool.map(lambda kv: one(*kv), list(feedback_by_subject.items())):
+            if done is not None:
+                repaired.append(done)
     return repaired
 
 
@@ -123,15 +137,34 @@ def database_with_repair(svc: Any, app_root: str, issues: list[dict], *, usage: 
                 feedback.setdefault(f.artifact_id, "The build created this application's tables and demo "
                                     "rows in a real database, and found:")
                 feedback[f.artifact_id] += "\n- " + f.detail
+        logger.info("[assemble] the database gate found %d thing(s) in round %d: %s", len(found), round_,
+                    "; ".join(f.detail[:80] for f in found[:4]))
         if round_ == REPAIR_ROUNDS or not feedback or not repair(svc, "entity_fields", feedback, usage=usage):
             issues.extend({"kind": "database", "entity": f.artifact_id, "detail": f.detail} for f in found)
             logger.warning("[assemble] the database refused %d thing(s); recorded", len(found))
             break
+        # REBUILT ONLY WHEN THE TABLES CHANGED. A repair that only moved the
+        # sample rows needs a new seed and the gate again, not a production
+        # build (three to four minutes each, twice, Ecom L1 2026-10-11).
+        schema_refused = not (result.get("push") or {}).get("ok", True)
+        before = _schema_fingerprint(app_root)
         _project_data_layer(svc, app_root)
         project_seed(svc.doc, app_root)
-        verify_build(app_root, install=False, dispatches=False)
-        rebuilt = True
+        if schema_refused or _schema_fingerprint(app_root) != before:
+            verify_build(app_root, install=False, dispatches=False)
+            rebuilt = True
     return {**result, "rebuilt": rebuilt}
+
+
+def _schema_fingerprint(app_root: str) -> str:
+    """What the data layer's files say, as one hash."""
+    import hashlib
+    from pathlib import Path
+    h = hashlib.sha256()
+    root = Path(app_root) / "src" / "db" / "schema"
+    for f in sorted(root.glob("*.ts")) if root.is_dir() else []:
+        h.update(f.name.encode()); h.update(f.read_bytes())
+    return h.hexdigest()
 
 
 __all__ = ["REPAIR_ROUNDS", "database_with_repair", "dispatch_feedback", "dispatches_with_repair", "repair"]

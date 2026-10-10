@@ -166,3 +166,50 @@ def test_a_sample_reference_to_a_missing_parent_goes_back_to_its_author():
     assert "Gujarat" in found[0].detail and "Maharashtra, Western Province" in found[0].detail
     doc["data"]["entities"][1]["fields"][2]["examples"] = ["Maharashtra", "Western Province"]
     assert sample_findings(doc) == []
+
+
+def test_a_primary_key_and_a_tax_number_are_not_sample_references():
+    """Ecom L1 (2026-10-11): User.id, Payout.id and VendorProfile.taxId were
+    read as references and sent their authors two rounds of repair, each
+    followed by a production build."""
+    from services.blueprint.data_gate import sample_findings
+    from services.blueprint.projection import _link_target
+    doc = {"data": {"entities": [
+        {"id": "E1", "name": "User", "table": "users", "account": True, "labelField": "name",
+         "fields": [{"name": "id", "type": "uuid", "primaryKey": True, "examples": ["1111"]},
+                    {"name": "name", "type": "string", "examples": ["Amelia", "Jordan"]}]},
+        {"id": "E2", "name": "VendorProfile", "table": "vendor_profiles", "labelField": "storeName",
+         "fields": [{"name": "id", "type": "uuid", "primaryKey": True},
+                    {"name": "storeName", "type": "string", "examples": ["Brightwood"]},
+                    {"name": "userId", "type": "uuid", "examples": ["Amelia"]},
+                    {"name": "taxId", "type": "string", "examples": ["TAX-91234"]}]},
+        {"id": "E3", "name": "Payout", "table": "payouts", "labelField": "reference",
+         "fields": [{"name": "id", "type": "uuid", "primaryKey": True, "examples": ["3a1f"]},
+                    {"name": "reference", "type": "string", "examples": ["P-1"]},
+                    {"name": "vendorId", "type": "uuid", "examples": ["Brightwood", "Nobody"]}]},
+    ], "relationships": [
+        {"from": "E2", "fromField": "userId", "to": "E1", "toField": "id"},
+        {"from": "E2", "fromField": "id", "to": "E3", "toField": "vendorId"},
+    ]}}
+    ents = {e["id"]: e for e in doc["data"]["entities"]}
+    f = lambda eid, n: next(x for x in ents[eid]["fields"] if x["name"] == n)
+    assert _link_target(doc, ents["E1"], f("E1", "id")) is None
+    assert _link_target(doc, ents["E3"], f("E3", "id")) is None
+    assert _link_target(doc, ents["E2"], f("E2", "taxId")) is None
+    assert _link_target(doc, ents["E2"], f("E2", "userId")) == "E1"
+    assert _link_target(doc, ents["E3"], f("E3", "vendorId")) == "E2"
+    found = sample_findings(doc)
+    assert [x.artifact_id for x in found] == ["E3"] and "Nobody" in found[0].detail
+
+
+def test_a_parent_whose_labels_repeat_files_no_sample_finding():
+    from services.blueprint.data_gate import sample_findings
+    doc = {"data": {"entities": [
+        {"id": "C", "name": "Cart", "table": "carts", "labelField": "status",
+         "fields": [{"name": "id", "type": "uuid", "primaryKey": True},
+                    {"name": "status", "type": "string", "examples": ["active", "active", "abandoned"]}]},
+        {"id": "I", "name": "CartItem", "table": "cart_items",
+         "fields": [{"name": "id", "type": "uuid", "primaryKey": True},
+                    {"name": "cartId", "type": "uuid", "references": "C", "examples": ["cart-001", "cart-002"]}]},
+    ]}}
+    assert sample_findings(doc) == []

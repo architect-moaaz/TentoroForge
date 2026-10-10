@@ -302,6 +302,11 @@ def sample_findings(doc: dict) -> list[Any]:
             if not labels:
                 continue
             have = {x.lower() for x in labels}
+            # A PARENT WHOSE LABELS DO NOT TELL ITS ROWS APART is reached by
+            # position, and no author can "name one of: active, active,
+            # active" (Cart, Ecom L1 2026-10-11).
+            if len(have) < len(labels):
+                continue
             missing = sorted({n for n in named if n.lower() not in have})
             if missing:
                 out.append(Finding(EDGE, section="data.entities", artifact_id=str(e.get("id") or ""),

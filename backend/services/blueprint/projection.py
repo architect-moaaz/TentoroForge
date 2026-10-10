@@ -3121,6 +3121,13 @@ def _link_target(doc: dict, entity: dict, field: dict) -> str | None:
     relationship, else an entity named by the field (`toolId` → Tool), else —
     an id naming a person (`ownerId`, `borrowerId`) — the account entity."""
     name = str(field.get("name") or "")
+    # A PRIMARY KEY POINTS AT NOTHING. A relationship's parent side names
+    # the parent's `id` as `toField`; read as the parent's own link, User.id
+    # and Payout.id were "sample references naming records their parent
+    # lacks", and the database gate sent their authors two rounds of repair
+    # for a fault that was not there (Ecom L1, 2026-10-11).
+    if field.get("primaryKey") or name == "id":
+        return None
     ents = [e for e in (doc.get("data") or {}).get("entities") or [] if e.get("status") != "DEPRECATED"]
     eid = str(entity.get("id") or "")
     for r in (doc.get("data") or {}).get("relationships") or []:
@@ -3137,6 +3144,10 @@ def _link_target(doc: dict, entity: dict, field: dict) -> str | None:
     for e in ents:
         if re.sub(r"[^a-z0-9]", "", str(e.get("name") or "").lower()) in (stem, stem.rstrip("s")):
             return str(e.get("id"))
+    # AN ID NAMING A PERSON is a uuid. A string `taxId` is a tax number, not
+    # the account entity; read as one it was refused for naming no User.
+    if str(field.get("type") or "").lower() not in ("uuid", ""):
+        return None
     account = next((e for e in ents if e.get("account")), None)
     return str(account.get("id")) if account and str(account.get("id")) != eid else None
 
