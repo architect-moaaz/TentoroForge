@@ -313,6 +313,17 @@ async def _start_timer_scheduler():
 
 
 @app.on_event("startup")
+async def _stacks_on_signal():
+    """`kill -USR1 <pid>` writes every thread's stack to stderr. A build step
+    that made no call, ran no process and wrote no line for minutes could not
+    be looked into without root (Ecom L1, 2026-10-11)."""
+    import faulthandler
+    import signal
+
+    faulthandler.register(signal.SIGUSR1, all_threads=True, chain=True)
+
+
+@app.on_event("startup")
 async def _close_orphaned_ledgers():
     """A run ledger left open by the process before this one is closed, so
     the panel does not read a killed build as running (`run_registry`)."""
