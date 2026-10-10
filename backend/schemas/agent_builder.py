@@ -23,3 +23,15 @@ class AgentListItem(BaseModel):
 class AgentTestRequest(BaseModel):
     message: str
     conversation_history: list[dict] = []
+
+
+class AgentScenarioSave(BaseModel):
+    """The saved test conversations for one agent (see services/agent_scenarios.py)."""
+    scenarios: list[dict] = []
+
+
+class AgentScenarioRun(BaseModel):
+    """Run scenarios against the agent as drawn (``graph`` may hold edits that are not saved yet).
+    ``scenarios`` omitted means the saved ones."""
+    graph: AgentDefinitionSave
+    scenarios: list[dict] | None = None

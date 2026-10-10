@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   Loader2,
   FlaskConical,
+  ListChecks,
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ import { api } from "@/lib/api";
 import { useAgentBuilderStore } from "@/stores/agent-builder";
 import { AgentCanvas } from "./AgentCanvas";
 import { AgentChecksBar } from "./AgentChecksBar";
+import { AgentScenariosPanel } from "./AgentScenariosPanel";
 import { AgentNodePalette } from "./AgentNodePalette";
 import { AgentNodeProperties } from "./AgentNodeProperties";
 import { AgentTemplateSelector } from "./AgentTemplateSelector";
@@ -62,6 +64,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   const [findings, setFindings] = useState<AgentFinding[]>([]);
   const [appChecked, setAppChecked] = useState(true);
   const [confirmingApply, setConfirmingApply] = useState(false);
+  const [showScenarios, setShowScenarios] = useState(false);
   const [showTestConsole, setShowTestConsole] = useState(false);
 
   // Fetch agent list
@@ -513,10 +516,24 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setShowTestConsole(!showTestConsole)}
+            onClick={() => {
+              setShowScenarios(false);
+              setShowTestConsole(!showTestConsole);
+            }}
           >
             <FlaskConical className="mr-1 h-3.5 w-3.5" />
             Test
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setShowTestConsole(false);
+              setShowScenarios(!showScenarios);
+            }}
+          >
+            <ListChecks className="mr-1 h-3.5 w-3.5" />
+            Scenarios
           </Button>
           <Button
             size="sm"
@@ -585,7 +602,20 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       <div className="flex flex-1 overflow-hidden">
         <AgentNodePalette />
         <div className="flex-1">
-          {showTestConsole ? (
+          {showScenarios ? (
+            <AgentScenariosPanel
+              projectId={projectId}
+              agentId={currentAgent.id}
+              graph={{
+                id: currentAgent.id,
+                name: editName,
+                description: editDescription || undefined,
+                nodes,
+                edges,
+                config: currentAgent.config,
+              }}
+            />
+          ) : showTestConsole ? (
             <AgentTestConsole
               projectId={projectId}
               agentId={currentAgent.id}

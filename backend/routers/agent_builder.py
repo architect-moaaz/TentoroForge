@@ -18,7 +18,9 @@ from models.project import (
     AgentType,
     Version,
 )
-from schemas.agent_builder import AgentDefinitionSave, AgentListItem, AgentTestRequest
+from schemas.agent_builder import (
+    AgentDefinitionSave, AgentListItem, AgentScenarioRun, AgentScenarioSave, AgentTestRequest,
+)
 from services.project_service import get_project_with_auth
 from services.git_service import git_commit
 from sse_helpers import sse_event, stream_agent_messages
@@ -134,6 +136,75 @@ async def check_agent_definition(
         raise HTTPException(status_code=400, detail="No output directory")
     _, app_root = resolve_roots(project.output_dir)
     return check_agent(req.model_dump(), app_root)
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/suggest-scenarios")
+async def suggest_agent_scenarios(
+    project_id: uuid.UUID,
+    req: AgentDefinitionSave,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """A starting set of test conversations drawn from what this agent can do. Nothing is saved."""
+    from services.agent_scenarios import suggest_scenarios
+
+    await get_project_with_auth(project_id, user, db)
+    return {"scenarios": suggest_scenarios(req.model_dump())}
+
+
+@router.get("/api/projects/{project_id}/agent-definitions/{agent_id}/tests")
+async def get_agent_scenarios(
+    project_id: uuid.UUID,
+    agent_id: str,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The agent's saved test conversations."""
+    from services.agent_scenarios import load_scenarios
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        return {"scenarios": []}
+    return {"scenarios": load_scenarios(project.output_dir, agent_id)}
+
+
+@router.put("/api/projects/{project_id}/agent-definitions/{agent_id}/tests")
+async def save_agent_scenarios(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentScenarioSave,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save the agent's test conversations (cleaned: only fields that mean something are kept)."""
+    from services.agent_scenarios import save_scenarios
+
+    project = await get_project_with_auth(project_id, user, db)
+    if not project.output_dir:
+        raise HTTPException(status_code=400, detail="No output directory")
+    return {"scenarios": save_scenarios(project.output_dir, agent_id, req.scenarios)}
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/tests/run")
+async def run_agent_scenarios(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentScenarioRun,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run test conversations against the agent as drawn: a real model call each, tools reported and
+    never executed. Pass/fail per scenario, with the reason in plain words."""
+    from services.agent_scenarios import load_scenarios, run_scenarios
+
+    project = await get_project_with_auth(project_id, user, db)
+    scenarios = req.scenarios if req.scenarios is not None else (
+        load_scenarios(project.output_dir, agent_id) if project.output_dir else [])
+    results = await run_scenarios(req.graph.model_dump(), scenarios)
+    return {"results": results,
+            "passed": sum(1 for r in results if r["status"] == "passed"),
+            "failed": sum(1 for r in results if r["status"] == "failed"),
+            "errors": sum(1 for r in results if r["status"] == "error")}
 
 
 @router.post("/api/projects/{project_id}/agent-definitions", status_code=201)

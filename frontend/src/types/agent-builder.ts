@@ -290,3 +290,36 @@ export interface AgentFinding {
   /** The box on the canvas this is about, when it is about one. */
   nodeId: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// Test scenarios — saved test conversations for an agent
+// ---------------------------------------------------------------------------
+
+export interface AgentScenarioExpect {
+  blocked?: boolean;
+  must_call?: string[];
+  must_not_call?: string[];
+  reply_matches?: string[];
+  reply_must_not_match?: string[];
+}
+
+export interface AgentScenario {
+  id: string;
+  name: string;
+  message: string;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+  expect: AgentScenarioExpect;
+}
+
+export interface AgentScenarioResult {
+  id: string;
+  name: string;
+  status: "passed" | "failed" | "error";
+  failures: string[];
+  error?: string;
+  response: string;
+  toolCalls: Array<{ name: string; input?: Record<string, unknown> }>;
+  blocked?: boolean;
+  ms?: number | null;
+  tokens?: number | null;
+}
