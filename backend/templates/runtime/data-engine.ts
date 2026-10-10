@@ -985,12 +985,18 @@ export async function findById(
   await _maskOrUnmaskOnRead(entityName, record, ctx);
 
   // Apply field-level read access
+  let visible: Record<string, any> = record;
   try {
     const { filterFields } = await import("@/lib/rules");
-    return await filterFields(entityName, record, { role: ctx.user?.role });
+    visible = await filterFields(entityName, record, { role: ctx.user?.role });
   } catch {
-    return record;
+    /* rules not available: the record as read */
   }
+
+  // The same name labels a list carries (`<fkProp>Label`), so one record says "Alice Johnson" and
+  // not only the id of her row. Best-effort: a lookup never fails the read.
+  await attachFkLabels(entityName, entity, [visible]);
+  return visible;
 }
 
 export async function query(

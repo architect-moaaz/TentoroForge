@@ -80,7 +80,11 @@ def _fields_note(entity: dict[str, Any], by_id: dict[str, dict[str, Any]], rels:
     pointers = []
     for r in rels:
         if r.get("from") == entity.get("id") and r.get("fromField") and by_id.get(r.get("to")):
-            pointers.append(f"{r['fromField']} is the id of a {str(by_id[r['to']].get('name')).lower()}")
+            target = str(by_id[r["to"]].get("name")).lower()
+            # "an order", but "a user" (a leading u that sounds like "you")
+            article = "an" if target[:1] in "aeio" or (target[:1] == "u" and not target.startswith(("us", "uni", "uti"))) else "a"
+            # The data engine puts the referenced record's name beside every id, as `<id field>Label`.
+            pointers.append(f"{r['fromField']} is the id of {article} {target} (its name comes back as {r['fromField']}Label)")
     note = "Fields: " + ", ".join(names) + "." if names else ""
     return (note + (" " + "; ".join(pointers) + "." if pointers else "")).strip()
 
@@ -201,6 +205,8 @@ def suggest_agent(doc: dict[str, Any]) -> dict[str, Any]:
         "- You act as the person who is signed in, so you can only do what they are allowed to do. If an action "
         "is refused, say why in plain words and do not try again.",
         "- Keep answers short. Use a short list for several records, one line each.",
+        "- Refer to people and records by name, never by id. Results carry the name beside each id, in a field "
+        "ending in Label (customerIdLabel, for example); show an id only if the person asks for it.",
         "- You cannot transfer anyone to a person; if asked, say so and suggest contacting the app's administrator.",
     ]
     if rules:

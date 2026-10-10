@@ -147,6 +147,8 @@ def test_the_fields_a_model_may_ask_for_exclude_secrets_and_vectors():
     assert "posterEmbedding" not in t["list_movies"]["description"]
     assert "title" in t["list_movies"]["description"]
     assert "movieId is the id of a movie" in t["list_ratings"]["description"]
+    # the name rides beside every id, and the model is told where to find it
+    assert "movieIdLabel" in t["list_ratings"]["description"]
 
 
 def test_the_prompt_says_what_the_app_is_its_rules_and_that_it_cannot_hand_off():
@@ -156,6 +158,7 @@ def test_the_prompt_says_what_the_app_is_its_rules_and_that_it_cannot_hand_off()
     assert "Silver Screen" not in prompt, "the design brief is not the assistant's business"
     assert "A comment is permanent once posted." in prompt and "Old rule" not in prompt
     assert "wait for a clear yes" in prompt
+    assert "Refer to people and records by name, never by id" in prompt and "Label" in prompt
     # an id already in the conversation is used, not fetched again; and the rule is not about ratings
     assert "Use the id of a record you already have from earlier in this conversation" in prompt
     assert "before you act on it" not in prompt, "the old rule forced a fresh lookup before every change"
@@ -233,3 +236,16 @@ async def test_a_project_with_no_blueprint_is_told_to_build_first(tmp_path, monk
     with pytest.raises(HTTPException) as e:
         await suggest_agent_definition(proj.id, SimpleNamespace(id="u"), None)
     assert e.value.status_code == 409 and "build the app first" in e.value.detail
+
+
+def test_an_id_pointer_reads_correctly_for_a_word_that_starts_with_a_vowel():
+    doc = blueprint()
+    doc["data"]["entities"].append({"id": "ENTITY-006", "name": "Order", "table": "orders",
+                                    "fields": [{"name": "id", "type": "uuid"}, {"name": "movieId", "type": "uuid"}]})
+    doc["data"]["relationships"].append({"from": "ENTITY-006", "fromField": "ratingId", "to": "ENTITY-003", "toField": "id"})
+    doc["data"]["relationships"].append({"from": "ENTITY-003", "fromField": "orderId", "to": "ENTITY-006", "toField": "id"})
+    doc["pages"].append({"id": "PAGE-9", "name": "Orders", "users": ["ROLE-001"], "access": "authenticated",
+                         "data": {"primaryEntity": "ENTITY-006"}})
+    t = tools_of(suggest_agent(doc))
+    assert "orderId is the id of an order" in t["list_ratings"]["description"]
+    assert "is the id of a user" in t["list_movies"]["description"], "'a user', not 'an user'"
