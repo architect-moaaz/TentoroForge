@@ -5946,6 +5946,34 @@ Alert Rules (optional):
   - New unrecognized intent patterns → suggest new tools or prompt updates
 ```
 
+### 20.18 As built — the fixed runtime (2026-10-06) ⚠️ CORRECTS §20.4–§20.10, §20.12–§20.13
+
+§20.4–§20.10 above are the design sketch. What ships differs in ways that matter; **where they disagree, this section wins.**
+
+**An agent is data; the runtime is fixed code.** `routers/agent_builder.py` no longer asks the `code_editor` LLM to invent `agent-service.ts`. The Builder's node graph (and the planner's `plan.agent_graph`, §20.1) is *compiled* by `services/agent_runtime_config.py` into a flat `AgentRuntimeConfig` (`src/agents/definitions/<id>.json`), and `services/agent_runtime_install.py` copies the fixed runtime beside it. The same graph always yields the same files. Per §116 the model decides what an agent *does at chat time*; deterministic code decides what is *installed*.
+
+```
+agent-definitions/<id>.json        the Builder's graph        (project root; source of truth)
+  └─ compile ─▶ src/agents/definitions/<id>.json, src/agents/tools/<fn>.ts, src/agents/registry.ts
+  runtime  ─▶ src/lib/agents/{types,guardrails,memory,tools,runtime,io,store}.ts
+              src/components/agents/ChatWidget.tsx          (mounted in (dashboard)/layout.tsx; also /assistant)
+              src/app/api/agent/chat/route.ts               POST (SSE) · GET (agents this person may use)
+              src/app/api/agent/conversations/route.ts      the signed-in person's own conversations
+              src/db/schema/_forge_agent.ts                 forge_agent_conversations, forge_agent_messages
+  source   ─▶ backend/templates/runtime/agents/, api-agent/, db/forge-agent.schema.ts
+```
+
+- **Install paths** (all idempotent, all no-LLM): `runtime_injector.inject_runtime` (any project that has `agent-definitions/*.json` — covers Blueprint assembly and the relay), the LangGraph spine's `_install_app_agent` in `pipeline_graph._node_finish` (plan with `agent_graph`), and the Builder's `/apply`. Everything written is added to `contracts/runtime-injection-manifest.json` so `api_route_prune` keeps it.
+- **Tools reach the app *through* the app.** `data` and `api` tools call the app's own routes (`/api/data/<entity>`, `/api/...`) with the **signed-in person's session cookie**, so role checks, ownership scope and masking apply to the agent exactly as to that person. §20.5's `X-Agent-User-Id` header is **not used** — it would let any caller act as any user. A tool may not call `/api/agent/*` (no self-recursion) or anything outside `/api/`.
+- **Credentials never leave through a tool.** Every tool result passes `redactCredentials` (drops `password*`, `*hash*`, `secret*`, `salt`, `api_key`, `*token*` except counters) before it reaches the model or is saved. Found live: a `data` tool over `users` was handed bcrypt hashes by the route. The SSE stream also carries only *that* a tool ran and whether it worked — never its result.
+- **Tool kinds:** `data` (list/get/create/update/delete), `api`, `workflow` (`triggerWorkflow`, as the person), `mcp` (`callMcpTool`; ids are the `MCP_SERVER_<hex12>` slug the app's env is keyed by; `args_mapping` can read an earlier tool's result), `ai_action` (the `ai.ts` presets, e.g. `identify_product`), `function` (planner-supplied `code` → `src/agents/tools/<name>.ts`). A tool that was *described but has no code* returns a plain "no implementation yet" error instead of pretending; raw-SQL tools are refused outright. The compiler returns a `warnings` list naming everything dropped or degraded.
+- **Loop:** at most `maxTurns` (default 8, ceiling 12) model↔tool rounds per message; a failed tool is reported to the model as an error result and the conversation continues; conversations belong to the person (someone else's id starts a new conversation). Memory keeps `maxMessages` turns verbatim and folds older ones into a rolling summary (conversation memory only — `vector`/`key_value` degrade with a warning).
+- **Guardrails:** input length / block patterns / `requireAuth` (default true); output block patterns / `strict` PII filter; **output rules** (`identify.confidence >= 0.5`) are FEEL-lite over tool results by tool name — a rule about a tool that never ran is skipped. A blocked answer is replaced (the widget swaps the streamed text) and only the replacement is stored.
+- **Builder Test console** (`services/agent_test_run.py`) is a real model call against the compiled definition — real tokens and latency, input guardrails applied — but **tools are shown, not executed** (the builder has no signed-in end user, and a test must not create records or fire workflows).
+- **Verification:** `templates/runtime/__tests__/run-agent-tests.sh` (loop, guardrails, memory, tools, redaction — pure, fakes for model/tools/db), `tests/services/test_agent_runtime_install.py`, `test_agent_installs_on_the_spine.py`, `tests/routers/test_agent_builder_runtime.py`. Also run live: the installed files typecheck clean in a real generated app, and a real chat through the app's `/api/agent/chat` (session auth → streamed Claude → function tool as the session user → persisted) worked end to end.
+- **Tools are checked against the app they live in (2026-10-10, `services/agent_access.py`).** Found live in Movie Review: the agent had `data` tools that create a rating and a comment, but the app lets *nobody* write `ratings`/`comments` through its data API (`ENTITY_ACCESS` says `write: []`) — the SubmitRating and PostComment workflows do it, and hold the rules (stars 1–5, one comment per person). Every chat attempt was a 403, whoever was signed in, and nothing at build time noticed. Now, at install with the app on disk, each write tool is compared with `src/lib/entity-access.ts`: a write to a closed entity is **replaced by the app's own workflow** for that table (same tool name; inputs taken from the workflow, typed from the Blueprint when present), or **removed** with a line added to the agent's prompt when no workflow does it. Reads and writes the app allows are untouched; an app with no access list is left as compiled. Every change is a plain-language warning in Apply. The builder's graph is never rewritten — the project stays the source of truth. The runtime also turns a bare 403 into "not allowed — don't retry, tell the person" instead of "Forbidden". Pinned by `tests/services/test_agent_access_reconcile.py`.
+- **Known limits:** router/handoff nodes are carried but not executed; no knowledge base or analytics yet; rate limits are per server instance (a floor, not a meter); an agent is not yet a Blueprint artifact, so it is not in the Blueprint's knowledge graph or drift checks.
+
 ---
 
 ## 21. AI-Powered Application Features
@@ -8445,7 +8473,7 @@ the pipeline for creating new modules via Planner, scoping files to modules,
 and tracking cross-module dependencies is not yet wired end-to-end.
 ```
 
-### Phase 8: AI Agent Builder (Weeks 23-25) — STATUS: ~80% COMPLETE (PLATFORM SIDE)
+### Phase 8: AI Agent Builder (Weeks 23-25) — STATUS: ~90% COMPLETE (core runtime shipped 2026-10-06)
 
 ```
 Goal: Visual agent builder with runtime in generated apps
@@ -8469,24 +8497,28 @@ Tasks — Platform Visual Builder:
 ✅ Agent definition CRUD endpoints (agent_builder.py router — 423 lines)
 □ Agent Builder agent (Agent #11) — system prompt and orchestration — AGENT FILE EXISTS, INTEGRATION PARTIAL
 
-Tasks — Generated App Runtime Templates:
-□ Agent runtime template (src/agents/runtime.ts) — NOT IMPLEMENTED
-□ Tool registry template (src/agents/tools/registry.ts) — NOT IMPLEMENTED
-□ Memory manager template (src/agents/memory.ts) — NOT IMPLEMENTED
-□ Guardrails template (src/agents/guardrails.ts) — NOT IMPLEMENTED
-□ Chat API route template (src/app/api/agents/[agentId]/chat/route.ts) — NOT IMPLEMENTED
-□ ChatWidget component template (floating + full-page modes) — NOT IMPLEMENTED
-□ Agent conversation tables in generated app schema — NOT IMPLEMENTED
+Tasks — Generated App Runtime Templates (core runtime shipped 2026-10-06, see §20.18):
+✅ Agent runtime (loop) — templates/runtime/agents/runtime.ts → src/lib/agents/runtime.ts
+✅ Tool runner (data / api / workflow / mcp / ai_action / function) — agents/tools.ts
+✅ Memory (history replay + rolling summary) — agents/memory.ts, agents/store.ts
+✅ Guardrails (input, output, output rules over tool results) — agents/guardrails.ts
+✅ Chat API route — src/app/api/agent/chat/route.ts (SSE) + /api/agent/conversations
+✅ ChatWidget component (floating + full-page /assistant)
+✅ Agent conversation tables — forge_agent_conversations / forge_agent_messages
+✅ Deterministic install (services/agent_runtime_install.py) on the injector, the LangGraph spine and the Builder's Apply — no LLM writes the runtime
+✅ Builder Test console calls a real model (tools shown, not executed)
+□ Router / human-handoff NODES are carried in the definition but not executed
 □ Knowledge base: pgvector setup, document upload, chunking, embedding — NOT IMPLEMENTED
 □ Agent analytics dashboard template — NOT IMPLEMENTED
 □ AppModel index: agents section — NOT IMPLEMENTED
+□ Blueprint-native agents (an agents artifact in the Blueprint schema) — NOT IMPLEMENTED
 
 Deliverable: User can visually create AI agents that run inside their generated app,
 using the app's own APIs as tools, with conversation memory, guardrails, and embedded chat UI.
 
-NOTE: The visual agent builder UI is fully complete. The main gap is generating the
-agent runtime code into the generated apps — the runtime templates, tool registry,
-memory management, guardrails, chat API, and ChatWidget component.
+NOTE: Both halves now exist: the visual builder, and a fixed, tested runtime that
+generated apps run (§20.18). What remains is the optional tail — knowledge base,
+analytics, router/handoff execution — and agents as a Blueprint artifact.
 ```
 
 ### Phase 9: AI-Powered App Features (Weeks 26-28) — STATUS: ~40% COMPLETE

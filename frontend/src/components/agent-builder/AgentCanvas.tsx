@@ -96,12 +96,51 @@ export function AgentCanvas({
   // never reach the parent, so the parent's `nodes.find(selectedId)` always
   // returns undefined and the Properties panel never opens. Same for saves —
   // the parent would persist stale state.
+  //
+  // THE HANDLERS ARE READ THROUGH REFS, NOT LISTED AS DEPENDENCIES. The panel
+  // passes them inline, so they are new functions on every render of the panel.
+  // Listed here, every report re-rendered the panel, which made a new handler,
+  // which re-ran the effect, which reported again — "Maximum update depth
+  // exceeded" the moment an agent was opened. What should trigger a report is the
+  // canvas's own state changing, and nothing else.
+  const onNodesChangeRef = useRef(onNodesChangeProp);
+  const onEdgesChangeRef = useRef(onEdgesChangeProp);
+  onNodesChangeRef.current = onNodesChangeProp;
+  onEdgesChangeRef.current = onEdgesChangeProp;
   useEffect(() => {
-    onNodesChangeProp?.(nodes);
-  }, [nodes, onNodesChangeProp]);
+    onNodesChangeRef.current?.(nodes);
+  }, [nodes]);
   useEffect(() => {
-    onEdgesChangeProp?.(edges);
-  }, [edges, onEdgesChangeProp]);
+    onEdgesChangeRef.current?.(edges);
+  }, [edges]);
+
+  // Sync parent → canvas, for what the canvas does not own: a node's DATA. The
+  // Properties side form edits the parent's copy (label, prompt, tool config);
+  // React Flow seeded its own state once from `initialNodes` and never looks
+  // again, so the card kept showing the old value — and the next drag reported
+  // the canvas's stale copy back to the parent, silently undoing the edit.
+  //
+  // Only `data` of nodes present on BOTH sides is adopted, and only when it
+  // differs. Positions, selection, and which nodes exist stay the canvas's: those
+  // are what the report above sends the other way, and adopting them too would
+  // have the two sides overwriting each other. After an adoption the canvas holds
+  // the parent's object, so the report it triggers comes back equal and this
+  // effect then finds nothing to change.
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  useEffect(() => {
+    const fromParent = new Map(initialNodes.map((n) => [n.id, n.data]));
+    let changed = false;
+    const next = nodesRef.current.map((n) => {
+      const data = fromParent.get(n.id);
+      if (data && JSON.stringify(data) !== JSON.stringify(n.data)) {
+        changed = true;
+        return { ...n, data };
+      }
+      return n;
+    });
+    if (changed) setNodes(next);
+  }, [initialNodes, setNodes]);
 
   const onConnect: OnConnect = useCallback(
     (params: Connection) => {

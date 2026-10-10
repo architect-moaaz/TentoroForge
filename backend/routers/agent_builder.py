@@ -28,9 +28,18 @@ router = APIRouter(tags=["agent-builder"])
 AGENT_DEFS_DIR = "agent-definitions"  # relative to project output_dir
 
 
-def _agent_defs_path(output_dir: str) -> Path:
+def _agent_defs_path(output_dir: str, *, create: bool = False) -> Path:
+    """The project's agent-definitions directory.
+
+    Only a WRITE creates it, and with its parents: a project row can outlive its
+    folder (a draft whose output directory was removed, a restore from a database
+    alone), and creating one level of a missing path raised FileNotFoundError out
+    of Save. Reads must not create anything — listing the agents of a project that
+    has none is not a reason to put a directory on disk.
+    """
     p = Path(output_dir) / AGENT_DEFS_DIR
-    p.mkdir(exist_ok=True)
+    if create:
+        p.mkdir(parents=True, exist_ok=True)
     return p
 
 
@@ -96,7 +105,7 @@ async def save_agent_definition(
     if not project.output_dir:
         raise HTTPException(status_code=400, detail="No output directory")
 
-    agent_file = _agent_defs_path(project.output_dir) / f"{req.id}.json"
+    agent_file = _agent_defs_path(project.output_dir, create=True) / f"{req.id}.json"
     agent_file.write_text(json.dumps(req.model_dump(), indent=2))
     return {"id": req.id, "saved": True}
 
@@ -152,7 +161,7 @@ async def apply_agent_definition(
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Apply an agent definition to the generated app via code_editor agent (SSE streaming)."""
+    """Install an agent into the generated app: compile its definition, lay down the runtime, validate, index (SSE streaming)."""
     project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir:
         raise HTTPException(status_code=400, detail="No output directory")
@@ -162,6 +171,7 @@ async def apply_agent_definition(
         raise HTTPException(status_code=404, detail="Agent definition not found")
 
     agent_data = json.loads(agent_file.read_text())
+    # What is recorded against the version: the definition, in the builder's words.
     instruction = _build_agent_instruction(agent_data)
 
     async def event_stream():
@@ -172,20 +182,33 @@ async def apply_agent_definition(
             total_turns = 0
             total_duration = 0
 
-            from agents.code_editor import run_code_editor
-            yield sse_event("status", {"message": "Generating agent runtime..."})
+            # The runtime is fixed code and the definition is data, so installing an
+            # agent is a compile + copy — no model writes it, and applying twice gives
+            # the same files.
+            import asyncio
 
-            async for evt in stream_agent_messages(
-                run_code_editor(output_dir=project.output_dir, instruction=instruction),
-                output_dir=project.output_dir,
-            ):
-                if evt.get("event") == "agent_result":
-                    data = json.loads(evt["data"])
-                    total_cost += data.get("cost_usd", 0)
-                    total_turns += data.get("num_turns", 0)
-                    total_duration += data.get("duration_ms", 0)
+            from services.agent_runtime_install import install_agent_runtime
+
+            yield sse_event("status", {"message": "Installing agent runtime..."})
+            install = await asyncio.to_thread(install_agent_runtime, project.output_dir)
+            if not install.get("installed"):
+                # Saved is saved: the definition is on disk and is installed by the
+                # build. Say that, rather than a bare failure — there is nothing
+                # wrong with the agent, there is just no app to put it in yet.
+                if install.get("no_app"):
+                    yield sse_event("error", {"message": (
+                        "This project has no generated app yet. Your agent is saved and will be "
+                        "installed when the app is built.")})
                 else:
-                    yield evt
+                    yield sse_event("error", {"message": "Nothing to install — the project has no agent definition."})
+                return
+            for w in install.get("warnings", []):
+                yield sse_event("log", {"text": f"[Agent] ⚠ {w}"})
+            yield sse_event("log", {"text": (
+                f"[Agent] installed {len(install['agents'])} agent(s), "
+                f"{len(install['written'])} file(s) written"
+                + ("" if install.get("widget_mounted") else "; the floating widget was not mounted (see /assistant)")
+            )})
 
             from agents.validator import run_validator
             yield sse_event("status", {"message": "Validating build..."})
@@ -263,6 +286,8 @@ async def apply_agent_definition(
                 "cost_usd": total_cost,
                 "duration_ms": total_duration,
                 "commit_hash": commit_hash,
+                "warnings": install.get("warnings", []),
+                "widget_mounted": install.get("widget_mounted", False),
             })
 
         except Exception as e:
@@ -283,7 +308,9 @@ async def test_agent(
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Test an agent definition with a message (returns simulated trace)."""
+    """Test an agent with a message: a real model call against its compiled definition.
+
+    Tools are shown, not executed (see services/agent_test_run.py)."""
     project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir:
         raise HTTPException(status_code=400, detail="No output directory")
@@ -292,32 +319,10 @@ async def test_agent(
     if not agent_file.exists():
         raise HTTPException(status_code=404, detail="Agent definition not found")
 
+    from services.agent_test_run import run_agent_test
+
     agent_data = json.loads(agent_file.read_text())
-    nodes = agent_data.get("nodes", [])
-    edges = agent_data.get("edges", [])
-
-    # Build a simulated execution trace by walking the graph
-    trace = []
-    for node in nodes:
-        node_data = node.get("data", {})
-        trace.append({
-            "node_id": node.get("id", ""),
-            "node_type": node_data.get("nodeType", ""),
-            "label": node_data.get("label", ""),
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "status": "completed",
-            "duration_ms": 50,
-            "tokens_used": 0,
-        })
-
-    return {
-        "response": f"[Test mode] Agent '{agent_data.get('name', 'Unnamed')}' processed your message: \"{req.message}\". "
-                     f"This is a simulated response. Apply the agent to generate actual runtime code.",
-        "trace": trace,
-        "total_tokens": 0,
-        "total_duration_ms": len(trace) * 50,
-    }
+    return await run_agent_test(agent_data, req.message, req.conversation_history)
 
 
 # ---------------------------------------------------------------------------

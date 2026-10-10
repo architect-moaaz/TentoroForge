@@ -200,7 +200,11 @@ def _remove_except(target: Path, root: Path, preserve: tuple[str, ...]) -> None:
     generated — keeps that decision with the caller that projects them.
     """
     for child in sorted(target.rglob("*"), key=lambda p: -len(p.parts)):
-        rel = str(child.relative_to(root))
+        # POSIX spelling: `preserve` is written `src/lib/workflows/definitions`, and on
+        # Windows `str(path)` is `src\lib\workflows\definitions`. Compared as it came,
+        # nothing matched, nothing was preserved, and the workflow definitions the
+        # projection wrote a moment earlier were deleted by the runtime injection.
+        rel = child.relative_to(root).as_posix()
         if any(rel == p or rel.startswith(p + "/") for p in preserve):
             continue
         if child.is_file() or child.is_symlink():
@@ -636,6 +640,18 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
             copied.append("globals.css(--color-*)")
     except Exception as e:
         errors.append(f"Failed to emit --color-* tokens: {e}")
+
+    # AI agents: a project that has agent definitions (the Agent Builder's, or the
+    # planner's agent_graph) gets the fixed agent runtime + its compiled definitions.
+    # Gated like the cart primitive — an app with no agent carries none of it.
+    try:
+        from services.agent_runtime_install import has_agents, install_agent_runtime
+
+        if has_agents(output_path):
+            agent_result = install_agent_runtime(output_path)
+            copied.extend(agent_result.get("written", []))
+    except Exception as e:
+        errors.append(f"Failed to install the agent runtime: {e}")
 
     logger.info(
         "Runtime injection: %d files copied, %d errors",

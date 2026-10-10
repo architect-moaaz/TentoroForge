@@ -1085,6 +1085,48 @@ def _page_route_count(output_dir: str) -> int:
     return sum(1 for p in sdir.rglob("*.json") if p.name != "shell.json")
 
 
+async def _install_app_agent(state: PipelineState, config: dict) -> dict | None:
+    """APP AGENT. A plan whose archetype carries an agent (`plan.agent_graph`) gets the
+    fixed agent runtime + its compiled definition — the same install the Agent
+    Builder's Apply performs, with no model in it. The relay did this after its
+    validator; the spine did not, so flipping the spine to default silently stopped
+    every agent app from getting its agent. Non-fatal: the user can re-apply from
+    the Agent Builder, so a failure here never fails the build.
+
+    Returns the install summary, or None when there was nothing to install."""
+    out, plan = state["output_dir"], state["plan"]
+    try:
+        agent_pid = _project_uuid(state)
+        if agent_pid is None or not plan.get("agent_graph"):
+            return None
+        from database import async_session as _agent_session
+        from models.project import Project as _AgentProject
+        from services.agent_from_plan import install_agent_from_plan
+        from sqlalchemy import select as _agent_select
+
+        async with _agent_session() as _db:
+            proj = (await _db.execute(
+                _agent_select(_AgentProject).where(_AgentProject.id == agent_pid)
+            )).scalar_one_or_none()
+            if proj is None:
+                return None
+            _status(config, "Installing app agent…")
+            summary = await install_agent_from_plan(
+                output_dir=out, plan=plan, org_id=proj.org_id, db=_db)
+        if summary:
+            _log(config, f"[Agent] installed '{summary['name']}' "
+                         f"({summary['node_count']} nodes, {summary['tool_count']} tools)")
+            for w in summary.get("warnings", []):
+                _log(config, f"[Agent] ⚠ {w}")
+        else:
+            _log(config, "[Agent] plan has an agent_graph but nothing could be installed "
+                         "(register its MCP servers and re-apply from the Agent Builder)")
+        return summary
+    except Exception as exc:  # noqa: BLE001
+        _log(config, f"[Agent] install skipped: {exc}")
+        return None
+
+
 async def _node_finish(state: PipelineState, config: dict) -> dict:
     """The schema-path tail: photo injection → nav-flow emit → standalone app
     emitter → npm install → fidelity scoring → post-generate guard suite →
@@ -1135,6 +1177,8 @@ async def _node_finish(state: PipelineState, config: dict) -> dict:
         _log(config, f"[Pipeline] post-generate guards applied ({applied} fix(es))")
     except Exception as exc:  # noqa: BLE001
         _log(config, f"[Pipeline] post-generate guards skipped: {exc}")
+
+    await _install_app_agent(state, config)
 
     # SHELL MENU FLOOR. An app with pages and no nav is unusable, and every
     # artifact-level check passes on an empty menu (valid JSON, valid
