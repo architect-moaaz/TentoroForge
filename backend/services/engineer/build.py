@@ -174,6 +174,52 @@ def first_nodes(plan: list[str], doc: Mapping[str, Any] | None = None) -> tuple[
     return [k for lvl in levels() for k in lvl if k in asked and k not in per and k not in last], scope
 
 
+def pending_feature_nodes(doc: Mapping[str, Any], per: list[str],
+                          plan: list[Feature]) -> tuple[list[str], dict[str, list[str]]]:
+    """Once every feature has run: the feature nodes with pending subjects
+    no feature claimed (a process nothing launches, a statement group about
+    no feature's requirements), with the services and projections of the
+    slice after them — and, per node, the unclaimed subjects, so the sweep
+    writes those and nothing a feature already owns. Empty when every
+    pending subject is some feature's."""
+    from services.blueprint.orchestrator import DAG, pending_subjects
+    unclaimed: dict[str, list[str]] = {}
+    for k in per:
+        node = DAG.get(k)
+        if node is None or node.kind != "agent" or not node.fanout:
+            continue
+        pending = pending_subjects(node, dict(doc))
+        if not pending:
+            continue
+        claimed: set[str] = set()
+        for i, f in enumerate(plan):
+            claimed |= set(subjects_of(f, k, doc, pending, first=(i == 0)))
+        left = [s for s in pending if s not in claimed]
+        if left:
+            unclaimed[k] = left
+    if not unclaimed:
+        return [], {}
+    first = min(per.index(k) for k in unclaimed)
+    return [k for i, k in enumerate(per) if k in unclaimed or (i > first and DAG[k].kind != "agent")], unclaimed
+
+
+class _Unclaimed:
+    """`orchestrator.Scope` for the sweep: a node authors only the subjects
+    no feature claimed; a service or projection runs whole."""
+
+    feature = Feature(id="SWEEP", name="what no feature claimed")
+
+    def __init__(self, subjects: dict[str, list[str]]):
+        self._subjects = subjects
+
+    def subjects(self, node: str, doc: Mapping[str, Any], pending: list[str]) -> list[str]:
+        mine = self._subjects.get(node)
+        return pending if mine is None else [s for s in pending if s in set(mine)]
+
+    def brief(self, node: str, subject: str) -> str:
+        return ""
+
+
 def incomplete_nodes(doc: Mapping[str, Any], output_dir: str) -> list[str]:
     """The graph's nodes not yet complete for this document, in order — what
     the build entry hands the engineer as its plan."""
@@ -346,6 +392,21 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
                 break
 
         whole: dict = {}
+        if not stopped:
+            # WHAT NO FEATURE CLAIMED IS WRITTEN BEFORE THE END. A process
+            # nothing launches and no record of a feature's names (a scheduled
+            # clean-up) was declared in one feature's run and written in none
+            # (Ecommerce1's "Abandon Inactive Carts", forge-v3, 2026-10-10):
+            # every feature node with pending subjects runs once more, unscoped,
+            # with the projections after it.
+            sweep, unclaimed = pending_feature_nodes(svc.doc, per, plan_features)
+            if sweep:
+                journal.write("sweep:start", nodes=sweep, subjects=unclaimed)
+                reports.append(run(svc, executor, plan=sweep, commit=True, user_request=description,
+                                   app_root=app_root, observer=observer, observer_agent=observer_agent,
+                                   scope=_Unclaimed(unclaimed)))
+                _reload(svc, output_dir)
+                journal.write("sweep:done", nodes=sweep)
         if not stopped and last:
             reports.append(run(svc, executor, plan=last, commit=True, user_request=description,
                                app_root=app_root, observer=observer, observer_agent=observer_agent))
@@ -621,5 +682,5 @@ def _executor(svc: Any, output_dir: str, say: Callable[[str, dict], None], obser
     return executor, observer_agent
 
 
-__all__ = ["build", "build_nodes", "first_nodes", "incomplete_nodes", "proven_before", "FeatureScope",
+__all__ = ["build", "build_nodes", "first_nodes", "incomplete_nodes", "pending_feature_nodes", "proven_before", "FeatureScope",
            "fix_ask", "PER_FEATURE", "FIX_ROUNDS"]

@@ -86,9 +86,16 @@ def features(doc: Mapping[str, Any]) -> list[Feature]:
     if not by_id or not out:
         out = [Feature(id="MODULE-ALL", name=WHOLE, pages=[str(p["id"]) for p in pages])]
     page_by_id = {str(p["id"]): p for p in pages}
+    module_reqs = {str(m["id"]): [str(r) for r in m.get("requirements") or []] for m in modules}
+    all_reqs = [str(r.get("id")) for r in _live(doc.get("requirements")) if r.get("id")]
     for f in out:
         ents: list[str] = []
-        reqs: list[str] = []
+        # THE MODULE'S REQUIREMENTS ARE THE FEATURE'S. A declared page names
+        # none (the contracts come later), and a feature with no requirements
+        # had no statement groups of its own: Ecommerce1's Storefront was
+        # "built" with nothing written about shopping and nothing tried
+        # (forge-v3, 2026-10-10 05:30). The whole application's are every one.
+        reqs: list[str] = list(module_reqs.get(f.id, [])) if f.id != "MODULE-ALL" else list(all_reqs)
         for pid in f.pages:
             data = page_by_id[pid].get("data") or {}
             for e in [data.get("primaryEntity"), *(data.get("supportingEntities") or [])]:
@@ -159,6 +166,11 @@ def subjects_of(feature: Feature, node: str, doc: Mapping[str, Any], pending: li
         return pending
     mine = set(feature.pages)
     if fanout == "pages":
+        # THE DOOR IS THE FIRST FEATURE'S. The sign-in and create-account
+        # screens belong to no module; they are written with the first
+        # feature, whose statements are the people's arrivals.
+        if first:
+            mine |= {str(p.get("id")) for p in _live(doc.get("pages")) if p.get("pattern") == "auth" and p.get("id")}
         return [s for s in pending if s in mine]
     if fanout == "page_features":
         groups = page_subjects(doc)
@@ -251,7 +263,20 @@ def unbuilt_of(doc: Mapping[str, Any], feature: Feature) -> list[str]:
     if stepless:
         out.append(f"{len(stepless)} process{'es have' if len(stepless) != 1 else ' has'} no steps: "
                    + ", ".join(str(w.get("name") or w.get("id")) for w in stepless[:8]))
+    unwritten = unwritten_statement_groups(doc, feature)
+    if unwritten:
+        out.append(f"the statements about {feature.label} are not written ({', '.join(unwritten[:6])})")
     return out
+
+
+def unwritten_statement_groups(doc: Mapping[str, Any], feature: Feature) -> list[str]:
+    """The feature's statement groups the writer has not written: a feature
+    is not proven while nothing says what must happen on it."""
+    if not feature.requirements:
+        return []
+    from services.blueprint.orchestrator import DAG, pending_subjects
+    pending = [s for s in pending_subjects(DAG["expectations"], dict(doc)) if s != PEOPLE_GROUP]
+    return subjects_of(feature, "expectations", doc, pending, first=False)
 
 
 def app_unbuilt(doc: Mapping[str, Any]) -> list[str]:
@@ -298,4 +323,4 @@ def brief_for(feature: Feature, node: str, doc: Mapping[str, Any]) -> str:
 
 
 __all__ = ["Feature", "features", "subjects_of", "workflows_of", "statements_of", "brief_for", "unbuilt_of",
-           "app_unbuilt", "WHOLE"]
+           "app_unbuilt", "unwritten_statement_groups", "WHOLE"]

@@ -18,9 +18,9 @@ from services.engineer import features as F
 from services.engineer.build import FeatureScope, build, build_nodes, fix_ask
 
 DOC = {
-    "modules": [{"id": "MODULE-001", "name": "Catalogue", "pages": ["PAGE-001", "PAGE-002"]},
-                {"id": "MODULE-002", "name": "Cart & Checkout", "pages": ["PAGE-003"]},
-                {"id": "MODULE-003", "name": "Accounts", "pages": ["PAGE-004"]}],
+    "modules": [{"id": "MODULE-001", "name": "Catalogue", "pages": ["PAGE-001", "PAGE-002"], "requirements": ["REQ-001", "REQ-002"]},
+                {"id": "MODULE-002", "name": "Cart & Checkout", "pages": ["PAGE-003"], "requirements": ["REQ-004"]},
+                {"id": "MODULE-003", "name": "Accounts", "pages": ["PAGE-004"], "requirements": ["REQ-008"]}],
     "pages": [
         {"id": "PAGE-001", "route": "/", "pattern": "dashboard", "module": "MODULE-001",
          "data": {"primaryEntity": "ENTITY-003"}, "requirements": ["REQ-001"]},
@@ -55,7 +55,9 @@ DOC = {
     "expectations": [
         {"id": "EXP-001", "requirements": ["REQ-001"], "steps": [{"act": "open", "page": "PAGE-002"}]},
         {"id": "EXP-013", "requirements": ["REQ-004"], "steps": [{"act": "do", "workflow": "FLOW-001"}]},
-        {"id": "EXP-027", "requirements": [], "steps": [{"act": "sign_in"}, {"act": "open", "page": "PAGE-004"}]},
+        {"id": "EXP-027", "requirements": [], "steps": [{"act": "sign_in"}, {"act": "open", "page": "PAGE-004"},
+                                                        {"act": "do", "workflow": "FLOW-005"}]},
+        {"id": "EXP-030", "requirements": ["REQ-002", "REQ-008"], "kind": "arrival", "steps": [{"act": "open", "page": "PAGE-002"}]},
     ],
 }
 
@@ -98,6 +100,9 @@ def test_each_node_has_a_part_that_belongs_to_the_feature(monkeypatch):
     cat, acc, cart = plan
     pages = ["PAGE-001", "PAGE-002", "PAGE-003", "PAGE-004", "PAGE-005"]
     assert F.subjects_of(cat, "page_code", DOC, pages, first=True) == ["PAGE-001", "PAGE-002", "PAGE-005"]
+    assert F.subjects_of(cat, "page_code", DOC, pages + ["PAGE-014"], first=True)[-1] == "PAGE-014", \
+        "the sign-in screen is written with the first feature"
+    assert "PAGE-014" not in F.subjects_of(cart, "page_code", DOC, pages + ["PAGE-014"], first=False)
     groups = orchestrator.page_subjects(DOC)
     assert F.subjects_of(cart, "page_details", DOC, list(groups), first=False) == ["ENTITY-004"]
     assert F.subjects_of(cat, "workflow_steps", DOC, ["FLOW-001", "FLOW-005", "FLOW-009"], first=True) == ["FLOW-001", "FLOW-009"], \
@@ -199,13 +204,13 @@ def test_the_engineer_builds_each_feature_and_proves_it_before_the_next(tmp_path
     assert proofs[0] == (["EXP-001"], True), "the first feature's own statements, with the authors' look"
     assert (["EXP-013"], True) in proofs and (["EXP-013"], False) in proofs, "then the fix turn's result is tried again"
     assert len(fixes) == 1 and "Cart & Checkout" in fixes[0] and "nothing was sent" in fixes[0]
-    assert sorted(proofs[-1][0]) == ["EXP-001", "EXP-013", "EXP-027"] and proofs[-1][1] is True, \
+    assert sorted(proofs[-1][0]) == ["EXP-001", "EXP-013", "EXP-027", "EXP-030"] and proofs[-1][1] is True, \
         "every statement once more at the end, with its authors' look"
     assert [f["feature"] for f in out["features"]] == ["MODULE-001", "MODULE-003", "MODULE-002"]
     cart = out["features"][2]
     assert cart["passed"] == 1 and cart["fixed"] == ["EXP-013"] and cart["failing"] == []
     assert any("Cart & Checkout: 1 of 1 statement of what must happen hold; fixed while building: EXP-013" in s for s in said)
-    assert out["statements"]["passed"] == 3 and not out["stopped"]
+    assert out["statements"]["passed"] == 4 and not out["stopped"]
     from services.engineer.journal import Journal
     assert Journal(tmp_path).finished() == ["MODULE-001", "MODULE-003", "MODULE-002"]
 
@@ -365,7 +370,7 @@ def test_the_whole_app_pass_fixes_what_a_later_feature_broke(tmp_path):
         fixes.append(ask)
         return {"status": "resolved", "answer": "set the customer's landing to the menu"}
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix)
-    assert sorted(proofs[-2][0]) == ["EXP-001", "EXP-013", "EXP-027"], "the whole-app pass tries every statement"
+    assert sorted(proofs[-2][0]) == ["EXP-001", "EXP-013", "EXP-027", "EXP-030"], "the whole-app pass tries every statement"
     assert proofs[-1][0] == ["EXP-001"] and proofs[-1][1] is False, "then what the fix changed is tried again"
     assert len(fixes) == 1 and "While building the whole application" in fixes[0] and "/orders, not /menu" in fixes[0]
     assert out["statements"]["fixed"] == ["EXP-001"] and out["statements"]["failing"] == []
@@ -493,6 +498,38 @@ def test_a_feature_whose_screens_are_not_built_stops_the_build(tmp_path):
     assert out["features"][0]["unbuilt"] and any("Catalogue is not built" in s for s in said)
     from services.engineer.journal import Journal
     assert Journal(tmp_path).finished_rows()[0]["unbuilt"]
+
+
+def test_a_feature_is_not_proven_while_its_statements_are_unwritten():
+    """Ecommerce1's Storefront (forge-v3, 2026-10-10 05:30): six screens built,
+    "no statements of its own to try" — the pages named no requirements, so
+    the writer was never asked about shopping and nothing was tried."""
+    cat = F.features(DOC)[0]
+    assert cat.requirements == ["REQ-001", "REQ-002"], "the module's requirements are the feature's"
+    assert F.unwritten_statement_groups(DOC, cat) == []
+    bare = {**DOC, "expectations": [e for e in DOC["expectations"] if e["id"] != "EXP-030"]}
+    assert F.unwritten_statement_groups(bare, cat) == ["REQ-001"], "REQ-002 is covered by no statement"
+    assert F.unbuilt_of(bare, cat) == ["the statements about Catalogue are not written (REQ-001)"]
+    whole = F.features({**DOC, "modules": []})[0]
+    assert whole.requirements == ["REQ-001", "REQ-002", "REQ-004", "REQ-008"], "the whole application's are every one"
+
+
+def test_what_no_feature_claimed_is_written_before_the_end():
+    """"Abandon Inactive Carts" — launched by nothing, naming no feature's
+    records — was declared in one feature's run and written in none."""
+    from services.engineer.build import _Unclaimed, build_nodes, pending_feature_nodes
+    once, per, last = build_nodes()
+    assert pending_feature_nodes(DOC, per, F.features(DOC)) == ([], {}), "every pending subject is some feature's"
+    doc = {**DOC, "workflows": DOC["workflows"] + [{"id": "FLOW-020", "name": "Abandon Inactive Carts",
+                                                    "trigger": {"kind": "scheduled"}, "inputs": [], "steps": []}]}
+    sweep, unclaimed = pending_feature_nodes(doc, per, F.features(doc))
+    assert unclaimed == {"workflow_steps": ["FLOW-020"]}
+    assert sweep[0] == "workflow_steps" and "page_details" not in sweep and "workflows" not in sweep
+    assert {"integration", "assemble", "frontend", "backend"} <= set(sweep), "the projections after it"
+    assert "page_code" not in sweep, "an agent node with nothing unclaimed is not run"
+    scope = _Unclaimed(unclaimed)
+    assert scope.subjects("workflow_steps", doc, ["FLOW-001", "FLOW-020"]) == ["FLOW-020"]
+    assert scope.subjects("assemble", doc, [""]) == [""]
 
 
 def test_the_whole_application_is_checked_before_it_is_handed_over():
