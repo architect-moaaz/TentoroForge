@@ -232,7 +232,9 @@ REQUIREMENTS_PER_SUBJECT = 4
 #: 62 processes landed on the one requirement group there was, and the call
 #: was cut off at 32,000 output tokens twice, five minutes and $0.38 each
 #: time (2026-10-11).
-PROCESSES_PER_SUBJECT = 8
+#: Eight was still a 57,000-token, seven-minute call (Ecom L1, 2026-10-11):
+#: four runs beside the others and lands in half the time.
+PROCESSES_PER_SUBJECT = 4
 
 
 def expect_subjects(doc: dict) -> dict[str, dict]:
