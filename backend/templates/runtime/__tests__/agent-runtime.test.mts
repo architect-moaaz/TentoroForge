@@ -259,6 +259,105 @@ console.log("conversations belong to the person");
   ok(theirs.at(-1).conversationId !== cid, "someone else's conversation id starts a new one instead");
 }
 
+console.log("what the tools returned is remembered, not fetched again");
+{
+  const blocks = (m: any) => (Array.isArray(m.content) ? m.content : []);
+  const kinds = (msgs: any[]) => msgs.map((m: any) => (typeof m.content === "string" ? "text" : blocks(m).map((b: any) => b.type).join("+")));
+
+  // A follow-up sees the lookup the last turn made.
+  {
+    const store = memoryStore();
+    const model = scripted([
+      [text("Looking. "), use("t1", "get_order", { id: "42" })],
+      [text("Order 42 has shipped.")],
+      [text("Changed.")],
+    ]);
+    const deps = { ...model, store, runTool: async () => ({ id: "42", status: "shipped" }) };
+    const first = await run(baseConfig(), "where is order 42", deps);
+    await run(baseConfig(), "change it", deps, { conversationId: first.at(-1).conversationId });
+    const msgs = model.seen[2].messages;
+    eqJson(kinds(msgs), ["text", "tool_use", "tool_result", "text", "text"], "the follow-up carries the call, its result, then the words");
+    ok(blocks(msgs[1])[0].name === "get_order" && blocks(msgs[1])[0].input.id === "42", "the call the model made is replayed");
+    ok(blocks(msgs[2])[0].tool_use_id === blocks(msgs[1])[0].id, "and the result answers that call");
+    ok(blocks(msgs[2])[0].content.includes("shipped"), "with what the tool returned");
+    ok(msgs[3].content.startsWith("Looking."), "then everything the assistant said");
+    ok(msgs.at(-1).content === "change it", "and the new message comes last");
+  }
+
+  // A failed tool is replayed as the error it was.
+  {
+    const store = memoryStore();
+    const model = scripted([[use("t1", "get_order", { id: "9" })], [text("I could not find it.")], [text("Ok")]]);
+    const deps = { ...model, store, runTool: async () => { throw new ToolError("no such order", "failed"); } };
+    const first = await run(baseConfig(), "order 9?", deps);
+    await run(baseConfig(), "and now?", deps, { conversationId: first.at(-1).conversationId });
+    const result = blocks(model.seen[2].messages[2])[0];
+    ok(result.is_error === true && /no such order/.test(result.content), "a failed call comes back as an error result");
+  }
+
+  // A huge result is cut, not carried whole.
+  {
+    const { MAX_RESULT_CHARS } = await import("../agents/memory.ts");
+    const store = memoryStore();
+    const model = scripted([[use("t1", "get_order", { id: "1" })], [text("Here.")], [text("Ok")]]);
+    const big = { rows: "x".repeat(MAX_RESULT_CHARS * 3) };
+    const deps = { ...model, store, runTool: async () => big };
+    const first = await run(baseConfig(), "list", deps);
+    await run(baseConfig(), "more", deps, { conversationId: first.at(-1).conversationId });
+    const content = blocks(model.seen[2].messages[2])[0].content;
+    ok(content.length < MAX_RESULT_CHARS + 100 && /\[cut: \d+ more characters\]/.test(content), "a long result is cut and says so");
+  }
+
+  // Only the last few tool turns carry their results; older ones are words only.
+  {
+    const { REPLAY_TOOL_TURNS } = await import("../agents/memory.ts");
+    const store = memoryStore();
+    const cfg = baseConfig({ memory: { type: "conversation", maxMessages: 40, summarizeAfter: 80 } });
+    const replies: any[][] = [];
+    const turns = REPLAY_TOOL_TURNS + 2;
+    for (let i = 0; i < turns; i++) replies.push([use(`t${i}`, "get_order", { id: String(i) })], [text(`done ${i}`)]);
+    replies.push([text("final")]);
+    const model = scripted(replies);
+    const deps = { ...model, store, runTool: async () => ({ ok: true }) };
+    let cid: string | null = null;
+    for (let i = 0; i < turns; i++) cid = (await run(cfg, `q${i}`, deps, { conversationId: cid })).at(-1).conversationId;
+    await run(cfg, "last", deps, { conversationId: cid });
+    const msgs = model.seen.at(-1).messages;
+    const calls = msgs.flatMap(blocks).filter((b: any) => b.type === "tool_use");
+    ok(calls.length === REPLAY_TOOL_TURNS, `only the last ${REPLAY_TOOL_TURNS} tool turns are replayed with their results`);
+    ok(msgs.some((m: any) => m.content === "done 0"), "the older turns are still there, as words");
+  }
+
+  // A tool the agent no longer has is not replayed as a call.
+  {
+    const store = memoryStore();
+    const model = scripted([[use("t1", "get_order", { id: "42" })], [text("Shipped.")], [text("Ok")]]);
+    const deps = { ...model, store, runTool: async () => ({ id: "42" }) };
+    const first = await run(baseConfig(), "order 42?", deps);
+    await run(baseConfig({ tools: [] }), "and?", deps, { conversationId: first.at(-1).conversationId });
+    const msgs = model.seen[2].messages;
+    ok(!msgs.some((m: any) => blocks(m).length > 0), "a removed tool is replayed as words only");
+    ok(msgs.some((m: any) => m.content === "Shipped."), "the words are kept");
+  }
+
+  // However the window is cut, a result never appears without its call, and the first turn is the person's.
+  {
+    const store = memoryStore();
+    const cfg = baseConfig({ memory: { type: "conversation", maxMessages: 3, summarizeAfter: 80 } });
+    const model = scripted([[use("t1", "get_order", { id: "1" })], [text("one")], [text("two")], [text("three")]]);
+    const deps = { ...model, store, runTool: async () => ({ ok: 1 }) };
+    let cid: string | null = null;
+    for (const q of ["a", "b", "c"]) cid = (await run(cfg, q, deps, { conversationId: cid })).at(-1).conversationId;
+    for (const call of model.seen) {
+      const msgs = call.messages;
+      ok(msgs[0].role === "user" && typeof msgs[0].content === "string", "the history starts with the person's words");
+      const callIds = new Set(msgs.flatMap(blocks).filter((b: any) => b.type === "tool_use").map((b: any) => b.id));
+      const orphan = msgs.flatMap(blocks).some((b: any) => b.type === "tool_result" && !callIds.has(b.tool_use_id));
+      ok(!orphan, "no tool result is left without the call it answers");
+    }
+  }
+}
+
 console.log("summarising");
 {
   const store = memoryStore();

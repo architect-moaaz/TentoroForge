@@ -7,15 +7,82 @@
  */
 import type { ConversationStore, MemorySpec, ModelMessage, StoredMessage } from "./types";
 
-/** The replay the model sees: the rolling summary (if any) then the most recent turns. */
+/**
+ * How many of the most recent assistant turns are replayed WITH what their tools returned.
+ * Older turns are words only: the facts they fetched have probably moved on, and the context
+ * is finite.
+ */
+export const REPLAY_TOOL_TURNS = 3;
+/** One tool result is cut to this many characters, so a long list cannot fill the context. */
+export const MAX_RESULT_CHARS = 3000;
+
+function clip(text: string): string {
+  return text.length > MAX_RESULT_CHARS
+    ? `${text.slice(0, MAX_RESULT_CHARS)}… [cut: ${text.length - MAX_RESULT_CHARS} more characters]`
+    : text;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+/**
+ * An assistant turn that used tools, as the model lived it: the calls it made, what they
+ * returned, then what it said. Without this the model saw only its own words and looked
+ * the same record up again on every follow-up ("change that customer" -> fetch the customer).
+ * The results are what the tool runner returned, so credentials are already redacted.
+ */
+function withToolResults(m: StoredMessage, at: number): ModelMessage[] {
+  const calls = m.toolCalls ?? [];
+  const uses = calls.map((c, k) => ({
+    type: "tool_use" as const,
+    id: `toolu_replay_${at}_${k}`,
+    name: c.name,
+    input: asRecord(c.input),
+  }));
+  const results = calls.map((c, k) => ({
+    type: "tool_result" as const,
+    tool_use_id: uses[k].id,
+    content: c.error ? `Error: ${c.error}` : clip(JSON.stringify(c.result ?? null)),
+    ...(c.error ? { is_error: true } : {}),
+  }));
+  return [
+    { role: "assistant", content: uses },
+    { role: "user", content: results },
+    { role: "assistant", content: m.content || "Done." },
+  ];
+}
+
+/**
+ * The replay the model sees: the rolling summary (if any) then the most recent turns, the
+ * last few with what their tools returned. `toolNames` are the tools the agent has NOW; a
+ * turn that used a tool since removed is replayed as words only, never as a call the model
+ * can no longer make.
+ */
 export async function loadHistory(
   store: ConversationStore,
   conversationId: string,
   summary: string | null,
   spec: MemorySpec,
+  toolNames?: ReadonlySet<string>,
 ): Promise<ModelMessage[]> {
   const rows = await store.listMessages(conversationId);
   const recent = rows.slice(-Math.max(1, spec.maxMessages));
+  // The API requires the first turn to be the user's. Dropped before anything is expanded, so a
+  // turn is never cut in half (a tool result with no call before it is refused).
+  let start = 0;
+  while (start < recent.length && recent[start].role !== "user") start++;
+  const turns = recent.slice(start);
+
+  // The most recent assistant turns that used tools, newest first.
+  const replay = new Set<number>();
+  for (let i = turns.length - 1; i >= 0 && replay.size < REPLAY_TOOL_TURNS; i--) {
+    const calls = turns[i].toolCalls;
+    if (turns[i].role === "assistant" && calls && calls.length > 0 && (!toolNames || calls.every((c) => toolNames.has(c.name)))) {
+      replay.add(i);
+    }
+  }
+
   const out: ModelMessage[] = [];
   if (summary) {
     // A summary is context, not a turn the person typed — framed as such so the
@@ -23,11 +90,10 @@ export async function loadHistory(
     out.push({ role: "user", content: `[Earlier in this conversation: ${summary}]` });
     out.push({ role: "assistant", content: "Understood." });
   }
-  for (const m of recent) {
-    out.push({ role: m.role, content: m.content });
-  }
-  // The API requires the first turn to be the user's.
-  while (out.length && out[0].role !== "user") out.shift();
+  turns.forEach((m, i) => {
+    if (replay.has(i)) out.push(...withToolResults(m, i));
+    else out.push({ role: m.role, content: m.content });
+  });
   return out;
 }
 

@@ -65,7 +65,7 @@ export async function runAgent(
     }
     if (!conversationId) conversationId = await deps.store.createConversation(config.id, userId);
 
-    const history = await loadHistory(deps.store, conversationId, summary, config.memory);
+    const history = await loadHistory(deps.store, conversationId, summary, config.memory, new Set(config.tools.map((t) => t.name)));
     const messages: ModelMessage[] = [...history, { role: "user", content: input.message }];
     await deps.store.saveMessage(conversationId, { role: "user", content: input.message });
 
