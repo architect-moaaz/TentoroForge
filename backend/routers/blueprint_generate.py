@@ -44,6 +44,8 @@ from models.auth import PlatformUser
 from auth import get_current_user
 from pathlib import Path
 
+from concurrent.futures import ThreadPoolExecutor
+
 from services.project_paths import project_root
 from services.project_service import get_project_with_auth
 
@@ -80,6 +82,19 @@ _DETACHED: set[asyncio.Task] = set()
 def _detach(task: "asyncio.Task") -> None:
     _DETACHED.add(task)
     task.add_done_callback(_DETACHED.discard)
+
+#: SMITH'S OWN THREADS. Every turn — a whole build included, for up to an hour
+#: — ran on asyncio's DEFAULT pool, which holds a handful of threads on a small
+#: host and is shared with everything that calls `asyncio.to_thread`. A few
+#: builds in flight filled it, and a "Not now" that needs a millisecond waited
+#: in its queue under "Thinking… 2m" while its ledger already said "working"
+#: (forge-v3, 2026-10-09). Builds and page reviews take the long pool; every
+#: other turn the short one, so an answer never queues behind a build.
+_LONG_TURNS = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("FORGE_BUILD_THREADS", "16")), thread_name_prefix="smith-build")
+_SHORT_TURNS = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("FORGE_TURN_THREADS", "32")), thread_name_prefix="smith-turn")
+
 router = APIRouter(tags=["generation", "blueprint"])
 
 
@@ -1110,7 +1125,7 @@ async def generate_via_blueprint(
         try:
             emit("started", {"projectId": str(project_id),
                              "engine": "blueprint"})
-            outcome = await loop.run_in_executor(None, work)
+            outcome = await loop.run_in_executor(_LONG_TURNS, work)
             # COMMIT THE BUILT APP. The mainline generate path commits after a
             # build; this DAG path did not, so the app tree stayed untracked and
             # Smith's first change landed in an untracked working tree — its
@@ -2170,7 +2185,8 @@ async def smith_chat(
             # Keep the INNER future too: `wait_for` cancels the shield on timeout,
             # but the inner build keeps running, and it is the inner one we wait
             # on to emit the real completion afterwards.
-            _inner = loop.run_in_executor(None, work)
+            _inner = loop.run_in_executor(
+                _LONG_TURNS if (req.approved or _reviewing) else _SHORT_TURNS, work)
             # ON DISK, FOR EVERY WORKER. The registry above is this worker's
             # memory; a panel whose stream dropped polls whichever worker
             # answers, and only a ledger tells it the turn is still working —
