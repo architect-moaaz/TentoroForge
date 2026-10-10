@@ -399,7 +399,11 @@ def _before_done(observations: list[Observation], landed: list[str]) -> str:
         return TRY_WIRED
     # NO CLAIM WITHOUT PROOF. A change after which nothing was used is a
     # change the reply cannot say works.
-    changes = [i for i, o in enumerate(observations) if _is_change(o)]
+    # A DEFINITION IS AGREED TO, NOT TRIED: writing the requirements changes
+    # no screen, and there may be no app yet — ecom v5's define turn was sent
+    # to `open_page` and the Workbench tried to prepare a tree that did not
+    # exist (forge-v3, 2026-10-10).
+    changes = [i for i, o in enumerate(observations) if _is_change(o) and not tools.is_definition(o.tool)]
     tries = [i for i, o in enumerate(observations) if tools.is_trial(o.tool)]
     if landed and changes and (not tries or tries[-1] < changes[-1]) \
             and TRY_AFTER.split(",", 1)[0] not in said:

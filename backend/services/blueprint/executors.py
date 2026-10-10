@@ -1302,6 +1302,16 @@ NODE_TASKS: dict[str, str] = {
         "Extract the application's requirements from the description. Each is one "
         "testable statement of something a user can do, with the evidence it came "
         "from. Do not design the solution.\n\n"
+        "WHAT THE PERSON LEFT UNSAID IS DECIDED FROM THE DOMAIN. A request that "
+        "names a kind of product and asks for it complete — rather than listing "
+        "its features — gets the requirements a practitioner of that domain "
+        "would list for a production-grade one: every capability its users "
+        "expect of such a product, not only the few the sentence mentions. Each "
+        "of those is marked `assumed`, with evidence saying it is the domain's "
+        "standard, so the person can strike what they do not want. A complete "
+        "product of a well-known kind usually has twenty to forty requirements in "
+        "six to ten areas; eight requirements for 'a complete X' is a sentence "
+        "read, not a product understood.\n\n"
         "EVIDENCE NAMES ITS SOURCE. A requirement drawn from what the person typed "
         "cites evidence of type `conversation`. A requirement drawn from the text "
         "under SUPPLIED DOCUMENTS cites evidence of type `document`, with `source` "
@@ -3104,8 +3114,8 @@ _PINNED_PAGE_FIELDS: tuple[str, ...] = ("id", "route", "figmaFrame", "module", "
                                         "menuEntry")
 
 
-def pin_page_set(result: AgentResult) -> None:
-    """Keep the declaration to what it declares.
+def pin_page_set(result: AgentResult, doc: dict | None = None) -> None:
+    """Keep the declaration to what it declares, and mend its slips.
 
     The page-set call is asked for routes and patterns and told to write
     nothing else, and it is a model: given the whole page shape it will
@@ -3114,16 +3124,29 @@ def pin_page_set(result: AgentResult) -> None:
     sit on a page whose contract is still to come. Dropped here, so the
     document only ever holds what this call is for.
 
-    Only widgets are dropped. A proposal for a section this agent may not
-    write at all is left for `apply_agent_result` to refuse: a boundary
-    violation is a fact about the model that must surface, not be tidied.
+    THE SLIPS WITH ONE RIGHT ANSWER ARE MENDED HERE, NOT REFUSED. The page
+    set is one five-minute call, and a refusal runs it whole again: ecom v4
+    and v5 (forge-v3, 2026-10-10) spent four such calls on two menu entries
+    leading to one route, a role whose pages had no `entry`, a `module` the
+    application did not have, and `flows` this call does not write — each
+    refusal's own words prescribing the single fix. What the refusal would
+    prescribe is applied: the later duplicate entry goes, the role's first
+    concrete page is its door, an unknown module is left out, the flows are
+    left to `app_flows`. What is a decision (which route, which pattern)
+    stays the model's and is still refused when wrong.
     """
-    result.proposals = [p for p in result.proposals if p.section != "widgets"]
+    result.proposals = [p for p in result.proposals if p.section not in ("widgets", "flows")]
+    modules = {str(m.get("id")) for m in (doc or {}).get("modules") or []
+               if isinstance(m, dict) and m.get("id") and str(m.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")}
     for proposal in result.proposals:
         if proposal.section != "pages":
             continue
         proposal.body = {k: v for k, v in (proposal.body or {}).items()
                          if k in _DECLARED_PAGE_FIELDS}
+        if modules and proposal.body.get("module") and str(proposal.body["module"]) not in modules:
+            logger.info("[page_contracts] %s: module %r is not the application's — left out",
+                        proposal.body.get("route"), proposal.body.get("module"))
+            proposal.body.pop("module", None)
         # A SCREEN'S RECORD IS ITS MAIN SECTION'S, as the declaration is told.
         # Left unsaid, the screen had no record at all: its contract's facts
         # could not resolve (`related` needs one) and seven of ToroCommerce's
@@ -3136,6 +3159,68 @@ def pin_page_set(result: AgentResult) -> None:
                          and str(sec.get("placement") or "main") in ("main", "tab")), None)
             if main is not None:
                 body["data"] = {**data, "primaryEntity": main["entity"]}
+    _one_entry_per_address(result)
+    _a_door_for_every_role(result, doc)
+
+
+def _one_entry_per_address(result: AgentResult) -> None:
+    """Two menu entries leading to the same page and view: the later goes."""
+    for proposal in result.proposals:
+        if proposal.section != "navigation" or not isinstance(proposal.body, dict):
+            continue
+        seen: set[tuple[str, str]] = set()
+
+        def prune(nodes: Any) -> list:
+            kept = []
+            for node in nodes or []:
+                if not isinstance(node, dict):
+                    continue
+                page = str(node.get("page") or "")
+                if page:
+                    key = (page, str(node.get("view") or ""))
+                    if key in seen:
+                        logger.info("[page_contracts] navigation: %r leads where an earlier entry does — dropped",
+                                    node.get("label"))
+                        continue
+                    seen.add(key)
+                if node.get("children"):
+                    node["children"] = prune(node.get("children"))
+                kept.append(node)
+            return kept
+
+        proposal.body["tree"] = prune(proposal.body.get("tree"))
+
+
+def _a_door_for_every_role(result: AgentResult, doc: dict | None) -> None:
+    """A role whose pages have no `entry` gets one: its first concrete page."""
+    from services.blueprint.account_model import roles_without_a_door
+    from services.blueprint.projection import restricted_roles
+
+    proposed = [p.body for p in result.proposals if p.section == "pages" and isinstance(p.body, dict)]
+    if not proposed:
+        return
+    merged: dict[str, dict] = {}
+    for page in (doc or {}).get("pages") or []:
+        if isinstance(page, dict) and str(page.get("status") or "").upper() not in ("REMOVED", "DEPRECATED"):
+            merged[str(page.get("id") or page.get("route"))] = dict(page)
+    for body in proposed:
+        key = str(body.get("id") or "") or next(
+            (k for k, v in merged.items() if v.get("route") == body.get("route")), str(body.get("route")))
+        merged[key] = {**merged.get(key, {}), **body}
+    after = {**(doc or {}), "pages": list(merged.values())}
+    try:
+        missing = list(roles_without_a_door(after))
+    except Exception:  # noqa: BLE001 — a check that cannot read leaves the refusal to say so
+        return
+    for role in missing:
+        for body in proposed:
+            route = str(body.get("route") or "")
+            if "[" in route or body.get("pattern") == "auth":
+                continue
+            if role in {str(r) for r in restricted_roles(after, {**body})}:
+                body["entry"] = True
+                logger.info("[page_contracts] %s is %s's door (no page was marked `entry`)", route, role)
+                break
 
 
 def _page_details_prompt(doc: dict, system: str, subject: str,
@@ -4525,7 +4610,8 @@ def make_executor(
                 with svc.lock:
                     pin_workflow_identity(svc, spec.subject, parsed)
             elif spec.node == "page_contracts":
-                pin_page_set(parsed)
+                with svc.lock:
+                    pin_page_set(parsed, svc.doc)
             elif spec.node == "page_details":
                 with svc.lock:
                     pin_page_identity(svc, spec.subject, parsed)
