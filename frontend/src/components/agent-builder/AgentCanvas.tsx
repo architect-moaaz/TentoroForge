@@ -47,6 +47,8 @@ interface AgentCanvasProps {
   initialEdges?: AgentEdgeSerialized[];
   onNodesChange?: (nodes: Node[]) => void;
   onEdgesChange?: (edges: Edge[]) => void;
+  /** Boxes with something wrong, by node id: they are drawn with a red or amber ring. */
+  problems?: Record<string, "error" | "warning">;
 }
 
 let nodeIdCounter = 1;
@@ -59,6 +61,7 @@ export function AgentCanvas({
   initialEdges = [],
   onNodesChange: onNodesChangeProp,
   onEdgesChange: onEdgesChangeProp,
+  problems,
 }: AgentCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { setSelectedNodeId } = useAgentBuilderStore();
@@ -214,10 +217,30 @@ export function AgentCanvas({
     [setNodes],
   );
 
+  // Drawn, not stored: a mark is derived from the latest checks each render, so it never goes into the
+  // canvas's own state (which is reported back to the parent and saved).
+  const shownNodes = useMemo(
+    () =>
+      problems && Object.keys(problems).length
+        ? nodes.map((n) =>
+            problems[n.id]
+              ? {
+                  ...n,
+                  className:
+                    problems[n.id] === "error"
+                      ? "[&>div]:!ring-2 [&>div]:!ring-red-500 [&>div]:!ring-offset-1"
+                      : "[&>div]:!ring-2 [&>div]:!ring-amber-400 [&>div]:!ring-offset-1",
+                }
+              : n,
+          )
+        : nodes,
+    [nodes, problems],
+  );
+
   return (
     <div ref={reactFlowWrapper} className="h-full w-full">
       <ReactFlow
-        nodes={nodes}
+        nodes={shownNodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
