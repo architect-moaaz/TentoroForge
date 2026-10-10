@@ -313,7 +313,7 @@ def test_both_halves_land_in_one_where():
     # the same predicate, or one of them is not in the count.
     src = (RUNTIME / "data-engine.ts").read_text()
     assert "async function accessConditions(" in src
-    assert "...scopeConditions(entityName, entity, ctx)," in src
+    assert "...scopeConditions(entityName, entity, ctx, 0, op)," in src
     assert "await rowAccessConditions(entityName, entity, ctx)" in src
     # Every read and write path goes through the combined form.
     assert src.count("accessConditions(") >= 9
@@ -373,3 +373,22 @@ def test_the_contract_accepts_an_actor_column():
             "unscopedRoles": [], "note": "home property"}
     jsonschema.validate(rule, {**item, "$defs": contract.get("$defs", {}),
                                "definitions": contract.get("definitions", {})})
+
+
+def test_everyone_reads_is_projected_and_the_contract_names_it():
+    """Ecom L1 (2026-10-11): Product scoped to its vendor showed a guest no
+    products and every category "0 products"; a catalogue is read by people
+    who hold no role."""
+    import json
+    from pathlib import Path
+    from services.blueprint.projection import ownership_rules
+    doc = {"data": {"entities": [
+        {"id": "E1", "name": "Product", "table": "products",
+         "fields": [{"name": "id"}, {"name": "vendorId"}]}]},
+        "security": {"ownershipRules": [
+            {"entity": "Product", "column": "vendorId", "kind": "scope", "reads": "everyone"},
+        ]}}
+    [rule] = ownership_rules(doc)["product"]
+    assert rule["reads"] == "everyone" and rule["column"] == "vendorId"
+    contract = json.loads((Path(__file__).resolve().parents[2] / "contracts" / "blueprint.schema.json").read_text("utf-8"))
+    assert '"everyone"' in json.dumps(contract)
