@@ -605,3 +605,22 @@ def test_the_person_hears_each_node_start_and_each_fan_out_finish():
     narrated({"event": "node:start", "node": "install"})
     assert [t for _, t in heard] == ["Writing the code of 27 screens.", "Writing the code of the screens: done."]
     assert len(seen) == 4, "the progress observer still sees every line"
+
+
+def test_a_statement_group_that_failed_last_run_is_not_asked_again():
+    from services.engineer.build import _SkipFailed
+    scope = _SkipFailed({"expectations:FLOW-033", "expectations:FLOW-017"})
+    assert scope.subjects("expectations", {}, ["people", "FLOW-033", "REQ-001", "FLOW-017"]) == ["people", "REQ-001"]
+    assert scope.on({}) is scope and scope.brief("expectations", "x") == ""
+
+
+def test_the_build_refreshes_the_platforms_files_before_it_lands():
+    """Ecom L1 (2026-10-11): rebuilt on a platform whose LiveRefresh had
+    changed, the app kept the old file — the assembly copies a default only
+    where the app has none."""
+    import inspect
+    from services.engineer import build as b
+    from services.smith.sync_app import FOUNDATION_FILES
+    src = inspect.getsource(b.build)
+    assert "refresh_engine(app_root, svc.doc)" in src and src.index("refresh_engine") < src.index('"land:start"')
+    assert ("src/lib/LiveRefresh.tsx", True) in FOUNDATION_FILES and ("src/sdk/picture.tsx", True) in FOUNDATION_FILES

@@ -155,6 +155,23 @@ class FeatureScope:
         return self
 
 
+class _SkipFailed:
+    """`orchestrator.Scope` that leaves out the subjects a previous run
+    failed on (labels `node:subject`)."""
+
+    def __init__(self, failed: set[str]):
+        self.failed = failed
+
+    def subjects(self, node: str, doc: Mapping[str, Any], pending: list[str]) -> list[str]:
+        return [s for s in pending if f"{node}:{s}" not in self.failed]
+
+    def brief(self, node: str, subject: str) -> str:
+        return ""
+
+    def on(self, doc: Mapping[str, Any]) -> "_SkipFailed":
+        return self
+
+
 def build_nodes() -> tuple[list[str], list[str], list[str]]:
     """``(once, per_feature, last)``: the build phase's nodes split by when
     the engineer runs them, each in the graph's own order. Read off the
@@ -391,6 +408,18 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
         # build — one pass, one tree, as the graph did. A node that fails for
         # some subject goes to a fix turn and runs once more.
         if per:
+            # THE PLATFORM'S OWN FILES, CURRENT BEFORE THE BUILD. The assembly
+            # copies a default only where the app has none, so a rebuilt app
+            # kept the engine, the live-refresh client and the SDK parts it
+            # was first built with (Ecom L1, 2026-10-11). What Smith's turns
+            # do first, the build does first.
+            try:
+                from services.smith.sync_app import refresh_engine
+                moved = refresh_engine(app_root, svc.doc)
+                if moved:
+                    journal.write("platform:refreshed", files=moved[:20])
+            except Exception as exc:  # noqa: BLE001 — a refresh that fails leaves the app as it was
+                logger.warning("[engineer] platform refresh failed: %s", exc)
             journal.write("land:start", nodes=per)
             say("message", {"text": "Writing every screen and building the application."})
             landed = run(svc, executor, plan=per, commit=True, user_request=description,
@@ -412,10 +441,18 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
         # its feature untried, not unbuilt (the node is optional).
         statements = [k for k in AFTER_LANDING if k in plan]
         if statements and not stopped:
-            journal.write("statements:start", nodes=statements)
+            # A GROUP THAT FAILED LAST TIME IS NOT ASKED AGAIN THIS TIME. Four
+            # process groups the writer could not finish were re-asked on
+            # every build, eight minutes each time (Ecom L1, 2026-10-11); the
+            # application is handed over without their statements, and the
+            # next definition change asks again.
+            last = journal.last("statements:done") or {}
+            gave_up = {str(x) for x in last.get("failed") or []}
+            journal.write("statements:start", nodes=statements, skipped=sorted(gave_up))
             say("message", {"text": "Writing down what must happen, to try the application against."})
             wrote = run(svc, executor, plan=statements, commit=True, user_request=description,
-                        app_root=app_root, observer=observer, observer_agent=observer_agent)
+                        app_root=app_root, observer=observer, observer_agent=observer_agent,
+                        scope=_SkipFailed(gave_up) if gave_up else None)
             reports.append(wrote)
             _reload(svc, output_dir)
             journal.write("statements:done", failed=list(getattr(wrote, "failed", None) or []))

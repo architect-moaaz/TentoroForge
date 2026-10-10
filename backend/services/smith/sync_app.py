@@ -82,6 +82,20 @@ SIGN_IN_FILES: tuple[tuple[str, bool], ...] = (
     ("src/lib/landing.ts", True),
     ("src/hooks/useLogin.ts", False),
 )
+#: The app foundation's own parts, the platform's: the live-refresh client
+#: and the SDK's pieces a page imports. Ecom L1 was rebuilt on a platform
+#: whose LiveRefresh no longer logged a browser error on every public
+#: screen, and kept the old one — the assembly copies a default only where
+#: the app has none (2026-10-11). `True` is written even where absent.
+FOUNDATION_FILES: tuple[tuple[str, bool], ...] = (
+    ("src/lib/LiveRefresh.tsx", True),
+    ("src/sdk/picture.tsx", True),
+    ("src/sdk/files.ts", False),
+    ("src/sdk/money.tsx", False),
+    ("src/sdk/camera.tsx", False),
+    ("src/sdk/map.tsx", False),
+    ("src/sdk/geo.ts", False),
+)
 
 #: Database scripts every app runs, the platform's: prepare, verify, reset.
 DB_SCRIPTS: tuple[str, ...] = ("src/db/prepare-schema.ts", "src/db/verify-schema.ts",
@@ -140,7 +154,7 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
             shutil.copyfile(f, dst)
             changed.append(rel)
     foundation = Path(__file__).resolve().parents[2] / "templates" / "app-foundation"
-    for rel, always in SIGN_IN_FILES:
+    for rel, always in (*SIGN_IN_FILES, *FOUNDATION_FILES):
         src, dst = foundation / rel, root / rel
         if not src.is_file() or (not always and not dst.is_file()):
             continue
