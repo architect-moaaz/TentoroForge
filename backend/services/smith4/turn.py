@@ -200,6 +200,10 @@ NOBODY_TO_ASK = ("Nobody can answer: this turn was started by the build, not a p
 STILL_FAILING = "Still not working:"
 
 
+class _TriesSpeak(Exception):
+    """An unattended turn out of steps after a failing try: its tries speak."""
+
+
 def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
          max_steps: int | None = None) -> Outcome:
     """One turn. `max_steps` overrides `loop.MAX_STEPS` for a caller with its
@@ -727,44 +731,8 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
             return _finished(landed, touched, step)
 
     if not landed:
-        # NOT "Nothing needed doing" AND "I stopped" IN ONE BREATH (F&B, twice):
-        # a turn that ran out of steps while looking has not decided anything
-        # — but it has FOUND things, and "I have not changed anything yet"
-        # threw away that the admin's landing now worked (F&B replay). A turn
-        # that changed nothing may speak, so it is asked once to say what it
-        # found; it cannot take another step.
-        said = ""
-        try:
-            observations.append(Observation(tool="done", status="error", said=OUT_OF_STEPS))
-            for _ask in range(2):
-                final = choose(ctx.ask, opening(ctx.project_id, ctx.out, ctx.ask), observations, history) or {}
-                if str(final.get("tool") or "") == "answer":
-                    said = str((final.get("args") or {}).get("text") or "").strip()
-                    break
-                # A STEP INSTEAD OF AN ANSWER IS ASKED FOR AGAIN, ONCE.
-                observations.append(Observation(tool=str(final.get("tool") or "?"), status="error", said=(
-                    "No more steps can run. Reply with `answer` only: what your tries showed.")))
-        except Exception:  # noqa: BLE001 — the fallback below is still true
-            logger.warning("smith4: the out-of-steps answer could not be had", exc_info=True)
-        if not said:
-            last = next((o for o in reversed(observations) if o.status == "finding" and o.said), None)
-            if last is not None:
-                said = f"The last thing I tried did not work: {' '.join(last.said.split())[:600]}"
-        if not said:
-            # WHAT THE TRIES SHOWED, IN THEIR OWN WORDS. Asked why images did
-            # not show, Smith uploaded one, saved a dish with it and opened the
-            # list — all of it worked — and the reply was "I have not changed
-            # anything yet" (F&B live test, 2026-10-02).
-            tried = [o.said.split("\n", 1)[0][:200] for o in observations
-                     if tools.is_trial(o.tool) and o.status == "read" and o.said]
-            if tried:
-                said = "What I tried, and what it showed:\n" + "\n".join(f"- {t}" for t in tried[-6:])
-        spent = f"time ({TURN_MINUTES:g} minutes)" if out_of_time else f"steps ({max_steps})"
-        tail = (f"\n\nThis turn ran out of {spent} before I changed anything. "
-                "Say “carry on” and I will pick up from there.")
-        return Outcome(status="no_op", touched=list(touched), said=(said + tail) if said else (
-            f"I have not changed anything yet — this turn ran out of {spent} "
-            "while I was still looking into it. Say “carry on” and I will pick up from there."))
+        return _out_of_steps(ctx, choose, observations, history, touched=touched,
+                             out_of_time=out_of_time, max_steps=max_steps)
     failing = _failing_note(observations)
     if not failing and _unproven(observations).startswith(UNPROVEN):
         # The change landed on the last step the cap allowed, untried.
@@ -839,6 +807,65 @@ def _plan(ctx: Ctx, args: dict, landed: list[str], touched: list[str]) -> Outcom
     return Outcome(status="asked", said=plan_mod.as_question(planned, over),
                    options=[plan_mod.ALL_LABEL, plan_mod.FIRST_LABEL, plan_mod.REWORD_LABEL],
                    touched=list(touched))
+
+
+def _out_of_steps(ctx: Ctx, choose: Choose, observations: list, history: list, *, touched: list[str],
+                  out_of_time: bool, max_steps: int) -> Outcome:
+    """A turn that ran out of steps or time having changed nothing: what it
+    found, said once — by the model for a person's turn, by its own tries
+    for an unattended one."""
+    # NOT "Nothing needed doing" AND "I stopped" IN ONE BREATH (F&B, twice):
+    # a turn that ran out of steps while looking has not decided anything
+    # — but it has FOUND things, and "I have not changed anything yet"
+    # threw away that the admin's landing now worked (F&B replay). A turn
+    # that changed nothing may speak, so it is asked once to say what it
+    # found; it cannot take another step.
+    said = ""
+    # THE TRIES SPEAK FOR AN UNATTENDED TURN. Asked by the engineer about a
+    # statement that did not hold, Smith ran `try_expectation`, saw it
+    # fail again, and ran out of steps saying "the categories screen is
+    # already working correctly" (ecom v2, forge-v3, 2026-10-10). Nobody
+    # is there to doubt it, and the engineer tries the statement again
+    # anyway — so a turn the build started ends with what its own tries
+    # showed, in their words, not with a verdict over them.
+    failed_tries = [o.said.split("\n", 1)[0][:200] for o in observations
+                    if tools.is_trial(o.tool) and o.status == "read" and trials.failed(o.said or "")]
+    try:
+        if ctx.unattended and failed_tries:
+            raise _TriesSpeak()
+        observations.append(Observation(tool="done", status="error", said=OUT_OF_STEPS))
+        for _ask in range(2):
+            final = choose(ctx.ask, opening(ctx.project_id, ctx.out, ctx.ask), observations, history) or {}
+            if str(final.get("tool") or "") == "answer":
+                said = str((final.get("args") or {}).get("text") or "").strip()
+                break
+            # A STEP INSTEAD OF AN ANSWER IS ASKED FOR AGAIN, ONCE.
+            observations.append(Observation(tool=str(final.get("tool") or "?"), status="error", said=(
+                "No more steps can run. Reply with `answer` only: what your tries showed.")))
+    except _TriesSpeak:
+        said = ("What I tried, and what it showed — it still does not hold:\n"
+                + "\n".join(f"- {t}" for t in failed_tries[-4:]))
+    except Exception:  # noqa: BLE001 — the fallback below is still true
+        logger.warning("smith4: the out-of-steps answer could not be had", exc_info=True)
+    if not said:
+        last = next((o for o in reversed(observations) if o.status == "finding" and o.said), None)
+        if last is not None:
+            said = f"The last thing I tried did not work: {' '.join(last.said.split())[:600]}"
+    if not said:
+        # WHAT THE TRIES SHOWED, IN THEIR OWN WORDS. Asked why images did
+        # not show, Smith uploaded one, saved a dish with it and opened the
+        # list — all of it worked — and the reply was "I have not changed
+        # anything yet" (F&B live test, 2026-10-02).
+        tried = [o.said.split("\n", 1)[0][:200] for o in observations
+                 if tools.is_trial(o.tool) and o.status == "read" and o.said]
+        if tried:
+            said = "What I tried, and what it showed:\n" + "\n".join(f"- {t}" for t in tried[-6:])
+    spent = f"time ({TURN_MINUTES:g} minutes)" if out_of_time else f"steps ({max_steps})"
+    tail = (f"\n\nThis turn ran out of {spent} before I changed anything. "
+            "Say “carry on” and I will pick up from there.")
+    return Outcome(status="no_op", touched=list(touched), said=(said + tail) if said else (
+        f"I have not changed anything yet — this turn ran out of {spent} "
+        "while I was still looking into it. Say “carry on” and I will pick up from there."))
 
 
 def _ended(tool: str, args: dict, landed: list[str], touched: list[str],

@@ -559,8 +559,10 @@ def emit_standalone_app(*, output_dir: str | Path, project_short_id: str) -> Non
     # Give each app a unique NEXTAUTH_SECRET so sessions don't leak across apps on a
     # shared origin (stale token -> wrong user id -> owner-scoped queries/inserts break).
     try:
-        from services.auth_secret import ensure_unique_auth_secret
+        from services.auth_secret import ensure_sensitive_key, ensure_unique_auth_secret
         ensure_unique_auth_secret(out)
+        # And the key its sensitive columns are encrypted with (ecom v2, 2026-10-10).
+        ensure_sensitive_key(out)
     except Exception as e:
         logger.warning("[auth-secret] skipped: %s", e)
 

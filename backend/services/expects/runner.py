@@ -395,8 +395,20 @@ class Trial:
         clash = _query(self.app, f'select 1 from "{table}" where "{to_snake(field)}"::text = \'{name}\' limit 1')
         if clash and clash[0]:
             values = {**values, field: f"{values[field]} {self.stamp.upper()}"}
+            # AND EVERY FIELD THAT MUST BE UNIQUE WITH IT. 'Electronics EXP008'
+            # kept the slug 'electronics', the app answered 409, and the
+            # statement failed as the app's (ecom v2, forge-v3, 2026-10-10).
+            told = [field]
+            for f in ent.get("fields") or []:
+                n = str(f.get("name") or "")
+                if not n or n == field or not isinstance(values.get(n), str) or not values[n].strip():
+                    continue
+                if f.get("unique") or "slug" in n.lower() or "number" in n.lower() or "code" in n.lower():
+                    values[n] = f"{values[n]}-{self.stamp.lower()}"
+                    told.append(n)
             self.log.append(f"the copy already had a {ent.get('name')} named {name!r}; {ref} is "
-                            f"{values[field]!r} so it can be told apart")
+                            f"{values[field]!r} so it can be told apart"
+                            + (f" (and its {', '.join(told[1:])} with it)" if len(told) > 1 else ""))
         return values
 
     def _make_self(self, g: dict, ent: dict) -> None:

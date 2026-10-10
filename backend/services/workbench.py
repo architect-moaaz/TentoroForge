@@ -18,12 +18,14 @@ five things, re-establishing any that is missing:
 
 1. installed — `node_modules` carries its completion marker and the lockfile
    is one npm can read;
-2. schema — the database has the tables the definition declares;
-3. seeded — the seed has run: the users table holds a login;
-4. the server answers;
-5. sign-in works — the seeded administrator signs in through the form.
+2. secrets — a session secret of its own, and the key its sensitive columns
+   are encrypted with;
+3. schema — the database has the tables the definition declares;
+4. seeded — the seed has run: the users table holds a login;
+5. the server answers;
+6. sign-in works — the seeded administrator signs in through the form.
 
-The first three need no server and are proven by `prepare`; the last two
+The first four need no server and are proven by `prepare`; the last two
 are proven by `RunningApp` as it serves (`served`). A precondition that
 cannot be established is a `PlatformFault`: ours to fix, named by what it is,
 and never a result reported for the app.
@@ -40,7 +42,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 #: What the Workbench proves, in order.
-PRECONDITIONS = ("installed", "schema", "seeded", "server", "login")
+PRECONDITIONS = ("installed", "secrets", "schema", "seeded", "server", "login")
 
 
 class PlatformFault(RuntimeError):
@@ -54,8 +56,8 @@ class PlatformFault(RuntimeError):
 
 
 def _said(precondition: str) -> str:
-    return {"installed": "installed", "schema": "its database tables", "seeded": "its seeded rows and logins",
-            "server": "served", "login": "signed in to"}.get(precondition, precondition)
+    return {"installed": "installed", "secrets": "its own secrets", "schema": "its database tables",
+            "seeded": "its seeded rows and logins", "server": "served", "login": "signed in to"}.get(precondition, precondition)
 
 
 def prepare(app_root: str | Path) -> dict[str, dict]:
@@ -64,7 +66,28 @@ def prepare(app_root: str | Path) -> dict[str, dict]:
     `{"ok": True, "did": what was re-established or ""}`. Raises
     `PlatformFault` for the first one that cannot be established."""
     root = Path(app_root)
-    return {"installed": _installed(root), **_database(root)}
+    return {"installed": _installed(root), "secrets": _secrets(root), **_database(root)}
+
+
+def _secrets(root: Path) -> dict:
+    """The app's own secrets: a session secret of its own and the key its
+    sensitive columns are encrypted with. An app emitted before the key was
+    made with it gets one at its first door (ecom v2, forge-v3, 2026-10-10:
+    every Vendor made through the app was refused with "SENSITIVE_ENCRYPTION_KEY
+    is not set", and a feature's statements went untried)."""
+    from services.auth_secret import ensure_sensitive_key, ensure_unique_auth_secret
+
+    if not (root / "package.json").is_file():
+        return {"ok": True, "did": ""}
+    did = []
+    try:
+        if ensure_unique_auth_secret(root).get("set"):
+            did.append("a session secret of its own")
+        if ensure_sensitive_key(root).get("set"):
+            did.append("a key for its sensitive columns")
+    except Exception as exc:  # noqa: BLE001 — a secret that cannot be written
+        raise PlatformFault("secrets", str(exc)[:600]) from exc
+    return {"ok": True, "did": " and ".join(did)}
 
 
 def _installed(root: Path) -> dict:

@@ -395,8 +395,20 @@ class VercelDeployProvider:
             # platform's public address and this project's id, so Smith's
             # inbox hears of a crash in the published app.
             from services.app_reporting import publish_env
+            integrations = {**publish_env(snapshot.project_id), **dict(snapshot.integrations)}
+            # THE KEY ITS SENSITIVE COLUMNS WERE ENCRYPTED WITH goes with the
+            # app, as its session secret does: the one made with it
+            # (`auth_secret.ensure_sensitive_key`), unless a person set one
+            # on /settings/integrations or Vercel already holds one — rows
+            # encrypted under a key must stay readable under it.
+            if not integrations.get("SENSITIVE_ENCRYPTION_KEY") and "SENSITIVE_ENCRYPTION_KEY" not in existing_by_key:
+                from pathlib import Path as _Path
+                from services.auth_secret import sensitive_key
+                own = sensitive_key(_Path(snapshot.output_dir) / "app")
+                if own:
+                    integrations["SENSITIVE_ENCRYPTION_KEY"] = own
             env = build_deploy_env(
-                integrations={**publish_env(snapshot.project_id), **dict(snapshot.integrations)},
+                integrations=integrations,
                 neon_url=neon_url,
                 vercel_url="",  # unused — NEXTAUTH_URL is left to VERCEL_URL
                 nextauth_secret=nextauth_secret,
