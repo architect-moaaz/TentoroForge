@@ -33,6 +33,9 @@ from typing import Iterable, Optional
 #: Room id -> human label. The frontend layout mirrors this list in order; a
 #: room added here needs a desk block there.
 DEPARTMENTS: dict[str, str] = {
+    # The person's door: Smith takes the ask, asks the open questions, and
+    # comes back here to answer. Every change after the build starts here.
+    "front_desk": "Front Desk",
     "discovery": "Discovery",
     "architecture": "Architecture",
     "design_studio": "Design Studio",
@@ -41,14 +44,45 @@ DEPARTMENTS: dict[str, str] = {
     "logic": "Logic",
     "security": "Security",
     "qa": "Verification",
+    # The machines the application runs on, and the bench it is tried on.
+    "engine_room": "Engine Room",
+    "workbench": "Workbench",
     "shipping": "Shipping",
     # Where the agents a question touches meet; nobody's desk is here.
     "huddle": "Huddle Room",
 }
 
 #: Rooms people come to rather than sit in. Nobody is seated here; the agents
-#: of a huddle walk in and back (`services.huddle.room`).
-MEETING_ROOMS: frozenset[str] = frozenset({"huddle"})
+#: of a huddle walk in and back (`services.huddle.room`); the engine room and
+#: the workbench hold machines, and Smith walks to the bench to try things.
+MEETING_ROOMS: frozenset[str] = frozenset({"huddle", "engine_room", "workbench"})
+
+
+#: The engines — the platform's machines, not people: what each one is for
+#: and which room it stands in. The office lights one up while it is in use
+#: (`engine_event`), so a build reads as agents writing AND the platform
+#: running what they wrote.
+ENGINES: dict[str, dict] = {
+    "data_engine": {"label": "Data Engine", "room": "engine_room",
+                    "does": "Reads and writes every record through the schema the Data desk projected; "
+                            "resolves the analytics queries live."},
+    "workflow_engine": {"label": "Workflow Engine", "room": "engine_room",
+                        "does": "Runs each process's steps — guards, writes, refusals, notifications — "
+                                "when a button is pressed or a schedule fires."},
+    "ui_engine": {"label": "UI Engine", "room": "engine_room",
+                  "does": "Renders every screen from its layout tree or its React code, against the SDK "
+                          "typed from the definition."},
+    "composer": {"label": "A2UI Composer", "room": "engine_room",
+                 "does": "Composes a screen's layout tree from its contract when Smith is asked to recompose one."},
+    "scaffold": {"label": "Render Scaffold", "room": "engine_room",
+                 "does": "Renders a page as it is written, so the UI engineer sees what it made before it is accepted."},
+    "apps_db": {"label": "Apps Database", "room": "workbench",
+                "does": "Every application's own Postgres: pushed, seeded, and copied for each trial so "
+                        "nothing tried touches real rows."},
+    "workbench": {"label": "Workbench", "room": "workbench",
+                  "does": "The one door to a running app: installed, schema, seeded, served, signed in — "
+                          "then the browser tries every statement as the person it is about."},
+}
 
 
 #: Which department each Blueprint agent sits in. Keys are agent names from
@@ -59,7 +93,7 @@ ROOM_OF: dict[str, str] = {
     "requirement": "discovery",
     "domain_intelligence": "discovery",
     "product_analysis": "discovery",
-    "smith": "discovery",
+    "smith": "front_desk",
     # Architecture — modules, navigation, the seams to the outside (§28, §60)
     "solution_architecture": "architecture",
     "integration": "architecture",
@@ -133,6 +167,12 @@ NODE_LABEL: dict[str, str] = {
     "verification": "Checking the blueprint against itself",
     "assemble": "Assembling and starting the application",
     "install": "Installing the toolchain",
+    "decisions": "Deciding the facts every writer must agree on",
+    "content_fields": "Adding the fields the screens need",
+    "auth_pages": "Declaring the sign-in screens",
+    "imagery": "Finding the photographs",
+    "brand_design_system": "Applying the brand",
+    "expectations": "Writing what must happen, to be tried as the person",
 }
 
 
@@ -301,6 +341,178 @@ def run_plan_event(agents: Iterable[str]) -> dict:
     """
     return {"type": "run_plan",
             "agents": sorted({office_agent(a) for a in agents})}
+
+
+# ---------------------------------------------------------------------------
+# The pipeline, Smith and the engines — what the DAG's lines do not say
+# ---------------------------------------------------------------------------
+
+#: The stages a build moves through, in order, as the office's pipeline strip
+#: shows them. `change` is Smith's after the handover.
+PIPELINE_STAGES: tuple[str, ...] = (
+    "define", "model", "opening", "build", "feature", "proof", "fix", "sweep", "whole", "handover",
+    "stopped", "change",
+)
+
+
+def pipeline_stage_event(stage: str, label: str = "", **extra) -> dict:
+    """Where the build is: one of `PIPELINE_STAGES`, said in a sentence, with
+    whatever names it (the feature, its place in the plan, what is missing)."""
+    evt = {"type": "pipeline_stage", "stage": stage, "label": label}
+    evt.update({k: v for k, v in extra.items() if v is not None})
+    return evt
+
+
+def smith_turn_event(status: str, text: str = "", *, mode: str = "conversation", outcome: str = "") -> dict:
+    """Smith begins or ends a turn: `status` is `start` or `end`; `mode` says
+    whether a person is waiting (`conversation`) or the engineer sent it
+    (`unattended`); `outcome` is the turn's status at the end."""
+    evt = {"type": "smith_turn", "status": status, "mode": mode, "text": _short(text, 160)}
+    if outcome:
+        evt["outcome"] = outcome
+    return evt
+
+
+#: What a Smith tool is, for the office: where Smith goes to do it.
+STEP_KINDS = ("read", "try", "write", "ask", "report", "end", "other")
+
+
+def step_kind(tool: str) -> str:
+    """`read` at the desk, `try` at the Workbench, `write` at the author's
+    desk, `ask` at the front desk, `report` on the board, `end`."""
+    name = (tool or "").strip()
+    if name in ("ask_user", "propose_plan"):
+        return "ask"
+    if name in ("done", "answer"):
+        return "end"
+    if name == "report_platform_fault":
+        return "report"
+    try:
+        from services.smith import tools as _tools
+    except Exception:  # noqa: BLE001 — the office needs no tool registry to draw a step
+        return "other"
+    if _tools.is_trial(name):
+        return "try"
+    if _tools.is_write(name) or _tools.is_definition(name):
+        return "write"
+    if _tools.is_read(name) or _tools.is_web(name):
+        return "read"
+    return "other"
+
+
+def smith_step_event(tool: str, said: str = "", status: str = "") -> dict:
+    """One step of a Smith turn, with where it happens."""
+    return {"type": "smith_step", "tool": tool, "kind": step_kind(tool), "status": status,
+            "said": _short(said, 120)}
+
+
+def trial_event(statement: str, says: str, verdict: str, who: str = "") -> dict:
+    """A statement tried on the Workbench as the person it is about:
+    `verdict` is `trying`, `passed`, `failed` or `not_tried`."""
+    return {"type": "trial", "statement": statement, "says": _short(says, 120), "verdict": verdict, "who": who}
+
+
+def engine_event(engine: str, state: str, detail: str = "") -> dict:
+    """An engine's light: `busy` while it works, `on` while it serves, `off`."""
+    return {"type": "engine", "engine": engine, "state": state, "detail": _short(detail, 120)}
+
+
+class JournalNarrator:
+    """Turn the engineer's journal into office events.
+
+    The engineer and Smith write their work down as they go
+    (`services.engineer.journal`): a turn begun, each step taken, a feature
+    started and proven, a fix turn, the sweep, the whole-app check, the end.
+    The office reads that account — one call site per event, as with the
+    run ledger — rather than a second narration beside it."""
+
+    def __init__(self, emit) -> None:
+        self._emit = emit
+        self._features: list[str] = []
+        self._names: dict[str, str] = {}
+        self._mode = "conversation"
+
+    def __call__(self, row: dict) -> None:
+        for evt in self.translate(row):
+            self._emit(evt)
+
+    def translate(self, row: dict) -> list[dict]:
+        ev = str(row.get("event") or "")
+        if ev == "turn:start":
+            self._mode = "unattended" if row.get("unattended") else "conversation"
+            return [smith_turn_event("start", str(row.get("message") or ""), mode=self._mode)]
+        if ev == "turn:step":
+            return [smith_step_event(str(row.get("tool") or ""), str(row.get("said") or ""),
+                                     str(row.get("status") or ""))]
+        if ev == "turn:end":
+            return [smith_turn_event("end", str(row.get("said") or ""), mode=self._mode,
+                                     outcome=str(row.get("status") or ""))]
+        if ev == "first:start":
+            nodes = [str(n) for n in row.get("nodes") or []]
+            return [pipeline_stage_event("opening", "Finishing what comes before the first feature: "
+                                         + ", ".join(NODE_LABEL.get(n, n).lower() for n in nodes[:4])
+                                         + ("…" if len(nodes) > 4 else ""), nodes=nodes)]
+        if ev == "first:failed":
+            return [pipeline_stage_event("stopped", "The product model could not be finished: "
+                                         + _short(row.get("why"), 120), why=_short(row.get("why"), 300))]
+        if ev == "run:start":
+            self._features = [str(f) for f in row.get("features") or []]
+            done = [str(f) for f in row.get("done_before") or []]
+            left = [f for f in self._features if f not in done]
+            return [pipeline_stage_event("build", f"Building {len(left)} feature{'s' if len(left) != 1 else ''}, "
+                                         f"each proven before the next", features=self._features, done=done)]
+        if ev == "feature:start":
+            fid = str(row.get("feature") or "")
+            self._names[fid] = str(row.get("name") or fid)
+            index = self._features.index(fid) + 1 if fid in self._features else 0
+            return [pipeline_stage_event("feature", f"Building {self._names[fid]}", feature=fid,
+                                         name=self._names[fid], index=index, total=len(self._features),
+                                         pages=list(row.get("pages") or []))]
+        if ev == "feature:done":
+            fid = str(row.get("feature") or "")
+            name = self._names.get(fid, fid)
+            unbuilt = list(row.get("unbuilt") or [])
+            if unbuilt:
+                return [pipeline_stage_event("stopped", f"{name} is not built: " + _short(unbuilt[0], 100),
+                                             feature=fid, name=name, unbuilt=unbuilt)]
+            n, held = int(row.get("statements") or 0), int(row.get("passed") or 0)
+            said = f"{name}: {held} of {n} statements hold" if n else f"{name} is built"
+            return [pipeline_stage_event("proof", said, feature=fid, name=name, statements=n, passed=held,
+                                         failing=list(row.get("failing") or []), done=True)]
+        if ev == "fix:start":
+            fid = str(row.get("feature") or "")
+            name = self._names.get(fid, "the whole application" if fid == "APP" else fid)
+            n = len(row.get("statements") or [])
+            return [pipeline_stage_event("fix", f"{name}: {n} statement{'s' if n != 1 else ''} not holding — "
+                                         f"Smith is finding the cause", feature=fid, name=name,
+                                         round=int(row.get("round") or 1),
+                                         ids=list(row.get("statements") or []))]
+        if ev == "mend:start":
+            fid = str(row.get("feature") or "")
+            name = self._names.get(fid, fid)
+            nodes = [str(n) for n in row.get("nodes") or []]
+            return [pipeline_stage_event("fix", f"{name}: {', '.join(NODE_LABEL.get(n, n).lower() for n in nodes)} "
+                                         f"did not finish — Smith is mending it", feature=fid, name=name, nodes=nodes)]
+        if ev == "sweep:start":
+            return [pipeline_stage_event("sweep", "Writing what no feature claimed",
+                                         nodes=[str(n) for n in row.get("nodes") or []])]
+        if ev == "whole:unbuilt":
+            missing = [str(m) for m in row.get("missing") or []]
+            return [pipeline_stage_event("whole", "Not whole yet: " + _short("; ".join(missing), 110),
+                                         missing=missing)]
+        if ev == "whole:done":
+            n, held = int(row.get("statements") or 0), int(row.get("passed") or 0)
+            return [pipeline_stage_event("whole", f"The whole application: {held} of {n} statements hold",
+                                         statements=n, passed=held, failing=list(row.get("failing") or []))]
+        if ev == "run:end":
+            stopped = str(row.get("stopped") or "")
+            if stopped:
+                return [pipeline_stage_event("stopped", _short(stopped, 140), why=stopped[:400])]
+            return [pipeline_stage_event("handover", "Built, tried and handed over",
+                                         state=str(row.get("state") or ""))]
+        if ev in ("run:out_of_time", "run:paused"):
+            return [pipeline_stage_event("stopped", "Paused: " + _short(row.get("why") or "out of time", 120))]
+        return []
 
 
 def build_success_event(total_files: int = 0, total_lines: int = 0) -> dict:

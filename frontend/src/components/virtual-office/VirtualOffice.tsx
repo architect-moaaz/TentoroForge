@@ -7,10 +7,17 @@ import { OfficeRenderer } from "./OfficeRenderer";
 import { preloadAll, loadManifest } from "./SpriteLoader";
 import { OFFICE_LAYOUT } from "./layout";
 import { PipelineProgress } from "./hud/PipelineProgress";
+import { PipelineStrip } from "./hud/PipelineStrip";
+import { FloorPlanPanel } from "./hud/FloorPlanPanel";
+import { EngineTooltip } from "./hud/EngineTooltip";
 import { AgentTooltip } from "./hud/AgentTooltip";
 import { MiniMap } from "./hud/MiniMap";
 import { SpeedControls } from "./hud/SpeedControls";
 import { AgentPanel } from "./hud/AgentPanel";
+import { Map as MapIcon } from "lucide-react";
+
+/** CSS pixels the pipeline strip and the department bar take at the top. */
+const HUD_TOP_PX = 92;
 
 export interface VirtualOfficeProps {
   className?: string;
@@ -32,11 +39,13 @@ export function VirtualOffice({
   const isDraggingRef = useRef(false);
   const lastMouseRef = useRef({ x: 0, y: 0 });
   const [ready, setReady] = useState(false);
+  const [showPlan, setShowPlan] = useState(false);
 
   const initialize = useOfficeStore((s) => s.initialize);
   const handleEvent = useOfficeStore((s) => s.handleEvent);
   const selectAgent = useOfficeStore((s) => s.selectAgent);
   const setHoveredAgent = useOfficeStore((s) => s.setHoveredAgent);
+  const setHoveredEngine = useOfficeStore((s) => s.setHoveredEngine);
   const selectedAgent = useOfficeStore((s) => s.selectedAgent);
 
   // ── Setup / teardown ────────────────────────────────────────────────────
@@ -66,6 +75,8 @@ export function VirtualOffice({
 
     const renderer = new OfficeRenderer(canvasRef.current);
     rendererRef.current = renderer;
+    // The strip and the department bar cover the top of the canvas.
+    renderer.setTopInset(HUD_TOP_PX * (window.devicePixelRatio || 1));
     renderer.start();
     setReady(true);
 
@@ -221,7 +232,23 @@ export function VirtualOffice({
       }
     }
     setHoveredAgent(found);
-  }, [setHoveredAgent]);
+
+    // Then the machines: a cabinet is one tile wide and two tall, the bench two by two.
+    let machine: string | null = null;
+    if (!found) {
+      for (const room of OFFICE_LAYOUT.rooms) {
+        for (const m of room.machines) {
+          const wide = m.engine === "workbench" ? 2 : 1;
+          const mx = (room.x + m.x) * tileSize;
+          const my = (room.y + m.y) * tileSize;
+          if (worldX >= mx && worldX < mx + wide * tileSize && worldY >= my && worldY < my + 2 * tileSize) {
+            machine = m.engine;
+          }
+        }
+      }
+    }
+    setHoveredEngine(machine);
+  }, [setHoveredAgent, setHoveredEngine]);
 
   const handleMouseUp = useCallback(() => {
     isDraggingRef.current = false;
@@ -261,21 +288,36 @@ export function VirtualOffice({
 
       {ready && (
         <>
-          {/* Top progress bar */}
+          {/* The pipeline, then the departments */}
           <div className="absolute top-0 left-0 right-0 z-10">
+            <PipelineStrip />
             <PipelineProgress />
           </div>
 
-          {/* Agent hover tooltip */}
+          {/* Agent and engine hover tooltips */}
           <AgentTooltip />
+          <EngineTooltip />
+
+          {/* The floor plan: every department, who is in it, what the engines do */}
+          <div className={`absolute bottom-3 z-30 transition-[left] ${showPlan ? "left-[492px]" : "left-[150px]"}`}>
+            <button
+              onClick={() => setShowPlan((v) => !v)}
+              className="flex items-center gap-1.5 bg-gray-900/80 backdrop-blur-sm rounded-lg border border-gray-700/50 px-2.5 py-1.5 text-xs text-gray-300 hover:text-white hover:bg-gray-800/80 transition-colors"
+              title="The office, explained"
+            >
+              <MapIcon className="w-3.5 h-3.5" />
+              Floor plan
+            </button>
+          </div>
+          {showPlan && <FloorPlanPanel onClose={() => setShowPlan(false)} />}
 
           {/* Mini map - bottom right */}
           <div className="absolute bottom-3 right-3 z-10">
             <MiniMap />
           </div>
 
-          {/* Speed controls - bottom left */}
-          <div className="absolute bottom-3 left-3 z-10">
+          {/* Speed controls - bottom left, beside the floor plan when it is open */}
+          <div className={`absolute bottom-3 z-30 transition-[left] ${showPlan ? "left-[352px]" : "left-3"}`}>
             <SpeedControls />
           </div>
 

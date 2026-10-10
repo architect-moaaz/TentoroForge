@@ -58,6 +58,7 @@ export interface Room {
   h: number;
   floorTile: string;
   furniture: FurniturePlacement[];
+  machines: MachinePlacement[];
   desks: DeskPosition[];
   color: string;
   description: string;
@@ -72,6 +73,13 @@ export interface DeskPosition {
 
 export interface FurniturePlacement {
   type: string;
+  x: number;
+  y: number;
+}
+
+/** An engine's machine, placed in its room (tile coords local to the room). */
+export interface MachinePlacement {
+  engine: string;
   x: number;
   y: number;
 }
@@ -259,7 +267,70 @@ export interface HuddleEndEvent {
   chair: string;
 }
 
+/** Where the build is — the engineer's journal, read by the office
+ *  (`backend/services/office_events.py`'s JournalNarrator). */
+export interface PipelineStageEvent {
+  type: "pipeline_stage";
+  stage: string;
+  label: string;
+  feature?: string;
+  name?: string;
+  index?: number;
+  total?: number;
+  features?: string[];
+  pages?: string[];
+  done?: string[] | boolean;
+  statements?: number;
+  passed?: number;
+  failing?: string[];
+  missing?: string[];
+  unbuilt?: string[];
+  nodes?: string[];
+  why?: string;
+  [extra: string]: unknown;
+}
+
+/** Smith begins or ends a turn — a person waiting, or the engineer's fix. */
+export interface SmithTurnEvent {
+  type: "smith_turn";
+  status: "start" | "end";
+  mode: "conversation" | "unattended";
+  text: string;
+  outcome?: string;
+}
+
+/** One step of a Smith turn: where Smith goes to do it. */
+export interface SmithStepEvent {
+  type: "smith_step";
+  tool: string;
+  kind: "read" | "try" | "write" | "ask" | "report" | "end" | "other";
+  status: string;
+  said: string;
+}
+
+/** A statement tried on the Workbench as the person it is about. */
+export interface TrialEvent {
+  type: "trial";
+  statement: string;
+  says: string;
+  verdict: "trying" | "passed" | "failed" | "not_tried";
+  who: string;
+}
+
+/** An engine's light: busy while it works, on while it serves, off. */
+export interface EngineEvent {
+  type: "engine";
+  engine: string;
+  state: "busy" | "on" | "off";
+  detail?: string;
+}
+
 export type OfficeEvent =
+  | PipelineStageEvent
+  | SmithTurnEvent
+  | SmithStepEvent
+  | TrialEvent
+  | EngineEvent
   | HuddleStartEvent
   | HuddleSayEvent
   | HuddleEndEvent
@@ -296,6 +367,7 @@ export interface Department {
 }
 
 export const DEPARTMENTS: Department[] = [
+  { id: "front_desk", label: "Front Desk", color: "#0EA5E9", description: "The person's door: Smith takes the ask, asks what is open, answers, and brings every change in here" },
   { id: "discovery", label: "Discovery", color: "#3B82F6", description: "What the application is for" },
   { id: "architecture", label: "Architecture", color: "#0369A1", description: "Modules, navigation and the seams outward" },
   { id: "design_studio", label: "Design Studio", color: "#8B5CF6", description: "The design language, before anything composes" },
@@ -303,7 +375,9 @@ export const DEPARTMENTS: Department[] = [
   { id: "composition", label: "Composition", color: "#EC4899", description: "The page trees and the schemas projected from them" },
   { id: "logic", label: "Logic", color: "#4F46E5", description: "Workflows and business rules" },
   { id: "security", label: "Security", color: "#DC2626", description: "Roles and the permissions that guard entities" },
-  { id: "qa", label: "Verification", color: "#0891B2", description: "Tests, the verification matrix, and what the run remembers" },
+  { id: "qa", label: "Verification", color: "#0891B2", description: "The observer judging every step, the statements of what must happen, and what the run remembers" },
+  { id: "engine_room", label: "Engine Room", color: "#475569", description: "The machines the application runs on: data, workflows, screens" },
+  { id: "workbench", label: "Workbench", color: "#CA8A04", description: "The one door to a running app, where every statement is tried as the person it is about" },
   { id: "shipping", label: "Shipping", color: "#16A34A", description: "The runtime, the preview, and the deploy" },
   { id: "huddle", label: "Huddle Room", color: "#B45309", description: "Where the agents a question touches settle it together" },
 ];
@@ -336,13 +410,14 @@ export interface AgentInfo {
 // renderer's sprite fallback covers from the working and base sheets.
 export const AGENT_REGISTRY: AgentInfo[] = [
   // ── Discovery ─────────────────────────────────────────────────────────
-  { id: "smith", name: "Smith", spriteKey: "contract_writer", room: "discovery", role: "The architect you talk to", color: "#1E40AF" },
+  { id: "smith", name: "Smith", spriteKey: "contract_writer", room: "front_desk", role: "The one you talk to: takes the ask, reproduces what you report as you, and fixes it through the right desk", color: "#1E40AF" },
   { id: "requirement", name: "Requirements", spriteKey: "discovery", room: "discovery", role: "Writes down what the app is for", color: "#3B82F6" },
   { id: "product_analysis", name: "Product Analyst", spriteKey: "planner", room: "discovery", role: "Works out the product shape", color: "#6366F1" },
   { id: "domain_intelligence", name: "Domain Intel", spriteKey: "chat_refiner", room: "discovery", role: "Knows how this industry works", color: "#E11D48" },
 
   // ── Architecture ──────────────────────────────────────────────────────
   { id: "solution_architecture", name: "Solution Architect", spriteKey: "navigator", room: "architecture", role: "Maps modules and navigation", color: "#0369A1" },
+  { id: "engineer", name: "Engineer", spriteKey: "farmer", room: "architecture", role: "Decides the facts every writer agrees on, then builds the app one feature at a time and proves each before the next", color: "#15803D" },
   { id: "integration", name: "Integrations", spriteKey: "portal_builder", room: "architecture", role: "Connects the outside services", color: "#0E7490" },
 
   // ── Design Studio ─────────────────────────────────────────────────────
@@ -438,3 +513,71 @@ export const AGENT_PHASE_MAP: Record<string, string> = {
   build: "export",
   deployment: "export",
 };
+
+
+// ── Engines ─────────────────────────────────────────────────────────────────
+//
+// The platform's machines, not people. Mirrors `ENGINES` in
+// `backend/services/office_events.py`: the backend lights them by id.
+
+export interface EngineInfo {
+  id: string;
+  label: string;
+  room: string;
+  does: string;
+  color: string;
+  kind: "engine" | "db" | "bench";
+}
+
+export const ENGINES: EngineInfo[] = [
+  { id: "data_engine", label: "Data Engine", room: "engine_room", kind: "engine", color: "#059669",
+    does: "Reads and writes every record through the schema the Data desk projected; resolves the analytics queries live." },
+  { id: "workflow_engine", label: "Workflow Engine", room: "engine_room", kind: "engine", color: "#4F46E5",
+    does: "Runs each process's steps — guards, writes, refusals, notifications — when a button is pressed or a schedule fires." },
+  { id: "ui_engine", label: "UI Engine", room: "engine_room", kind: "engine", color: "#EC4899",
+    does: "Renders every screen from its layout tree or its React code, against the SDK typed from the definition." },
+  { id: "composer", label: "A2UI Composer", room: "engine_room", kind: "engine", color: "#8B5CF6",
+    does: "Composes a screen's layout tree from its contract when Smith is asked to recompose one." },
+  { id: "scaffold", label: "Render Scaffold", room: "engine_room", kind: "engine", color: "#F59E0B",
+    does: "Renders a page as it is written, so the UI engineer sees what it made before it is accepted." },
+  { id: "apps_db", label: "Apps Database", room: "workbench", kind: "db", color: "#0EA5E9",
+    does: "Every application's own Postgres: pushed, seeded, and copied for each trial so nothing tried touches real rows." },
+  { id: "workbench", label: "Workbench", room: "workbench", kind: "bench", color: "#CA8A04",
+    does: "The one door to a running app: installed, schema, seeded, served, signed in — then the browser tries every statement as the person it is about." },
+];
+
+export const ENGINE_BY_ID: Record<string, EngineInfo> = Object.fromEntries(
+  ENGINES.map((e) => [e.id, e]),
+);
+
+/** Which engines a DAG node runs, so they light while the node works. */
+export const NODE_ENGINES: Record<string, string[]> = {
+  backend: ["data_engine"],
+  integration: ["workflow_engine"],
+  frontend: ["ui_engine"],
+  page_layouts: ["composer"],
+  page_code: ["scaffold", "ui_engine"],
+  assemble: ["data_engine", "workflow_engine", "ui_engine", "apps_db"],
+};
+
+// ── The pipeline ────────────────────────────────────────────────────────────
+//
+// The stages a build moves through, as the strip above the floor shows them.
+// `proof` and `fix` happen inside a feature; `change` is Smith's after the
+// handover.
+
+export interface PipelineStep {
+  id: string;
+  label: string;
+  stages: string[];
+}
+
+export const PIPELINE: PipelineStep[] = [
+  { id: "define", label: "Define", stages: ["define"] },
+  { id: "model", label: "Model", stages: ["model"] },
+  { id: "opening", label: "Opening", stages: ["opening"] },
+  { id: "features", label: "Features", stages: ["build", "feature", "proof", "fix"] },
+  { id: "sweep", label: "Sweep", stages: ["sweep"] },
+  { id: "whole", label: "Whole app", stages: ["whole"] },
+  { id: "handover", label: "Handover", stages: ["handover"] },
+];

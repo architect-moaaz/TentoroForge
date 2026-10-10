@@ -29,16 +29,35 @@ class Journal:
     """`.forge/engineer/journal.jsonl`: one JSON object per line, in order."""
 
     def __init__(self, output_dir: str | Path):
-        self.dir = Path(output_dir) / ".forge" / "engineer"
+        self.output_dir = Path(output_dir)
+        self.dir = self.output_dir / ".forge" / "engineer"
         self.path = self.dir / "journal.jsonl"
         self.lock = self.dir / "lock"
+        self._narrator: Any = None
 
     def write(self, event: str, **data: Any) -> dict:
         self.dir.mkdir(parents=True, exist_ok=True)
         row = {"event": event, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **data}
         with open(self.path, "a", encoding="utf-8") as f:
             f.write(json.dumps(row, default=str) + "\n")
+        self._narrate(row)
         return row
+
+    def _narrate(self, row: dict) -> None:
+        """THE OFFICE READS THE JOURNAL. The same row that is written down is
+        the one the floor animates — Smith's steps, the engineer's features —
+        through the project's office when one is bound (`office_bridge`);
+        never fatal, and nothing when no browser is watching."""
+        try:
+            if self._narrator is None:
+                from services.office_bridge import office_for
+                from services.office_events import JournalNarrator
+                show = office_for(self.output_dir)
+                self._narrator = JournalNarrator(show) if show is not None else False
+            if self._narrator:
+                self._narrator(row)
+        except Exception:  # noqa: BLE001 — a picture never breaks the work
+            pass
 
     def rows(self) -> Iterator[dict]:
         try:

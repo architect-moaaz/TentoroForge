@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { AgentCharacter } from "./AgentCharacter";
-import { OFFICE_LAYOUT, huddleSeats } from "./layout";
+import { OFFICE_LAYOUT, huddleSeats, benchSpot, visitorSpot, boardSpot, roomCenter } from "./layout";
 import { findPath, buildWalkableGrid } from "./Pathfinder";
 import {
   AGENT_REGISTRY,
@@ -29,8 +29,79 @@ import {
   type HuddleStartEvent,
   type HuddleSayEvent,
   type HuddleEndEvent,
+  type PipelineStageEvent,
+  type SmithTurnEvent,
+  type SmithStepEvent,
+  type TrialEvent,
+  type EngineEvent,
   type Position,
+  NODE_ENGINES,
+  ENGINE_BY_ID,
 } from "./types";
+
+/** Where the build is, read off the engineer's journal. */
+export interface PipelineState {
+  stage: string | null;
+  label: string;
+  feature?: string;
+  name?: string;
+  index?: number;
+  total?: number;
+  features: string[];
+  /** Features proven so far (ids). */
+  done: string[];
+  /** What the last stage said about proof: statements held / written. */
+  passed?: number;
+  statements?: number;
+  /** Why it stopped, when it did. */
+  why?: string;
+  /** The last few stages, newest last. */
+  history: PipelineStageEvent[];
+}
+
+/** Smith's turn, as the Front Desk shows it. */
+export interface SmithState {
+  inTurn: boolean;
+  mode: "conversation" | "unattended";
+  text: string;
+  step?: { tool: string; kind: SmithStepEvent["kind"]; said: string; status: string };
+  steps: number;
+  outcome?: string;
+}
+
+export interface EngineState {
+  state: "busy" | "on" | "off";
+  detail: string;
+  since: number;
+}
+
+export interface TrialsState {
+  tried: number;
+  passed: number;
+  failed: number;
+  untried: number;
+  trying?: TrialEvent;
+  last?: TrialEvent;
+}
+
+/** Which desk a Smith write lands on: the author of what the tool changes.
+ *  A tool not named here is Smith's own (a seam write at the Front Desk). */
+const WRITE_OWNER: Record<string, string> = {
+  edit_file: "ui_engineer",
+  write_page_code: "ui_engineer",
+  rewrite_pages: "ui_engineer",
+  write_frame: "ui_engineer",
+  verify_pages: "page_reviewer",
+  write_section: "solution_architecture",
+  edit_definition: "solution_architecture",
+  define_application: "requirement",
+  set_field: "data_model",
+  add_expectation: "testing",
+}
+
+const EMPTY_PIPELINE: PipelineState = { stage: null, label: "", features: [], done: [], history: [] };
+const EMPTY_SMITH: SmithState = { inTurn: false, mode: "conversation", text: "", steps: 0 };
+const EMPTY_TRIALS: TrialsState = { tried: 0, passed: 0, failed: 0, untried: 0 };
 
 /** One artifact in flight between two desks, queued for the renderer.
  *
@@ -112,6 +183,19 @@ export interface OfficeStore {
   /** The huddle at the table now, if any — who is in it, what about, and
    *  once decided, what was decided. */
   huddle: OfficeHuddle | null;
+  /** Where the build is: the engineer's journal, stage by stage. */
+  pipeline: PipelineState;
+  /** Smith's turn at the Front Desk. */
+  smith: SmithState;
+  /** The engines' lights, by engine id. */
+  engines: Map<string, EngineState>;
+  /** What the Workbench has tried this run. */
+  trials: TrialsState;
+  /** What the bench is saying, drawn as its speech bubble. */
+  benchSays: { text: string; type: "normal" | "error" | "success"; at: number } | null;
+  hoveredEngine: string | null;
+  /** A camera request from the HUD (a room clicked on the floor plan). */
+  focus: Position | null;
 
   // Actions
   initialize: () => void;
@@ -123,6 +207,11 @@ export interface OfficeStore {
   /** No more frames are coming — the producer failed, or went away. Only for
    *  a producer that knows; a run that finishes clears this itself. */
   endRun: () => void;
+  setHoveredEngine: (id: string | null) => void;
+  /** Ask the camera to look at a room. */
+  focusRoom: (roomId: string) => void;
+  /** Hand the renderer the pending camera request, if any. */
+  takeFocus: () => Position | null;
   setSpeed: (speed: number) => void;
   selectAgent: (id: string | null) => void;
   setHoveredAgent: (id: string | null) => void;
@@ -206,6 +295,13 @@ export const useOfficeStore = create<OfficeStore>((set, get) => ({
   party: null,
   runActive: false,
   huddle: null,
+  pipeline: EMPTY_PIPELINE,
+  smith: EMPTY_SMITH,
+  engines: new Map(),
+  trials: EMPTY_TRIALS,
+  benchSays: null,
+  hoveredEngine: null,
+  focus: null,
 
   // ── Actions ─────────────────────────────────────────────────────────────
 
@@ -260,8 +356,214 @@ export const useOfficeStore = create<OfficeStore>((set, get) => ({
           agent.setSpeechBubble(e.action ?? "Working...", "normal");
         });
 
-        set({ activeAgents: newActive, blockedReasons, skippedReasons,
+        // The engines this step runs light up with it.
+        const engines = new Map(get().engines);
+        for (const id of NODE_ENGINES[e.node ?? ""] ?? []) {
+          engines.set(id, { state: "busy", detail: e.action ?? `Running ${e.node}`, since: Date.now() });
+        }
+        set({ activeAgents: newActive, blockedReasons, skippedReasons, engines,
               events: updatedEvents });
+        break;
+      }
+
+      case "pipeline_stage": {
+        const e = event as PipelineStageEvent;
+        const prev = get().pipeline;
+        const next: PipelineState = {
+          ...prev,
+          stage: e.stage,
+          label: e.label,
+          feature: e.feature ?? (e.stage === "feature" || e.stage === "proof" || e.stage === "fix" ? prev.feature : undefined),
+          name: e.name ?? (e.stage === "feature" || e.stage === "proof" || e.stage === "fix" ? prev.name : undefined),
+          index: e.index ?? prev.index,
+          total: e.total ?? prev.total,
+          features: Array.isArray(e.features) ? e.features : prev.features,
+          done: Array.isArray(e.done) ? e.done : prev.done,
+          passed: typeof e.passed === "number" ? e.passed : prev.passed,
+          statements: typeof e.statements === "number" ? e.statements : prev.statements,
+          why: e.stage === "stopped" ? String(e.why ?? e.label) : undefined,
+          history: [...prev.history, e].slice(-30),
+        };
+        if (e.stage === "proof" && e.done === true && e.feature && !next.done.includes(e.feature)) {
+          next.done = [...next.done, e.feature];
+        }
+        const trials = e.stage === "build" || e.stage === "define" ? EMPTY_TRIALS : get().trials;
+        // The engineer says each stage; a feature's start is its walk to the
+        // Architecture board, a proof its walk to the bench.
+        const engineer = agents.get("engineer");
+        if (engineer) {
+          if (e.stage === "feature") {
+            const desk = getDeskPosition("engineer", AGENT_BY_ID.engineer?.room ?? "architecture");
+            navigateAgent(engineer, desk, () => {
+              engineer.startWorking();
+              engineer.setSpeechBubble(e.label, "normal");
+            });
+          } else if (e.stage === "proof" || e.stage === "whole") {
+            navigateAgent(engineer, benchSpot(), () => {
+              engineer.startReading();
+              engineer.setSpeechBubble(e.label, e.failing && (e.failing as string[]).length ? "error" : "success");
+            });
+          } else if (e.stage === "handover") {
+            navigateAgent(engineer, visitorSpot(), () => {
+              engineer.celebrate();
+              engineer.setSpeechBubble(e.label, "success");
+            });
+          } else if (e.stage === "stopped") {
+            navigateAgent(engineer, visitorSpot(), () => {
+              engineer.setError(e.label);
+            });
+          } else {
+            engineer.setSpeechBubble(e.label, "normal");
+          }
+        }
+        set({ pipeline: next, trials, events: updatedEvents });
+        break;
+      }
+
+      case "smith_turn": {
+        const e = event as SmithTurnEvent;
+        const smith = agents.get("smith");
+        if (e.status === "start") {
+          if (smith) {
+            const desk = getDeskPosition("smith", "front_desk");
+            navigateAgent(smith, desk, () => {
+              smith.startReading();
+              smith.setSpeechBubble(e.text || "Taking a look…", "normal");
+            });
+          }
+          set({
+            smith: { inTurn: true, mode: e.mode, text: e.text, steps: 0 },
+            // A person's turn keeps the office on screen until it ends.
+            ...(e.mode === "conversation" ? { runActive: true } : {}),
+            events: updatedEvents,
+          });
+        } else {
+          const outcome = e.outcome ?? "";
+          const good = outcome === "resolved" || outcome === "answered" || outcome === "asked";
+          if (smith) {
+            const where = e.mode === "conversation" ? visitorSpot() : getDeskPosition("smith", "front_desk");
+            navigateAgent(smith, where, () => {
+              if (good && outcome !== "asked") smith.celebrate();
+              else smith.goIdle();
+              smith.setSpeechBubble(e.text || outcome || "Done", good ? "success" : "error");
+            });
+          }
+          set({
+            smith: { ...get().smith, inTurn: false, outcome, text: e.text },
+            ...(e.mode === "conversation" ? { runActive: false } : {}),
+            events: updatedEvents,
+          });
+        }
+        break;
+      }
+
+      case "smith_step": {
+        const e = event as SmithStepEvent;
+        const smith = agents.get("smith");
+        const said = e.said || e.tool.replace(/_/g, " ");
+        const bubbleType = e.status === "error" ? "error" : e.status === "resolved" ? "success" : "normal";
+        if (smith) {
+          switch (e.kind) {
+            case "try": {
+              navigateAgent(smith, benchSpot(), () => {
+                smith.startWorking();
+                smith.setSpeechBubble(said, bubbleType);
+              });
+              break;
+            }
+            case "write": {
+              const owner = WRITE_OWNER[e.tool];
+              const to = owner ? agents.get(owner) : undefined;
+              if (owner && to) {
+                const theirs = getDeskPosition(owner, AGENT_BY_ID[owner]?.room ?? "discovery");
+                navigateAgent(smith, { x: theirs.x + (theirs.x % 2 === 0 ? -1 : 1), y: theirs.y }, () => {
+                  smith.startWorking();
+                  smith.setSpeechBubble(said, bubbleType);
+                  to.startWorking();
+                  to.setSpeechBubble(`With Smith: ${e.tool.replace(/_/g, " ")}`, "normal");
+                  setTimeout(() => to.goIdle(), 2500);
+                });
+              } else {
+                const desk = getDeskPosition("smith", "front_desk");
+                navigateAgent(smith, desk, () => {
+                  smith.startWorking();
+                  smith.setSpeechBubble(said, bubbleType);
+                });
+              }
+              break;
+            }
+            case "ask": {
+              navigateAgent(smith, visitorSpot(), () => {
+                smith.startReading();
+                smith.setSpeechBubble(said, "normal");
+              });
+              break;
+            }
+            case "report": {
+              navigateAgent(smith, boardSpot(), () => {
+                smith.startWorking();
+                smith.setSpeechBubble(`Platform fault pinned: ${said}`, "error");
+              });
+              break;
+            }
+            case "end": {
+              smith.setSpeechBubble(said, bubbleType);
+              break;
+            }
+            default: {
+              const desk = getDeskPosition("smith", "front_desk");
+              navigateAgent(smith, desk, () => {
+                smith.startReading();
+                smith.setSpeechBubble(said, bubbleType);
+              });
+            }
+          }
+        }
+        set({
+          smith: { ...get().smith, inTurn: true, steps: get().smith.steps + 1,
+                   step: { tool: e.tool, kind: e.kind, said: e.said, status: e.status } },
+          events: updatedEvents,
+        });
+        break;
+      }
+
+      case "trial": {
+        const e = event as TrialEvent;
+        const t = { ...get().trials };
+        const engines = new Map(get().engines);
+        let says: { text: string; type: "normal" | "error" | "success" } | null = null;
+        if (e.verdict === "trying") {
+          t.trying = e;
+          says = { text: `Trying${e.who ? ` as ${e.who}` : ""}: ${e.says}`, type: "normal" };
+          engines.set("workbench", { state: "busy", detail: `trying ${e.statement}`, since: Date.now() });
+        } else {
+          t.tried += 1;
+          if (e.verdict === "passed") t.passed += 1;
+          else if (e.verdict === "failed") t.failed += 1;
+          else t.untried += 1;
+          t.trying = undefined;
+          t.last = e;
+          says = e.verdict === "passed"
+            ? { text: `✓ ${e.says}`, type: "success" }
+            : e.verdict === "failed"
+              ? { text: `✗ ${e.says}`, type: "error" }
+              : { text: `Could not try: ${e.says}`, type: "error" };
+          engines.set("workbench", { state: "on", detail: `${t.passed} held, ${t.failed} failed`, since: Date.now() });
+        }
+        set({ trials: t, engines, benchSays: says ? { ...says, at: Date.now() } : get().benchSays,
+              events: updatedEvents });
+        break;
+      }
+
+      case "engine": {
+        const e = event as EngineEvent;
+        if (!ENGINE_BY_ID[e.engine]) break;
+        const engines = new Map(get().engines);
+        engines.set(e.engine, { state: e.state, detail: e.detail ?? "", since: Date.now() });
+        const bench = e.engine === "workbench" && e.detail
+          ? { text: e.detail, type: (e.state === "off" ? "normal" : "normal") as "normal", at: Date.now() }
+          : null;
+        set({ engines, ...(bench ? { benchSays: bench } : {}), events: updatedEvents });
         break;
       }
 
@@ -554,9 +856,15 @@ export const useOfficeStore = create<OfficeStore>((set, get) => ({
         newActive.delete(e.agent);
         const nodesDone = get().nodesDone + 1;
         const nodesPlanned = get().nodesPlanned;
+        const engines = new Map(get().engines);
+        for (const id of NODE_ENGINES[e.node ?? ""] ?? []) {
+          const cur = engines.get(id);
+          if (cur && cur.state === "busy") engines.set(id, { state: "off", detail: "", since: Date.now() });
+        }
         set({
           activeAgents: newActive,
           nodesDone,
+          engines,
           // Only the DAG declares a plan size. Under the legacy relay the
           // phase_complete branch still owns the bar, so leave it alone.
           ...(nodesPlanned
@@ -740,6 +1048,24 @@ export const useOfficeStore = create<OfficeStore>((set, get) => ({
     set({ runActive: false });
   },
 
+  setHoveredEngine: (id: string | null) => {
+    set({ hoveredEngine: id });
+  },
+
+  focusRoom: (roomId: string) => {
+    try {
+      set({ focus: roomCenter(roomId) });
+    } catch {
+      // no such room: nothing to look at
+    }
+  },
+
+  takeFocus: () => {
+    const at = get().focus;
+    if (at) set({ focus: null });
+    return at;
+  },
+
   takeDeliveries: () => {
     const queued = get().deliveries;
     if (queued.length === 0) return queued;
@@ -796,6 +1122,13 @@ export const useOfficeStore = create<OfficeStore>((set, get) => ({
       party: null,
       runActive: false,
       huddle: null,
+      pipeline: EMPTY_PIPELINE,
+      smith: EMPTY_SMITH,
+      engines: new Map(),
+      trials: EMPTY_TRIALS,
+      benchSays: null,
+      hoveredEngine: null,
+      focus: null,
     });
   },
 

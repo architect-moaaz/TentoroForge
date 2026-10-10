@@ -256,3 +256,103 @@ def test_the_observer_sees_every_line_the_ledger_writes(tmp_path):
     on_disk = [json.loads(line) for line in
                (tmp_path / ".forge" / "runs" / "run-2.jsonl").read_text().splitlines()]
     assert [e["event"] for e in seen] == [e["event"] for e in on_disk]
+
+
+# ---------------------------------------------------------------------------
+# The whole platform on the floor: the engines, the pipeline, Smith
+# ---------------------------------------------------------------------------
+
+def test_every_engine_stands_in_a_declared_room():
+    from services.office_events import ENGINES
+    assert ENGINES, "the engine room is not empty"
+    for key, engine in ENGINES.items():
+        assert engine["room"] in DEPARTMENTS, f"{key} stands in no department"
+        assert engine["label"] and engine["does"]
+    assert {e["room"] for e in ENGINES.values()} == {"engine_room", "workbench"}
+
+
+def test_smith_sits_at_the_front_desk_and_the_engineer_in_architecture():
+    assert ROOM_OF["smith"] == "front_desk"
+    assert ROOM_OF["engineer"] == "architecture"
+
+
+def test_a_step_is_placed_by_what_it_does():
+    from services.office_events import step_kind
+    assert step_kind("open_page") == "try" and step_kind("try_expectation") == "try"
+    assert step_kind("read_section") == "read" and step_kind("read_page_code") == "read"
+    assert step_kind("write_section") == "write" and step_kind("edit_file") == "write"
+    assert step_kind("define_application") == "write" and step_kind("fetch_url") == "read"
+    assert step_kind("ask_user") == "ask" and step_kind("done") == "end" and step_kind("answer") == "end"
+    assert step_kind("report_platform_fault") == "report"
+    assert step_kind("") == "other"
+
+
+def test_the_journal_narrates_the_build_to_the_office():
+    """The engineer's journal rows (Ecommerce1, forge-v3, 2026-10-10), as the
+    office hears them: the opening, the features counted, the proof, a fix
+    turn, the sweep, the whole-app check, the end."""
+    from services.office_events import JournalNarrator
+    out: list[dict] = []
+    n = JournalNarrator(out.append)
+    n({"event": "first:start", "nodes": ["install", "design_system", "decisions"]})
+    n({"event": "run:start", "features": ["MODULE-001", "MODULE-002"], "done_before": []})
+    n({"event": "feature:start", "feature": "MODULE-001", "name": "Storefront", "pages": ["PAGE-001"]})
+    n({"event": "fix:start", "feature": "MODULE-001", "round": 1, "statements": ["EXP-001", "EXP-002"]})
+    n({"event": "feature:done", "feature": "MODULE-001", "statements": 4, "passed": 4, "failing": [], "unbuilt": []})
+    n({"event": "feature:start", "feature": "MODULE-002", "name": "Account", "pages": ["PAGE-007"]})
+    n({"event": "feature:done", "feature": "MODULE-002", "statements": 0, "passed": 0, "failing": [],
+       "unbuilt": ["1 screen has no code and no layout: /account"]})
+    n({"event": "sweep:start", "nodes": ["workflow_steps", "assemble"]})
+    n({"event": "whole:unbuilt", "missing": ["1 process has no steps: Abandon Inactive Carts"]})
+    n({"event": "whole:done", "statements": 10, "passed": 10, "failing": []})
+    n({"event": "run:end", "statements": {}, "stopped": "", "state": "PREVIEW"})
+    stages = [(e["stage"], e["label"]) for e in out]
+    assert stages[0][0] == "opening" and "installing the toolchain" in stages[0][1]
+    assert stages[1] == ("build", "Building 2 features, each proven before the next")
+    assert out[2] == {"type": "pipeline_stage", "stage": "feature", "label": "Building Storefront", "feature": "MODULE-001",
+                      "name": "Storefront", "index": 1, "total": 2, "pages": ["PAGE-001"]}
+    assert stages[3][0] == "fix" and "Storefront: 2 statements not holding" in stages[3][1]
+    assert out[4]["stage"] == "proof" and out[4]["passed"] == 4 and out[4]["done"] is True
+    assert out[6]["stage"] == "stopped" and out[6]["label"].startswith("Account is not built: 1 screen has no code")
+    assert stages[7][0] == "sweep" and stages[8][0] == "whole" and "Not whole yet" in stages[8][1]
+    assert out[9] == {"type": "pipeline_stage", "stage": "whole", "label": "The whole application: 10 of 10 statements hold",
+                      "statements": 10, "passed": 10, "failing": []}
+    assert stages[10] == ("handover", "Built, tried and handed over")
+    n({"event": "run:end", "stopped": "the application is not whole: 1 process has no steps"})
+    assert out[-1]["stage"] == "stopped" and out[-1]["why"].startswith("the application is not whole")
+    n({"event": "first:failed", "why": "entity_fields:ENTITY-001: two logins"})
+    assert out[-1]["stage"] == "stopped" and "two logins" in out[-1]["label"]
+
+
+def test_the_journal_narrates_smiths_turn_to_the_office():
+    from services.office_events import JournalNarrator
+    out: list[dict] = []
+    n = JournalNarrator(out.append)
+    n({"event": "turn:start", "message": "Add to cart does nothing", "unattended": False})
+    n({"event": "turn:step", "tool": "open_page", "status": "read", "said": "the button sent nothing"})
+    n({"event": "turn:step", "tool": "edit_file", "status": "resolved", "said": "wired it"})
+    n({"event": "turn:end", "status": "resolved", "said": "Fixed and tried as the customer"})
+    assert out[0] == {"type": "smith_turn", "status": "start", "mode": "conversation", "text": "Add to cart does nothing"}
+    assert out[1] == {"type": "smith_step", "tool": "open_page", "kind": "try", "status": "read", "said": "the button sent nothing"}
+    assert out[2]["kind"] == "write"
+    assert out[3] == {"type": "smith_turn", "status": "end", "mode": "conversation",
+                      "text": "Fixed and tried as the customer", "outcome": "resolved"}
+    n({"event": "turn:start", "message": "While building Orders…", "unattended": True})
+    assert out[-1]["mode"] == "unattended"
+    assert n.translate({"event": "turn:nothing"}) == []
+
+
+def test_the_journal_reaches_the_office_through_the_bound_project(tmp_path, monkeypatch):
+    """`Journal.write` is the one call site: the row written down is the row
+    the floor animates, through whatever office the project is bound to."""
+    from services import office_bridge
+    from services.engineer.journal import Journal
+    shown: list[dict] = []
+    monkeypatch.setattr(office_bridge, "office_for", lambda od: shown.append)
+    j = Journal(tmp_path)
+    j.write("turn:start", message="hi", unattended=False)
+    j.write("feature:start", feature="MODULE-001", name="Menu", pages=[])
+    assert [e["type"] for e in shown] == ["smith_turn", "pipeline_stage"]
+    monkeypatch.setattr(office_bridge, "office_for", lambda od: None)
+    Journal(tmp_path / "other").write("turn:start", message="nobody watching")
+    assert len(shown) == 2

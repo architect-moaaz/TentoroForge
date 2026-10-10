@@ -1202,6 +1202,26 @@ def warm(app: Any, doc: dict) -> None:
             pass
 
 
+def _office(project_dir: Path) -> Callable[..., None]:
+    """What this project's office is shown, or nothing when none is bound."""
+    try:
+        from services.office_bridge import office_for
+        from services.office_events import trial_event
+        emit = office_for(project_dir)
+    except Exception:  # noqa: BLE001
+        return lambda *a: None
+    if emit is None:
+        return lambda *a: None
+
+    def show(kind: str, *args: str) -> None:
+        try:
+            if kind == "trial":
+                emit(trial_event(*args))
+        except Exception:  # noqa: BLE001 — a picture never breaks a trial
+            pass
+    return show
+
+
 def run(app: Any, doc: dict, project_dir: Path, *, only: list[str] | None = None,
         emit: Callable[[dict], None] | None = None, restore: bool = False) -> dict:
     """Every statement (or `only` those ids) tried on the running copy. With
@@ -1215,14 +1235,22 @@ def run(app: Any, doc: dict, project_dir: Path, *, only: list[str] | None = None
     warm(app, doc)
     recipes = resolve.Recipes(project_dir / ".forge" / "expects" / "recipes.json")
     results: list[dict] = []
+    # THE WORKBENCH ON SCREEN: each statement as it is tried, as the person
+    # it is about, and what it found (`office_events.trial_event`).
+    show = _office(project_dir)
     try:
         sessions: dict = {}
         with Browser(project_dir / ".forge" / "expects" / "browser") as b:
             for n, st in enumerate(rows):
                 if n:
                     fresh.reset()
+                who = next((str(s.get("as") or "") for s in st.get("steps") or [] if isinstance(s, dict)
+                            and s.get("as")), "")
+                show("trial", str(st.get("id") or ""), str(st.get("says") or ""), "trying", who)
                 res = Trial(app, doc, b, recipes, Logins(app, doc), sessions).run(st)
                 results.append(res)
+                show("trial", str(res.get("id") or st.get("id") or ""), str(st.get("says") or ""),
+                     str(res.get("verdict") or "not_tried"), who)
                 if emit:
                     emit(res)
         if restore and rows:

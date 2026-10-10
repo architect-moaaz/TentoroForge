@@ -2523,6 +2523,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     plan = [k for k in plan if k not in already]
 
     emit("plan", _plan_event(plan, already, phase != "build"))
+    _show_stage(output_dir, phase, plan)
 
     usage = RunUsage.for_app(svc)
     router = tiered_router()
@@ -2636,6 +2637,23 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     return {"awaitingApproval": phase != "build", "forecast": counts,
             "state": state, "phase": phase,
             "report": _report_payload(report, svc.doc)}
+
+
+def _show_stage(output_dir: str, phase: str, plan: list[str]) -> None:
+    """The office's pipeline strip, for the two phases before the engineer's
+    journal narrates (`office_events.JournalNarrator`): the definition and
+    the product model. Nothing when no office is bound; never fatal."""
+    try:
+        from services.office_bridge import office_for
+        from services.office_events import pipeline_stage_event
+        show = office_for(output_dir)
+        if show is None or phase not in ("define", "model"):
+            return
+        label = ("Writing down what the application is for" if phase == "define"
+                 else "Working out what the application is made of")
+        show(pipeline_stage_event(phase, label, nodes=list(plan)))
+    except Exception:  # noqa: BLE001 — a picture never breaks a build
+        logger.debug("[blueprint] could not show the %s stage", phase, exc_info=True)
 
 
 def _carry_approvals(svc: Any, why: str) -> None:

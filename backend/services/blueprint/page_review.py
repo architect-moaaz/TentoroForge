@@ -298,10 +298,13 @@ class RunningApp:
         # platform cannot establish is its fault, said as such, never a
         # review of the app (TStyle, forge-v3, 2026-10-09).
         from services import app_databases, workbench
+        self._light("apps_db", "busy", "preparing the app's database and seed")
         try:
             ready = workbench.prepare(self.root)
         except workbench.PlatformFault as exc:
+            self._light("apps_db", "off", str(exc))
             raise ReviewUnavailable(str(exc)) from exc
+        self._light("apps_db", "on", "tables and logins in place")
         self.started_db = bool((ready.get("seeded") or {}).get("started"))
         if app_databases.server():
             # NO DOCKER IN THE PLATFORM'S CONTAINER (forge-v3): the app's
@@ -340,6 +343,7 @@ class RunningApp:
                        # variable the process already carries.
                        "FORGE_PROJECT_ID": ""})
         if self.mode == "production":
+            self._light("workbench", "busy", "building the app as it ships")
             why = production_build(self.root, self.dist_dir, env=env, sink=sink)
             if why:
                 self.__exit__(None, None, None)
@@ -347,6 +351,7 @@ class RunningApp:
             cmd = ["npx", "next", "start", "--port", str(self.port)]
         else:
             cmd = ["npx", "next", "dev", "--port", str(self.port)]
+        self._light("workbench", "busy", "starting the app")
         self.proc = subprocess.Popen(
             cmd, cwd=self.root,
             stdout=sink, stderr=subprocess.STDOUT if self.log is not None else subprocess.DEVNULL,
@@ -374,7 +379,21 @@ class RunningApp:
         except workbench.PlatformFault as exc:
             self.__exit__(None, None, None)
             raise ReviewUnavailable(str(exc)) from exc
+        self._light("workbench", "on", "served and signed in")
         return self
+
+    def _light(self, engine: str, state: str, detail: str = "") -> None:
+        """THE ENGINES ON SCREEN: the bench and the database light up while
+        this app is prepared, built, served and tried (`office_events`).
+        Nothing when no office is bound to this project; never fatal."""
+        try:
+            from services.office_bridge import office_for
+            from services.office_events import engine_event
+            show = office_for(self.root.parent)
+            if show is not None:
+                show(engine_event(engine, state, detail))
+        except Exception:  # noqa: BLE001 — a picture never breaks a review
+            pass
 
     def __exit__(self, *exc: Any) -> None:
         try:
@@ -387,6 +406,7 @@ class RunningApp:
 
     def _stop(self) -> None:
         if self.proc is not None:
+            self._light("workbench", "off")
             from services import dev_servers
             dev_servers.forget(self.proc.pid)
             for sig in (signal.SIGTERM, signal.SIGKILL):

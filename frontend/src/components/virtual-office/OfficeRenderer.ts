@@ -17,7 +17,7 @@ import {
 } from "./utils/animation";
 import { useOfficeStore, type OfficeStore, type Delivery } from "./OfficeStateManager";
 import type { Camera, AgentCharacterState, Position, Room } from "./types";
-import { AGENT_REGISTRY, AGENT_BY_ID } from "./types";
+import { AGENT_REGISTRY, AGENT_BY_ID, ENGINE_BY_ID } from "./types";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -91,6 +91,8 @@ export class OfficeRenderer {
   private lastTally: Map<string, number> = new Map();
   /** Desk stamps still fading, as `agentId -> ms remaining`. */
   private stamps: Map<string, number> = new Map();
+  /** Canvas pixels the HUD covers at the top; the office is fitted under it. */
+  private topInset = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -103,12 +105,29 @@ export class OfficeRenderer {
 
   // ── Lifecycle ───────────────────────────────────────────────────────────
 
+  /** Tell the renderer how much of the canvas's top the HUD covers, so the
+   *  whole office fits below it rather than its first row under it. */
+  setTopInset(px: number): void {
+    this.topInset = Math.max(0, px);
+  }
+
+  /** Fit the whole office in the canvas, below the HUD. */
+  fitAll(): void {
+    const zoom = fitZoom(OFFICE_LAYOUT, this.canvas.width, this.canvas.height - this.topInset);
+    const ts = OFFICE_LAYOUT.tileSize;
+    const cx = (OFFICE_LAYOUT.width * ts) / 2;
+    // The canvas centre is `inset / 2` below the visible region's centre, so
+    // the office's centre goes that much above it, in world pixels.
+    const cy = (OFFICE_LAYOUT.height * ts) / 2 - this.topInset / 2 / zoom;
+    this.camera.x = this.camera.targetX = cx;
+    this.camera.y = this.camera.targetY = cy;
+    this.camera.zoom = this.camera.targetZoom = zoom;
+  }
+
   start(): void {
     if (this.animationId !== null) return;
-    // Set initial zoom to fit the entire office
-    const zoom = fitZoom(OFFICE_LAYOUT, this.canvas.width, this.canvas.height);
-    this.camera.zoom = zoom;
-    this.camera.targetZoom = zoom;
+    // Set initial zoom to fit the entire office, under the HUD
+    this.fitAll();
     this.lastTimestamp = performance.now();
     this.animationId = requestAnimationFrame((ts) => this.loop(ts));
   }
@@ -138,6 +157,13 @@ export class OfficeRenderer {
 
     this.updateParcels(dt, store);
     this.updateStamps(dt, store);
+
+    // A room clicked on the floor plan: look at it, a little closer.
+    const focus = store.takeFocus();
+    if (focus) {
+      const ts = OFFICE_LAYOUT.tileSize;
+      this.setCameraTarget(focus.x * ts, focus.y * ts, Math.max(this.camera.targetZoom, 1.1));
+    }
 
     // Update camera – follow selected agent if any
     if (store.selectedAgent) {
@@ -176,10 +202,12 @@ export class OfficeRenderer {
     this.drawActiveRoomHighlights(timestamp, store);
     this.drawWalls();
     this.drawFurniture();
+    this.drawMachines(timestamp, store);
     this.drawCharacters(timestamp, store);
     this.drawParcels(timestamp);
     this.drawRoomLabels(store);
     this.drawSpeechBubbles(timestamp, store);
+    this.drawBenchBubble(timestamp, store);
     // Badges last. They sit above the head, which is also where the speech
     // bubble goes — drawn with the characters, a blocked agent's padlock ended
     // up behind the very bubble explaining why it was blocked.
@@ -386,6 +414,170 @@ export class OfficeRenderer {
         }
       }
     }
+  }
+
+  // ── Machines ──────────────────────────────────────────────────────────
+  //
+  // The engines are not people: a cabinet two tiles tall with the engine's
+  // name on it and one light — off, steady while it serves, pulsing while it
+  // works. The Workbench is the crane: the rig that picks the app up, starts
+  // it and tries every statement on it.
+
+  private drawMachines(timestamp: number, store: OfficeStore): void {
+    const { ctx } = this;
+    const ts = OFFICE_LAYOUT.tileSize;
+    for (const room of OFFICE_LAYOUT.rooms) {
+      for (const m of room.machines) {
+        const info = ENGINE_BY_ID[m.engine];
+        if (!info) continue;
+        const px = (room.x + m.x) * ts;
+        const py = (room.y + m.y) * ts;
+        const light = store.engines.get(m.engine);
+        const hovered = store.hoveredEngine === m.engine;
+        if (info.kind === "bench") {
+          this.drawBench(px, py, ts, info.color, light?.state ?? "off", timestamp, hovered);
+        } else {
+          this.drawCabinet(px, py, ts, info, light?.state ?? "off", timestamp, hovered);
+        }
+      }
+    }
+  }
+
+  private lightColor(state: "busy" | "on" | "off", timestamp: number): string {
+    if (state === "busy") {
+      const pulse = 0.55 + 0.45 * Math.sin(timestamp / 160);
+      return `rgba(245, 158, 11, ${pulse.toFixed(2)})`;
+    }
+    return state === "on" ? "#22c55e" : "#334155";
+  }
+
+  private drawCabinet(px: number, py: number, ts: number, info: { label: string; color: string; kind: string },
+                      state: "busy" | "on" | "off", timestamp: number, hovered: boolean): void {
+    const { ctx } = this;
+    const w = ts - 6;
+    const h = ts * 2 - 8;
+    const x = px + 3;
+    const y = py + 4;
+    ctx.save();
+    if (hovered || state !== "off") {
+      ctx.shadowColor = state === "off" ? "rgba(255,255,255,0.35)" : this.colorWithAlpha(info.color, 0.8);
+      ctx.shadowBlur = hovered ? 14 : 8;
+    }
+    // Body
+    ctx.fillStyle = "#1e293b";
+    this.roundRect(x, y, w, h, 4);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = hovered ? "#e2e8f0" : "#475569";
+    ctx.lineWidth = hovered ? 1.5 : 1;
+    this.roundRect(x, y, w, h, 4);
+    ctx.stroke();
+    // Colour band naming the engine
+    ctx.fillStyle = info.color;
+    ctx.fillRect(x + 3, y + 3, w - 6, 5);
+    // Units with a light each, the top one the engine's own
+    for (let i = 0; i < 4; i++) {
+      const uy = y + 12 + i * ((h - 16) / 4);
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(x + 4, uy, w - 8, (h - 16) / 4 - 3);
+      ctx.fillStyle = i === 0 ? this.lightColor(state, timestamp) : (state === "off" ? "#1e293b" : "#164e63");
+      ctx.beginPath();
+      ctx.arc(x + w - 9, uy + ((h - 16) / 4 - 3) / 2, 2.6, 0, Math.PI * 2);
+      ctx.fill();
+      if (state === "busy" && i > 0) {
+        // Activity bars that move while it works
+        const n = 3 + Math.floor(((timestamp / 180) + i * 2) % 4);
+        ctx.fillStyle = this.colorWithAlpha(info.color, 0.7);
+        for (let k = 0; k < n; k++) ctx.fillRect(x + 7 + k * 5, uy + 3, 3, 2);
+      }
+    }
+    // Name under the cabinet
+    ctx.font = "bold 8px 'Inter', 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "#e2e8f0";
+    const lines = info.label.split(" ");
+    lines.forEach((word, i) => ctx.fillText(word, x + w / 2, y + h + 2 + i * 9));
+    ctx.restore();
+  }
+
+  private drawBench(px: number, py: number, ts: number, color: string, state: "busy" | "on" | "off",
+                    timestamp: number, hovered: boolean): void {
+    const { ctx } = this;
+    const sprite = getSprite("characters_idle_auth_agent") ?? getSprite("characters_working_auth_agent");
+    const size = ts * 2;
+    ctx.save();
+    if (hovered || state !== "off") {
+      ctx.shadowColor = state === "off" ? "rgba(255,255,255,0.35)" : this.colorWithAlpha(color, 0.9);
+      ctx.shadowBlur = hovered ? 16 : 10;
+    }
+    if (sprite) {
+      const bob = state === "busy" ? Math.sin(timestamp / 220) * 2 : 0;
+      ctx.drawImage(sprite, px, py - 6 + bob, size, size);
+    } else {
+      // A rig: two posts, a beam, a hook, and the app's crate under it.
+      ctx.fillStyle = "#0f766e";
+      ctx.fillRect(px + 6, py + 4, 8, size - 10);
+      ctx.fillRect(px + size - 14, py + 4, 8, size - 10);
+      ctx.fillRect(px + 6, py + 4, size - 12, 8);
+      ctx.fillStyle = "#f59e0b";
+      ctx.fillRect(px + size / 2 - 10, py + size / 2, 20, 16);
+    }
+    ctx.shadowBlur = 0;
+    // The bench light
+    ctx.fillStyle = this.lightColor(state, timestamp);
+    ctx.beginPath();
+    ctx.arc(px + size - 8, py + 2, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = "bold 9px 'Inter', 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "#e2e8f0";
+    ctx.fillText("Workbench", px + size / 2, py + size - 4);
+    ctx.restore();
+  }
+
+  /** What the bench says — a statement being tried, and what it found. */
+  private drawBenchBubble(timestamp: number, store: OfficeStore): void {
+    const says = store.benchSays;
+    if (!says) return;
+    const age = Date.now() - says.at;
+    if (age > SPEECH_BUBBLE_DURATION + SPEECH_BUBBLE_FADE) return;
+    const room = OFFICE_LAYOUT.rooms.find((r) => r.id === "workbench");
+    const m = room?.machines.find((x) => x.engine === "workbench");
+    if (!room || !m) return;
+    const ts = OFFICE_LAYOUT.tileSize;
+    const cx = (room.x + m.x + 1) * ts;
+    const top = (room.y + m.y) * ts - 10;
+    const alpha = age > SPEECH_BUBBLE_DURATION ? 1 - (age - SPEECH_BUBBLE_DURATION) / SPEECH_BUBBLE_FADE : 1;
+    const { ctx } = this;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+    ctx.font = SPEECH_FONT;
+    const lines = this.wrapText(says.text, SPEECH_MAX_WIDTH);
+    const lineH = 13;
+    const bw = Math.min(SPEECH_MAX_WIDTH, Math.max(...lines.map((l) => ctx.measureText(l).width))) + SPEECH_PADDING * 2;
+    const bh = lines.length * lineH + SPEECH_PADDING * 2;
+    const bx = cx - bw / 2;
+    const by = top - bh - SPEECH_POINTER_SIZE;
+    ctx.fillStyle = says.type === "error" ? "#fee2e2" : says.type === "success" ? "#dcfce7" : "#ffffff";
+    ctx.strokeStyle = says.type === "error" ? "#ef4444" : says.type === "success" ? "#22c55e" : "#94a3b8";
+    ctx.lineWidth = 1;
+    this.roundRect(bx, by, bw, bh, SPEECH_RADIUS);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - SPEECH_POINTER_SIZE, by + bh);
+    ctx.lineTo(cx, by + bh + SPEECH_POINTER_SIZE);
+    ctx.lineTo(cx + SPEECH_POINTER_SIZE, by + bh);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#0f172a";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    lines.forEach((l, i) => ctx.fillText(l, bx + SPEECH_PADDING, by + SPEECH_PADDING + i * lineH));
+    ctx.restore();
   }
 
   // ── Characters ────────────────────────────────────────────────────────
@@ -1315,10 +1507,8 @@ export class OfficeRenderer {
     this.canvas.width = width;
     this.canvas.height = height;
     this.ctx.imageSmoothingEnabled = false;
-    // Auto-fit the office into the new canvas size
-    const zoom = fitZoom(OFFICE_LAYOUT, width, height);
-    this.camera.zoom = zoom;
-    this.camera.targetZoom = zoom;
+    // Auto-fit the office into the new canvas size, under the HUD
+    this.fitAll();
   }
 
   getCamera(): Camera {
