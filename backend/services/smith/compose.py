@@ -948,30 +948,35 @@ def recode_page(svc: Any, route: str, *, app_root: str, request: str,
             return {"applied": False, "committed": [], "version": int(svc.doc.get("version") or 0),
                     "reason": "the page writer left the code as it was" + (f": {why}" if why else ""),
                     "missing": []}
-        before = svc.snapshot()
-        committed: list[str] = []
-        steps = [("analytics", list(widgets))] if widgets else []
-        steps.append(("ui_engineer", [ArtifactProposal(section="pageCode", natural_key=str(page["id"]), body=body)]))
-        for agent, proposals in steps:
-            application = apply_agent_result(svc, AgentResult(
-                task_id=f"TASK-smith-recode-{page['id']}-{agent}", agent=agent,
-                proposals=proposals, confidence=1.0), commit=False)
-            if not application.applied:
-                svc.doc = before
-                svc.save()
-                return {"applied": False, "committed": [], "version": int(svc.doc.get("version") or 0),
-                        "reason": application.reason or "the change was refused", "missing": []}
-            committed += list(application.artifacts or [])
-        record = svc.commit(
-            user_request=request or f"change {route}",
-            smith_interpretation=(f"rewrite {route}" + (
-                f", adding {', '.join(str(w.body.get('label')) for w in widgets)}" if widgets else "")),
-            before=before, affected=sorted(set(committed) | {str(page["id"])}))
-        version = int(record["version"])
+        # ONE RECODE WRITES THE DOCUMENT AT A TIME. The compose above ran
+        # free; the give-back rewrites several screens at once (2026-10-11).
+        with svc.lock:
+            before = svc.snapshot()
+            committed: list[str] = []
+            steps = [("analytics", list(widgets))] if widgets else []
+            steps.append(("ui_engineer", [ArtifactProposal(section="pageCode", natural_key=str(page["id"]), body=body)]))
+            for agent, proposals in steps:
+                application = apply_agent_result(svc, AgentResult(
+                    task_id=f"TASK-smith-recode-{page['id']}-{agent}", agent=agent,
+                    proposals=proposals, confidence=1.0), commit=False)
+                if not application.applied:
+                    svc.doc = before
+                    svc.save()
+                    return {"applied": False, "committed": [], "version": int(svc.doc.get("version") or 0),
+                            "reason": application.reason or "the change was refused", "missing": []}
+                committed += list(application.artifacts or [])
+            record = svc.commit(
+                user_request=request or f"change {route}",
+                smith_interpretation=(f"rewrite {route}" + (
+                    f", adding {', '.join(str(w.body.get('label')) for w in widgets)}" if widgets else "")),
+                before=before, affected=sorted(set(committed) | {str(page["id"])}))
+            version = int(record["version"])
     finally:
         # The SDK as the document has it, whichever way this went.
-        ensure_sdk(svc.doc, root)
-    project_code_pages(svc.doc, root)
+        with svc.lock:
+            ensure_sdk(svc.doc, root)
+    with svc.lock:
+        project_code_pages(svc.doc, root)
     # SHOWN MEANS DRAWN: a new widget counts when the new view reads it.
     keys = widget_keys(svc.doc)
     view = str(body.get("view") or "")

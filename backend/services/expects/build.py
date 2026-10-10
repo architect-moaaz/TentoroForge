@@ -296,18 +296,36 @@ def _prove(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] | Non
         if not parts:
             break
         sent_back: list[str] = []
-        for (node, subject), items in parts.items():
+
+        def send(node: str, subject: str, items: list) -> tuple[list[str], list[str]]:
             names = "; ".join(f"\"{st.get('says')}\"" for st, _r in items[:3])
             say("message", {"text": f"Not holding yet: {names}. Sending it back to whoever wrote "
                                     f"{'that process' if node == 'workflow_steps' else 'that screen'}"
                                     + (" again, with what it showed after the change." if attempt == 2 else ".")})
             try:
-                touched += [t for t in author(svc, output_dir, node, subject,
-                                              author_brief(svc.doc, items, node, subject)) if t not in touched]
-                sent_back += [str(r.get("id")) for _st, r in items]
+                return (list(author(svc, output_dir, node, subject, author_brief(svc.doc, items, node, subject))),
+                        [str(r.get("id")) for _st, r in items])
             except Exception as exc:  # noqa: BLE001 — one author never ends the build
                 logger.warning("[expects] %s %s: %s", node, subject, exc)
-            _reload(svc, output_dir)
+                return [], []
+
+        # EVERY SCREEN AT ONCE, EACH PROCESS IN TURN. Six screens rewritten
+        # one after another, each with its look, were half an hour for one
+        # feature (Ecom L1, 2026-10-11); screens are independent files, and
+        # a process's rerun re-projects the app, which is one at a time.
+        from concurrent.futures import ThreadPoolExecutor
+        pages = [(k, v) for k, v in parts.items() if k[0] == "page_code"]
+        others = [(k, v) for k, v in parts.items() if k[0] != "page_code"]
+        outcomes: list[tuple[list[str], list[str]]] = []
+        if pages:
+            with ThreadPoolExecutor(max_workers=min(6, len(pages)), thread_name_prefix="forge-give-back") as pool:
+                outcomes += list(pool.map(lambda kv: send(kv[0][0], kv[0][1], kv[1]), pages))
+        for (node, subject), items in others:
+            outcomes.append(send(node, subject, items))
+        for changed, ids in outcomes:
+            touched += [t for t in changed if t not in touched]
+            sent_back += ids
+        _reload(svc, output_dir)
         still: list[dict] = []
         for res in tried(sent_back) if sent_back else []:
             sid = str(res.get("id"))
