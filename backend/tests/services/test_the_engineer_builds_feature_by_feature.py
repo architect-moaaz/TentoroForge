@@ -579,3 +579,15 @@ def test_a_second_login_entity_sends_the_declaration_back_to_its_author(tmp_path
     assert scope.brief("entity_fields", "ENTITY-001") == ""
     nodes, scope = first_nodes(["entity_fields"], {"data": {"entities": [{"id": "E1", "name": "Customer", "account": True}]}})
     assert nodes == ["entity_fields"] and scope is None
+
+
+def test_the_statements_are_written_after_the_landing_not_before_it(svc):
+    """Ecom L1 (2026-10-11): the statements writer stood in front of every
+    page and retried at its output cap for twenty minutes; nothing was laid
+    out meanwhile."""
+    from services.engineer.build import AFTER_LANDING, build_nodes, first_nodes
+    once, per, last = build_nodes()
+    assert "expectations" in once and "expectations" not in per
+    nodes, _ = first_nodes(["workflow_steps", "expectations", "page_code", "memory"], svc.doc)
+    assert "workflow_steps" in nodes and "expectations" not in nodes
+    assert AFTER_LANDING == ("expectations",)

@@ -109,6 +109,14 @@ PER_FEATURE: tuple[str, ...] = ("page_layouts", "backend", "page_code", "fronten
 #: What runs after the landing and the proofs: what the build remembers and
 #: the check of the definition against itself.
 LAST: tuple[str, ...] = ("memory", "verification")
+#: Written AFTER the landing and before the proofs: the statements of what
+#: must happen are tried against screens, so no screen waits on them. In
+#: the opening they stood in front of every page: Ecom L1's 62 processes
+#: made the statements writer the slowest definition call, it retried at
+#: its output cap for twenty minutes, and nothing was laid out meanwhile
+#: (2026-10-11). The old graph composed pages beside the workflows, and a
+#: tester saw screens while the rest limped; the engineer does again.
+AFTER_LANDING: tuple[str, ...] = ("expectations",)
 #: A feature node that writes once for the whole application and is not
 #: written again for the next feature: the section it writes, once present.
 ONCE_WRITTEN: dict[str, str] = {"ui_direction": "composition"}
@@ -186,7 +194,8 @@ def first_nodes(plan: list[str], doc: Mapping[str, Any] | None = None) -> tuple[
             f"{' and '.join(accounts)} are each marked `account: true`, and exactly one entity is the person "
             f"behind a login. Keep it on the one people sign up as; make the other a record linked to it "
             f"(a `userId` reference to that entity) or a role of it. Keep every other entity as declared.")
-    return [k for lvl in levels() for k in lvl if k in asked and k not in per and k not in last], scope
+    return [k for lvl in levels() for k in lvl
+            if k in asked and k not in per and k not in last and k not in AFTER_LANDING], scope
 
 
 def incomplete_nodes(doc: Mapping[str, Any], output_dir: str) -> list[str]:
@@ -352,6 +361,19 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
                                                 journal, say, executor=executor, description=description,
                                                 observer=observer, observer_agent=observer_agent, scope=None)
                 journal.write("land:done", failed=unfinished)
+
+        # THE STATEMENTS, ONCE THE SCREENS ARE THERE: written now, tried
+        # feature by feature below. A group the writer cannot finish leaves
+        # its feature untried, not unbuilt (the node is optional).
+        statements = [k for k in AFTER_LANDING if k in plan]
+        if statements and not stopped:
+            journal.write("statements:start", nodes=statements)
+            say("message", {"text": "Writing down what must happen, to try the application against."})
+            wrote = run(svc, executor, plan=statements, commit=True, user_request=description,
+                        app_root=app_root, observer=observer, observer_agent=observer_agent)
+            reports.append(wrote)
+            _reload(svc, output_dir)
+            journal.write("statements:done", failed=list(getattr(wrote, "failed", None) or []))
 
         # PROVEN FEATURE BY FEATURE, in order of dependence: each tried as
         # the people it is for, fixed where it fails, before the next.
