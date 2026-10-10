@@ -575,3 +575,88 @@ def test_the_bell_is_not_touched_when_no_agent_hands_over(tmp_path):
     bell.write_text(STOCK_BELL, encoding="utf-8")
     install_agent_runtime(project, graphs=[sample_graph()])
     assert bell.read_text(encoding="utf-8") == STOCK_BELL
+
+
+# ---------------------------------------------------------------------------
+# safety: changes are held until the person agrees; each person has limits
+# ---------------------------------------------------------------------------
+
+def compiled_tool(**cfg) -> tuple[dict, list[str]]:
+    c = compile_agent(graph(node("sp", "system_prompt", "P", {"prompt": "x"}), tool("t", "do_it", **cfg)))
+    return c.config["tools"][0], c.warnings
+
+
+@pytest.mark.parametrize("cfg", [
+    {"tool_type": "data_engine", "entity": "tickets", "operation": "create"},
+    {"tool_type": "data_engine", "entity": "tickets", "operation": "update"},
+    {"tool_type": "data_engine", "entity": "tickets", "operation": "delete"},
+    {"tool_type": "workflow", "workflow_id": "assign_ticket"},
+    {"tool_type": "api_call", "endpoint": "/api/tickets/close", "method": "POST"},
+    {"tool_type": "api_call", "endpoint": "/api/tickets/1", "method": "delete"},
+])
+def test_a_tool_that_changes_data_is_held_until_the_person_agrees(cfg):
+    t, _ = compiled_tool(**cfg)
+    assert t["confirm"] is True
+
+
+@pytest.mark.parametrize("cfg", [
+    {"tool_type": "data_engine", "entity": "tickets", "operation": "list"},
+    {"tool_type": "data_engine", "entity": "tickets", "operation": "get"},
+    {"tool_type": "api_call", "endpoint": "/api/tickets", "method": "GET"},
+    {"tool_type": "function", "code": "return { ok: true };"},
+])
+def test_a_read_is_never_held(cfg):
+    t, _ = compiled_tool(**cfg)
+    assert "confirm" not in t
+
+
+def test_the_builder_can_switch_it_on_for_a_tool_the_compiler_cannot_judge():
+    t, _ = compiled_tool(tool_type="function", code="return 1;", confirm=True)
+    assert t["confirm"] is True
+
+
+def test_switching_it_off_for_a_write_is_allowed_and_said():
+    t, warnings = compiled_tool(tool_type="data_engine", entity="tickets", operation="update", confirm=False)
+    assert "confirm" not in t
+    assert any("without asking the person first" in w and "do_it" in w for w in warnings)
+
+
+def test_switching_it_off_for_a_read_says_nothing():
+    _, warnings = compiled_tool(tool_type="data_engine", entity="tickets", operation="list", confirm=False)
+    assert not any("without asking" in w for w in warnings)
+
+
+def test_the_check_names_a_write_that_runs_without_asking():
+    from services.agent_check import check_agent
+
+    g = graph(node("sp", "system_prompt", "P", {"prompt": "x"}),
+              tool("t", "close_ticket", tool_type="data_engine", entity="tickets", operation="update", confirm=False))
+    f = [x for x in check_agent(g)["findings"] if x["code"] == "writes_without_asking"]
+    assert len(f) == 1 and f[0]["severity"] == "warning" and f[0]["nodeId"] == "t"
+
+
+def test_usage_limits_come_from_the_guardrail_box_and_only_what_is_set():
+    sp = node("sp", "system_prompt", "P", {"prompt": "x"})
+    none = compile_agent(graph(sp)).config["guardrails"]
+    assert "limits" not in none  # the runtime's defaults apply
+    some = compile_agent(graph(sp, node("g", "guardrail", "G", {"max_messages_per_minute": 5, "max_tokens_per_day": 0}))).config["guardrails"]
+    assert some["limits"] == {"perMinute": 5, "tokensPerDay": 0}
+    junk = compile_agent(graph(sp, node("g", "guardrail", "G", {"max_messages_per_hour": -1, "max_tokens_per_day": "lots", "max_messages_per_minute": True}))).config["guardrails"]
+    assert "limits" not in junk
+
+
+def test_the_install_brings_the_safety_files_and_the_usage_table(tmp_path):
+    project, app = make_app(tmp_path)
+    install_agent_runtime(project, graphs=[sample_graph()])
+    for f in ("confirm.ts", "limits.ts", "usage-store.ts"):
+        assert (app / "src" / "lib" / "agents" / f).is_file()
+    assert (app / "src" / "db" / "schema" / "_forge_agent_usage.ts").is_file()
+    assert "forgeAgentUsage" in (app / "src" / "db" / "schema" / "index.ts").read_text()
+
+
+def test_an_assistant_that_has_changing_tools_is_told_the_app_asks_so_it_does_not_ask_twice():
+    sp = node("sp", "system_prompt", "P", {"prompt": "You help."})
+    with_write = compile_agent(graph(sp, tool("t", "close", tool_type="data_engine", entity="tickets", operation="update")))
+    assert "confirmed by the app" in with_write.config["systemPrompt"] and "same input" in with_write.config["systemPrompt"]
+    reads_only = compile_agent(graph(sp, tool("t", "look", tool_type="data_engine", entity="tickets", operation="list")))
+    assert "confirmed by the app" not in reads_only.config["systemPrompt"]

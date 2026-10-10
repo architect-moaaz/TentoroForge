@@ -19,6 +19,13 @@ interface GuardrailEditorProps {
   onUpdate: (config: Partial<GuardrailConfig>) => void;
 }
 
+/** The usual limits (the same as the app's runtime defaults). */
+const LIMITS: Array<{ key: "max_messages_per_minute" | "max_messages_per_hour" | "max_tokens_per_day"; label: string; fallback: number }> = [
+  { key: "max_messages_per_minute", label: "messages a minute", fallback: 12 },
+  { key: "max_messages_per_hour", label: "messages an hour", fallback: 100 },
+  { key: "max_tokens_per_day", label: "model tokens a day", fallback: 500000 },
+];
+
 export function GuardrailEditor({ config, onUpdate }: GuardrailEditorProps) {
   const addRule = () => {
     const rules = config.rules || [];
@@ -116,6 +123,32 @@ export function GuardrailEditor({ config, onUpdate }: GuardrailEditorProps) {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* How much one person may use the assistant, so a loop or a script cannot run up the bill. */}
+      <div className="space-y-1.5 rounded border p-2" data-testid="usage-limits">
+        <Label className="text-xs">Usage limits (per person)</Label>
+        {LIMITS.map((l) => (
+          <div key={l.key} className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={0}
+              className="h-7 w-24 text-[10px]"
+              aria-label={l.label}
+              placeholder={String(l.fallback)}
+              value={config[l.key] ?? ""}
+              onChange={(e) => {
+                const raw = e.target.value.trim();
+                const n = Number(raw);
+                onUpdate({ [l.key]: raw === "" || !Number.isFinite(n) || n < 0 ? undefined : Math.floor(n) } as Partial<GuardrailConfig>);
+              }}
+            />
+            <span className="text-[10px] text-muted-foreground">{l.label}</span>
+          </div>
+        ))}
+        <p className="text-[10px] text-muted-foreground">
+          Empty uses the usual limit shown in grey; 0 means no limit. Past a limit the person is told to wait, and nothing is spent.
+        </p>
       </div>
 
       <div>

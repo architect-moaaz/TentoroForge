@@ -3,8 +3,8 @@
  */
 import { db } from "@/db";
 import { forgeAgentConversations, forgeAgentMessages } from "@/db/schema/_forge_agent";
-import { and, asc, eq, inArray } from "drizzle-orm";
-import type { ConversationStore, StoredMessage } from "./types";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import type { ConfirmState, ConversationStore, StoredMessage } from "./types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -58,6 +58,23 @@ export const drizzleStore: ConversationStore = {
     await db
       .update(forgeAgentConversations)
       .set({ updatedAt: new Date() })
+      .where(eq(forgeAgentConversations.id, conversationId));
+  },
+
+  async getState(conversationId): Promise<ConfirmState> {
+    const rows = await db
+      .select({ metadata: forgeAgentConversations.metadata })
+      .from(forgeAgentConversations)
+      .where(eq(forgeAgentConversations.id, conversationId))
+      .limit(1);
+    const c = (rows[0]?.metadata as { confirm?: Partial<ConfirmState> } | null)?.confirm;
+    return { turn: Number(c?.turn) || 0, holds: Array.isArray(c?.holds) ? c.holds : [] };
+  },
+
+  async setState(conversationId, state) {
+    await db
+      .update(forgeAgentConversations)
+      .set({ metadata: sql`coalesce(${forgeAgentConversations.metadata}, '{}'::jsonb) || ${JSON.stringify({ confirm: state })}::jsonb` })
       .where(eq(forgeAgentConversations.id, conversationId));
   },
 

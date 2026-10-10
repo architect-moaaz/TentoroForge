@@ -19,7 +19,7 @@ type Ui = {
   position: "bottom-right" | "bottom-left" | "full-page";
 };
 type AgentInfo = { id: string; name: string; description: string | null; ui: Ui };
-type ToolNote = { id: string; tool: string; state: "running" | "ok" | "failed" };
+type ToolNote = { id: string; tool: string; state: "running" | "ok" | "failed" | "held" };
 /** "human" is a person on the team who has taken the conversation over. */
 type Msg = { role: "user" | "assistant" | "human"; content: string; tools?: ToolNote[]; notice?: string };
 /** The conversation is with a person: where it stands, as the person who asked sees it. */
@@ -46,7 +46,7 @@ const label = (tool: string) => tool.replace(/[_-]+/g, " ");
 type SavedMessage = {
   role: "user" | "assistant" | "human";
   content: string;
-  toolCalls?: Array<{ name: string; error?: string | null }> | null;
+  toolCalls?: Array<{ name: string; error?: string | null; result?: { held?: boolean } | null }> | null;
 };
 
 /** A saved turn as the chat draws it: the words, and a chip for each tool it used. */
@@ -57,7 +57,7 @@ function fromSaved(m: SavedMessage, i: number): Msg {
     tools: (m.toolCalls ?? []).map((t, k) => ({
       id: `saved-${i}-${k}`,
       tool: t.name,
-      state: t.error ? ("failed" as const) : ("ok" as const),
+      state: t.error ? ("failed" as const) : t.result?.held ? ("held" as const) : ("ok" as const),
     })),
   };
 }
@@ -351,7 +351,9 @@ export function ChatWidget({
             if (e.ok && e.tool === "request_human") handedOver = true;
             patchLast((m) => ({
               ...m,
-              tools: (m.tools ?? []).map((t) => (t.id === e.id ? { ...t, state: e.ok ? "ok" : "failed" } : t)),
+              tools: (m.tools ?? []).map((t) =>
+                t.id === e.id ? { ...t, state: !e.ok ? "failed" : e.held ? "held" : "ok" } : t,
+              ),
             }));
           }
           else if (e.type === "blocked")
@@ -440,7 +442,8 @@ export function ChatWidget({
                 <div className="mb-1 flex flex-wrap gap-1">
                   {m.tools.map((t) => (
                     <span key={t.id} className="rounded-full px-2 py-0.5 text-[11px]" style={{ background: C.border, color: C.mutedText }}>
-                      {t.state === "running" ? "…" : t.state === "ok" ? "✓" : "✗"} {label(t.tool)}
+                      {t.state === "running" ? "…" : t.state === "ok" ? "✓" : t.state === "held" ? "⏸" : "✗"} {label(t.tool)}
+                      {t.state === "held" ? ": waiting for your OK" : ""}
                     </span>
                   ))}
                 </div>

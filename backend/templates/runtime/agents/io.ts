@@ -188,5 +188,13 @@ export async function realDeps(store: AgentDeps["store"]): Promise<AgentDeps> {
   } catch {
     /* no handoff support installed */
   }
-  return { callModel, runTool: createToolRunner(toolIO, limiter), store, evalExpression, handoffs };
+  // Usage counts for the limits. Absent when this app has no usage table: nobody is limited.
+  let usage: AgentDeps["usage"];
+  try {
+    const us: any = await import("./usage-store");
+    usage = us.usageStore;
+  } catch {
+    /* no usage store installed */
+  }
+  return { callModel, runTool: createToolRunner(toolIO, limiter), store, evalExpression, handoffs, usage };
 }

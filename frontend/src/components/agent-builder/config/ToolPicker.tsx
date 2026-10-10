@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -210,6 +211,8 @@ export function ToolPicker({ config, onUpdate, projectId, orgId }: ToolPickerPro
     }));
     onUpdate({ parameters: params });
   };
+
+  const asksFirst = config.confirm ?? changesData(config);
 
   return (
     <div className="space-y-3">
@@ -573,6 +576,29 @@ export function ToolPicker({ config, onUpdate, projectId, orgId }: ToolPickerPro
           ))}
         </div>
       </div>
+
+      {/* Hold back a change until the person has said yes. Enforced by the app, not left to the assistant. */}
+      <div className="space-y-1 rounded border p-2">
+        <div className="flex items-center gap-2">
+          <Switch checked={asksFirst} onCheckedChange={(v) => onUpdate({ confirm: v })} aria-label="Ask the person first" />
+          <Label className="text-xs">Ask the person first</Label>
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          {asksFirst
+            ? "The assistant must say what it is about to do and wait for a yes. The app enforces this: the change does not run until the person has replied."
+            : changesData(config)
+              ? "This tool changes data and will run as soon as the assistant decides to. Anything it gets wrong happens at once."
+              : "Reads run straight away. Switch this on for a tool that changes things."}
+        </p>
+      </div>
     </div>
   );
+}
+
+/** Whether a tool changes anything: a create/update/delete, a call that is not a plain read, or a workflow. */
+export function changesData(c: ToolConfig): boolean {
+  if (c.tool_type === "workflow") return true;
+  if (c.tool_type === "data_engine") return c.operation === "create" || c.operation === "update" || c.operation === "delete";
+  if (c.tool_type === "api_call" || c.tool_type === "external") return !["", "GET", "HEAD"].includes((c.method || "GET").toUpperCase());
+  return false;
 }

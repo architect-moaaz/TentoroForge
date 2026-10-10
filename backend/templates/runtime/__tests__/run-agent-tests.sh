@@ -7,3 +7,6 @@ node --experimental-strip-types --no-warnings "$DIR/agent-runtime.test.mts"
 
 # Human handoff: who may work the inbox, assignment, and that nothing after the record can fail it.
 node --experimental-strip-types --no-warnings "$DIR/agent-handoff.test.mts"
+
+# Confirm before changing, and per-person limits.
+node --experimental-strip-types --no-warnings "$DIR/agent-safety.test.mts"

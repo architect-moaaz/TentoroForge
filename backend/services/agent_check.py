@@ -70,6 +70,8 @@ def _classify_compile_warning(text: str) -> tuple[str, str] | None:
         return "warning", "tool_unimplemented"
     if "raw sql" in t:
         return "warning", "raw_sql"
+    if "without asking the person first" in t:
+        return "warning", "writes_without_asking"
     if "not supported yet" in t:
         return "warning", "memory_downgraded"
     if "custom input filter" in t:
