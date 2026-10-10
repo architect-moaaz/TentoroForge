@@ -243,6 +243,50 @@ def merged(reports: list[Any]) -> Any:
     return out
 
 
+#: What the person hears when a build node starts. The chat said one line
+#: per phase and nothing while a phase ran, and twenty-five minutes of
+#: silence read as "every single process go stuck" (Ecom L1, 2026-10-11).
+#: `{n}` is the node's fan-out: screens, processes, parts.
+NODE_SAYS: dict[str, str] = {
+    "page_details": "Detailing {n} screens.",
+    "workflows": "Deciding the processes.",
+    "workflow_steps": "Writing the steps of {n} processes.",
+    "business_rules": "Writing the rules.",
+    "analytics": "Deciding the figures and charts.",
+    "app_flows": "Mapping how people move through the application.",
+    "page_layouts": "Laying out {n} screens.",
+    "backend": "Writing the data layer.",
+    "page_code": "Writing the code of {n} screens.",
+    "frontend": "Assembling the frontend.",
+    "integration": "Wiring the connections.",
+    "assemble": "Building the application — the production build.",
+    "expectations": "Writing down what must happen, in {n} parts.",
+    "memory": "Writing down what was decided.",
+    "verification": "Checking the definition against itself.",
+}
+
+
+class _Narrated:
+    """The run's progress observer, with a line to the chat as each node
+    starts and as a fan-out finishes."""
+
+    def __init__(self, observer: Any, say: Callable[[str, dict], None]) -> None:
+        self._observer, self._say = observer, say
+
+    def __call__(self, line: dict) -> Any:
+        event, node = str(line.get("event") or ""), str(line.get("node") or "")
+        if event == "node:start" and node in NODE_SAYS:
+            self._say("message", {"text": NODE_SAYS[node].format(n=int(line.get("subjects") or 1))})
+        elif event == "node:done" and node in ("page_code", "assemble", "workflow_steps", "expectations"):
+            self._say("message", {"text": f"{NODE_SAYS[node].split(' —')[0].rstrip('.').format(n='the')}: done."})
+        if self._observer is not None:
+            return self._observer(line)
+        return None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._observer, name)
+
+
 def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] | None = None,
           description: str = "", budget_minutes: float = 0, app_name: str = "",
           executor: Any = None, observer_agent: Any = None, observer: Any = None,
@@ -264,6 +308,7 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
     from services.blueprint.service import BlueprintService
 
     say = emit or (lambda _e, _d: None)
+    observer = _Narrated(observer, say)
     # ONE DOCUMENT. The caller's service, when it has one: Crumb's build
     # entry kept its own copy of the definition while the engineer worked on
     # another, and the state-settling save at the end wrote the model-phase

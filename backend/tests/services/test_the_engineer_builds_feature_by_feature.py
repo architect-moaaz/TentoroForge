@@ -581,13 +581,27 @@ def test_a_second_login_entity_sends_the_declaration_back_to_its_author(tmp_path
     assert nodes == ["entity_fields"] and scope is None
 
 
-def test_the_statements_are_written_after_the_landing_not_before_it(svc):
+def test_the_statements_are_written_after_the_landing_not_before_it():
     """Ecom L1 (2026-10-11): the statements writer stood in front of every
     page and retried at its output cap for twenty minutes; nothing was laid
     out meanwhile."""
     from services.engineer.build import AFTER_LANDING, build_nodes, first_nodes
     once, per, last = build_nodes()
     assert "expectations" in once and "expectations" not in per
-    nodes, _ = first_nodes(["workflow_steps", "expectations", "page_code", "memory"], svc.doc)
+    nodes, _ = first_nodes(["workflow_steps", "expectations", "page_code", "memory"], {})
     assert "workflow_steps" in nodes and "expectations" not in nodes
     assert AFTER_LANDING == ("expectations",)
+
+
+def test_the_person_hears_each_node_start_and_each_fan_out_finish():
+    """Twenty-five minutes of one line read as "every single process go
+    stuck" (Ecom L1, 2026-10-11)."""
+    from services.engineer.build import _Narrated
+    heard, seen = [], []
+    narrated = _Narrated(seen.append, lambda e, d: heard.append((e, d["text"])))
+    narrated({"event": "node:start", "node": "page_code", "subjects": 27})
+    narrated({"event": "node:subject", "node": "page_code", "subject": "PAGE-001", "ok": True})
+    narrated({"event": "node:done", "node": "page_code"})
+    narrated({"event": "node:start", "node": "install"})
+    assert [t for _, t in heard] == ["Writing the code of 27 screens.", "Writing the code of the screens: done."]
+    assert len(seen) == 4, "the progress observer still sees every line"
