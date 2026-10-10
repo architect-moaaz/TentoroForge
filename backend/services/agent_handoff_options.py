@@ -60,7 +60,8 @@ def _people(app_root: Path) -> tuple[list[dict[str, Any]], str | None]:
             continue
         out.append({"id": str(r["id"]),
                     "name": str(r.get("display_name") or r.get("name") or r.get("full_name") or r.get("email") or r["id"]),
-                    "role": str(r["role"]) if r.get("role") else None})
+                    # a person who signed up keeps their role in account_type; a seeded one in role
+                    "role": str(r.get("role") or r.get("account_type")) if (r.get("role") or r.get("account_type")) else None})
     out.sort(key=lambda p: p["name"].lower())
     return out, None
 

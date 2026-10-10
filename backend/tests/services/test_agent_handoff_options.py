@@ -59,6 +59,7 @@ def test_people_come_from_the_apps_users_table_and_inactive_ones_are_left_out(tm
             {"id": "u2", "name": "Idris", "role": "Support Agent"},
             {"id": "u3", "email": "only-email@x.test", "role": "Manager"},
             {"id": "u4", "display_name": "Gone", "role": "Manager", "is_active": False},
+            {"id": "u6", "display_name": "Signed Up", "role": None, "account_type": "Support Agent"},
             {"display_name": "No id"}]
     seen = {}
     fake = FakeConnection(rows)
@@ -69,8 +70,9 @@ def test_people_come_from_the_apps_users_table_and_inactive_ones_are_left_out(tm
 
     monkeypatch.setattr("psycopg2.connect", connect)
     got = handoff_options(project)
-    assert [p["name"] for p in got["people"]] == ["Idris", "Maya Brandt", "only-email@x.test"], "named, sorted, active only"
-    assert got["people"][1] == {"id": "u1", "name": "Maya Brandt", "role": "Manager"}
+    assert [p["name"] for p in got["people"]] == ["Idris", "Maya Brandt", "only-email@x.test", "Signed Up"], "named, sorted, active only"
+    assert {"id": "u1", "name": "Maya Brandt", "role": "Manager"} in got["people"]
+    assert {"id": "u6", "name": "Signed Up", "role": "Support Agent"} in got["people"], "a signed-up person's role is their account_type"
     assert "Support Agent" in got["roles"], "a role someone holds counts even when the Blueprint does not list it"
     assert got["peopleNote"] is None and fake.closed and seen["url"].endswith("/app") and seen["timeout"] <= 5
 
