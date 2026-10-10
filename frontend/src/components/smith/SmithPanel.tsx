@@ -828,11 +828,15 @@ export function SmithPanel({
       : null);
 
   return (
-    <div className={cn("flex h-full min-w-0", className)}>
+    // `min-w-0` and `overflow-hidden` on the row AND on each column: a flex
+    // item's default `min-width: auto` is its content's width, so one
+    // unbreakable line in the rail grew the rail past its set width and
+    // pushed it off the viewport (ecom v2, 2026-10-10).
+    <div className={cn("flex h-full w-full min-w-0 overflow-hidden", className)}>
     {/* Smith's live render review — a fixed bottom-right window while it looks
         at what it built; renders nothing until a review starts. */}
     <ReviewWindow review={run.review} />
-    <div className="flex h-full min-w-0 flex-1 flex-col border-l bg-background">
+    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden border-l bg-background">
       <header className="flex items-center justify-between border-b px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold">Smith</h2>
@@ -1150,7 +1154,7 @@ export function SmithPanel({
     */}
     <aside
       className={cn(
-        "hidden shrink-0 flex-col border-l bg-muted/30 lg:flex",
+        "hidden min-w-0 shrink-0 flex-col overflow-hidden border-l bg-muted/30 lg:flex",
         openGate === "product_model" && wideModel
           ? "w-[clamp(420px,60%,920px)]"
           : "w-[clamp(360px,36%,440px)]",
@@ -1553,7 +1557,7 @@ export function ThinkingTrail({
   return (
     <div className="max-w-[90%] space-y-1 border-l-2 border-muted pl-3">
       {busy && (
-        <div className="flex items-center gap-2 whitespace-nowrap text-xs leading-none text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-2 text-xs leading-none text-muted-foreground">
           {/* The Tentoro Forge loader — an anvil being struck. Its own
               animation is the working signal, so no spinner is needed; rendered
               only while busy, it stops the moment the turn ends. */}
@@ -1564,10 +1568,10 @@ export function ThinkingTrail({
             aria-hidden="true"
             className="h-9 w-9 shrink-0"
           />
-          <span className="font-medium text-foreground">{activity}</span>
+          <span className="min-w-0 truncate font-medium text-foreground">{activity}</span>
           <span aria-hidden="true">…</span>
           {elapsed >= 1000 && (
-            <span className="tabular-nums text-muted-foreground/70">
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-muted-foreground/70">
               · {human(elapsed)}
             </span>
           )}
