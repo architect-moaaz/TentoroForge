@@ -40,6 +40,42 @@ const HEADING = "var(--font-heading, inherit)";
 
 const label = (tool: string) => tool.replace(/[_-]+/g, " ");
 
+type SavedMessage = {
+  role: "user" | "assistant";
+  content: string;
+  toolCalls?: Array<{ name: string; error?: string | null }> | null;
+};
+
+/** A saved turn as the chat draws it: the words, and a chip for each tool it used. */
+function fromSaved(m: SavedMessage, i: number): Msg {
+  return {
+    role: m.role,
+    content: m.content,
+    tools: (m.toolCalls ?? []).map((t, k) => ({
+      id: `saved-${i}-${k}`,
+      tool: t.name,
+      state: t.error ? ("failed" as const) : ("ok" as const),
+    })),
+  };
+}
+
+// "New chat" is remembered per agent, so a reload does not bring the old conversation back.
+const freshKey = (agentId: string) => `forge-agent-new:${agentId}`;
+const readFresh = (agentId: string): number => {
+  try {
+    return Number(window.localStorage.getItem(freshKey(agentId)) ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+};
+const writeFresh = (agentId: string) => {
+  try {
+    window.localStorage.setItem(freshKey(agentId), String(Date.now()));
+  } catch {
+    /* private window: the old conversation simply comes back on reload */
+  }
+};
+
 // ── a small, safe markdown renderer ───────────────────────────────────────
 // The model writes **bold**, "- " lists, numbered lists, `code` and pipe tables. Shown as plain
 // text those are stray asterisks and dashes. Built from React elements only, never HTML strings.
@@ -171,6 +207,25 @@ export function ChatWidget({
         if (!pick) return;
         setAgent(pick);
         if (pick.ui.welcomeMessage) setMsgs([{ role: "assistant", content: pick.ui.welcomeMessage }]);
+        // Pick up where the person left off. A reload used to start from nothing, so the agent
+        // "forgot" a conversation that was sitting in the database.
+        fetch(`${BASE}/api/agent/conversations?agent=${encodeURIComponent(pick.id)}`, { credentials: "same-origin" })
+          .then((r) => (r.ok ? r.json() : []))
+          .then(async (list: Array<{ id: string; updatedAt?: string | null }>) => {
+            const latest = Array.isArray(list) ? list[0] : undefined;
+            if (!latest || !live) return;
+            const touched = latest.updatedAt ? new Date(latest.updatedAt).getTime() : 0;
+            if (touched <= readFresh(pick.id)) return;
+            const res = await fetch(`${BASE}/api/agent/conversations?id=${encodeURIComponent(latest.id)}`, {
+              credentials: "same-origin",
+            });
+            if (!res.ok || !live) return;
+            const conv = (await res.json()) as { id: string; messages?: SavedMessage[] };
+            if (!conv.messages?.length) return;
+            setConversationId(conv.id);
+            setMsgs(conv.messages.map(fromSaved));
+          })
+          .catch(() => {});
       })
       .catch(() => {});
     return () => {
@@ -181,6 +236,15 @@ export function ChatWidget({
   React.useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [msgs]);
+
+  // Start over: forget this conversation here (it stays in the database) and show the welcome again.
+  function newChat() {
+    if (!agent || busy) return;
+    writeFresh(agent.id);
+    setConversationId(null);
+    setInput("");
+    setMsgs(agent.ui.welcomeMessage ? [{ role: "assistant", content: agent.ui.welcomeMessage }] : []);
+  }
 
   // The last message is the one being written; every update replaces it.
   const patchLast = (fn: (m: Msg) => Msg) =>
@@ -265,11 +329,23 @@ export function ChatWidget({
           <div className="truncate text-base font-semibold" style={{ fontFamily: HEADING }}>{ui.title}</div>
           {ui.subtitle && <div className="truncate text-xs opacity-80">{ui.subtitle}</div>}
         </div>
-        {variant === "floating" && (
-          <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="rounded p-1 hover:bg-white/20">
-            ✕
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {conversationId && (
+            <button
+              type="button"
+              onClick={newChat}
+              disabled={busy}
+              className="rounded px-2 py-1 text-xs hover:bg-white/20 disabled:opacity-50"
+            >
+              New chat
+            </button>
+          )}
+          {variant === "floating" && (
+            <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="rounded p-1 hover:bg-white/20">
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3" aria-live="polite">
