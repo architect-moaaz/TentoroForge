@@ -1603,7 +1603,7 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
     for node in ("ux_architecture", "integrations", "page_layouts",
                  "design_system", "page_details", "entity_fields"):
         assert r.for_task(node, "x").max_tokens == DEFAULT_MAX_TOKENS, node
-    assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
+    assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts", "expectations",
                                        "security", "workflows", "requirements",
                                        "business_rules", "analytics", "workflow_steps",
                                        "page_code"}   # a page's two whole files
