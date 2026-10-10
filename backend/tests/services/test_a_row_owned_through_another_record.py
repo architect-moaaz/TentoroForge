@@ -64,3 +64,43 @@ def test_the_manifest_names_the_table_the_engine_resolves():
     assert rules["appointment"] == [{"column": "childId", "kind": "scope", "scope": "user",
                                      "unscopedRoles": [], "through": "children"}]
     assert "through" not in rules["child"][0]
+
+
+MARKET = {"data": {"entities": [
+    {"id": "E1", "name": "User", "table": "users", "account": True, "fields": [{"name": "id"}]},
+    {"id": "E2", "name": "VendorProfile", "table": "vendor_profiles", "fields": [{"name": "id"}, {"name": "userId"}]},
+    {"id": "E3", "name": "VendorOrder", "table": "vendor_orders", "fields": [{"name": "id"}, {"name": "vendorId"}]},
+    {"id": "E4", "name": "OrderItem", "table": "order_items", "fields": [{"name": "id"}, {"name": "vendorOrderId"}]},
+    {"id": "E5", "name": "Product", "table": "products", "fields": [{"name": "id"}, {"name": "vendorId"}]},
+]}}
+
+
+def test_a_chain_of_through_rules_ending_at_a_scoped_record_is_accepted():
+    """Ecom L1 (2026-10-11): an order item is the vendor's through the vendor
+    order, which is the vendor's through their profile — the engine walks
+    three records deep, and the checker refused the chain, so the edit that
+    answered dropped four entities' rules and every vendor saw every order."""
+    check_security(_result([
+        {"entity": "VendorProfile", "column": "userId"},
+        {"entity": "VendorOrder", "column": "vendorId", "through": "VendorProfile"},
+        {"entity": "OrderItem", "column": "vendorOrderId", "through": "VendorOrder"},
+        {"entity": "Product", "column": "vendorId", "through": "VendorProfile"},
+    ]), MARKET)
+
+
+def test_a_chain_that_never_reaches_a_scoped_record_is_refused_with_what_to_add():
+    found = ownership_findings({"ownershipRules": [
+        {"entity": "VendorOrder", "column": "vendorId", "through": "VendorProfile"},
+        {"entity": "OrderItem", "column": "vendorOrderId", "through": "VendorOrder"},
+    ]}, MARKET)
+    assert len(found) == 2
+    assert "VendorProfile, which has no scope rule of its own" in found[0]
+    assert "add a rule for VendorProfile" in found[0] and "keep this rule" in found[0]
+
+
+def test_a_cycle_of_through_rules_is_refused():
+    found = ownership_findings({"ownershipRules": [
+        {"entity": "VendorOrder", "column": "vendorId", "through": "OrderItem"},
+        {"entity": "OrderItem", "column": "vendorOrderId", "through": "VendorOrder"},
+    ]}, MARKET)
+    assert len(found) == 2
