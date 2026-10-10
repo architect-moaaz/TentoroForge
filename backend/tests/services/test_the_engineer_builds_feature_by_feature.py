@@ -53,7 +53,7 @@ DOC = {
          "inputs": [{"name": "product", "kind": "record", "entity": "ENTITY-003"}]},
     ],
     "expectations": [
-        {"id": "EXP-001", "requirements": ["REQ-001"], "steps": [{"act": "open", "page": "PAGE-002"}]},
+        {"id": "EXP-001", "requirements": ["REQ-001"], "kind": "arrival", "steps": [{"act": "open", "page": "PAGE-002"}]},
         {"id": "EXP-013", "requirements": ["REQ-004"], "steps": [{"act": "do", "workflow": "FLOW-001"}]},
         {"id": "EXP-027", "requirements": [], "steps": [{"act": "sign_in"}, {"act": "open", "page": "PAGE-004"},
                                                         {"act": "do", "workflow": "FLOW-005"}]},
@@ -137,11 +137,15 @@ def test_the_build_phase_is_split_into_once_per_feature_and_last():
     from services.blueprint.orchestrator import DAG, descendants
     once, per, last = build_nodes()
     assert "install" in once and "decisions" in once and "design_system" in once
-    assert "auth_pages" in per and "ui_direction" in per, "between two feature nodes is a feature node"
-    assert per[0] == "page_details" and per[-1] == "assemble" and "workflow_steps" in per
-    assert per.index("page_details") < per.index("auth_pages") < per.index("page_layouts")
-    assert per.index("page_details") < per.index("ui_direction") < per.index("page_code")
-    assert per.index("workflows") < per.index("workflow_steps") < per.index("page_code")
+    # WRITTEN ONCE, FOR THE WHOLE APPLICATION: the contracts, the processes,
+    # the rules, the analytics, the flows, the statements (ecom v2: $15.76
+    # for three of seven features when they were written per feature).
+    for k in ("page_details", "auth_pages", "ui_direction", "workflows", "business_rules", "analytics",
+              "app_flows", "expectations", "content_fields"):
+        assert k in once, f"{k} is written once"
+    assert per == ["workflow_steps", "apis", "page_layouts", "backend", "page_code", "frontend", "integration", "assemble"], \
+        "what lands a feature: its processes' steps, its screens' layouts and code, the projections, the build"
+    assert "apis" in per, "between two feature nodes is a feature node"
     assert last == ["memory", "verification"]
     assert not set(once) & set(per) and not set(per) & set(last)
     for k in once:
@@ -212,17 +216,18 @@ def test_the_engineer_builds_each_feature_and_proves_it_before_the_next(tmp_path
     from services.engineer.build import split_feature_nodes
     authoring, landing = split_feature_nodes(per)
     assert runs[1][0] == authoring and runs[2][0] == landing and runs[-1][0] == last
-    assert authoring + landing == per and landing[-1] == "assemble" and "page_details" in authoring
+    assert authoring + landing == per and landing[-1] == "assemble" and authoring == ["workflow_steps", "apis"]
+    assert "page_details" in runs[0][0], "the contracts are written once, before the first feature"
     assert proofs[0] == (["EXP-001"], True), "the first feature's own statements, with the authors' look"
     assert (["EXP-013"], True) in proofs and (["EXP-013"], False) in proofs, "then the fix turn's result is tried again"
     assert len(fixes) == 1 and "Cart & Checkout" in fixes[0] and "nothing was sent" in fixes[0]
-    assert sorted(proofs[-1][0]) == ["EXP-001", "EXP-013", "EXP-027", "EXP-030"] and proofs[-1][1] is True, \
+    assert sorted(proofs[-1][0]) == ["EXP-001", "EXP-030"] and proofs[-1][1] is True, \
         "every statement once more at the end, with its authors' look"
     assert [f["feature"] for f in out["features"]] == ["MODULE-001", "MODULE-003", "MODULE-002"]
     cart = out["features"][2]
     assert cart["passed"] == 1 and cart["fixed"] == ["EXP-013"] and cart["failing"] == []
     assert any("Cart & Checkout: 1 of 1 statement of what must happen hold; fixed while building: EXP-013" in s for s in said)
-    assert out["statements"]["passed"] == 4 and not out["stopped"]
+    assert out["statements"]["passed"] == 2 and not out["stopped"], "the arrival and the uncovered one, at the end"
     from services.engineer.journal import Journal
     assert Journal(tmp_path).finished() == ["MODULE-001", "MODULE-003", "MODULE-002"]
 
@@ -340,7 +345,7 @@ def test_a_node_that_failed_for_a_feature_is_mended_and_run_again(tmp_path):
     def run(svc, executor, *, plan, scope=None, **kw):
         plans.append((list(plan), scope.feature.id if scope else None))
         calls["n"] += 1
-        if scope and scope.feature.id == "MODULE-001" and "page_details" in plan:
+        if scope and scope.feature.id == "MODULE-001" and "workflow_steps" in plan:
             return SimpleNamespace(failed=["assemble", "page_code:PAGE-001"], paused_because="",
                                    failed_because={"assemble": "NeedsWorkflow: needs a workflow that does not exist yet: unmark an item"})
         return SimpleNamespace(failed=[], paused_because="")
@@ -382,7 +387,7 @@ def test_the_whole_app_pass_fixes_what_a_later_feature_broke(tmp_path):
         fixes.append(ask)
         return {"status": "resolved", "answer": "set the customer's landing to the menu"}
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix)
-    assert sorted(proofs[-2][0]) == ["EXP-001", "EXP-013", "EXP-027", "EXP-030"], "the whole-app pass tries every statement"
+    assert sorted(proofs[-2][0]) == ["EXP-001", "EXP-030"], "the whole-app pass tries the arrivals and what no feature covered"
     assert proofs[-1][0] == ["EXP-001"] and proofs[-1][1] is False, "then what the fix changed is tried again"
     assert len(fixes) == 1 and "While building the whole application" in fixes[0] and "/orders, not /menu" in fixes[0]
     assert out["statements"]["fixed"] == ["EXP-001"] and out["statements"]["failing"] == []
@@ -441,9 +446,9 @@ def test_the_engineer_finishes_the_model_first_and_stops_when_it_cannot(tmp_path
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run,
                 prove=lambda *a, **k: {}, fix=lambda *a: {}, emit=lambda k, d: said.append(d.get("text", "")),
                 plan=["entity_fields", "page_contracts", "security", "install", "page_details", "assemble"])
-    assert len(plans) == 1 and "page_details" not in plans[0] and "assemble" not in plans[0], \
+    assert len(plans) == 1 and "assemble" not in plans[0], \
         "one opening run of what is pending above the features, and nothing built after it fails"
-    assert [k for k in plans[0] if k != "install"] == ["entity_fields", "page_contracts", "security"]
+    assert [k for k in plans[0] if k != "install"] == ["entity_fields", "page_contracts", "security", "page_details"]
     assert out["stopped"].startswith("the product model could not be finished") and out["features"] == []
     assert out["report"].paused_because == out["stopped"], "the entry reads it and does not hand over"
     assert any("I could not finish the product model" in s and "already on Vendor" in s for s in said)
@@ -574,7 +579,7 @@ def test_what_is_missing_at_the_end_is_the_engineers_to_finish(tmp_path):
     sweeps = [p for p, f in plans if f == "SWEEP"]
     assert sweeps and sweeps[0][0] == "workflow_steps", "the orphan process is written in the sweep first"
     assert not fixes or "Abandon Inactive Carts" in fixes[0], "and only what the sweep could not finish goes to a fix turn"
-    assert not out["stopped"] and out["statements"]["passed"] == 4, "then the whole application is tried and handed over"
+    assert not out["stopped"] and out["statements"]["passed"] == 2, "then the whole application is tried and handed over"
     assert not any("Build again" in s for s in said)
 
 
@@ -666,3 +671,40 @@ def test_a_stop_waits_for_the_writing_ahead_and_keeps_it(tmp_path):
     assert out["stopped"].startswith("paused: the API credit ran out")
     assert (True, "MODULE-003") in seen, "the feature written ahead finished and is kept for the resume"
     assert (False, "MODULE-003") not in seen, "and was not landed"
+
+
+def test_the_end_tries_what_did_not_hold_and_what_no_feature_covered():
+    from services.engineer.build import untried_or_failing
+    plan = F.features(DOC)
+    rows = [{"feature": "MODULE-001", "failing": [], "untried": []},
+            {"feature": "MODULE-002", "failing": ["EXP-013"], "untried": []}]
+    assert untried_or_failing(DOC, plan, rows) == ["EXP-013", "EXP-001", "EXP-030"], \
+        "the one that failed, the arrival, and the one no feature's proof covered — not the ones that held"
+    assert untried_or_failing(DOC, plan, [{"failing": ["EXP-013"], "untried": ["EXP-013", "EXP-999"]}]) == ["EXP-013", "EXP-001", "EXP-030"]
+
+
+def test_a_fix_round_that_changed_nothing_is_the_last(tmp_path):
+    _project(tmp_path)
+    fixes: list[str] = []
+    proofs: list = []
+
+    def run(svc, executor, *, plan, scope=None, **kw):
+        return SimpleNamespace(failed=[], paused_because="")
+
+    def prove(svc, od, only=None, give_back=None, **kw):
+        proofs.append(list(only or []))
+        rows = [{"id": sid, "says": sid, "verdict": "failed" if sid == "EXP-013" else "passed",
+                 "failures": ["nothing was sent"] if sid == "EXP-013" else []} for sid in only or []]
+        return {"statements": len(rows), "passed": sum(r["verdict"] == "passed" for r in rows),
+                "failing": [r["id"] for r in rows if r["verdict"] == "failed"], "untried": [], "fixed": [], "results": rows}
+
+    def fix(od, ask):
+        fixes.append(ask)
+        return {"status": "no_op", "answer": "Nothing needed doing."}
+    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix)
+    assert sum("While building Cart & Checkout" in f for f in fixes) == 1, "one fix turn that changed nothing, no second round"
+    assert sum("While building the whole application" in f for f in fixes) == 1, "the end gives it one more look"
+    cart = next(f for f in out["features"] if f["feature"] == "MODULE-002")
+    assert cart["failing"] == ["EXP-013"]
+    assert sorted(proofs[-1]) == ["EXP-001", "EXP-013", "EXP-030"], "the end tries what failed, the arrivals and what no feature covered"
+    assert not any(sorted(p) == ["EXP-001", "EXP-013", "EXP-027", "EXP-030"] for p in proofs), "never every statement again"

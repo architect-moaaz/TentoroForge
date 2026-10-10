@@ -91,12 +91,21 @@ class _Pulse:
 logger = logging.getLogger(__name__)
 
 #: The build-phase nodes that are one feature's at a time. The slice is
-#: closed by `build_nodes`: a node between two of these (`auth_pages`,
-#: `ui_direction`) is a feature node too, or the graph's order is broken.
+#: closed by `build_nodes`: a node between two of these (`apis`) is a
+#: feature node too, or the graph's order is broken.
+#:
+#: WHAT IS WRITTEN ONCE IS WRITTEN ONCE. The contracts, the processes, the
+#: rules, the analytics, the flows and the statements were authored per
+#: feature, each call carrying the whole section and returning it unchanged:
+#: seven features, seven calls where the graph made one, each bigger than
+#: the last — ecom v2 cost $15.76 for three of seven features where the
+#: graph built a whole e-commerce app for $11.62 (forge-v3, 2026-10-10).
+#: They are authored once more for the whole application, in the opening,
+#: the graph's way; what is a feature's is what lands it: its processes'
+#: steps, its screens' layouts and code, the projections, the build — then
+#: its proof, before the next feature's code is written.
 PER_FEATURE: tuple[str, ...] = (
-    "page_details", "content_fields", "workflows", "workflow_steps", "business_rules",
-    "analytics", "app_flows", "apis", "expectations", "page_layouts", "backend",
-    "page_code", "frontend", "integration", "assemble",
+    "workflow_steps", "page_layouts", "backend", "page_code", "frontend", "integration", "assemble",
 )
 #: The feature nodes that LAND the feature in the tree — the layouts, the
 #: code, the projections, the build. They wait for the previous feature's
@@ -521,8 +530,11 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
                                     pages=[str(p.get("id")) for p in plan_pages(svc.doc)],
                                     requirements=[str(r.get("id")) for r in svc.doc.get("requirements") or []
                                                   if isinstance(r, dict) and r.get("id")])
-            whole = (_prove_feature(svc, output_dir, whole_feature, prove, fix, budget, journal, say, ids=None)
-                     if statements_exist(svc.doc) else {})
+            # WHAT HELD IN ITS FEATURE IS NOT TRIED AGAIN: what failed, what
+            # could not be tried, and what no feature's proof covered.
+            again_ids = untried_or_failing(svc.doc, plan_features, results)
+            whole = (_prove_feature(svc, output_dir, whole_feature, prove, fix, budget, journal, say, ids=again_ids)
+                     if again_ids else {})
             journal.write("whole:done", passed=whole.get("passed"), statements=whole.get("statements"),
                           failing=whole.get("failing"), untried=whole.get("untried"), fixed=whole.get("fixed"))
         out = _stopped(journal, svc, reports, stopped, features=results, statements=whole)
@@ -652,6 +664,31 @@ def _mend_failed_nodes(svc: Any, output_dir: str, app_root: str, feature: Featur
     return still
 
 
+def untried_or_failing(doc: Mapping[str, Any], plan: list[Feature], results: list[dict]) -> list[str]:
+    """The statements the end of the build tries: those a feature's proof
+    left failing or untried, those no feature's proof covered at all, and
+    the people's arrivals — where someone lands is what a later feature
+    moves (Crumb's customer landed on /orders once Orders existed,
+    2026-10-09). Not what held in its own feature: Crumb's pass tried all
+    thirteen again, twelve of which had just held; ecom v2's would have
+    tried 45."""
+    from services.expects.statements import expectations
+    rows_ = expectations(dict(doc))
+    every = [str(e.get("id")) for e in rows_]
+    arrivals = {str(e.get("id")) for e in rows_ if str(e.get("kind") or "") == "arrival"}
+    covered: set[str] = set()
+    for f in plan:
+        covered |= set(statements_of(f, doc))
+    again: list[str] = []
+    for row in results:
+        again += [str(x) for x in (row.get("failing") or []) + (row.get("untried") or [])]
+    for sid in every:
+        if (sid not in covered or sid in arrivals) and sid not in again:
+            again.append(sid)
+    seen: set[str] = set()
+    return [s for s in again if s in set(every) and not (s in seen or seen.add(s))]
+
+
 def statements_exist(doc: Mapping[str, Any]) -> bool:
     from services.expects.statements import expectations
     return bool(expectations(dict(doc)))
@@ -700,6 +737,7 @@ def _prove_feature(svc: Any, output_dir: str, feature: Feature, prove: Callable[
         if not failing or budget.over():
             break
         groups = by_cause(failing, lambda r: (r.get("failures") or [""])[0])[:FIX_TURNS_PER_ROUND]
+        changed_any = False
         for group in groups:
             journal.write("fix:start", feature=feature.id, round=round_,
                           statements=[str(r.get("id")) for r in group])
@@ -712,7 +750,15 @@ def _prove_feature(svc: Any, output_dir: str, feature: Feature, prove: Callable[
                 answer = {"status": "failed", "answer": str(exc)}
             journal.write("fix:end", feature=feature.id, round=round_,
                           status=(answer or {}).get("status"), said=str((answer or {}).get("answer") or "")[:400])
+            if str((answer or {}).get("status") or "") not in ("no_op", "failed"):
+                changed_any = True
             _reload(svc, output_dir)
+        if not changed_any:
+            # NOTHING WAS CHANGED, SO NOTHING IS TRIED AGAIN and no second
+            # round is asked: a round of "nothing needed doing" costs the
+            # same as one that fixes something (ecom v2, 2026-10-10).
+            journal.write("fix:nothing_changed", feature=feature.id, round=round_)
+            break
         again = prove(svc, output_dir, only=[str(r.get("id")) for r in failing], give_back=False)
         now_passing = [str(r.get("id")) for r in again.get("results") or [] if r.get("verdict") == "passed"]
         fixed += [s for s in now_passing if s not in fixed]
