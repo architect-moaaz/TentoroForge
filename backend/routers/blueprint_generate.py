@@ -225,8 +225,8 @@ def _is_built(output_dir) -> bool:
     after it, a change to the running app (compose / mutate). DEFECT-C-03/B-09
     is the pre-build case being routed as if the app already existed.
     """
-    from pathlib import Path as _P
-    return (_P(output_dir) / "app" / "package.json").is_file()
+    from services.smith.gates import is_built
+    return is_built(output_dir)
 
 
 #: A message that asks to ADD or CHANGE something in the definition — an

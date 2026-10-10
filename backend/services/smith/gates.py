@@ -65,8 +65,20 @@ def _live(rows: Any) -> list[dict]:
 
 
 def is_built(output_dir: str | Path) -> bool:
-    """The same signal the router uses: the generated app's package.json."""
-    return (Path(output_dir) / "app" / "package.json").is_file()
+    """Built means ASSEMBLED, not scaffolded. The opening run's `install`
+    writes the app's package.json before a single screen exists; read as
+    "built", a stopped opening answered "Build the whole app" with "it is
+    already built from this definition, and nothing has changed since"
+    (Ecom L1, 2026-10-11). The build stamp the assembly writes into
+    `runtime.build` is the handover; the scaffold alone is not."""
+    root = Path(output_dir)
+    if not (root / "app" / "package.json").is_file():
+        return False
+    try:
+        doc = json.loads((root / ".forge" / "blueprint" / "current.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return True            # no definition to consult: the scaffold is all there is
+    return bool(((doc.get("runtime") or {}).get("build")))
 
 
 def current(doc: Mapping[str, Any], output_dir: str | Path) -> str | None:

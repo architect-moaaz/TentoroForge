@@ -117,6 +117,9 @@ def test_the_state_says_which_review_is_open(svc, tmp_path):
     assert gates.current(svc.doc, tmp_path) == gates.PRODUCT_MODEL
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "package.json").write_text("{}")
+    assert gates.current(svc.doc, tmp_path) == gates.PRODUCT_MODEL, "a scaffold is not a build"
+    svc.doc["runtime"] = {"build": {"status": "passed"}}
+    svc.save()
     assert gates.current(svc.doc, tmp_path) is None
 
 
@@ -585,3 +588,16 @@ def test_a_requirement_written_down_with_no_part_briefed_is_not_done(svc):
                              executor=_executor({}))
     said = gates.say_model_change(out)
     assert "Done" not in said and "changed nothing in the model" in said and out["requirements"][0] in said
+
+
+def test_a_scaffold_without_a_build_stamp_is_not_built(svc, tmp_path):
+    """Ecom L1 (2026-10-11): the opening's install wrote package.json, the
+    opening stopped, and "Build the whole app" was answered "it is already
+    built from this definition"."""
+    app = tmp_path / "app"
+    app.mkdir(exist_ok=True)
+    (app / "package.json").write_text("{}", "utf-8")
+    assert gates.is_built(tmp_path) is False
+    svc.doc["runtime"] = {"build": {"status": "passed"}}
+    svc.save()
+    assert gates.is_built(tmp_path) is True
