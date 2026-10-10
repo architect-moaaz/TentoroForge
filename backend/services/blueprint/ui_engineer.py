@@ -431,7 +431,10 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
 
 A form input for an image field is kind: "image" (a picker that uploads); for any other stored file
 (a document, a PDF) kind: "file", with accept?=".pdf,.docx" — never a text box for either. Show a stored
-file with <a href={fileUrl(row.x)}>, an image with <img src={fileUrl(row.x)} />.
+file with <a href={fileUrl(row.x)}>, an image with <Picture src={row.x} alt={row.name} className="h-40 w-full object-cover" />
+(from "@/sdk"): the stored picture, or a designed stand-in in the app's own colours when the field is
+empty. Never a bare <img> for an image field — seeded records carry no pictures, and a bare <img> is a
+broken box with its alt text on every card.
 
 <ImageSearch label?="Find products that look like this" />
    The search box for similar(): an upload that sets ?image= to the picked picture (and clears it).
@@ -467,7 +470,8 @@ const t = useT();  t({ en: "Orders", hi: "ऑर्डर" })
 
 // ---- @/sdk — anywhere ----
 Entity types (Case, User, …), `workflows`, `pages`, `href(page, params?, query?)`,
-`fileUrl(row.photo)` — the src for an image field (a stored file's id), or null when it is empty,
+`fileUrl(row.photo)` — the src for an image field (a stored file's id), or null when it is empty;
+`<Picture src={row.photo} alt={row.name} className=… />` — that picture, or a designed stand-in when empty,
 e.g. href(pages.caseRecord, { id }) or href(pages.allCases, {}, { q: "late", status: "OPEN" }).
 """
 

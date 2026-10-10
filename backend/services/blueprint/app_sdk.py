@@ -561,7 +561,8 @@ def emit_index() -> str:
             'export * from "./workflows";\n'
             'export * from "./pages";\n'
             'export * from "./widgets";\n'
-            'export * from "./files";\n')
+            'export * from "./files";\n'
+            'export * from "./picture";\n')
 
 
 def sdk_files(doc: dict) -> dict[str, str]:
