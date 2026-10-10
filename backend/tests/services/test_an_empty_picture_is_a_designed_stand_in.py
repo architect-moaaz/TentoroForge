@@ -21,3 +21,13 @@ def test_the_page_writer_is_told_to_use_it_and_the_reviewer_to_refuse_a_bare_img
     assert "<Picture src={row.x}" in notes and "Never a bare <img>" in notes
     system = page_review.__file__ and open(page_review.__file__, encoding="utf-8").read()
     assert "shows only its alt text" in system and "high-severity" in system
+
+
+def test_live_refresh_opens_the_stream_only_when_it_is_its_own():
+    """Ecom L1 (2026-10-11): the gated stream, opened signed out, answered the
+    sign-in page; EventSource logged a MIME error on every public screen,
+    and the trials counted it against every control."""
+    src = (TEMPLATE.parent.parent / "lib" / "LiveRefresh.tsx").read_text("utf-8")
+    assert "streamIsOurs" in src and 'includes("text/event-stream")' in src
+    assert 'new EventSource(STREAM_URL)' in src and "NEXT_PUBLIC_BASE_PATH" in src
+    assert 'new EventSource("/api/events/stream")' not in src
