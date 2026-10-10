@@ -693,6 +693,18 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
     except Exception as e:
         errors.append(f"Failed to emit --color-* tokens: {e}")
 
+    # AI agents: a project that has agent definitions (the Agent Builder's, or the
+    # planner's agent_graph) gets the fixed agent runtime + its compiled definitions.
+    # Gated like the cart primitive — an app with no agent carries none of it.
+    try:
+        from services.agent_runtime_install import has_agents, install_agent_runtime
+
+        if has_agents(output_path):
+            agent_result = install_agent_runtime(output_path)
+            copied.extend(agent_result.get("written", []))
+    except Exception as e:
+        errors.append(f"Failed to install the agent runtime: {e}")
+
     logger.info(
         "Runtime injection: %d files copied, %d errors",
         len(copied),
