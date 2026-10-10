@@ -416,11 +416,36 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             # with steps, the people it is for, the statements that say what
             # must happen — before a single one is tried once more.
             missing = app_unbuilt(svc.doc)
+            if missing and not budget.over():
+                # WHAT IS MISSING IS THE ENGINEER'S TO FINISH, NOT THE PERSON'S.
+                # "Build again to finish it" was said to a tester about a
+                # process the build itself had left without steps (Ecommerce1,
+                # forge-v3, 2026-10-10 05:50). A fix turn with the list, then
+                # the sweep once more, and only what still cannot be finished
+                # is reported.
+                journal.write("whole:unbuilt", missing=missing)
+                say("message", {"text": "The application is not whole yet: " + "; ".join(missing[:6])
+                                        + ". Finishing it."})
+                try:
+                    answer = fix(output_dir, whole_ask(missing))
+                except Exception as exc:  # noqa: BLE001 — one fix turn never ends the build
+                    logger.warning("[engineer] whole-app mend failed: %s", exc)
+                    answer = {"status": "failed", "answer": str(exc)}
+                journal.write("whole:mend", status=(answer or {}).get("status"),
+                              said=str((answer or {}).get("answer") or "")[:400])
+                _reload(svc, output_dir)
+                sweep, unclaimed = pending_feature_nodes(svc.doc, per, plan_features)
+                again = sweep or [k for k in per if k in ("integration", "assemble")]
+                reports.append(run(svc, executor, plan=again, commit=True, user_request=description,
+                                   app_root=app_root, observer=observer, observer_agent=observer_agent,
+                                   scope=_Unclaimed(unclaimed) if sweep else None))
+                _reload(svc, output_dir)
+                missing = app_unbuilt(svc.doc)
             if missing:
                 stopped = "the application is not whole: " + "; ".join(missing[:8])
-                journal.write("whole:unbuilt", missing=missing)
-                say("message", {"text": "I have not handed the application over, because it is not whole: "
-                                        + "; ".join(missing[:8]) + ". Build again to finish it."})
+                journal.write("whole:unfinished", missing=missing)
+                say("message", {"text": "I could not finish the application, so I have not handed it over: "
+                                        + "; ".join(missing[:8]) + ". Tell me what to change, or Build again and I will carry on from here."})
         if not stopped:
             # EVERY STATEMENT ONCE MORE, AND WHAT A LATER FEATURE BROKE IS
             # FIXED: Crumb's customer landed on /orders once the Orders
@@ -495,6 +520,20 @@ def proven_before(feature: Feature, rows: list[dict], doc: Mapping[str, Any]) ->
             continue
         return True
     return False
+
+
+def whole_ask(missing: list[str]) -> str:
+    """What the unattended turn is asked when the built application is not
+    whole: what is missing, named; finish it where it lives."""
+    lines = "\n".join(f"- {m}" for m in missing[:8])
+    return (
+        f"Every feature is built, and the application is not whole:\n{lines}\n\n"
+        "Finish each where it lives — write the steps of a process that has none (`write_workflow_steps`), "
+        "write the screen that has no code and no layout, declare the roles the screens need, write the "
+        "statements of what must happen — then stop. Nobody is waiting to answer questions: decide from the "
+        "definition and act. A fault in the platform itself is reported with `report_platform_fault`, "
+        "not patched around."
+    )
 
 
 def node_failure_ask(feature: Feature, failures: dict[str, str]) -> str:

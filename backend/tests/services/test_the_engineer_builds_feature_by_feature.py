@@ -532,6 +532,40 @@ def test_what_no_feature_claimed_is_written_before_the_end():
     assert scope.subjects("assemble", doc, [""]) == [""]
 
 
+def test_what_is_missing_at_the_end_is_the_engineers_to_finish(tmp_path):
+    """"I have not handed the application over … Build again to finish it"
+    was said to a tester about a process the build itself had left without
+    steps (Ecommerce1, forge-v3, 2026-10-10 05:50)."""
+    svc = _project(tmp_path)
+    svc.doc["workflows"].append({"id": "FLOW-020", "name": "Abandon Inactive Carts", "trigger": {"kind": "scheduled"},
+                                 "inputs": [], "steps": []})
+    svc.save()
+    plans: list = []
+    fixes: list[str] = []
+
+    def run(s, executor, *, plan, scope=None, **kw):
+        plans.append((list(plan), getattr(getattr(scope, "feature", None), "id", None)))
+        return SimpleNamespace(failed=[], paused_because="")
+
+    def fix(od, ask):
+        fixes.append(ask)
+        for w in svc.doc["workflows"]:
+            if w["id"] == "FLOW-020":
+                w["steps"] = [{"id": "s1"}]
+        svc.save()
+        return {"status": "resolved", "answer": "wrote the clean-up's steps"}
+    prove = lambda s, od, only=None, **kw: {"statements": len(only or []), "passed": len(only or []), "failing": [],
+                                             "untried": [], "fixed": [], "results": [{"id": i, "verdict": "passed"} for i in only or []]}
+    said: list[str] = []
+    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix,
+                emit=lambda k, d: said.append(d.get("text", "")))
+    sweeps = [p for p, f in plans if f == "SWEEP"]
+    assert sweeps and sweeps[0][0] == "workflow_steps", "the orphan process is written in the sweep first"
+    assert not fixes or "Abandon Inactive Carts" in fixes[0], "and only what the sweep could not finish goes to a fix turn"
+    assert not out["stopped"] and out["statements"]["passed"] == 4, "then the whole application is tried and handed over"
+    assert not any("Build again" in s for s in said)
+
+
 def test_the_whole_application_is_checked_before_it_is_handed_over():
     from services.engineer.features import app_unbuilt
     assert app_unbuilt(DOC) == []
