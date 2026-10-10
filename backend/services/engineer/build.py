@@ -447,7 +447,10 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             # application is handed over without their statements, and the
             # next definition change asks again.
             last = journal.last("statements:done") or {}
-            gave_up = {str(x) for x in last.get("failed") or []}
+            # ...and what the last run already gave up on stays given up: a
+            # run that skipped them failed none, and the next asked again.
+            gave_up = ({str(x) for x in last.get("failed") or []}
+                       | {str(x) for x in (journal.last("statements:start") or {}).get("skipped") or []})
             journal.write("statements:start", nodes=statements, skipped=sorted(gave_up))
             say("message", {"text": "Writing down what must happen, to try the application against."})
             wrote = run(svc, executor, plan=statements, commit=True, user_request=description,

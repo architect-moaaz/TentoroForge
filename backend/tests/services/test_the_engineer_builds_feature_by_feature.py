@@ -624,3 +624,14 @@ def test_the_build_refreshes_the_platforms_files_before_it_lands():
     src = inspect.getsource(b.build)
     assert "refresh_engine(app_root, svc.doc)" in src and src.index("refresh_engine") < src.index('"land:start"')
     assert ("src/lib/LiveRefresh.tsx", True) in FOUNDATION_FILES and ("src/sdk/picture.tsx", True) in FOUNDATION_FILES
+
+
+def test_what_the_last_run_gave_up_on_stays_given_up(tmp_path):
+    from services.engineer.journal import Journal
+    j = Journal(tmp_path)
+    j.write("statements:start", nodes=["expectations"], skipped=["expectations:FLOW-017"])
+    j.write("statements:done", failed=["expectations:FLOW-033"])
+    last = j.last("statements:done") or {}
+    gave_up = ({str(x) for x in last.get("failed") or []}
+               | {str(x) for x in (j.last("statements:start") or {}).get("skipped") or []})
+    assert gave_up == {"expectations:FLOW-017", "expectations:FLOW-033"}
