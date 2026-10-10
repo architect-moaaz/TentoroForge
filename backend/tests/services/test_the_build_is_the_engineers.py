@@ -90,3 +90,24 @@ def test_a_resumed_build_counts_what_was_complete_before_it(project, tmp_path, m
                         lambda svc, report: seen.update(completed=sorted(report.completed)) or "PREVIEW")
     router._run_dag(str(tmp_path), str(tmp_path / "app"), "", approved=True, emit=lambda k, d: None)
     assert seen["completed"] == ["assemble", "install", "page_code", "verification"]
+
+
+def test_a_build_the_engineer_stopped_is_neither_handed_over_nor_walked_to_preview(project, tmp_path, monkeypatch):
+    """Ecommerce1 (forge-v3, 2026-10-10): 33 of 35 screens unwritten, and the
+    entry said "Your application is built" and walked the state to PREVIEW."""
+    from routers import blueprint_generate as router
+    from services.blueprint.orchestrator import RunReport
+    report = RunReport(completed=["install", "page_details", "assemble", "verification"])
+    report.paused_because = "Catalogue is not built: 2 screens have no code and no layout: /, /products"
+    monkeypatch.setattr("services.engineer.build.build",
+                        lambda od, app, **kw: {"features": [{"feature": "MODULE-001", "unbuilt": ["2 screens"]}],
+                                               "statements": {}, "stopped": report.paused_because,
+                                               "state": "PLAN_REVIEW", "report": report})
+    monkeypatch.setattr("services.smith.smith.settle_state_after_build",
+                        lambda svc, report: (_ for _ in ()).throw(AssertionError("walked the state of a stopped build")))
+    said: list[tuple[str, dict]] = []
+    out = router._run_dag(str(tmp_path), str(tmp_path / "app"), "", approved=True,
+                          emit=lambda kind, data: said.append((kind, data)), app_name="Shop")
+    texts = [d.get("text", "") for k, d in said if k == "message"]
+    assert not any("Your application is built" in t for t in texts), "not handed over"
+    assert out["state"] == "PLAN_REVIEW" and out["report"]["paused"].startswith("Catalogue is not built")

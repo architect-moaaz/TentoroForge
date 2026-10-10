@@ -2607,7 +2607,14 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
 
         # Settled once: at the handover when there was one — a second walk
         # would take a previewed app back through the rebuild states.
-        state = str(svc.doc.get("state") or "") if settled_early else settle_state_after_build(svc, report)
+        # A BUILD THE ENGINEER STOPPED IS NOT WALKED TO PREVIEW. Its tree may
+        # be assembled, and what is assembled is not the application: a build
+        # on an unfinished model reached PREVIEW with 33 of 35 screens
+        # unwritten (Ecommerce1, forge-v3, 2026-10-10). The state stays where
+        # it was; Build again carries on from what was done.
+        stopped = engineered and bool(getattr(report, "paused_because", ""))
+        state = (str(svc.doc.get("state") or "") if settled_early or stopped
+                 else settle_state_after_build(svc, report))
         logger.info("[blueprint] %s built: state=%s completed=%d failed=%s",
                     Path(output_dir).name, state, len(report.completed),
                     report.failed or "-")

@@ -1260,7 +1260,11 @@ def test_a_node_starts_the_moment_its_own_dependency_is_done(svc):
         if spec.node == "design_system":
             time.sleep(0.3)
         elif spec.node == "page_contracts":
-            return page_agent_result(spec)
+            # The page set names each screen's module — the one the
+            # architect declared just before (`check_page_modules`).
+            out = page_agent_result(spec)
+            out.proposals[0].body["module"] = "MODULE-001"
+            return out
         with lock:
             returned[spec.node] = time.monotonic()
         return _wave_result(spec)

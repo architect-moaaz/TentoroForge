@@ -43,10 +43,13 @@ DOC = {
     ]},
     "requirements": [{"id": f"REQ-00{n}", "area": a, "acceptanceCriteria": ["x"]}
                      for n, a in ((1, "Catalogue"), (2, "Catalogue"), (4, "Cart"), (8, "Accounts"))],
+    "roles": [{"id": "ROLE-001", "name": "Customer"}],
+    "pageLayouts": [{"page": pid, "composedBy": "deterministic", "tree": {}}
+                    for pid in ("PAGE-001", "PAGE-002", "PAGE-003", "PAGE-004", "PAGE-005")],
     "workflows": [
-        {"id": "FLOW-001", "name": "Add to Cart", "launchedFrom": ["PAGE-002"], "inputs": []},
-        {"id": "FLOW-005", "name": "Update Profile", "launchedFrom": ["PAGE-004"], "inputs": []},
-        {"id": "FLOW-009", "name": "Restock", "trigger": {"kind": "scheduled"},
+        {"id": "FLOW-001", "name": "Add to Cart", "launchedFrom": ["PAGE-002"], "inputs": [], "steps": [{"id": "s1"}]},
+        {"id": "FLOW-005", "name": "Update Profile", "launchedFrom": ["PAGE-004"], "inputs": [], "steps": [{"id": "s1"}]},
+        {"id": "FLOW-009", "name": "Restock", "trigger": {"kind": "scheduled"}, "steps": [{"id": "s1"}],
          "inputs": [{"name": "product", "kind": "record", "entity": "ENTITY-003"}]},
     ],
     "expectations": [
@@ -72,6 +75,21 @@ def test_with_no_modules_the_whole_application_is_one_feature():
     doc["pages"] = [{k: v for k, v in p.items() if k != "module"} for p in DOC["pages"]]
     plan = F.features(doc)
     assert len(plan) == 1 and plan[0].name == F.WHOLE and len(plan[0].pages) == 5
+
+
+def test_screens_in_no_module_are_built_one_record_at_a_time():
+    """Ecommerce1 (forge-v3, 2026-10-10): seven approved modules naming no
+    pages, 33 screens naming no module — one feature, "the rest of the
+    application"."""
+    doc = {**DOC, "modules": [{**m, "pages": []} for m in DOC["modules"]],
+           "pages": [{k: v for k, v in p.items() if k != "module"} for p in DOC["pages"]]
+           + [{"id": "PAGE-020", "route": "/about", "pattern": "static"}]}
+    plan = F.features(doc)
+    assert [f.id for f in plan] == ["MODULE-REST:ENTITY-003", "MODULE-REST:ENTITY-001", "MODULE-REST:ENTITY-004",
+                                    "MODULE-REST:other"], "by record, dependence first (the cart after both)"
+    assert plan[0].name == "the Product screens" and plan[0].pages == ["PAGE-001", "PAGE-002", "PAGE-005"]
+    assert plan[3].name == "the other screens" and plan[3].pages == ["PAGE-020"]
+    assert not any(f.id == "MODULE-REST" for f in plan)
 
 
 def test_each_node_has_a_part_that_belongs_to_the_feature(monkeypatch):
@@ -108,12 +126,25 @@ def test_a_node_that_writes_once_is_told_which_feature_this_call_is_for():
 
 
 def test_the_build_phase_is_split_into_once_per_feature_and_last():
+    """Ecommerce1 (forge-v3, 2026-10-10): `auth_pages` and `ui_direction`
+    ran once, before any page existed — they depend on `page_details`, and
+    `page_layouts` and `page_code` depend on them. The slice is the graph's."""
+    from services.blueprint.orchestrator import DAG, descendants
     once, per, last = build_nodes()
-    assert "install" in once and "auth_pages" in once
+    assert "install" in once and "decisions" in once and "design_system" in once
+    assert "auth_pages" in per and "ui_direction" in per, "between two feature nodes is a feature node"
     assert per[0] == "page_details" and per[-1] == "assemble" and "workflow_steps" in per
+    assert per.index("page_details") < per.index("auth_pages") < per.index("page_layouts")
+    assert per.index("page_details") < per.index("ui_direction") < per.index("page_code")
     assert per.index("workflows") < per.index("workflow_steps") < per.index("page_code")
     assert last == ["memory", "verification"]
     assert not set(once) & set(per) and not set(per) & set(last)
+    for k in once:
+        assert not any(d in per or d in last for d in DAG[k].depends_on), f"{k} runs once but depends on a later node"
+    for k in per:
+        assert not any(d in last for d in DAG[k].depends_on), f"{k} is a feature node but depends on a last node"
+    for k in last:
+        assert not (descendants(k) & set(per)), f"{k} runs last but a feature node depends on it"
 
 
 def _project(tmp_path):
@@ -162,7 +193,9 @@ def test_the_engineer_builds_each_feature_and_proves_it_before_the_next(tmp_path
                 executor=object(), run=run, prove=prove, fix=fix)
     assert [r[1] for r in runs] == [None, "MODULE-001", "MODULE-003", "MODULE-002", None]
     once, per, last = build_nodes()
-    assert runs[0][0] == once and runs[1][0] == per and runs[-1][0] == last
+    assert {"install", "decisions", "design_system"} <= set(runs[0][0]) and not set(runs[0][0]) & set(per), \
+        "the opening run is everything pending above the features, and no feature node"
+    assert runs[1][0] == per and runs[-1][0] == last
     assert proofs[0] == (["EXP-001"], True), "the first feature's own statements, with the authors' look"
     assert (["EXP-013"], True) in proofs and (["EXP-013"], False) in proofs, "then the fix turn's result is tried again"
     assert len(fixes) == 1 and "Cart & Checkout" in fixes[0] and "nothing was sent" in fixes[0]
@@ -181,7 +214,7 @@ def test_a_run_picks_up_where_the_last_one_stopped_and_stops_on_its_budget(tmp_p
     _project(tmp_path)
     from services.engineer.journal import Journal
     j = Journal(tmp_path)
-    j.write("feature:done", feature="MODULE-001")
+    j.write("feature:done", feature="MODULE-001", pages=["PAGE-001", "PAGE-002", "PAGE-005"], statements=1)
     runs = []
 
     def run(svc, executor, *, plan, scope=None, **kw):
@@ -189,10 +222,10 @@ def test_a_run_picks_up_where_the_last_one_stopped_and_stops_on_its_budget(tmp_p
         return SimpleNamespace(failed=[], paused_because="")
     prove = lambda svc, od, **kw: {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": [], "results": []}
     from services.engineer import build as B
-    monkeypatch.setattr(B.Budget, "over", lambda self: len(runs) >= 1)   # time runs out after one feature
+    monkeypatch.setattr(B.Budget, "over", lambda self: len(runs) >= 2)   # time runs out after one feature
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove,
                 fix=lambda od, ask: {}, budget_minutes=1)
-    assert runs == ["MODULE-003"], "the once-nodes and the finished feature are not run again"
+    assert runs == [None, "MODULE-003"], "what is pending above the features runs again; the finished feature does not"
     assert out["stopped"].startswith("out of time") and out["statements"] == {}
     assert j.finished() == ["MODULE-001", "MODULE-003"]
     assert j.last("run:out_of_time")["left"] == ["MODULE-002"]
@@ -205,6 +238,25 @@ def test_one_engineer_per_app_at_a_time(tmp_path):
     with pytest.raises(Busy):
         build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=lambda *a, **k: None,
               prove=lambda *a, **k: {}, fix=lambda *a: {})
+
+
+def test_a_lock_nobody_has_pulsed_is_taken_over(tmp_path):
+    """A killed resume left its lock with pid 63; in the container that pid
+    is the next worker's (Ecommerce1, forge-v3, 2026-10-10)."""
+    import os
+    import time
+    from services.engineer.journal import Busy, Journal, STALE_MINUTES
+    j = Journal(tmp_path)
+    j.acquire()                                    # our own live pid holds it
+    old = time.time() - (STALE_MINUTES + 1) * 60
+    os.utime(j.lock, (old, old))
+    Journal(tmp_path).acquire()                    # alive, but nothing pulsed: taken over
+    runs = tmp_path / ".forge" / "runs"
+    runs.mkdir(parents=True)
+    (runs / "20261010-010225-engineer.jsonl").write_text("{}\n")
+    os.utime(j.lock, (old, old))
+    with pytest.raises(Busy):
+        Journal(tmp_path).acquire()               # an engineer's ledger pulsed just now
 
 
 def test_the_fix_turn_is_told_the_feature_the_failures_and_the_rule():
@@ -347,8 +399,10 @@ def test_the_build_is_in_flight_from_its_first_feature_to_its_last(tmp_path, mon
     events = [json.loads(l) for l in ledgers[0].read_text().splitlines()]
     kinds = [e["event"] for e in events]
     assert kinds[0] == "run:start" and kinds[1] == "plan" and kinds[-1] == "run:end"
-    assert events[1]["nodes"] == ["feature:MODULE-001", "feature:MODULE-003", "feature:MODULE-002"]
-    assert [e["node"] for e in events if e["event"] == "node:done"] == events[1]["nodes"]
+    assert events[1]["nodes"] == ["opening"], "in flight from the opening run on"
+    plans = [e for e in events if e["event"] == "plan"]
+    assert plans[-1]["nodes"] == ["feature:MODULE-001", "feature:MODULE-003", "feature:MODULE-002"]
+    assert [e["node"] for e in events if e["event"] == "node:done"] == ["opening", *plans[-1]["nodes"]]
     after = ledger_snapshot(tmp_path, turns=False)
     assert not (after and after.get("active")), "and idle once it has finished"
 
@@ -370,9 +424,86 @@ def test_the_engineer_finishes_the_model_first_and_stops_when_it_cannot(tmp_path
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run,
                 prove=lambda *a, **k: {}, fix=lambda *a: {}, emit=lambda k, d: said.append(d.get("text", "")),
                 plan=["entity_fields", "page_contracts", "security", "install", "page_details", "assemble"])
-    assert plans == [["entity_fields", "page_contracts", "security"]], "the model's pending nodes, and nothing built after they fail"
+    assert len(plans) == 1 and "page_details" not in plans[0] and "assemble" not in plans[0], \
+        "one opening run of what is pending above the features, and nothing built after it fails"
+    assert [k for k in plans[0] if k != "install"] == ["entity_fields", "page_contracts", "security"]
     assert out["stopped"].startswith("the product model could not be finished") and out["features"] == []
+    assert out["report"].paused_because == out["stopped"], "the entry reads it and does not hand over"
     assert any("I could not finish the product model" in s and "already on Vendor" in s for s in said)
+
+
+def test_the_model_is_finished_first_on_a_resumed_build_too(tmp_path):
+    """Ecommerce1's resume (forge-v3, 2026-10-10 01:02) skipped the pending
+    model nodes because a feature was already "done", and wrote 33 page
+    contracts on entities with no fields and an app with no roles."""
+    _project(tmp_path)
+    from services.engineer.journal import Journal
+    Journal(tmp_path).write("feature:done", feature="MODULE-001", pages=["PAGE-001", "PAGE-002", "PAGE-005"],
+                            statements=1)
+    plans: list = []
+
+    def run(svc, executor, *, plan, scope=None, **kw):
+        plans.append((list(plan), scope.feature.id if scope else None))
+        return SimpleNamespace(failed=[], paused_because="")
+    prove = lambda svc, od, **kw: {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": [], "results": []}
+    build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=lambda *a: {},
+          plan=["entity_fields", "security", "install", "page_details", "page_code", "assemble", "memory"])
+    assert plans[0][1] is None and {"entity_fields", "security"} <= set(plans[0][0]), "the model nodes run first"
+    assert [f for _, f in plans[1:3]] == ["MODULE-003", "MODULE-002"]
+
+
+def test_a_stale_journal_row_is_not_a_proven_feature(tmp_path):
+    """Ecommerce1's first run wrote `feature:done MODULE-ALL, pages: []`
+    and its resume counted it as proven (forge-v3, 2026-10-10)."""
+    from services.engineer.build import proven_before
+    cat = F.features(DOC)[0]
+    row = {"feature": "MODULE-001", "pages": ["PAGE-001", "PAGE-002", "PAGE-005"], "statements": 1}
+    assert proven_before(cat, [row], DOC)
+    assert not proven_before(cat, [{**row, "pages": []}], DOC), "a row over different screens"
+    assert not proven_before(cat, [{**row, "unbuilt": ["2 screens have no code and no layout"]}], DOC)
+    assert not proven_before(cat, [{**row, "feature": "MODULE-ALL"}], DOC), "a feature that is not in the plan"
+    bare = {**DOC, "pageLayouts": []}
+    assert not proven_before(cat, [row], bare), "proven then, but its screens are not built now"
+
+
+def test_a_feature_whose_screens_are_not_built_stops_the_build(tmp_path):
+    """Ecommerce1 (forge-v3, 2026-10-10): "the application is built; it has
+    no statements of its own to try" over 33 screens nothing composed, and
+    the app was handed over at PREVIEW."""
+    svc = _project(tmp_path)
+    svc.doc["pageLayouts"] = [l for l in svc.doc["pageLayouts"] if l["page"] not in ("PAGE-001", "PAGE-002")]
+    svc.save()
+    runs: list = []
+    proofs: list = []
+
+    def run(s, executor, *, plan, scope=None, **kw):
+        runs.append(scope.feature.id if scope else None)
+        return SimpleNamespace(failed=[], paused_because="")
+
+    def prove(s, od, only=None, **kw):
+        proofs.append(only)
+        return {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": [], "results": []}
+    said: list[str] = []
+    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=lambda *a: {},
+                emit=lambda k, d: said.append(d.get("text", "")))
+    assert runs == [None, "MODULE-001"], "nothing is built on an unbuilt feature"
+    assert proofs == [], "and nothing is tried on it"
+    assert out["stopped"].startswith("Catalogue is not built: 2 screens have no code and no layout: /, /products")
+    assert out["report"].paused_because == out["stopped"]
+    assert out["features"][0]["unbuilt"] and any("Catalogue is not built" in s for s in said)
+    from services.engineer.journal import Journal
+    assert Journal(tmp_path).finished_rows()[0]["unbuilt"]
+
+
+def test_the_whole_application_is_checked_before_it_is_handed_over():
+    from services.engineer.features import app_unbuilt
+    assert app_unbuilt(DOC) == []
+    assert app_unbuilt({**DOC, "roles": []}) == ["no roles are declared while 5 screens need a sign-in"]
+    assert app_unbuilt({**DOC, "expectations": []}) == ["no statements of what must happen were written"]
+    stepless = {**DOC, "workflows": [{**w, "steps": []} for w in DOC["workflows"]]}
+    assert app_unbuilt(stepless) == ["3 processes have no steps: Add to Cart, Update Profile, Restock"]
+    assert app_unbuilt({**DOC, "pageLayouts": [], "pageCode": [{"page": "PAGE-001"}]})[0] == \
+        "4 screens have no code and no layout: /products, /cart, /account, /products/compare"
 
 
 def test_a_second_login_entity_sends_the_declaration_back_to_its_author(tmp_path):
@@ -380,10 +511,10 @@ def test_a_second_login_entity_sends_the_declaration_back_to_its_author(tmp_path
     svc.doc["data"] = {"entities": [{"id": "ENTITY-001", "name": "Customer", "table": "customers", "account": True, "fields": []},
                                     {"id": "ENTITY-002", "name": "Vendor", "table": "vendors", "account": True, "fields": []}]}
     svc.save()
-    from services.engineer.build import _unfinished_model
-    nodes, scope = _unfinished_model(["entity_fields", "page_contracts", "security", "install"], svc.doc)
-    assert nodes[0] == "data_model" and "entity_fields" in nodes, "the declarer goes first"
+    from services.engineer.build import first_nodes
+    nodes, scope = first_nodes(["entity_fields", "page_contracts", "security", "install"], svc.doc)
+    assert "data_model" in nodes and nodes.index("data_model") < nodes.index("entity_fields"), "the declarer goes first"
     assert "Customer and Vendor are each marked `account: true`" in scope.brief("data_model", "")
     assert scope.brief("entity_fields", "ENTITY-001") == ""
-    nodes, scope = _unfinished_model(["entity_fields"], {"data": {"entities": [{"id": "E1", "name": "Customer", "account": True}]}})
+    nodes, scope = first_nodes(["entity_fields"], {"data": {"entities": [{"id": "E1", "name": "Customer", "account": True}]}})
     assert nodes == ["entity_fields"] and scope is None

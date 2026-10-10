@@ -392,6 +392,9 @@ class AgentResult:
     confidence: float = 1.0
     #: Populated by apply_agent_result — the IDs actually allocated.
     artifacts: list[str] = field(default_factory=list)
+    #: The DAG node this call was for, when it was a node's call: what the
+    #: reply may write is the node's (`check_node_sections`), not the agent's.
+    node: str = ""
 
     def validate(self) -> None:
         if self.status not in ("completed", "blocked", "failed"):
@@ -463,6 +466,99 @@ def check_capability(result: AgentResult) -> None:
                 f"(§30). It writes: {', '.join(sorted(cap.writes)) or '<nothing>'}. "
                 f"Return a ChangeRequest to Smith instead."
             )
+
+
+class OutsideTheNodesWork(AuthorRefusal):
+    """A call wrote a section another node of the build is responsible for."""
+
+
+#: Sections a node writes beside the ones it `produces`: the page set binds
+#: its pages into the navigation tree; the field author adds the constraints
+#: and relationships its fields imply; the contracts carry a page's widgets.
+#: Measured across every app on forge-v3 (2026-10-10): every other node wrote
+#: only what it produces.
+NODE_ALSO_WRITES: dict[str, frozenset[str]] = {
+    "page_contracts": frozenset({"navigation"}),
+    "entity_fields": frozenset({"data"}),
+    "page_details": frozenset({"widgets"}),
+}
+
+
+def node_sections(node: str) -> frozenset[str]:
+    """The top-level sections one DAG node's calls may write: what it
+    produces (`data.entities` → `data`) and what it also writes."""
+    from services.blueprint.orchestrator import DAG
+    dag_node = DAG.get(node)
+    if dag_node is None:
+        return frozenset()
+    return frozenset(p.split(".")[0] for p in dag_node.produces) | NODE_ALSO_WRITES.get(node, frozenset())
+
+
+def check_node_sections(result: AgentResult) -> None:
+    """A CALL WRITES THE NODE'S SECTIONS, NOT ITS AGENT'S. The §30 boundary
+    is the agent's — `page_design` may write pages — and one agent serves
+    several nodes: Ecommerce1's `app_flows` call, run before any page set
+    existed, declared 33 pages of its own with no module and no contract,
+    and the build composed nothing from them (forge-v3, 2026-10-10). The
+    node names what the call is for; a section it does not produce is some
+    other node's to write, and the reply is refused naming that node."""
+    node = str(getattr(result, "node", "") or "")
+    if not node:
+        return
+    from services.blueprint.orchestrator import DAG
+    if node not in DAG or DAG[node].kind != "agent":
+        return
+    allowed = node_sections(node)
+    if not allowed:
+        return
+    for p in result.proposals:
+        top = str(p.section or "").split(".")[0]
+        if top in allowed:
+            continue
+        writers = sorted(k for k, n in DAG.items() if k != node and n.kind == "agent"
+                         and top in {q.split(".")[0] for q in n.produces})
+        by = f" — {', '.join(f'`{w}`' for w in writers)} writes {top!r}" if writers else ""
+        raise OutsideTheNodesWork(
+            f"this call is `{node}`, which writes {', '.join(sorted(allowed))}; it may not write "
+            f"{p.section!r}{by}. Leave {top!r} exactly as it is and write only "
+            f"{', '.join(sorted(allowed))}."
+        )
+
+
+class PageWithoutAModule(AuthorRefusal):
+    """A page set declared a page in no module while the application has them."""
+
+
+def check_page_modules(result: AgentResult, doc: dict | None) -> None:
+    """EVERY DECLARED SCREEN NAMES ITS MODULE. The modules are what the person
+    approved and what the engineer builds one at a time; a screen in none
+    falls to "the rest of the application", and an application whose every
+    screen fell there was built as one 33-screen feature (Ecommerce1,
+    forge-v3, 2026-10-10). Held at the declaration, where the module is
+    decided — a contract or an edit to a declared page is not asked again."""
+    if str(getattr(result, "node", "") or "") != "page_contracts" or not doc:
+        return
+    modules = [m for m in doc.get("modules") or [] if isinstance(m, dict) and m.get("id")
+               and str(m.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
+    if not modules:
+        return
+    ids = {str(m["id"]) for m in modules}
+    missing: list[str] = []
+    for p in result.proposals:
+        if p.section != "pages" or not isinstance(p.body, dict):
+            continue
+        if str(p.body.get("pattern") or "") == "auth":
+            continue
+        module = str(p.body.get("module") or "")
+        if module not in ids:
+            what = str(p.body.get("route") or p.body.get("name") or p.body.get("id") or "a page")
+            missing.append(f"{what}: `module` {module!r} is not one of the application's modules"
+                           if module else f"{what}: no `module`")
+    if missing:
+        named = ", ".join(f"{m['id']} ({m['name']})" if m.get("name") else str(m["id"]) for m in modules)
+        raise PageWithoutAModule(
+            "Every page names the module it belongs to — one of: " + named + ". "
+            + _all_of(missing))
 
 
 class InvalidWorkflowStep(AuthorRefusal):
@@ -1491,6 +1587,8 @@ def apply_agent_result(
     """
     result.validate()
     check_capability(result)
+    check_node_sections(result)
+    check_page_modules(result, svc.doc)
     # THE COMPOSERS' WORDS INTO THE CONTRACT'S, BEFORE THE CONTRACT READS THEM.
     from services.blueprint.layout_vocabulary import translate_layout_vocabulary
     translate_layout_vocabulary(result, svc.doc)

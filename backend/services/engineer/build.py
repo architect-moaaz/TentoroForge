@@ -12,6 +12,16 @@ the caller says.
 The nodes, the executors, the checks and the observer are the build's own;
 what changes is the order of work and that nothing starts on a feature that
 has not been proven.
+
+THE GRAPH'S ORDER IS KEPT. The scheduler honours a node's dependencies
+only inside one run's plan, and the engineer runs several plans: Ecommerce1
+(forge-v3, 2026-10-10) ran `decisions`, `auth_pages` and `ui_direction`
+before the entity fields, the page set and the roles existed, then skipped
+those on its resume because a feature was already "done", and the flows
+writer declared 33 pages nobody had contracted. So every run's plan is
+closed upstream — what is still pending above the features runs first,
+every time — and the feature nodes are the convex slice of the graph
+between the first feature node and the last.
 """
 from __future__ import annotations
 
@@ -19,7 +29,8 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from services.engineer.features import Feature, brief_for, features, statements_of, subjects_of
+from services.engineer.features import (Feature, app_unbuilt, brief_for, features, statements_of, subjects_of,
+                                        unbuilt_of)
 from services.engineer.journal import Budget, Journal
 
 
@@ -33,15 +44,25 @@ class _Pulse:
     21:29). One ledger spans the build: planned as its features, a feature
     per node, a pulse every twenty seconds, finished with the merged report."""
 
-    def __init__(self, output_dir: str, plan: list[Feature]):
+    #: The build's first node, before the features are known: everything
+    #: pending above them (the model, the design, the decisions).
+    OPENING = "opening"
+
+    def __init__(self, output_dir: str):
         import threading
         import time as _time
         from services.blueprint.run_ledger import RunLedger
         self.ledger = RunLedger(output_dir, f"{_time.strftime('%Y%m%d-%H%M%S')}-engineer", phase="build")
-        self.ledger.planned([f"feature:{f.id}" for f in plan])
+        self.ledger.planned([self.OPENING])
+        self.ledger.node_start(self.OPENING)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._beat, name="forge-engineer-pulse", daemon=True)
         self._thread.start()
+
+    def plan(self, features: list[Feature]) -> None:
+        """The features, once the opening run has settled what they are."""
+        self.ledger.node_done(self.OPENING)
+        self.ledger.planned([f"feature:{f.id}" for f in features])
 
     def _beat(self) -> None:
         while not self._stop.wait(20.0):
@@ -68,14 +89,17 @@ class _Pulse:
 
 logger = logging.getLogger(__name__)
 
-#: The build-phase nodes that are one feature's at a time, in the graph's order.
+#: The build-phase nodes that are one feature's at a time. The slice is
+#: closed by `build_nodes`: a node between two of these (`auth_pages`,
+#: `ui_direction`) is a feature node too, or the graph's order is broken.
 PER_FEATURE: tuple[str, ...] = (
     "page_details", "content_fields", "workflows", "workflow_steps", "business_rules",
     "analytics", "app_flows", "apis", "expectations", "page_layouts", "backend",
     "page_code", "frontend", "integration", "assemble",
 )
-#: The build-phase nodes that run once, after every feature.
-LAST: tuple[str, ...] = ("memory", "verification")
+#: A feature node that writes once for the whole application and is not
+#: written again for the next feature: the section it writes, once present.
+ONCE_WRITTEN: dict[str, str] = {"ui_direction": "composition"}
 #: How many unattended fix turns a feature's failing statements get.
 FIX_ROUNDS = 2
 #: Steps an unattended fix turn may take.
@@ -91,6 +115,9 @@ class FeatureScope:
         self.feature, self.first = feature, first
 
     def subjects(self, node: str, doc: Mapping[str, Any], pending: list[str]) -> list[str]:
+        written = ONCE_WRITTEN.get(node)
+        if written and doc.get(written):
+            return []
         return subjects_of(self.feature, node, doc, pending, first=self.first)
 
     def brief(self, node: str, subject: str) -> str:
@@ -107,15 +134,52 @@ class FeatureScope:
 
 def build_nodes() -> tuple[list[str], list[str], list[str]]:
     """``(once, per_feature, last)``: the build phase's nodes split by when
-    the engineer runs them, each in the graph's own order."""
-    from services.blueprint.orchestrator import levels
+    the engineer runs them, each in the graph's own order. Read off the
+    graph: a node that depends on a feature node and that a feature node
+    depends on is a feature node; one that depends on a feature node and
+    that none depends on runs last; the rest run once, before."""
+    from services.blueprint.orchestrator import descendants, levels
     from services.smith.smith import domain_nodes, model_nodes
     earlier = set(domain_nodes()) | set(model_nodes())
     order = [k for lvl in levels() for k in lvl if k not in earlier]
-    per = [k for k in order if k in PER_FEATURE]
-    last = [k for k in order if k in LAST]
+    per_set = set(PER_FEATURE)
+    below: set[str] = set()
+    for k in PER_FEATURE:
+        below |= descendants(k)
+    per = [k for k in order if k in per_set or (k in below and descendants(k) & per_set)]
+    last = [k for k in order if k not in per and k in below]
     once = [k for k in order if k not in per and k not in last]
     return once, per, last
+
+
+def first_nodes(plan: list[str], doc: Mapping[str, Any] | None = None) -> tuple[list[str], Any]:
+    """Of the nodes a build still has to run, the ones that come before its
+    first feature — the domain, the model, and the build-phase nodes no
+    feature node feeds — in the graph's order; and, when the declaration
+    itself is why the model could not finish, the declarer put back in front
+    with the brief that mends it. Run on every build, resumed or not: the
+    model is finished before anything is built on it."""
+    from services.blueprint.orchestrator import levels
+    once, per, last = build_nodes()
+    asked = set(plan)
+    scope: Any = None
+    accounts = [str(e.get("name")) for e in ((doc or {}).get("data") or {}).get("entities") or []
+                if isinstance(e, dict) and e.get("account") and e.get("status") != "DEPRECATED"]
+    if len(accounts) > 1 and {"entity_fields", "data_model"} & asked:
+        asked.add("data_model")
+        scope = _ModelScope(
+            f"{' and '.join(accounts)} are each marked `account: true`, and exactly one entity is the person "
+            f"behind a login. Keep it on the one people sign up as; make the other a record linked to it "
+            f"(a `userId` reference to that entity) or a role of it. Keep every other entity as declared.")
+    return [k for lvl in levels() for k in lvl if k in asked and k not in per and k not in last], scope
+
+
+def incomplete_nodes(doc: Mapping[str, Any], output_dir: str) -> list[str]:
+    """The graph's nodes not yet complete for this document, in order — what
+    the build entry hands the engineer as its plan."""
+    from services.blueprint.orchestrator import completed_nodes, levels, nodes_recorded_done
+    already = completed_nodes(doc, confirmed=nodes_recorded_done(output_dir) or None)
+    return [k for lvl in levels() for k in lvl if k not in already]
 
 
 def fix_ask(feature: Feature, items: list[dict]) -> str:
@@ -163,11 +227,16 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
           fix: Callable[[str, str], dict] | None = None) -> dict:
     """Build the approved definition at `output_dir` feature by feature.
     Returns what was done and proven: ``{features: [...], statements, state,
-    stopped, report}``. `done_nodes` are the build-phase nodes an earlier run
-    completed (a resumed build): the once-and-last nodes among them are not
-    run again. `run`, `prove` and `fix` are the orchestrator's `run`, the
-    statements' `prove_expectations` and an unattended Smith turn unless a
-    caller (a test) hands in its own."""
+    stopped, report}``. `plan` is the graph's nodes still to run (the build
+    entry's; computed here when a caller has none); `done_nodes` are the
+    ones an earlier run completed. `run`, `prove` and `fix` are the
+    orchestrator's `run`, the statements' `prove_expectations` and an
+    unattended Smith turn unless a caller (a test) hands in its own.
+
+    A build that stops — the model could not be finished, a feature's
+    screens have no code, the application is not whole at the end — says so
+    in `stopped`, and its report carries it as `paused_because`, so the
+    entry neither hands the application over nor calls it built."""
     from services.blueprint.service import BlueprintService
 
     say = emit or (lambda _e, _d: None)
@@ -179,67 +248,67 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
     svc = svc if svc is not None else BlueprintService.load(output_dir=output_dir)
     journal = Journal(output_dir)
     journal.acquire()
+    pulse: _Pulse | None = None
     try:
+        pulse = _Pulse(output_dir)
         run = run or _orchestrator_run
         prove = prove or _prove
         fix = fix or _fix
         if executor is None:
             executor, observer_agent = _executor(svc, output_dir, say, observer_agent)
         budget = Budget(budget_minutes)
-        earlier = journal.finished()
-        once, per, last = build_nodes()
         skip = set(done_nodes or ())
-        once = [k for k in once if k not in skip]
-        last = [k for k in last if k not in skip]
+        if plan is None:
+            plan = incomplete_nodes(svc.doc, output_dir)
+        plan = [k for k in plan if k not in skip]
+        once, per, last = build_nodes()
+        last = [k for k in last if k in plan]
         reports: list[Any] = []
-        # THE MODEL IS FINISHED FIRST. "Press Build app — the build finishes
-        # the model first" was true of the graph and not of the engineer:
-        # Ecommerce1's build (forge-v3, 2026-10-10) went on without entity
-        # fields, page contracts or roles, and 33 pages had nothing to be
-        # composed from. The domain and model nodes still pending run before
-        # anything is built; one that still fails ends the run with what could
-        # not be decided, instead of a built-looking app with nothing in it.
-        unfinished, model_scope = _unfinished_model(plan or [], svc.doc)
-        if unfinished and not earlier:
-            journal.write("model:start", nodes=unfinished)
-            say("message", {"text": "Finishing the product model first: " + ", ".join(unfinished) + "."})
-            model = run(svc, executor, plan=unfinished, commit=True, user_request=description, app_root=app_root,
-                        observer=observer, observer_agent=observer_agent, scope=model_scope)
-            reports.append(model)
+
+        # WHAT COMES BEFORE THE FIRST FEATURE RUNS FIRST, EVERY TIME: the
+        # domain and model nodes still pending, the design, the decisions.
+        # A build on an unfinished model built nothing (Ecommerce1, forge-v3,
+        # 2026-10-10), and its resume skipped the model again because a
+        # feature had been marked done.
+        first, model_scope = first_nodes(plan, svc.doc)
+        if first:
+            journal.write("first:start", nodes=first)
+            if model_scope is not None or any(k in first for k in _model_keys()):
+                say("message", {"text": "Finishing the product model first: "
+                                        + ", ".join(k for k in first if k in _model_keys()) + "."})
+            opening = run(svc, executor, plan=first, commit=True, user_request=description, app_root=app_root,
+                          observer=observer, observer_agent=observer_agent, scope=model_scope)
+            reports.append(opening)
             _reload(svc, output_dir)
-            failed = [f for f in (getattr(model, "failed", None) or [])]
+            failed = _required_failures(opening)
             if failed:
-                because = getattr(model, "failed_because", None) or {}
+                because = getattr(opening, "failed_because", None) or {}
                 why = "; ".join(f"{f}: {str(because.get(f) or 'it failed')[:300]}" for f in failed)
-                journal.write("model:failed", failed=failed, why=why)
+                journal.write("first:failed", failed=failed, why=why)
                 stopped = f"the product model could not be finished: {why}"
                 say("message", {"text": "I could not finish the product model, so I have not built on it — "
                                         + why[:700] + ". Tell me what to change, or Build again once it is mended."})
-                out = {"features": [], "statements": {}, "stopped": stopped,
-                       "state": str(svc.doc.get("state") or ""), "report": merged(reports)}
-                journal.write("run:end", **{k: v for k, v in out.items() if k not in ("features", "report")})
+                out = _stopped(journal, svc, reports, stopped, features=[])
+                pulse.end(out["report"])
                 return out
-            journal.write("model:done", nodes=unfinished)
-        plan = features(svc.doc)
-        journal.write("run:start", features=[f.id for f in plan], done_before=earlier,
+            journal.write("first:done", nodes=first)
+
+        plan_features = features(svc.doc)
+        rows_before = journal.finished_rows()
+        earlier = [f.id for f in plan_features if proven_before(f, rows_before, svc.doc)]
+        journal.write("run:start", features=[f.id for f in plan_features], done_before=earlier,
                       budget_minutes=budget_minutes)
-        say("message", {"text": _opening(plan, earlier, app_name)})
+        say("message", {"text": _opening(plan_features, earlier, app_name)})
         results: list[dict] = []
         stopped = ""
-        pulse = _Pulse(output_dir, [f for f in plan if f.id not in earlier])
+        pulse.plan([f for f in plan_features if f.id not in earlier])
 
-        if not earlier and once:
-            reports.append(run(svc, executor, plan=once, commit=True, user_request=description,
-                               app_root=app_root, observer=observer, observer_agent=observer_agent))
-            _reload(svc, output_dir)
-            journal.write("once:done", nodes=once)
-
-        for i, feature in enumerate(plan):
+        for i, feature in enumerate(plan_features):
             if feature.id in earlier:
                 continue
             if budget.over():
                 stopped = f"out of time after {budget.spent():.0f} minutes"
-                journal.write("run:out_of_time", left=[f.id for f in plan[i:]])
+                journal.write("run:out_of_time", left=[f.id for f in plan_features[i:]])
                 break
             journal.write("feature:start", feature=feature.id, name=feature.name,
                           pages=feature.pages, requirements=feature.requirements)
@@ -259,18 +328,39 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             failed = _mend_failed_nodes(svc, output_dir, app_root, feature, report, per, run, fix, budget,
                                         journal, say, executor=executor, description=description,
                                         observer=observer, observer_agent=observer_agent, scope=scope)
-            proof = _prove_feature(svc, output_dir, feature, prove, fix, budget, journal, say)
+            # NOT BUILT IS NOT DONE. A feature whose screens have no code and
+            # no layout, or whose processes have no steps, is not proven by
+            # trying statements about it: it is recorded as unbuilt, and the
+            # build stops with it rather than hand over what is not there.
+            unbuilt = unbuilt_of(svc.doc, feature)
+            proof = (_prove_feature(svc, output_dir, feature, prove, fix, budget, journal, say)
+                     if not unbuilt else {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": []})
             row = {"feature": feature.id, "name": feature.name, "pages": feature.pages,
-                   "failed_nodes": failed, **proof}
+                   "failed_nodes": failed, "unbuilt": unbuilt, **proof}
             results.append(row)
             journal.write("feature:done", **row)
             pulse.done(feature)
-            say("message", {"text": _said_feature(feature, proof)})
+            say("message", {"text": _said_feature(feature, proof, unbuilt)})
+            if unbuilt:
+                stopped = f"{feature.label} is not built: " + "; ".join(unbuilt[:6])
+                break
 
+        whole: dict = {}
         if not stopped and last:
             reports.append(run(svc, executor, plan=last, commit=True, user_request=description,
                                app_root=app_root, observer=observer, observer_agent=observer_agent))
             _reload(svc, output_dir)
+        if not stopped:
+            # THE APPLICATION, WHOLE: every screen written, every process
+            # with steps, the people it is for, the statements that say what
+            # must happen — before a single one is tried once more.
+            missing = app_unbuilt(svc.doc)
+            if missing:
+                stopped = "the application is not whole: " + "; ".join(missing[:8])
+                journal.write("whole:unbuilt", missing=missing)
+                say("message", {"text": "I have not handed the application over, because it is not whole: "
+                                        + "; ".join(missing[:8]) + ". Build again to finish it."})
+        if not stopped:
             # EVERY STATEMENT ONCE MORE, AND WHAT A LATER FEATURE BROKE IS
             # FIXED: Crumb's customer landed on /orders once the Orders
             # feature existed, and the statement from the first feature failed
@@ -283,21 +373,67 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
                      if statements_exist(svc.doc) else {})
             journal.write("whole:done", passed=whole.get("passed"), statements=whole.get("statements"),
                           failing=whole.get("failing"), untried=whole.get("untried"), fixed=whole.get("fixed"))
-        else:
-            whole = {}
-        out = {"features": results, "statements": whole, "stopped": stopped,
-               "state": str(svc.doc.get("state") or ""), "report": merged(reports)}
-        journal.write("run:end", **{k: v for k, v in out.items() if k not in ("features", "report")})
+        out = _stopped(journal, svc, reports, stopped, features=results, statements=whole)
         pulse.end(out["report"])
         return out
     except BaseException as exc:
-        try:
+        if pulse is not None:
             pulse.end(error=exc)
-        except NameError:
-            pass
         raise
     finally:
         journal.release()
+
+
+def _stopped(journal: Journal, svc: Any, reports: list[Any], stopped: str, *, features: list[dict],
+             statements: dict | None = None) -> dict:
+    """The build's result, with its report carrying why it stopped — the
+    entry reads `paused_because` and neither hands over nor announces."""
+    report = merged(reports)
+    if stopped and not getattr(report, "paused_because", ""):
+        report.paused_because = stopped
+    out = {"features": features, "statements": statements or {}, "stopped": stopped,
+           "state": str(svc.doc.get("state") or ""), "report": report}
+    journal.write("run:end", **{k: v for k, v in out.items() if k not in ("features", "report")})
+    return out
+
+
+def _model_keys() -> set[str]:
+    from services.smith.smith import domain_nodes, model_nodes
+    return set(domain_nodes()) | set(model_nodes())
+
+
+def _required_failures(report: Any) -> list[str]:
+    """The failures of the opening run that nothing can be built on: a
+    required node's, by its label (`entity_fields:ENTITY-001` → `entity_fields`)."""
+    from services.blueprint.orchestrator import DAG
+    out: list[str] = []
+    for label in getattr(report, "failed", None) or []:
+        key = str(label).split(":", 1)[0]
+        if key in DAG and DAG[key].optional:
+            continue
+        out.append(str(label))
+    return out
+
+
+def proven_before(feature: Feature, rows: list[dict], doc: Mapping[str, Any]) -> bool:
+    """Whether an earlier run built and proved this very feature: a
+    `feature:done` row of the same id over the same screens, nothing of it
+    unbuilt then, and nothing of it unbuilt now. Ecommerce1's resume took
+    "MODULE-ALL, pages: []" as a proven feature and picked up from there
+    (forge-v3, 2026-10-10)."""
+    for r in rows:
+        if str(r.get("feature")) != feature.id:
+            continue
+        if sorted(str(p) for p in r.get("pages") or []) != sorted(feature.pages):
+            continue
+        if r.get("unbuilt"):
+            continue
+        if not feature.pages and not r.get("statements"):
+            continue
+        if unbuilt_of(doc, feature):
+            continue
+        return True
+    return False
 
 
 def node_failure_ask(feature: Feature, failures: dict[str, str]) -> str:
@@ -368,27 +504,6 @@ class _ModelScope:
         return self._brief if node == "data_model" else ""
 
 
-def _unfinished_model(plan: list[str], doc: Mapping[str, Any] | None = None) -> tuple[list[str], Any]:
-    """The domain and model nodes a build was asked to run — the ones not
-    complete when it started — in the graph's order; and, when the
-    declaration itself is the fault, the declarer put back in front with the
-    brief that mends it."""
-    from services.blueprint.orchestrator import levels
-    from services.smith.smith import domain_nodes, model_nodes
-    wanted = set(domain_nodes()) | set(model_nodes())
-    asked = set(plan)
-    scope: Any = None
-    accounts = [str(e.get("name")) for e in ((doc or {}).get("data") or {}).get("entities") or []
-                if isinstance(e, dict) and e.get("account") and e.get("status") != "DEPRECATED"]
-    if len(accounts) > 1 and "entity_fields" in asked:
-        asked.add("data_model")
-        scope = _ModelScope(
-            f"{' and '.join(accounts)} are each marked `account: true`, and exactly one entity is the person "
-            f"behind a login. Keep it on the one people sign up as; make the other a record linked to it "
-            f"(a `userId` reference to that entity) or a role of it. Keep every other entity as declared.")
-    return [k for lvl in levels() for k in lvl if k in wanted and k in asked], scope
-
-
 def plan_pages(doc: Mapping[str, Any]) -> list[dict]:
     return [p for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("id")
             and p.get("status") != "DEPRECATED"]
@@ -444,7 +559,9 @@ def _prove_feature(svc: Any, output_dir: str, feature: Feature, prove: Callable[
             "fixed": fixed}
 
 
-def _said_feature(feature: Feature, proof: dict) -> str:
+def _said_feature(feature: Feature, proof: dict, unbuilt: list[str] | None = None) -> str:
+    if unbuilt:
+        return f"{feature.label} is not built: " + "; ".join(unbuilt[:6]) + "."
     n, held = proof.get("statements", 0), proof.get("passed", 0)
     if not n:
         return f"{feature.label} is built; it has no statements of its own to try."
@@ -504,4 +621,5 @@ def _executor(svc: Any, output_dir: str, say: Callable[[str, dict], None], obser
     return executor, observer_agent
 
 
-__all__ = ["build", "build_nodes", "FeatureScope", "fix_ask", "PER_FEATURE", "LAST", "FIX_ROUNDS"]
+__all__ = ["build", "build_nodes", "first_nodes", "incomplete_nodes", "proven_before", "FeatureScope",
+           "fix_ask", "PER_FEATURE", "FIX_ROUNDS"]

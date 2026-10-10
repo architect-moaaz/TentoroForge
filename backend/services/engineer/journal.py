@@ -17,6 +17,10 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
+#: A lock nothing has pulsed for this long is nobody's.
+STALE_MINUTES = 5
+
+
 class Busy(RuntimeError):
     """Another engineer is at work on this app."""
 
@@ -50,10 +54,15 @@ class Journal:
     def finished(self) -> list[str]:
         """The features a previous run finished, in order."""
         out: list[str] = []
-        for r in self.rows():
-            if r.get("event") == "feature:done" and r.get("feature") and r["feature"] not in out:
+        for r in self.finished_rows():
+            if r["feature"] not in out:
                 out.append(str(r["feature"]))
         return out
+
+    def finished_rows(self) -> list[dict]:
+        """Every `feature:done` row, in order — what each finished feature
+        covered (its screens) and what it proved, for `build.proven_before`."""
+        return [r for r in self.rows() if r.get("event") == "feature:done" and r.get("feature")]
 
     def last(self, event: str) -> dict | None:
         found = None
@@ -65,12 +74,30 @@ class Journal:
     # --- one engineer per app -------------------------------------------
     def acquire(self) -> None:
         """Take the app, or raise `Busy` naming who has it. A lock whose
-        holder is gone is taken over."""
+        holder is gone is taken over — and so is one whose holder is alive
+        but whose build has not pulsed: in a container the pids are few and
+        reused, and a killed resume's pid (Ecommerce1, 2026-10-10) is the
+        next worker's tomorrow."""
         self.dir.mkdir(parents=True, exist_ok=True)
         holder = self._holder()
-        if holder and _alive(holder):
+        if holder and _alive(holder) and self._pulsing():
             raise Busy(f"an engineer (pid {holder}) is already at work on this app")
         self.lock.write_text(str(os.getpid()), "utf-8")
+
+    def _pulsing(self) -> bool:
+        """Whether the engineer holding the lock is at work: the lock is
+        fresh, or an engineer's ledger on this app pulsed within
+        `STALE_MINUTES` (the pulse is every twenty seconds)."""
+        try:
+            latest = self.lock.stat().st_mtime
+        except OSError:
+            return False
+        for ledger in (self.dir.parent / "runs").glob("*-engineer.jsonl"):
+            try:
+                latest = max(latest, ledger.stat().st_mtime)
+            except OSError:
+                continue
+        return time.time() - latest < STALE_MINUTES * 60
 
     def release(self) -> None:
         if self._holder() == os.getpid():

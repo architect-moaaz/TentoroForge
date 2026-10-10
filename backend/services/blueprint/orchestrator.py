@@ -1928,6 +1928,7 @@ def _execute(
             advance(pool, key)
             return
         with svc.lock:
+            _for_node(outcome, key)
             refused, application = _repair_apply(
                 svc, outcome, commit=commit, user_request=user_request)
             if refused is None:
@@ -2210,6 +2211,16 @@ def _record_observation(report: RunReport, ledger: Any, obs: Any) -> None:
         hits = obs.findings.get(subject, [])
         _note(ledger, "observed", obs.node, subject, not hits, len(hits),
               obs.critic)
+
+
+def _for_node(result: Any, key: str) -> None:
+    """The reply is the node's: what it may write is decided by the node it
+    was called for (`agent_contract.check_node_sections`), not by its agent."""
+    if hasattr(result, "proposals"):
+        try:
+            result.node = key
+        except Exception:  # noqa: BLE001 — a result that cannot carry it is checked by agent alone
+            pass
 
 
 def _repair_apply(
@@ -2717,6 +2728,7 @@ def _apply_subject(
         return _rejected(_reason(outcome))
 
     try:
+        _for_node(outcome, key)
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
@@ -2931,6 +2943,7 @@ def _run_agent_subject(
             continue
 
         try:
+            _for_node(result, key)
             application = apply_agent_result(
                 svc, result, commit=commit, user_request=user_request,
             )

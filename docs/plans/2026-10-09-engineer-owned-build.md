@@ -610,3 +610,65 @@ between two graph runs (21:29): the engineer's build now carries one ledger
 with a pulse from its first feature to its last. Not yet run live: a build
 started from the UI, Smith's problem report from the panel,
 `report_platform_fault`; the mend of a failed node is proven by tests only.
+
+### 2026-10-10 — the first tester's build, and what it showed
+
+Ecommerce1 (q3lcz9t8), the first build a tester ran from the UI through
+the engineer, was handed over at PREVIEW with 0 of 35 pages ready. The
+tester's own words: "this change has made the things unreliable". Read
+from its ledgers, journal and version history, every fault was the
+engineer's order of work, none the Workbench's:
+
+1. **The engineer broke the graph's dependency rule.** The scheduler
+   honours a node's dependencies only inside one run's plan, and the
+   engineer runs several plans. Its `once` run executed `decisions`,
+   `auth_pages` and `ui_direction` before the entity fields, the page set
+   and the roles existed (the model phase had failed on two `account:
+   true` entities); its feature run then ran `app_flows`, which — being a
+   `page_design` agent — declared 33 pages of its own, with no module and
+   no contract, and nothing composed them. On the resume the pending model
+   nodes were skipped altogether, because a feature was already "done".
+2. **A feature "done" with nothing in it.** `feature:done MODULE-ALL,
+   pages: []` was taken as a proven feature, so the resume picked up from
+   there and ran 33 page contracts on entities with no fields and an app
+   with no roles.
+3. **Handed over unfinished.** "The application is built; it has no
+   statements of its own to try" over 33 unwritten screens; the state
+   walked to PREVIEW because `assemble` had completed.
+4. **One 33-screen feature.** Seven approved modules named no pages and
+   no page named a module, so every screen fell to "the rest of the
+   application" — the old build under another name.
+
+Fixed, on `claude/workbench` → `smithv4`:
+
+- Every engineer run's plan is closed upstream: whatever is still pending
+  above the features — the domain, the model, the design, the decisions —
+  runs first, on every build, resumed or not (`first_nodes`), and a
+  required node that fails there stops the build with its reason. The
+  feature slice is read off the graph and is convex: a node between two
+  feature nodes (`auth_pages`, `ui_direction`) is a feature node;
+  `ui_direction` is not written again once `composition` exists.
+- A call writes its node's sections, not its agent's
+  (`check_node_sections`, from the node stamped on every reply before it
+  is applied): `app_flows` writes `flows`; a reply that writes `pages` is
+  refused naming `page_contracts`. Measured across every app on forge-v3,
+  the only writes beside `produces` are `page_contracts` → navigation,
+  `entity_fields` → data, `page_details` → widgets, and those are allowed.
+- The page set names every screen's module when the application has
+  modules (`check_page_modules`, at the declaration only); screens that
+  still belong to no module are built one record at a time, not as one
+  feature.
+- A feature is proven before only by a journal row over the same screens
+  with nothing unbuilt, and only while its screens are built now
+  (`proven_before`). A feature whose screens have no code and no layout,
+  or whose processes have no steps, is not tried and stops the build
+  (`unbuilt_of`); at the end the whole application is checked —
+  every screen, every process, the roles, the statements — before a
+  statement is tried once more (`app_unbuilt`). A stopped build carries
+  its reason as `paused_because`: the entry neither hands over nor walks
+  the state to PREVIEW.
+- The engineer's ledger is in flight from the opening run on, not from
+  the first feature.
+
+The Workbench held: the resume's statements were never reached, and the
+first run's "no statements to try" was the engineer's claim, not a trial's.
