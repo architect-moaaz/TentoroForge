@@ -170,6 +170,10 @@ def test_is_built_is_the_emitted_app_not_the_definition(tmp_path):
     # After a build, app_emitter has written the Next app's package.json.
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "package.json").write_text("{}")
+    # The opening's install writes the scaffold before a screen exists; a
+    # stopped opening is not a build (Ecom L1, 2026-10-11).
+    assert _is_built(str(tmp_path)) is False
+    (tmp_path / ".forge" / "blueprint" / "current.json").write_text('{"runtime": {"build": {"status": "passed"}}}')
     assert _is_built(str(tmp_path)) is True
 
 
