@@ -672,3 +672,34 @@ Fixed, on `claude/workbench` → `smithv4`:
 
 The Workbench held: the resume's statements were never reached, and the
 first run's "no statements to try" was the engineer's claim, not a trial's.
+
+### 2026-10-10 — cost and time, measured, and the shape corrected
+
+The usage ledger on forge-v3: the graph built TStyle for $10.33 and
+E-commerce for $11.62 (~35 min each); the engineer built Crumb for $9.91,
+ecom v1 for $11.80, and ecom v2 reached $15.76 at three of seven features
+(85 min) — a full ecom v2 would have been ~$35 and 2+ hours. Zero apps a
+tester has used and found working since the switch. The user's verdict:
+"the generation time and the cost has increased".
+
+Where it went: the nodes that write one section for the whole app
+(`workflows`, `business_rules`, `analytics`, `app_flows`, `apis`,
+`expectations`) ran once per feature, each call carrying the whole
+section; the observer's repair rounds doubled some of them; a production
+build and a trial run per feature.
+
+Corrected: those sections are authored once, in the opening, the graph's
+way; a feature is what lands it (`PER_FEATURE` = workflow_steps,
+page_layouts, backend, page_code, frontend, integration, assemble), proven
+before the next feature's code is written; the next feature's steps are
+written while this one lands (the overlap); a fix round that changed
+nothing is the last; the end tries only what failed, what was untried,
+what no feature covered, and the arrivals. Expected for an ecom v2-size
+app: ~$12–15 and ~60–75 minutes, to be measured on the next build.
+
+Also fixed from ecom v2: the sensitive-column key was never written for a
+built app (40 statements "could not be tried"); a record told apart by
+name kept its slug (409); Smith's `read_rows` could not open any app's
+database; an unattended turn's out-of-steps answer contradicted its own
+try. Still to do: the paused stop says nothing to the tester; "could not
+be tried" should say why when the cause is the platform's.
