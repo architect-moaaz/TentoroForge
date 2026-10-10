@@ -2859,6 +2859,10 @@ def _gate_turn(svc: Any, gate: str, output_dir: str, app_root: str, req: Any, *,
         logger.warning("[gates] could not interpret %r: %s", req.message[:80], exc)
         return None
     kind = str(turn.get("kind") or "other")
+    logger.info("[gates] %s at %s read %r as %s (parts=%s, brief=%r, new=%d, reword=%d)",
+                Path(output_dir).name, gate, req.message[:80], kind, list(turn.get("parts") or []),
+                str(turn.get("brief") or "")[:120], len(turn.get("newRequirements") or []),
+                len(turn.get("reword") or []))
     if kind == "other":
         return None
     if kind == "question":

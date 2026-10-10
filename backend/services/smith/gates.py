@@ -420,7 +420,9 @@ def interpret(doc: Mapping[str, Any], gate: str, message: str, history: list[tup
               "- `change`: they want something in it different.\n"
               "- `question`: they are asking about it — answer from what is shown, in two or three "
               "plain sentences, and do not change anything.\n"
-              "- `approve`: they accept it as it stands.\n"
+              "- `approve`: they accept it as it stands — said in so many words (yes, approve, "
+              "looks right, build it). A message that asks for anything is a `change`, even one "
+              "asked before: if it was done already, it is done again.\n"
               "- `other`: anything that is not about what is shown.\n"
               f"{rules}\nUse only ids that appear in what is shown. Every field is required; use "
               "empty strings and empty lists for what does not apply.")
