@@ -351,3 +351,39 @@ def test_the_build_is_in_flight_from_its_first_feature_to_its_last(tmp_path, mon
     assert [e["node"] for e in events if e["event"] == "node:done"] == events[1]["nodes"]
     after = ledger_snapshot(tmp_path, turns=False)
     assert not (after and after.get("active")), "and idle once it has finished"
+
+
+def test_the_engineer_finishes_the_model_first_and_stops_when_it_cannot(tmp_path):
+    """Ecommerce1 (forge-v3, 2026-10-10): the tester pressed Build on an
+    unfinished model; the engineer built on no entity fields, no page
+    contracts and no roles, and 33 pages had nothing to be composed from."""
+    _project(tmp_path)
+    plans: list = []
+
+    def run(svc, executor, *, plan, scope=None, **kw):
+        plans.append(list(plan))
+        if "entity_fields" in plan:
+            return SimpleNamespace(failed=["entity_fields:ENTITY-001"], paused_because="",
+                                   failed_because={"entity_fields:ENTITY-001": "InvalidEntityFields: Customer: `account: true` is already on Vendor"})
+        return SimpleNamespace(failed=[], paused_because="")
+    said: list[str] = []
+    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run,
+                prove=lambda *a, **k: {}, fix=lambda *a: {}, emit=lambda k, d: said.append(d.get("text", "")),
+                plan=["entity_fields", "page_contracts", "security", "install", "page_details", "assemble"])
+    assert plans == [["entity_fields", "page_contracts", "security"]], "the model's pending nodes, and nothing built after they fail"
+    assert out["stopped"].startswith("the product model could not be finished") and out["features"] == []
+    assert any("I could not finish the product model" in s and "already on Vendor" in s for s in said)
+
+
+def test_a_second_login_entity_sends_the_declaration_back_to_its_author(tmp_path):
+    svc = _project(tmp_path)
+    svc.doc["data"] = {"entities": [{"id": "ENTITY-001", "name": "Customer", "table": "customers", "account": True, "fields": []},
+                                    {"id": "ENTITY-002", "name": "Vendor", "table": "vendors", "account": True, "fields": []}]}
+    svc.save()
+    from services.engineer.build import _unfinished_model
+    nodes, scope = _unfinished_model(["entity_fields", "page_contracts", "security", "install"], svc.doc)
+    assert nodes[0] == "data_model" and "entity_fields" in nodes, "the declarer goes first"
+    assert "Customer and Vendor are each marked `account: true`" in scope.brief("data_model", "")
+    assert scope.brief("entity_fields", "ENTITY-001") == ""
+    nodes, scope = _unfinished_model(["entity_fields"], {"data": {"entities": [{"id": "E1", "name": "Customer", "account": True}]}})
+    assert nodes == ["entity_fields"] and scope is None

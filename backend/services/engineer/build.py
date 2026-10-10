@@ -158,7 +158,7 @@ def merged(reports: list[Any]) -> Any:
 def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] | None = None,
           description: str = "", budget_minutes: float = 0, app_name: str = "",
           executor: Any = None, observer_agent: Any = None, observer: Any = None,
-          done_nodes: set[str] | None = None, svc: Any = None,
+          done_nodes: set[str] | None = None, svc: Any = None, plan: list[str] | None = None,
           run: Callable[..., Any] | None = None, prove: Callable[..., dict] | None = None,
           fix: Callable[[str, str], dict] | None = None) -> dict:
     """Build the approved definition at `output_dir` feature by feature.
@@ -186,13 +186,41 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
         if executor is None:
             executor, observer_agent = _executor(svc, output_dir, say, observer_agent)
         budget = Budget(budget_minutes)
-        plan = features(svc.doc)
         earlier = journal.finished()
         once, per, last = build_nodes()
         skip = set(done_nodes or ())
         once = [k for k in once if k not in skip]
         last = [k for k in last if k not in skip]
         reports: list[Any] = []
+        # THE MODEL IS FINISHED FIRST. "Press Build app — the build finishes
+        # the model first" was true of the graph and not of the engineer:
+        # Ecommerce1's build (forge-v3, 2026-10-10) went on without entity
+        # fields, page contracts or roles, and 33 pages had nothing to be
+        # composed from. The domain and model nodes still pending run before
+        # anything is built; one that still fails ends the run with what could
+        # not be decided, instead of a built-looking app with nothing in it.
+        unfinished, model_scope = _unfinished_model(plan or [], svc.doc)
+        if unfinished and not earlier:
+            journal.write("model:start", nodes=unfinished)
+            say("message", {"text": "Finishing the product model first: " + ", ".join(unfinished) + "."})
+            model = run(svc, executor, plan=unfinished, commit=True, user_request=description, app_root=app_root,
+                        observer=observer, observer_agent=observer_agent, scope=model_scope)
+            reports.append(model)
+            _reload(svc, output_dir)
+            failed = [f for f in (getattr(model, "failed", None) or [])]
+            if failed:
+                because = getattr(model, "failed_because", None) or {}
+                why = "; ".join(f"{f}: {str(because.get(f) or 'it failed')[:300]}" for f in failed)
+                journal.write("model:failed", failed=failed, why=why)
+                stopped = f"the product model could not be finished: {why}"
+                say("message", {"text": "I could not finish the product model, so I have not built on it — "
+                                        + why[:700] + ". Tell me what to change, or Build again once it is mended."})
+                out = {"features": [], "statements": {}, "stopped": stopped,
+                       "state": str(svc.doc.get("state") or ""), "report": merged(reports)}
+                journal.write("run:end", **{k: v for k, v in out.items() if k not in ("features", "report")})
+                return out
+            journal.write("model:done", nodes=unfinished)
+        plan = features(svc.doc)
         journal.write("run:start", features=[f.id for f in plan], done_before=earlier,
                       budget_minutes=budget_minutes)
         say("message", {"text": _opening(plan, earlier, app_name)})
@@ -323,6 +351,42 @@ def _mend_failed_nodes(svc: Any, output_dir: str, app_root: str, feature: Featur
 def statements_exist(doc: Mapping[str, Any]) -> bool:
     from services.expects.statements import expectations
     return bool(expectations(dict(doc)))
+
+
+class _ModelScope:
+    """What the declarer is told when its declaration is why the model could
+    not finish: Ecommerce1's `data_model` marked Customer and Vendor both
+    `account: true`, and the field authors were refused for it (2026-10-10)."""
+
+    def __init__(self, brief: str):
+        self._brief = brief
+
+    def subjects(self, node: str, doc: Mapping[str, Any], pending: list[str]) -> list[str]:
+        return pending
+
+    def brief(self, node: str, subject: str) -> str:
+        return self._brief if node == "data_model" else ""
+
+
+def _unfinished_model(plan: list[str], doc: Mapping[str, Any] | None = None) -> tuple[list[str], Any]:
+    """The domain and model nodes a build was asked to run — the ones not
+    complete when it started — in the graph's order; and, when the
+    declaration itself is the fault, the declarer put back in front with the
+    brief that mends it."""
+    from services.blueprint.orchestrator import levels
+    from services.smith.smith import domain_nodes, model_nodes
+    wanted = set(domain_nodes()) | set(model_nodes())
+    asked = set(plan)
+    scope: Any = None
+    accounts = [str(e.get("name")) for e in ((doc or {}).get("data") or {}).get("entities") or []
+                if isinstance(e, dict) and e.get("account") and e.get("status") != "DEPRECATED"]
+    if len(accounts) > 1 and "entity_fields" in asked:
+        asked.add("data_model")
+        scope = _ModelScope(
+            f"{' and '.join(accounts)} are each marked `account: true`, and exactly one entity is the person "
+            f"behind a login. Keep it on the one people sign up as; make the other a record linked to it "
+            f"(a `userId` reference to that entity) or a role of it. Keep every other entity as declared.")
+    return [k for lvl in levels() for k in lvl if k in wanted and k in asked], scope
 
 
 def plan_pages(doc: Mapping[str, Any]) -> list[dict]:

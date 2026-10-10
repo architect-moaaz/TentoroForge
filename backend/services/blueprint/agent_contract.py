@@ -611,6 +611,20 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
     # the account is made.
     live = [e for e in ((doc or {}).get("data") or {}).get("entities") or []
             if isinstance(e, dict) and e.get("status") != "DEPRECATED"]
+    # REFUSED WHERE IT IS DECLARED. Ecommerce1's data model marked Customer AND
+    # Vendor `account: true` in one reply; the check compared each against the
+    # entities already applied (none yet) and let both through, then refused
+    # each field author twice for a flag it was told to keep — the model never
+    # finished (forge-v3, 2026-10-10). Two accounts in one reply are refused
+    # here, naming both and the way out; a field author whose declared row
+    # inherited the conflict is not the one to mend it.
+    declared = [str(p.body.get("name") or p.natural_key) for p in result.proposals
+                if p.section == "data.entities" and isinstance(p.body, dict) and p.body.get("account")]
+    if len(declared) > 1:
+        problems.append(f"{' and '.join(declared)} are each marked `account: true`, and exactly one entity is "
+                        f"the person behind a login. Keep it on the one people sign up as; make the other a "
+                        f"record linked to it (a `userId`/`accountId` reference to that entity) or a role of it, "
+                        f"never a second login")
     for proposal in (p for p in result.proposals if p.section == "data.entities"):
         body = proposal.body if isinstance(proposal.body, dict) else {}
         name = body.get("name") or proposal.natural_key
@@ -620,7 +634,8 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
         if not (body.get("account") or any(e.get("account") and same(e) for e in live)):
             continue
         other = next((e for e in live if e.get("account") and not same(e)), None)
-        if body.get("account") and other is not None:
+        inherited = any(e.get("account") and same(e) for e in live)
+        if body.get("account") and other is not None and not inherited:
             problems.append(f"{name}: `account: true` is already on {other.get('name')} — one entity is the "
                             "person behind a login")
         from services.blueprint.projection import _is_credential_field

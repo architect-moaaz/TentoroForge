@@ -2550,7 +2550,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
                             + len([k for k in last if k in plan]))
         built = engineer_build(output_dir, app_root, emit=emit, description=description, app_name=app_name,
                                executor=executor, observer_agent=watcher, observer=progress,
-                               done_nodes=set(already), svc=svc)
+                               done_nodes=set(already), svc=svc, plan=list(plan))
         report = built["report"]
         # WHAT WAS COMPLETE BEFORE THIS RUN IS COMPLETE. The state walk reads
         # the report's completed nodes; a resumed run completes few of them
