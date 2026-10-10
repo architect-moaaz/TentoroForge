@@ -156,6 +156,10 @@ def test_the_prompt_says_what_the_app_is_its_rules_and_that_it_cannot_hand_off()
     assert "Silver Screen" not in prompt, "the design brief is not the assistant's business"
     assert "A comment is permanent once posted." in prompt and "Old rule" not in prompt
     assert "wait for a clear yes" in prompt
+    # an id already in the conversation is used, not fetched again; and the rule is not about ratings
+    assert "Use the id of a record you already have from earlier in this conversation" in prompt
+    assert "before you act on it" not in prompt, "the old rule forced a fresh lookup before every change"
+    assert "a rating" not in prompt, "the generic prompt is not about any one app"
     assert "cannot transfer anyone to a person" in prompt
     assert "- Admin: Manages the catalog." in prompt
 

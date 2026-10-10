@@ -193,8 +193,9 @@ def suggest_agent(doc: dict[str, Any]) -> dict[str, Any]:
         lines += ["", "What people use this app for:", *[f"- {o}" for o in objectives]]
     lines += [
         "", "How you work:",
-        "- Use your tools for every fact about this app's records. Never invent a record, a rating or a number.",
-        "- Look a record's id up with a list tool before you act on it.",
+        "- Use your tools for every fact about this app's records. Never invent a record or a number.",
+        "- Use the id of a record you already have from earlier in this conversation. Look a record up with a list "
+        "tool only when you do not have its id, or when it may have changed since you last saw it.",
         "- Before anything that creates or changes something, say exactly what you are about to do and wait "
         "for a clear yes. Be extra careful when the app says it cannot be undone.",
         "- You act as the person who is signed in, so you can only do what they are allowed to do. If an action "
