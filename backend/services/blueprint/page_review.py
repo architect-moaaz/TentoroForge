@@ -32,7 +32,6 @@ import json
 import logging
 import os
 import shutil
-import signal
 import socket
 import subprocess
 import time
@@ -253,13 +252,8 @@ class RunningApp:
 
     def __exit__(self, *exc: Any) -> None:
         if self.proc is not None:
-            for sig in (signal.SIGTERM, signal.SIGKILL):
-                try:
-                    os.killpg(os.getpgid(self.proc.pid), sig)
-                    self.proc.wait(timeout=10)
-                    break
-                except Exception:  # noqa: BLE001
-                    continue
+            from services.process_tree import kill_process_tree
+            kill_process_tree(self.proc, grace=10)
         if self._sink is not None:
             self._sink.close()
             self._sink = None

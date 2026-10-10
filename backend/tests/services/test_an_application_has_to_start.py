@@ -119,7 +119,15 @@ def test_the_whole_process_tree_is_ended_not_just_npm():
 
     src = inspect.getsource(verify_boot)
     assert "start_new_session=True" in src
-    assert "killpg" in src
+    # The group kill moved into the shared helper, which also knows Windows (no process
+    # groups, no SIGKILL: taskkill /T). The boot check must still end the TREE through it,
+    # and the helper must still signal the group on POSIX.
+    assert "kill_process_tree" in src
+    from services import process_tree
+
+    helper = inspect.getsource(process_tree.kill_process_tree)
+    assert "killpg" in helper
+    assert "taskkill" in helper
     # NO UNBOUNDED READ ANYWHERE. Every `communicate` carries a timeout, and
     # the bare `proc.stdout.read()` that could wait for an EOF a surviving
     # grandchild would never send is gone.

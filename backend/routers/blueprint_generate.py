@@ -1379,15 +1379,19 @@ async def _adopt_mcp_servers(output_dir: Path, project: Any, db: AsyncSession) -
     org_id = getattr(project, "org_id", None)
     if org_id is None:
         return
+    # Each read in its own SAVEPOINT (see `_adopt_brand_language`): one that fails
+    # must not leave the shared transaction aborted for the next.
     try:
         from services.blueprint import mcp_catalog
-        await mcp_catalog.refresh(output_dir, org_id, db)
+        async with db.begin_nested():
+            await mcp_catalog.refresh(output_dir, org_id, db)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[smith-chat] MCP servers not read for %s: %s", output_dir.name, exc)
     if (output_dir / "app" / "package.json").is_file():
         try:
             from services.env_writer import write_env_local_from_platform
-            await write_env_local_from_platform(output_dir, org_id, db)
+            async with db.begin_nested():
+                await write_env_local_from_platform(output_dir, org_id, db)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[smith-chat] app settings not written for %s: %s", output_dir.name, exc)
 
@@ -2043,9 +2047,15 @@ async def _adopt_brand_language(output_dir: Path, project: Any,
         from models.brand_profile import OrgBrandProfile
         from sqlalchemy import select
 
-        found = await db.execute(
-            select(OrgBrandProfile).where(OrgBrandProfile.org_id == org_id))
-        profile = found.scalar_one_or_none()
+        # In a SAVEPOINT. This session is shared with everything the turn does next,
+        # and Postgres refuses every statement after a failed one until the
+        # transaction is rolled back — so an unreadable profile (a missing table)
+        # silently took the MCP-server read down with it ("InFailedSQLTransaction").
+        # The savepoint rolls back only this read; the transaction stays usable.
+        async with db.begin_nested():
+            found = await db.execute(
+                select(OrgBrandProfile).where(OrgBrandProfile.org_id == org_id))
+            profile = found.scalar_one_or_none()
     except Exception as exc:  # noqa: BLE001 — no profile readable is no profile
         logger.info("[brand] %s: profile not readable (%s)", org_id, exc)
         return False

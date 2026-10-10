@@ -288,15 +288,23 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
                 continue
             rel = src.relative_to(layer)
             dst_rel = rel.with_suffix("") if rel.suffix == _TMPL_SUFFIX else rel
-            if (any(str(dst_rel).startswith(p) for p in PROJECTED_PATHS)
-                    and str(dst_rel) not in SCAFFOLD_OWNED
-                    and str(dst_rel) not in SCAFFOLD_DEFAULTS):
+            # POSIX SPELLING, BECAUSE THAT IS HOW EVERY LIST HERE IS WRITTEN.
+            # `str(path)` on Windows is `src\middleware.ts`; `PROJECTED_PATHS` says
+            # `src/middleware.ts`. The comparison never matched, so on Windows
+            # nothing was protected: the scaffold's hard-coded gate replaced the
+            # projected middleware (every page bounced to /login while a valid session
+            # sat in the browser), and every other projected file the scaffold also
+            # ships went the same way.
+            key = dst_rel.as_posix()
+            if (any(key.startswith(p) for p in PROJECTED_PATHS)
+                    and key not in SCAFFOLD_OWNED
+                    and key not in SCAFFOLD_DEFAULTS):
                 continue
             dst = out / dst_rel
             # A default only fills a hole. The projection ran first and its
             # output is the application's; this is what stands in when it did
             # not run at all.
-            if str(dst_rel) in SCAFFOLD_DEFAULTS and dst.exists():
+            if key in SCAFFOLD_DEFAULTS and dst.exists():
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             if rel.suffix == _TMPL_SUFFIX:
@@ -304,7 +312,7 @@ def copy_scaffold(app_root: str | Path, *, project_short_id: str) -> list[str]:
                                             project_short_id=project_short_id))
             else:
                 shutil.copyfile(src, dst)
-            written.append(str(dst_rel))
+            written.append(key)
     # WHAT THE SCAFFOLD NO LONGER SHIPS IS REMOVED. Copying only adds, so a
     # file a template retired stayed in every application built before: the
     # root page that redirected to a hard-coded /home sat beside the group's
@@ -1073,6 +1081,26 @@ class BootFailed(RuntimeError):
     """The application compiles and will not start."""
 
 
+def boot_request_timeout(timeout: float) -> float:
+    """How long the first request to a freshly started dev server may take.
+
+    THE FIRST REQUEST IS A COMPILE. `next dev` builds a route on demand, and the entry route pulls
+    in the auth layer and the page's whole component tree, so on a cold start the reply comes after
+    the compile, not before it. On a Windows laptop that was 60.3 seconds for `/movies` through
+    its redirect to `/login` — the server answered 200 and this had already given up at 60, after
+    the whole application had been written. A fixed 60 also ignored the `timeout` the caller chose
+    for booting, which says how patient this machine needs to be. `FORGE_BOOT_REQUEST_TIMEOUT`
+    overrides it for an even slower one.
+    """
+    override = os.environ.get("FORGE_BOOT_REQUEST_TIMEOUT")
+    if override:
+        try:
+            return max(1.0, float(override))
+        except ValueError:
+            pass
+    return max(60.0, float(timeout))
+
+
 def verify_boot(app_root: str | Path, *, entry: str = "/",
                 timeout: int = 120) -> dict[str, Any]:
     """Start the app and prove it serves its way in. Raise if it will not.
@@ -1101,7 +1129,6 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
     a sign-in — both mean the server started and routed. This checks booting,
     not behaviour, and a database is not required to run it.
     """
-    import signal
     import socket
     import subprocess
     import time
@@ -1130,16 +1157,10 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
     )
 
     def _kill_tree() -> None:
-        for sig in (signal.SIGTERM, signal.SIGKILL):
-            try:
-                os.killpg(os.getpgid(proc.pid), sig)
-            except (ProcessLookupError, PermissionError):
-                return
-            try:
-                proc.wait(timeout=10)
-                return
-            except subprocess.TimeoutExpired:
-                continue
+        # Shared with the review server: POSIX signals the process group; Windows has no
+        # process groups and walks the tree with taskkill instead (see services.process_tree).
+        from services.process_tree import kill_process_tree
+        kill_process_tree(proc, grace=10)
 
     def _stop() -> str:
         """End the whole tree, then read what it said. Never unbounded."""
@@ -1181,7 +1202,7 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
 
         url = f"http://127.0.0.1:{port}{entry if entry.startswith('/') else '/' + entry}"
         try:
-            with urllib.request.urlopen(url, timeout=60) as reply:
+            with urllib.request.urlopen(url, timeout=boot_request_timeout(timeout)) as reply:
                 status = reply.status
         except urllib.error.HTTPError as exc:
             status = exc.code          # 4xx/5xx still means it routed
