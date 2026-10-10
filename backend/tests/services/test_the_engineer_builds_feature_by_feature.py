@@ -152,6 +152,14 @@ def test_the_build_phase_is_split_into_once_per_feature_and_last():
         assert not (descendants(k) & set(per)), f"{k} runs last but a feature node depends on it"
 
 
+@pytest.fixture(autouse=True)
+def _one_feature_at_a_time(monkeypatch):
+    """The order of runs is what these tests read; the overlap (the next
+    feature authored on a thread while this one lands) has its own test."""
+    from services.engineer import build as B
+    monkeypatch.setattr(B, "OVERLAP", False)
+
+
 def _project(tmp_path):
     import json
     from services.blueprint.service import BlueprintService
@@ -196,11 +204,15 @@ def test_the_engineer_builds_each_feature_and_proves_it_before_the_next(tmp_path
 
     out = build(str(tmp_path), str(tmp_path / "app"), emit=lambda k, d: said.append(d.get("text", "")),
                 executor=object(), run=run, prove=prove, fix=fix)
-    assert [r[1] for r in runs] == [None, "MODULE-001", "MODULE-003", "MODULE-002", None]
+    assert [r[1] for r in runs] == [None, "MODULE-001", "MODULE-001", "MODULE-003", "MODULE-003",
+                                    "MODULE-002", "MODULE-002", None], "each feature: its definition, then its landing"
     once, per, last = build_nodes()
     assert {"install", "decisions", "design_system"} <= set(runs[0][0]) and not set(runs[0][0]) & set(per), \
         "the opening run is everything pending above the features, and no feature node"
-    assert runs[1][0] == per and runs[-1][0] == last
+    from services.engineer.build import split_feature_nodes
+    authoring, landing = split_feature_nodes(per)
+    assert runs[1][0] == authoring and runs[2][0] == landing and runs[-1][0] == last
+    assert authoring + landing == per and landing[-1] == "assemble" and "page_details" in authoring
     assert proofs[0] == (["EXP-001"], True), "the first feature's own statements, with the authors' look"
     assert (["EXP-013"], True) in proofs and (["EXP-013"], False) in proofs, "then the fix turn's result is tried again"
     assert len(fixes) == 1 and "Cart & Checkout" in fixes[0] and "nothing was sent" in fixes[0]
@@ -230,7 +242,7 @@ def test_a_run_picks_up_where_the_last_one_stopped_and_stops_on_its_budget(tmp_p
     monkeypatch.setattr(B.Budget, "over", lambda self: len(runs) >= 2)   # time runs out after one feature
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove,
                 fix=lambda od, ask: {}, budget_minutes=1)
-    assert runs == [None, "MODULE-003"], "what is pending above the features runs again; the finished feature does not"
+    assert runs == [None, "MODULE-003", "MODULE-003"], "what is pending above the features runs again; the finished feature does not"
     assert out["stopped"].startswith("out of time") and out["statements"] == {}
     assert j.finished() == ["MODULE-001", "MODULE-003"]
     assert j.last("run:out_of_time")["left"] == ["MODULE-002"]
@@ -340,8 +352,8 @@ def test_a_node_that_failed_for_a_feature_is_mended_and_run_again(tmp_path):
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix)
     assert len(fixes) == 1 and "While building Catalogue, the build could not finish" in fixes[0]
     assert "assemble: NeedsWorkflow" in fixes[0] and "report_platform_fault" in fixes[0]
-    mend = [p for p, f in plans if f == "MODULE-001" and "page_details" not in p]
-    assert mend == [["page_code", "assemble"]], "the failed nodes run again, assembly last"
+    mend = [p for p, f in plans if f == "MODULE-001" and p == ["page_code", "assemble"]]
+    assert len(mend) == 1, "the failed nodes run again, assembly last"
     assert out["features"][0]["failed_nodes"] == [], "and the feature records what still failed: nothing"
 
 
@@ -454,7 +466,7 @@ def test_the_model_is_finished_first_on_a_resumed_build_too(tmp_path):
     build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=lambda *a: {},
           plan=["entity_fields", "security", "install", "page_details", "page_code", "assemble", "memory"])
     assert plans[0][1] is None and {"entity_fields", "security"} <= set(plans[0][0]), "the model nodes run first"
-    assert [f for _, f in plans[1:3]] == ["MODULE-003", "MODULE-002"]
+    assert [f for _, f in plans[1:5]] == ["MODULE-003", "MODULE-003", "MODULE-002", "MODULE-002"]
 
 
 def test_a_stale_journal_row_is_not_a_proven_feature(tmp_path):
@@ -491,7 +503,7 @@ def test_a_feature_whose_screens_are_not_built_stops_the_build(tmp_path):
     said: list[str] = []
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=lambda *a: {},
                 emit=lambda k, d: said.append(d.get("text", "")))
-    assert runs == [None, "MODULE-001"], "nothing is built on an unbuilt feature"
+    assert runs == [None, "MODULE-001", "MODULE-001"], "nothing is built on an unbuilt feature"
     assert proofs == [], "and nothing is tried on it"
     assert out["stopped"].startswith("Catalogue is not built: 2 screens have no code and no layout: /, /products")
     assert out["report"].paused_because == out["stopped"]
@@ -589,3 +601,68 @@ def test_a_second_login_entity_sends_the_declaration_back_to_its_author(tmp_path
     assert scope.brief("entity_fields", "ENTITY-001") == ""
     nodes, scope = first_nodes(["entity_fields"], {"data": {"entities": [{"id": "E1", "name": "Customer", "account": True}]}})
     assert nodes == ["entity_fields"] and scope is None
+
+
+def test_the_next_feature_is_written_while_this_one_lands_and_is_proven(tmp_path):
+    """ecom v2 (forge-v3, 2026-10-10): each feature took 18–25 minutes, five
+    to eight of them the build and the browser with nothing for the model to
+    do. The next feature's definition is written in that time; only its
+    landing waits for this one's proof."""
+    import threading
+    from services.engineer.build import split_feature_nodes
+    _project(tmp_path)
+    once, per, last = build_nodes()
+    authoring, landing = split_feature_nodes(per)
+    seen: list[tuple[str, str | None, str]] = []
+    m3_authored = threading.Event()
+    m1_landing = threading.Event()
+    lock = threading.Lock()
+
+    def run(svc, executor, *, plan, scope=None, **kw):
+        fid = scope.feature.id if scope else None
+        kind = "author" if plan == authoring else "land" if plan == landing else "other"
+        with lock:
+            seen.append((kind, fid, threading.current_thread().name))
+        if kind == "land" and fid == "MODULE-001":
+            m1_landing.set()
+            assert m3_authored.wait(5), "the next feature's definition is being written while this one lands"
+        if kind == "author" and fid == "MODULE-003":
+            assert m1_landing.wait(5), "and it started once this one's definition was done"
+            m3_authored.set()
+        return SimpleNamespace(failed=[], paused_because="")
+    prove = lambda svc, od, only=None, **kw: {"statements": len(only or []), "passed": len(only or []), "failing": [],
+                                             "untried": [], "fixed": [], "results": [{"id": i, "verdict": "passed"} for i in only or []]}
+    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=lambda *a: {},
+                overlap=True)
+    assert not out["stopped"] and [f["feature"] for f in out["features"]] == ["MODULE-001", "MODULE-003", "MODULE-002"]
+    kinds = [(k, f) for k, f, _ in seen]
+    assert kinds.index(("author", "MODULE-003")) < kinds.index(("land", "MODULE-003"))
+    assert kinds.index(("author", "MODULE-002")) < kinds.index(("land", "MODULE-002"))
+    assert kinds.index(("land", "MODULE-001")) < kinds.index(("land", "MODULE-003")) < kinds.index(("land", "MODULE-002")), \
+        "the landings stay in order: one tree, one build, one proof at a time"
+    ahead_threads = {t for k, f, t in seen if k == "author" and f != "MODULE-001"}
+    assert all("forge-engineer-ahead" in t for t in ahead_threads), "written ahead on the engineer's own thread"
+    from services.engineer.journal import Journal
+    rows = [r for r in Journal(tmp_path).rows() if r["event"].startswith("ahead:")]
+    assert [(r["event"], r["feature"]) for r in rows] == [("ahead:start", "MODULE-003"), ("ahead:used", "MODULE-003"),
+                                                         ("ahead:start", "MODULE-002"), ("ahead:used", "MODULE-002")]
+
+
+def test_a_stop_waits_for_the_writing_ahead_and_keeps_it(tmp_path):
+    _project(tmp_path)
+    from services.engineer.build import split_feature_nodes
+    once, per, last = build_nodes()
+    authoring, landing = split_feature_nodes(per)
+    seen: list = []
+
+    def run(svc, executor, *, plan, scope=None, **kw):
+        fid = scope.feature.id if scope else None
+        seen.append((plan == authoring, fid))
+        if plan == landing and fid == "MODULE-001":
+            return SimpleNamespace(failed=[], paused_because="the API credit ran out")
+        return SimpleNamespace(failed=[], paused_because="")
+    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=lambda *a, **k: {},
+                fix=lambda *a: {}, overlap=True)
+    assert out["stopped"].startswith("paused: the API credit ran out")
+    assert (True, "MODULE-003") in seen, "the feature written ahead finished and is kept for the resume"
+    assert (False, "MODULE-003") not in seen, "and was not landed"

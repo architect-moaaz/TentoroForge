@@ -26,6 +26,7 @@ between the first feature node and the last.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -97,6 +98,15 @@ PER_FEATURE: tuple[str, ...] = (
     "analytics", "app_flows", "apis", "expectations", "page_layouts", "backend",
     "page_code", "frontend", "integration", "assemble",
 )
+#: The feature nodes that LAND the feature in the tree — the layouts, the
+#: code, the projections, the build. They wait for the previous feature's
+#: proof; the others — the authoring, which writes the definition and calls
+#: the model — run ahead for the next feature while this one is on the
+#: Workbench (`OVERLAP`). One tree, one build, one trial at a time; the
+#: writing need not wait for them.
+LANDING: tuple[str, ...] = ("page_layouts", "backend", "page_code", "frontend", "integration", "assemble")
+#: Whether the next feature is authored while the current one lands and is proven.
+OVERLAP = True
 #: A feature node that writes once for the whole application and is not
 #: written again for the next feature: the section it writes, once present.
 ONCE_WRITTEN: dict[str, str] = {"ui_direction": "composition"}
@@ -265,12 +275,18 @@ def merged(reports: list[Any]) -> Any:
     return out
 
 
+def split_feature_nodes(per: list[str]) -> tuple[list[str], list[str]]:
+    """``(authoring, landing)``: the feature nodes that write the definition,
+    and the ones that land it in the tree, each in the graph's order."""
+    return [k for k in per if k not in LANDING], [k for k in per if k in LANDING]
+
+
 def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] | None = None,
           description: str = "", budget_minutes: float = 0, app_name: str = "",
           executor: Any = None, observer_agent: Any = None, observer: Any = None,
           done_nodes: set[str] | None = None, svc: Any = None, plan: list[str] | None = None,
           run: Callable[..., Any] | None = None, prove: Callable[..., dict] | None = None,
-          fix: Callable[[str, str], dict] | None = None) -> dict:
+          fix: Callable[[str, str], dict] | None = None, overlap: bool | None = None) -> dict:
     """Build the approved definition at `output_dir` feature by feature.
     Returns what was done and proven: ``{features: [...], statements, state,
     stopped, report}``. `plan` is the graph's nodes still to run (the build
@@ -295,6 +311,10 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
     journal = Journal(output_dir)
     journal.acquire()
     pulse: _Pulse | None = None
+    overlap = OVERLAP if overlap is None else overlap
+    ahead: Any = None                      # the next feature's authoring, in flight
+    ahead_for: str = ""
+    pool: ThreadPoolExecutor | None = None
     try:
         pulse = _Pulse(output_dir)
         run = run or _orchestrator_run
@@ -349,6 +369,16 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
         stopped = ""
         pulse.plan([f for f in plan_features if f.id not in earlier])
 
+        authoring, landing = split_feature_nodes(per)
+        left = [f for f in plan_features if f.id not in earlier]
+
+        def author(feature: Feature, *, first: bool) -> Any:
+            """The feature's definition: contracts, processes, rules, statements."""
+            scope = FeatureScope(feature, first=first).on(svc.doc)
+            return run(svc, executor, plan=authoring, commit=True, user_request=description,
+                       app_root=app_root, observer=observer, observer_agent=observer_agent, scope=scope)
+
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="forge-engineer-ahead")
         for i, feature in enumerate(plan_features):
             if feature.id in earlier:
                 continue
@@ -362,14 +392,39 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             say("message", {"text": f"Building {feature.label}: its screens, its processes, and the "
                                     f"checks that say what must happen on them."})
             scope = FeatureScope(feature, first=(i == 0)).on(svc.doc)
-            report = run(svc, executor, plan=per, commit=True, user_request=description,
+            # THE DEFINITION FIRST — written ahead while the previous feature
+            # was on the Workbench, or now.
+            if ahead is not None and ahead_for == feature.id:
+                authored = ahead.result()
+                ahead, ahead_for = None, ""
+                journal.write("ahead:used", feature=feature.id)
+            else:
+                authored = author(feature, first=(i == 0))
+            reports.append(authored)
+            _reload(svc, output_dir)
+            if getattr(authored, "paused_because", ""):
+                stopped = f"paused: {authored.paused_because}"
+                journal.write("run:paused", feature=feature.id, why=authored.paused_because)
+                break
+            # THE NEXT FEATURE IS WRITTEN WHILE THIS ONE LANDS AND IS PROVEN.
+            # The build, the trials and the fix turns are minutes of waiting on
+            # the tree and the browser; the model has nothing to do in them.
+            # Writing the definition does not touch the tree, and one feature
+            # writes at a time, so the shared sections are never written twice
+            # at once. Only the landing waits.
+            after = next((f for f in left[left.index(feature) + 1:]), None) if feature in left else None
+            if overlap and after is not None and not budget.over():
+                journal.write("ahead:start", feature=after.id, name=after.name, while_=feature.id)
+                ahead, ahead_for = pool.submit(author, after, first=False), after.id
+            landed = run(svc, executor, plan=landing, commit=True, user_request=description,
                          app_root=app_root, observer=observer, observer_agent=observer_agent,
                          scope=scope)
-            reports.append(report)
+            reports.append(landed)
             _reload(svc, output_dir)
-            if getattr(report, "paused_because", ""):
-                stopped = f"paused: {report.paused_because}"
-                journal.write("run:paused", feature=feature.id, why=report.paused_because)
+            report = merged([authored, landed])
+            if getattr(landed, "paused_because", ""):
+                stopped = f"paused: {landed.paused_because}"
+                journal.write("run:paused", feature=feature.id, why=landed.paused_because)
                 break
             failed = _mend_failed_nodes(svc, output_dir, app_root, feature, report, per, run, fix, budget,
                                         journal, say, executor=executor, description=description,
@@ -391,6 +446,17 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
                 stopped = f"{feature.label} is not built: " + "; ".join(unbuilt[:6])
                 break
 
+        if ahead is not None:
+            # A build that stopped mid-loop lets the writing ahead finish: what
+            # it wrote stays in the definition for the resume. Its report is
+            # kept; nothing of it is proven.
+            try:
+                reports.append(ahead.result())
+            except Exception:  # noqa: BLE001 — the stop stands either way
+                logger.warning("[engineer] the authoring ahead failed", exc_info=True)
+            ahead, ahead_for = None, ""
+            _reload(svc, output_dir)
+        pool.shutdown(wait=True)
         whole: dict = {}
         if not stopped:
             # WHAT NO FEATURE CLAIMED IS WRITTEN BEFORE THE END. A process
@@ -467,6 +533,8 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             pulse.end(error=exc)
         raise
     finally:
+        if pool is not None:
+            pool.shutdown(wait=False)
         journal.release()
 
 
@@ -688,9 +756,17 @@ def _opening(plan: list[Feature], earlier: list[str], app_name: str) -> str:
 
 
 def _reload(svc: Any, output_dir: str) -> None:
+    """The document as the disk holds it — under the service's lock, since
+    the next feature's authoring may be applying to it on another thread."""
     from services.blueprint.service import BlueprintService
+    import threading
+    lock = getattr(svc, "lock", None)
+    if not hasattr(lock, "__enter__"):
+        lock = threading.Lock()
     try:
-        svc.doc = BlueprintService.load(output_dir=output_dir).doc
+        fresh = BlueprintService.load(output_dir=output_dir).doc
+        with lock:
+            svc.doc = fresh
     except Exception:  # noqa: BLE001
         logger.warning("[engineer] could not reload the definition", exc_info=True)
 
@@ -721,5 +797,6 @@ def _executor(svc: Any, output_dir: str, say: Callable[[str, dict], None], obser
     return executor, observer_agent
 
 
-__all__ = ["build", "build_nodes", "first_nodes", "incomplete_nodes", "pending_feature_nodes", "proven_before", "FeatureScope",
+__all__ = ["build", "build_nodes", "first_nodes", "incomplete_nodes", "pending_feature_nodes", "proven_before",
+           "split_feature_nodes", "FeatureScope", "LANDING", "OVERLAP",
            "fix_ask", "PER_FEATURE", "FIX_ROUNDS"]
