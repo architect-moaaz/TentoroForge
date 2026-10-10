@@ -390,3 +390,21 @@ def test_a_record_that_belongs_to_someone_is_made_as_them():
     assert any("belongs to someone" in f for f in st.statement_findings(doc, e)), "made by the admin, it is nobody's"
     e["given"][-1]["as"] = "ROLE-001"
     assert not any("belongs to someone" in f for f in st.statement_findings(doc, e))
+
+
+def test_a_guests_steps_before_a_roles_sign_in_are_mended_into_that_persons():
+    """Ecom L1 (2026-10-11): every arrival statement was written "a guest
+    opens the page, then the role signs in", refused, and mended by an edit
+    turn; the mend is deterministic, so the seam does it."""
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal, check_expectations
+    body = {"says": "A patient sent to sign in from Visits is brought back.", "kind": "arrival",
+            "requirements": ["REQ-002"],
+            "steps": [{"as": "guest", "act": "open", "page": "PAGE-003"},
+                      {"as": "ROLE-001", "act": "sign_in"}],
+            "then": [{"check": "on", "as": "ROLE-001", "page": "PAGE-003"}]}
+    assert any("another browser" in f for f in st.statement_findings(DOC, copy.deepcopy(body)))
+    result = AgentResult(task_id="T", agent="testing", proposals=[
+        ArtifactProposal(section="expectations", natural_key="arrive", body=body)])
+    check_expectations(result, DOC)
+    assert body["steps"][0]["as"] == "ROLE-001"
+    assert st.statement_findings(DOC, body) == []

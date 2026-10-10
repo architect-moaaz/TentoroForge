@@ -880,10 +880,12 @@ def check_expectations(result: "AgentResult", doc: dict | None) -> None:
     the people it is done as, what each check looks at — and the set for
     what it leaves untried, so the writer mends the statement rather than
     the runner finding at the end that it names nothing."""
-    from services.expects.statements import expectation_findings
+    from services.expects.statements import expectation_findings, mend_statement
     proposals = [p.body for p in result.proposals if p.section == "expectations" and isinstance(p.body, dict)]
     if not proposals or not doc:
         return
+    for body in proposals:
+        mend_statement(body)
     # One call's part of the set is held to that part (`expect_subjects`); a
     # statement added later — the person's words, a report — is held alone.
     subject = getattr(result, "subject", None)

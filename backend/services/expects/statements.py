@@ -387,6 +387,29 @@ def _the_apps_words(doc: dict) -> str:
     return " ".join(parts).lower()
 
 
+def mend_statement(st: dict) -> dict:
+    """ONE PERSON, ONE BROWSER, MENDED AT THE SEAM. An arrival statement is
+    written as "a guest opens the page, then the role signs in" — the shape
+    the words have — and the runner holds one browser per person, so the
+    role's sign-in page is the guest's browser's to see. The steps before a
+    role's sign-in are that person's, signed out until then; said in the
+    writer's task and still written as `guest` (Ecom L1, 2026-10-11, an
+    edit turn per build). The mend is the refusal's own instruction."""
+    steps = st.get("steps") or []
+    for i, s in enumerate(steps):
+        if not isinstance(s, dict) or s.get("act") != "sign_in" or s.get("page"):
+            continue
+        role = str(s.get("as") or "")
+        if not role or role == GUEST:
+            continue
+        for t in steps[:i]:
+            if isinstance(t, dict) and str(t.get("as") or "") == GUEST:
+                t["as"] = role
+                if s.get("who") and not t.get("who"):
+                    t["who"] = s["who"]
+    return st
+
+
 def statement_findings(doc: dict, st: dict) -> list[str]:
     """What one statement names that the application does not have, or a
     check that has nothing to look at."""
@@ -643,6 +666,6 @@ def expectation_findings(doc: dict, statements: list[dict] | None = None, *,
     return out
 
 
-__all__ = ["expectations", "expect_brief", "EXPECT_PROMPT", "statement_findings", "coverage_findings",
+__all__ = ["expectations", "expect_brief", "EXPECT_PROMPT", "statement_findings", "coverage_findings", "mend_statement",
            "expectation_findings", "expect_subjects", "subject_ask", "subject_written", "PEOPLE",
            "GUEST", "ACTS", "CHECKS"]
