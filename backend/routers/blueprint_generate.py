@@ -919,6 +919,41 @@ def _announce_build_complete(doc: dict | None, emit, *, offer_verify: bool,
         logger.warning("[blueprint] %s: could not announce completion", where)
 
 
+async def _spend_gate(db: AsyncSession, project: Any, user: Any, *, estimate: float) -> None:
+    """NOTHING STARTS THAT THE ACCOUNT CANNOT PAY FOR. A five-module build
+    sank $14 before the API refused it for an empty balance (forge-v3,
+    2026-10-10). Before a build or a turn, the balance (when one is
+    recorded) must cover what it is expected to cost, and no limit over
+    the platform, the organisation, the person or the application may be
+    reached — else 402, in the administrator's terms (`services.spending`)."""
+    from routers.usage import _projects_known
+    from services import spending
+    from services.build_usage import read_ledger
+    try:
+        projects, names = await _projects_known(db)
+        why = spending.check(read_ledger(), estimate=estimate, org=str(getattr(project, "org_id", "") or ""),
+                             user=str(getattr(user, "email", "") or ""),
+                             project=str(getattr(project, "short_id", "") or ""), projects=projects, names=names)
+    except Exception:  # noqa: BLE001 — the check never breaks the work it guards
+        logger.warning("[spend] the check before work could not run", exc_info=True)
+        return
+    if why:
+        raise HTTPException(status_code=402, detail="Not started: " + "; ".join(why) + ".")
+
+
+def _acting_as(work: Any, user: Any, project: Any) -> Any:
+    """`work`, run as the person whose request it is: every usage row it
+    writes names them and their organisation (`build_usage.acting`). The
+    executor's thread does not inherit the request's context, so it is set
+    inside the call."""
+    from services.build_usage import acting
+
+    def run() -> Any:
+        with acting(user=str(getattr(user, "email", "") or ""), org=str(getattr(project, "org_id", "") or "")):
+            return work()
+    return run
+
+
 def _output_dir(project: Any) -> Path:
     """Where this project's application lives.
 
@@ -1021,6 +1056,11 @@ async def generate_via_blueprint(
         # find it. See services/run_registry.
         run_registry.note(str(project_id), event, data)
 
+    from services import spending as _spending
+    from services.build_usage import read_ledger as _read_ledger
+    await _spend_gate(db, project, user, estimate=(
+        _spending.estimate_build_usd(_read_ledger()) if req.approved and not req.define_only
+        else _spending.TURN_USD * 3))
     run_registry.begin(str(project_id), phase="build")
 
     async def generate() -> None:
@@ -1125,7 +1165,7 @@ async def generate_via_blueprint(
         try:
             emit("started", {"projectId": str(project_id),
                              "engine": "blueprint"})
-            outcome = await loop.run_in_executor(_LONG_TURNS, work)
+            outcome = await loop.run_in_executor(_LONG_TURNS, _acting_as(work, user, project))
             # COMMIT THE BUILT APP. The mainline generate path commits after a
             # build; this DAG path did not, so the app tree stayed untracked and
             # Smith's first change landed in an untracked working tree — its
@@ -1694,6 +1734,11 @@ async def smith_chat(
     except OSError as exc:
         logger.warning("[smith-chat] could not point the app's reporter at the platform: %s", exc)
 
+    from services import spending as _spending
+    from services.build_usage import read_ledger as _read_ledger
+    await _spend_gate(db, project, user, estimate=(
+        _spending.estimate_build_usd(_read_ledger()) if getattr(req, "approved", False) else _spending.TURN_USD))
+
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
@@ -2186,7 +2231,7 @@ async def smith_chat(
             # but the inner build keeps running, and it is the inner one we wait
             # on to emit the real completion afterwards.
             _inner = loop.run_in_executor(
-                _LONG_TURNS if (req.approved or _reviewing) else _SHORT_TURNS, work)
+                _LONG_TURNS if (req.approved or _reviewing) else _SHORT_TURNS, _acting_as(work, user, project))
             # ON DISK, FOR EVERY WORKER. The registry above is this worker's
             # memory; a panel whose stream dropped polls whichever worker
             # answers, and only a ledger tells it the turn is still working —

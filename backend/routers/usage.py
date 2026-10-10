@@ -82,3 +82,139 @@ async def get_platform_patches(
     from services.smith.file_edit import open_patches
     patches = open_patches(OUTPUT_ROOT)
     return {"count": len(patches), "patches": patches}
+
+
+# --------------------------------------------------------------------------- #
+# Spend: per person, organisation and application, by period; credit and limits
+# --------------------------------------------------------------------------- #
+
+from pydantic import BaseModel, Field  # noqa: E402
+
+
+async def _projects_known(db: AsyncSession) -> tuple[dict[str, dict], dict[str, str]]:
+    """Every application's organisation, owner (email) and name, keyed by
+    its id — what attributes a ledger row to a person and an organisation —
+    and display names for scopes."""
+    from models.org import Organization
+    from models.project import Project
+    rows = (await db.execute(select(Project.short_id, Project.name, Project.org_id, Project.owner_id))).all()
+    owners = {r.owner_id for r in rows if r.owner_id is not None}
+    emails: dict[str, str] = {}
+    if owners:
+        found = (await db.execute(select(PlatformUser.id, PlatformUser.email)
+                                  .where(PlatformUser.id.in_(list(owners))))).all()
+        emails = {str(u.id): u.email for u in found}
+    orgs = (await db.execute(select(Organization.id, Organization.name))).all()
+    projects = {str(r.short_id): {"org": str(r.org_id), "owner": emails.get(str(r.owner_id), ""), "name": r.name}
+                for r in rows}
+    names = {f"org:{o.id}": o.name for o in orgs}
+    names.update({f"project:{k}": v["name"] for k, v in projects.items()})
+    return projects, names
+
+
+async def _scope_allowed(user: PlatformUser, db: AsyncSession, *, org: str, person: str, project: str) -> None:
+    """Who may read a scope: an org admin reads anything; anyone reads their
+    own spend (`user=me`) and their own applications'."""
+    if person == "me" or person == user.email:
+        return
+    if project:
+        from models.project import Project
+        row = (await db.execute(select(Project).where(Project.short_id == project))).scalar_one_or_none()
+        if row is not None and str(row.owner_id) == str(user.id):
+            return
+    await _require_any_org_admin(user, db)
+
+
+@router.get("/api/spend/report")
+async def get_spend_report(
+    period: str = "month",
+    at: str | None = None,
+    org: str = "",
+    person: str = "",
+    project: str = "",
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """What was spent in the period containing `at` (today by default), for
+    a scope — the platform, an organisation, a person (`me` or an email),
+    an application — split by agent, application, person, model, phase and
+    day."""
+    from services import spending
+    from services.build_usage import read_ledger
+    await _scope_allowed(user, db, org=org, person=person, project=project)
+    if person == "me":
+        person = user.email
+    projects, _names = await _projects_known(db)
+    try:
+        return spending.report(read_ledger(), period=period, at=spending.parse_at(at), org=org, user=person,
+                               project=project, projects=projects)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/spend/standing")
+async def get_spend_standing(
+    org: str = "",
+    person: str = "",
+    project: str = "",
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The account's balance, and where a scope stands against every limit
+    that covers it, per period."""
+    from services import spending
+    from services.build_usage import read_ledger
+    await _scope_allowed(user, db, org=org, person=person, project=project)
+    if person == "me":
+        person = user.email
+    projects, _names = await _projects_known(db)
+    out = spending.standing(read_ledger(), org=org, user=person, project=project, projects=projects)
+    out["policy"] = spending.read_policy()
+    out["build_estimate_usd"] = spending.estimate_build_usd(read_ledger())
+    return out
+
+
+class CreditIn(BaseModel):
+    amount: float = Field(gt=0)
+    note: str = ""
+
+
+@router.post("/api/spend/credits", status_code=201)
+async def post_spend_credit(
+    body: CreditIn,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record money put on the account — the opening balance first, then
+    every top-up — so the platform can say what is left."""
+    from services import spending
+    await _require_any_org_admin(user, db)
+    try:
+        return spending.add_credit(body.amount, note=body.note, by=user.email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class LimitsIn(BaseModel):
+    scope: str
+    day: float | None = None
+    week: float | None = None
+    month: float | None = None
+    year: float | None = None
+
+
+@router.put("/api/spend/limits")
+async def put_spend_limits(
+    body: LimitsIn,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Spending limits for a scope (`platform`, `org:<id>`, `user:<email>`,
+    `project:<id>`) per period; a period left empty has none."""
+    from services import spending
+    await _require_any_org_admin(user, db)
+    try:
+        return {"scope": body.scope, "limits": spending.set_limits(
+            body.scope, {k: v for k, v in body.model_dump().items() if k in spending.PERIODS})}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
