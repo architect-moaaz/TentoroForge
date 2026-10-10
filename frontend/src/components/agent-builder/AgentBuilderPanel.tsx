@@ -75,6 +75,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       setEdges(agent.edges || []);
       setSelectedNodeId(null);
       setShowTestConsole(false);
+      setApplyStatus(null);
     },
     [projectId, setCurrentAgent, setSelectedNodeId],
   );
@@ -109,6 +110,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     setEdges(newAgent.edges);
     setSelectedNodeId(null);
     setShowTestConsole(false);
+    setApplyStatus(null);
   }, [setCurrentAgent, setSelectedNodeId]);
 
   // Create from template
@@ -129,6 +131,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       setEdges(newAgent.edges);
       setSelectedNodeId(null);
       setShowTestConsole(false);
+      setApplyStatus(null);
     },
     [setCurrentAgent, setSelectedNodeId],
   );
@@ -150,6 +153,16 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     });
   }, [currentAgent, editName, editDescription, nodes, edges, projectId, queryClient]);
 
+  // Save, from the toolbar button: the outcome is shown in the status bar.
+  const handleSave = useCallback(async () => {
+    try {
+      await saveAgent();
+      setApplyStatus("Saved.");
+    } catch (e) {
+      setApplyStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [saveAgent]);
+
   // Delete agent
   const deleteAgent = useCallback(
     async (id: string) => {
@@ -167,7 +180,14 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   // Apply agent to generated app
   const applyAgent = useCallback(async () => {
     if (!currentAgent) return;
-    await saveAgent();
+    try {
+      await saveAgent();
+    } catch (e) {
+      // Reported where the person is looking; thrown from a click handler it
+      // surfaced as an uncaught "Runtime ApiError" overlay with no way forward.
+      setApplyStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
 
     setIsApplying(true);
     setApplyStatus("Starting...");
@@ -239,6 +259,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     setCurrentAgent(null);
     setSelectedNodeId(null);
     setShowTestConsole(false);
+    setApplyStatus(null);
   }, [setCurrentAgent, setSelectedNodeId]);
 
   // Update node data
@@ -360,7 +381,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
         </div>
 
         <div className="flex items-center gap-1">
-          <Button size="sm" variant="outline" onClick={saveAgent}>
+          <Button size="sm" variant="outline" onClick={handleSave}>
             <Save className="mr-1 h-3.5 w-3.5" />
             Save
           </Button>
@@ -388,9 +409,24 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       </div>
 
       {/* Progress bar */}
-      {isApplying && applyStatus && (
-        <div className="border-b bg-blue-50 px-4 py-1.5">
-          <p className="text-xs text-blue-700">{applyStatus}</p>
+      {applyStatus && (
+        <div
+          role="status"
+          className={
+            /^(error|failed)/i.test(applyStatus)
+              ? "border-b bg-red-50 px-4 py-1.5"
+              : "border-b bg-blue-50 px-4 py-1.5"
+          }
+        >
+          <p
+            className={
+              /^(error|failed)/i.test(applyStatus)
+                ? "text-xs text-red-700"
+                : "text-xs text-blue-700"
+            }
+          >
+            {applyStatus}
+          </p>
         </div>
       )}
 
