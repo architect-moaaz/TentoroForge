@@ -200,18 +200,16 @@ def test_the_engineer_builds_each_feature_and_proves_it_before_the_next(tmp_path
     assert {"install", "decisions", "design_system", "page_details"} <= set(runs[0][0]) and not set(runs[0][0]) & set(per), \
         "the opening run is everything pending above the landing: the contracts and statements included"
     assert runs[1][0] == per and runs[-1][0] == last and per[-1] == "assemble"
-    assert [p[0] for p in proofs[:4]] == [["EXP-001"], ["EXP-027"], ["EXP-013"], ["EXP-013"]], \
-        "then each feature is proven in order of dependence; the cart's failing statement is tried again after the fix"
-    assert proofs[0] == (["EXP-001"], True), "the first feature's own statements, with the authors' look"
-    assert (["EXP-013"], True) in proofs and (["EXP-013"], False) in proofs, "then the fix turn's result is tried again"
+    # PROVEN ALL AT ONCE: one pass over every statement with the authors'
+    # look, then the cart's failing statement is tried again after its fix
+    # turn (Ecom L1: a feature at a time was an hour each, 2026-10-11).
+    assert proofs == [(None, True), (["EXP-013"], False)]
     assert len(fixes) == 1 and "Cart & Checkout" in fixes[0] and "nothing was sent" in fixes[0]
-    assert sorted(proofs[-1][0]) == ["EXP-001", "EXP-030"] and proofs[-1][1] is True, \
-        "every statement once more at the end, with its authors' look"
-    assert [f["feature"] for f in out["features"]] == ["MODULE-001", "MODULE-003", "MODULE-002"]
+    assert [f["feature"] for f in out["features"]] == ["MODULE-001", "MODULE-003", "MODULE-002"], "said per feature, in order"
     cart = out["features"][2]
     assert cart["passed"] == 1 and cart["fixed"] == ["EXP-013"] and cart["failing"] == []
     assert any("Cart & Checkout: 1 of 1 statement of what must happen hold; fixed while building: EXP-013" in s for s in said)
-    assert out["statements"]["passed"] == 2 and not out["stopped"], "the arrival and the uncovered one, at the end"
+    assert out["statements"]["passed"] == 3 and out["statements"]["turns"] == 1 and not out["stopped"]
     from services.engineer.journal import Journal
     assert Journal(tmp_path).finished() == ["MODULE-001", "MODULE-003", "MODULE-002"]
 
@@ -232,14 +230,14 @@ def test_a_run_picks_up_where_the_last_one_stopped_and_stops_on_its_budget(tmp_p
         proofs.append(list(only or []))
         return {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": [], "results": []}
     from services.engineer import build as B
-    monkeypatch.setattr(B.Budget, "over", lambda self: len(proofs) >= 1)   # time runs out after one feature is proven
+    monkeypatch.setattr(B.Budget, "over", lambda self: True)   # time is out before the proof
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove,
                 fix=lambda od, ask: {}, budget_minutes=1)
     assert runs == [None, None], "what is pending above the landing runs again, and the landing; nothing per feature"
-    assert proofs == [["EXP-027"]], "the finished feature is not proven again; the next one is"
+    assert proofs == [], "no time left: nothing is tried"
     assert out["stopped"].startswith("out of time") and out["statements"] == {}
-    assert j.finished() == ["MODULE-001", "MODULE-003"]
-    assert j.last("run:out_of_time")["left"] == ["MODULE-002"]
+    assert j.finished() == ["MODULE-001"], "the finished feature stays finished"
+    assert j.last("run:out_of_time")["left"] == ["MODULE-003", "MODULE-002"], "the rest is left, in order"
 
 
 def test_one_engineer_per_app_at_a_time(tmp_path):
@@ -364,10 +362,10 @@ def test_the_whole_app_pass_fixes_what_a_later_feature_broke(tmp_path):
     def prove(svc, od, only=None, give_back=None, **kw):
         proofs.append((only, give_back))
         rows = []
-        for sid in only or []:
-            # EXP-001 holds in its own feature and fails once the whole app
-            # is tried (a later feature moved the landing), until a fix lands.
-            ok = not (sid == "EXP-001" and len(only or []) > 1 and not fixes)
+        for sid in (list(only) if only is not None else ["EXP-001", "EXP-013", "EXP-027", "EXP-030"]):
+            # EXP-001 fails when the whole app is tried (a later feature
+            # moved the landing), until a fix lands.
+            ok = not (sid == "EXP-001" and only is None and not fixes)
             rows.append({"id": sid, "says": sid, "verdict": "passed" if ok else "failed",
                          "failures": [] if ok else ["Customer is on /orders, not /menu"]})
         return {"statements": len(rows), "passed": sum(r["verdict"] == "passed" for r in rows),
@@ -377,9 +375,9 @@ def test_the_whole_app_pass_fixes_what_a_later_feature_broke(tmp_path):
         fixes.append(ask)
         return {"status": "resolved", "answer": "set the customer's landing to the menu"}
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix)
-    assert sorted(proofs[-2][0]) == ["EXP-001", "EXP-030"], "the whole-app pass tries the arrivals and what no feature covered"
-    assert proofs[-1][0] == ["EXP-001"] and proofs[-1][1] is False, "then what the fix changed is tried again"
-    assert len(fixes) == 1 and "While building the whole application" in fixes[0] and "/orders, not /menu" in fixes[0]
+    assert proofs[0] == (None, True), "every statement, the arrivals and what no feature covered included"
+    assert proofs[-1] == (["EXP-001"], False), "then what the fix changed is tried again"
+    assert len(fixes) == 1 and "While building" in fixes[0] and "/orders, not /menu" in fixes[0]
     assert out["statements"]["fixed"] == ["EXP-001"] and out["statements"]["failing"] == []
 
 
@@ -544,8 +542,10 @@ def test_what_is_missing_at_the_end_is_the_engineers_to_finish(tmp_path):
                 w["steps"] = [{"id": "s1"}]
         svc.save()
         return {"status": "resolved", "answer": "wrote the clean-up's steps"}
-    prove = lambda s, od, only=None, **kw: {"statements": len(only or []), "passed": len(only or []), "failing": [],
-                                             "untried": [], "fixed": [], "results": [{"id": i, "verdict": "passed"} for i in only or []]}
+    def prove(s, od, only=None, **kw):
+        ids = list(only) if only is not None else ["EXP-001", "EXP-030"]
+        return {"statements": len(ids), "passed": len(ids), "failing": [], "untried": [], "fixed": [],
+                "results": [{"id": i, "verdict": "passed"} for i in ids]}
     said: list[str] = []
     out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove, fix=fix,
                 emit=lambda k, d: said.append(d.get("text", "")))
@@ -635,3 +635,41 @@ def test_what_the_last_run_gave_up_on_stays_given_up(tmp_path):
     gave_up = ({str(x) for x in last.get("failed") or []}
                | {str(x) for x in (j.last("statements:start") or {}).get("skipped") or []})
     assert gave_up == {"expectations:FLOW-017", "expectations:FLOW-033"}
+
+
+def _failing_prove(verdicts: dict[str, str]):
+    """A proof whose statements fail by cause; `verdicts` maps id → failure text."""
+    def prove(svc, od, only=None, give_back=None, **kw):
+        ids = list(only) if only is not None else list(verdicts)
+        rows = [{"id": i, "says": i, "verdict": "failed", "failures": [verdicts[i]]} for i in ids]
+        return {"statements": len(rows), "passed": 0, "failing": ids, "untried": [], "fixed": [], "results": rows}
+    return prove
+
+
+def test_fix_turns_stop_after_two_in_a_row_fix_nothing(tmp_path):
+    """Four turns on one feature held four statements in forty minutes
+    (Ecom L1, 2026-10-11): a cause the engineer cannot reach is reported."""
+    from services.engineer.journal import Journal
+    _project(tmp_path)
+    run = lambda svc, executor, *, plan, scope=None, **kw: SimpleNamespace(failed=[], paused_because="")
+    fixes: list[str] = []
+    prove = _failing_prove({"EXP-001": "landed on /orders, not /menu", "EXP-013": "nothing was sent",
+                            "EXP-027": "the button does nothing", "EXP-030": "a fourth cause"})
+    out = build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove,
+                fix=lambda od, ask: fixes.append(ask) or {"status": "resolved", "answer": "changed something"})
+    assert len(fixes) == 2, "two turns fixed nothing: the third cause is not chased"
+    assert out["statements"]["turns"] == 2 and out["statements"]["passed"] == 0
+    assert Journal(tmp_path).last("fix:stopped")["turns"] == 2
+
+
+def test_fix_turns_are_capped_per_build(tmp_path, monkeypatch):
+    from services.engineer import build as B
+    _project(tmp_path)
+    monkeypatch.setattr(B, "FIX_TURNS", 1)
+    monkeypatch.setattr(B, "FIX_DRY_STOP", 9)
+    run = lambda svc, executor, *, plan, scope=None, **kw: SimpleNamespace(failed=[], paused_because="")
+    fixes: list[str] = []
+    prove = _failing_prove({"EXP-001": "one cause", "EXP-013": "another cause", "EXP-027": "a third"})
+    out = B.build(str(tmp_path), str(tmp_path / "app"), executor=object(), run=run, prove=prove,
+                  fix=lambda od, ask: fixes.append(ask) or {"status": "resolved", "answer": "changed something"})
+    assert len(fixes) == 1 and out["statements"]["turns"] == 1

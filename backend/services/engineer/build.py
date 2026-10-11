@@ -120,15 +120,16 @@ AFTER_LANDING: tuple[str, ...] = ("expectations",)
 #: A feature node that writes once for the whole application and is not
 #: written again for the next feature: the section it writes, once present.
 ONCE_WRITTEN: dict[str, str] = {"ui_direction": "composition"}
-#: How many unattended fix turns a feature's failing statements get: one.
-#: Its authors have had their look first (the statements' own give-back);
-#: a second Smith round rarely found what the first did not, and cost the same.
-FIX_ROUNDS = 1
 #: Steps an unattended fix turn may take: reproduce, find the cause, change
 #: it, try it. What needs more than that is reported, not chased.
 FIX_STEPS = 15
-#: Fix turns per round at most — the causes, not every statement.
-FIX_TURNS_PER_ROUND = 4
+#: Fix turns a build gets at most, across the whole application — the
+#: causes, not every statement. Four turns on one feature held four
+#: statements in forty minutes (Ecom L1, 2026-10-11).
+FIX_TURNS = 6
+#: Turns in a row that fix nothing before the fixing stops: a cause the
+#: engineer cannot reach is reported, not chased with the next one.
+FIX_DRY_STOP = 2
 
 
 class FeatureScope:
@@ -460,38 +461,55 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
             _reload(svc, output_dir)
             journal.write("statements:done", failed=list(getattr(wrote, "failed", None) or []))
 
-        # PROVEN FEATURE BY FEATURE, in order of dependence: each tried as
-        # the people it is for, fixed where it fails, before the next.
-        for i, feature in enumerate(plan_features):
-            if stopped:
-                break
-            if feature.id in earlier:
-                continue
+        # PROVEN ALL AT ONCE, SAID PER FEATURE. Features proved one after
+        # another were an hour each (Ecom L1: 66 minutes for the first of
+        # nine, 2026-10-11). Every statement of every feature is tried in one
+        # pass on the benches, the authors' look is given back once over the
+        # whole, and the fix turns work the causes across the application —
+        # capped, and stopped when they stop fixing anything.
+        whole: dict = {}
+        if not stopped:
+            for feature in plan_features:
+                if feature.id in earlier:
+                    continue
+                # NOT BUILT IS NOT DONE. A feature whose screens have no code
+                # and no layout, or whose processes have no steps, is not
+                # proven by trying statements about it: it is recorded as
+                # unbuilt, and the build stops with it rather than hand over
+                # what is not there.
+                unbuilt = unbuilt_of(svc.doc, feature)
+                if unbuilt:
+                    row = {"feature": feature.id, "name": feature.name, "pages": feature.pages, "failed_nodes": [],
+                           "unbuilt": unbuilt, "statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": []}
+                    results.append(row)
+                    journal.write("feature:start", feature=feature.id, name=feature.name,
+                                  pages=feature.pages, requirements=feature.requirements)
+                    journal.write("feature:done", **row)
+                    say("message", {"text": _said_feature(feature, row, unbuilt)})
+                    stopped = f"{feature.label} is not built: " + "; ".join(unbuilt[:6])
+                    break
+        if not stopped:
+            todo = [f for f in plan_features if f.id not in earlier]
             if budget.over():
                 stopped = f"out of time after {budget.spent():.0f} minutes"
-                journal.write("run:out_of_time", left=[f.id for f in plan_features[i:]])
-                break
-            journal.write("feature:start", feature=feature.id, name=feature.name,
-                          pages=feature.pages, requirements=feature.requirements)
-            pulse.start(feature)
-            say("message", {"text": f"Trying {feature.label} as the people it is for."})
-            # NOT BUILT IS NOT DONE. A feature whose screens have no code and
-            # no layout, or whose processes have no steps, is not proven by
-            # trying statements about it: it is recorded as unbuilt, and the
-            # build stops with it rather than hand over what is not there.
-            unbuilt = unbuilt_of(svc.doc, feature)
-            proof = (_prove_feature(svc, output_dir, feature, prove, fix, budget, journal, say)
-                     if not unbuilt else {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": []})
-            row = {"feature": feature.id, "name": feature.name, "pages": feature.pages,
-                   "failed_nodes": [], "unbuilt": unbuilt, **proof}
-            results.append(row)
-            journal.write("feature:done", **row)
-            pulse.done(feature)
-            say("message", {"text": _said_feature(feature, proof, unbuilt)})
-            if unbuilt:
-                stopped = f"{feature.label} is not built: " + "; ".join(unbuilt[:6])
-                break
-        whole: dict = {}
+                journal.write("run:out_of_time", left=[f.id for f in todo])
+            elif todo:
+                for f in todo:
+                    journal.write("feature:start", feature=f.id, name=f.name, pages=f.pages,
+                                  requirements=f.requirements)
+                    pulse.start(f)
+                say("message", {"text": "Trying the whole application as the people it is for."})
+                journal.write("prove:start", features=[f.id for f in todo])
+                whole = _prove_all(svc, output_dir, plan_features, prove, fix, budget, journal, say)
+                for f in todo:
+                    row = _feature_row(f, whole, svc.doc)
+                    results.append(row)
+                    journal.write("feature:done", **row)
+                    pulse.done(f)
+                    say("message", {"text": _said_feature(f, row)})
+                journal.write("whole:done", passed=whole.get("passed"), statements=whole.get("statements"),
+                              failing=whole.get("failing"), untried=whole.get("untried"),
+                              fixed=whole.get("fixed"), turns=whole.get("turns"))
         if not stopped and last:
             reports.append(run(svc, executor, plan=last, commit=True, user_request=description,
                                app_root=app_root, observer=observer, observer_agent=observer_agent))
@@ -529,22 +547,6 @@ def build(output_dir: str, app_root: str, *, emit: Callable[[str, dict], None] |
                 journal.write("whole:unfinished", missing=missing)
                 say("message", {"text": "I could not finish the application, so I have not handed it over: "
                                         + "; ".join(missing[:8]) + ". Tell me what to change, or Build again and I will carry on from here."})
-        if not stopped:
-            # EVERY STATEMENT ONCE MORE, AND WHAT A LATER FEATURE BROKE IS
-            # FIXED: Crumb's customer landed on /orders once the Orders
-            # feature existed, and the statement from the first feature failed
-            # at the end with nobody sent to mend it (2026-10-09).
-            whole_feature = Feature(id="APP", name="the whole application",
-                                    pages=[str(p.get("id")) for p in plan_pages(svc.doc)],
-                                    requirements=[str(r.get("id")) for r in svc.doc.get("requirements") or []
-                                                  if isinstance(r, dict) and r.get("id")])
-            # WHAT HELD IN ITS FEATURE IS NOT TRIED AGAIN: what failed, what
-            # could not be tried, and what no feature's proof covered.
-            again_ids = untried_or_failing(svc.doc, plan_features, results)
-            whole = (_prove_feature(svc, output_dir, whole_feature, prove, fix, budget, journal, say, ids=again_ids)
-                     if again_ids else {})
-            journal.write("whole:done", passed=whole.get("passed"), statements=whole.get("statements"),
-                          failing=whole.get("failing"), untried=whole.get("untried"), fixed=whole.get("fixed"))
         out = _stopped(journal, svc, reports, stopped, features=results, statements=whole)
         pulse.end(out["report"])
         return out
@@ -720,63 +722,69 @@ def plan_pages(doc: Mapping[str, Any]) -> list[dict]:
             and p.get("status") != "DEPRECATED"]
 
 
-def _prove_feature(svc: Any, output_dir: str, feature: Feature, prove: Callable[..., dict],
-                   fix: Callable[[str, str], dict], budget: Budget, journal: Journal,
-                   say: Callable[[str, dict], None], ids: list[str] | None = ...) -> dict:
-    """The feature's statements, tried; what fails handed to its authors by
-    the statements' own give-back, then to the engineer's fix turns. `ids`
-    None means every statement (the whole-app pass)."""
+def _prove_all(svc: Any, output_dir: str, plan_features: list[Feature], prove: Callable[..., dict],
+               fix: Callable[[str, str], dict], budget: Budget, journal: Journal,
+               say: Callable[[str, dict], None]) -> dict:
+    """Every statement of the application, tried once with the authors'
+    look; then the causes of what still fails, each to one unattended fix
+    turn and tried again — at most FIX_TURNS turns, and no more once
+    FIX_DRY_STOP turns in a row have fixed nothing."""
     from services.blueprint.repair_groups import by_cause
-    from services.expects.statements import expectations
 
-    if ids is ...:
-        ids = statements_of(feature, svc.doc)
-    if ids is None:
-        ids = [str(e.get("id")) for e in expectations(dict(svc.doc))]
-    if not ids:
-        return {"statements": 0, "passed": 0, "failing": [], "untried": [], "fixed": []}
-    out = prove(svc, output_dir, only=ids, give_back=True)
+    out = prove(svc, output_dir, only=None, give_back=True)
+    merged: dict[str, dict] = {str(r.get("id")): r for r in out.get("results") or []}
     fixed: list[str] = list(out.get("fixed") or [])
-    for round_ in range(1, FIX_ROUNDS + 1):
-        failing = [r for r in out.get("results") or [] if r.get("verdict") == "failed"
-                   and str(r.get("id")) in set(out.get("failing") or [])]
-        if not failing or budget.over():
+    owner = {sid: f for f in plan_features for sid in statements_of(f, svc.doc)}
+    failing = [r for r in merged.values() if r.get("verdict") == "failed"]
+    turns = dry = 0
+    for group in by_cause(failing, lambda r: (r.get("failures") or [""])[0]):
+        if turns >= FIX_TURNS or dry >= FIX_DRY_STOP or budget.over():
             break
-        groups = by_cause(failing, lambda r: (r.get("failures") or [""])[0])[:FIX_TURNS_PER_ROUND]
-        changed_any = False
-        for group in groups:
-            journal.write("fix:start", feature=feature.id, round=round_,
-                          statements=[str(r.get("id")) for r in group])
-            say("message", {"text": f"{feature.label}: {len(group)} statement{'s' if len(group) != 1 else ''} "
-                                    f"not holding — finding the cause and fixing it."})
-            try:
-                answer = fix(output_dir, fix_ask(feature, group))
-            except Exception as exc:  # noqa: BLE001 — one fix turn never ends the build
-                logger.warning("[engineer] fix turn failed: %s", exc)
-                answer = {"status": "failed", "answer": str(exc)}
-            journal.write("fix:end", feature=feature.id, round=round_,
-                          status=(answer or {}).get("status"), said=str((answer or {}).get("answer") or "")[:400])
-            if str((answer or {}).get("status") or "") not in ("no_op", "failed"):
-                changed_any = True
-            _reload(svc, output_dir)
-        if not changed_any:
-            # NOTHING WAS CHANGED, SO NOTHING IS TRIED AGAIN and no second
-            # round is asked: a round of "nothing needed doing" costs the
-            # same as one that fixes something (ecom v2, 2026-10-10).
-            journal.write("fix:nothing_changed", feature=feature.id, round=round_)
-            break
-        again = prove(svc, output_dir, only=[str(r.get("id")) for r in failing], give_back=False)
-        now_passing = [str(r.get("id")) for r in again.get("results") or [] if r.get("verdict") == "passed"]
-        fixed += [s for s in now_passing if s not in fixed]
-        merged = {str(r.get("id")): r for r in out.get("results") or []}
-        merged.update({str(r.get("id")): r for r in again.get("results") or []})
-        out = {**out, "results": list(merged.values()),
-               "failing": sorted(s for s, r in merged.items() if r.get("verdict") == "failed"),
-               "untried": sorted(s for s, r in merged.items() if r.get("verdict") == "not_tried"),
-               "passed": sum(1 for r in merged.values() if r.get("verdict") == "passed")}
-    return {"statements": len(ids), "passed": int(out.get("passed") or 0),
-            "failing": list(out.get("failing") or []), "untried": list(out.get("untried") or []),
-            "fixed": fixed}
+        feature = owner.get(str(group[0].get("id"))) or Feature(id="APP", name="the application")
+        ids = [str(r.get("id")) for r in group]
+        turns += 1
+        journal.write("fix:start", feature=feature.id, turn=turns, statements=ids)
+        say("message", {"text": f"{feature.label}: {len(group)} statement{'s' if len(group) != 1 else ''} "
+                                f"not holding — finding the cause and fixing it (turn {turns} of {FIX_TURNS})."})
+        try:
+            answer = fix(output_dir, fix_ask(feature, group))
+        except Exception as exc:  # noqa: BLE001 — one fix turn never ends the build
+            logger.warning("[engineer] fix turn failed: %s", exc)
+            answer = {"status": "failed", "answer": str(exc)}
+        status = str((answer or {}).get("status") or "")
+        journal.write("fix:end", feature=feature.id, turn=turns, status=status,
+                      said=str((answer or {}).get("answer") or "")[:400])
+        if status in ("no_op", "failed"):
+            dry += 1
+            continue
+        _reload(svc, output_dir)
+        again = prove(svc, output_dir, only=ids, give_back=False)
+        held = [str(r.get("id")) for r in again.get("results") or [] if r.get("verdict") == "passed"]
+        for r in again.get("results") or []:
+            merged[str(r.get("id"))] = r
+        fixed += [sid for sid in held if sid not in fixed]
+        dry = 0 if held else dry + 1
+        journal.write("fix:yield", turn=turns, held=held)
+    if dry >= FIX_DRY_STOP:
+        journal.write("fix:stopped", turns=turns, why=f"{FIX_DRY_STOP} turns in a row fixed nothing")
+        say("message", {"text": "The fix turns stopped fixing anything, so what is left is reported rather than chased."})
+    rows = list(merged.values())
+    return {"statements": len(rows), "passed": sum(1 for r in rows if r.get("verdict") == "passed"),
+            "failing": sorted(sid for sid, r in merged.items() if r.get("verdict") == "failed"),
+            "untried": sorted(sid for sid, r in merged.items() if r.get("verdict") == "not_tried"),
+            "fixed": fixed, "results": rows, "turns": turns}
+
+
+def _feature_row(feature: Feature, whole: dict, doc: Mapping[str, Any]) -> dict:
+    """One feature's share of the whole proof: its statements, what held,
+    what failed, what the fix turns mended."""
+    ids = set(statements_of(feature, doc))
+    rows = [r for r in whole.get("results") or [] if str(r.get("id")) in ids]
+    return {"feature": feature.id, "name": feature.name, "pages": feature.pages, "failed_nodes": [], "unbuilt": [],
+            "statements": len(rows), "passed": sum(1 for r in rows if r.get("verdict") == "passed"),
+            "failing": sorted(str(r.get("id")) for r in rows if r.get("verdict") == "failed"),
+            "untried": sorted(str(r.get("id")) for r in rows if r.get("verdict") == "not_tried"),
+            "fixed": [sid for sid in whole.get("fixed") or [] if sid in ids]}
 
 
 def _said_feature(feature: Feature, proof: dict, unbuilt: list[str] | None = None) -> str:
@@ -850,4 +858,4 @@ def _executor(svc: Any, output_dir: str, say: Callable[[str, dict], None], obser
 
 
 __all__ = ["build", "build_nodes", "first_nodes", "incomplete_nodes", "proven_before", "FeatureScope",
-           "fix_ask", "PER_FEATURE", "FIX_ROUNDS"]
+           "fix_ask", "PER_FEATURE", "FIX_TURNS", "FIX_DRY_STOP"]
