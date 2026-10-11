@@ -4754,6 +4754,67 @@ def project_tenancy(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": ["src/lib/tenancy-policy.ts"], "kind": policy["kind"]}
 
 
+SIGN_IN_POLICY_FILE = "src/lib/sign-in-policy.ts"
+
+
+def sso_secret_names(entry_id: str) -> dict[str, str]:
+    """The NAMES an identity provider is reached with, from the entry's id:
+    `SSO_<ID>_ISSUER`, `SSO_<ID>_CLIENT_ID`, `SSO_<ID>_CLIENT_SECRET`."""
+    up = re.sub(r"[^A-Z0-9]+", "_", str(entry_id or "").upper()).strip("_") or "SSO"
+    return {"issuerKey": f"SSO_{up}_ISSUER", "clientIdKey": f"SSO_{up}_CLIENT_ID", "clientSecretKey": f"SSO_{up}_CLIENT_SECRET"}
+
+
+def sign_in_policy(doc: dict) -> dict[str, Any]:
+    """How people sign in, as the runtime reads it: password, magic link, and
+    each provider with the names it is reached by and its role mapping by
+    role NAME (the Blueprint says ids; the session carries names)."""
+    sec = (doc.get("security") or {}).get("signIn") if isinstance(doc.get("security"), dict) else {}
+    sec = sec if isinstance(sec, dict) else {}
+    role_names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or [] if isinstance(r, dict)}
+    name_of = lambda r: role_names.get(str(r), str(r)) if r else None  # noqa: E731
+    sso: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for e in sec.get("sso") or []:
+        if not isinstance(e, dict) or not e.get("id") or str(e["id"]) in seen:
+            continue
+        seen.add(str(e["id"]))
+        kind = "saml" if str(e.get("kind") or "oidc") == "saml" or str(e.get("provider") or "") == "saml" else "oidc"
+        rf = e.get("roleFrom") if isinstance(e.get("roleFrom"), dict) else None
+        sso.append({"id": str(e["id"]), "name": str(e.get("name") or e["id"]), "kind": kind,
+                    "provider": str(e.get("provider") or ("saml" if kind == "saml" else "oidc")),
+                    **sso_secret_names(str(e["id"])),
+                    "domains": [str(d).lower().lstrip("@") for d in e.get("domains") or [] if str(d).strip()],
+                    "roleFrom": ({"claim": str(rf.get("claim") or "groups"),
+                                  "map": {str(k): name_of(v) for k, v in (rf.get("map") or {}).items() if name_of(v)},
+                                  "default": name_of(rf.get("default"))} if rf else None),
+                    "provisioning": str(e.get("provisioning") or "just_in_time")})
+    password = sec.get("password") is not False
+    magic = sec.get("magicLink") is True
+    if not password and not magic and not sso:
+        password = True   # nobody could sign in otherwise; the contract check refuses this upstream
+    return {"password": password, "magicLink": magic, "sso": sso}
+
+
+def project_sign_in(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """`src/lib/sign-in-policy.ts`: the ways in, as `auth.ts` and the form read them."""
+    lib = Path(app_root) / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    policy = sign_in_policy(doc)
+    (lib / "sign-in-policy.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "// How people sign in: email and password, a one-time link by email, and\n"
+        "// each identity provider by the NAMES it is reached with (values live on\n"
+        "// the platform; a provider whose names are unset is said, not offered).\n"
+        "export interface SsoEntry {\n  id: string;\n  name: string;\n  kind: \"oidc\" | \"saml\";\n"
+        "  provider: \"entra\" | \"google\" | \"okta\" | \"oidc\" | \"saml\";\n"
+        "  issuerKey: string;\n  clientIdKey: string;\n  clientSecretKey: string;\n  domains: string[];\n"
+        "  roleFrom: { claim: string; map: Record<string, string>; default: string | null } | null;\n"
+        "  provisioning: \"invite_only\" | \"just_in_time\";\n}\n"
+        "export interface SignInPolicy { password: boolean; magicLink: boolean; sso: SsoEntry[] }\n"
+        f"export const SIGN_IN: SignInPolicy = {json.dumps(policy, indent=2)};\n", "utf-8")
+    return {"files": [SIGN_IN_POLICY_FILE], **policy}
+
+
 #: The currency a locale pays in, when the product does not say.
 _LOCALE_CURRENCY: dict[str, str] = {
     "us": "USD", "gb": "GBP", "ae": "AED", "sa": "SAR", "in": "INR", "pk": "PKR", "bd": "BDT", "eg": "EGP", "ng": "NGN",

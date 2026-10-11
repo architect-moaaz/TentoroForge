@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLogin } from "@/hooks/useLogin";
 import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
+import { SignInMethods } from "@/sdk/auth";
 
 /**
  * Auth page — COMPOSED PER APP.
@@ -59,6 +60,7 @@ function LoginForm() {
         className="w-full rounded-[var(--radius)] bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-50">
         {isLoading ? "Signing in…" : "Sign in"}
       </button>
+      <SignInMethods email={email} />
       <p className="text-center text-sm text-muted-foreground">
         Don&apos;t have an account? <a href="/signup" className="font-medium text-primary hover:underline">Sign up</a>
       </p>

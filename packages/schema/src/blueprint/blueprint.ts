@@ -2261,6 +2261,48 @@ export const Security = z.object({
    */
   signupRole: RoleId.optional(),
   /**
+   * HOW PEOPLE SIGN IN. `password`: email and password (the default).
+   * `magicLink`: a one-time link sent to the address, good for fifteen
+   * minutes, used once. `sso`: the identity providers an organisation signs
+   * in through — each an `auth` integration row holding the NAMES of its
+   * issuer, client id and client secret (`SSO_<ID>_ISSUER`,
+   * `SSO_<ID>_CLIENT_ID`, `SSO_<ID>_CLIENT_SECRET`; values live on the
+   * platform). `kind: oidc` speaks OpenID Connect to the provider itself
+   * (Entra, Google, Okta, or any issuer with discovery); `kind: saml` speaks
+   * OIDC to the platform's SAML bridge, which speaks SAML to the enterprise.
+   * `domains` limits who may sign in through it; `roleFrom` reads the role
+   * off a claim (a group name → a role id), else `default`; `provisioning`
+   * says whether a person unknown to the application is made on first
+   * sign-in (`just_in_time`) or must have been invited (`invite_only`).
+   * Password off with nothing else on is refused: nobody could sign in.
+   */
+  signIn: z
+    .object({
+      password: z.boolean().default(true),
+      magicLink: z.boolean().default(false),
+      sso: z
+        .array(
+          z.object({
+            id: z.string().regex(/^[a-z][a-z0-9_]{0,23}$/, "a short lower_snake id: entra, google, okta_saml"),
+            name: z.string(),
+            kind: z.enum(["oidc", "saml"]).default("oidc"),
+            provider: z.enum(["entra", "google", "okta", "oidc", "saml"]).default("oidc"),
+            integration: IntegrationId.optional(),
+            domains: z.array(z.string()).default([]),
+            roleFrom: z
+              .object({
+                claim: z.string().default("groups"),
+                map: z.record(z.string(), RoleId).default({}),
+                default: RoleId.optional(),
+              })
+              .optional(),
+            provisioning: z.enum(["invite_only", "just_in_time"]).default("just_in_time"),
+          }),
+        )
+        .default([]),
+    })
+    .default({}),
+  /**
    * A string states policy and enforces nothing; a {@link RecordScopeRule}
    * is enforced. An entity with no rule is readable by every authenticated
    * user — correct when authorisation is by role rather than by record, and

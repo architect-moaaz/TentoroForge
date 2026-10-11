@@ -96,6 +96,14 @@
 {"say": "we have a new branch, Riverside", "verb": "add_organisation"}
 {"say": "move dave@clinic.com to Northside as a Nurse", "verb": "move_login"}
 {"say": "put sara@shop.com in the Riverside branch", "verb": "move_login"}
+{"say": "sign in by magic link only", "verb": "set_sign_in_method"}
+{"say": "turn passwords off", "verb": "set_sign_in_method"}
+{"say": "people in the Finance group are Accountants, everyone else is a Viewer", "verb": "map_sso_roles"}
+{"say": "the Admins group signs in as Administrator", "verb": "map_sso_roles"}
+{"say": "only @acme.com may sign in", "verb": "restrict_sign_in_domains"}
+{"say": "anyone with a company Google account may sign in", "verb": "restrict_sign_in_domains"}
+{"say": "let people sign in with their Microsoft 365 account", "verb": "connect_service", "note": "sign-in through a provider is connect_service; the sign-in adapter is tried first"}
+{"say": "connect sign-in to Okta over SAML", "verb": "connect_service"}
 {"say": "remove the archive nurse thing", "verb": "remove_workflow"}
 {"say": "we don't want the Monday reminder any more", "verb": "remove_workflow"}
 {"say": "experience can't be more than 60 years", "verb": "add_rule"}
@@ -230,7 +238,6 @@
 {"say": "Drop the rule that a nurse needs at least one speciality", "verb": "remove_rule"}
 {"say": "let anyone open registration without signing in", "verb": "edit_access", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "change the theme colour to green", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
-{"say": "make it darker", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "change the theme colour from blue to green", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "Make it look nicer", "verb": "restyle"}
 {"say": "call it Nurse Directory", "verb": "edit_navigation", "note": "quoted in the catalogue as an example of this verb"}

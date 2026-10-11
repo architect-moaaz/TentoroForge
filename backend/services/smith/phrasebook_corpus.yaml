@@ -556,6 +556,57 @@ sentences:
     source: code
     reaches: {verb: move_login, states: [change]}
 
+  # How people sign in: the ways in, a provider's groups as roles, whose
+  # domains a provider admits. Connecting the provider itself is
+  # connect_service ("let people sign in with Google").
+  - id: does-magic-link-only
+    say: "sign in by magic link only"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: set_sign_in_method, states: [change]}
+
+  - id: does-passwords-off
+    say: "turn passwords off"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: set_sign_in_method, states: [change]}
+
+  - id: does-map-groups-to-roles
+    say: "people in the Finance group are Accountants, everyone else is a Viewer"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: map_sso_roles, states: [change]}
+
+  - id: does-admins-group-is-admin
+    say: "the Admins group signs in as Administrator"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: map_sso_roles, states: [change]}
+
+  - id: does-only-our-domain
+    say: "only @acme.com may sign in"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: restrict_sign_in_domains, states: [change]}
+
+  - id: does-any-company-google
+    say: "anyone with a company Google account may sign in"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: restrict_sign_in_domains, states: [change]}
+
+  - id: integration-sign-in-microsoft
+    say: "let people sign in with their Microsoft 365 account"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: connect_service, states: [integration]}
+
+  - id: integration-sign-in-okta-saml
+    say: "connect sign-in to Okta over SAML"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: connect_service, states: [integration]}
+
   - id: does-stop-welcome-email
     say: "stop sending the welcome email"
     checked: {colour: acts, via: handler}

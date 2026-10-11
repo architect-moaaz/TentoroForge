@@ -2702,6 +2702,101 @@
           "$ref": "#/properties/roles/items/properties/id",
           "description": "Stable ROLE identifier (§12)"
         },
+        "signIn": {
+          "type": "object",
+          "properties": {
+            "password": {
+              "type": "boolean",
+              "default": true
+            },
+            "magicLink": {
+              "type": "boolean",
+              "default": false
+            },
+            "sso": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]{0,23}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "oidc",
+                      "saml"
+                    ],
+                    "default": "oidc"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "entra",
+                      "google",
+                      "okta",
+                      "oidc",
+                      "saml"
+                    ],
+                    "default": "oidc"
+                  },
+                  "integration": {
+                    "$ref": "#/properties/workflows/items/properties/trigger/properties/integration",
+                    "description": "Stable INT identifier (§12)"
+                  },
+                  "domains": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": []
+                  },
+                  "roleFrom": {
+                    "type": "object",
+                    "properties": {
+                      "claim": {
+                        "type": "string",
+                        "default": "groups"
+                      },
+                      "map": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "$ref": "#/properties/roles/items/properties/id"
+                        },
+                        "default": {}
+                      },
+                      "default": {
+                        "$ref": "#/properties/roles/items/properties/id",
+                        "description": "Stable ROLE identifier (§12)"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "provisioning": {
+                    "type": "string",
+                    "enum": [
+                      "invite_only",
+                      "just_in_time"
+                    ],
+                    "default": "just_in_time"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
         "ownershipRules": {
           "type": "array",
           "items": {

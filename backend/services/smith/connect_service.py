@@ -13,12 +13,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from services.smith import email_connect, payment_connect
+from services.smith import email_connect, payment_connect, sign_in_connect
 
 logger = logging.getLogger(__name__)
 
-#: The adapters, in the order they are tried.
-ADAPTERS: tuple[Any, ...] = (email_connect, payment_connect)
+#: The adapters, in the order they are tried. Sign-in first: its words are
+#: "sign in through …", so "connect it to our Microsoft 365" alone is mail.
+ADAPTERS: tuple[Any, ...] = (sign_in_connect, email_connect, payment_connect)
 
 
 def actions() -> set[str]:

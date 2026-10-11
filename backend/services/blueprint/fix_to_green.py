@@ -208,6 +208,14 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
             bench.extra_env.update(signing_secrets(svc.doc))
         except Exception:  # noqa: BLE001
             logger.warning("[fix-to-green] no signing secrets for the bench", exc_info=True)
+    # EVERY DECLARED IDENTITY PROVIDER POINTS AT THE PLATFORM'S MOCK ISSUER on
+    # the copy: a sign-in is proven end to end without a real tenant's secret.
+    if "routes" in what and hasattr(bench, "extra_env"):
+        try:
+            from services.blueprint.sso_check import bench_env
+            bench.extra_env.update(bench_env(svc.doc))
+        except Exception:  # noqa: BLE001
+            logger.warning("[fix-to-green] no sign-in names for the bench", exc_info=True)
     try:
         try:
             app = bench.app()
@@ -220,6 +228,12 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
             try:
                 from services.blueprint.route_check import check_routes
                 out = check_routes(app, svc.doc, only=only_pages, cancelled=cancelled)
+                if only_pages is None:
+                    from services.blueprint.sso_check import check_sso
+                    ways = check_sso(app, svc.doc, cancelled=cancelled)
+                    for k in ("green", "red", "untried"):
+                        out[k] = list(out[k]) + list(ways[k])
+                    out["total"] = int(out["total"]) + int(ways["total"])
                 _merge(svc, "routes", out, only_pages)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[fix-to-green] the route check failed", exc_info=True)
@@ -347,10 +361,11 @@ def by_cause(reds: list[dict]) -> list[dict]:
         cause = str(r.get("cause") or r.get("id"))
         kind = ("process" if cause.startswith("FLOW-") else "rule" if cause.startswith("RULE-")
                 else "access" if cause.startswith("ENTITY-") else "integration" if cause.startswith("INT-")
-                else "audit" if cause == "audit" else "tenancy" if cause == "tenancy" else "page")
+                else "audit" if cause == "audit" else "tenancy" if cause == "tenancy"
+                else "sign_in" if cause.startswith("sso:") or cause in ("magic_link", "sign_up") else "page")
         g = groups.setdefault(cause, {"cause": cause, "kind": kind, "items": []})
         g["items"].append(r)
-    order = {"page": 0, "process": 1, "rule": 2, "access": 3, "integration": 4, "audit": 5, "tenancy": 6}
+    order = {"page": 0, "process": 1, "rule": 2, "access": 3, "integration": 4, "audit": 5, "tenancy": 6, "sign_in": 7}
     return sorted(groups.values(), key=lambda g: (order[g["kind"]], g["cause"]))
 
 
@@ -373,7 +388,7 @@ def ask_for(group: dict, doc: dict) -> str:
         return page_ask(group["cause"], item)
     seen = "\n".join(f"- {r.get('label')}: {r.get('why')}" for r in items[:12])
     what = {"process": "process", "rule": "rule", "access": "record type", "integration": "outside system",
-            "audit": "audit trail", "tenancy": "organisations"}[group["kind"]]
+            "audit": "audit trail", "tenancy": "organisations", "sign_in": "way in"}[group["kind"]]
     return (f"The build tried the {what} {items[0].get('label')} ({group['cause']}) as the people it is for. "
             f"This did not hold:\n{seen}\n\n"
             "Find the cause and fix it where it lives — the steps, a rule, the data model, who may do what, "

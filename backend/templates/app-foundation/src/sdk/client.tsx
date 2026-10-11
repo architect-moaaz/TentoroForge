@@ -14,7 +14,7 @@ import { fileUrl } from "./files";
 import { roundPoint, isPoint, type GeoPoint } from "./geo";
 
 export { WidgetView, chartPropsFor, type WidgetViewData, type WidgetViewProps } from "./widget-view";
-export { SignInForm, SignUpForm, useSignIn, useSignUp, signupFields, type AccountField } from "./auth";
+export { SignInForm, SignInMethods, SignUpForm, useSignIn, useSignInMethods, useMagicLink, useSignUp, signupFields, type AccountField, type SignInMethods as SignInMethodList } from "./auth";
 export type { ChartSelection } from "@tentoroforge/library";
 export { distanceKm, formatDistance, parseNear, type GeoPoint } from "./geo";
 

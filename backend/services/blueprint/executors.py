@@ -1953,6 +1953,17 @@ NODE_TASKS: dict[str, str] = {
         "not need is not declared."
     ),
     "security": (
+        "Say how people sign in, under `signIn`: `password` (email and password), "
+        "`magicLink` (a one-time link by email), and `sso` — one entry per identity "
+        "provider an organisation signs in through, each naming the `auth` "
+        "integration row (from the integrations section) that holds its secret "
+        "NAMES, its `kind` (`oidc` to Entra, Google, Okta or any issuer; `saml` "
+        "through the platform's bridge), the `domains` it admits, `roleFrom` (the "
+        "claim carrying groups, a map of group name to role, a default), and "
+        "`provisioning` — made on first sign-in, or invited first. Password off "
+        "with nothing else on is refused. The requirements decide: an enterprise "
+        "that signs in through its directory says so; a consumer product does not "
+        "get a provider nobody asked for.\n\n"
         "When the data model marks a tenant entity, declare `tenancy`: `kind: "
         "organisation`; `memberRoles`, the roles people hold INSIDE an "
         "organisation; `platformRoles`, the roles held platform-wide that see "

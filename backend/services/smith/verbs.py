@@ -82,6 +82,11 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # Organisations: a new one, and which one a login belongs to.
     "add_organisation": {"change"},
     "move_login": {"change"},
+    # How people sign in: which ways in, the provider's groups as roles, whose
+    # domains may sign in through a provider.
+    "set_sign_in_method": {"change"},
+    "map_sso_roles": {"change"},
+    "restrict_sign_in_domains": {"change"},
     # Money: a refund through the payment service; the currency money is in.
     "refund": {"change"},
     "set_currency": {"change"},
@@ -336,6 +341,22 @@ VERB_HELP: dict[str, str] = {
         "Put a login in an organisation, with a role there: \"move "
         "dave@clinic.com to Northside as a Nurse\". Needs the email and the "
         "organisation; the role is optional."
+    ),
+    "set_sign_in_method": (
+        "Change the ways people sign in: \"sign in by magic link only\", \"turn "
+        "passwords off\", \"turn on magic links as well\", \"passwords only\". A "
+        "change that leaves nobody a way in is refused. Connecting an identity "
+        "provider (Microsoft 365, Google, Okta, SAML) is connect_service."
+    ),
+    "map_sso_roles": (
+        "Which role a person signing in through the organisation's provider "
+        "gets, by their group: \"people in the Finance group are Accountants, "
+        "everyone else is a Viewer\". Needs at least one group or a default."
+    ),
+    "restrict_sign_in_domains": (
+        "Whose email domains may sign in through a provider: \"only @acme.com "
+        "may sign in\", \"anyone may sign in\". Needs the domains, or that "
+        "anyone may."
     ),
     "refund": (
         "Refund a payment through the payment service: \"refund order 1234\", "
@@ -701,6 +722,18 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'move_login': (
         'move dave@clinic.com to Northside as a Nurse',
         'put sara@shop.com in the Riverside branch',
+    ),
+    'set_sign_in_method': (
+        'sign in by magic link only',
+        'turn passwords off',
+    ),
+    'map_sso_roles': (
+        'people in the Finance group are Accountants, everyone else is a Viewer',
+        'the Admins group signs in as Administrator',
+    ),
+    'restrict_sign_in_domains': (
+        'only @acme.com may sign in',
+        'anyone with a company Google account may sign in',
     ),
     'refund': (
         'refund order 1234',

@@ -74,6 +74,7 @@ from routers.runtime_exceptions import router as runtime_exceptions_router
 from routers.incidents import router as incidents_router
 from routers.notifications import router as notifications_router
 from routers.sso import router as sso_router
+from routers.mock_idp import router as mock_idp_router
 from routers.audit import router as audit_router
 from routers.attachments import router as attachments_router
 from routers.exports import router as exports_router
@@ -207,6 +208,7 @@ app.include_router(ai_features_router)
 app.include_router(portal_router)
 app.include_router(notifications_router)
 app.include_router(sso_router)
+app.include_router(mock_idp_router)
 app.include_router(audit_router)
 app.include_router(files_router)
 app.include_router(attachments_router)

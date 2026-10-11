@@ -173,7 +173,7 @@ _READS: dict[str, set[str]] = {
                   "workflows", "security", "domainReference"},
 
     # §100 — permissions guard entities, pages and workflow execution.
-    "security": {"requirements", "data", "pages", "workflows", "domainReference"},
+    "security": {"requirements", "data", "pages", "workflows", "integrations", "domainReference"},
 
     "integration": {"requirements", "domainReference"},
 
@@ -704,8 +704,16 @@ def check_integrations(result: "AgentResult", doc: dict | None = None) -> None:
             else:
                 provider = str(body.get("provider") or "").strip().lower()
                 known = providers_of(serves)
+                from services.smith.connect_service import adapter_for
+                flexible = bool(getattr(adapter_for(serves), "FLEXIBLE_NAMES", False))
                 if provider not in known:
                     problems.append(f"{name}: `{serves}` is carried by {', '.join(sorted(known))}; got provider {provider!r}")
+                elif flexible:
+                    # NAMES PER ENTRY (`SSO_<ID>_ISSUER/CLIENT_ID/CLIENT_SECRET`):
+                    # any complete triple reaches a provider.
+                    if not adapter_for(serves).complete_triples(refs):
+                        problems.append(f"{name}: {provider} reads a triple of names — {', '.join(known[provider])} "
+                                        "(or the same three under the entry's own id)")
                 else:
                     missing = [k for k in known[provider] if k not in refs]
                     if missing:
@@ -1368,6 +1376,82 @@ def check_tenancy(result: "AgentResult", doc: dict | None) -> None:
         raise InvalidTenancy(_all_of(problems))
 
 
+class InvalidSignIn(AuthorRefusal):
+    """A way in nobody could take, or a provider with no row to reach it by."""
+
+
+_SSO_ID = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
+_DOMAIN = re.compile(r"^@?[a-z0-9-]+(\.[a-z0-9-]+)+$", re.I)
+
+
+def check_sign_in(result: "AgentResult", doc: dict | None) -> None:
+    """Password off needs another way in; every provider names an `auth`
+    integration that exists (or is proposed) and carries its three names;
+    a role map names declared roles; a just-in-time provider has a default
+    role or a map; domains are domains."""
+    doc = doc or {}
+    problems: list[str] = []
+    roles = {str(r.get("id")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    roles |= {str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    for p in result.proposals:
+        if p.section == "security" and isinstance(p.body, dict):
+            for r in (p.body.get("roles") or []) if isinstance(p.body.get("roles"), list) else []:
+                if isinstance(r, dict):
+                    roles |= {str(r.get("id") or ""), str(r.get("name") or "")}
+    rows = {str(r.get("id")): r for r in doc.get("integrations") or [] if isinstance(r, dict)
+            and str(r.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")}
+    proposed = {p.natural_key or str((p.body or {}).get("name") or ""): p.body for p in result.proposals
+                if p.section == "integrations" and isinstance(p.body, dict)}
+    from services.blueprint.projection import sso_secret_names
+    for p in result.proposals:
+        if p.section != "security" or not isinstance(p.body, dict) or not isinstance(p.body.get("signIn"), dict):
+            continue
+        si = p.body["signIn"]
+        sso = [e for e in si.get("sso") or [] if isinstance(e, dict)]
+        if si.get("password") is False and not si.get("magicLink") and not sso:
+            problems.append("security.signIn: password off with no magic link and no identity provider — nobody could sign in")
+        seen: set[str] = set()
+        for e in sso:
+            eid = str(e.get("id") or "")
+            if not _SSO_ID.match(eid):
+                problems.append(f"security.signIn.sso: `id` is a short lower_snake name (entra, okta_saml); got {eid!r}")
+            if eid in seen:
+                problems.append(f"security.signIn.sso: two entries share the id {eid!r}")
+            seen.add(eid)
+            ref = str(e.get("integration") or "")
+            row = rows.get(ref) or next((b for k, b in proposed.items() if ref and (k == ref or str(b.get("id") or "") == ref)), None)
+            if row is None:
+                by_kind = [r for r in list(rows.values()) + list(proposed.values()) if str(r.get("kind") or "") == "auth"
+                           and str(r.get("serves") or "") == "sign_in"]
+                row = by_kind[0] if len(by_kind) == 1 and not ref else None
+            if row is None:
+                problems.append(f"security.signIn.sso[{eid}]: `integration` names an `auth` integration row (serves `sign_in`) "
+                                "that holds the provider's secret NAMES; none found")
+            else:
+                names = set(sso_secret_names(eid).values())
+                refs = {str(r) for r in row.get("secretRefs") or []}
+                missing = sorted(names - refs)
+                if missing:
+                    problems.append(f"security.signIn.sso[{eid}]: its integration row lists {', '.join(sorted(refs)) or 'no names'}; "
+                                    f"add {', '.join(missing)} to its `secretRefs`")
+            for d in e.get("domains") or []:
+                if not _DOMAIN.match(str(d)):
+                    problems.append(f"security.signIn.sso[{eid}]: `domains` holds domains (acme.com); got {str(d)[:40]!r}")
+            rf = e.get("roleFrom") if isinstance(e.get("roleFrom"), dict) else None
+            if rf:
+                for group, role in (rf.get("map") or {}).items():
+                    if str(role) not in roles:
+                        problems.append(f"security.signIn.sso[{eid}]: roleFrom.map[{group!r}] names an unknown role {role!r}")
+                if rf.get("default") and str(rf["default"]) not in roles:
+                    problems.append(f"security.signIn.sso[{eid}]: roleFrom.default names an unknown role {rf['default']!r}")
+            if str(e.get("provisioning") or "just_in_time") == "just_in_time" and not (rf and (rf.get("map") or rf.get("default"))) \
+                    and not p.body.get("signupRole") and not (doc.get("security") or {}).get("signupRole"):
+                problems.append(f"security.signIn.sso[{eid}]: a person made on first sign-in needs a role — set `roleFrom` "
+                                "(a group map or a default) or `signupRole`")
+    if problems:
+        raise InvalidSignIn(_all_of(problems))
+
+
 class InvalidAudit(AuthorRefusal):
     """An audit policy nobody may read, or an audit screen for the wrong people."""
 
@@ -1726,6 +1810,7 @@ def apply_agent_result(
     check_integrations(result, svc.doc)
     check_audit(result, svc.doc)
     check_tenancy(result, svc.doc)
+    check_sign_in(result, svc.doc)
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)

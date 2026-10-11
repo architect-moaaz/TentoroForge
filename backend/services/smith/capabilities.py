@@ -56,7 +56,8 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "Give someone a login, take one away, or send someone a fresh link when "
      "they are locked out. Each person sets their own password — I never see "
      "one, and never tell you anyone else's.",
-     frozenset({"add_login", "remove_login", "reset_login", "add_organisation", "move_login"})),
+     frozenset({"add_login", "remove_login", "reset_login", "add_organisation", "move_login",
+                "set_sign_in_method", "map_sso_roles", "restrict_sign_in_domains"})),
     ("How it looks",
      "The colours, type and density of the whole application, the menu down "
      "the side, and your own logo in the corner of every screen — attach the "

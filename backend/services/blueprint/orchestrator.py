@@ -433,8 +433,9 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # on rules but `integration` and `memory`, so this costs no time.
     _n("business_rules", "business_rules", ("entity_fields", "workflows"), ("businessRules",),
        note="§107 step 16; not a distinct box in §28"),
-    _n("security", "security", ("entity_fields",), ("security", "roles", "permissions"),
-       note="§100; placed after the data model because permissions guard entities"),
+    _n("security", "security", ("entity_fields", "integrations"), ("security", "roles", "permissions"),
+       note="§100; placed after the data model because permissions guard entities, and after the "
+            "integrations because a sign-in through an identity provider names its `auth` row"),
     _n("integrations", "integration", ("application_model",), ("integrations",)),
 
     # join
@@ -2974,7 +2975,7 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     control that lived in the route would not cover the SSR path.
     """
     from services.blueprint.projection import (
-        apply_data_projection, project_append_only_entities, project_audit, project_money, project_tenancy,
+        apply_data_projection, project_append_only_entities, project_audit, project_money, project_sign_in, project_tenancy,
         project_embedding_columns, project_ownership_rules,
         project_searchable_columns, project_sensitive_columns,
     )
@@ -2989,6 +2990,7 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     project_audit(svc.doc, app_root)
     project_money(svc.doc, app_root)
     project_tenancy(svc.doc, app_root)
+    project_sign_in(svc.doc, app_root)
     project_ownership_rules(svc.doc, app_root)
 
 
