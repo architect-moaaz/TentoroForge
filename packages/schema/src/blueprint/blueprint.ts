@@ -214,6 +214,12 @@ export const Product = z.object({
    * Defaults to "en" because that is what every existing application is, and
    * a default of "unknown" would make each of them look like a question.
    */
+  /**
+   * The currency money is kept and shown in — ISO 4217 (`AED`, `GBP`). Money
+   * fields hold MAJOR units (12.50, never 1250); a payment adapter converts
+   * to minor units at the gateway. Absent, derived from `locale`.
+   */
+  currency: z.string().optional(),
   locale: z
     .string()
     .describe(
@@ -1706,6 +1712,11 @@ export const Entity = z.object({
    * said so to the person. The audit trail itself is append-only by the
    * database, not by this flag.
    */
+  /**
+   * THE THING PEOPLE BUY. On the one entity whose rows are put in a cart
+   * and paid for; the runtime ships its cart and checkout with it.
+   */
+  commerce: z.boolean().default(false),
   appendOnly: z.boolean().default(false),
   account: z.boolean().optional(),
   ...artifactBase,

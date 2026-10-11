@@ -251,9 +251,12 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
                 from services.blueprint.webhook_check import check_webhooks
                 hooks = check_webhooks(app, svc.doc, secrets=getattr(bench, "extra_env", None),
                                        only=only_flows, cancelled=cancelled)
-                for k in ("green", "red", "untried"):
-                    out[k] = list(out[k]) + list(hooks[k])
-                out["total"] = int(out["total"]) + int(hooks["total"])
+                from services.blueprint.payment_check import check_payments
+                pays = check_payments(app, svc.doc, bench=bench, client=client, only=only_flows, cancelled=cancelled)
+                for part in (hooks, pays):
+                    for k in ("green", "red", "untried"):
+                        out[k] = list(out[k]) + list(part[k])
+                    out["total"] = int(out["total"]) + int(part["total"])
                 _merge(svc, "systems", out, only_flows)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[fix-to-green] the clock check failed", exc_info=True)

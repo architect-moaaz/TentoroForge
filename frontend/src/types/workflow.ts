@@ -80,7 +80,8 @@ export type ActionType =
   | "for_each"
   | "emit_event"
   | "wait_for_event"
-  | "custom" | "ocr_document";
+  | "custom" | "ocr_document"
+  | "create_checkout" | "refund_payment" | "payment_status" | "connect_account";
 
 export type ApprovalType = "single" | "sequential" | "parallel_all" | "parallel_any" | "threshold";
 

@@ -12,7 +12,7 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { INBOUND } from "@/lib/integrations/connected";
-import { PROVIDER_VERIFIERS } from "@/lib/integrations/providers";
+import { PAYMENT_PROVIDERS, PROVIDER_VERIFIERS } from "@/lib/integrations/providers";
 import { emitEventAndProcess } from "@/lib/events/bus";
 import { initializeRuntime } from "@/lib/runtime-loader";
 
@@ -60,6 +60,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ integra
   if (svc.verify === "bearer") {
     const auth = req.headers.get("authorization") ?? "";
     if (!same(auth, `Bearer ${secret}`)) return NextResponse.json({ error: "bad token" }, { status: 401 });
+  } else if (svc.verify === "provider" && PAYMENT_PROVIDERS.has(String(svc.provider))) {
+    // A PAYMENT PROVIDER'S CALL IS SETTLED BY ITS ADAPTER: verified, read
+    // into the ledger, put on the bus as `<integration>.payment.succeeded`.
+    await initializeRuntime();
+    const { onProviderCall } = await import("@/lib/payments");
+    const out = await onProviderCall(String(svc.provider), integration, raw, req.headers, secret);
+    return NextResponse.json(out.body, { status: out.status });
   } else if (svc.verify === "provider") {
     const verifier = PROVIDER_VERIFIERS[String(svc.provider)];
     if (!verifier) return NextResponse.json({ error: `no verifier for ${svc.provider}` }, { status: 501 });

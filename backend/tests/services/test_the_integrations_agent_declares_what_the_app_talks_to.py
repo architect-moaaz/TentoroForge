@@ -29,7 +29,11 @@ def test_a_carried_action_uses_its_adapters_provider_and_names():
                                     secretRefs=["RESEND_API_KEY", "FORGE_EMAIL_FROM"]), {})
     check_integrations(_integration(name="Xero", provider="xero", secretRefs=["XERO_API_KEY"]), {})
     with pytest.raises(InvalidIntegration, match="names an action with an adapter"):
+        check_integrations(_integration(name="Texts", provider="twilio", serves="send_sms", secretRefs=["TWILIO_KEY"]), {})
+    with pytest.raises(InvalidIntegration, match="add STRIPE_SECRET_KEY"):
         check_integrations(_integration(name="Pay", provider="stripe", serves="take_payment", secretRefs=["STRIPE_KEY"]), {})
+    check_integrations(_integration(name="Pay", kind="payment", provider="stripe", serves="take_payment",
+                                    secretRefs=["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PUBLISHABLE_KEY"]), {})
     with pytest.raises(InvalidIntegration, match="is carried by"):
         check_integrations(_integration(name="Mail", provider="mailchimp", serves="send_email", secretRefs=["MC_KEY"]), {})
     with pytest.raises(InvalidIntegration, match="add RESEND_API_KEY"):

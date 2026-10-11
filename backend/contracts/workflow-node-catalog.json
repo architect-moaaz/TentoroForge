@@ -435,6 +435,70 @@
             ],
             "defaults": {}
           }
+        },
+        {
+          "key": "create_checkout",
+          "label": "Take payment",
+          "icon": "CreditCard",
+          "gradient": "bg-gradient-to-br from-emerald-500 to-emerald-700",
+          "description": "Send the person to pay through the connected payment service; the run's end redirects to the checkout",
+          "config": {
+            "required": [
+              [
+                "amount",
+                "lineItems"
+              ],
+              [
+                "reference"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "refund_payment",
+          "label": "Refund a payment",
+          "icon": "Undo2",
+          "gradient": "bg-gradient-to-br from-emerald-500 to-emerald-700",
+          "description": "Refund a payment, whole or part, through the service that took it",
+          "config": {
+            "required": [
+              [
+                "paymentId"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "payment_status",
+          "label": "Payment status",
+          "icon": "Receipt",
+          "gradient": "bg-gradient-to-br from-emerald-500 to-emerald-700",
+          "description": "Read a payment's state from the ledger and the service",
+          "config": {
+            "required": [
+              [
+                "paymentId"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
+          "key": "connect_account",
+          "label": "Connect a payee",
+          "icon": "Landmark",
+          "gradient": "bg-gradient-to-br from-emerald-500 to-emerald-700",
+          "description": "Start onboarding a vendor or payee with the payment service so payouts can be split to them",
+          "config": {
+            "required": [
+              [
+                "reference"
+              ]
+            ],
+            "defaults": {}
+          }
         }
       ]
     },

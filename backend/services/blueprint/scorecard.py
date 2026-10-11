@@ -71,7 +71,8 @@ def empty(doc: dict) -> dict:
     card["criteria"]["logic"]["total"] = int(flows)
     try:
         from services.blueprint.clock_check import clocked
-        card["criteria"]["systems"]["total"] = len(clocked(doc))
+        from services.blueprint.payment_check import paying
+        card["criteria"]["systems"]["total"] = len(clocked(doc)) + len(paying(doc))
     except Exception:  # noqa: BLE001
         pass
     for c in CRITERIA:

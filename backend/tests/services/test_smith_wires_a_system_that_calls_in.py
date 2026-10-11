@@ -45,7 +45,7 @@ def test_connect_service_tries_every_adapter_then_declares(monkeypatch, tmp_path
     assert connect_service.run(str(tmp_path), service="our Outlook")["applied"] and seen["email"] == "our Outlook"
     monkeypatch.setattr(connect_service, "declare", lambda out, service, reasoning=None: {"applied": True, "diff_summary": f"Declared {service}"})
     assert "Declared Xero" in connect_service.run(str(tmp_path), service="Xero")["diff_summary"]
-    assert connect_service.actions() == {"send_email"} and "resend" in connect_service.providers_of("send_email")
+    assert connect_service.actions() == {"send_email", "take_payment"} and "resend" in connect_service.providers_of("send_email")
 
 
 def test_the_verb_is_smiths():

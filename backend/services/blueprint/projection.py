@@ -2248,6 +2248,18 @@ def feel_condition(expr: Any) -> Any:
 _ROLE_KEYS = ("recipientRole", "toRole", "assigneeRole", "role", "escalateTo")
 
 
+_PAGE_KEYS = ("successPage", "cancelPage", "returnPage")
+
+
+def _pages_by_route(config: dict[str, Any], page_routes: dict[str, str]) -> dict[str, Any]:
+    """Page ids in a step's config, as the routes the browser is sent to."""
+    for key in _PAGE_KEYS:
+        value = config.get(key)
+        if isinstance(value, str) and value in page_routes:
+            config[key] = page_routes[value]
+    return config
+
+
 def _roles_by_name(config: dict[str, Any], role_names: dict[str, str]) -> dict[str, Any]:
     """Role ids in a step's config, as the role names the runtime compares."""
     for key in _ROLE_KEYS:
@@ -2522,6 +2534,10 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     # stored for role "ROLE-002" and no admin ever saw it.
     role_names = {str(r.get("id")): str(r.get("name")) for r in doc.get("roles") or []
                   if isinstance(r, dict) and r.get("id") and r.get("name")}
+    # A step names a page as the Blueprint does (`PAGE-004`); a checkout's
+    # return page is an address the browser is sent to.
+    page_routes = {str(p.get("id")): str(p.get("route") or "/") for p in doc.get("pages") or []
+                   if isinstance(p, dict) and p.get("id")}
     for wf in workflows:
         slug = to_snake(wf.get("name") or wf.get("id") or "workflow").replace("_", "-")
         declared_trigger = wf.get("trigger") or {}
@@ -2561,8 +2577,8 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
         chain = ["trigger"]
         for s in steps:
             entity = entities.get(s.get("entity")) or {}
-            config = _roles_by_name(_step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
-                                    role_names)
+            config = _pages_by_route(_roles_by_name(_step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
+                                    role_names), page_routes)
             # A NOTIFICATION OPENS WHAT IT IS ABOUT: the record's address
             # (its screen's panel, or its record page) with its id.
             from services.blueprint.record_links import notification_link
@@ -3915,6 +3931,9 @@ _ALWAYS_OPEN: tuple[str, ...] = (
     "api/auth", "_next", "favicon.ico",
     "login", "signup", "set-password",
     "api/cron", "api/webhooks",
+    # The stand-in checkout: a signed-out buyer (a guest cart) is sent here
+    # too; it shows an amount by a session id and charges nothing.
+    "pay", "api/pay",
 )
 
 
@@ -4642,6 +4661,43 @@ def project_public_nav(doc: dict, app_root: str | Path) -> str:
         "export const PUBLIC_NAV: { appName: string; items: PublicNavItem[]; signIn: boolean } = "
         + json.dumps(nav, indent=2) + ";\n", "utf-8")
     return str(path.relative_to(Path(app_root)))
+
+
+#: The currency a locale pays in, when the product does not say.
+_LOCALE_CURRENCY: dict[str, str] = {
+    "us": "USD", "gb": "GBP", "ae": "AED", "sa": "SAR", "in": "INR", "pk": "PKR", "bd": "BDT", "eg": "EGP", "ng": "NGN",
+    "ke": "KES", "za": "ZAR", "au": "AUD", "nz": "NZD", "ca": "CAD", "sg": "SGD", "my": "MYR", "id": "IDR", "ph": "PHP",
+    "jp": "JPY", "kr": "KRW", "cn": "CNY", "hk": "HKD", "tw": "TWD", "th": "THB", "vn": "VND", "br": "BRL", "mx": "MXN",
+    "ar": "ARS", "cl": "CLP", "co": "COP", "tr": "TRY", "ru": "RUB", "ch": "CHF", "se": "SEK", "no": "NOK", "dk": "DKK",
+    "pl": "PLN", "cz": "CZK", "hu": "HUF", "il": "ILS", "qa": "QAR", "kw": "KWD", "bh": "BHD", "om": "OMR", "jo": "JOD",
+    "ma": "MAD", "lk": "LKR", "np": "NPR",
+}
+_EURO = {"de", "fr", "es", "it", "nl", "be", "at", "pt", "ie", "fi", "gr", "sk", "si", "lt", "lv", "ee", "lu", "mt", "cy", "hr"}
+
+
+def currency_of(doc: dict) -> str:
+    """ISO 4217: the product's own, else the locale's region, else USD."""
+    product = doc.get("product") if isinstance(doc.get("product"), dict) else {}
+    said = str(product.get("currency") or "").strip().upper()
+    if len(said) == 3 and said.isalpha():
+        return said
+    locale = str(product.get("locale") or "en").replace("_", "-").lower()
+    region = locale.split("-")[-1] if "-" in locale else ""
+    if region in _EURO:
+        return "EUR"
+    return _LOCALE_CURRENCY.get(region, "USD")
+
+
+def project_money(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """`src/lib/money.ts`: the currency money is kept (major units) and shown in."""
+    lib = Path(app_root) / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    (lib / "money.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "// The currency money is kept and shown in. Money fields hold MAJOR units\n"
+        "// (12.50, never 1250); a payment adapter converts at the gateway.\n"
+        f"export const CURRENCY = {json.dumps(currency_of(doc))};\n", "utf-8")
+    return {"files": ["src/lib/money.ts"], "currency": currency_of(doc)}
 
 
 AUDIT_POLICY_FILE = "src/lib/audit-policy.ts"

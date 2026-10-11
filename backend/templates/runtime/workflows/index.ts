@@ -1747,6 +1747,105 @@ export function registerDefaultActions(): void {
   // /api/notifications, displayable with ActivityFeed/Banner/List). Config keys
   // (all support {{var}} refs): title|subject, message|body, to|userId, toRole|
   // assigneeRole, type, entityId.
+  // ─── Payments ────────────────────────────────────────────────────────
+  // The run never holds a card: `create_checkout` opens a hosted page and
+  // the run's end sends the person there (`config.redirect: "{{checkout.url}}"`);
+  // the provider's signed event — or the stand-in's page — settles it.
+  registerActionHandler("create_checkout", async (config, ctx) => {
+    try {
+      const pay = await import("../payments");
+      const cfg = config as any;
+      const currency = String(_resolveRef(cfg.currency, ctx) ?? "").toUpperCase() || (await pay.currencyOf());
+      const items = Array.isArray(cfg.lineItems) ? (_resolveValueMap({ x: cfg.lineItems }, ctx) as any).x : null;
+      const lines = Array.isArray(items) ? items.map((li: any) => ({ name: String(li?.name ?? "Item"),
+        amountMinor: pay.toMinor(Number(li?.amount ?? 0), currency), quantity: Math.max(1, Number(li?.quantity ?? 1)) })) : [];
+      const amountMajor = lines.length ? lines.reduce((s: number, li: any) => s + (li.amountMinor * li.quantity), 0) / (pay.toMinor(1, currency) || 1)
+        : Number(_resolveRef(cfg.amount, ctx) ?? 0);
+      const amountMinor = lines.length ? lines.reduce((s: number, li: any) => s + li.amountMinor * li.quantity, 0) : pay.toMinor(amountMajor, currency);
+      if (!(amountMinor > 0)) return { error: "create_checkout: the amount is not above zero" };
+      const ref = cfg.reference && typeof cfg.reference === "object" ? _resolveValueMap(cfg.reference, ctx) as any : {};
+      const origin = String((ctx.variables as any).__origin ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+      const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+      const successPath = String(_resolveRef(cfg.successPage, ctx) ?? "/");
+      const cancelPath = String(_resolveRef(cfg.cancelPage, ctx) ?? successPath);
+      const { adapter, secrets, live, notice } = await pay.adapterFor();
+      const user = (ctx as any)?.user;
+      const paymentId = await pay.ledgerInsert({ provider: adapter.provider, provider_ref: null, amount_minor: amountMinor, currency,
+        entity: ref?.entity ? String(ref.entity) : null, entity_id: ref?.id != null ? String(ref.id) : null,
+        actor_id: user?.id ? String(user.id) : null, description: cfg.description ? String(_resolveRef(cfg.description, ctx) ?? "") : null,
+        success_url: `${origin}${base}${successPath}`, cancel_url: `${origin}${base}${cancelPath}`,
+        metadata: { workflow: String((ctx as any)?.workflowId ?? ""), ...(ref?.entity ? { entity: String(ref.entity) } : {}), ...(ref?.id != null ? { entityId: String(ref.id) } : {}) } });
+      const out = await adapter.createCheckout({ paymentId, amountMinor, currency, description: cfg.description ? String(_resolveRef(cfg.description, ctx) ?? "") : undefined,
+        lineItems: lines.length ? lines : undefined, customerEmail: cfg.customerEmail ? String(_resolveRef(cfg.customerEmail, ctx) ?? "") : (user?.email ? String(user.email) : undefined),
+        successUrl: `${origin}${base}${successPath}?payment=${paymentId}`, cancelUrl: `${origin}${base}${cancelPath}?payment=${paymentId}&cancelled=1`,
+        metadata: { paymentId, ...(ref?.entity ? { entity: String(ref.entity) } : {}), ...(ref?.id != null ? { entityId: String(ref.id) } : {}) },
+        transfer: cfg.transfer && typeof cfg.transfer === "object" ? _resolveValueMap(cfg.transfer, ctx) as any : undefined }, secrets, origin);
+      await pay.ledgerSet(paymentId, { provider_ref: out.providerRef });
+      return { url: out.url, sessionId: out.sessionId, paymentId, provider: adapter.provider, amount: amountMajor, currency, live,
+        ...(notice ? { notice, standIn: true } : {}) };
+    } catch (err) {
+      console.error("[workflow] create_checkout failed:", err);
+      return { error: String(err) };
+    }
+  });
+
+  registerActionHandler("refund_payment", async (config, ctx) => {
+    try {
+      const pay = await import("../payments");
+      const id = String(_resolveRef((config as any).paymentId, ctx) ?? "");
+      const row = id ? await pay.ledgerGet(id) : null;
+      if (!row) return { error: `refund_payment: no payment '${id}' on the ledger` };
+      if (row.status !== "succeeded" && row.status !== "partially_refunded") return { error: `refund_payment: the payment is ${row.status}, not paid` };
+      const amount = (config as any).amount != null ? Number(_resolveRef((config as any).amount, ctx)) : undefined;
+      const adapter = pay.ADAPTERS[row.provider] ?? pay.ADAPTERS.stand_in;
+      const { secrets } = await pay.adapterFor();
+      const out = await adapter.refund({ providerRef: String(row.provider_ref), amountMinor: amount ? pay.toMinor(amount, row.currency) : undefined }, secrets);
+      if (row.provider === "stand_in" || out.status === "succeeded") {
+        await pay.settle(String(row.metadata?.integration ?? row.provider), { type: "refund.succeeded", providerRef: String(row.provider_ref),
+          paymentId: row.id, amountMinor: amount ? pay.toMinor(amount, row.currency) : Number(row.amount_minor), currency: row.currency, metadata: {} });
+      }
+      return { refundId: out.refundId, status: out.status, paymentId: row.id };
+    } catch (err) {
+      console.error("[workflow] refund_payment failed:", err);
+      return { error: String(err) };
+    }
+  });
+
+  registerActionHandler("payment_status", async (config, ctx) => {
+    try {
+      const pay = await import("../payments");
+      const id = String(_resolveRef((config as any).paymentId, ctx) ?? "");
+      const row = id ? await pay.ledgerGet(id) : null;
+      if (!row) return { error: `payment_status: no payment '${id}' on the ledger`, status: "unknown" };
+      return { status: row.status, amount: pay.toMajor(Number(row.amount_minor), row.currency), currency: row.currency,
+        providerRef: row.provider_ref, provider: row.provider, entity: row.entity, entityId: row.entity_id };
+    } catch (err) {
+      return { error: String(err), status: "unknown" };
+    }
+  });
+
+  registerActionHandler("connect_account", async (config, ctx) => {
+    try {
+      const pay = await import("../payments");
+      const { adapter, secrets, live, notice } = await pay.adapterFor();
+      const ref = (config as any).reference && typeof (config as any).reference === "object" ? _resolveValueMap((config as any).reference, ctx) as any : {};
+      const origin = String((ctx.variables as any).__origin ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+      const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+      const returnPath = String(_resolveRef((config as any).returnPage, ctx) ?? "/");
+      if (!live || !adapter.connect) {
+        return { accountRef: `standin_acct_${String(ref?.id ?? "payee")}`, onboardingUrl: `${origin}${base}${returnPath}?onboarded=standin`,
+          standIn: true, notice: notice ?? `${adapter.provider} cannot onboard payees; a stand-in account was recorded.` };
+      }
+      const account = await adapter.connect.createAccount({ reference: `${ref?.entity ?? ""}:${ref?.id ?? ""}` }, secrets);
+      const link = await adapter.connect.onboardingLink({ accountRef: account.accountRef, returnUrl: `${origin}${base}${returnPath}?onboarded=1`,
+        refreshUrl: `${origin}${base}${returnPath}?onboarding=again` }, secrets);
+      return { accountRef: account.accountRef, onboardingUrl: link.url, provider: adapter.provider };
+    } catch (err) {
+      console.error("[workflow] connect_account failed:", err);
+      return { error: String(err) };
+    }
+  });
+
   registerActionHandler("send_notification", async (config, ctx) => {
     const title = String(_resolveRef((config as any).title ?? (config as any).subject ?? "Notification", ctx) ?? "Notification");
     const message = String(_resolveRef((config as any).message ?? (config as any).body ?? "", ctx) ?? "");

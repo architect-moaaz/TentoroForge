@@ -643,6 +643,22 @@ def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> N
                 problems.append(f"{name}/{key}: `config.dueIn` is a number of minutes")
             if "escalateTo" in cfg and str(cfg.get("escalateTo")) not in roles | role_names:
                 problems.append(f"{name}/{key}: `config.escalateTo` names a declared role; got {cfg.get('escalateTo')!r}")
+            if str(cfg.get("actionType") or "") == "create_checkout":
+                ref = cfg.get("reference")
+                if not (isinstance(ref, dict) and ref.get("entity") and ref.get("id") is not None):
+                    problems.append(f"{name}/{key}: `create_checkout` names the record it pays for as "
+                                    "`reference: {entity, id}`")
+                if cfg.get("amount") is None and not cfg.get("lineItems"):
+                    problems.append(f"{name}/{key}: `create_checkout` says what is paid: `amount` (major units) or `lineItems`")
+                pays = [i for i in live_integrations if str(i.get("serves") or "") == "take_payment"]
+                listeners = [w for w in (doc.get("workflows") or []) + [p.body for p in proposals]
+                             if isinstance(w, dict) and str((w.get("trigger") or {}).get("kind") or "") == "webhook"
+                             and str((w.get("trigger") or {}).get("event") or "") == "payment.succeeded"]
+                if not pays:
+                    problems.append(f"{name}/{key}: no integration `serves: take_payment`; declare the payment service first")
+                elif not listeners:
+                    problems.append(f"{name}/{key}: nothing listens for `payment.succeeded` from {pays[0].get('name')} — declare "
+                                    "a workflow with a `webhook` trigger on it that records the outcome")
             auth = cfg.get("auth")
             if auth is not None:
                 ref = str((auth or {}).get("secretRef") or "") if isinstance(auth, dict) else ""

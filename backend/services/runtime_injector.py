@@ -239,7 +239,7 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
     # "events" = the durable event bus + cron scheduler (R1/R2/R3):
     # workflows/index.ts imports ../events/emit-node and engine resumes
     # ride through events/bus.ts, so it MUST ship with the workflows dir.
-    for subdir in ["feel-lite", "workflows", "rules", "events"]:
+    for subdir in ["feel-lite", "workflows", "rules", "events", "payments"]:
         src = _TEMPLATE_DIR / subdir
         dst = src_lib / subdir
 
@@ -708,6 +708,17 @@ def _plan_has_commerce_flag(output_path: Path) -> bool:
     error and the fix is one commerce_flag update, whereas the reverse
     ships bloat we saw on nni3wjf6).
     """
+    # THE BLUEPRINT'S OWN WORD FIRST: an entity marked `commerce` is the thing
+    # people buy, and the cart ships with it.
+    try:
+        bp = output_path.parent / ".forge" / "blueprint" / "current.json"
+        if bp.exists():
+            doc = json.loads(bp.read_text(encoding="utf-8"))
+            if any(isinstance(e, dict) and e.get("commerce") is True
+                   for e in (doc.get("data") or {}).get("entities") or []):
+                return True
+    except Exception:  # noqa: BLE001 — an unreadable document says nothing
+        pass
     try:
         plan_path = output_path / "contracts" / "plan.json"
         if not plan_path.exists():
@@ -928,6 +939,35 @@ def _inject_file_storage(output_path: Path) -> list[str]:
                     txt.rstrip() + '\nexport { forgeEvents } from "./_forge_events";\n',
                     encoding="utf-8",
                 )
+
+    # 5a-iv. forge_payments: the application's own ledger of payments; the
+    #        stand-in's route and page, so a checkout works before any key.
+    pay_schema = _TEMPLATE_DIR / "db" / "forge-payments.schema.ts"
+    if pay_schema.exists() and schema_dir.exists():
+        shutil.copy2(pay_schema, schema_dir / "_forge_payments.ts")
+        written.append("src/db/schema/_forge_payments.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_payments" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgePayments } from "./_forge_payments";\n', encoding="utf-8")
+    standin_route = _TEMPLATE_DIR / "api-pay" / "stand-in" / "route.ts"
+    if standin_route.exists():
+        dst = output_path / "src" / "app" / "api" / "pay" / "stand-in" / "route.ts"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(standin_route, dst)
+        written.append("src/app/api/pay/stand-in/route.ts")
+    standin_page = _TEMPLATE_DIR / "pages" / "pay" / "stand-in" / "page.tsx"
+    if standin_page.exists():
+        dst = output_path / "src" / "app" / "pay" / "stand-in" / "page.tsx"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(standin_page, dst)
+        written.append("src/app/pay/stand-in/page.tsx")
+    money = output_path / "src" / "lib" / "money.ts"
+    if money.parent.exists() and not money.exists():
+        money.write_text("// Written by the Blueprint projection (project_money). The currency money is kept and shown in.\n"
+                         "export const CURRENCY = \"USD\";\n", encoding="utf-8")
+        written.append("src/lib/money.ts")
 
     # 5a''. forge_audit table: the trail. Shipped like forge_events so
     #       drizzle-kit creates it; the runtime guards it on first use.
@@ -1484,6 +1524,13 @@ export async function POST(
     workflowId = id;
     const body = await request.json();
     const input = body.input || {};
+    // WHERE THE APPLICATION IS, for a step that builds an absolute address
+    // (a checkout's return pages): the request's own origin, behind a proxy too.
+    try {
+      const proto = request.headers.get("x-forwarded-proto") || new URL(request.url).protocol.replace(":", "");
+      const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || new URL(request.url).host;
+      if (host) input.__origin = `${proto}://${host}`;
+    } catch { /* no origin: the step falls back to the configured address */ }
     // THE NAMES, NEVER THE VALUES. `input` is a customer's record — an order,
     // an address, a diagnosis. Its keys say which wire broke; its values are
     // the owner's data and do not leave this process.

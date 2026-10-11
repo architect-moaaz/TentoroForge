@@ -147,6 +147,13 @@ def workflow(ctx: Ctx, u: dict) -> Outcome:
     return step
 
 
+def payment(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.payment_change import run
+    verb = u["verb"]
+    return from_seam(run(ctx.out, verb, change=_s(u, "change") or ctx.ask, reasoning=ctx.reasoning),
+                     fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+
+
 def audit(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.audit_change import run
     verb = u["verb"]
@@ -851,6 +858,7 @@ PERFORM: dict[str, Perform] = {
     "set_deadline": schedule, "run_now": schedule,
     "add_webhook": webhook,
     "show_audit": audit, "export_audit": audit, "verify_audit": audit, "edit_audit": audit,
+    "refund": payment, "set_currency": payment,
     "edit_access": access,
     "add_rule": rule, "edit_rule": rule, "remove_rule": rule,
     "add_entity": entity, "remove_entity": entity,

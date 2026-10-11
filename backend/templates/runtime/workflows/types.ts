@@ -49,7 +49,11 @@ export type ActionType =
   | "ai_extract"
   | "ai_decide"
   | "mcp_tool_call"
-  | "ocr_document";
+  | "ocr_document"
+  | "create_checkout"
+  | "refund_payment"
+  | "payment_status"
+  | "connect_account";
 
 export type NodeType =
   | "trigger"

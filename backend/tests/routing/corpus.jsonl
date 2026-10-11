@@ -88,6 +88,10 @@
 {"say": "verify the record", "verb": "verify_audit"}
 {"say": "keep every change on the record", "verb": "edit_audit"}
 {"say": "require a reason to change an invoice", "verb": "edit_audit"}
+{"say": "refund order 1234", "verb": "refund"}
+{"say": "give the customer their money back for booking 88", "verb": "refund"}
+{"say": "prices are in dirhams", "verb": "set_currency"}
+{"say": "use GBP", "verb": "set_currency"}
 {"say": "remove the archive nurse thing", "verb": "remove_workflow"}
 {"say": "we don't want the Monday reminder any more", "verb": "remove_workflow"}
 {"say": "experience can't be more than 60 years", "verb": "add_rule"}

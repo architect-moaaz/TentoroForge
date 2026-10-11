@@ -12,7 +12,7 @@ import crypto from "node:crypto";
 installHarness({ stubs: {
   "next/server": "export const NextResponse = { json: (body, init) => ({ status: init?.status ?? 200, body }) };",
   "@/lib/integrations/connected": 'export const INBOUND = { shop: { name: "Shop", provider: "shop", verify: "hmac_sha256", signingSecretRef: "SHOP_WEBHOOK_SECRET", events: ["order.paid"] }, bot: { name: "Bot", provider: "bot", verify: "bearer", signingSecretRef: "BOT_TOKEN", events: [] } };',
-  "@/lib/integrations/providers": "export const PROVIDER_VERIFIERS = {};",
+  "@/lib/integrations/providers": "export const PROVIDER_VERIFIERS = {}; export const PAYMENT_PROVIDERS = new Set();",
   "@/lib/events/bus": "export async function emitEventAndProcess(type, opts) { globalThis.__EMITTED__.push({ type, opts }); if (globalThis.__SEEN__.has(opts.dedupeKey)) return { duplicate: true }; globalThis.__SEEN__.add(opts.dedupeKey); return { id: 'evt-' + globalThis.__EMITTED__.length }; }",
   "@/lib/runtime-loader": "export async function initializeRuntime() {}",
 } });

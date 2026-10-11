@@ -13,12 +13,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from services.smith import email_connect
+from services.smith import email_connect, payment_connect
 
 logger = logging.getLogger(__name__)
 
 #: The adapters, in the order they are tried.
-ADAPTERS: tuple[Any, ...] = (email_connect,)
+ADAPTERS: tuple[Any, ...] = (email_connect, payment_connect)
 
 
 def actions() -> set[str]:

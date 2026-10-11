@@ -86,11 +86,29 @@ class ConfigKey:
 #   standalone-app/src/lib/workflows/index.ts  (send_email, ...)
 #   standalone-app/src/lib/workflows/ai.ts     (ai_generate, ai_classify, ai_extract, ai_decide)
 #   standalone-app/src/lib/storage.ts          (S3 uploads — indirect via file API)
+#: Payments: the Stripe adapter's keys, read by every payment action.
+_STRIPE_KEYS: list[ConfigKey] = [
+        ConfigKey(key="STRIPE_SECRET_KEY", provider="stripe", label="Stripe secret key", kind="password",
+                  required=False, help_url="https://dashboard.stripe.com/apikeys"),
+        ConfigKey(key="STRIPE_WEBHOOK_SECRET", provider="stripe", label="Stripe webhook signing secret", kind="password",
+                  required=False, help_url="https://dashboard.stripe.com/webhooks"),
+        ConfigKey(key="STRIPE_PUBLISHABLE_KEY", provider="stripe", label="Stripe publishable key", kind="text",
+                  required=False, help_url="https://dashboard.stripe.com/apikeys"),
+    ]
+
 NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
     # --- Email --------------------------------------------------------- #
     # Two providers, mutually exclusive: SMTP wins when SMTP_HOST is set,
     # Resend is used otherwise. FORGE_EMAIL_FROM is shared (it lives under
     # `resend` in the registry but the runtime reads it for either path).
+    # Payments: the Stripe adapter (`runtime/payments/stripe.ts`). The same
+    # keys carry take_payment, refund_payment, payment_status and
+    # connect_account; a second provider is its own entry here and one file
+    # in the runtime's registry.
+    "take_payment": _STRIPE_KEYS,
+    "refund_payment": _STRIPE_KEYS,
+    "payment_status": _STRIPE_KEYS,
+    "connect_account": _STRIPE_KEYS,
     "send_email": [
         # Resend
         ConfigKey(

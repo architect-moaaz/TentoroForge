@@ -605,6 +605,9 @@ What a finished page looks like:
 - MONEY SAYS ITS CURRENCY. A price is shown in the currency its record carries
   (Intl.NumberFormat with that currency), never a fixed symbol; amounts in different
   currencies are never added, compared or put in one range — group them by currency.
+  A money field holds MAJOR units (12.50 is twelve and a half) in the application's
+  currency (`CURRENCY` from "@/lib/money" when a record carries none): never divide
+  or multiply by 100 to show it.
 - NOTHING HIDES UNDER THE APP'S OWN BARS. On a phone the application's tab bar may sit on the
   bottom edge. A bar the page fixes to the bottom (a sticky primary action) sits above it —
   `bottom-[var(--app-bottom-inset,0px)]`, never `bottom-0` — and the page leaves that room under

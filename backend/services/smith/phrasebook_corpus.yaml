@@ -508,6 +508,30 @@ sentences:
     source: code
     reaches: {verb: edit_audit, states: [change]}
 
+  - id: does-refund-order
+    say: "refund order 1234"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: refund, states: [change]}
+
+  - id: does-money-back-booking
+    say: "give the customer their money back for booking 88"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: refund, states: [change]}
+
+  - id: does-prices-in-dirhams
+    say: "prices are in dirhams"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: set_currency, states: [change]}
+
+  - id: does-use-gbp
+    say: "use GBP"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: set_currency, states: [change]}
+
   - id: does-stop-welcome-email
     say: "stop sending the welcome email"
     checked: {colour: acts, via: handler}

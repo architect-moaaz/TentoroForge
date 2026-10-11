@@ -198,6 +198,59 @@ export const ACTION_CONTRACTS: Record<string, ActionContract> = {
     ],
   },
 
+  // --- Payments ------------------------------------------------------- //
+  create_checkout: {
+    label: "Take payment",
+    inputs: [
+      { name: "amount", type: "number", label: "Amount (major units)" },
+      { name: "lineItems", type: "array", label: "Line items [{name, amount, quantity}]" },
+      { name: "currency", type: "string", label: "Currency (ISO 4217; the app's by default)" },
+      { name: "description", type: "string", label: "What is being paid for" },
+      { name: "reference", type: "object", required: true, label: "The record this pays for {entity, id}" },
+      { name: "customerEmail", type: "string", label: "Payer's email", advanced: true },
+      { name: "successPage", type: "string", label: "Page after paying" },
+      { name: "cancelPage", type: "string", label: "Page after cancelling" },
+      { name: "transfer", type: "object", label: "Split {destinationAccountRef, applicationFeePercent}", advanced: true },
+    ],
+    outputs: [
+      { name: "url", type: "string", label: "Checkout URL" },
+      { name: "sessionId", type: "string", label: "Checkout session" },
+      { name: "paymentId", type: "string", label: "Ledger payment id" },
+      { name: "provider", type: "string", label: "Provider" },
+    ],
+  },
+  refund_payment: {
+    label: "Refund a payment",
+    inputs: [
+      { name: "paymentId", type: "string", required: true, label: "Ledger payment id" },
+      { name: "amount", type: "number", label: "Amount (major units; whole when absent)" },
+    ],
+    outputs: [
+      { name: "refundId", type: "string", label: "Refund id" },
+      { name: "status", type: "string", label: "Status" },
+    ],
+  },
+  payment_status: {
+    label: "Payment status",
+    inputs: [{ name: "paymentId", type: "string", required: true, label: "Ledger payment id" }],
+    outputs: [
+      { name: "status", type: "string", label: "Status" },
+      { name: "amount", type: "number", label: "Amount" },
+      { name: "currency", type: "string", label: "Currency" },
+    ],
+  },
+  connect_account: {
+    label: "Connect a payee",
+    inputs: [
+      { name: "reference", type: "object", required: true, label: "The payee record {entity, id}" },
+      { name: "returnPage", type: "string", label: "Page after onboarding" },
+    ],
+    outputs: [
+      { name: "onboardingUrl", type: "string", label: "Onboarding URL" },
+      { name: "accountRef", type: "string", label: "Payee account" },
+    ],
+  },
+
   // --- Compute -------------------------------------------------------- //
   custom: {
     label: "Custom Function",

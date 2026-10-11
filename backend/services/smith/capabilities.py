@@ -71,7 +71,7 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "letting it look connected.",
      frozenset({"edit_product", "add_requirement", "edit_requirement",
                 "remove_requirement", "add_api", "edit_api", "remove_api",
-                "add_integration", "remove_integration", "connect_service", "add_webhook"})),
+                "add_integration", "remove_integration", "connect_service", "add_webhook", "refund", "set_currency"})),
     ("Your own data",
      "Load the records you already have — attach a spreadsheet and say which "
      "records it holds. I say how many rows would land and which column "

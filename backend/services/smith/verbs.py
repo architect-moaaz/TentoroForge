@@ -79,6 +79,9 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # tells the app (its events, in the user's words).
     "add_webhook": {"integration", "change"},
     # The audit trail: read it, export it, verify its chain, change the policy.
+    # Money: a refund through the payment service; the currency money is in.
+    "refund": {"change"},
+    "set_currency": {"change"},
     "show_audit": {"change"},
     "export_audit": set(),
     "verify_audit": set(),
@@ -321,6 +324,16 @@ VERB_HELP: dict[str, str] = {
         "when an order is paid\", \"accept payment.succeeded from Stripe\". Gives the "
         "address to call, the header it signs with and the NAME of the secret to set. "
         "Needs which system and what it tells the app."
+    ),
+    "refund": (
+        "Refund a payment through the payment service: \"refund order 1234\", "
+        "\"give the customer their money back for booking 88\". Runs the "
+        "application's refund process on a copy and says what it did. Needs "
+        "which payment or record."
+    ),
+    "set_currency": (
+        "The currency money is kept and shown in: \"prices are in dirhams\", "
+        "\"use GBP\". Needs the currency."
     ),
     "show_audit": (
         "Read the audit trail: \"who changed the invoices yesterday\", \"what did "
@@ -668,6 +681,14 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'add_webhook': (
         'let Shopify tell the app when an order is paid',
         'accept payment.succeeded from Stripe',
+    ),
+    'refund': (
+        'refund order 1234',
+        'give the customer their money back for booking 88',
+    ),
+    'set_currency': (
+        'prices are in dirhams',
+        'use GBP',
     ),
     'show_audit': (
         'who changed the invoices yesterday',
