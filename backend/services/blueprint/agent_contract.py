@@ -601,6 +601,15 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
     # the account is made.
     live = [e for e in ((doc or {}).get("data") or {}).get("entities") or []
             if isinstance(e, dict) and e.get("status") != "DEPRECATED"]
+    # ONE LOGIN ENTITY, DECIDED ONCE. Two entities both marked `account`
+    # (a marketplace's Shopper and VendorAccount, 7ttp60zi 2026-10-11) were
+    # each refused because the OTHER already had the flag; each author then
+    # dropped its own flag "since the other holds it", and neither landed.
+    # The first live account entity is the login; the refusal names it and
+    # goes only to the others. Within one reply (the entity set), the first
+    # proposal that claims it is the login and the later claimants are told.
+    login = next((e for e in live if e.get("account")), None)
+    claimed_here: list[str] = []
     for proposal in (p for p in result.proposals if p.section == "data.entities"):
         body = proposal.body if isinstance(proposal.body, dict) else {}
         name = body.get("name") or proposal.natural_key
@@ -609,10 +618,18 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
         # later and need not repeat it.
         if not (body.get("account") or any(e.get("account") and same(e) for e in live)):
             continue
-        other = next((e for e in live if e.get("account") and not same(e)), None)
-        if body.get("account") and other is not None:
-            problems.append(f"{name}: `account: true` is already on {other.get('name')} — one entity is the "
-                            "person behind a login")
+        if body.get("account"):
+            if login is not None and not same(login):
+                problems.append(f"{name}: `account: true` is already on {login.get('name')} — one entity is the "
+                                f"person behind a login. Drop `account` here: a {name} is a login "
+                                f"({login.get('name')}) with its own role, and this entity holds what that "
+                                "person has beyond the login, referencing it by a field")
+            elif login is None and claimed_here and str(name) not in claimed_here:
+                problems.append(f"{name}: `account: true` is already on {claimed_here[0]} in this reply — one "
+                                f"entity is the person behind a login. Keep it on {claimed_here[0]} and drop it "
+                                f"here; a {name} is a login with its own role plus this record of what they have")
+            elif login is None and str(name) not in claimed_here:
+                claimed_here.append(str(name))
         from services.blueprint.projection import _is_credential_field
         for f in body.get("fields") or []:
             # THE LOGIN HOLDS THE PASSWORD. 0l133sp2's Member carried a required
