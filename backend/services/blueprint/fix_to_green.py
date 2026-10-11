@@ -79,7 +79,8 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
             emit("scorecard", {"summary": sc.summary(svc.doc), "phase": phase})
 
     turns, yields, stopped = 0, [], None
-    with _ledger(output_dir if record else None, 1, node="checks", phase="checking") as ledger:
+    ledger_ctx = _ledger(output_dir if record else None, 1, node="checks", phase="checking")
+    with ledger_ctx as ledger:
         sc.set_status(svc, "checking")
         scorecard_event("checking")
         _check_everything(svc, output_dir, app_root, report, say=say, run_turn=run_turn,
@@ -103,8 +104,15 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
             turns += 1
             before = {(r["criterion"], r["id"]): r for r in reds}
             ledger.node_subject("checks", f"turn {turns}", turns, FIX_TURNS, True)
+            card_before = sc.read(svc.doc)
             _fix(batch, output_dir, run_turn=run_turn, say=say)
             reload()
+            # THE CARD IS THE CHECKS' TO WRITE. A Smith turn loads the engine's
+            # copy of the Blueprint, which still carries the hand-over card, and
+            # its save put that card back over the one the checks had written
+            # (12 reds became "21 of 21" mid-loop, 6132cfss, 2026-10-11).
+            if card_before is not None:
+                sc.restore(svc, card_before)
             _check_again(svc, output_dir, app_root, report, batch, run_turn=run_turn, app_factory=app_factory,
                          bench_factory=bench_factory, client=client, cancelled=cancelled, record=record)
             reds = sc.reds(svc.doc)
@@ -122,7 +130,7 @@ def run_checks_to_green(svc: Any, output_dir: str, app_root: str, report: Any, *
                              fix={"turns": turns, "yield": yields, "stopped": stopped})
         scorecard_event("stopped" if stopped == "stopped by the person" else "done")
         if stopped == "stopped by the person":
-            ledger.stopped = stopped
+            ledger_ctx.stopped = stopped
             say("Stopped checking. The app stays as it is: " + sc.closing(svc.doc))
         else:
             say(sc.closing(svc.doc))

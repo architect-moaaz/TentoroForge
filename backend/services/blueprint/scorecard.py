@@ -92,6 +92,13 @@ def seed_from_boot(svc: Any) -> dict:
     return card
 
 
+def restore(svc: Any, card: dict) -> dict:
+    """Put a card back on a document that was reloaded from disk after
+    another writer saved an older one."""
+    _save(svc, card)
+    return card
+
+
 def read(doc: dict) -> dict | None:
     card = (doc.get("runtime") or {}).get("scorecard")
     return card if isinstance(card, dict) else None
@@ -218,4 +225,4 @@ def _save(svc: Any, card: dict) -> None:
 
 
 __all__ = ["CRITERIA", "LABELS", "closing", "empty", "green_line", "item", "opening", "read", "reds",
-           "seed_from_boot", "set_status", "summary", "write"]
+           "restore", "seed_from_boot", "set_status", "summary", "write"]

@@ -146,3 +146,41 @@ def test_the_cap_and_the_person_both_end_the_loop(tmp_path, monkeypatch):
     assert out["turns"] == 0 and out["stopped"] == "stopped by the person" and turns == []
     assert sc.read(svc2.doc)["status"] == "stopped"
     assert [d["text"] for e, d in said if e == "message"][-1].startswith("Stopped checking.")
+
+
+def test_a_smith_turn_that_saves_an_older_card_does_not_lose_the_checks_findings(tmp_path, monkeypatch):
+    """The turn loads the engine's copy of the Blueprint, still carrying the
+    hand-over card, and its save put it back over the checks' card
+    (6132cfss, 2026-10-11): the loop restores its card after each turn."""
+    svc = _Svc(tmp_path, DOC)
+    sc.seed_from_boot(svc)
+    stale = json.loads(json.dumps(svc.doc))                       # the hand-over card, as the engine's copy holds it
+    stuck = {"pages": [sc.item("PAGE-002", "Checkout", "it answers HTTP 500", "PAGE-002")]}
+    turns, run_turn = _wire(monkeypatch, svc, [stuck, {}])
+
+    def clobbering_turn(pid, output_dir, ask, **k):
+        (tmp_path / ".forge" / "blueprint" / "current.json").write_text(json.dumps(stale))
+        return {"answer": "fixed", "edited_paths": ["x"]}
+    monkeypatch.setattr("services.blueprint.service.BlueprintService.load",
+                        classmethod(lambda cls, output_dir: type("S", (), {"doc": json.loads(
+                            (tmp_path / ".forge" / "blueprint" / "current.json").read_text())})()))
+    seen = []
+    orig = ftg._check_again
+
+    def check_again(svc_, *a, **k):
+        seen.append(sc.read(svc_.doc)["criteria"]["pages"]["red"][:])    # what the loop holds when it checks again
+        return orig(svc_, *a, **k)
+    monkeypatch.setattr(ftg, "_check_again", check_again)
+    ftg.run_checks_to_green(svc, str(tmp_path), str(tmp_path / "app"), None, emit=None, run_turn=clobbering_turn, record=False)
+    assert seen and seen[0] and seen[0][0]["id"] == "PAGE-002"       # the red survived the turn's stale save
+
+
+def test_a_stop_is_written_as_the_ledgers_reason(tmp_path, monkeypatch):
+    svc = _Svc(tmp_path, DOC)
+    sc.seed_from_boot(svc)
+    turns, run_turn = _wire(monkeypatch, svc, [{"pages": [sc.item("PAGE-002", "Checkout", "500", "PAGE-002")]}])
+    ftg.run_checks_to_green(svc, str(tmp_path), str(tmp_path / "app"), None, emit=None, run_turn=run_turn,
+                            record=True, cancelled=lambda: True)
+    ledger = next((tmp_path / ".forge" / "runs").glob("*-checks.jsonl"))
+    last = json.loads(ledger.read_text().splitlines()[-1])
+    assert last["event"] == "run:end" and last["pausedBecause"] == "stopped by the person"
