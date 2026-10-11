@@ -71,6 +71,27 @@ def people_of_role(app: Any, doc: dict, role: str) -> list[tuple[str, str]]:
     return people[:2]
 
 
+def people_in_two_organisations(app: Any, doc: dict, role: str) -> list[tuple[str, str]]:
+    """Two logins of `role`, each the member of a DIFFERENT organisation (the
+    seed makes one per role in each of two), as `(id, name)`; fewer when the
+    copy has fewer."""
+    from services.blueprint.page_review import _query
+    safe = role.replace("'", "''")
+    rows = _query(app, "select u.id, coalesce(u.name, u.email), m.org_id from users u "
+                       "join forge_memberships m on m.user_id = u.id::text and m.status = 'active' "
+                       f"where m.role = '{safe}' order by m.org_id, u.created_at")
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for r in rows or []:
+        if len(r) < 3 or r[2] in seen:
+            continue
+        seen.add(r[2])
+        out.append((r[0], r[1]))
+        if len(out) == 2:
+            break
+    return out
+
+
 def second_person(app: Any, first: tuple[str, str]) -> tuple[str, str] | None:
     """A second login of the same role, made on the copy from the first: the
     same row with a fresh id and address. The seed makes one person per role
@@ -186,7 +207,12 @@ def check_access(app: Any, doc: dict, *, only: set[str] | None = None,
                     continue
                 try:
                     if role not in people:
-                        people[role] = people_of_role(app, doc, role)
+                        # AN ORGANISATION'S SCOPE IS PROVEN AS TWO ORGANISATIONS:
+                        # one member of each, reading the same record type.
+                        people[role] = (people_in_two_organisations(app, doc, role)
+                                        if str(rule.get("derived") or "") == "tenancy" else [])
+                        if len(people[role]) < 2:
+                            people[role] = people_of_role(app, doc, role)
                     found = people[role]
                     if len(found) < (1 if role in exempt else 2):
                         untried.append(it(f"no {'login' if role in exempt else 'two logins'} of {role} on the copy to read as"))
@@ -226,6 +252,11 @@ def check_access(app: Any, doc: dict, *, only: set[str] | None = None,
                     red.append(it(f"two different {role}s both get {len(shared)} {ename} records owned through "
                                   f"{rule.get('through')}"))
                     continue
+                if str(rule.get("derived") or "") == "tenancy":
+                    orgs = {_value(r, column) for r in rows_a}
+                    if len(orgs) > 1:
+                        red.append(it(f"a {role} gets {ename} records of {len(orgs)} organisations — the organisation's scope does not hold"))
+                        continue
                 if not rule.get("through") and rule.get("scope", "user") == "user" and not rule.get("actorColumn"):
                     foreign = [r for r in rows_a if _value(r, column) not in ("", a[0])]
                     if foreign:
@@ -237,8 +268,9 @@ def check_access(app: Any, doc: dict, *, only: set[str] | None = None,
                     if mine is not None and mine <= LIMIT and mine != len(rows_a):
                         red.append(it(f"a {role} gets {len(rows_a)} {ename} records but owns {mine}"))
                         continue
-                green.append(it(f"each {role} gets only their own {ename} records"))
+                green.append(it(f"each {role} gets only their own {ename} records" if str(rule.get("derived") or "") != "tenancy"
+                                else f"a {role} gets only their organisation's {ename} records"))
     return {"total": total, "green": green, "red": red, "untried": untried}
 
 
-__all__ = ["check_access", "exempt_roles", "people_of_role", "scoped_entities", "second_person"]
+__all__ = ["check_access", "exempt_roles", "people_in_two_organisations", "people_of_role", "scoped_entities", "second_person"]

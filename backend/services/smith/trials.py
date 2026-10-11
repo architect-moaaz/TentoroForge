@@ -253,8 +253,15 @@ def _session(app: Any, doc: dict, ref: str, guest: str | None = None) -> tuple[s
         who = Session(sub=_ADMIN_UUID, name="Admin", email=ADMIN_EMAIL, role=role)
     else:
         found = login_of_role(app, doc, role)
+        # THE ORGANISATION THEY ACT IN rides in the minted session: the app's
+        # own sign-in is not run for it, and every scoped read needs it.
+        org = ""
+        if found:
+            from services.blueprint.page_review import _query
+            rows = _query(app, f"select coalesce(active_org_id, '') from users where id = '{str(found[0]).replace(chr(39), chr(39)*2)}'")
+            org = rows[0][0] if rows and rows[0] else ""
         who = (Session(sub=found[0], name=found[1], email=f"{role.lower().replace(' ', '.')}@example.com",
-                       role=role) if found else
+                       role=role, active_org_id=org) if found else
                Session(sub=f"preview-{role.lower().replace(' ', '-')}", name=f"{role} (preview)",
                        email=f"{role.lower().replace(' ', '.')}@example.com", role=role))
     return f"{who.name} ({role})", cookies(who, base_url=app.base)

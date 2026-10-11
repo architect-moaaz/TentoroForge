@@ -352,7 +352,7 @@ def test_the_platform_declaration_is_parsed_not_transcribed():
     # can gate on it. Parsing is what makes this a one-line acknowledgement
     # instead of a fourth hand-copy drifting off the original.
     assert set(declared) == {"id", "email", "password", "name",
-                             "accountType", "isActive", "createdAt"}
+                             "accountType", "isActive", "activeOrgId", "createdAt"}
     assert declared["email"] == {"name": "email", "type": "text",
                                  "required": True, "unique": True}
     # The default `authorize()` depends on — a falsy isActive rejects the login.

@@ -1264,9 +1264,27 @@ def ownership_findings(security: dict, doc: dict) -> list[str]:
             at = through_of[at]
         return at in scoped
     problems: list[str] = []
+    # WHERE A WORKSPACE SCOPE'S ACTOR COMES FROM: a column of the login entity
+    # (`actorColumn`), or the organisation the person acts in when the
+    # application declares `security.tenancy`. A rule saying neither
+    # compared every row to nothing and was accepted (2026-10-12).
+    tenancy_on = isinstance(doc.get("security"), dict) and \
+        str(((doc.get("security") or {}).get("tenancy") or {}).get("kind") or "none") == "organisation"
+    login_cols: set[str] = set()
+    for e in entities:
+        if isinstance(e, dict) and e.get("account") is True:
+            login_cols = {str(f.get("name")) for f in e.get("fields") or [] if isinstance(f, dict)}
     for r in rules:
         named, column = str(r.get("entity") or ""), str(r.get("column") or "")
         entity = find(named)
+        if str(r.get("scope") or "user") == "workspace" and r.get("kind", "scope") != "attribution":
+            actor = str(r.get("actorColumn") or "")
+            if not actor and not tenancy_on:
+                problems.append(f"{named}.{column}: a workspace scope says where the actor's workspace comes from — "
+                                "`actorColumn` (a field of the login entity) — or the application declares "
+                                "`security.tenancy` and the organisation is the person's active one")
+            elif actor and login_cols and actor not in login_cols:
+                problems.append(f"{named}.{column}: `actorColumn` {actor!r} is not a field of the login entity")
         if entity is None:
             problems.append(f"ownership rule for {named!r}: the data model has no such entity")
             continue
@@ -1303,6 +1321,51 @@ def check_security(result: "AgentResult", doc: dict | None) -> None:
                 for msg in ownership_findings(p.body, doc or {})]
     if problems:
         raise InvalidOwnershipRule(_all_of(problems))
+
+
+class InvalidTenancy(AuthorRefusal):
+    """Organisations declared in a way the runtime could not serve."""
+
+
+def check_tenancy(result: "AgentResult", doc: dict | None) -> None:
+    """One tenant entity at most; a tenancy names it; every role is a member
+    role or a platform role, never both; the admin role is a member role."""
+    doc = doc or {}
+    problems: list[str] = []
+    entities = [p.body for p in result.proposals if p.section == "data.entities" and isinstance(p.body, dict)]
+    tenants_here = [str(e.get("name")) for e in entities if e.get("tenant") is True]
+    existing = [str(e.get("name")) for e in (doc.get("data") or {}).get("entities") or []
+                if isinstance(e, dict) and e.get("tenant") is True and str(e.get("name")) not in tenants_here
+                and str(e.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
+    if len(tenants_here) + len(existing) > 1:
+        problems.append(f"only ONE entity is the organisation (`tenant: true`); got {', '.join(tenants_here + existing)}")
+    roles = {str(r.get("id")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    role_names = {str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    for p in result.proposals:
+        if p.section != "security" or not isinstance(p.body, dict) or not isinstance(p.body.get("tenancy"), dict):
+            continue
+        ten = p.body["tenancy"]
+        if str(ten.get("kind") or "none") != "organisation":
+            continue
+        has_tenant = bool(tenants_here or existing or any(isinstance(e, dict) and e.get("tenant") is True
+                                                           for e in (doc.get("data") or {}).get("entities") or []))
+        if not has_tenant:
+            problems.append("security.tenancy: `organisation` needs an entity marked `tenant: true` in the data model")
+        members = [str(r) for r in ten.get("memberRoles") or []]
+        platform = [str(r) for r in ten.get("platformRoles") or []]
+        for r in members + platform:
+            if r not in roles | role_names:
+                problems.append(f"security.tenancy: {r!r} is not a declared role")
+        both = sorted(set(members) & set(platform))
+        if both:
+            problems.append(f"security.tenancy: a role is a member role or a platform role, never both: {', '.join(both)}")
+        if not members:
+            problems.append("security.tenancy: name the `memberRoles` people hold inside an organisation")
+        admin = ten.get("organisationAdminRole")
+        if admin and str(admin) not in members:
+            problems.append(f"security.tenancy: `organisationAdminRole` {admin!r} is not one of the member roles")
+    if problems:
+        raise InvalidTenancy(_all_of(problems))
 
 
 class InvalidAudit(AuthorRefusal):
@@ -1662,6 +1725,7 @@ def apply_agent_result(
     check_workflow_triggers(result, svc.doc)
     check_integrations(result, svc.doc)
     check_audit(result, svc.doc)
+    check_tenancy(result, svc.doc)
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)

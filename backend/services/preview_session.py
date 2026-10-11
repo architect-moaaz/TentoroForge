@@ -85,6 +85,10 @@ class Session:
     #: table, so the application's role vocabulary is its own strings and the
     #: Blueprint's `ROLE-001` is not what any in-page check compares against.
     role: str = ""
+    #: The organisation the person acts in, when the application has several;
+    #: the app's own `jwt` is not run for a minted token, so the claim rides.
+    active_org_id: str = ""
+    org_role: str = ""
 
     def claims(self, *, now: int, ttl_s: int = DEFAULT_TTL_S) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -104,6 +108,11 @@ class Session:
         }
         if self.role:
             out["role"] = self.role
+        if self.active_org_id:
+            out["activeOrgId"] = self.active_org_id
+            out["profile"] = {"activeOrgId": self.active_org_id}
+        if self.org_role:
+            out["orgRole"] = self.org_role
         return out
 
 

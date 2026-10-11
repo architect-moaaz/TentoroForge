@@ -381,8 +381,11 @@ function actorValue(rule: OwnershipRule, ctx: DataEngineContext): unknown {
   // the value is read off it. A rule without one falls back to the session's
   // `workspaceId`, which a session may still not carry — the safe direction.
   const user = ctx.user as Record<string, unknown> | undefined;
+  // IN AN APPLICATION OF SEVERAL ORGANISATIONS the workspace is the one the
+  // person acts in (`activeOrgId`, from their membership); a rule naming an
+  // `actorColumn` reads that column of the users row instead.
   const v = rule.scope === "workspace"
-    ? (rule.actorColumn ? user?.[rule.actorColumn] : user?.workspaceId)
+    ? (rule.actorColumn ? user?.[rule.actorColumn] : (user?.activeOrgId ?? user?.workspaceId))
     : ctx.user?.id;
   return v === undefined || v === null || v === "" ? undefined : v;
 }
@@ -957,30 +960,37 @@ export async function create(
   // Tenancy scoping: fill a NOT NULL workspace/tenant FK server-side (it's no
   // longer a form field) from the user's own workspace, falling back to the
   // single workspace row — so a create still satisfies the NOT NULL constraint.
-  const _tenancyFks = ["workspaceId", "tenantId", "orgId", "organizationId"];
-  const _needTenancy = _tenancyFks.filter((fk) => fk in entity.table && cleanData[fk] == null);
+  // THE ORGANISATION A ROW BELONGS TO IS THE ACTOR'S ACTIVE ONE — never the
+  // first row of some table. The old fallback picked "the single workspace"
+  // and, with two, put a new row in someone else's. A tenancy column with no
+  // active organisation is refused, not guessed.
+  const _tenancyFks = new Set(["workspaceId", "tenantId", "orgId", "organizationId"]);
+  try {
+    const ten: any = await import("./tenancy");
+    const pol = await ten.policy();
+    const col = pol?.columns?.[getTableName(entity.table as any)] ?? pol?.columns?.[entityName] ?? pol?.columns?.[entityName.toLowerCase()];
+    if (col) _tenancyFks.add(col);
+  } catch { /* no policy */ }
+  const _needTenancy = [..._tenancyFks].filter((fk) => fk in entity.table && cleanData[fk] == null);
   if (_needTenancy.length) {
-    let _wsId: any = (ctx.user as any)?.workspaceId ?? null;
+    let _wsId: any = (ctx.user as any)?.activeOrgId ?? (ctx.user as any)?.workspaceId ?? null;
     if (!_wsId && _uid) {
       try {
         const usersT = getEntity("users")?.table as any;
-        if (usersT && "workspaceId" in usersT) {
+        if (usersT) {
           const [u] = await db.select().from(usersT).where(eq(usersT.id, _uid)).limit(1);
-          _wsId = (u as any)?.workspaceId ?? null;
+          _wsId = (u as any)?.activeOrgId ?? (u as any)?.workspaceId ?? null;
         }
-      } catch { /* ignore — fall back below */ }
+      } catch { /* ignore */ }
     }
-    if (!_wsId) {
-      for (const wsName of ["workspaces", "workspace", "tenants", "organizations", "orgs"]) {
-        const wt = getEntity(wsName)?.table as any;
-        if (!wt) continue;
-        try {
-          const [w] = await db.select().from(wt).limit(1);
-          if ((w as any)?.id) { _wsId = (w as any).id; break; }
-        } catch { /* ignore */ }
+    if (_wsId) {
+      for (const fk of _needTenancy) cleanData[fk] = _wsId;
+    } else {
+      const required = _needTenancy.filter((fk) => (entity.table as any)[fk]?.notNull);
+      if (required.length) {
+        throw new ValidationError([`${entityName} belongs to an organisation and you are acting in none (${required.join(", ")}).`]);
       }
     }
-    if (_wsId) for (const fk of _needTenancy) cleanData[fk] = _wsId;
   }
 
   // Ownership on the write side — BOTH kinds of rule. The column names the

@@ -68,16 +68,24 @@ export const authOptions: NextAuthOptions = {
           // engine, and a page binds `{{user.<column>}}`. Only the password
           // hash stays behind.
           const profile = profileOf(user as Record<string, unknown>);
+          // An explicit role wins; otherwise the account type chosen at
+          // signup stands in, so an app whose only role signal is the
+          // signup choice still drives menu visibility off it.
+          const stored = (user as any).role || (user as any).accountType || "user";
+          // IN AN APPLICATION OF SEVERAL ORGANISATIONS the role is the
+          // membership's in the organisation the person acts in; a platform
+          // role is held everywhere. `resolve` is the plain role elsewhere.
+          const tenancy = await import("@/lib/tenancy");
+          const inOrg = await tenancy.resolve({ id: String(user.id), role: stored, activeOrgId: (user as any).activeOrgId ?? null });
           return {
             ...profile,
             id: user.id,
             email: user.email,
             name: (user as any).name || `${(user as any).firstName || ""} ${(user as any).lastName || ""}`.trim(),
-            // An explicit role wins; otherwise the account type chosen at
-            // signup stands in, so an app whose only role signal is the
-            // signup choice still drives menu visibility off it.
-            role: (user as any).role || (user as any).accountType || "user",
+            role: inOrg.role || stored,
             accountType: (user as any).accountType || null,
+            activeOrgId: inOrg.activeOrgId,
+            orgRole: inOrg.orgRole,
           };
         } catch (error) {
           console.error("Auth error:", error);
@@ -89,12 +97,39 @@ export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
   pages: { signIn: "/login", error: "/login" },
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.id = user.id;
         token.role = (user as any).role;
         token.accountType = (user as any).accountType ?? null;
         (token as any).profile = profileOf(user as Record<string, unknown>);
+        (token as any).activeOrgId = (user as any).activeOrgId ?? null;
+        (token as any).orgRole = (user as any).orgRole ?? null;
+        (token as any).refreshedAt = Date.now();
+      }
+      // A CHANGED MEMBERSHIP REACHES THE SESSION: on `update()` (a switch, a
+      // re-role) and every fifteen minutes, the organisation and the role
+      // are read again. A token used to be frozen at sign-in.
+      const stale = Date.now() - Number((token as any).refreshedAt ?? 0) > 15 * 60_000;
+      if (token.id && (trigger === "update" || stale)) {
+        try {
+          const tenancy = await import("@/lib/tenancy");
+          await tenancy.policy();
+          if (tenancy.tenancyOn()) {
+            const [row] = await db.select().from(users).where(eq(users.id, String(token.id))).limit(1);
+            if (row) {
+              const stored = (row as any).role || (row as any).accountType || "user";
+              const inOrg = await tenancy.resolve({ id: String(row.id), role: stored, activeOrgId: (row as any).activeOrgId ?? null });
+              token.role = inOrg.role || stored;
+              (token as any).activeOrgId = inOrg.activeOrgId;
+              (token as any).orgRole = inOrg.orgRole;
+              (token as any).profile = { ...profileOf(row as Record<string, unknown>), activeOrgId: inOrg.activeOrgId };
+            }
+          }
+        } catch (err) {
+          console.warn("[auth] the session could not be refreshed:", err);
+        }
+        (token as any).refreshedAt = Date.now();
       }
       return token;
     },
@@ -104,6 +139,8 @@ export const authOptions: NextAuthOptions = {
         (session.user as any).id = token.id;
         (session.user as any).role = token.role;
         (session.user as any).accountType = (token as any).accountType ?? null;
+        (session.user as any).activeOrgId = (token as any).activeOrgId ?? null;
+        (session.user as any).orgRole = (token as any).orgRole ?? null;
       }
       return session;
     },
@@ -130,9 +167,9 @@ export async function auth() {
 }
 
 declare module "next-auth" {
-  interface User { id: string; role?: string; accountType?: string | null; }
-  interface Session { user: { id: string; role?: string; accountType?: string | null; name?: string | null; email?: string | null; image?: string | null; }; }
+  interface User { id: string; role?: string; accountType?: string | null; activeOrgId?: string | null; orgRole?: string | null; }
+  interface Session { user: { id: string; role?: string; accountType?: string | null; activeOrgId?: string | null; orgRole?: string | null; name?: string | null; email?: string | null; image?: string | null; }; }
 }
 declare module "next-auth/jwt" {
-  interface JWT { id: string; role?: string; accountType?: string | null; }
+  interface JWT { id: string; role?: string; accountType?: string | null; activeOrgId?: string | null; orgRole?: string | null; }
 }

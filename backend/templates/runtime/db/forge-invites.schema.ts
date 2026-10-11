@@ -41,5 +41,9 @@ export const forgeInvites = pgTable("forge_invites", {
   // Set the moment the password is chosen. A used link is refused from then on,
   // which is what makes a setup link one-time.
   usedAt: timestamp("used_at"),
+  // An invite INTO an organisation: the membership (and its role) made when
+  // the person sets their password. Null for an application with none.
+  orgId: text("org_id"),
+  role: text("role"),
   createdAt: timestamp("created_at").defaultNow(),
 });

@@ -385,6 +385,19 @@ type RosterEntry = {
   invite?: { issue?: string; tokenHash?: string; purpose?: string; expiresAt?: string } | null;
 };
 
+/** The organisations the owner added by name, before anyone joined them. */
+function rosterOrganisations(): string[] {
+  const rosterPath = path.join(process.cwd(), "src", "db", "accounts.json");
+  if (!fs.existsSync(rosterPath)) return [];
+  try {
+    const doc = JSON.parse(fs.readFileSync(rosterPath, "utf8"));
+    const rows = Array.isArray(doc?.organisations) ? doc.organisations : [];
+    return rows.map((o: any) => String(o?.name ?? "")).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** The people the owner asked to be able to log in, or [] when none. */
 function accountRoster(): RosterEntry[] {
   const rosterPath = path.join(process.cwd(), "src", "db", "accounts.json");
@@ -423,6 +436,73 @@ function accountRoster(): RosterEntry[] {
  * every restart would re-open a spent link and clear a password the person had
  * already chosen.
  */
+/**
+ * TWO ORGANISATIONS, SO THE SCOPE CAN BE PROVEN. When the application has
+ * several organisations: a demo organisation every demo login belongs to in
+ * its role, and a second one with its own member per member role, so a check
+ * can read as one and the other. A platform role belongs to none and sees
+ * all. Idempotent.
+ */
+async function seedOrganisations(): Promise<void> {
+  let policy: any = null;
+  try { policy = (await import("../lib/tenancy-policy")).TENANCY; } catch { return; }
+  if (!policy || policy.kind !== "organisation" || !policy.table) return;
+  const users = tableFor("users");
+  const memberships = tableFor("forgeMemberships");
+  if (!users || !memberships || process.env.FORGE_DEMO_LOGINS === "0") return;
+  const nameCol = String(policy.nameColumn || "name");
+  const orgIds: string[] = [];
+  for (const orgName of ["Demo organisation", "Second organisation"]) {
+    const found: any = await db.execute(sql.raw(`SELECT id::text AS id FROM "${policy.table}" WHERE "${nameCol}" = '${orgName.replace(/'/g, "''")}' LIMIT 1`));
+    const row = (Array.isArray(found) ? found : found?.rows ?? [])[0];
+    if (row?.id) { orgIds.push(String(row.id)); continue; }
+    const made: any = await db.execute(sql.raw(`INSERT INTO "${policy.table}" ("${nameCol}") VALUES ('${orgName.replace(/'/g, "''")}') RETURNING id::text AS id`));
+    const mrow = (Array.isArray(made) ? made : made?.rows ?? [])[0];
+    if (mrow?.id) orgIds.push(String(mrow.id));
+  }
+  if (orgIds.length < 2) return;
+  const password = await bcrypt.hash(ADMIN_PASSWORD, 12);
+  const platform = new Set<string>((policy.platformRoles || []).map(String));
+  const join = async (userId: string, orgId: string, role: string) => {
+    await db.execute(sql`INSERT INTO forge_memberships (user_id, org_id, role, status) VALUES (${userId}, ${orgId}, ${role}, 'active')
+      ON CONFLICT (user_id, org_id) DO UPDATE SET role = EXCLUDED.role, status = 'active'`);
+  };
+  const roleColumn = "role" in users ? "role" : "accountType" in users ? "accountType" : null;
+  for (const role of (policy.memberRoles || []).map(String)) {
+    if (!role || platform.has(role)) continue;
+    const first: any = await db.select().from(users).where(eq((users as any).email, demoEmail(role))).limit(1);
+    if (first[0]?.id) {
+      await join(String(first[0].id), orgIds[0], role);
+      await db.update(users).set({ activeOrgId: orgIds[0] } as any).where(eq((users as any).id, first[0].id));
+    }
+    const email = demoEmail(role).replace("@", ".second@");
+    const row: Record<string, unknown> = { email, password, activeOrgId: orgIds[1] };
+    if (roleColumn) row[roleColumn] = role;
+    if ("name" in users) row.name = `${role} (second organisation)`;
+    if ("isActive" in users) row.isActive = true;
+    try {
+      await resolveRequiredFks(users, row);
+      Object.assign(row, minimalRow(users, `${role} (second)`, row, true));
+      const created = await db.insert(users).values(row as any).onConflictDoNothing({ target: (users as any).email }).returning();
+      const second: any = created[0] ?? (await db.select().from(users).where(eq((users as any).email, email)).limit(1))[0];
+      if (second?.id) {
+        await ensureAccountRow(String(second.id), email, `${role} (second)`);
+        await join(String(second.id), orgIds[1], role);
+      }
+    } catch (e) {
+      console.warn(`second-organisation login for ${role} not seeded:`, e);
+    }
+  }
+  // AND THE ONES THE OWNER NAMED, empty until someone is invited into them.
+  for (const orgName of rosterOrganisations()) {
+    const found: any = await db.execute(sql.raw(`SELECT id::text AS id FROM "${policy.table}" WHERE "${nameCol}" = '${orgName.replace(/'/g, "''")}' LIMIT 1`));
+    if ((Array.isArray(found) ? found : found?.rows ?? [])[0]?.id) continue;
+    await db.execute(sql.raw(`INSERT INTO "${policy.table}" ("${nameCol}") VALUES ('${orgName.replace(/'/g, "''")}')`));
+    console.log(`✅ organisation: ${orgName}`);
+  }
+  console.log(`✅ organisations: ${orgIds.length}, with a member per role in each`);
+}
+
 async function seedAccounts(): Promise<void> {
   const roster = accountRoster();
   if (!roster.length) return;
@@ -466,6 +546,27 @@ async function seedAccounts(): Promise<void> {
       const created = await db.insert(users).values(row as any)
         .onConflictDoNothing({ target: (users as any).email }).returning();
       if (created[0]?.id) await ensureAccountRow(String(created[0].id), email, String(entry.name || email));
+      // A ROSTERED PERSON IN AN ORGANISATION: the membership, by the
+      // organisation's name (made when it does not exist), in their role.
+      if (entry.organisation) {
+        try {
+          const ten: any = await import("../lib/tenancy");
+          const policy = await ten.policy();
+          if (policy.kind === "organisation" && policy.table) {
+            const nameCol = String(policy.nameColumn || "name");
+            const found: any = await db.execute(sql.raw(`SELECT id::text AS id FROM "${policy.table}" WHERE "${nameCol}" = '${String(entry.organisation).replace(/'/g, "''")}' LIMIT 1`));
+            let orgId = (Array.isArray(found) ? found : found?.rows ?? [])[0]?.id;
+            if (!orgId) orgId = await ten.createOrganisation(String(entry.organisation));
+            const who: any = created[0] ?? (await db.select().from(users).where(eq((users as any).email, email)).limit(1))[0];
+            if (orgId && who?.id) {
+              await ten.join(String(who.id), String(orgId), String(entry.role || policy.memberRoles[0] || "member"));
+              await ten.setActive(String(who.id), String(orgId));
+            }
+          }
+        } catch (e) {
+          console.warn(`membership for ${email} not seeded:`, e);
+        }
+      }
 
       const invite = entry.invite;
       const issue = String(invite?.issue || "");
@@ -988,6 +1089,7 @@ async function main(): Promise<void> {
   // idempotent and never clobbers a real admin.
   const adminId = await seedAdmin();
   await seedRoleLogins();
+  await seedOrganisations();
   await ensureAccountRow(adminId, ADMIN_EMAIL, "Admin");
 
   // AND SO MUST THE PEOPLE THE OWNER ADDED — for the same reason and above the

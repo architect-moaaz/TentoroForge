@@ -2974,7 +2974,7 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     control that lived in the route would not cover the SSR path.
     """
     from services.blueprint.projection import (
-        apply_data_projection, project_append_only_entities, project_audit, project_money,
+        apply_data_projection, project_append_only_entities, project_audit, project_money, project_tenancy,
         project_embedding_columns, project_ownership_rules,
         project_searchable_columns, project_sensitive_columns,
     )
@@ -2988,6 +2988,7 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     project_append_only_entities(svc.doc, app_root)
     project_audit(svc.doc, app_root)
     project_money(svc.doc, app_root)
+    project_tenancy(svc.doc, app_root)
     project_ownership_rules(svc.doc, app_root)
 
 

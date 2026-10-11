@@ -3807,6 +3807,25 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
             out.setdefault(form, [])
             if rule not in out[form]:
                 out[form].append(rule)
+    # AN ORGANISATION'S ROWS ARE ITS OWN — derived from the data model, not
+    # authored. Every entity with a field referencing the tenant entity is
+    # scoped to the actor's active organisation; platform roles see all. A
+    # rule the author wrote for the same column stands.
+    policy = tenancy_policy(doc)
+    if policy["kind"] == "organisation":
+        for entity in entities:
+            name = entity.get("name") or ""
+            column = policy["columns"].get(str(name)) or policy["columns"].get(str(entity.get("table") or ""))
+            if not column:
+                continue
+            forms = _key_forms(name) | _key_forms(entity.get("table") or to_snake(name))
+            if any(str(r.get("column")) == column for form in forms for r in out.get(form, [])):
+                continue
+            rule = {"column": column, "kind": "scope", "scope": "workspace",
+                    "unscopedRoles": list(policy["platformRoles"]), "derived": "tenancy"}
+            for form in forms:
+                out.setdefault(form, []).append(rule)
+
     return out
 
 
@@ -4661,6 +4680,78 @@ def project_public_nav(doc: dict, app_root: str | Path) -> str:
         "export const PUBLIC_NAV: { appName: string; items: PublicNavItem[]; signIn: boolean } = "
         + json.dumps(nav, indent=2) + ";\n", "utf-8")
     return str(path.relative_to(Path(app_root)))
+
+
+def tenant_entity(doc: dict) -> dict | None:
+    """The one entity marked `tenant: true`, live."""
+    for e in (doc.get("data") or {}).get("entities") or []:
+        if isinstance(e, dict) and e.get("tenant") is True and str(e.get("status") or "").upper() not in ("DEPRECATED", "REMOVED"):
+            return e
+    return None
+
+
+def tenancy_columns(doc: dict) -> dict[str, str]:
+    """`{table or entity name: field}` for every entity with a field that
+    references the tenant entity — the column that says which organisation a
+    row belongs to. Read from the field's own `references`, else from
+    `data.relationships` (every spelling the engine may ask by)."""
+    tenant = tenant_entity(doc)
+    if tenant is None:
+        return {}
+    tid = str(tenant.get("id"))
+    tname = str(tenant.get("name") or "")
+    out: dict[str, str] = {}
+    data = doc.get("data") or {}
+    by_id = {str(e.get("id")): e for e in data.get("entities") or [] if isinstance(e, dict)}
+    for e in by_id.values():
+        if str(e.get("id")) == tid or str(e.get("status") or "").upper() in ("DEPRECATED", "REMOVED"):
+            continue
+        field = next((str(f.get("name")) for f in e.get("fields") or []
+                      if isinstance(f, dict) and str(f.get("references") or "") == tid), None)
+        if field is None:
+            for rel in data.get("relationships") or []:
+                if not isinstance(rel, dict):
+                    continue
+                src, tgt = str(rel.get("from") or rel.get("source") or ""), str(rel.get("to") or rel.get("target") or "")
+                if src in (str(e.get("id")), str(e.get("name"))) and tgt in (tid, tname) and rel.get("field"):
+                    field = str(rel.get("field"))
+                    break
+        if field:
+            for key in {str(e.get("name") or ""), str(e.get("table") or ""), _var_name(e), str(e.get("name") or "").lower()}:
+                if key:
+                    out[key] = field
+    return out
+
+
+def tenancy_policy(doc: dict) -> dict[str, Any]:
+    """The organisations the Blueprint declares, as the runtime reads them."""
+    sec = (doc.get("security") or {}).get("tenancy") if isinstance(doc.get("security"), dict) else {}
+    sec = sec if isinstance(sec, dict) else {}
+    tenant = tenant_entity(doc)
+    kind = "organisation" if str(sec.get("kind") or "none") == "organisation" and tenant is not None else "none"
+    role_names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or [] if isinstance(r, dict)}
+    names = lambda refs: sorted({role_names.get(str(r), str(r)) for r in refs or [] if str(r)})  # noqa: E731
+    admin = sec.get("organisationAdminRole")
+    name_field = str(sec.get("nameField") or (tenant or {}).get("labelField") or "name")
+    return {"kind": kind, "entity": str(tenant.get("name")) if tenant else None,
+            "table": (str(tenant.get("table") or to_snake(str(tenant.get("name") or ""))) if tenant else None),
+            "nameColumn": to_snake(name_field) if tenant else None,
+            "memberRoles": names(sec.get("memberRoles")), "platformRoles": names(sec.get("platformRoles")),
+            "adminRole": role_names.get(str(admin), str(admin)) if admin else None,
+            "signup": str(sec.get("signup") or "both"), "columns": tenancy_columns(doc) if kind == "organisation" else {}}
+
+
+def project_tenancy(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """`src/lib/tenancy-policy.ts`: the organisations, as the runtime reads them."""
+    lib = Path(app_root) / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    policy = tenancy_policy(doc)
+    (lib / "tenancy-policy.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "// The organisations this application serves side by side: the tenant\n"
+        "// entity, who belongs (member roles) and who sees all (platform roles).\n"
+        f"export const TENANCY = {json.dumps(policy, indent=2)} as const;\n", "utf-8")
+    return {"files": ["src/lib/tenancy-policy.ts"], "kind": policy["kind"]}
 
 
 #: The currency a locale pays in, when the product does not say.

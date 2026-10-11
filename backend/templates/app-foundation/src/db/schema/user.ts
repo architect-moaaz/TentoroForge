@@ -19,5 +19,9 @@ export const users = pgTable("users", {
   // DB enum — the value set is the app's, not the platform's.
   accountType: text("account_type"),
   isActive: boolean("is_active").default(true),
+  // The organisation this person is acting in, when the application has
+  // several side by side (`security.tenancy`); their membership there gives
+  // their role. Null for an application with none.
+  activeOrgId: text("active_org_id"),
   createdAt: timestamp("created_at").defaultNow(),
 });

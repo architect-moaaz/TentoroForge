@@ -1763,6 +1763,10 @@
               "labelField": {
                 "type": "string"
               },
+              "tenant": {
+                "type": "boolean",
+                "default": false
+              },
               "commerce": {
                 "type": "boolean",
                 "default": false
@@ -2788,6 +2792,50 @@
             "type": "string"
           },
           "default": []
+        },
+        "tenancy": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "none",
+                "organisation"
+              ],
+              "default": "none"
+            },
+            "signup": {
+              "type": "string",
+              "enum": [
+                "creates_organisation",
+                "joins_by_invite",
+                "both"
+              ],
+              "default": "both"
+            },
+            "memberRoles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "platformRoles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "organisationAdminRole": {
+              "type": "string"
+            },
+            "nameField": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
         },
         "auditLogging": {
           "type": "boolean",

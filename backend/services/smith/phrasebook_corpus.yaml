@@ -532,6 +532,30 @@ sentences:
     source: code
     reaches: {verb: set_currency, states: [change]}
 
+  - id: does-add-organisation
+    say: "add an organisation called Northside Clinic"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_organisation, states: [change]}
+
+  - id: does-new-branch
+    say: "we have a new branch, Riverside"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_organisation, states: [change]}
+
+  - id: does-move-login
+    say: "move dave@clinic.com to Northside as a Nurse"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: move_login, states: [change]}
+
+  - id: does-put-in-branch
+    say: "put sara@shop.com in the Riverside branch"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: move_login, states: [change]}
+
   - id: does-stop-welcome-email
     say: "stop sending the welcome email"
     checked: {colour: acts, via: handler}

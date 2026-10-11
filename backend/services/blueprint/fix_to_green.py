@@ -228,6 +228,12 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
             try:
                 from services.blueprint.access_check import check_access
                 out = check_access(app, svc.doc, only=only_entities, cancelled=cancelled)
+                if only_entities is None:
+                    from services.blueprint.tenancy_trials import check_tenancy
+                    orgs = check_tenancy(app, svc.doc, cancelled=cancelled)
+                    for k in ("green", "red", "untried"):
+                        out[k] = list(out[k]) + list(orgs[k])
+                    out["total"] = int(out["total"]) + int(orgs["total"])
                 _merge(svc, "access", out, only_entities)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[fix-to-green] the access check failed", exc_info=True)
@@ -341,10 +347,10 @@ def by_cause(reds: list[dict]) -> list[dict]:
         cause = str(r.get("cause") or r.get("id"))
         kind = ("process" if cause.startswith("FLOW-") else "rule" if cause.startswith("RULE-")
                 else "access" if cause.startswith("ENTITY-") else "integration" if cause.startswith("INT-")
-                else "audit" if cause == "audit" else "page")
+                else "audit" if cause == "audit" else "tenancy" if cause == "tenancy" else "page")
         g = groups.setdefault(cause, {"cause": cause, "kind": kind, "items": []})
         g["items"].append(r)
-    order = {"page": 0, "process": 1, "rule": 2, "access": 3, "integration": 4, "audit": 5}
+    order = {"page": 0, "process": 1, "rule": 2, "access": 3, "integration": 4, "audit": 5, "tenancy": 6}
     return sorted(groups.values(), key=lambda g: (order[g["kind"]], g["cause"]))
 
 
@@ -367,7 +373,7 @@ def ask_for(group: dict, doc: dict) -> str:
         return page_ask(group["cause"], item)
     seen = "\n".join(f"- {r.get('label')}: {r.get('why')}" for r in items[:12])
     what = {"process": "process", "rule": "rule", "access": "record type", "integration": "outside system",
-            "audit": "audit trail"}[group["kind"]]
+            "audit": "audit trail", "tenancy": "organisations"}[group["kind"]]
     return (f"The build tried the {what} {items[0].get('label')} ({group['cause']}) as the people it is for. "
             f"This did not hold:\n{seen}\n\n"
             "Find the cause and fix it where it lives — the steps, a rule, the data model, who may do what, "

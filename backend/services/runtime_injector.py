@@ -295,6 +295,22 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
             copied.append("src/lib/audit.ts")
         except Exception as e:
             errors.append(f"Failed to copy audit: {e}")
+    tenancy_src = _TEMPLATE_DIR / "tenancy.ts"
+    if tenancy_src.exists():
+        try:
+            shutil.copy2(tenancy_src, src_lib / "tenancy.ts")
+            copied.append("src/lib/tenancy.ts")
+        except Exception as e:
+            errors.append(f"Failed to copy tenancy: {e}")
+    tpolicy = src_lib / "tenancy-policy.ts"
+    if not tpolicy.exists():
+        tpolicy.write_text(
+            "// Written by the Blueprint projection (project_tenancy). None: this\n"
+            "// application serves one organisation.\n"
+            "export const TENANCY = { kind: \"none\", entity: null, table: null, nameColumn: null, memberRoles: [], "
+            "platformRoles: [], adminRole: null, signup: \"both\", columns: {} } as const;\n",
+            encoding="utf-8")
+        copied.append("src/lib/tenancy-policy.ts")
     policy = src_lib / "audit-policy.ts"
     if not policy.exists():
         policy.write_text(
@@ -939,6 +955,26 @@ def _inject_file_storage(output_path: Path) -> list[str]:
                     txt.rstrip() + '\nexport { forgeEvents } from "./_forge_events";\n',
                     encoding="utf-8",
                 )
+
+    # 5a-v. forge_memberships: who belongs to which organisation; the
+    #       organisation routes. The page and the switcher ship with the
+    #       foundation and say "one organisation" when there is none.
+    mem_schema = _TEMPLATE_DIR / "db" / "forge-memberships.schema.ts"
+    if mem_schema.exists() and schema_dir.exists():
+        shutil.copy2(mem_schema, schema_dir / "_forge_memberships.ts")
+        written.append("src/db/schema/_forge_memberships.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_memberships" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgeMemberships } from "./_forge_memberships";\n', encoding="utf-8")
+    for sub, dst in (("api-org/route.ts", "org/route.ts"), ("api-org/members/route.ts", "org/members/route.ts")):
+        src = _TEMPLATE_DIR / sub
+        if src.exists():
+            target = output_path / "src" / "app" / "api" / dst
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
+            written.append(f"src/app/api/{dst}")
 
     # 5a-iv. forge_payments: the application's own ledger of payments; the
     #        stand-in's route and page, so a checkout works before any key.

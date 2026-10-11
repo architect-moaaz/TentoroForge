@@ -1716,6 +1716,13 @@ export const Entity = z.object({
    * THE THING PEOPLE BUY. On the one entity whose rows are put in a cart
    * and paid for; the runtime ships its cart and checkout with it.
    */
+  /**
+   * THE ORGANISATION PEOPLE BELONG TO. On the one entity that is the tenant
+   * (a Clinic, a Company, a Practice): every entity with a field that
+   * `references` it belongs to an organisation, and its rows are scoped to
+   * the person's active one. Memberships live in a runtime table.
+   */
+  tenant: z.boolean().default(false),
   commerce: z.boolean().default(false),
   appendOnly: z.boolean().default(false),
   account: z.boolean().optional(),
@@ -2281,6 +2288,24 @@ export const Security = z.object({
     )
     .default([]),
   protectedRoutes: z.array(z.string()).default([]),
+  /**
+   * SEVERAL ORGANISATIONS, SIDE BY SIDE. `organisation`: the tenant entity's
+   * rows are organisations; people join them by signup or invite and hold a
+   * role PER organisation (`memberRoles`); `platformRoles` are held
+   * platform-wide and see every organisation. `organisationAdminRole` is the
+   * member role that invites, removes and re-roles members. `signup` says
+   * whether a new person creates an organisation, joins by invite, or either.
+   */
+  tenancy: z
+    .object({
+      kind: z.enum(["none", "organisation"]).default("none"),
+      signup: z.enum(["creates_organisation", "joins_by_invite", "both"]).default("both"),
+      memberRoles: z.array(z.string()).default([]),
+      platformRoles: z.array(z.string()).default([]),
+      organisationAdminRole: z.string().optional(),
+      nameField: z.string().optional(),
+    })
+    .default({}),
   /** Superseded by `audit`; read by nothing. Kept so older documents load. */
   auditLogging: z.boolean().default(false),
   /**

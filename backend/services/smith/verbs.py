@@ -79,6 +79,9 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # tells the app (its events, in the user's words).
     "add_webhook": {"integration", "change"},
     # The audit trail: read it, export it, verify its chain, change the policy.
+    # Organisations: a new one, and which one a login belongs to.
+    "add_organisation": {"change"},
+    "move_login": {"change"},
     # Money: a refund through the payment service; the currency money is in.
     "refund": {"change"},
     "set_currency": {"change"},
@@ -324,6 +327,15 @@ VERB_HELP: dict[str, str] = {
         "when an order is paid\", \"accept payment.succeeded from Stripe\". Gives the "
         "address to call, the header it signs with and the NAME of the secret to set. "
         "Needs which system and what it tells the app."
+    ),
+    "add_organisation": (
+        "Add an organisation to an application that serves several: \"add an "
+        "organisation called Northside Clinic\". Needs its name."
+    ),
+    "move_login": (
+        "Put a login in an organisation, with a role there: \"move "
+        "dave@clinic.com to Northside as a Nurse\". Needs the email and the "
+        "organisation; the role is optional."
     ),
     "refund": (
         "Refund a payment through the payment service: \"refund order 1234\", "
@@ -681,6 +693,14 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'add_webhook': (
         'let Shopify tell the app when an order is paid',
         'accept payment.succeeded from Stripe',
+    ),
+    'add_organisation': (
+        'add an organisation called Northside Clinic',
+        'we have a new branch, Riverside',
+    ),
+    'move_login': (
+        'move dave@clinic.com to Northside as a Nurse',
+        'put sara@shop.com in the Riverside branch',
     ),
     'refund': (
         'refund order 1234',
