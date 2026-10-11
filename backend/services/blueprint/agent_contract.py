@@ -925,6 +925,19 @@ def check_page_access(result: "AgentResult", doc: dict | None) -> None:
             touched.add(str(merged[key].get("route") or key))
     problems = [f for f in access_findings(list(merged.values()))
                 if any(r in f for r in touched)]
+    # A RESTRICTED PAGE NAMES WHO MAY OPEN IT. Nameless, the projection makes
+    # it the administrator's (restricted means restricted) — so a vendor's
+    # Product Catalogue and Product Editor declared `role_restricted` with no
+    # `users` answered 403 to every vendor (7ttp60zi, 2026-10-11). Said to the
+    # author, in the same attempt, rather than found by a person.
+    for body in proposed:
+        key = str(body.get("id") or "") or next(
+            (k for k, v in merged.items() if v.get("route") == body.get("route")), str(body.get("route")))
+        page = merged.get(key) or body
+        if str(page.get("access") or "") == "role_restricted" and not page.get("users"):
+            problems.append(f"{page.get('route') or page.get('name')}: `access: \"role_restricted\"` names no "
+                            "role — put the roles that may open it in `users` (the people this screen is "
+                            "for); a restricted page nobody is named for is the administrator's alone")
     if problems:
         raise InconsistentPageAccess(_all_of(problems))
 
