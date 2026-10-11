@@ -556,6 +556,86 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
         raise InvalidWorkflowStep(_all_of(problems))
 
 
+class InvalidTrigger(AuthorRefusal):
+    """A workflow's trigger, wait or deadline is not one the clock can read."""
+
+
+def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> None:
+    """A trigger the runtime will act on, a wait it can measure, a deadline
+    it can hand on.
+
+    A schedule used to be a sentence nothing parsed, a record change a
+    condition nothing read, and `"1 hour"` a wait of zero: each was accepted
+    at the author and silent in the app (2026-10-12). Refused here with
+    what to write instead, so the agent is asked again."""
+    proposals = [p for p in result.proposals if p.section == "workflows"]
+    if not proposals:
+        return
+    from services.blueprint.cron_expr import is_valid_cron, parse_duration_ms
+    from services.blueprint.functional_completeness import with_loop_bodies
+    doc = doc or {}
+    entities = {str(e.get("id")) for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)}
+    roles = {str(r.get("id")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    role_names = {str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    integrations = {str(i.get("id")) for i in doc.get("integrations") or []
+                    if isinstance(i, dict) and str(i.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")}
+    problems: list[str] = []
+    for proposal in proposals:
+        body = proposal.body
+        name = body.get("name") or proposal.natural_key
+        trig = body.get("trigger") if isinstance(body.get("trigger"), dict) else {}
+        kind = str(trig.get("kind") or "manual")
+        if kind == "schedule":
+            cron = str(trig.get("cron") or trig.get("detail") or "").strip()
+            if not is_valid_cron(cron):
+                problems.append(f"{name}: a schedule says when as `trigger.cron`, five fields "
+                                f"(`0 9 * * 1` is Mondays at 09:00); got {cron!r}")
+            tz = str(trig.get("timezone") or "").strip()
+            if tz:
+                try:
+                    from zoneinfo import ZoneInfo
+                    ZoneInfo(tz)
+                except Exception:  # noqa: BLE001
+                    problems.append(f"{name}: `trigger.timezone` {tz!r} is not an IANA zone (`Asia/Dubai`)")
+        elif kind == "db_change":
+            if str(trig.get("entity") or "") not in entities:
+                problems.append(f"{name}: a `db_change` trigger names the record type it watches as "
+                                f"`trigger.entity` (an entity id); got {trig.get('entity')!r}")
+            if str(trig.get("on") or "") not in ("created", "updated", "deleted"):
+                problems.append(f"{name}: a `db_change` trigger says which change as `trigger.on`: "
+                                f"created, updated or deleted; got {trig.get('on')!r}")
+        elif kind == "api_event":
+            if not str(trig.get("event") or trig.get("detail") or "").strip():
+                problems.append(f"{name}: an `api_event` trigger names its event as `trigger.event`")
+        elif kind == "webhook":
+            if str(trig.get("integration") or "") not in integrations:
+                problems.append(f"{name}: a `webhook` trigger names the integration that calls in as "
+                                f"`trigger.integration` (one declared under `integrations`); got "
+                                f"{trig.get('integration')!r}")
+            if not str(trig.get("event") or "").strip():
+                problems.append(f"{name}: a `webhook` trigger names the event the integration sends as `trigger.event`")
+        for st in with_loop_bodies(body).get("steps") or []:
+            if not isinstance(st, dict):
+                continue
+            cfg = st.get("config") if isinstance(st.get("config"), dict) else {}
+            key = st.get("key") or st.get("id")
+            if str(st.get("type") or "") == "wait":
+                until = str(cfg.get("until") or "")
+                length = parse_duration_ms(cfg.get("for") if cfg.get("for") is not None
+                                           else cfg.get("duration") if cfg.get("duration") is not None
+                                           else cfg.get("durationMs"))
+                if not (length > 0 or "{{" in until):
+                    problems.append(f"{name}/{key}: a wait says how long as `config.for` (`2 days`, `PT90M`) "
+                                    "or when as `config.until` (a template to a date)")
+            if "dueIn" in cfg and not (isinstance(cfg.get("dueIn"), int) and not isinstance(cfg.get("dueIn"), bool)
+                                       and cfg["dueIn"] > 0):
+                problems.append(f"{name}/{key}: `config.dueIn` is a number of minutes")
+            if "escalateTo" in cfg and str(cfg.get("escalateTo")) not in roles | role_names:
+                problems.append(f"{name}/{key}: `config.escalateTo` names a declared role; got {cfg.get('escalateTo')!r}")
+    if problems:
+        raise InvalidTrigger(_all_of(problems))
+
+
 class InvalidEntityFields(AuthorRefusal):
     """An entity's fields cannot be stored as proposed."""
 
@@ -1446,6 +1526,7 @@ def apply_agent_result(
     check_pattern_templates(result, svc.doc)
     from services.blueprint.mcp_catalog import load as _mcp_servers
     check_workflow_steps(result, svc.doc, _mcp_servers(getattr(svc, "output_dir", None)))
+    check_workflow_triggers(result, svc.doc)
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)

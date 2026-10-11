@@ -42,8 +42,10 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
                 "add_entity", "remove_entity", "rename_entity", "change_field_type"})),
     ("What it does by itself",
      "Add, change or stop a process — an email after a registration, an "
-     "archive instead of a delete, a reminder on a timer.",
-     frozenset({"add_workflow", "edit_workflow", "remove_workflow"})),
+     "archive instead of a delete, a reminder on a timer — and when it runs: "
+     "on a schedule, paused, now, with a deadline that hands a late task on.",
+     frozenset({"add_workflow", "edit_workflow", "remove_workflow",
+                "set_schedule", "pause_schedule", "resume_schedule", "set_deadline", "run_now"})),
     ("What it will not let people do",
      "Add, change or drop a rule that stops a record being saved.",
      frozenset({"add_rule", "edit_rule", "remove_rule"})),

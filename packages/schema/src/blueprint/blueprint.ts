@@ -1846,6 +1846,21 @@ export const WorkflowStep = z.object({
        *  notification's text on `send_notification`. */
       message: z.string().optional(),
       /**
+       * On a `wait`: how long the run pauses — an ISO-8601 duration (`P2D`,
+       * `PT90M`) or words (`2 days`, `90 minutes`). The run is put down and
+       * picked up by the clock; nothing sleeps.
+       */
+      for: z.string().optional(),
+      /** On a `wait`: a moment to wait until, as a template to a date
+       *  (`{{booking.startsAt}}`). */
+      until: z.string().optional(),
+      /** On a `wait_for_event`: how long to wait before giving up, as `for`. */
+      timeout: z.string().optional(),
+      /** On a human step: minutes until it is overdue. */
+      dueIn: z.number().int().positive().optional(),
+      /** On a human step: the role an overdue task is handed to. */
+      escalateTo: RoleId.optional(),
+      /**
        * On an `end`: the few named values the page that ran this workflow may
        * read, each a template over what the run holds (`{{checkout.url}}`).
        * The run's reply is a receipt, never the run — its variables are
@@ -1874,7 +1889,26 @@ export const Workflow = z.object({
   trigger: z.object({
     /** A trigger variant from the workflow node catalog. */
     kind: z.enum(["manual", "webhook", "schedule", "api_event", "db_change"]),
+    /** The sentence: when and why this runs. The fields below are what the
+     *  engine reads; `detail` is for the person. */
     detail: z.string().default(""),
+    /** `schedule`: a 5-field cron (`0 9 * * 1`), read in `timezone`. */
+    cron: z.string().optional(),
+    /** `schedule`: an IANA zone (`Asia/Dubai`); the application's locale
+     *  decides the default. */
+    timezone: z.string().optional(),
+    /** `schedule`: paused when false — Smith's "stop the nightly reminder". */
+    enabled: z.boolean().default(true),
+    /** `db_change`: the record type whose change starts this. */
+    entity: EntityId.optional(),
+    /** `db_change`: which change. */
+    on: z.enum(["created", "updated", "deleted"]).optional(),
+    /** `api_event` | `webhook`: the event's name as the bus carries it
+     *  (`order.paid`; for a webhook, as the integration's `inbound.events`
+     *  list it). */
+    event: z.string().optional(),
+    /** `webhook`: the integration whose call starts this. */
+    integration: IntegrationId.optional(),
   }),
   steps: z.array(WorkflowStep).default([]),
   /** Pages that can launch this workflow — the wiring, declared not inferred. */

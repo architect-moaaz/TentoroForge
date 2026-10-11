@@ -68,6 +68,16 @@
 {"say": "archiving should take them off their ward too", "verb": "edit_workflow"}
 {"say": "send the welcome email an hour later, not straight away", "verb": "edit_workflow"}
 {"say": "stop sending the welcome email", "verb": "remove_workflow"}
+{"say": "send the payment reminder every Monday at 9", "verb": "set_schedule"}
+{"say": "run the nightly digest at 6pm", "verb": "set_schedule"}
+{"say": "pause the nightly digest", "verb": "pause_schedule"}
+{"say": "stop the reminders for now", "verb": "pause_schedule"}
+{"say": "resume the reminders", "verb": "resume_schedule"}
+{"say": "start the digest again", "verb": "resume_schedule"}
+{"say": "approvals not done in 2 days go to the manager", "verb": "set_deadline"}
+{"say": "reviewers get 4 hours, then it goes to the admin", "verb": "set_deadline"}
+{"say": "run the digest now", "verb": "run_now"}
+{"say": "fire the payment reminder", "verb": "run_now"}
 {"say": "remove the archive nurse thing", "verb": "remove_workflow"}
 {"say": "we don't want the Monday reminder any more", "verb": "remove_workflow"}
 {"say": "experience can't be more than 60 years", "verb": "add_rule"}

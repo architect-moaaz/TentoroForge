@@ -27,13 +27,14 @@ from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
 
-CRITERIA: tuple[str, ...] = ("pages", "routes", "access", "logic", "domain", "smith")
+CRITERIA: tuple[str, ...] = ("pages", "routes", "access", "logic", "systems", "domain", "smith")
 
 LABELS: dict[str, str] = {
     "pages": "Pages built and working",
     "routes": "Routes answer as declared",
     "access": "Each role sees only its own",
     "logic": "Processes and rules",
+    "systems": "Runs on time and talks to the outside",
     "domain": "What such products have",
     "smith": "Fixed after hand-over",
 }
@@ -67,6 +68,11 @@ def empty(doc: dict) -> dict:
             "criteria": {c: _criterion() for c in CRITERIA}}
     card["criteria"]["pages"]["total"] = int(planned)
     card["criteria"]["logic"]["total"] = int(flows)
+    try:
+        from services.blueprint.clock_check import clocked
+        card["criteria"]["systems"]["total"] = len(clocked(doc))
+    except Exception:  # noqa: BLE001
+        pass
     for c in CRITERIA:
         card["criteria"][c]["untried"] = [item(c, LABELS[c], "not checked yet", c)]
     return card

@@ -390,6 +390,14 @@ class VercelDeployProvider:
             # cases where our DB claims redeploy but Vercel is empty.
             vercel_has_nextauth_secret = "NEXTAUTH_SECRET" in existing_by_key
             nextauth_secret = "" if vercel_has_nextauth_secret else secrets.token_hex(32)
+            # THE CLOCK'S KEY, THE APP'S OWN. The tick authenticates itself
+            # with CRON_SECRET; Vercel sends it on every cron call. The one the
+            # app already runs with locally travels; a Vercel row that exists
+            # is kept.
+            cron_secret = ""
+            if "CRON_SECRET" not in existing_by_key:
+                from services.blueprint.assembly import existing_secrets
+                cron_secret = existing_secrets(Path(snapshot.output_dir)).get("CRON_SECRET") or secrets.token_urlsafe(24)
 
             # WHERE THE APP REPORTS ITS FAILURES (services/app_reporting): the
             # platform's public address and this project's id, so Smith's
@@ -400,6 +408,7 @@ class VercelDeployProvider:
                 neon_url=neon_url,
                 vercel_url="",  # unused — NEXTAUTH_URL is left to VERCEL_URL
                 nextauth_secret=nextauth_secret,
+                cron_secret=cron_secret,
                 # Reusing an existing Neon DB = a redeploy with live data;
                 # tell the build to skip schema reset + reseed.
                 keep_db_state=reused_neon,

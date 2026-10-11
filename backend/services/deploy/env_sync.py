@@ -54,6 +54,7 @@ def build_deploy_env(
     nextauth_secret: str,
     blob_token: str | None = None,
     keep_db_state: bool = False,
+    cron_secret: str = "",
 ) -> dict[str, str]:
     """Return the env-var map to push to Vercel."""
     env: dict[str, str] = {}
@@ -89,6 +90,12 @@ def build_deploy_env(
 
     if blob_token:
         env["BLOB_READ_WRITE_TOKEN"] = blob_token
+
+    # THE CLOCK'S KEY TRAVELS WITH THE APP. Vercel sends it as the bearer on
+    # every cron call and the tick refuses anything else; an org-wide value
+    # from the integrations store wins when one is set.
+    if cron_secret and "CRON_SECRET" not in env:
+        env["CRON_SECRET"] = cron_secret
 
     # Redeploys that reuse an existing Neon project must not wipe live data:
     # reset-schema.ts and seed.ts both honor this flag and skip their

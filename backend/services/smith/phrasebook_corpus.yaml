@@ -388,6 +388,66 @@ sentences:
     source: code
     reaches: {verb: remove_workflow, states: [workflow]}
 
+  - id: does-run-reminder-mondays
+    say: "send the payment reminder every Monday at 9"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: set_schedule, states: [workflow, change]}
+
+  - id: does-pause-digest
+    say: "pause the nightly digest"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: pause_schedule, states: [workflow]}
+
+  - id: does-resume-reminders
+    say: "resume the reminders"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: resume_schedule, states: [workflow]}
+
+  - id: does-escalate-late-approvals
+    say: "approvals not done in 2 days go to the manager"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: set_deadline, states: [workflow, change]}
+
+  - id: does-run-digest-now
+    say: "run the digest now"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: run_now, states: [workflow]}
+
+  - id: does-run-digest-at-six
+    say: "run the nightly digest at 6pm"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: set_schedule, states: [workflow, change]}
+
+  - id: does-stop-reminders-for-now
+    say: "stop the reminders for now"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: pause_schedule, states: [workflow]}
+
+  - id: does-start-digest-again
+    say: "start the digest again"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: resume_schedule, states: [workflow]}
+
+  - id: does-reviewers-four-hours
+    say: "reviewers get 4 hours, then it goes to the admin"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: set_deadline, states: [workflow, change]}
+
+  - id: does-fire-payment-reminder
+    say: "fire the payment reminder"
+    checked: {colour: acts, via: handler}
+    source: routing
+    reaches: {verb: run_now, states: [workflow]}
+
   - id: does-stop-welcome-email
     say: "stop sending the welcome email"
     checked: {colour: acts, via: handler}

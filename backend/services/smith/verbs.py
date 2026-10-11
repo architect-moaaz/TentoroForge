@@ -67,6 +67,14 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "add_workflow": {"workflow"},
     "edit_workflow": {"workflow", "change"},
     "remove_workflow": {"workflow"},
+    # When a process runs: the clock's fields of the Blueprint (`trigger.cron`,
+    # `trigger.enabled`, a human step's `dueIn`/`escalateTo`), and one that
+    # changes nothing — "run it now".
+    "set_schedule": {"workflow", "change"},
+    "pause_schedule": {"workflow"},
+    "resume_schedule": {"workflow"},
+    "set_deadline": {"workflow", "change"},
+    "run_now": {"workflow"},
     # Access — roles, permissions, who reaches which screen. One verb: the
     # security agent re-decides the model and a second call the screens.
     "edit_access": {"change"},
@@ -276,6 +284,29 @@ VERB_HELP: dict[str, str] = {
     "remove_workflow": (
         "Retire a workflow and take its controls off every screen: \"remove the "
         "delete nurse workflow\". Needs which workflow."
+    ),
+    "set_schedule": (
+        "Run a process on the clock: \"send the reminder every Monday at 9\", "
+        "\"run the digest nightly at 6\", \"check for overdue invoices every "
+        "hour\". Sets when (a cron the engine keeps, in the application's "
+        "zone). Needs which process and the cadence in the user's words."
+    ),
+    "pause_schedule": (
+        "Stop a scheduled process until it is resumed: \"pause the nightly "
+        "digest\", \"stop sending the reminders for now\". Needs which process."
+    ),
+    "resume_schedule": (
+        "Start a paused schedule again: \"resume the reminders\". Needs which process."
+    ),
+    "set_deadline": (
+        "How long a person has for a step of a process, and who gets it when "
+        "they are late: \"approvals not done in 2 days go to the manager\", "
+        "\"give reviewers 4 hours\". Needs which process and the deadline in "
+        "the user's words."
+    ),
+    "run_now": (
+        "Run a scheduled process right now, on a copy of the data, and say what "
+        "happened: \"run the digest now\", \"fire the reminder\". Needs which process."
     ),
     "edit_access": (
         "Change who can do what: \"add a Ward Manager role\", \"only admins can "
@@ -580,6 +611,26 @@ VERB_HELP: dict[str, str] = {
 #: the old classifier's prompt; there is no prompt now, so they live with the
 #: verb. The phrasebook checks each is still quoted somewhere the model reads.
 VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
+    'set_schedule': (
+        'send the payment reminder every Monday at 9',
+        'run the nightly digest at 6pm',
+    ),
+    'pause_schedule': (
+        'pause the nightly digest',
+        'stop the reminders for now',
+    ),
+    'resume_schedule': (
+        'resume the reminders',
+        'start the digest again',
+    ),
+    'set_deadline': (
+        'approvals not done in 2 days go to the manager',
+        'reviewers get 4 hours, then it goes to the admin',
+    ),
+    'run_now': (
+        'run the digest now',
+        'fire the payment reminder',
+    ),
     'compose_route': (
         'The page is empty',
         'add a dashboard at /',

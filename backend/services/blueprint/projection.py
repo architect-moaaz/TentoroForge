@@ -2245,7 +2245,7 @@ def feel_condition(expr: Any) -> Any:
 
 
 #: Step config keys that name a role.
-_ROLE_KEYS = ("recipientRole", "toRole", "assigneeRole", "role")
+_ROLE_KEYS = ("recipientRole", "toRole", "assigneeRole", "role", "escalateTo")
 
 
 def _roles_by_name(config: dict[str, Any], role_names: dict[str, str]) -> dict[str, Any]:
@@ -2430,6 +2430,71 @@ def _table_of(doc: dict, entity_id: str) -> str:
     return ""
 
 
+def _trigger_contract(doc: dict, wf: dict) -> dict[str, Any] | None:
+    """The top-level `trigger` the runtime reads (`events/triggers.ts`):
+    `{kind: "schedule", cron, timezone?, enabled?}` or `{kind: "event",
+    event}`. The legacy `definition.trigger` is still written beside it.
+
+    A `db_change` used to put its sentence under `definition.trigger.
+    condition`, which nothing read, so no process ever started on a record's
+    change (2026-10-12). The event is named as the data engine emits it:
+    the table's export name, lowercased, then `.created|updated|deleted`."""
+    from services.blueprint.cron_expr import is_valid_cron
+    t = wf.get("trigger") or {}
+    kind = str(t.get("kind") or "manual")
+    if kind == "schedule":
+        cron = str(t.get("cron") or "").strip()
+        if not cron and is_valid_cron(str(t.get("detail") or "")):
+            cron = str(t.get("detail")).strip()
+        if not is_valid_cron(cron):
+            return None
+        out: dict[str, Any] = {"kind": "schedule", "cron": cron}
+        if str(t.get("timezone") or "").strip():
+            out["timezone"] = str(t["timezone"]).strip()
+        if t.get("enabled") is False:
+            out["enabled"] = False
+        return out
+    if kind == "db_change":
+        on = str(t.get("on") or "")
+        ent = next((e for e in (doc.get("data") or {}).get("entities") or []
+                    if isinstance(e, dict) and str(e.get("id")) == str(t.get("entity") or "")), None)
+        if ent is None or on not in ("created", "updated", "deleted"):
+            return None
+        return {"kind": "event", "event": f"{_var_name(ent).lower()}.{on}"}
+    if kind in ("api_event", "webhook"):
+        event = str(t.get("event") or t.get("detail") or "").strip()
+        return {"kind": "event", "event": event} if event else None
+    return None
+
+
+def _write_tick(app_root: Path, crons: list[str]) -> str | None:
+    """The app's `vercel.json` cron entry, as often as the finest schedule
+    needs (floor one minute, default every fifteen). Merged into the file
+    the runtime shipped, or the template when the app has none yet."""
+    import json as _json
+    from services.blueprint.cron_expr import tick_minutes
+    from services.runtime_injector import _TEMPLATE_DIR
+    n = tick_minutes(crons)
+    target = Path(app_root) / "vercel.json"
+    source = target if target.exists() else (_TEMPLATE_DIR / "vercel.json")
+    try:
+        body = _json.loads(source.read_text("utf-8"))
+    except Exception:  # noqa: BLE001 — a file the person wrote by hand
+        return None
+    schedule = "* * * * *" if n == 1 else f"*/{n} * * * *"
+    crons_list = body.get("crons") if isinstance(body.get("crons"), list) else []
+    tick = next((c for c in crons_list if isinstance(c, dict) and c.get("path") == "/api/cron/tick"), None)
+    if tick is None:
+        crons_list.append({"path": "/api/cron/tick", "schedule": schedule})
+    elif tick.get("schedule") == schedule and target.exists():
+        return None
+    else:
+        tick["schedule"] = schedule
+    body["crons"] = crons_list
+    target.write_text(_json.dumps(body, indent=2) + "\n", "utf-8")
+    return "vercel.json"
+
+
 def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/lib/workflows/definitions/*.json`` from the Blueprint.
 
@@ -2450,6 +2515,7 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
     written: list[str] = []
     code_map: list[dict] = []
+    schedule_crons: list[str] = []
     # A step names a role as the Blueprint does (`ROLE-002`); the session,
     # the inbox and /api/notifications know it by its name ("Admin"). An id
     # there matched nobody — 0l133sp2's "awaiting KYC verification" was
@@ -2524,6 +2590,10 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
                        lambda k, t, cfg, lbl: _wf_node(k, t, len(nodes), cfg, lbl))
         _check_graph(str(wf.get("name") or wf.get("id")), nodes, edges, catalog)
 
+        contract = _trigger_contract(doc, wf)
+        if contract and contract.get("kind") == "schedule":
+            # The legacy shape carries the cron too, never the sentence.
+            trigger_cfg["cron"] = contract["cron"]
         definition = {
             "id": slug,
             "name": wf.get("name") or slug,
@@ -2548,7 +2618,10 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             "processVariables": [],
             "definition": {"trigger": dict(trigger_cfg),
                            "nodes": nodes, "edges": edges},
+            **({"trigger": contract} if contract else {}),
         }
+        if contract and contract.get("kind") == "schedule":
+            schedule_crons.append(str(contract["cron"]))
         (out / f"{slug}.json").write_text(
             json.dumps(definition, indent=2, sort_keys=True) + "\n", "utf-8")
         rel = f"src/lib/workflows/definitions/{slug}.json"
@@ -2566,6 +2639,10 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 (out / f"{slug}.json").unlink(missing_ok=True)
 
     written.append(project_launch_roles(doc, app_root)["files"][0])
+    if schedule_crons:
+        tick = _write_tick(Path(app_root), schedule_crons)
+        if tick:
+            written.append(tick)
     return {"files": written, "workflows": len(written), "codeMap": code_map}
 
 

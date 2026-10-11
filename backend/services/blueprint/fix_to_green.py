@@ -187,15 +187,15 @@ def _check_everything(svc: Any, output_dir: str, app_root: str, report: Any, *, 
     say(f"Checked {total} page{'s' if total != 1 else ''}: {max(total - len(reds) - len(untried), 0)} work, "
         f"{len(reds)} don't" + (f", {len(untried)} I couldn't open" if untried else "") + ".")
     rules = _on_a_bench(svc, output_dir, bench_factory=bench_factory, client=client, cancelled=cancelled,
-                        what=("routes", "access", "rules", "domain"))
+                        what=("routes", "access", "rules", "systems", "domain"))
     _write_logic(svc, processes, rules.get("rules"))
     say(_logic_line(svc))
 
 
 def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, cancelled: Callable[[], bool],
                 what: tuple[str, ...], only_pages: set[str] | None = None, only_entities: set[str] | None = None,
-                only_rules: set[str] | None = None) -> dict:
-    """Routes, access, rules and the domain score on ONE running copy."""
+                only_rules: set[str] | None = None, only_flows: set[str] | None = None) -> dict:
+    """Routes, access, rules, the clock and the domain score on ONE running copy."""
     from services.smith import trials
     results: dict[str, dict] = {}
     factory = bench_factory or trials.Bench
@@ -235,6 +235,15 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
                 logger.warning("[fix-to-green] the rule trials failed", exc_info=True)
                 results["rules"] = {"total": 0, "green": [], "red": [],
                                     "untried": [sc.item("rules", "Rules", f"the check failed: {exc}"[:200], "rules")]}
+        if "systems" in what:
+            try:
+                from services.blueprint.clock_check import check_clock
+                out = check_clock(app, svc.doc, bench=bench, app_root=str(Path(output_dir) / "app"), client=client,
+                                  only=only_flows, cancelled=cancelled)
+                _merge(svc, "systems", out, only_flows)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[fix-to-green] the clock check failed", exc_info=True)
+                sc.write(svc, "systems", green=0, red=[], untried=[sc.item("systems", sc.LABELS["systems"], f"the check failed: {exc}"[:200], "systems")])
         if "domain" in what:
             try:
                 from services.blueprint.domain_score import score_domain
@@ -404,10 +413,12 @@ def _check_again(svc: Any, output_dir: str, app_root: str, report: Any, batch: l
             sc.write(svc, "logic", green=max(total - len(red) - len(untried), 0), red=red, untried=untried, total=total)
         except Exception:  # noqa: BLE001
             logger.warning("[fix-to-green] the process check again failed", exc_info=True)
-    if pages or rules or entities:
+    if pages or rules or entities or flows:
         results = _on_a_bench(svc, output_dir, bench_factory=bench_factory, client=client, cancelled=cancelled,
-                              what=tuple(c for c, on in (("routes", pages), ("access", entities), ("rules", rules)) if on),
-                              only_pages=pages or None, only_entities=entities or None, only_rules=rules or None)
+                              what=tuple(c for c, on in (("routes", pages), ("access", entities), ("rules", rules),
+                                                         ("systems", flows)) if on),
+                              only_pages=pages or None, only_entities=entities or None, only_rules=rules or None,
+                              only_flows=flows or None)
         if rules and results.get("rules"):
             prior = (sc.read(svc.doc) or card)["criteria"]["logic"]
             out = results["rules"]

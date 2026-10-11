@@ -36,6 +36,7 @@ function _actorOf(pv: Record<string, unknown> | undefined): { id: string; role?:
   buildTimeoutResumeInput,
   WAITING_EVENT_VAR,
 } from "./triggers";
+import { buildTimerResumeInput } from "./triggers";
 
 export interface EmitOpts {
   entity?: string | null;
@@ -320,10 +321,10 @@ export async function resumeExpiredWaits(now: Date = new Date()): Promise<number
   }> = [];
   try {
     const res: any = await db.execute(sql`
-      SELECT id, workflow_id, node_id, process_variables
+      SELECT id, workflow_id, node_id, task_type, process_variables
       FROM workflow_tasks
       WHERE status = 'pending'
-        AND task_type = 'wait_for_event'
+        AND task_type IN ('wait_for_event', 'wait_timer')
         AND due_at IS NOT NULL
         AND due_at <= ${now.toISOString()}::timestamptz
       ORDER BY due_at
@@ -351,7 +352,13 @@ export async function resumeExpiredWaits(now: Date = new Date()): Promise<number
           ? JSON.parse(task.process_variables || "{}")
           : ((task.process_variables as Record<string, unknown>) ?? {});
       const awaited = String(pv?.[WAITING_EVENT_VAR] ?? "");
-      const input = buildTimeoutResumeInput(pv, task.node_id, awaited);
+      // A TIMER'S TIME CAME; AN EVENT'S WAIT RAN OUT. The first continues
+      // as planned (`waited: true`), the second on its escalation branch
+      // (`timedOut: true`).
+      const timer = String((task as any).task_type ?? "") === "wait_timer";
+      const input = timer
+        ? buildTimerResumeInput(pv, task.node_id, now.toISOString())
+        : buildTimeoutResumeInput(pv, task.node_id, awaited);
 
       // Complete the task row FIRST so a slow/failed resume can never
       // double-fire on the next sweep (mirrors the scheduler's
@@ -359,7 +366,7 @@ export async function resumeExpiredWaits(now: Date = new Date()): Promise<number
       try {
         await db.execute(sql`
           UPDATE workflow_tasks
-          SET status = 'completed', completed_at = NOW(), decision = 'timeout'
+          SET status = 'completed', completed_at = NOW(), decision = ${timer ? "elapsed" : "timeout"}
           WHERE id = ${task.id}::uuid AND status = 'pending'
         `);
       } catch (err) {

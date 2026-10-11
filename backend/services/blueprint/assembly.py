@@ -690,6 +690,11 @@ def assemble(doc: dict, app_root: str | Path, *,
         f"DATABASE_URL={database_url}\n"
         f"AUTH_SECRET={kept.get('AUTH_SECRET') or secrets.token_urlsafe(32)}\n"
         f"NEXTAUTH_SECRET={kept.get('NEXTAUTH_SECRET') or secrets.token_urlsafe(32)}\n"
+        # THE CLOCK'S OWN KEY. The tick (`/api/cron/tick`) is outside the
+        # sign-in gate and authenticates itself with this; the app's
+        # self-ping and Vercel's cron both carry it. Kept across rebuilds
+        # like the auth secrets, so a running schedule is not locked out.
+        f"CRON_SECRET={kept.get('CRON_SECRET') or secrets.token_urlsafe(24)}\n"
         # No NEXTAUTH_URL: pinning it to :3000 sent every post-login redirect
         # to a port the app is not served on. NextAuth infers the origin from
         # the request, which is correct for any port a preview lands on.
@@ -757,7 +762,7 @@ def assemble(doc: dict, app_root: str | Path, *,
     }
 
 
-_SECRET_KEYS = ("AUTH_SECRET", "NEXTAUTH_SECRET")
+_SECRET_KEYS = ("AUTH_SECRET", "NEXTAUTH_SECRET", "CRON_SECRET")
 
 
 def existing_secrets(app_root: str | Path) -> dict[str, str]:

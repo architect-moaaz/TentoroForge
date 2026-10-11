@@ -84,9 +84,26 @@ export function isValidCron(expr: string): boolean {
  * are restricted, the day matches if EITHER matches; when only one is
  * restricted it alone governs.
  */
-export function cronMatches(expr: string, date: Date): boolean {
+/** The clock parts of `date` in `timezone` (UTC when none): minute, hour,
+ *  day of month, month, day of week. */
+export function clockParts(date: Date, timezone?: string): { minute: number; hour: number; dom: number; month: number; dow: number } {
+  if (!timezone) {
+    return { minute: date.getUTCMinutes(), hour: date.getUTCHours(), dom: date.getUTCDate(),
+             month: date.getUTCMonth() + 1, dow: date.getUTCDay() };
+  }
+  const fmt = new Intl.DateTimeFormat("en-US", { timeZone: timezone, hourCycle: "h23", minute: "numeric",
+    hour: "numeric", day: "numeric", month: "numeric", weekday: "short" });
+  const got: Record<string, string> = {};
+  for (const part of fmt.formatToParts(date)) got[part.type] = part.value;
+  const dows = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return { minute: Number(got.minute), hour: Number(got.hour) % 24, dom: Number(got.day),
+           month: Number(got.month), dow: Math.max(0, dows.indexOf(String(got.weekday).slice(0, 3))) };
+}
+
+export function cronMatches(expr: string, date: Date, timezone?: string): boolean {
   const parts = String(expr ?? "").trim().split(/\s+/);
   if (parts.length !== 5) return false;
+  const at = clockParts(date, timezone);
 
   const minute = parseCronField(parts[0], 0, 59);
   const hour = parseCronField(parts[1], 0, 23);
@@ -98,15 +115,15 @@ export function cronMatches(expr: string, date: Date): boolean {
   const inSet = (set: Set<number> | "*", v: number): boolean =>
     set === "*" || set.has(v);
 
-  if (!inSet(minute, date.getUTCMinutes())) return false;
-  if (!inSet(hour, date.getUTCHours())) return false;
-  if (!inSet(mon, date.getUTCMonth() + 1)) return false;
+  if (!inSet(minute, at.minute)) return false;
+  if (!inSet(hour, at.hour)) return false;
+  if (!inSet(mon, at.month)) return false;
 
   // 7 ≡ 0 ≡ Sunday: normalise a set containing 7 to also contain 0.
-  const day = date.getUTCDay();
+  const day = at.dow;
   const dowMatch =
     dow === "*" || dow.has(day) || (day === 0 && dow.has(7));
-  const domMatch = inSet(dom, date.getUTCDate());
+  const domMatch = inSet(dom, at.dom);
   if (dom !== "*" && dow !== "*") return domMatch || dowMatch;
   if (dom !== "*") return domMatch;
   if (dow !== "*") return dowMatch;
@@ -127,7 +144,7 @@ const _MINUTE_MS = 60 * 1000;
  * so each due window fires exactly once no matter how often (or rarely)
  * the sweeper is invoked.
  */
-export function isDue(expr: string, lastRunAt: Date | null, now: Date): boolean {
+export function isDue(expr: string, lastRunAt: Date | null, now: Date, timezone?: string): boolean {
   if (!isValidCron(expr)) return false;
   const nowFloor = Math.floor(now.getTime() / _MINUTE_MS) * _MINUTE_MS;
   const lookback = lastRunAt ? _LOOKBACK_MS : _FIRST_RUN_LOOKBACK_MS;
@@ -138,7 +155,7 @@ export function isDue(expr: string, lastRunAt: Date | null, now: Date): boolean 
     start = Math.max(start, lastFloor + _MINUTE_MS);
   }
   for (let t = start; t <= nowFloor; t += _MINUTE_MS) {
-    if (cronMatches(expr, new Date(t))) return true;
+    if (cronMatches(expr, new Date(t), timezone)) return true;
   }
   return false;
 }

@@ -147,6 +147,14 @@ def workflow(ctx: Ctx, u: dict) -> Outcome:
     return step
 
 
+def schedule(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.schedule_change import run
+    verb = u["verb"]
+    return from_seam(run(ctx.out, verb, workflow=_s(u, "workflow") or ctx.ask, change=_s(u, "change") or ctx.ask,
+                         reasoning=ctx.reasoning),
+                     fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+
+
 def access(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.access_change import run
     return from_seam(run(ctx.out, _s(u, "change") or ctx.ask, reasoning=ctx.reasoning),
@@ -825,6 +833,8 @@ PERFORM: dict[str, Perform] = {
     "restyle": restyle, "set_logo": logo, "remove_logo": logo,
     "edit_navigation": navigation,
     "add_workflow": workflow, "edit_workflow": workflow, "remove_workflow": workflow,
+    "set_schedule": schedule, "pause_schedule": schedule, "resume_schedule": schedule,
+    "set_deadline": schedule, "run_now": schedule,
     "edit_access": access,
     "add_rule": rule, "edit_rule": rule, "remove_rule": rule,
     "add_entity": entity, "remove_entity": entity,

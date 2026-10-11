@@ -700,17 +700,37 @@ async function executeNode(
         break;
 
       case "wait": {
-        // Cap wait to 5 seconds in execution — real delays should use scheduling
-        const waitMs = Math.min(Number(config.duration || 0), 5000);
-        if (waitMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        // A WAIT IS A PAUSE, NOT A SLEEP. The run is put down the way a
+        // `wait_for_event` is — a workflow_tasks row with its due time —
+        // and the clock (`resumeExpiredWaits`, from the tick) picks it up
+        // and replays this node with `{waited: true}` as its cached output.
+        // Only a wait short enough to hold the request (≤ 5 s) sleeps in
+        // place. `Number("1 hour")` used to be NaN, so no wait ever waited.
+        const untilText = typeof config.until === "string" && config.until.trim()
+          ? String(interpolateValue(config.until, ctx.variables) ?? "") : "";
+        const untilAt = untilText ? new Date(untilText) : null;
+        const waitMs = untilAt && !Number.isNaN(untilAt.getTime())
+          ? Math.max(0, untilAt.getTime() - Date.now())
+          : parseDurationMs(config.for ?? config.duration ?? config.durationMs);
+        if (waitMs <= 5_000) {
+          if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+          logEntry.output = { waited: true, waitedMs: waitMs };
+          nextEdges = workflow.definition.edges.filter((e) => e.source === node.id);
+          break;
         }
-        logEntry.output = { waitedMs: waitMs, requestedMs: config.duration };
-      }
-        nextEdges = workflow.definition.edges.filter(
-          (e) => e.source === node.id,
-        );
+        const until = new Date(Date.now() + waitMs).toISOString();
+        logEntry.status = "running";
+        logEntry.output = {
+          taskCreated: true,
+          taskType: "wait_timer",
+          waitingForHumanAction: true, // THE pause flag — see executeWorkflow's scan
+          until,
+          dueIn: Math.max(1, Math.ceil(waitMs / 60_000)),
+        };
+        ctx.variables.__waiting_event = "__timer";
+        nextEdges = [];
         break;
+      }
 
       case "user_task":
       case "approval":
@@ -1585,3 +1605,31 @@ async function executeParallelBranches(
 // Rule-table evaluation lives in ./decision.ts (kept out of engine.ts
 // so the standalone test harness can exercise it without pulling in
 // any @/db / drizzle imports).
+
+/**
+ * How long a `wait` waits, in milliseconds: an ISO-8601 duration (`P2D`,
+ * `PT90M`), words (`2 days`, `90 minutes`, `1 hour 30 minutes`), or a
+ * number of milliseconds (the legacy `duration`/`durationMs`). Unreadable
+ * is 0: the run does not wait, and the author's check refuses the step.
+ */
+export function parseDurationMs(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, value);
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+  if (/^\d+(\.\d+)?$/.test(text)) return Math.max(0, Number(text));
+  const iso = /^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/i.exec(text);
+  if (iso) {
+    const [, w, d, h, m, s] = iso.map((x) => Number(x || 0));
+    return ((((w * 7 + d) * 24 + h) * 60 + m) * 60 + s) * 1000;
+  }
+  let total = 0;
+  let matched = false;
+  const units: Record<string, number> = { s: 1000, sec: 1000, second: 1000, m: 60_000, min: 60_000, minute: 60_000,
+    h: 3_600_000, hr: 3_600_000, hour: 3_600_000, d: 86_400_000, day: 86_400_000, w: 604_800_000, week: 604_800_000 };
+  for (const part of text.matchAll(/(\d+(?:\.\d+)?)\s*(weeks?|w|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b/gi)) {
+    const unit = part[2].toLowerCase().replace(/s$/, "");
+    const ms = units[unit] ?? units[unit.replace(/e$/, "")] ?? 0;
+    if (ms) { total += Number(part[1]) * ms; matched = true; }
+  }
+  return matched ? total : 0;
+}

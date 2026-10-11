@@ -1,5 +1,5 @@
 {
-  "$comment": "Forge workflow node catalog — the components a workflow is built from. Source of truth: packages/catalog/workflow-nodes.json. The copies at backend/contracts/workflow-node-catalog.json and frontend/src/catalog/workflow-nodes.json are emitted by packages/catalog/scripts/emit.mjs; backend/tests/services/test_workflow_node_catalog.py fails when they drift. Every `type` is a runtime NodeType and every action variant has a registered handler.",
+  "$comment": "Forge workflow node catalog \u2014 the components a workflow is built from. Source of truth: packages/catalog/workflow-nodes.json. The copies at backend/contracts/workflow-node-catalog.json and frontend/src/catalog/workflow-nodes.json are emitted by packages/catalog/scripts/emit.mjs; backend/tests/services/test_workflow_node_catalog.py fails when they drift. Every `type` is a runtime NodeType and every action variant has a registered handler.",
   "catalogVersion": 1,
   "categories": [
     {
@@ -145,7 +145,7 @@
           "label": "Custom Action",
           "icon": "Play",
           "gradient": "bg-gradient-to-br from-teal-400 to-teal-600",
-          "description": "Evaluate ONE FEEL formula over the workflow's variables (in code or expression) — never instructions in words; work described in words is an AI step",
+          "description": "Evaluate ONE FEEL formula over the workflow's variables (in code or expression) \u2014 never instructions in words; work described in words is an AI step",
           "config": {
             "required": [
               [
@@ -315,7 +315,7 @@
           "label": "Transform",
           "icon": "Hash",
           "gradient": "bg-gradient-to-br from-stone-400 to-stone-600",
-          "description": "Transform/map data — an expression or code is ONE FEEL formula, never instructions in words",
+          "description": "Transform/map data \u2014 an expression or code is ONE FEEL formula, never instructions in words",
           "config": {
             "required": [
               [
@@ -373,7 +373,7 @@
           "label": "For Each",
           "icon": "Repeat",
           "gradient": "bg-gradient-to-br from-sky-400 to-blue-600",
-          "description": "Run steps once per item of a list — items: the list (\"{{extract_listings.output}}\"), as: the item's name, steps: [{key, config}] actions run in order per item, each output read by the steps after it as {{key.field}}; where: a FEEL condition over the item — items it rejects are skipped",
+          "description": "Run steps once per item of a list \u2014 items: the list (\"{{extract_listings.output}}\"), as: the item's name, steps: [{key, config}] actions run in order per item, each output read by the steps after it as {{key.field}}; where: a FEEL condition over the item \u2014 items it rejects are skipped",
           "config": {
             "required": [
               [
@@ -561,7 +561,7 @@
       "label": "Wait",
       "icon": "Clock",
       "gradient": "bg-gradient-to-br from-amber-500 to-amber-700",
-      "description": "Time-based delay",
+      "description": "A pause the clock ends \u2014 the run is put down and picked up when `for` has passed or `until` arrives",
       "handles": {
         "in": true,
         "out": true,
@@ -570,13 +570,13 @@
       "config": {
         "required": [
           [
+            "for",
+            "until",
             "duration",
             "durationMs"
           ]
         ],
-        "defaults": {
-          "duration": "1 hour"
-        }
+        "defaults": {}
       }
     },
     {
@@ -585,7 +585,7 @@
       "label": "End",
       "icon": "Square",
       "gradient": "bg-gradient-to-br from-red-400 to-red-600",
-      "description": "Workflow end. A workflow with more than one end says on EVERY end whether it was refused: config.refused true where the run stopped without doing what was asked (a check failed) — with config.message, the sentence the person is shown — and false where it did it",
+      "description": "Workflow end. A workflow with more than one end says on EVERY end whether it was refused: config.refused true where the run stopped without doing what was asked (a check failed) \u2014 with config.message, the sentence the person is shown \u2014 and false where it did it",
       "handles": {
         "in": true,
         "out": false,
@@ -782,7 +782,7 @@
       "label": "AI Extract",
       "icon": "ScanText",
       "gradient": "bg-gradient-to-br from-fuchsia-500 to-fuchsia-700",
-      "description": "Extract structured data (aiExtractFields) — one record, or with aiExtractMany: true a list of every record, which a db_insert writes one row per item",
+      "description": "Extract structured data (aiExtractFields) \u2014 one record, or with aiExtractMany: true a list of every record, which a db_insert writes one row per item",
       "handles": {
         "in": true,
         "out": true,

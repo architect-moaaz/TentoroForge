@@ -12,7 +12,8 @@ import { initializeRuntime } from "@/lib/runtime-loader";
 import { db } from "@/db";
 import { forgeSchedules } from "@/db/schema/_forge_schedules";
 import { eq } from "drizzle-orm";
-import { runDueSchedules } from "@/lib/events/scheduler";
+import { runDueSchedules, fireSchedule } from "@/lib/events/scheduler";
+import { processTaskEscalations } from "@/lib/workflows/escalation";
 import { processPendingEvents, resumeExpiredWaits } from "@/lib/events/bus";
 import { getTriggerContract } from "@/lib/events/triggers";
 
@@ -85,11 +86,30 @@ async function handler(req: Request): Promise<Response> {
 
   await initializeRuntime();
 
+  // THE TICK'S CLOCK. `?at=<iso>` lets the platform's checks (and Smith) ask
+  // "what would the clock do at this moment" — a wait due tomorrow is
+  // resumed today, on a copy, to prove that it resumes. `?workflow=<id>
+  // &force=1` fires one schedule whether or not it is due: "run it now".
+  // Both ride behind the same secret as the tick itself.
+  const params = new URL(req.url).searchParams;
+  const atParam = params.get("at");
+  const atDate = atParam ? new Date(atParam) : null;
+  const now = atDate && !Number.isNaN(atDate.getTime()) ? atDate : new Date();
+  let forced: { workflow: string; fired: boolean; reason?: string } | null = null;
+  const forceId = params.get("workflow");
+  if (forceId && params.get("force") === "1") {
+    try {
+      forced = { workflow: forceId, ...(await fireSchedule(forceId, now)) };
+    } catch (err) {
+      forced = { workflow: forceId, fired: false, reason: String(err) };
+    }
+  }
+
   // R2: exact-cron schedules (top-level trigger {kind:"schedule", cron}) —
   // real 5-field matcher against forge_schedules last-run state.
   let cronFired: string[] = [];
   try {
-    cronFired = (await runDueSchedules(new Date())).fired;
+    cronFired = (await runDueSchedules(now)).fired;
   } catch (err) {
     console.warn("[cron] runDueSchedules failed:", err);
   }
@@ -107,9 +127,34 @@ async function handler(req: Request): Promise<Response> {
   // timedOut marker so escalation branches fire instead of hanging forever.
   let timedOut = 0;
   try {
-    timedOut = await resumeExpiredWaits(new Date());
+    timedOut = await resumeExpiredWaits(now);
   } catch (err) {
     console.warn("[cron] resumeExpiredWaits failed:", err);
+  }
+
+  // OVERDUE TASKS GO TO WHOEVER THE STEP NAMED (`escalateTo`), and that
+  // role is told in the app. Recorded on every task since the engine's
+  // first day; acted on by nothing until 2026-10-12.
+  let escalated = 0;
+  try {
+    const out = await processTaskEscalations(db, async (_channel, target, payload) => {
+      try {
+        const { forgeNotifications } = await import("@/db/schema/_forge_notifications");
+        await db.insert(forgeNotifications).values({
+          title: "A task was handed to you",
+          message: String(payload?.message ?? ""),
+          role: String(target),
+          type: "warning",
+          entityId: payload?.recordId ? String(payload.recordId) : null,
+          link: payload?.taskId ? `/tasks/${payload.taskId}` : null,
+        });
+      } catch (err) {
+        console.warn("[cron] could not tell the escalation role:", err);
+      }
+    }, now);
+    escalated = out.escalated;
+  } catch (err) {
+    console.warn("[cron] processTaskEscalations failed:", err);
   }
 
   const all = await listWorkflows();
@@ -144,6 +189,9 @@ async function handler(req: Request): Promise<Response> {
   }
 
   return Response.json({
+    at: now.toISOString(),
+    ...(forced ? { forced } : {}),
+    escalated,
     checked: scheduled.length,
     fired,
     cronFired,

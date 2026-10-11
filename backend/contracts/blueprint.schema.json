@@ -1957,6 +1957,36 @@
               "detail": {
                 "type": "string",
                 "default": ""
+              },
+              "cron": {
+                "type": "string"
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "entity": {
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                "description": "Stable ENTITY identifier (§12)"
+              },
+              "on": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "updated",
+                  "deleted"
+                ]
+              },
+              "event": {
+                "type": "string"
+              },
+              "integration": {
+                "type": "string",
+                "pattern": "^INT-\\d{3,}$",
+                "description": "Stable INT identifier (§12)"
               }
             },
             "required": [
@@ -2030,6 +2060,23 @@
                     },
                     "message": {
                       "type": "string"
+                    },
+                    "for": {
+                      "type": "string"
+                    },
+                    "until": {
+                      "type": "string"
+                    },
+                    "timeout": {
+                      "type": "string"
+                    },
+                    "dueIn": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "escalateTo": {
+                      "$ref": "#/properties/roles/items/properties/id",
+                      "description": "Stable ROLE identifier (§12)"
                     },
                     "reply": {
                       "type": "object",
@@ -2489,9 +2536,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "pattern": "^INT-\\d{3,}$",
-            "description": "Stable INT identifier (§12)"
+            "$ref": "#/properties/workflows/items/properties/trigger/properties/integration"
           },
           "name": {
             "type": "string"
