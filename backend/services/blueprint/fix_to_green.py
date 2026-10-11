@@ -187,7 +187,7 @@ def _check_everything(svc: Any, output_dir: str, app_root: str, report: Any, *, 
     say(f"Checked {total} page{'s' if total != 1 else ''}: {max(total - len(reds) - len(untried), 0)} work, "
         f"{len(reds)} don't" + (f", {len(untried)} I couldn't open" if untried else "") + ".")
     rules = _on_a_bench(svc, output_dir, bench_factory=bench_factory, client=client, cancelled=cancelled,
-                        what=("routes", "access", "rules", "systems", "domain"))
+                        what=("routes", "access", "rules", "systems", "audit", "domain"))
     _write_logic(svc, processes, rules.get("rules"))
     say(_logic_line(svc))
 
@@ -258,6 +258,14 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[fix-to-green] the clock check failed", exc_info=True)
                 sc.write(svc, "systems", green=0, red=[], untried=[sc.item("systems", sc.LABELS["systems"], f"the check failed: {exc}"[:200], "systems")])
+        if "audit" in what:
+            try:
+                from services.blueprint.audit_check import check_audit
+                out = check_audit(app, svc.doc, cancelled=cancelled)
+                sc.write(svc, "audit", green=out["green"], red=out["red"], untried=out["untried"], total=out["total"])
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[fix-to-green] the audit check failed", exc_info=True)
+                sc.write(svc, "audit", green=0, red=[], untried=[sc.item("audit", sc.LABELS["audit"], f"the check failed: {exc}"[:200], "audit")])
         if "domain" in what:
             try:
                 from services.blueprint.domain_score import score_domain
@@ -329,10 +337,11 @@ def by_cause(reds: list[dict]) -> list[dict]:
     for r in reds:
         cause = str(r.get("cause") or r.get("id"))
         kind = ("process" if cause.startswith("FLOW-") else "rule" if cause.startswith("RULE-")
-                else "access" if cause.startswith("ENTITY-") else "integration" if cause.startswith("INT-") else "page")
+                else "access" if cause.startswith("ENTITY-") else "integration" if cause.startswith("INT-")
+                else "audit" if cause == "audit" else "page")
         g = groups.setdefault(cause, {"cause": cause, "kind": kind, "items": []})
         g["items"].append(r)
-    order = {"page": 0, "process": 1, "rule": 2, "access": 3, "integration": 4}
+    order = {"page": 0, "process": 1, "rule": 2, "access": 3, "integration": 4, "audit": 5}
     return sorted(groups.values(), key=lambda g: (order[g["kind"]], g["cause"]))
 
 
@@ -354,7 +363,8 @@ def ask_for(group: dict, doc: dict) -> str:
                 "findings": [(str(r.get("criterion") or "check"), str(r.get("why") or "")) for r in items]}
         return page_ask(group["cause"], item)
     seen = "\n".join(f"- {r.get('label')}: {r.get('why')}" for r in items[:12])
-    what = {"process": "process", "rule": "rule", "access": "record type", "integration": "outside system"}[group["kind"]]
+    what = {"process": "process", "rule": "rule", "access": "record type", "integration": "outside system",
+            "audit": "audit trail"}[group["kind"]]
     return (f"The build tried the {what} {items[0].get('label')} ({group['cause']}) as the people it is for. "
             f"This did not hold:\n{seen}\n\n"
             "Find the cause and fix it where it lives — the steps, a rule, the data model, who may do what, "

@@ -1289,6 +1289,51 @@ def check_security(result: "AgentResult", doc: dict | None) -> None:
         raise InvalidOwnershipRule(_all_of(problems))
 
 
+class InvalidAudit(AuthorRefusal):
+    """An audit policy nobody may read, or an audit screen for the wrong people."""
+
+
+def check_audit(result: "AgentResult", doc: dict | None) -> None:
+    """A trail has reviewers who are roles; reasons are required on records
+    that exist; an `audit_trail` page is for the reviewers, and only where a
+    trail is declared."""
+    doc = doc or {}
+    roles = {str(r.get("id")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    role_names = {str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    entities = {str(e.get("id")) for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)}
+    problems: list[str] = []
+    audit = ((doc.get("security") or {}).get("audit") or {}) if isinstance(doc.get("security"), dict) else {}
+    for p in result.proposals:
+        if p.section == "security" and isinstance(p.body, dict) and isinstance(p.body.get("audit"), dict):
+            audit = p.body["audit"]
+            level = str(audit.get("level") or "none")
+            reviewers = [str(r) for r in audit.get("reviewers") or []]
+            if level != "none" and not reviewers:
+                problems.append("security.audit: a trail nobody may read is write-only — name the `reviewers` (roles)")
+            for r in reviewers:
+                if r not in roles | role_names:
+                    problems.append(f"security.audit.reviewers: {r!r} is not a declared role")
+            for e in audit.get("reasonRequired") or []:
+                if str(e) not in entities:
+                    problems.append(f"security.audit.reasonRequired: {e!r} is not a declared entity id")
+    level = str(audit.get("level") or "none")
+    reviewers = {str(r) for r in audit.get("reviewers") or []}
+    for p in result.proposals:
+        if p.section != "pages" or not isinstance(p.body, dict):
+            continue
+        if str(p.body.get("pattern") or "") != "audit_trail":
+            continue
+        name = p.body.get("name") or p.natural_key
+        if level == "none":
+            problems.append(f"{name}: an `audit_trail` page needs a trail — `security.audit.level` is none")
+        users = [str(u) for u in p.body.get("users") or []]
+        if not users or any(u not in reviewers for u in users):
+            problems.append(f"{name}: an `audit_trail` page is for the reviewers the audit policy names; "
+                            f"`users` must be among {sorted(reviewers) or ['(none declared)']}")
+    if problems:
+        raise InvalidAudit(_all_of(problems))
+
+
 class InvalidBusinessRule(AuthorRefusal):
     """A rule the engine could not evaluate as written."""
 
@@ -1600,6 +1645,7 @@ def apply_agent_result(
     check_workflow_steps(result, svc.doc, _mcp_servers(getattr(svc, "output_dir", None)))
     check_workflow_triggers(result, svc.doc)
     check_integrations(result, svc.doc)
+    check_audit(result, svc.doc)
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)

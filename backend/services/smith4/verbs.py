@@ -147,6 +147,13 @@ def workflow(ctx: Ctx, u: dict) -> Outcome:
     return step
 
 
+def audit(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.audit_change import run
+    verb = u["verb"]
+    return from_seam(run(ctx.out, verb, change=_s(u, "change") or ctx.ask, reasoning=ctx.reasoning),
+                     fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+
+
 def webhook(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.webhook_change import run
     return from_seam(run(ctx.out, integration=_s(u, "integration") or ctx.ask, change=_s(u, "change") or ctx.ask,
@@ -843,6 +850,7 @@ PERFORM: dict[str, Perform] = {
     "set_schedule": schedule, "pause_schedule": schedule, "resume_schedule": schedule,
     "set_deadline": schedule, "run_now": schedule,
     "add_webhook": webhook,
+    "show_audit": audit, "export_audit": audit, "verify_audit": audit, "edit_audit": audit,
     "edit_access": access,
     "add_rule": rule, "edit_rule": rule, "remove_rule": rule,
     "add_entity": entity, "remove_entity": entity,

@@ -1043,6 +1043,32 @@ async function _scoped(table: any, where: any, ctx: WorkflowExecutionContext, op
   return where ? and(where, scope) : scope;
 }
 
+/**
+ * A process's own write, on the trail: `via workflow:<id>`, as whoever was
+ * running it — a schedule or an event with nobody acting is the
+ * application's own (`workflow`). Recorded after the step's write, never
+ * failing it: a trail that cannot be written is said in the log.
+ */
+async function _trail(ctx: WorkflowExecutionContext, action: "create" | "update" | "delete", table: any,
+                      before: any, after: any): Promise<void> {
+  try {
+    const { auditOn, recordAudit, actorOf } = await import("../audit");
+    if (!auditOn()) return;
+    const user = (ctx as any)?.user;
+    const actor = user?.id ? actorOf(user) : { kind: "workflow" as const };
+    const wid = String((ctx as any)?.workflowId ?? "");
+    await recordAudit(db, { action, entity: getTableName(table), entityId: (after ?? before)?.id != null ? String((after ?? before).id) : null,
+      before: before ?? null, after: after ?? null, actor, via: wid ? `workflow:${wid}` : "workflow",
+      runId: (ctx as any)?.runId ? String((ctx as any).runId) : null });
+  } catch (err) {
+    console.warn("[workflow] the trail could not be written:", err);
+  }
+}
+
+function auditOn(): boolean {
+  try { return Boolean(require("../audit").auditOn()); } catch { return false; }
+}
+
 export const MATCHES_NOTHING = Symbol("matches-nothing");
 
 /** The comparisons an object `where` value may name, and their spellings. */
@@ -1279,6 +1305,7 @@ export function registerDefaultActions(): void {
           try {
             const rows = await (db as any).insert(table).values(values).returning();
             const row = Array.isArray(rows) ? rows[0] : rows;
+            await _trail(ctx, "create", table, null, row);
             if (row) inserted.push(await embedWrittenRow(table, row));
           } catch (err) {
             console.warn(`[workflow] db_insert (row-fanout): row failed —`, err);
@@ -1333,6 +1360,7 @@ export function registerDefaultActions(): void {
       const values = _finalizeInsert(table, raw, ctx);
       const rows = await (db as any).insert(table).values(values).returning();
       const row = Array.isArray(rows) ? rows[0] : rows;
+      await _trail(ctx, "create", table, null, row);
       if (row && typeof row === "object") await embedWrittenRow(table, row);
       if (row && typeof row === "object") {
         // Legacy flat aliases (`scan_sessions_id`) — kept for
@@ -1457,9 +1485,15 @@ export function registerDefaultActions(): void {
       const q = (db as any).update(table).set(raw);
       const where = _buildWhere(table, (config as any).where, ctx);
       _requireWhereOrThrow("db_update", config, where);
-      const rows = await q.where(await _scoped(table, where, ctx, "write")).returning();
+      const kept = await _scoped(table, where, ctx, "write");
+      const before: any[] = auditOn() ? await (db as any).select().from(table).where(kept) : [];
+      const rows = await q.where(kept).returning();
       if (Array.isArray(rows)) {
-        for (const r of rows) await embedWrittenRow(table, r, null, Object.keys(raw));
+        const was = new Map(before.map((b: any) => [String(b?.id), b]));
+        for (const r of rows) {
+          await embedWrittenRow(table, r, null, Object.keys(raw));
+          await _trail(ctx, "update", table, was.get(String(r?.id)) ?? null, r);
+        }
       }
       const count = Array.isArray(rows) ? rows.length : 1;
       // `updated` (the legacy scalar) + contract-declared `updated: {count, rows}`.
@@ -1504,6 +1538,7 @@ export function registerDefaultActions(): void {
       try {
         const rows: any = await (q.where(kept) as any).returning();
         count = Array.isArray(rows) ? rows.length : 0;
+        for (const r of Array.isArray(rows) ? rows : []) await _trail(ctx, "delete", table, r, null);
       } catch {
         await q.where(kept);
       }

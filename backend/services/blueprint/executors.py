@@ -1423,6 +1423,10 @@ NODE_TASKS: dict[str, str] = {
         "human-readable label (`labelField`), which are required, unique or "
         "the primary key, which take one of a fixed set of `enumValues`, and "
         "which hold sensitive data. Mark `sensitive: true` on anything "
+        "A sensitive field may say how it is shown to roles not among its "
+        "`readers` (`mask`: last4, email, phone, full). A record type whose "
+        "rows are written once and never changed or removed — a ledger, a log, "
+        "a consent — is `appendOnly: true`. "
         "personal or financial — downstream agents rely on that flag and "
         "cannot see this section to second-guess it. The foreign keys are "
         "the declared relationships: give each one its column here, named as "
@@ -1466,6 +1470,10 @@ NODE_TASKS: dict[str, str] = {
         "product."
     ),
     "page_contracts": (
+        "When the application keeps an audit trail (`security.audit.level` is "
+        "not none), declare one page of pattern `audit_trail` for its reviewers "
+        "(`users` are the reviewer roles): it is the runtime's own screen of who "
+        "did what, when, before and after; nothing else is written for it. "
         "Decide the page set, feature by feature, from the slots below: fill "
         "a feature completely or decline it completely, and for every page "
         "you keep give its `name`, `route`, a one-sentence `purpose`, its "
@@ -1927,6 +1935,15 @@ NODE_TASKS: dict[str, str] = {
         "not need is not declared."
     ),
     "security": (
+        "Say what the application keeps on the record, under `audit`: `level` "
+        "none, `writes` (every create, update and delete, with who, when, before "
+        "and after, kept so it cannot be changed) or `regulated` (writes plus "
+        "sensitive reads, exports and sign-ins, with a reason required on the "
+        "record types named in `reasonRequired`); `reviewers`, the roles that "
+        "open and export the trail (a trail nobody may read is refused); and "
+        "`retentionDays` when the field keeps records for a set time. The "
+        "domain decides the level — what its regulators, auditors and "
+        "disputes expect — not caution.\n\n"
         "Define roles and the permissions that guard entities and endpoints. "
         "Then say who reaches which rows: an entity whose rows belong to one "
         "user or one workspace needs an ownershipRules entry naming the entity "
@@ -2759,6 +2776,13 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                             "another. Names a field below."
                         ),
                     },
+                    "appendOnly": {
+                        "type": "boolean",
+                        "description": (
+                            "True on a record type whose rows are written once and never "
+                            "changed or removed — a ledger, a log, a consent."
+                        ),
+                    },
                     "account": {
                         "type": "boolean",
                         "description": (
@@ -2781,6 +2805,18 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                 "required": {"type": "boolean"},
                                 "primaryKey": {"type": "boolean"},
                                 "unique": {"type": "boolean"},
+                                "mask": {
+                                    "type": "string",
+                                    "enum": ["last4", "email", "phone", "full"],
+                                    "description": (
+                                        "On a sensitive field: how it is shown to roles not "
+                                        "among its readers."
+                                    ),
+                                },
+                                "readers": {
+                                    "type": "array", "items": {"type": "string"},
+                                    "description": "On a sensitive field: the roles that may see it unmasked.",
+                                },
                                 "sensitive": {
                                     "type": "boolean",
                                     "description": (

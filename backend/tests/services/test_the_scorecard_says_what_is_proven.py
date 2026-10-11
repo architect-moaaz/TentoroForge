@@ -38,7 +38,8 @@ def test_the_boot_card_knows_what_the_build_could_not_finish(tmp_path):
     assert (pages["total"], pages["green"]) == (2, 1)
     assert pages["red"][0]["id"] == "PAGE-002" and "not served" in pages["red"][0]["why"]
     assert card["status"] == "checking" and card["version"] == 3
-    assert all(card["criteria"][c]["untried"] for c in sc.CRITERIA)      # nothing else tried yet
+    assert all(card["criteria"][c]["untried"] for c in sc.CRITERIA if c != "audit")   # nothing else tried yet
+    assert card["criteria"]["audit"] == {"total": 0, "green": 0, "red": [], "untried": []}, "no trail declared: nothing to prove"
     assert svc.doc["runtime"]["scorecard"] is card and svc.saves == 1
     assert card["criteria"]["logic"]["total"] == 1                          # one process to run
 

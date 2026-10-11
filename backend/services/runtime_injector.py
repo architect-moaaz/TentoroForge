@@ -284,6 +284,26 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
         except Exception as e:
             errors.append(f"Failed to copy data-engine: {e}")
 
+    # THE TRAIL: the module the data engine, the workflow handlers, the
+    # sign-in and the export record through. Reads the projected policy
+    # (`src/lib/audit-policy.ts`, a stub below when the Blueprint declares
+    # no trail) and does nothing at level `none`.
+    audit_src = _TEMPLATE_DIR / "audit.ts"
+    if audit_src.exists():
+        try:
+            shutil.copy2(audit_src, src_lib / "audit.ts")
+            copied.append("src/lib/audit.ts")
+        except Exception as e:
+            errors.append(f"Failed to copy audit: {e}")
+    policy = src_lib / "audit-policy.ts"
+    if not policy.exists():
+        policy.write_text(
+            "// Written by the Blueprint projection (project_audit). None: this\n"
+            "// application declares no audit trail, so nothing is recorded.\n"
+            "export const AUDIT = { level: \"none\", reviewers: [], retentionDays: null, reasonRequired: [] } as const;\n",
+            encoding="utf-8")
+        copied.append("src/lib/audit-policy.ts")
+
     # Slice-4 sensitive-column encrypt-at-rest helper. Copied into every
     # generated app so the data-engine can import it even when no sensitive
     # column is currently declared (the manifest is always emitted; the
@@ -908,6 +928,29 @@ def _inject_file_storage(output_path: Path) -> list[str]:
                     txt.rstrip() + '\nexport { forgeEvents } from "./_forge_events";\n',
                     encoding="utf-8",
                 )
+
+    # 5a''. forge_audit table: the trail. Shipped like forge_events so
+    #       drizzle-kit creates it; the runtime guards it on first use.
+    au_schema = _TEMPLATE_DIR / "db" / "forge-audit.schema.ts"
+    if au_schema.exists() and schema_dir.exists():
+        shutil.copy2(au_schema, schema_dir / "_forge_audit.ts")
+        written.append("src/db/schema/_forge_audit.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_audit" not in txt:
+                barrel.write_text(
+                    txt.rstrip() + '\nexport { forgeAudit } from "./_forge_audit";\n',
+                    encoding="utf-8",
+                )
+    for sub, dst in (("api-audit/route.ts", "audit/route.ts"), ("api-audit/export/route.ts", "audit/export/route.ts"),
+                     ("api-audit/verify/route.ts", "audit/verify/route.ts")):
+        src = _TEMPLATE_DIR / sub
+        if src.exists():
+            target = output_path / "src" / "app" / "api" / dst
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
+            written.append(f"src/app/api/{dst}")
 
     # 5b. workflow_tasks table: pending human tasks emitted by user_task
     #     nodes. persistPendingTask (runtime/workflows/index.ts:186) writes

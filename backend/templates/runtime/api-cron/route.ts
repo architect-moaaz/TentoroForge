@@ -188,10 +188,20 @@ async function handler(req: Request): Promise<Response> {
     }
   }
 
+  // THE TRAIL'S RETENTION, through its one door.
+  let pruned = 0;
+  try {
+    const audit = await import("@/lib/audit");
+    pruned = await audit.pruneByPolicy(now);
+  } catch (err) {
+    console.warn("[cron] the audit prune failed:", err);
+  }
+
   return Response.json({
     at: now.toISOString(),
     ...(forced ? { forced } : {}),
     escalated,
+    pruned,
     checked: scheduled.length,
     fired,
     cronFired,

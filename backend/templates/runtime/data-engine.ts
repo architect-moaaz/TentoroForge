@@ -24,6 +24,18 @@ import { windowStart, priorWindow } from "./data-engine/aggregate-window";
 // with no sensitive columns, so every helper below is a no-op fast-path on
 // non-sensitive entities — zero overhead for plain CRUD.
 import { sensitiveColumnsFor, type SensitiveColumnSpec } from "./sensitive-columns";
+import { actorOf, auditOn, ready as auditReady, reasonRequired, recordAudit, regulated, withAudit } from "./audit";
+
+/** Whether `entity` is a ledger — rows written once. The manifest is
+ *  projected beside this module; an app built before it existed has none. */
+async function isAppendOnly(entity: string): Promise<boolean> {
+  try {
+    const mod: any = await import("./append-only-entities");
+    return Boolean(mod?.isAppendOnly?.(entity));
+  } catch {
+    return false;
+  }
+}
 import { encryptSensitive, decryptSensitive, mask, looksMasked } from "./sensitive-crypto";
 // SEARCH-2 op:"search" — the manifest lists which `_search` tsvector columns
 // each entity carries. Empty for apps with no `search: true` columns, so
@@ -121,6 +133,14 @@ export interface DataEngineContext {
   /** A signed-out visitor's guest token (the `forge-guest` cookie): the rows
    *  a rule's `guestColumn` marks as theirs are reachable with it. */
   guest?: string;
+  /** Why this change is made — required on the records the audit policy
+   *  names (`X-Change-Reason` on the request). */
+  reason?: string;
+  /** Where the write came from, for the trail: `api` (default),
+   *  `workflow:<id>`, `event:<type>`, `seed`, `smith`. */
+  via?: string;
+  /** The run a workflow's write belongs to. */
+  runId?: string;
 }
 
 // ─── Slice-4 encrypt-at-rest helpers ─────────────────────────────────────
@@ -168,6 +188,30 @@ function _auditUnmask(entity: string, column: string, ctx: DataEngineContext): v
   // aggregators. `console.info` is chosen so a debug filter can drop it
   // in dev without losing warnings/errors.
   console.info("[sensitive-unmask]", JSON.stringify(payload));
+}
+
+/** A row as the trail keeps it: every sensitive value as its mask, never
+ *  the plaintext or the ciphertext. */
+function _snapshotForAudit(entityName: string, row: Record<string, any> | null | undefined): Record<string, any> | null {
+  if (!row || typeof row !== "object") return null;
+  const specs = sensitiveColumnsFor(entityName);
+  const out: Record<string, any> = { ...row };
+  for (const col of Object.keys(specs)) {
+    const encKey = `${col}_encrypted`;
+    const maskKey = `${col}_mask`;
+    if (encKey in out) delete out[encKey];
+    if (col in out && out[col] != null) out[col] = out[maskKey] ?? _maskPlain(out[col], specs[col].mask);
+  }
+  return out;
+}
+
+/** The change to `entity` needs a reason the request did not carry. */
+async function _requireReason(entityName: string, ctx: DataEngineContext): Promise<void> {
+  await auditReady();
+  if (!auditOn() || !reasonRequired(entityName)) return;
+  if (!String(ctx.reason ?? "").trim()) {
+    throw new ValidationError([`A reason is required to change a ${entityName}: say why (X-Change-Reason).`]);
+  }
 }
 
 /** Write path: convert every plaintext sensitive value in `data` into the
@@ -256,6 +300,13 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
       // the incident is visible in logs.
       const blob = record[encKey];
       _auditUnmask(entityName, col, ctx);
+      if (regulated()) {
+        // LOOKING IS ON THE RECORD: who saw which column of which row.
+        await recordAudit(db, { action: "read_sensitive", entity: entityName,
+          entityId: (record as any)?.id != null ? String((record as any).id) : null, changed: [col],
+          actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api" }).catch((e: unknown) =>
+            console.warn("[audit] a sensitive read could not be recorded:", e));
+      }
       try {
         display = blob ? await decryptSensitive(String(blob)) : null;
       } catch (e) {
@@ -1004,9 +1055,15 @@ export async function create(
   }
   await _encryptSensitiveOnWrite(entityName, validated);
 
-  // Insert
+  // Insert — and the trail's row, in the same transaction.
+  await _requireReason(entityName, ctx);
   stringifyDatesForStringColumns(entity.table, validated);
-  const [record] = await db.insert(entity.table).values(validated as any).returning();
+  const record = await withAudit(
+    async (tx: any) => (await tx.insert(entity.table).values(validated as any).returning())[0],
+    (r: any) => ({ action: "create", entity: entityName, entityId: r?.id != null ? String(r.id) : null,
+                   before: null, after: _snapshotForAudit(entityName, r), reason: ctx.reason ?? null,
+                   actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api", runId: ctx.runId ?? null }),
+  );
   await embedWrittenRow(entity.table, record);
   const event = `${entityName.toLowerCase()}_created`;
 
@@ -1038,6 +1095,11 @@ export async function update(
                        ...await accessConditions(entityName, entity, ctx)])!;
   const [existing] = await db.select().from(entity.table).where(where).limit(1);
   if (!existing) throw new NotFoundError(entityName, id);
+  // ROWS WRITTEN ONCE ARE NOT CHANGED — in the engine, not only at the route.
+  if (await isAppendOnly(entityName)) {
+    throw new ValidationError([`${entityName} is a ledger: rows are added, never changed.`]);
+  }
+  await _requireReason(entityName, ctx);
 
   // Strip system fields
   const { id: _, createdAt, updatedAt, created_at, updated_at, ...cleanData } = data;
@@ -1076,7 +1138,13 @@ export async function update(
   await _encryptSensitiveOnWrite(entityName, updateData);
 
   stringifyDatesForStringColumns(entity.table, updateData);
-  const [record] = await db.update(entity.table).set(updateData).where(where).returning();
+  const record = await withAudit(
+    async (tx: any) => (await tx.update(entity.table).set(updateData).where(where).returning())[0],
+    (r: any) => ({ action: "update", entity: entityName, entityId: String(id),
+                   before: _snapshotForAudit(entityName, existing), after: _snapshotForAudit(entityName, r),
+                   reason: ctx.reason ?? null, actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api",
+                   runId: ctx.runId ?? null }),
+  );
   await embedWrittenRow(entity.table, record, existing);
   const event = `${entityName.toLowerCase()}_updated`;
 
@@ -1101,8 +1169,17 @@ export async function remove(
                        ...await accessConditions(entityName, entity, ctx)])!;
   const [existing] = await db.select().from(entity.table).where(where).limit(1);
   if (!existing) throw new NotFoundError(entityName, id);
+  if (await isAppendOnly(entityName)) {
+    throw new ValidationError([`${entityName} is a ledger: rows are added, never removed.`]);
+  }
+  await _requireReason(entityName, ctx);
 
-  await db.delete(entity.table).where(where);
+  await withAudit(
+    async (tx: any) => { await tx.delete(entity.table).where(where); return existing; },
+    (r: any) => ({ action: "delete", entity: entityName, entityId: String(id),
+                   before: _snapshotForAudit(entityName, r), after: null, reason: ctx.reason ?? null,
+                   actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api", runId: ctx.runId ?? null }),
+  );
   const event = `${entityName.toLowerCase()}_deleted`;
 
   emit(event, { entityId: id, entity: existing, user: ctx.user }).catch(console.error);

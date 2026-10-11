@@ -460,6 +460,54 @@ sentences:
     source: code
     reaches: {verb: add_webhook, states: [integration, change]}
 
+  - id: does-who-changed-invoices
+    say: "who changed the invoices yesterday"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: show_audit, states: [change]}
+
+  - id: does-show-deletions
+    say: "show me the deletions"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: show_audit, states: [change]}
+
+  - id: does-export-audit
+    say: "export the audit trail"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: export_audit, states: []}
+
+  - id: does-audit-for-auditors
+    say: "give me the audit log for the auditors"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: export_audit, states: []}
+
+  - id: does-audit-intact
+    say: "is the audit trail intact"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: verify_audit, states: []}
+
+  - id: does-verify-record
+    say: "verify the record"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: verify_audit, states: []}
+
+  - id: does-keep-on-record
+    say: "keep every change on the record"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_audit, states: [change]}
+
+  - id: does-reason-to-change-invoice
+    say: "require a reason to change an invoice"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_audit, states: [change]}
+
   - id: does-stop-welcome-email
     say: "stop sending the welcome email"
     checked: {colour: acts, via: handler}

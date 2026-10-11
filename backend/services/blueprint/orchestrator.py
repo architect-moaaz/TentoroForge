@@ -493,10 +493,13 @@ FANOUT: dict[str, Any] = {
         s["id"] for s in (doc.get("designSources") or []) if s.get("id")
     ],
     # A deferred module's screens are declared and not written (see `scope`).
+    # An `audit_trail` page is the runtime's own screen (`project_audit`),
+    # gated to the reviewers; nobody writes code for it.
     "pages": lambda doc: [
         p["id"] for p in (doc.get("pages") or [])
         if p.get("id") and p.get("status") != "DEPRECATED"
         and p["id"] not in _deferred_pages(doc)
+        and str(p.get("pattern") or "") != "audit_trail"
     ],
     # §107 step 16 — one call per declared workflow.
     "workflows": lambda doc: [
@@ -2971,7 +2974,7 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     control that lived in the route would not cover the SSR path.
     """
     from services.blueprint.projection import (
-        apply_data_projection, project_append_only_entities,
+        apply_data_projection, project_append_only_entities, project_audit,
         project_embedding_columns, project_ownership_rules,
         project_searchable_columns, project_sensitive_columns,
     )
@@ -2983,6 +2986,7 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     project_searchable_columns(svc.doc, app_root)
     project_embedding_columns(svc.doc, app_root)
     project_append_only_entities(svc.doc, app_root)
+    project_audit(svc.doc, app_root)
     project_ownership_rules(svc.doc, app_root)
 
 

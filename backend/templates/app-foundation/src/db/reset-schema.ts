@@ -40,8 +40,12 @@ const SCAFFOLD_TABLES = new Set([
   "__drizzle_migrations",
 ]);
 
+// `forge_` is the prefix the runtime's tables carry (forge_events,
+// forge_audit, …); `_forge_` was their FILE name, which no table has, so the
+// trail counted as the person's work and a republish could wipe it.
 const isScaffold = (name: string) =>
-  SCAFFOLD_TABLES.has(name) || name.startsWith("_forge_") ||
+  SCAFFOLD_TABLES.has(name) || name.startsWith("_forge_") || name.startsWith("forge_") ||
+  name === "workflow_execution_log" || name === "workflow_tasks" ||
   name.startsWith("drizzle");
 
 // Wrapped in an async IIFE — tsx transforms to CJS in Vercel builds,

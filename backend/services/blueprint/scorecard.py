@@ -27,7 +27,7 @@ from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
 
-CRITERIA: tuple[str, ...] = ("pages", "routes", "access", "logic", "systems", "domain", "smith")
+CRITERIA: tuple[str, ...] = ("pages", "routes", "access", "logic", "systems", "audit", "domain", "smith")
 
 LABELS: dict[str, str] = {
     "pages": "Pages built and working",
@@ -35,6 +35,7 @@ LABELS: dict[str, str] = {
     "access": "Each role sees only its own",
     "logic": "Processes and rules",
     "systems": "Runs on time and talks to the outside",
+    "audit": "Every change is on the record",
     "domain": "What such products have",
     "smith": "Fixed after hand-over",
 }
@@ -75,6 +76,10 @@ def empty(doc: dict) -> dict:
         pass
     for c in CRITERIA:
         card["criteria"][c]["untried"] = [item(c, LABELS[c], "not checked yet", c)]
+    # NO TRAIL DECLARED, NOTHING TO PROVE: the row reads 0 of 0, not "not yet".
+    audit = ((doc.get("security") or {}).get("audit") or {}) if isinstance(doc.get("security"), dict) else {}
+    if str(audit.get("level") or "none") == "none":
+        card["criteria"]["audit"] = _criterion()
     return card
 
 

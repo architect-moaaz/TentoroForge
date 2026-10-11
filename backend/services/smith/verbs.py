@@ -78,6 +78,11 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # An outside system that calls the application: which one, and what it
     # tells the app (its events, in the user's words).
     "add_webhook": {"integration", "change"},
+    # The audit trail: read it, export it, verify its chain, change the policy.
+    "show_audit": {"change"},
+    "export_audit": set(),
+    "verify_audit": set(),
+    "edit_audit": {"change"},
     # Access — roles, permissions, who reaches which screen. One verb: the
     # security agent re-decides the model and a second call the screens.
     "edit_access": {"change"},
@@ -316,6 +321,26 @@ VERB_HELP: dict[str, str] = {
         "when an order is paid\", \"accept payment.succeeded from Stripe\". Gives the "
         "address to call, the header it signs with and the NAME of the secret to set. "
         "Needs which system and what it tells the app."
+    ),
+    "show_audit": (
+        "Read the audit trail: \"who changed the invoices yesterday\", \"what did "
+        "Dave do on 2026-10-01\", \"show me the deletions\". Answers from the "
+        "record: who, what, when, before and after. Needs what to look for, in "
+        "the user's words."
+    ),
+    "export_audit": (
+        "Export the whole audit trail as a file: \"export the audit trail\", "
+        "\"give me the audit log for the auditors\"."
+    ),
+    "verify_audit": (
+        "Check the audit trail is intact — every entry still chained to the one "
+        "before: \"is the audit trail intact\", \"verify the record\"."
+    ),
+    "edit_audit": (
+        "Change what is kept on the record: \"keep every change on the record\", "
+        "\"keep the trail for seven years\", \"let the compliance officer read "
+        "the audit trail\", \"require a reason to change an invoice\". Re-decides "
+        "the audit policy. Needs the change in the user's words."
     ),
     "edit_access": (
         "Change who can do what: \"add a Ward Manager role\", \"only admins can "
@@ -643,6 +668,22 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'add_webhook': (
         'let Shopify tell the app when an order is paid',
         'accept payment.succeeded from Stripe',
+    ),
+    'show_audit': (
+        'who changed the invoices yesterday',
+        'show me the deletions',
+    ),
+    'export_audit': (
+        'export the audit trail',
+        'give me the audit log for the auditors',
+    ),
+    'verify_audit': (
+        'is the audit trail intact',
+        'verify the record',
+    ),
+    'edit_audit': (
+        'keep every change on the record',
+        'require a reason to change an invoice',
     ),
     'compose_route': (
         'The page is empty',

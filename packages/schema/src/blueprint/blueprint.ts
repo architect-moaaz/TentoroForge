@@ -338,6 +338,7 @@ export const PagePattern = z.enum([
   // build never saw — no contract, no design, not in the editor — so every
   // app opened on the same sign-in page with the same "Welcome back". As
   // pages they are written like every other; `auth` says which.
+  "audit_trail",
   "auth",
 ]);
 
@@ -1641,6 +1642,12 @@ export const Field = z.object({
   enumValues: z.array(z.string()).optional(),
   /** Marks PII / financial data so security rules can act on it structurally. */
   sensitive: z.boolean().default(false),
+  /** How a sensitive value is shown to a role not among its `readers`:
+   *  the last four, the email's shape, the phone's last four, or nothing. */
+  mask: z.enum(["last4", "email", "phone", "full"]).optional(),
+  /** The roles that may see a sensitive value unmasked; looking is on the
+   *  record when the audit level is `regulated`. */
+  readers: z.array(z.string()).optional(),
   /**
    * The entity this field points at, when it is a foreign key.
    *
@@ -1693,6 +1700,13 @@ export const Entity = z.object({
    * no Member, filled a separate public "Create Profile" form that belonged
    * to nobody, and their KYC could not be found. At most one entity.
    */
+  /**
+   * ROWS ARE WRITTEN ONCE. A ledger, a log, a consent: inserted, never
+   * changed or removed — refused by the data engine and the data API, and
+   * said so to the person. The audit trail itself is append-only by the
+   * database, not by this flag.
+   */
+  appendOnly: z.boolean().default(false),
   account: z.boolean().optional(),
   ...artifactBase,
 });
@@ -2256,7 +2270,27 @@ export const Security = z.object({
     )
     .default([]),
   protectedRoutes: z.array(z.string()).default([]),
+  /** Superseded by `audit`; read by nothing. Kept so older documents load. */
   auditLogging: z.boolean().default(false),
+  /**
+   * THE TRAIL. `writes`: every create, update and delete of a record, with
+   * who, when, before and after, kept in `forge_audit` — tamper-evident
+   * (a hash chain) and immutable (the database refuses to change or erase a
+   * row). `regulated`: writes plus sensitive reads (an unmasked value),
+   * exports, sign-ins and sign-in failures, and a reason required on the
+   * records named in `reasonRequired`. `reviewers` are the roles that open
+   * the audit screen, export it and verify the chain; a level with none is
+   * refused — a trail nobody may read is write-only. `retentionDays`
+   * absent keeps everything.
+   */
+  audit: z
+    .object({
+      level: z.enum(["none", "writes", "regulated"]).default("none"),
+      reviewers: z.array(z.string()).default([]),
+      retentionDays: z.number().int().positive().optional(),
+      reasonRequired: z.array(EntityId).default([]),
+    })
+    .default({}),
 });
 
 // ===========================================================================

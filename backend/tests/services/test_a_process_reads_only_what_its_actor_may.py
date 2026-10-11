@@ -28,4 +28,6 @@ def test_every_reading_and_writing_step_asks_for_it():
     for handler, op in (("db_update", "write"), ("db_delete", "write"), ("db_query", "read")):
         block = index.split(f'registerActionHandler("{handler}"', 1)[1].split("registerActionHandler(", 1)[0]
         assert f'_scoped(table, where, ctx, "{op}")' in block, f"{handler} runs unscoped"
-    assert re.search(r"q\.where\(await _scoped\(table, where, ctx, \"write\"\)\)\.returning\(\)", index), "db_update writes through the scope"
+    update = index.split('registerActionHandler("db_update"', 1)[1].split("registerActionHandler(", 1)[0]
+    assert 'const kept = await _scoped(table, where, ctx, "write");' in update and "q.where(kept).returning()" in update, \
+        "db_update writes through the scope"

@@ -19,6 +19,20 @@ function profileOf(row: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
+/** A sign-in, or a failed one, on the trail when the level is `regulated`. */
+async function _signIn(user: any, email: string, ok: boolean): Promise<void> {
+  try {
+    const audit = await import("@/lib/audit");
+    if (!audit.regulated()) return;
+    await audit.recordAudit(db, { action: ok ? "login" : "login_failed", entity: "users",
+      entityId: user?.id != null ? String(user.id) : null, after: { email },
+      actor: user?.id ? { id: String(user.id), role: String(user.role ?? user.accountType ?? ""), kind: "user" } : { kind: "system" },
+      via: "sign-in" });
+  } catch (err) {
+    console.warn("[audit] a sign-in could not be recorded:", err);
+  }
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -37,15 +51,16 @@ export const authOptions: NextAuthOptions = {
             .where(eq(users.email, credentials.email))
             .limit(1);
 
-          if (!user) return null;
+          if (!user) { await _signIn(null, String(credentials.email), false); return null; }
           // Only check isActive if the field exists (not all schemas have it)
-          if ("isActive" in user && !(user as any).isActive) return null;
+          if ("isActive" in user && !(user as any).isActive) { await _signIn(user, String(credentials.email), false); return null; }
 
           const valid = await bcrypt.compare(
             credentials.password,
             (user as any).password
           );
-          if (!valid) return null;
+          if (!valid) { await _signIn(user, String(credentials.email), false); return null; }
+          await _signIn(user, String(credentials.email), true);
 
           // THE ROW, MINUS THE CREDENTIAL. Every scalar column of the users
           // row rides in the session: an ownership rule's `actorColumn`

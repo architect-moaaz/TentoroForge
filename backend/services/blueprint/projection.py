@@ -4644,6 +4644,66 @@ def project_public_nav(doc: dict, app_root: str | Path) -> str:
     return str(path.relative_to(Path(app_root)))
 
 
+AUDIT_POLICY_FILE = "src/lib/audit-policy.ts"
+
+
+def audit_policy(doc: dict) -> dict[str, Any]:
+    """The trail the Blueprint declares, as the runtime reads it: the level,
+    the reviewers by role NAME, retention, and the record types a change
+    must state a reason for — by every spelling the engine may use."""
+    sec = (doc.get("security") or {}).get("audit") if isinstance(doc.get("security"), dict) else {}
+    sec = sec if isinstance(sec, dict) else {}
+    level = str(sec.get("level") or "none")
+    if level not in ("writes", "regulated"):
+        level = "none"
+    role_names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or [] if isinstance(r, dict)}
+    reviewers = sorted({role_names.get(str(r), str(r)) for r in sec.get("reviewers") or [] if str(r)})
+    entities = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)}
+    reason: list[str] = []
+    for ref in sec.get("reasonRequired") or []:
+        ent = entities.get(str(ref))
+        if ent is None:
+            continue
+        for n in (ent.get("name"), ent.get("table"), _var_name(ent)):
+            if n and str(n).lower() not in reason:
+                reason.append(str(n).lower())
+    days = sec.get("retentionDays")
+    return {"level": level, "reviewers": reviewers, "retentionDays": int(days) if isinstance(days, int) and days > 0 else None,
+            "reasonRequired": reason}
+
+
+def project_audit(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write the audit policy the runtime reads, and the audit screen at the
+    route of every `audit_trail` page. A page of that pattern is a runtime
+    page, not one the page writer codes: the trail's reader is the same in
+    every application, gated to the reviewers the policy names."""
+    root = Path(app_root)
+    policy = audit_policy(doc)
+    lib = root / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    (lib / "audit-policy.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "//\n// The audit trail this application keeps: none, every write, or regulated\n"
+        "// (writes, sensitive reads, exports, sign-ins; a reason on the records named).\n"
+        f"export const AUDIT = {json.dumps(policy, indent=2)} as const;\n", "utf-8")
+    files = [AUDIT_POLICY_FILE]
+    if policy["level"] != "none":
+        from services.runtime_injector import _TEMPLATE_DIR
+        template = _TEMPLATE_DIR / "pages" / "audit-trail" / "page.tsx"
+        for page in doc.get("pages") or []:
+            if not isinstance(page, dict) or str(page.get("pattern") or "") != "audit_trail":
+                continue
+            if str(page.get("status") or "").upper() in ("DEPRECATED", "REMOVED"):
+                continue
+            route = str(page.get("route") or "/audit").strip("/") or "audit"
+            target = root / "src" / "app" / "(dashboard)" / route / "page.tsx"
+            if template.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(template.read_text("utf-8"), "utf-8")
+                files.append(f"src/app/(dashboard)/{route}/page.tsx")
+    return {"files": files, "level": policy["level"]}
+
+
 def project_append_only_entities(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/lib/append-only-entities.ts`` — imported by the data engine.
 

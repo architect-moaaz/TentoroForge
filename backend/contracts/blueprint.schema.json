@@ -657,6 +657,7 @@
               "split_view",
               "document_workspace",
               "tool",
+              "audit_trail",
               "auth"
             ]
           },
@@ -1698,6 +1699,21 @@
                       "type": "boolean",
                       "default": false
                     },
+                    "mask": {
+                      "type": "string",
+                      "enum": [
+                        "last4",
+                        "email",
+                        "phone",
+                        "full"
+                      ]
+                    },
+                    "readers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "references": {
                       "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
                       "description": "Stable ENTITY identifier (§12)"
@@ -1743,6 +1759,10 @@
               },
               "labelField": {
                 "type": "string"
+              },
+              "appendOnly": {
+                "type": "boolean",
+                "default": false
               },
               "account": {
                 "type": "boolean"
@@ -2765,6 +2785,40 @@
         "auditLogging": {
           "type": "boolean",
           "default": false
+        },
+        "audit": {
+          "type": "object",
+          "properties": {
+            "level": {
+              "type": "string",
+              "enum": [
+                "none",
+                "writes",
+                "regulated"
+              ],
+              "default": "none"
+            },
+            "reviewers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "retentionDays": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "reasonRequired": {
+              "type": "array",
+              "items": {
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+              },
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
         }
       },
       "additionalProperties": false,

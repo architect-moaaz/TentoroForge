@@ -80,6 +80,14 @@
 {"say": "fire the payment reminder", "verb": "run_now"}
 {"say": "let Shopify tell the app when an order is paid", "verb": "add_webhook"}
 {"say": "accept payment.succeeded from Stripe", "verb": "add_webhook"}
+{"say": "who changed the invoices yesterday", "verb": "show_audit"}
+{"say": "show me the deletions", "verb": "show_audit"}
+{"say": "export the audit trail", "verb": "export_audit"}
+{"say": "give me the audit log for the auditors", "verb": "export_audit"}
+{"say": "is the audit trail intact", "verb": "verify_audit"}
+{"say": "verify the record", "verb": "verify_audit"}
+{"say": "keep every change on the record", "verb": "edit_audit"}
+{"say": "require a reason to change an invoice", "verb": "edit_audit"}
 {"say": "remove the archive nurse thing", "verb": "remove_workflow"}
 {"say": "we don't want the Monday reminder any more", "verb": "remove_workflow"}
 {"say": "experience can't be more than 60 years", "verb": "add_rule"}

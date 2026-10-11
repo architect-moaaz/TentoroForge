@@ -161,6 +161,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ entity:
   try {
     const rows = (await db.select().from(table).limit(MAX_ROWS)) as Record<string, unknown>[];
     const csv = toCsv(carry, rows);
+    try {
+      const audit = await import("@/lib/audit");
+      if (audit.regulated()) {
+        await audit.recordAudit(db, { action: "export", entity: name, after: { rows: rows.length, columns: carry },
+          actor: audit.actorOf(user), via: "export" });
+      }
+    } catch (err) {
+      console.warn("[audit] the export could not be recorded:", err);
+    }
     const headers: Record<string, string> = {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="${name}.csv"`,

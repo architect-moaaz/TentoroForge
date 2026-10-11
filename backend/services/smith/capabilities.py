@@ -51,7 +51,7 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      frozenset({"add_rule", "edit_rule", "remove_rule"})),
     ("Who is allowed to do what",
      "Roles, permissions, and which screens each kind of person can open.",
-     frozenset({"edit_access"})),
+     frozenset({"edit_access", "show_audit", "export_audit", "verify_audit", "edit_audit"})),
     ("The people who log in",
      "Give someone a login, take one away, or send someone a fresh link when "
      "they are locked out. Each person sets their own password — I never see "
