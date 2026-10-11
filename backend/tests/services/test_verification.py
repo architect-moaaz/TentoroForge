@@ -55,7 +55,9 @@ def test_all_ten_section_75_edges_are_implemented():
     # below keeps meaning "the PRD's ten are all still implemented" rather
     # than drifting into "however many edges there happen to be".
     added = {"Navigation↔Page", "Page↔Workflow", "Widget↔DataSource",
-             "Page↔Layout", "Page↔Precondition", "Page↔Function"}
+             "Page↔Layout", "Page↔Precondition", "Page↔Function",
+             # The domain reference held to (`reference_coverage`).
+             "Reference↔Page", "Reference↔Record", "Reference↔Process", "Reference↔Integration"}
     prd_ten = set(EDGES) - added
     # Nine of §75's ten: Requirement↔Test counted declared tests that no step
     # ever wrote out or ran, so it could only ever say every requirement was

@@ -143,7 +143,9 @@ def test_an_app_that_cannot_start_records_every_process(tmp_path, monkeypatch):
     svc = _Svc(tmp_path, DOC)
     out = pt.prove_processes(svc, str(tmp_path), client=_client([]), bench_factory=_Down,
                              run_turn=lambda *a, **k: {})
-    assert len(out["left"]) == 2 and "would not start" in out["left"][0]["reason"]
+    # THE CHECK'S OWN FAILURE IS NOT THE APP'S: said as untried, never as failing.
+    assert out["left"] == []
+    assert len(out["untried"]) == 2 and "would not start" in out["untried"][0]["reason"]
 
 
 # --- a reply Smith can read --------------------------------------------------

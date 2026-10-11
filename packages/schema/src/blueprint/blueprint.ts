@@ -116,6 +116,86 @@ export const Capability = z.object({
   ...artifactBase,
 });
 
+// ===========================================================================
+// §11b · domainReference — what a practitioner expects of such a product
+// ===========================================================================
+
+/**
+ * One screen a product in this sub-domain is expected to have, independent
+ * of what was asked for. The model answers it with a page whose `reference`
+ * names it, or declines it with a reason.
+ */
+export const ReferenceScreen = z.object({
+  name: z.string(),
+  purpose: z.string().default(""),
+  forRoles: z.array(z.string()).default([]),
+  kind: z.enum(["dashboard", "list", "record", "form", "workspace", "public", "tool"]).optional(),
+});
+
+export const ReferenceRecord = z.object({
+  name: z.string(),
+  purpose: z.string().default(""),
+  /** The fields that make the record usable to a practitioner. */
+  fields: z.array(z.string()).default([]),
+  statuses: z.array(z.string()).default([]),
+});
+
+export const ReferenceProcess = z.object({
+  name: z.string(),
+  purpose: z.string().default(""),
+  steps: z.array(z.string()).default([]),
+  roles: z.array(z.string()).default([]),
+  /** The records the process writes. */
+  writes: z.array(z.string()).default([]),
+});
+
+export const ReferenceRule = z.object({
+  name: z.string(),
+  statement: z.string(),
+  /** One concrete input a correct product refuses. */
+  refusedCase: z.string().default(""),
+});
+
+/** A reference item this product does not need, and why; `by` is the agent
+ *  or "owner" that declined it. A decline without a reason is a finding. */
+export const ReferenceDecline = z.object({
+  kind: z.enum(["screen", "record", "process", "rule", "integration"]),
+  name: z.string(),
+  reason: z.string().min(1),
+  by: z.string().default("owner"),
+});
+
+/**
+ * The domain reference the build writes first (`domain_reference` node,
+ * owned by `domain_intelligence`): the domain and sub-domain this product
+ * belongs to and what a practitioner expects of a product there — screens,
+ * records, processes, rules with their refused cases, integrations,
+ * conventions and benchmark products. The model nodes are held to it (every
+ * item answered by an artifact whose `reference` names it, or declined with a
+ * reason) and the finished application is scored against it
+ * (`runtime.scorecard.domain`). `sources` holds what a researcher read when
+ * one did; empty means the model's own knowledge.
+ */
+export const DomainReference = z.object({
+  domain: z.string().default(""),
+  subdomain: z.string().default(""),
+  summary: z.string().default(""),
+  personas: z.array(Persona).default([]),
+  screens: z.array(ReferenceScreen).default([]),
+  records: z.array(ReferenceRecord).default([]),
+  processes: z.array(ReferenceProcess).default([]),
+  rules: z.array(ReferenceRule).default([]),
+  integrations: z
+    .array(z.object({ name: z.string(), purpose: z.string().default(""), providers: z.array(z.string()).default([]) }))
+    .default([]),
+  /** Units, statuses, vocabulary, regulatory habits of the field. */
+  conventions: z.array(z.string()).default([]),
+  /** Well-known products people would hold this one against, and what to take from each. */
+  benchmarks: z.array(z.object({ product: z.string(), takeaway: z.string().default("") })).default([]),
+  sources: z.array(z.string()).default([]),
+  declined: z.array(ReferenceDecline).default([]),
+});
+
 export const Product = z.object({
   objectives: z.array(z.string()).default([]),
   personas: z.array(Persona).default([]),
@@ -414,6 +494,8 @@ export const PageContract = z.object({
   route: z.string().describe("URL path, e.g. /candidates or /candidates/[id]"),
   purpose: z.string().describe("Why this page exists, in business terms"),
   pattern: PagePattern.optional(),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   /** On an `auth` page: which of the two it is. */
   auth: z.enum(["login", "signup"]).optional(),
   module: ModuleId.optional(),
@@ -1598,6 +1680,8 @@ export const Entity = z.object({
   name: z.string(),
   table: z.string(),
   description: z.string().default(""),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   fields: z.array(Field).default([]),
   /** Field used as the human label in pickers, FK columns and breadcrumbs. */
   labelField: z.string().optional(),
@@ -1770,6 +1854,8 @@ export const Workflow = z.object({
   id: WorkflowId,
   name: z.string(),
   purpose: z.string().default(""),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   trigger: z.object({
     /** A trigger variant from the workflow node catalog. */
     kind: z.enum(["manual", "webhook", "schedule", "api_event", "db_change"]),
@@ -1839,6 +1925,8 @@ export const BusinessRule = z.object({
   name: z.string(),
   /** Human statement of the rule, e.g. "Expenses above ₹50,000 need approval". */
   statement: z.string(),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   /** Machine-evaluable form. */
   expression: z.string().optional(),
   appliesTo: z.array(AnyArtifactId).default([]),
@@ -1896,6 +1984,8 @@ export const Integration = z.object({
   name: z.string(),
   kind: z.enum(["email", "storage", "payment", "auth", "webhook", "mcp", "other"]),
   provider: z.string().default(""),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   /** Names only. §42/§99 — raw credentials never live in the Blueprint. */
   secretRefs: z.array(z.string()).default([]),
   /**
@@ -2592,9 +2682,44 @@ export const Runtime = z.object({
       working: z.number(),
       fixed: z.array(z.string()).default([]),
       failing: z.array(z.string()).default([]),
+      /** Pages the check could not open — its own failure, never the app's; said, never repaired. */
+      untried: z.array(z.string()).default([]),
       /** The Blueprint version the check reflects; a later version is a
        *  change nobody has used the app after. */
       version: z.number().optional(),
+    })
+    .optional(),
+  /**
+   * The application scored against the definition of success, written by the
+   * checks that run after hand-over (`services/blueprint/scorecard`): pages
+   * built and working, routes answering as declared for every role, access
+   * (each role sees only its rows), logic (processes run through, rules
+   * refuse their refused case), domain (the reference answered) and smith
+   * (what the fix loop closed). `untried` is what a check could not try —
+   * its own failure, never the application's — and is never repaired.
+   */
+  scorecard: z
+    .object({
+      version: z.number().optional(),
+      at: z.string().optional(),
+      status: z.enum(["checking", "fixing", "done", "stopped"]).default("checking"),
+      criteria: z
+        .record(
+          z.object({
+            total: z.number().default(0),
+            green: z.number().default(0),
+            red: z.array(z.record(z.string(), z.unknown())).default([]),
+            untried: z.array(z.record(z.string(), z.unknown())).default([]),
+          }),
+        )
+        .default({}),
+      fix: z
+        .object({
+          turns: z.number().default(0),
+          yield: z.array(z.number()).default([]),
+          stopped: z.string().nullable().optional(),
+        })
+        .optional(),
     })
     .optional(),
 });
@@ -2760,6 +2885,7 @@ export const Blueprint = z.object({
 
   application: ApplicationMeta,
   product: Product.default({}),
+  domainReference: DomainReference.default({}),
 
   roles: z.array(Role).default([]),
   permissions: z.array(Permission).default([]),

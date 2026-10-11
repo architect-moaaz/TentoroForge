@@ -78,7 +78,7 @@ class _App:
 def _pages_saying(findings_by_round):
     rounds = iter(findings_by_round)
 
-    def check_pages(app, doc, todo, out_dir, *, server_said):
+    def check_pages(app, doc, todo, out_dir, *, server_said, **k):
         found = next(rounds)
         return {v["page"]: {"name": v["name"], "route": v["route"],
                             "findings": [(v["as"], found[v["route"]])] if v["route"] in found else []}

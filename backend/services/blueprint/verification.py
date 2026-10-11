@@ -57,6 +57,14 @@ EDGES: tuple[str, ...] = (
     # §73 — every other edge asks whether the Blueprint is coherent. This asks
     # whether what it describes would do anything.
     "Page↔Function",
+    # The domain reference held to: every screen, record, process, rule and
+    # integration a practitioner expects is answered by name or declined with
+    # a reason (`reference_coverage`). Four edges, not one, so a screen is
+    # judged at the model gate while the processes are not yet planned.
+    "Reference↔Page",
+    "Reference↔Record",
+    "Reference↔Process",
+    "Reference↔Integration",
 )
 
 #: What this module does *not* establish, so nobody mistakes a green report for
@@ -72,6 +80,7 @@ UNVERIFIED_HERE = (
 SECTION_OWNER: dict[str, str] = {
     "requirements": "requirement",
     "product": "product_analysis",
+    "domainReference": "domain_intelligence",
     "modules": "solution_architecture",
     "navigation": "solution_architecture",
     "pages": "page_design",
@@ -131,6 +140,10 @@ EDGE_SECTIONS: dict[str, tuple[str, ...]] = {
     "Page↔Workflow": ("pages", "workflows"),
     "Page↔Layout": ("pages", "pageLayouts"),
     "Widget↔DataSource": ("widgets", "pages", "data.entities"),
+    "Reference↔Page": ("domainReference", "pages"),
+    "Reference↔Record": ("domainReference", "data.entities"),
+    "Reference↔Process": ("domainReference", "workflows", "businessRules"),
+    "Reference↔Integration": ("domainReference", "integrations"),
 }
 
 #: Methods that change state and therefore need an explicit permission (§100).
@@ -1119,7 +1132,16 @@ CHECKS: dict[str, Callable[[dict], list[Finding]]] = {
     "Page↔Workflow": check_page_workflow,
     "Page↔Layout": check_page_layout,
     "Widget↔DataSource": check_widget_datasource,
+    "Reference↔Page": lambda doc: _reference_check("check_reference_pages", doc),
+    "Reference↔Record": lambda doc: _reference_check("check_reference_records", doc),
+    "Reference↔Process": lambda doc: _reference_check("check_reference_processes", doc),
+    "Reference↔Integration": lambda doc: _reference_check("check_reference_integrations", doc),
 }
+
+
+def _reference_check(name: str, doc: dict) -> list[Finding]:
+    from services.blueprint import reference_coverage
+    return getattr(reference_coverage, name)(doc)
 
 
 # ---------------------------------------------------------------------------

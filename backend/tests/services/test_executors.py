@@ -1606,6 +1606,7 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
     assert set(MAX_TOKENS_BY_NODE) == {"data_model", "page_contracts",
                                        "security", "workflows", "requirements",
                                        "business_rules", "analytics", "workflow_steps",
+                                       "domain_reference",
                                        "page_code"}   # a page's two whole files
 
 

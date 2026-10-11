@@ -1318,6 +1318,24 @@ NODE_TASKS: dict[str, str] = {
         "\"DEPRECATED\"`. Everything the brief does not touch is left out of "
         "your reply and stays exactly as it is."
     ),
+    "domain_reference": (
+        "From the requirements, name the DOMAIN and the SUB-DOMAIN this product belongs to — a "
+        "dental clinic is not a hospital; a food-ordering app is not a marketplace; a multi-vendor "
+        "marketplace is not a single-brand shop. Then write what a practitioner expects of a product "
+        "in that sub-domain, independent of what was asked for: the standard screens (each with who "
+        "it is for and what question it answers), the records such products keep (with the fields "
+        "that make them usable), the processes people run (with their steps, who runs them and what "
+        "each writes), the rules a correct product refuses to break (each with ONE concrete refused "
+        "case — an input the product must turn down), the integrations such products usually have, "
+        "the conventions of the field (units, statuses, vocabulary, regulatory habits, what a "
+        "record is called), and the three to five well-known products people would hold this one "
+        "against (`benchmarks`, with what to take from each).\n\n"
+        "BE SPECIFIC TO THE SUB-DOMAIN AND THE LOCALE: a list that would fit any application is a "
+        "failed answer. Name only what a practitioner would notice missing — eight to twenty "
+        "screens, not forty; the records and processes that define the field, not every one "
+        "imaginable. Write the `summary` as the two sentences a practitioner would use to say what "
+        "such a product is. Leave `declined` and `sources` empty: they are not yours."
+    ),
     "application_model": (
         "FIRST, THE LANGUAGE. If the request says what language the INTERFACE "
         "is in, set `locale` before anything else — a brief opening \"an "
@@ -2113,6 +2131,45 @@ def _conventions_addendum(doc: dict) -> str:
     )
 
 
+#: The model nodes held to the domain reference, and the reference list each
+#: answers. `security` answers the rules too: a rule about who may do what is
+#: its to write.
+REFERENCE_HOLD: dict[str, tuple[str, str]] = {
+    "ux_architecture": ("screens", "module"),
+    "page_contracts": ("screens", "page"),
+    "data_model": ("records", "entity"),
+    "workflows": ("processes", "workflow"),
+    "business_rules": ("rules", "rule"),
+    "security": ("rules", "rule or ownership rule"),
+    "integrations": ("integrations", "integration"),
+}
+
+
+def reference_hold(doc: dict, node: str) -> str:
+    """The paragraph that holds a model node to the domain reference: every
+    item of its kind answered by name or declined with a reason. Empty when
+    the application has no reference, or the node answers none of it."""
+    held = REFERENCE_HOLD.get(node)
+    if not held:
+        return ""
+    list_key, artifact = held
+    items = [i for i in ((doc.get("domainReference") or {}).get(list_key) or []) if isinstance(i, dict) and i.get("name")]
+    if not items:
+        return ""
+    kind = list_key[:-1] if list_key.endswith("s") else list_key
+    names = ", ".join(f"'{i['name']}'" for i in items[:40])
+    return (
+        f"\n\nHELD TO THE DOMAIN REFERENCE. `domainReference.{list_key}` is what a practitioner expects of "
+        f"this product: {names}. Every one of them is either ANSWERED — set `reference` on the {artifact} "
+        "that answers it, to the item's exact name — or DECLINED: return a `change_request` with "
+        "`section: \"domainReference\"`, `reason` saying why this product does not need it, and "
+        f"`proposed: {{\"declined\": [{{\"kind\": \"{kind}\", \"name\": \"<its exact name>\", "
+        "\"reason\": \"<why>\"}]}}`. An item neither answered nor declined is refused back to you. "
+        "What the person asked for comes first; the reference adds what they would expect without "
+        "having said it, and a decline is the right answer when it does not fit this product."
+    )
+
+
 def build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
     subject: str = "", feedback: str = "", references: Sequence[Path] = (),
@@ -2147,7 +2204,8 @@ def build_prompt(
         writes="\n".join(f"  - {s}" for s in sorted(cap.writes)) or "  (none)",
         reply_rules=(DATA_MODEL_REPLY_RULES if node in SCHEMA_BY_NODE
                      else ENVELOPE_RULES),
-        task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns."),
+        task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns.")
+             + reference_hold(doc, node),
     )
     if inline_shapes:
         shapes = writable_shapes(agent)
@@ -3565,6 +3623,9 @@ class RunUsage:
 #: also the one most likely to show up as worse UI, so it wants an A/B against
 #: the scoreboard rather than an assumption.
 EFFORT_BY_NODE: dict[str, str] = {
+    # What a practitioner expects of such a product: the one place the build
+    # reasons about the field itself. Everything downstream is held to it.
+    "domain_reference": "high",
     # Structure over work already decided; the shape is tightly constrained.
     "ux_architecture": "medium",
     "design_system": "medium",
@@ -3637,6 +3698,9 @@ EFFORT_BY_AGENT: dict[str, str] = {
 }
 
 MAX_TOKENS_BY_NODE: dict[str, int] = {
+    # Screens, records, processes, rules, conventions and benchmarks of a
+    # whole field in one reply; the headroom is free when unused.
+    "domain_reference": 64000,
     # Names the entities and their relationships without a field; the 64k
     # the single call needed went on fields, which `entity_fields` writes one
     # entity at a time inside the default.

@@ -203,6 +203,10 @@ class DagNode:
     whole: bool = False
 
 
+#: The reason a run reports when a person stopped it (`should_stop`).
+STOPPED_BY_PERSON = "stopped by the person"
+
+
 def _n(key, agent, depends_on=(), produces=(), note="", kind="agent",
        fanout="", optional=False, whole=False) -> DagNode:
     return DagNode(key, agent, frozenset(depends_on), frozenset(produces),
@@ -225,8 +229,16 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("figma_intelligence", "figma_intelligence", (), ("requirements",),
        fanout="design_sources",
        note="§48-§51; design evidence, not design decisions"),
+    # THE DOMAIN REFERENCE, FIRST. What a practitioner expects of a product in
+    # this sub-domain — screens, records, processes, rules, conventions,
+    # benchmarks — written from the requirements before anything is modelled,
+    # shown at the requirements' review, and held to by every model node
+    # (`reference_coverage`): "industry-standard and relevant to its domain"
+    # is measured against this, not guessed at.
+    _n("domain_reference", "domain_intelligence", ("requirements",), ("domainReference",),
+       note="what a practitioner expects of such a product; the model is held to it"),
     _n("application_model", "product_analysis",
-       ("requirements", "figma_intelligence"), ("product",)),
+       ("requirements", "figma_intelligence", "domain_reference"), ("product",)),
 
     # left branch — data
     # ENTITIES ARE NAMED ONCE AND DETAILED ONE AT A TIME. This node names the
@@ -1267,8 +1279,15 @@ def run(
     app_root: str | None = None,
     observer: Callable[[dict], None] | None = None,
     observer_agent: Any = None,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> RunReport:
     """Execute a plan in dependency order.
+
+    ``should_stop`` is asked before each round of the scheduler; when it says
+    so the run pauses as for an outage — nothing new is sent, what is in
+    flight lands, every node not started is skipped with the reason, and the
+    report says ``paused_because`` — so a person's Stop ends a build at its
+    next step instead of only closing the stream that watched it.
 
     ``executor`` performs the actual agent call — injected so this module never
     depends on an LLM. Retries are bounded by ``max_attempts`` (§103: tasks must
@@ -1338,7 +1357,7 @@ def run(
         return _execute(svc, executor, order, in_plan, report, done, ledger,
                         max_attempts=max_attempts, commit=commit,
                         user_request=user_request, app_root=app_root,
-                        observer_agent=observer_agent)
+                        observer_agent=observer_agent, should_stop=should_stop)
     except BaseException as exc:
         # THE LINE THAT WAS MISSING. A run that raises out of here used to
         # leave nothing at all — the report died with the call, the registry
@@ -1365,6 +1384,7 @@ def _execute(
     user_request: str,
     app_root: str | None,
     observer_agent: Any = None,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> RunReport:
     """The scheduler. Split from `run` so the ledger can record a crash.
 
@@ -1951,6 +1971,8 @@ def _execute(
     pool = ThreadPoolExecutor(max_workers=WAVE_CONCURRENCY)
     try:
         while True:
+            if not paused and should_stop():
+                pause(STOPPED_BY_PERSON)
             # Start everything that can start, to a fixpoint: a service node
             # completes inline and may have readied its dependents.
             while True:

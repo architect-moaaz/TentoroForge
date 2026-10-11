@@ -143,7 +143,7 @@ def test_a_failing_page_goes_to_smith_and_is_checked_again(monkeypatch, tmp_path
                                                                     "name": "Dashboard"}])
     rounds = []
 
-    def check_pages(app, doc, todo, out_dir, *, server_said):
+    def check_pages(app, doc, todo, out_dir, *, server_said, **k):
         rounds.append(sorted(v["route"] for v in todo))
         broken = len(rounds) == 1
         return {v["page"]: {"name": v["name"], "route": v["route"],
@@ -156,14 +156,14 @@ def test_a_failing_page_goes_to_smith_and_is_checked_again(monkeypatch, tmp_path
                        run_turn=lambda pid, od, ask, **k: asks.append((ask, k)) or {"answer": "fixed"})
     assert rounds == [["/dashboard", "/slots"], ["/slots"]]          # only the repaired page again
     assert len(asks) == 1 and "as Parent: slots show dates in 2001" in asks[0][0] and asks[0][1]["unattended"]
-    assert out == {"pages": 2, "working": 2, "fixed": ["/slots"], "left": [], "touched": []}
+    assert out == {"pages": 2, "working": 2, "fixed": ["/slots"], "left": [], "untried": [], "touched": []}
     assert svc.doc["runtime"]["check"] == {"pages": 2, "working": 2, "fixed": ["/slots"], "failing": [],
-                                           "version": 0}
+                                           "untried": [], "version": 0}
 
 
 def test_what_still_fails_is_recorded_by_name(monkeypatch, tmp_path):
     monkeypatch.setattr("services.blueprint.app_check.visits", lambda doc: [_visit()])
-    monkeypatch.setattr(ac, "check_pages", lambda app, doc, todo, out_dir, *, server_said: {
+    monkeypatch.setattr(ac, "check_pages", lambda app, doc, todo, out_dir, *, server_said, **k: {
         "PAGE-003": {"name": "Slots", "route": "/slots", "findings": [("Parent", "it answers HTTP 500")]}})
     svc = _Svc(tmp_path, DOC)
     out = ac.check_app(svc, str(tmp_path), app_factory=_App, record=False, run_turn=lambda *a, **k: {})
@@ -181,11 +181,13 @@ def test_the_record_of_the_check_is_declared_in_the_contract():
     jsonschema.validate({"check": {"pages": 3, "working": 2, "fixed": ["/a"], "failing": ["/b"]}}, runtime)
 
 
-def test_the_build_uses_the_app_after_its_processes_run():
-    src = (Path(__file__).resolve().parents[2] / "routers/blueprint_generate.py").read_text()
-    body = src[src.index("def _finish_unfinished_pages"):]
+def test_the_checks_use_the_app_after_its_processes_run():
+    """After hand-over (`fix_to_green`): the page funnel, then every process,
+    then every page used — a page's controls run the processes."""
+    src = (Path(__file__).resolve().parents[2] / "services/blueprint/fix_to_green.py").read_text()
+    body = src[src.index("def _check_everything"):]
     body = body[:body.index("\ndef ")]
-    assert body.index("prove_processes(") < body.index("check_app(")
+    assert body.index("_repair_pages(") < body.index("_prove_processes(") < body.index("_check_app(")
 
 
 # --- found on F&B's copy, 2026-10-03 -------------------------------------------------

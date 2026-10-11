@@ -186,10 +186,26 @@ def visit_id(v: dict) -> str:
 # Reading what the browser saw
 # --------------------------------------------------------------------------- #
 
+#: What the browser script reports about ITSELF: it could not navigate in
+#: time, could not take the picture. Neither is a fact about the page.
+TOOLING_PREFIXES = ("navigation:", "screenshot:")
+
+
+def tooling_faults(shot: dict) -> list[str]:
+    """The check's own failures on one visit — the browser did not get to the
+    page, or could not picture it. Said as "could not try", never as a fault
+    of the application: the app check once sent ten pages to repair for its
+    own screenshot timeout (`page_shots.mjs:154`, ECom L2, 2026-10-11)."""
+    if shot.get("unavailable"):
+        return [f"the page could not be opened: {shot['unavailable']}"]
+    return [f"the check's browser failed: {str(e)[:200]}" for e in shot.get("errors") or []
+            if str(e).startswith(TOOLING_PREFIXES)]
+
+
 def shot_findings(shot: dict, visit: dict, doc: dict) -> list[str]:
     """Facts about one page opened as one person that mean it does not work."""
     from services.blueprint.page_review import BROKEN_OUTCOMES
-    if shot.get("skipped"):
+    if shot.get("skipped") or shot.get("unavailable"):
         return []
     out: list[str] = []
     status = shot.get("status")
@@ -203,7 +219,7 @@ def shot_findings(shot: dict, visit: dict, doc: dict) -> list[str]:
     landed = str(shot.get("landed") or "")
     if visit["as"] != "signed out" and re.search(r"/(login|signin|sign-in)\b", landed):
         out.append(f"it sends a signed-in {visit['as']} to {landed}")
-    for e in (shot.get("errors") or [])[:4]:
+    for e in [e for e in shot.get("errors") or [] if not str(e).startswith(TOOLING_PREFIXES)][:4]:
         out.append(f"the browser reports: {str(e)[:200]}")
     empty = (shot.get("states") or {}).get("empty") or {}
     if (isinstance(empty.get("status"), int) and empty["status"] >= 500) or empty.get("errors"):
@@ -336,7 +352,8 @@ def _entries(app: Any, doc: dict, batch: list[dict]) -> list[dict]:
 
 
 def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
-                server_said: Callable[[], list[str]] = lambda: []) -> dict[str, dict]:
+                server_said: Callable[[], list[str]] = lambda: [],
+                cancelled: Callable[[], bool] = lambda: False) -> dict[str, dict]:
     """Open `todo` (from `visits`) and read what happened: `{page: {name,
     route, findings: [(as, finding)]}}` for every page visited."""
     from services.blueprint.page_review import ReviewUnavailable, run_shots
@@ -349,12 +366,13 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
     def shoot(role: str) -> tuple[str, list[dict]]:
         batch = by_role[role]
         safe = re.sub(r"[^a-z0-9]+", "-", role.lower()).strip("-") or "role"
+        if cancelled():
+            return role, [{"id": visit_id(v), "unavailable": "stopped by the person"} for v in batch]
         try:
             shots = run_shots(app, _entries(app, doc, batch), out_dir / safe,
                               probe=role != "signed out", states=role != "signed out")
         except ReviewUnavailable as exc:
-            shots = [{"id": visit_id(v), "errors": [f"the page could not be opened: {exc}"]}
-                     for v in batch]
+            shots = [{"id": visit_id(v), "unavailable": str(exc)} for v in batch]
         return role, shots
 
     with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
@@ -366,11 +384,16 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
     for role, shots in results:
         by_id = {str(s.get("id")): s for s in shots if isinstance(s, dict)}
         for v in by_role[role]:
-            page = report.setdefault(v["page"], {"name": v["name"], "route": v["route"], "findings": []})
+            page = report.setdefault(v["page"], {"name": v["name"], "route": v["route"], "findings": [],
+                                                 "untried": []})
             shot = by_id.get(visit_id(v))
+            where = f"{v['inside']}, " if v.get("inside") else ""
             if shot is None:
-                page["findings"].append((role, (f"{v['inside']}, " if v.get("inside") else "")
-                                         + "it could not be opened at all — the browser reported nothing for it"))
+                page["untried"].append((role, where + "the browser reported nothing for it"))
+                continue
+            for fault in tooling_faults(shot):
+                page["untried"].append((role, where + fault))
+            if shot.get("unavailable"):
                 continue
             if v.get("inside"):
                 # What the plain page already said is not said again from
@@ -388,7 +411,8 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
     login = next((v for v in todo if v.get("as") == "signed out" and not v.get("inside")), None)
     if login is not None:
         for f in arrival_findings(app, doc, out_dir):
-            report.setdefault(login["page"], {"name": login["name"], "route": login["route"], "findings": []})
+            report.setdefault(login["page"], {"name": login["name"], "route": login["route"], "findings": [],
+                                              "untried": []})
             report[login["page"]]["findings"].append(("signing in", f))
     return report
 
@@ -415,7 +439,8 @@ def check_app(svc: Any, output_dir: str, *args: Any, **kwargs: Any) -> dict:
 def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] | None = None,
                run_turn: Callable[..., dict] | None = None,
                app_factory: Callable[[Path], Any] | None = None,
-               rounds: int = ROUNDS, record: bool = True, only: set[str] | None = None) -> dict:
+               rounds: int = ROUNDS, record: bool = True, only: set[str] | None = None,
+               cancelled: Callable[[], bool] = lambda: False) -> dict:
     """Use every page as every role — or only the pages `only` names — repair
     what fails; returns the check's summary (also written to `runtime.check`,
     merged over the last one when only some pages were looked at). The summary
@@ -471,11 +496,11 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
                     return [l.strip() for l in fresh.decode("utf-8", "replace").splitlines() if l.strip()]
 
                 report = check_pages(running, svc.doc, todo, Path(output_dir) / ".forge" / "check" / f"round-{round_}",
-                                     server_said=server_said)
+                                     server_said=server_said, cancelled=cancelled)
             except Exception as exc:  # noqa: BLE001 — a check that cannot run is said, not fatal
                 logger.warning("[app-check] the app could not be run: %s", exc)
-                report = {v["page"]: {"name": v["name"], "route": v["route"],
-                                      "findings": [(v["as"], f"the app could not be started to check it: {exc}")]}
+                report = {v["page"]: {"name": v["name"], "route": v["route"], "findings": [],
+                                      "untried": [(v["as"], f"the app could not be started to check it: {exc}")]}
                           for v in todo}
                 last.update(report)
                 break
@@ -491,7 +516,7 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
                     fixed.append(item["route"])
                 ledger.node_subject("app_check", pid, len([1 for i in last.values() if not i["findings"]]),
                                     pages_total, not item["findings"])
-            if not failing or round_ > rounds:
+            if not failing or round_ > rounds or cancelled():
                 break
             for i, (pid, item) in enumerate(failing.items()):
                 if i >= MAX_REPAIRS:
@@ -511,25 +536,32 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
     left = [{"page": pid, "name": item["name"], "route": item["route"],
              "findings": [f"as {w}: {f}" for w, f in item["findings"][:8]]}
             for pid, item in last.items() if item["findings"]]
+    untried = [{"page": pid, "name": item["name"], "route": item["route"],
+                "reasons": [f"as {w}: {f}" for w, f in (item.get("untried") or [])[:8]]}
+               for pid, item in last.items() if item.get("untried") and not item["findings"]]
+    for item in untried:
+        logger.info("[app-check] could not try %s: %s", item["route"], "; ".join(item["reasons"][:2])[:300])
     for item in left:
         ledger_note = "; ".join(item["findings"][:3])[:600]
         logger.info("[app-check] still failing %s: %s", item["route"], ledger_note)
-    summary = {"pages": pages_total, "working": pages_total - len(left),
-               "fixed": sorted(set(fixed)), "left": left, "touched": touched}
-    _record(svc, last, left, fixed, pages_total, partial=only is not None)
+    summary = {"pages": pages_total, "working": pages_total - len(left) - len(untried),
+               "fixed": sorted(set(fixed)), "left": left, "untried": untried, "touched": touched}
+    _record(svc, last, left, fixed, pages_total, partial=only is not None, untried=untried)
     if only is not None:
-        failing = list((svc.doc.get("runtime") or {}).get("check", {}).get("failing") or [t["route"] for t in left])
-        summary["working"] = pages_total - len(failing)
+        check = (svc.doc.get("runtime") or {}).get("check", {})
+        failing = list(check.get("failing") or [t["route"] for t in left])
+        summary["working"] = pages_total - len(failing) - len(check.get("untried") or [])
     return summary
 
 
 def _record(svc: Any, last: dict[str, dict], left: list[dict], fixed: list[str], pages_total: int, *,
-            partial: bool) -> None:
+            partial: bool, untried: list[dict] | None = None) -> None:
     """Write what the check found. A check of some pages updates those pages
     and keeps what the last check said of the rest; without a whole check to
     build on it records the failures alone, never a count it did not see."""
     runtime = dict(svc.doc.get("runtime") or {})
     checked = {pid for pid in last}
+    checked_routes = {str(item.get("route")) for item in last.values()}
     prior = runtime.get("check") if isinstance(runtime.get("check"), dict) else None
     issues = [i for i in runtime.get("issues") or []
               if not (isinstance(i, dict) and i.get("kind") == "page_check"
@@ -538,11 +570,16 @@ def _record(svc: Any, last: dict[str, dict], left: list[dict], fixed: list[str],
                 "detail": " | ".join(t["findings"])[:600]} for t in left]
     runtime["issues"] = issues
     failing = sorted({str(i.get("route")) for i in issues if isinstance(i, dict) and i.get("kind") == "page_check"})
+    could_not = sorted({str(t["route"]) for t in untried or []}
+                       | ({str(r) for r in (prior or {}).get("untried") or [] if r not in checked_routes}
+                          if partial else set()))
     if not partial or prior is not None:
-        runtime["check"] = {"pages": pages_total, "working": max(pages_total - len(failing), 0),
+        runtime["check"] = {"pages": pages_total,
+                            "working": max(pages_total - len(failing) - len(could_not), 0),
                             "fixed": sorted(set(list((prior or {}).get("fixed") or []) + list(fixed)))
                             if partial else sorted(set(fixed)),
                             "failing": failing,
+                            "untried": could_not,
                             "version": int(svc.doc.get("version") or 0)}
     svc.doc["runtime"] = runtime
     try:
@@ -662,5 +699,5 @@ def publish_note(output_dir: str) -> dict:
     }
 
 
-__all__ = ["MAX_CHANGE_PAGES", "MAX_REPAIRS", "affected_pages", "check_change", "publish_note", "ROUNDS", "check_app", "check_pages", "fault_ask", "screen_findings",
+__all__ = ["MAX_CHANGE_PAGES", "MAX_REPAIRS", "affected_pages", "check_change", "publish_note", "ROUNDS", "check_app", "check_pages", "fault_ask", "screen_findings", "tooling_faults",
            "shot_findings", "visits"]

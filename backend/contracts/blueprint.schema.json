@@ -196,6 +196,267 @@
       "additionalProperties": false,
       "default": {}
     },
+    "domainReference": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "default": ""
+        },
+        "subdomain": {
+          "type": "string",
+          "default": ""
+        },
+        "summary": {
+          "type": "string",
+          "default": ""
+        },
+        "personas": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/product/properties/personas/items"
+          },
+          "default": []
+        },
+        "screens": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "forRoles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "dashboard",
+                  "list",
+                  "record",
+                  "form",
+                  "workspace",
+                  "public",
+                  "tool"
+                ]
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "statuses": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "processes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "writes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "string"
+              },
+              "refusedCase": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": [
+              "name",
+              "statement"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "integrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "conventions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "benchmarks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "product": {
+                "type": "string"
+              },
+              "takeaway": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": [
+              "product"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "declined": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "screen",
+                  "record",
+                  "process",
+                  "rule",
+                  "integration"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "by": {
+                "type": "string",
+                "default": "owner"
+              }
+            },
+            "required": [
+              "kind",
+              "name",
+              "reason"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
     "roles": {
       "type": "array",
       "items": {
@@ -398,6 +659,9 @@
               "tool",
               "auth"
             ]
+          },
+          "reference": {
+            "type": "string"
           },
           "auth": {
             "type": "string",
@@ -1398,6 +1662,9 @@
                 "type": "string",
                 "default": ""
               },
+              "reference": {
+                "type": "string"
+              },
               "fields": {
                 "type": "array",
                 "items": {
@@ -1670,6 +1937,9 @@
           "purpose": {
             "type": "string",
             "default": ""
+          },
+          "reference": {
+            "type": "string"
           },
           "trigger": {
             "type": "object",
@@ -1953,6 +2223,9 @@
           "statement": {
             "type": "string"
           },
+          "reference": {
+            "type": "string"
+          },
           "expression": {
             "type": "string"
           },
@@ -2231,6 +2504,9 @@
           "provider": {
             "type": "string",
             "default": ""
+          },
+          "reference": {
+            "type": "string"
           },
           "secretRefs": {
             "type": "array",
@@ -3856,6 +4132,13 @@
               },
               "default": []
             },
+            "untried": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
             "version": {
               "type": "number"
             }
@@ -3864,6 +4147,85 @@
             "pages",
             "working"
           ],
+          "additionalProperties": false
+        },
+        "scorecard": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number"
+            },
+            "at": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "checking",
+                "fixing",
+                "done",
+                "stopped"
+              ],
+              "default": "checking"
+            },
+            "criteria": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "total": {
+                    "type": "number",
+                    "default": 0
+                  },
+                  "green": {
+                    "type": "number",
+                    "default": 0
+                  },
+                  "red": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "default": []
+                  },
+                  "untried": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "default": []
+                  }
+                },
+                "additionalProperties": false
+              },
+              "default": {}
+            },
+            "fix": {
+              "type": "object",
+              "properties": {
+                "turns": {
+                  "type": "number",
+                  "default": 0
+                },
+                "yield": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "default": []
+                },
+                "stopped": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
           "additionalProperties": false
         }
       },

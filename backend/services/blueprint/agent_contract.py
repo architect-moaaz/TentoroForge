@@ -52,7 +52,8 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "pageLayouts", "pageCode", "composition", "completeness"}
+       "pageLayouts", "pageCode", "composition", "completeness",
+       "domainReference"}
 )
 
 
@@ -124,17 +125,18 @@ _READS: dict[str, set[str]] = {
     # Discovery: intent in, requirements out. Nothing designed yet exists.
     "requirement": set(),
     "domain_intelligence": {"requirements"},
-    "product_analysis": {"requirements"},
+    "product_analysis": {"requirements", "domainReference"},
 
     # Structure: modules and navigation over the pages that exist.
     # `designSources` because a connected design DRAWS the navigation — its
     # sidebar is the same subtree on every screen — and the agent that authors
     # `navigation.tree` could not see it, so every Figma app got the generic
     # sidebar with the design's own rail rendered inside each page (§48).
-    "solution_architecture": {"requirements", "pages", "designSources"},
+    "solution_architecture": {"requirements", "pages", "designSources", "domainReference"},
 
-    # Data: grounded in requirements, not in anybody's UI.
-    "data_model": {"requirements"},
+    # Data: grounded in requirements, not in anybody's UI — and in what a
+    # practitioner expects such a product to keep (`domainReference`).
+    "data_model": {"requirements", "domainReference"},
 
     # Design language: the product and what the UI already uses.
     "accessibility": {"requirements", "pages"},
@@ -158,22 +160,22 @@ _READS: dict[str, set[str]] = {
                     # The app flows are the screens' and the processes'
                     # paths: who moves where, by which process (`flows`) —
                     # written once the roles are (`security`).
-                    "workflows", "security"},
+                    "workflows", "security", "domainReference"},
 
     # Behaviour: what the business does, over the data it does it to.
-    "workflow": {"requirements", "data", "pages", "businessRules", "roles"},
-    "business_rules": {"requirements", "data", "workflows"},
+    "workflow": {"requirements", "data", "pages", "businessRules", "roles", "domainReference"},
+    "business_rules": {"requirements", "data", "workflows", "domainReference"},
 
     # The analytics each page carries, over the data the pages show and the
     # processes that move it — the states a workflow changes are what a
     # dashboard counts.
     "analytics": {"requirements", "product", "data", "pages", "roles",
-                  "workflows", "security"},
+                  "workflows", "security", "domainReference"},
 
     # §100 — permissions guard entities, pages and workflow execution.
-    "security": {"requirements", "data", "pages", "workflows"},
+    "security": {"requirements", "data", "pages", "workflows", "domainReference"},
 
-    "integration": {"requirements"},
+    "integration": {"requirements", "domainReference"},
 
     # Endpoints are derived, not authored, but the derivation reads all of this.
     "api": {"requirements", "data", "database", "workflows", "pages",
@@ -200,7 +202,9 @@ def _cap(agent: str, writes: Iterable[str], tools: Iterable[str] = (), **kw) -> 
 #: starting point to argue with, not scripture.
 AGENT_REGISTRY: dict[str, AgentCapability] = {
     "requirement": _cap("requirement", {"requirements", "product"}),
-    "domain_intelligence": _cap("domain_intelligence", {"product"}),
+    # The domain reference: what a practitioner expects of such a product,
+    # written before the model and held to by every model node.
+    "domain_intelligence": _cap("domain_intelligence", {"domainReference"}),
     "product_analysis": _cap("product_analysis", {"product", "requirements"}),
     "solution_architecture": _cap("solution_architecture", {"modules", "navigation"}),
     # §30, verbatim: may compose pages, select patterns, define UI interactions,
@@ -327,7 +331,7 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
          "pages", "components", "widgets", "data.entities",
          "data.relationships", "data.constraints", "workflows",
          "businessRules", "integrations", "roles", "permissions", "security",
-         "designSystem"},
+         "designSystem", "domainReference"},
         tools={"blueprint:read", "blueprint:write"},
     ),
     # §31/§34 — the Figma Intelligence Agent contributes evidence, not design
@@ -1280,6 +1284,26 @@ def _canonical_key(alloc: Any, section: str, body: Mapping[str, Any],
     return canon
 
 
+def record_declines(svc: BlueprintService, result: AgentResult) -> list[dict]:
+    """Change requests to `domainReference` carrying `proposed.declined`
+    become declines by this agent; everything else is left as it was."""
+    from services.blueprint.reference_coverage import record_declines as _record
+    added: list[dict] = []
+    for cr in result.change_requests or []:
+        if getattr(cr, "section", "") != "domainReference":
+            continue
+        declines = (cr.proposed or {}).get("declined") if isinstance(cr.proposed, dict) else None
+        if not isinstance(declines, list):
+            continue
+        for d in declines:
+            if isinstance(d, dict) and not d.get("reason") and cr.reason:
+                d = {**d, "reason": cr.reason}
+            added += _record(svc, [d], by=result.agent)
+    if added:
+        svc.save()
+    return added
+
+
 def apply_agent_result(
     svc: BlueprintService,
     result: AgentResult,
@@ -1303,6 +1327,12 @@ def apply_agent_result(
     """
     result.validate()
     check_capability(result)
+    # A REFERENCE ITEM THIS PRODUCT DOES NOT NEED, SAID WITH A REASON. An agent
+    # may not write `domainReference`; it returns a change request addressed
+    # to it (§30), and this deterministic step records the decline, by name,
+    # so the coverage check stops asking and the person sees who declined
+    # what at the model gate.
+    record_declines(svc, result)
     # THE COMPOSERS' WORDS INTO THE CONTRACT'S, BEFORE THE CONTRACT READS THEM.
     from services.blueprint.layout_vocabulary import translate_layout_vocabulary
     translate_layout_vocabulary(result, svc.doc)

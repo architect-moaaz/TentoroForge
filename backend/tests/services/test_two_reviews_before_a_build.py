@@ -84,8 +84,10 @@ def svc(tmp_path):
 # Which nodes each review runs
 # --------------------------------------------------------------------------- #
 
-def test_the_first_review_is_the_requirements_alone():
-    assert domain_nodes() == ["requirements"]
+def test_the_first_review_is_the_requirements_and_what_such_products_have():
+    # The domain reference is written from the requirements and shown beside
+    # them: a wrong sub-domain is cheapest to catch at the first review.
+    assert domain_nodes() == ["requirements", "domain_reference"]
 
 
 def test_the_product_model_names_the_parts_and_writes_none_of_them_in_detail():

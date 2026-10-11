@@ -252,6 +252,60 @@ export function SmithPanel({
   const transcriptRef = useRef<HTMLDivElement>(null);
   const completedRef = useRef(false);
 
+  // WHAT WAS SAID WHILE NOBODY WAS LISTENING. The transcript is the durable
+  // record; the stream is not. Read it after a run ends, and while the
+  // checks after a hand-over are speaking into it from the background.
+  const syncTranscript = useCallback(async () => {
+    if (!projectId) return;
+    try {
+      const token =
+        typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      const res = await fetch(
+        `${API_BASE}/api/projects/${projectId}/conversations`,
+        {
+          credentials: "include",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        },
+      );
+      if (!res.ok) return;
+      const rows = (await res.json()) as Array<Record<string, unknown>>;
+      if (!Array.isArray(rows)) return;
+      setMessages((cur) => {
+        const seen = new Set(cur.map((m) => `${m.role}\u0000${m.text}`));
+        const add = rows
+          .filter((r) => String(r.content ?? "").trim())
+          .map((r) => {
+            const meta = (r.metadata ?? {}) as Record<string, unknown>;
+            return {
+              role: r.role === "user" ? ("user" as const) : ("smith" as const),
+              text: String(r.content ?? ""),
+              options: (meta.options as string[]) ?? undefined,
+              diffSummary: (meta.diffSummary as string) || undefined,
+              at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
+            };
+          })
+          .filter((m) => !seen.has(`${m.role}\u0000${m.text}`));
+        return add.length ? [...cur, ...add] : cur;
+      });
+    } catch {
+      /* a missed sync is not an error — a reload still recovers it */
+    }
+  }, [projectId]);
+
+  // THE CHECKS SPEAK INTO THE TRANSCRIPT, NOT THE STREAM. While they run,
+  // read it every few seconds so each "fixed" line arrives as it is said;
+  // once more when they end, for the closing line.
+  const checksActive = Boolean(run.checks?.active);
+  useEffect(() => {
+    if (!projectId) return;
+    if (!checksActive) {
+      void syncTranscript();
+      return;
+    }
+    const timer = setInterval(() => void syncTranscript(), 10000);
+    return () => clearInterval(timer);
+  }, [projectId, checksActive, syncTranscript]);
+
   // Fire `onRunComplete` once per run, not on every render that follows it.
   useEffect(() => {
     if (run.status === "complete" && !completedRef.current) {
@@ -282,43 +336,7 @@ export function SmithPanel({
       // manual reload; the user saw the build finish and no offer. Fetch the
       // transcript and append whatever is not already shown (deduped by
       // role+text, so a message that WAS streamed is not doubled).
-      if (projectId) {
-        void (async () => {
-          try {
-            const token =
-              typeof window !== "undefined" ? localStorage.getItem("token") : null;
-            const res = await fetch(
-              `${API_BASE}/api/projects/${projectId}/conversations`,
-              {
-                credentials: "include",
-                headers: token ? { Authorization: `Bearer ${token}` } : {},
-              },
-            );
-            if (!res.ok) return;
-            const rows = (await res.json()) as Array<Record<string, unknown>>;
-            if (!Array.isArray(rows)) return;
-            setMessages((cur) => {
-              const seen = new Set(cur.map((m) => `${m.role}\u0000${m.text}`));
-              const add = rows
-                .filter((r) => String(r.content ?? "").trim())
-                .map((r) => {
-                  const meta = (r.metadata ?? {}) as Record<string, unknown>;
-                  return {
-                    role: r.role === "user" ? ("user" as const) : ("smith" as const),
-                    text: String(r.content ?? ""),
-                    options: (meta.options as string[]) ?? undefined,
-                    diffSummary: (meta.diffSummary as string) || undefined,
-                    at: r.created_at ? Date.parse(String(r.created_at)) : Date.now(),
-                  };
-                })
-                .filter((m) => !seen.has(`${m.role}\u0000${m.text}`));
-              return add.length ? [...cur, ...add] : cur;
-            });
-          } catch {
-            /* a missed sync is not an error — a reload still recovers it */
-          }
-        })();
-      }
+      void syncTranscript();
     }
     if (run.status === "running") {
       completedRef.current = false;
@@ -328,7 +346,7 @@ export function SmithPanel({
       // that had just been approved, while twenty stages ran unseen behind it.
       setOpenPlan(null);
     }
-  }, [run.status, run.awaitingApproval, onRunComplete, projectId]);
+  }, [run.status, run.awaitingApproval, onRunComplete, projectId, syncTranscript]);
 
   /**
    * §107 step 1 — Smith speaks first.
@@ -810,7 +828,7 @@ export function SmithPanel({
           <h2 className="text-sm font-semibold">Smith</h2>
           <p className="text-xs text-muted-foreground">Application architect</p>
         </div>
-        {busy && (
+        {(busy || run.checks?.active) && (
           <button
             onClick={stop}
             className="text-xs text-muted-foreground hover:text-foreground"
@@ -819,6 +837,25 @@ export function SmithPanel({
           </button>
         )}
       </header>
+      {run.checks?.active && (
+        <div
+          data-testid="checks-strip"
+          className="flex items-center gap-3 border-b bg-muted/40 px-4 py-1.5 text-xs text-muted-foreground"
+        >
+          <span className="font-medium text-foreground">
+            {run.checks.phase === "fixing" ? "Fixing" : "Checking"}
+          </span>
+          {Object.entries(run.checks.scorecard ?? {})
+            .filter(([, v]) => v.total > 0)
+            .map(([k, v]) => (
+              <span key={k}>
+                {k} {v.green}/{v.total}
+                {v.untried ? ` (${v.untried} untried)` : ""}
+              </span>
+            ))}
+          <span className="ml-auto">The app is yours to use meanwhile.</span>
+        </div>
+      )}
 
       <div ref={transcriptRef} className="flex-1 space-y-4 overflow-y-auto p-4">
         {messages.length === 0 && !busy && (
