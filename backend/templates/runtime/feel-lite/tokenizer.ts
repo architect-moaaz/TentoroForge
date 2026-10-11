@@ -36,6 +36,9 @@ export enum TokenType {
   Gt = "Gt",           // >
   Gte = "Gte",         // >=
 
+  // A value, or else another: `a ?? b`
+  Coalesce = "Coalesce", // ??
+
   // Delimiters
   LParen = "LParen",
   RParen = "RParen",
@@ -163,6 +166,14 @@ export function tokenize(input: string): Token[] {
     if (ch === "." && pos + 1 < input.length && input[pos + 1] === ".") {
       advance(); advance();
       addToken(TokenType.DotDot, "..", start);
+      continue;
+    }
+    // A VALUE, OR ELSE ANOTHER. Process authors write `a ?? b` in formulas
+    // as they would anywhere; the parser refused it, and Place Order's
+    // unit-price step was refused with it (torob2, 2026-10-09).
+    if (ch === "?" && pos + 1 < input.length && input[pos + 1] === "?") {
+      advance(); advance();
+      addToken(TokenType.Coalesce, "??", start);
       continue;
     }
     if (ch === "!" && pos + 1 < input.length && input[pos + 1] === "=") {
