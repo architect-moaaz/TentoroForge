@@ -147,6 +147,13 @@ def workflow(ctx: Ctx, u: dict) -> Outcome:
     return step
 
 
+def webhook(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.webhook_change import run
+    return from_seam(run(ctx.out, integration=_s(u, "integration") or ctx.ask, change=_s(u, "change") or ctx.ask,
+                         reasoning=ctx.reasoning),
+                     fail="I could not let that system call the application, and have changed nothing.")
+
+
 def schedule(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.schedule_change import run
     verb = u["verb"]
@@ -499,7 +506,7 @@ def tree_edit(ctx: Ctx, u: dict) -> Outcome:
 # --------------------------------------------------------------------------- #
 
 def connect_service(ctx: Ctx, u: dict) -> Outcome:
-    from services.smith.email_connect import run
+    from services.smith.connect_service import run
     return from_seam(run(ctx.out, service=_s(u, "integration"), reasoning=ctx.reasoning),
                      fail="I could not connect that and have changed nothing.")
 
@@ -835,6 +842,7 @@ PERFORM: dict[str, Perform] = {
     "add_workflow": workflow, "edit_workflow": workflow, "remove_workflow": workflow,
     "set_schedule": schedule, "pause_schedule": schedule, "resume_schedule": schedule,
     "set_deadline": schedule, "run_now": schedule,
+    "add_webhook": webhook,
     "edit_access": access,
     "add_rule": rule, "edit_rule": rule, "remove_rule": rule,
     "add_entity": entity, "remove_entity": entity,

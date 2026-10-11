@@ -42,6 +42,9 @@ export interface EmitOpts {
   entity?: string | null;
   entityId?: string | null;
   payload?: Record<string, unknown>;
+  /** A key for one delivery of this event; a second emit with the same
+   *  key is a duplicate and inserts nothing. */
+  dedupeKey?: string;
 }
 
 export interface ForgeEventRow {
@@ -63,24 +66,29 @@ function _rows(res: unknown): any[] {
 export async function emitEvent(
   type: string,
   opts: EmitOpts = {},
-): Promise<{ id: string } | null> {
+): Promise<{ id: string } | { duplicate: true } | null> {
   const t = String(type ?? "").trim();
   if (!t) return null;
   try {
+    const key = typeof opts.dedupeKey === "string" && opts.dedupeKey.trim() ? opts.dedupeKey.trim() : null;
     const res: any = await db.execute(sql`
-      INSERT INTO forge_events (id, type, entity, entity_id, payload, created_at)
+      INSERT INTO forge_events (id, type, entity, entity_id, payload, created_at, dedupe_key)
       VALUES (
         gen_random_uuid(),
         ${t},
         ${opts.entity ?? null},
         ${opts.entityId ?? null},
         ${JSON.stringify(opts.payload ?? {})}::jsonb,
-        NOW()
+        NOW(),
+        ${key}
       )
+      ON CONFLICT (dedupe_key) DO NOTHING
       RETURNING id
     `);
     const row = _rows(res)[0];
-    return row?.id ? { id: String(row.id) } : null;
+    if (row?.id) return { id: String(row.id) };
+    // A key the table has seen: the same delivery again, not a failure.
+    return key ? { duplicate: true } : null;
   } catch (err) {
     console.warn(`[events] emitEvent(${t}) failed (non-fatal):`, err);
     return null;
@@ -96,8 +104,9 @@ export async function emitEvent(
 export async function emitEventAndProcess(
   type: string,
   opts: EmitOpts = {},
-): Promise<{ id: string } | null> {
+): Promise<{ id: string } | { duplicate: true } | null> {
   const row = await emitEvent(type, opts);
+  if (row && "duplicate" in row) return row;
   if (row) {
     void _kickProcessing().catch((err) =>
       console.warn("[events] inline processing failed (cron will sweep):", err),

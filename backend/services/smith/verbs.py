@@ -75,6 +75,9 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "resume_schedule": {"workflow"},
     "set_deadline": {"workflow", "change"},
     "run_now": {"workflow"},
+    # An outside system that calls the application: which one, and what it
+    # tells the app (its events, in the user's words).
+    "add_webhook": {"integration", "change"},
     # Access — roles, permissions, who reaches which screen. One verb: the
     # security agent re-decides the model and a second call the screens.
     "edit_access": {"change"},
@@ -307,6 +310,12 @@ VERB_HELP: dict[str, str] = {
     "run_now": (
         "Run a scheduled process right now, on a copy of the data, and say what "
         "happened: \"run the digest now\", \"fire the reminder\". Needs which process."
+    ),
+    "add_webhook": (
+        "Let an outside system call the application: \"let Shopify tell the app "
+        "when an order is paid\", \"accept payment.succeeded from Stripe\". Gives the "
+        "address to call, the header it signs with and the NAME of the secret to set. "
+        "Needs which system and what it tells the app."
     ),
     "edit_access": (
         "Change who can do what: \"add a Ward Manager role\", \"only admins can "
@@ -630,6 +639,10 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'run_now': (
         'run the digest now',
         'fire the payment reminder',
+    ),
+    'add_webhook': (
+        'let Shopify tell the app when an order is paid',
+        'accept payment.succeeded from Stripe',
     ),
     'compose_route': (
         'The page is empty',

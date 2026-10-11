@@ -200,6 +200,14 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
     results: dict[str, dict] = {}
     factory = bench_factory or trials.Bench
     bench = factory(output_dir)
+    # THE CHECK'S OWN SIGNING SECRETS, on the copy only: a webhook is proven
+    # by signing a call with a value no real system holds.
+    if "systems" in what and hasattr(bench, "extra_env"):
+        try:
+            from services.blueprint.webhook_check import signing_secrets
+            bench.extra_env.update(signing_secrets(svc.doc))
+        except Exception:  # noqa: BLE001
+            logger.warning("[fix-to-green] no signing secrets for the bench", exc_info=True)
     try:
         try:
             app = bench.app()
@@ -240,6 +248,12 @@ def _on_a_bench(svc: Any, output_dir: str, *, bench_factory: Any, client: Any, c
                 from services.blueprint.clock_check import check_clock
                 out = check_clock(app, svc.doc, bench=bench, app_root=str(Path(output_dir) / "app"), client=client,
                                   only=only_flows, cancelled=cancelled)
+                from services.blueprint.webhook_check import check_webhooks
+                hooks = check_webhooks(app, svc.doc, secrets=getattr(bench, "extra_env", None),
+                                       only=only_flows, cancelled=cancelled)
+                for k in ("green", "red", "untried"):
+                    out[k] = list(out[k]) + list(hooks[k])
+                out["total"] = int(out["total"]) + int(hooks["total"])
                 _merge(svc, "systems", out, only_flows)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[fix-to-green] the clock check failed", exc_info=True)
@@ -315,10 +329,10 @@ def by_cause(reds: list[dict]) -> list[dict]:
     for r in reds:
         cause = str(r.get("cause") or r.get("id"))
         kind = ("process" if cause.startswith("FLOW-") else "rule" if cause.startswith("RULE-")
-                else "access" if cause.startswith("ENTITY-") else "page")
+                else "access" if cause.startswith("ENTITY-") else "integration" if cause.startswith("INT-") else "page")
         g = groups.setdefault(cause, {"cause": cause, "kind": kind, "items": []})
         g["items"].append(r)
-    order = {"page": 0, "process": 1, "rule": 2, "access": 3}
+    order = {"page": 0, "process": 1, "rule": 2, "access": 3, "integration": 4}
     return sorted(groups.values(), key=lambda g: (order[g["kind"]], g["cause"]))
 
 
@@ -340,7 +354,7 @@ def ask_for(group: dict, doc: dict) -> str:
                 "findings": [(str(r.get("criterion") or "check"), str(r.get("why") or "")) for r in items]}
         return page_ask(group["cause"], item)
     seen = "\n".join(f"- {r.get('label')}: {r.get('why')}" for r in items[:12])
-    what = {"process": "process", "rule": "rule", "access": "record type"}[group["kind"]]
+    what = {"process": "process", "rule": "rule", "access": "record type", "integration": "outside system"}[group["kind"]]
     return (f"The build tried the {what} {items[0].get('label')} ({group['cause']}) as the people it is for. "
             f"This did not hold:\n{seen}\n\n"
             "Find the cause and fix it where it lives — the steps, a rule, the data model, who may do what, "

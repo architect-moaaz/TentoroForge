@@ -119,6 +119,9 @@ class Bench:
         self._app: Any = None
         self._log_at = 0
         self.log = Path(output_dir) / ".forge" / "trials" / "server.log"
+        #: Names and values the copy's environment gets beyond the platform's
+        #: (a check's own signing secrets). Set before the first `app()`.
+        self.extra_env: dict[str, str] = {}
         #: The last `try_workflow`'s tables before and after it ran.
         self.last_written: tuple[dict[str, Any], dict[str, Any]] | None = None
         #: ONE SIGNED-OUT VISITOR FOR THE TURN. A shopper's browser keeps the
@@ -138,6 +141,7 @@ class Bench:
             self._log_at = 0
             import uuid
             app = factory(Path(self.output_dir) / "app", log=self.log,
+                          **({"extra_env": self.extra_env} if self.extra_env else {}),
                           dist_dir=f".next-trial-{uuid.uuid4().hex[:6]}")
             try:
                 self._app = app.__enter__()

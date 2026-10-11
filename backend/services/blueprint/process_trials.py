@@ -439,7 +439,15 @@ def _prove_processes(svc: Any, output_dir: str, *,
                             if unseen:
                                 said += ("\n\nthen, looking for it as the person who ran it:\n"
                                          + "\n".join(f"  {u}" for u in unseen))
-                        if run_failed(said) or "\nthen, looking for it as the person who ran it:" in said:
+                        if "is not set in this environment" in said:
+                            # A SECRET THE COPY DOES NOT HOLD IS THE CHECK'S
+                            # SHORTFALL, NOT THE APP'S: never sent for repair.
+                            proven.append(pid)
+                            untried.append({"workflow": pid, "name": str(by_id[pid].get("name") or pid),
+                                            "reason": next((line.strip() for line in said.splitlines()
+                                                            if "is not set in this environment" in line),
+                                                           "a secret is not set")[:200]})
+                        elif run_failed(said) or "\nthen, looking for it as the person who ran it:" in said:
                             failing.append((by_id[pid], run, said))
                         else:
                             proven.append(pid)

@@ -716,6 +716,17 @@ def assemble(doc: dict, app_root: str | Path, *,
             "Settings \u2192 Integrations, or here for a local run.\n"
             + "".join(f"# {key}=\n" for key in service["keys"])
         )
+    # AND EVERY OTHER SYSTEM THE APPLICATION DECLARES: a step reaches it with
+    # `auth` naming one of these; a webhook from it is checked against one.
+    from services.blueprint.projection import declared_services
+    seen = {k for s in connected_services(doc) for k in s["keys"]}
+    for declared in declared_services(doc):
+        keys = [k for k in declared["keys"] if k not in seen]
+        if keys:
+            env_body += (f"\n# {declared['name'] or declared['slug']} — declared; set on the platform under "
+                         "Settings \u2192 Integrations, or here for a local run.\n"
+                         + "".join(f"# {key}=\n" for key in keys))
+            seen.update(keys)
     (out / ".env.example").write_text(env_body, "utf-8")
 
     # Next.js gives `.env.local` precedence over `.env`, and the scaffold ships

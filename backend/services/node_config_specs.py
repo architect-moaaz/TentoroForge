@@ -18,10 +18,10 @@ an entry here. Types that read no secrets (`db_insert`, `http_call`, `custom`,
 `[]` for them and callers skip them.
 
 Providers grouped in v1: `resend` (email), `anthropic` (AI), `s3` (uploads).
-`twilio` and `stripe` are placeholders shipped to prove the shape for future
-node types — they have no runtime handler yet, so nothing reads their keys,
-but the settings page will render their cards when a plan references
-`send_sms` / `stripe_charge` in a future release.
+A secret an application ITSELF declares (`integrations[].secretRefs`) has no
+entry here: `services.declared_secrets` registers it under the synthetic
+provider `app:<integration>` from the application's Blueprint, so it is
+settable on the platform and shipped like any other key.
 
 Design: docs/superpowers/specs/2026-07-22-integrations-settings.md.
 """

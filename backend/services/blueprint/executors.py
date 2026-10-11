@@ -1827,7 +1827,12 @@ NODE_TASKS: dict[str, str] = {
         "or `config.until` (a template to a date); the run is put down and "
         "the clock picks it up with nobody present. A human step that must "
         "be done in time carries `config.dueIn` (minutes) and "
-        "`config.escalateTo` (the role an overdue task is handed to). Any step "
+        "`config.escalateTo` (the role an overdue task is handed to). A call to "
+        "an outside system (`http_call`) carries `config.auth` naming the "
+        "secret by NAME (`{\"secretRef\": \"XERO_API_KEY\"}`, declared on an "
+        "integration's `secretRefs`); the runtime attaches the value, and a "
+        "template can never reach it. A process another system starts has no "
+        "person acting; it reads who it concerns from what it was handed. Any step "
         "that mutates an entity must name a real one.\n\n"
         "A `custom` or `transform` step's `code` is ONE FEEL formula the engine "
         "evaluates, never instructions in words. Work you would describe in "
@@ -1903,6 +1908,23 @@ NODE_TASKS: dict[str, str] = {
         "saying what to do first) and `page` (the page where they do it; a "
         "new account is sent there first). Every gated workflow then starts "
         "by checking it and refuses with the message when it is not met."
+    ),
+    "integrations": (
+        "Declare each outside system this application talks to, from the "
+        "requirements and the domain reference: `name`, `kind` (email, "
+        "storage, payment, auth, webhook, mcp, other), `provider` (the product, "
+        "in lower case) and `secretRefs` — the NAMES of the variables its "
+        "credentials live in, UPPER_SNAKE (`XERO_API_KEY`), never a value. "
+        "`serves` names the runtime action the integration carries, only from "
+        "the adapters listed below, with that adapter's provider and names; a "
+        "system with no adapter has `serves: \"\"` and is reached from a "
+        "workflow step's `auth` by one of its names. When the system CALLS THE "
+        "APPLICATION — tells it a payment settled, an order shipped — declare "
+        "`inbound`: the `events` it sends (short names, `payment.succeeded`), "
+        "how it signs (`verify`: hmac_sha256 unless the adapter says "
+        "otherwise) and `signingSecretRef`, one of `secretRefs`, the name of "
+        "its signing secret. A system the requirements and the reference do "
+        "not need is not declared."
     ),
     "security": (
         "Define roles and the permissions that guard entities and endpoints. "
@@ -2173,6 +2195,16 @@ REFERENCE_HOLD: dict[str, tuple[str, str]] = {
 }
 
 
+def integration_adapters(node: str) -> str:
+    """For the integrations node: the actions the runtime has adapters for,
+    their providers and the names they read — read from the adapters, so the
+    prompt never says more than the code can do."""
+    if node != "integrations":
+        return ""
+    from services.smith.connect_service import adapter_lines
+    return "\n\n" + adapter_lines()
+
+
 def reference_hold(doc: dict, node: str) -> str:
     """The paragraph that holds a model node to the domain reference: every
     item of its kind answered by name or declined with a reason. Empty when
@@ -2233,7 +2265,7 @@ def build_prompt(
         reply_rules=(DATA_MODEL_REPLY_RULES if node in SCHEMA_BY_NODE
                      else ENVELOPE_RULES),
         task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns.")
-             + reference_hold(doc, node),
+             + reference_hold(doc, node) + integration_adapters(node),
     )
     if inline_shapes:
         shapes = writable_shapes(agent)

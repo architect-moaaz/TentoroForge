@@ -163,7 +163,7 @@ _READS: dict[str, set[str]] = {
                     "workflows", "security", "domainReference"},
 
     # Behaviour: what the business does, over the data it does it to.
-    "workflow": {"requirements", "data", "pages", "businessRules", "roles", "domainReference"},
+    "workflow": {"requirements", "data", "pages", "businessRules", "roles", "domainReference", "integrations"},
     "business_rules": {"requirements", "data", "workflows", "domainReference"},
 
     # The analytics each page carries, over the data the pages show and the
@@ -577,8 +577,11 @@ def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> N
     entities = {str(e.get("id")) for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)}
     roles = {str(r.get("id")) for r in doc.get("roles") or [] if isinstance(r, dict)}
     role_names = {str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
-    integrations = {str(i.get("id")) for i in doc.get("integrations") or []
-                    if isinstance(i, dict) and str(i.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")}
+    live_integrations = [i for i in doc.get("integrations") or []
+                         if isinstance(i, dict) and str(i.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
+    integrations = {str(i.get("id")) for i in live_integrations}
+    inbound_by_id = {str(i.get("id")): i.get("inbound") for i in live_integrations if isinstance(i.get("inbound"), dict)}
+    declared_refs = {str(r) for i in live_integrations for r in i.get("secretRefs") or []}
     problems: list[str] = []
     for proposal in proposals:
         body = proposal.body
@@ -608,12 +611,20 @@ def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> N
             if not str(trig.get("event") or trig.get("detail") or "").strip():
                 problems.append(f"{name}: an `api_event` trigger names its event as `trigger.event`")
         elif kind == "webhook":
+            row = inbound_by_id.get(str(trig.get("integration") or ""))
             if str(trig.get("integration") or "") not in integrations:
                 problems.append(f"{name}: a `webhook` trigger names the integration that calls in as "
                                 f"`trigger.integration` (one declared under `integrations`); got "
                                 f"{trig.get('integration')!r}")
-            if not str(trig.get("event") or "").strip():
+            elif row is None:
+                problems.append(f"{name}: {trig.get('integration')} does not call in — it declares no `inbound`; "
+                                "a webhook starts only from an integration with one")
+            event = str(trig.get("event") or "").strip()
+            if not event:
                 problems.append(f"{name}: a `webhook` trigger names the event the integration sends as `trigger.event`")
+            elif row is not None and event not in [str(e) for e in row.get("events") or []]:
+                problems.append(f"{name}: {trig.get('integration')} sends {', '.join(str(e) for e in row.get('events') or []) or 'nothing listed'}; "
+                                f"`trigger.event` {event!r} is not one of them")
         for st in with_loop_bodies(body).get("steps") or []:
             if not isinstance(st, dict):
                 continue
@@ -632,8 +643,69 @@ def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> N
                 problems.append(f"{name}/{key}: `config.dueIn` is a number of minutes")
             if "escalateTo" in cfg and str(cfg.get("escalateTo")) not in roles | role_names:
                 problems.append(f"{name}/{key}: `config.escalateTo` names a declared role; got {cfg.get('escalateTo')!r}")
+            auth = cfg.get("auth")
+            if auth is not None:
+                ref = str((auth or {}).get("secretRef") or "") if isinstance(auth, dict) else ""
+                if not ref:
+                    problems.append(f"{name}/{key}: `config.auth` names the secret as `secretRef` (a NAME an integration declares)")
+                elif ref not in declared_refs:
+                    problems.append(f"{name}/{key}: `auth.secretRef` {ref!r} is declared by no integration; declare it under "
+                                    f"`integrations[].secretRefs` first" + (f" (declared: {', '.join(sorted(declared_refs))})" if declared_refs else ""))
     if problems:
         raise InvalidTrigger(_all_of(problems))
+
+
+class InvalidIntegration(AuthorRefusal):
+    """An integration the runtime could not carry, or a secret written where a name belongs."""
+
+
+SECRET_NAME = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
+
+
+def check_integrations(result: "AgentResult", doc: dict | None = None) -> None:
+    """A declared integration the runtime can act on: `serves` only an
+    action with an adapter (and then that adapter's provider and names),
+    secret NAMES never values, and an `inbound` that says how a call is
+    verified and by which of its names."""
+    proposals = [p for p in result.proposals if p.section == "integrations"]
+    if not proposals:
+        return
+    from services.smith.connect_service import actions, providers_of
+    from services.smith.secrets_scrub import carries_secret
+    problems: list[str] = []
+    for proposal in proposals:
+        body = proposal.body or {}
+        name = body.get("name") or proposal.natural_key
+        refs = [str(r) for r in body.get("secretRefs") or []]
+        for ref in refs:
+            if not SECRET_NAME.match(ref) or carries_secret(ref):
+                problems.append(f"{name}: `secretRefs` holds NAMES, UPPER_SNAKE (`XERO_API_KEY`); got {ref[:40]!r}")
+        serves = str(body.get("serves") or "").strip()
+        if serves:
+            if serves not in actions():
+                problems.append(f"{name}: `serves` names an action with an adapter ({', '.join(sorted(actions()))}) "
+                                f"or is empty; got {serves!r}")
+            else:
+                provider = str(body.get("provider") or "").strip().lower()
+                known = providers_of(serves)
+                if provider not in known:
+                    problems.append(f"{name}: `{serves}` is carried by {', '.join(sorted(known))}; got provider {provider!r}")
+                else:
+                    missing = [k for k in known[provider] if k not in refs]
+                    if missing:
+                        problems.append(f"{name}: {provider} reads {', '.join(known[provider])} — add {', '.join(missing)} to `secretRefs`")
+        inbound = body.get("inbound")
+        if inbound is not None:
+            if not isinstance(inbound, dict):
+                problems.append(f"{name}: `inbound` is an object: events, verify, signingSecretRef")
+            else:
+                ref = str(inbound.get("signingSecretRef") or "")
+                if ref not in refs:
+                    problems.append(f"{name}: `inbound.signingSecretRef` names one of `secretRefs`; got {ref!r}")
+                if not [e for e in inbound.get("events") or [] if str(e).strip()]:
+                    problems.append(f"{name}: `inbound.events` lists the events the system sends (`payment.succeeded`)")
+    if problems:
+        raise InvalidIntegration(_all_of(problems))
 
 
 class InvalidEntityFields(AuthorRefusal):
@@ -1527,6 +1599,7 @@ def apply_agent_result(
     from services.blueprint.mcp_catalog import load as _mcp_servers
     check_workflow_steps(result, svc.doc, _mcp_servers(getattr(svc, "output_dir", None)))
     check_workflow_triggers(result, svc.doc)
+    check_integrations(result, svc.doc)
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)

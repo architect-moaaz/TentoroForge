@@ -2070,6 +2070,31 @@
                     "timeout": {
                       "type": "string"
                     },
+                    "auth": {
+                      "type": "object",
+                      "properties": {
+                        "secretRef": {
+                          "type": "string"
+                        },
+                        "in": {
+                          "type": "string",
+                          "enum": [
+                            "bearer",
+                            "header",
+                            "query",
+                            "basic"
+                          ],
+                          "default": "bearer"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "secretRef"
+                      ],
+                      "additionalProperties": false
+                    },
                     "dueIn": {
                       "type": "integer",
                       "exclusiveMinimum": 0
@@ -2570,6 +2595,34 @@
           "serves": {
             "type": "string",
             "default": ""
+          },
+          "inbound": {
+            "type": "object",
+            "properties": {
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "verify": {
+                "type": "string",
+                "enum": [
+                  "hmac_sha256",
+                  "bearer",
+                  "provider"
+                ],
+                "default": "hmac_sha256"
+              },
+              "signingSecretRef": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "signingSecretRef"
+            ],
+            "additionalProperties": false
           },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"

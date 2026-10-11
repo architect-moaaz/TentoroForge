@@ -1657,12 +1657,29 @@ export function registerDefaultActions(): void {
         "Content-Type": "application/json",
         ...authorHeaders,
       };
+      let url = String(resolvedUrl);
+      // THE CALL IS SIGNED WITH A SECRET NAMED, NEVER WRITTEN. `auth.secretRef`
+      // is the NAME of a variable the environment holds (declared on an
+      // integration's `secretRefs`); the value goes into the request and
+      // nowhere else — not a variable, not the log. Templates cannot reach
+      // the environment, so this is the only way a key enters a call.
+      const auth = (config as any).auth;
+      if (auth && typeof auth === "object" && auth.secretRef) {
+        const name = String(auth.secretRef);
+        const value = process.env[name];
+        if (!value) return { error: `${name} is not set in this environment`, status: 0, ok: false };
+        const where = String(auth.in || "bearer");
+        if (where === "header") headers[String(auth.name || "X-API-Key")] = value;
+        else if (where === "basic") headers["Authorization"] = `Basic ${Buffer.from(value).toString("base64")}`;
+        else if (where === "query") url += `${url.includes("?") ? "&" : "?"}${encodeURIComponent(String(auth.name || "key"))}=${encodeURIComponent(value)}`;
+        else headers["Authorization"] = `Bearer ${value}`;
+      }
       // 30 s ceiling — a hung endpoint used to hang the whole workflow run
       // indefinitely. AbortSignal.timeout is a Node 18+/browser built-in.
       const controller = new AbortController();
       const timeoutMs = Number((config as any).timeoutMs ?? 30_000) || 30_000;
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(String(resolvedUrl), {
+      const res = await fetch(url, {
         method: String(config.method || "GET"),
         headers,
         body: resolvedBody !== undefined ? JSON.stringify(resolvedBody) : undefined,

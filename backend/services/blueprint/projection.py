@@ -2805,6 +2805,36 @@ def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:
 CONNECTED_SERVICES_FILE = "src/lib/integrations/connected.ts"
 
 
+def integration_slug(row: dict) -> str:
+    """The URL-safe name an integration answers under (`/api/webhooks/<slug>`)."""
+    return to_snake(str(row.get("name") or row.get("id") or "integration")).replace("_", "-") or "integration"
+
+
+def inbound_services(doc: dict) -> list[dict[str, Any]]:
+    """Every live integration that CALLS THE APPLICATION, with how its call
+    is verified: names only, never a value."""
+    out: list[dict[str, Any]] = []
+    for row in _live(doc.get("integrations")):
+        inbound = row.get("inbound") if isinstance(row.get("inbound"), dict) else None
+        if not inbound or not str(inbound.get("signingSecretRef") or "").strip():
+            continue
+        out.append({"slug": integration_slug(row), "name": str(row.get("name") or ""),
+                    "provider": str(row.get("provider") or ""),
+                    "verify": str(inbound.get("verify") or "hmac_sha256"),
+                    "signingSecretRef": str(inbound["signingSecretRef"]).strip(),
+                    "events": [str(e) for e in inbound.get("events") or []]})
+    return out
+
+
+def declared_services(doc: dict) -> list[dict[str, Any]]:
+    """Every live integration, with the NAMES of its secrets — what a step's
+    `auth` may name, and what the platform's settings offer to set."""
+    return [{"slug": integration_slug(row), "name": str(row.get("name") or ""),
+             "provider": str(row.get("provider") or ""),
+             "keys": [str(k) for k in row.get("secretRefs") or []]}
+            for row in _live(doc.get("integrations"))]
+
+
 def connected_services(doc: dict) -> list[dict[str, Any]]:
     """Every integration that SERVES a workflow action, in document order.
 
@@ -2813,7 +2843,7 @@ def connected_services(doc: dict) -> list[dict[str, Any]]:
     a value never reaches a projected file any more than it reaches the
     Blueprint (§42).
     """
-    from services.smith.email_connect import FROM_KEY, LIVE_KEY
+    from services.smith.connect_service import from_key, live_key
 
     out: list[dict[str, Any]] = []
     for row in _live(doc.get("integrations")):
@@ -2822,6 +2852,8 @@ def connected_services(doc: dict) -> list[dict[str, Any]]:
             continue
         provider = str(row.get("provider") or "")
         keys = [str(k) for k in row.get("secretRefs") or []]
+        LIVE_KEY = {provider: live_key(serves, provider)} if live_key(serves, provider) else {}
+        FROM_KEY = from_key(serves)
         # NO ADAPTER, NO CONNECTION. A row may name a provider nothing in the
         # runtime can talk to — a hand-authored Blueprint can say
         # `provider: "mailchimp", serves: "send_email"` — and handing it to
@@ -2906,7 +2938,36 @@ def project_integrations(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "  return CONNECTED_SERVICES[action];",
         "}",
         "",
+        "/** An outside system that CALLS the application, by the name it answers",
+        " *  under at /api/webhooks/<slug>: how its call is verified and the NAME of",
+        " *  its signing secret. */",
+        "export type InboundService = {",
+        "  name: string;",
+        "  provider: string;",
+        "  verify: string;",
+        "  signingSecretRef: string;",
+        "  events: string[];",
+        "};",
+        "",
+        "export const INBOUND: Record<string, InboundService> = {",
     ]
+    for entry in inbound_services(doc):
+        lines.append(f"  {json.dumps(entry['slug'])}: " + json.dumps({
+            "name": entry["name"], "provider": entry["provider"], "verify": entry["verify"],
+            "signingSecretRef": entry["signingSecretRef"], "events": entry["events"]}) + ",")
+    lines += [
+        "};",
+        "",
+        "/** Every system this application declares, with the NAMES of its secrets",
+        " *  (what a step's `auth.secretRef` may name). */",
+        "export type DeclaredService = { name: string; provider: string; keys: string[] };",
+        "",
+        "export const DECLARED: Record<string, DeclaredService> = {",
+    ]
+    for entry in declared_services(doc):
+        lines.append(f"  {json.dumps(entry['slug'])}: " + json.dumps({
+            "name": entry["name"], "provider": entry["provider"], "keys": entry["keys"]}) + ",")
+    lines += ["};", ""]
     out = Path(app_root) / "src" / "lib" / "integrations"
     out.mkdir(parents=True, exist_ok=True)
     (out / "connected.ts").write_text(chr(10).join(lines), "utf-8")

@@ -448,6 +448,18 @@ sentences:
     source: routing
     reaches: {verb: run_now, states: [workflow]}
 
+  - id: does-let-shopify-call
+    say: "let Shopify tell the app when an order is paid"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_webhook, states: [integration, change]}
+
+  - id: does-accept-stripe-event
+    say: "accept payment.succeeded from Stripe"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_webhook, states: [integration, change]}
+
   - id: does-stop-welcome-email
     say: "stop sending the welcome email"
     checked: {colour: acts, via: handler}

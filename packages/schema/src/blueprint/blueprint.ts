@@ -1856,6 +1856,21 @@ export const WorkflowStep = z.object({
       until: z.string().optional(),
       /** On a `wait_for_event`: how long to wait before giving up, as `for`. */
       timeout: z.string().optional(),
+      /**
+       * On an `http_call`: how the call is signed, naming the secret by its
+       * NAME (`secretRef`, declared on an integration's `secretRefs`); the
+       * runtime reads the value from its environment and never writes it
+       * into a variable or a log. `in`: as a bearer token (default), a
+       * header called `name`, a query parameter called `name`, or HTTP basic
+       * (the secret holds `user:password`).
+       */
+      auth: z
+        .object({
+          secretRef: z.string(),
+          in: z.enum(["bearer", "header", "query", "basic"]).default("bearer"),
+          name: z.string().optional(),
+        })
+        .optional(),
       /** On a human step: minutes until it is overdue. */
       dueIn: z.number().int().positive().optional(),
       /** On a human step: the role an overdue task is handed to. */
@@ -2051,6 +2066,23 @@ export const Integration = z.object({
    * which service it is sending through — or that none is connected.
    */
   serves: z.string().default(""),
+  /**
+   * When the outside system CALLS THE APPLICATION. The app answers at
+   * `/api/webhooks/<integration>` and believes a call only once its
+   * signature checks out against the secret `signingSecretRef` names (one
+   * of `secretRefs`; the value lives on the platform). `events` are the
+   * names the system sends, as a `webhook` trigger's `event` names them.
+   * `verify`: `hmac_sha256` (an `X-Signature: t=<unix>,v1=<hex>` over
+   * `<t>.<body>`), `bearer` (the secret as a bearer token), or `provider`
+   * (the provider's own scheme, from its adapter).
+   */
+  inbound: z
+    .object({
+      events: z.array(z.string()).default([]),
+      verify: z.enum(["hmac_sha256", "bearer", "provider"]).default("hmac_sha256"),
+      signingSecretRef: z.string(),
+    })
+    .optional(),
   ...artifactBase,
 });
 

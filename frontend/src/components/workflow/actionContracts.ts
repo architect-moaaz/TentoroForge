@@ -189,6 +189,7 @@ export const ACTION_CONTRACTS: Record<string, ActionContract> = {
       },
       { name: "body", type: "object", label: "Body" },
       { name: "headers", type: "object", label: "Headers", advanced: true },
+      { name: "auth", type: "object", label: "Auth (a secret by its name: {secretRef, in, name})", advanced: true },
     ],
     outputs: [
       { name: "status", type: "number", label: "HTTP status" },

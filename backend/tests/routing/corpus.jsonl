@@ -78,6 +78,8 @@
 {"say": "reviewers get 4 hours, then it goes to the admin", "verb": "set_deadline"}
 {"say": "run the digest now", "verb": "run_now"}
 {"say": "fire the payment reminder", "verb": "run_now"}
+{"say": "let Shopify tell the app when an order is paid", "verb": "add_webhook"}
+{"say": "accept payment.succeeded from Stripe", "verb": "add_webhook"}
 {"say": "remove the archive nurse thing", "verb": "remove_workflow"}
 {"say": "we don't want the Monday reminder any more", "verb": "remove_workflow"}
 {"say": "experience can't be more than 60 years", "verb": "add_rule"}
