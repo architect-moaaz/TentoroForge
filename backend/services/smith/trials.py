@@ -180,16 +180,22 @@ def _role(doc: dict, ref: str) -> tuple[str, bool]:
     from services.blueprint.account_model import admin_role
     admin = admin_role(doc) or "Admin"
     want = (ref or "").strip()
-    if not want or want.lower() in ("admin", "administrator", admin.lower()):
+    if not want:
         return admin, True
     if want.lower() in SIGNED_OUT:
         return "", False
+    # A ROLE THE APP NAMES WINS OVER THE ALIAS. "Admin" meant the computed
+    # back-office role even when the app had a role called Admin, so on a
+    # marketplace whose back office ranked as Vendor every trial "as Admin"
+    # ran as a vendor: 200 on /vendor, refused on /admin (rwt6ef5p, 2026-10-11).
     for r in doc.get("roles") or []:
         if not isinstance(r, dict):
             continue
         if want.lower() in (str(r.get("id") or "").lower(), str(r.get("name") or "").lower()):
             name = str(r.get("name") or r.get("id"))
             return name, name == admin
+    if want.lower() in ("admin", "administrator", admin.lower()):
+        return admin, True
     known = ", ".join(str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict))
     raise ValueError(f"no role called {want!r}; the app's roles are {known or 'none'}, or `signed out`")
 

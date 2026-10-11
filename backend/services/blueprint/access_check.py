@@ -47,9 +47,10 @@ def scoped_entities(doc: dict) -> list[tuple[dict, list[dict]]]:
 
 def people_of_role(app: Any, doc: dict, role: str) -> list[tuple[str, str]]:
     """Up to two `(id, name)` logins of `role` on the copy, the seeded
-    administrator aside. A role with one login gets a preview session as a
-    second person: the engine scopes by the session's id, so a person the
-    users table has never seen must get nothing of anyone else's."""
+    administrator aside — REAL ones only. A session for a person the users
+    table has never seen is answered 404 by the data API ("No record with
+    that id"), which proves nothing about the scope; a role with fewer than
+    two logins is `untried`, said so, never red (rwt6ef5p, 2026-10-11)."""
     from services.blueprint.page_review import _query
     from services.seed_backstop import _ADMIN_UUID
     cols = {r[0] for r in _query(app, "select column_name from information_schema.columns "
@@ -63,10 +64,42 @@ def people_of_role(app: Any, doc: dict, role: str) -> list[tuple[str, str]]:
         order = "order by created_at " if "created_at" in cols else ""
         rows = _query(app, f"select id, {name} from users where ({where}) and id <> '{_ADMIN_UUID}' {order}limit 2")
         people = [(r[0], r[1] if len(r) > 1 else role) for r in rows or [] if r and r[0]]
-    while len(people) < 2:
-        n = len(people) + 1
-        people.append((f"preview-{role.lower().replace(' ', '-')}-{n}", f"{role} (preview {n})"))
+    if len(people) == 1:
+        made = second_person(app, people[0])
+        if made:
+            people.append(made)
     return people[:2]
+
+
+def second_person(app: Any, first: tuple[str, str]) -> tuple[str, str] | None:
+    """A second login of the same role, made on the copy from the first: the
+    same row with a fresh id and address. The seed makes one person per role
+    and the copy is thrown away, so the check makes the other itself rather
+    than leave every scoped record type untried (rwt6ef5p, 2026-10-11)."""
+    import uuid
+    from services.blueprint.page_review import _query
+    cols = [r[0] for r in _query(app, "select column_name from information_schema.columns "
+                                      "where table_name = 'users' order by ordinal_position") if r]
+    if "id" not in cols:
+        return None
+    new_id = str(uuid.uuid4())
+    picks = []
+    for c in cols:
+        if c == "id":
+            picks.append(f"'{new_id}'")
+        elif c == "email":
+            picks.append(f"regexp_replace(email::text, '@', '+second@')")
+        elif c == "name":
+            picks.append("name::text || ' (second)'")
+        else:
+            picks.append(f'"{c}"')
+    quoted = ", ".join(f'"{c}"' for c in cols)
+    first_id = str(first[0]).replace("'", "''")
+    _query(app, f'insert into users ({quoted}) select {", ".join(picks)} from users where id::text = \'{first_id}\'')
+    made = _query(app, f"select id from users where id::text = '{new_id}'")
+    if not made or not made[0]:
+        return None
+    return new_id, f"{first[1]} (second)"
 
 
 def _jar(app: Any, role: str, person: tuple[str, str]) -> list[dict]:
@@ -99,6 +132,27 @@ def _value(row: dict, column: str) -> str:
     return ""
 
 
+def exempt_roles(doc: dict, rule: dict, hops: int = 3) -> set[str]:
+    """The roles a rule exempts — along its `through` chain too: the engine
+    scopes a reached record by the target's rules, so a role the target
+    exempts sees every row here (`throughConditions`)."""
+    from services.blueprint.projection import _key_forms, ownership_rules, to_snake
+    manifest = ownership_rules(doc)
+    out = {str(r) for r in rule.get("unscopedRoles") or []}
+    seen: set[str] = set()
+    target = str(rule.get("through") or "")
+    while target and hops > 0 and target not in seen:
+        seen.add(target)
+        hops -= 1
+        rules = [r for form in _key_forms(target) for r in manifest.get(form) or [] if r.get("kind") == "scope"]
+        if not rules:
+            break
+        for r in rules:
+            out |= {str(x) for x in r.get("unscopedRoles") or []}
+        target = str(rules[0].get("through") or "")
+    return out
+
+
 def check_access(app: Any, doc: dict, *, only: set[str] | None = None,
                  cancelled: Callable[[], bool] = lambda: False) -> dict:
     """`{total, green, red, untried}` over (record type × role) for every
@@ -109,6 +163,7 @@ def check_access(app: Any, doc: dict, *, only: set[str] | None = None,
 
     roles = [str(r.get("name")) for r in doc.get("roles") or []
              if isinstance(r, dict) and r.get("name") and r.get("status") != "DEPRECATED"]
+    people: dict[str, list[tuple[str, str]]] = {}
     green: list[dict] = []
     red: list[dict] = []
     untried: list[dict] = []
@@ -121,7 +176,7 @@ def check_access(app: Any, doc: dict, *, only: set[str] | None = None,
         slug = _slug(ename)
         for rule in rules:
             column = str(rule.get("column") or "")
-            exempt = {str(r) for r in rule.get("unscopedRoles") or []}
+            exempt = exempt_roles(doc, rule)
             for role in roles:
                 total += 1
                 label = f"{ename} as {role}"
@@ -130,13 +185,19 @@ def check_access(app: Any, doc: dict, *, only: set[str] | None = None,
                     untried.append(it("stopped by the person"))
                     continue
                 try:
-                    a, b = people_of_role(app, doc, role)
+                    if role not in people:
+                        people[role] = people_of_role(app, doc, role)
+                    found = people[role]
+                    if len(found) < (1 if role in exempt else 2):
+                        untried.append(it(f"no {'login' if role in exempt else 'two logins'} of {role} on the copy to read as"))
+                        continue
+                    a, b = found[0], (found[1] if len(found) > 1 else found[0])
                     status_a, rows_a = _rows(app, slug, _jar(app, role, a))
                     status_b, rows_b = _rows(app, slug, _jar(app, role, b))
                 except Exception as exc:  # noqa: BLE001 — the app did not answer
                     untried.append(it(f"the app did not answer: {str(exc)[:160]}"))
                     continue
-                if status_a in (401, 403) and status_b in (401, 403):
+                if status_a in (401, 403, 404) and status_b in (401, 403, 404):
                     total -= 1                                   # not this role's record type at all
                     continue
                 if status_a != 200 or status_b != 200:
@@ -180,4 +241,4 @@ def check_access(app: Any, doc: dict, *, only: set[str] | None = None,
     return {"total": total, "green": green, "red": red, "untried": untried}
 
 
-__all__ = ["check_access", "people_of_role", "scoped_entities"]
+__all__ = ["check_access", "exempt_roles", "people_of_role", "scoped_entities", "second_person"]

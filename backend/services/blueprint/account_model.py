@@ -147,6 +147,13 @@ def admin_role(doc: dict) -> str | None:
         only = sum(1 for p in mine if [str(u) for u in p.get("users") or []] == [rid])
         return restricted, only, len(mine)
 
+    # A ROLE CALLED ADMIN IS THE BACK OFFICE. The ranking tied Vendor (four
+    # restricted pages) with Admin (four restricted pages) and took the first,
+    # so the seeded administrator was a Vendor and the role named Admin had
+    # no login at all (rwt6ef5p, 2026-10-11).
+    named = [r for r in roles if str(r.get("name") or "").strip().lower() in ("admin", "administrator")]
+    if named:
+        return str(named[0].get("name"))
     best = max(roles, key=rank)
     return str(best.get("name")) if best.get("name") else None
 
