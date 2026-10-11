@@ -167,3 +167,54 @@ proven hand-over, or 55 minutes and $35 to a booting app with a verdict.
 For an app of L2's size, roughly half of each. These are estimates from
 the ledgers, not measurements; one run that completes without a platform
 fault is the measurement this document still lacks.
+
+## 7. What changed on smith-revamp after this analysis (2026-10-11, afternoon)
+
+Built from the plan the owner approved ("hand over, then fix to green";
+"a domain reference the build writes first"); commits aae4d540 and
+3b94d9f2 on `smith-revamp`, with twelve smithv41 fixes carried over
+between them (ownership chains, database-gate false findings, `reads:
+"everyone"`, orphan ledgers, USR1 stacks, the Picture part, live-refresh
+probe, built = runtime.build stamp, three prompt/template fixes).
+
+- The build turn ends the moment the app boots: "Your application is
+  built" + logins + a six-criterion **scorecard** (`runtime.scorecard`);
+  Publish lights within seconds; the checks run in the background and
+  speak into the transcript; the panel shows a strip, never "Building…".
+- Checks: routes over HTTP (guest → sign in, wrong role → 403), access
+  as two people of each role, every gated rule tried with an input it
+  must refuse, processes run through, the domain scored against the
+  reference. A check's own failure is `untried`, never repaired.
+- One fix loop over every red by cause (pages three at once, the rest
+  alone), capped at six turns and two dry turns, each green said.
+- Stop is a file the orchestrator and the checks read; a stopped build
+  hands over what booted.
+- `domainReference` written by a new `domain_reference` node after the
+  requirements, shown at the first review, held to by every model node
+  (answer by name or decline with a reason), scored at the end.
+
+**Measured so far.** On the built ECom L2 (rwt6ef5p), the route check
+found 8 reds and the access check 16 — all three causes were the
+check's, not the app's, and are fixed: the back-office ranking tied
+Vendor with the role named Admin and took the first (so the seeded
+administrator was a Vendor); a trial "as Admin" resolved to that computed
+role; the access check treated a person the users table never saw as a
+leak. After: 78 of 78 routes green; 17 of 24 access green, 0 red, 7
+untried for want of rows; ~90 s on a running copy, no model calls.
+
+A fresh end-to-end run (ECom L3, fv3d6h4y) got through define, the
+reference node (15 screens, 6 records, 4 processes, 5 rules with refused
+cases, 4 benchmarks; held to by the model: 26 of 34 items answered by
+name before the rules node ran) and the model phase, then **paused on an
+exhausted Anthropic credit balance** at the opening (20 min, $4.93 to
+that point). The hand-over, the background checks and the fix loop are
+therefore proven by tests and by the L2 smoke, not yet by a complete
+build. Two things the aborted run showed: a chat approval sent before any
+definition exists runs the graph from an empty description (an API-only
+path; the panel cannot do it), and the reference's sub-domain was a
+"single-vendor storefront" for a brief that said "multi-vendor
+marketplace" — because that brief never reached the Blueprint on that
+path, not because the node ignored it. Re-run with credit: start a
+project from the panel, answer Smith's language question, approve the two
+reviews, Build; expect the card at ≈ the graph's end and the checks to
+report into the chat afterwards.
