@@ -1876,8 +1876,21 @@ export function registerDefaultActions(): void {
         notificationId = row?.id ?? null;
       } catch (e) { console.warn("[workflow] send_notification persist failed:", e); }
     }
+    // TO THE PERSON'S DEVICES TOO, when the step says `push` and the
+    // application sends it: signed with its own keys, reaching every device
+    // they subscribed. Said when it could not (no device, no keys).
+    const channels = Array.isArray((config as any).channels) ? (config as any).channels.map(String) : ["in_app"];
+    let pushed: { sent: number; pruned: number; notice?: string } | null = null;
+    if (channels.includes("push")) {
+      try {
+        const { sendPush } = await import("@/lib/push");
+        pushed = await sendPush({ userIds: userId ? [String(userId)] : [], role: role ? String(role) : undefined },
+                                { title, body: message, link });
+      } catch (e) { pushed = { sent: 0, pruned: 0, notice: `push failed: ${e instanceof Error ? e.message : String(e)}` }; }
+    }
     // Contract-declared `notificationId` — was always null before.
-    return { sent: true, channel: "in_app", notificationId };
+    return { sent: true, channel: pushed && pushed.sent > 0 ? "in_app+push" : "in_app", notificationId,
+             ...(pushed ? { pushed: pushed.sent, pushNotice: pushed.notice } : {}) };
   });
 
   // Real email. THE APPLICATION KNOWS WHICH SERVICE IT IS MEANT TO SEND

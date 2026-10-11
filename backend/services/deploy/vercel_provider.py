@@ -395,9 +395,14 @@ class VercelDeployProvider:
             # app already runs with locally travels; a Vercel row that exists
             # is kept.
             cron_secret = ""
+            from services.blueprint.assembly import existing_secrets
+            local_secrets = existing_secrets(Path(snapshot.output_dir))
             if "CRON_SECRET" not in existing_by_key:
-                from services.blueprint.assembly import existing_secrets
-                cron_secret = existing_secrets(Path(snapshot.output_dir)).get("CRON_SECRET") or secrets.token_urlsafe(24)
+                cron_secret = local_secrets.get("CRON_SECRET") or secrets.token_urlsafe(24)
+            # THE PUSH KEYS the app already signs with: a deployment that lacks
+            # them gets the same pair, never a new one (see services/push_keys).
+            from services.push_keys import VAPID_KEYS
+            app_secrets = {k: local_secrets[k] for k in VAPID_KEYS if local_secrets.get(k) and k not in existing_by_key}
 
             # WHERE THE APP REPORTS ITS FAILURES (services/app_reporting): the
             # platform's public address and this project's id, so Smith's
@@ -418,6 +423,7 @@ class VercelDeployProvider:
                 nextauth_secret=nextauth_secret,
                 cron_secret=cron_secret,
                 nextauth_url=nextauth_url,
+                app_secrets=app_secrets,
                 # Reusing an existing Neon DB = a redeploy with live data;
                 # tell the build to skip schema reset + reseed.
                 keep_db_state=reused_neon,

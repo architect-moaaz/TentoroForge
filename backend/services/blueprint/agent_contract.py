@@ -53,7 +53,7 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
        "pageLayouts", "pageCode", "composition", "completeness",
-       "domainReference"}
+       "domainReference", "mobile"}
 )
 
 
@@ -132,14 +132,14 @@ _READS: dict[str, set[str]] = {
     # sidebar is the same subtree on every screen — and the agent that authors
     # `navigation.tree` could not see it, so every Figma app got the generic
     # sidebar with the design's own rail rendered inside each page (§48).
-    "solution_architecture": {"requirements", "pages", "designSources", "domainReference"},
+    "solution_architecture": {"requirements", "pages", "designSources", "domainReference", "mobile"},
 
     # Data: grounded in requirements, not in anybody's UI — and in what a
     # practitioner expects such a product to keep (`domainReference`).
     "data_model": {"requirements", "domainReference"},
 
     # Design language: the product and what the UI already uses.
-    "accessibility": {"requirements", "pages"},
+    "accessibility": {"requirements", "pages", "mobile"},
     "figma_intelligence": {"requirements", "pages"},
 
     # §30 verbatim — page design may compose pages and select patterns, and may
@@ -205,7 +205,7 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # The domain reference: what a practitioner expects of such a product,
     # written before the model and held to by every model node.
     "domain_intelligence": _cap("domain_intelligence", {"domainReference"}),
-    "product_analysis": _cap("product_analysis", {"product", "requirements"}),
+    "product_analysis": _cap("product_analysis", {"product", "requirements", "mobile"}),
     "solution_architecture": _cap("solution_architecture", {"modules", "navigation"}),
     # §30, verbatim: may compose pages, select patterns, define UI interactions,
     # use A2UI MCP, update UI-related Blueprint information. May NOT touch
@@ -1376,6 +1376,38 @@ def check_tenancy(result: "AgentResult", doc: dict | None) -> None:
         raise InvalidTenancy(_all_of(problems))
 
 
+class InvalidMobile(AuthorRefusal):
+    """A push channel in an application without push, or a store wrapper with no id."""
+
+
+def check_mobile(result: "AgentResult", doc: dict | None) -> None:
+    """A `send_notification` step may name `push` among its channels only
+    where `mobile.push` is on; a store wrapper names its bundle id."""
+    doc = doc or {}
+    problems: list[str] = []
+    mobile = doc.get("mobile") if isinstance(doc.get("mobile"), dict) else {}
+    for p in result.proposals:
+        if p.section == "mobile" and isinstance(p.body, dict):
+            mobile = {**mobile, **p.body}
+            store = p.body.get("store") if isinstance(p.body.get("store"), dict) else {}
+            if store.get("enabled") is True and not store.get("bundleId"):
+                problems.append("mobile.store: a store wrapper names its `bundleId` (com.example.app)")
+    push_on = mobile.get("push") is True
+    for p in result.proposals:
+        if p.section != "workflows" or not isinstance(p.body, dict):
+            continue
+        for step in p.body.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            cfg = step.get("config") if isinstance(step.get("config"), dict) else {}
+            channels = cfg.get("channels")
+            if isinstance(channels, list) and "push" in [str(c) for c in channels] and not push_on:
+                problems.append(f"{p.body.get('name') or p.natural_key}: step {step.get('id') or step.get('name')!s} sends by `push`, "
+                                "and the application does not send push (`mobile.push` is off) — drop the channel or turn push on")
+    if problems:
+        raise InvalidMobile(_all_of(problems))
+
+
 class InvalidSignIn(AuthorRefusal):
     """A way in nobody could take, or a provider with no row to reach it by."""
 
@@ -1811,6 +1843,7 @@ def apply_agent_result(
     check_audit(result, svc.doc)
     check_tenancy(result, svc.doc)
     check_sign_in(result, svc.doc)
+    check_mobile(result, svc.doc)
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)

@@ -887,6 +887,12 @@ def test_the_prompt_redirects_rationale_to_assumptions(svc):
 #: than a data one, so an unexplained gap is a bug and an explained one is a
 #: design decision.
 _DELIBERATE_BLIND_SPOTS: dict[tuple[str, str], str] = {
+    ("data_model", "mobile"):
+        "Whether the app installs on a phone or sends push changes no record "
+        "type; the data model reads the requirements and the domain reference.",
+    ("integrations", "mobile"):
+        "Push is sent with the app's own keys, not through an outside system; "
+        "nothing in `mobile` names a service to declare.",
     ("page_layouts", "components"):
         "A2UI composes from the component catalog, not from Blueprint "
         "`components` — which the frontend projection derives from the trees "

@@ -104,6 +104,10 @@
 {"say": "anyone with a company Google account may sign in", "verb": "restrict_sign_in_domains"}
 {"say": "let people sign in with their Microsoft 365 account", "verb": "connect_service", "note": "sign-in through a provider is connect_service; the sign-in adapter is tried first"}
 {"say": "connect sign-in to Okta over SAML", "verb": "connect_service"}
+{"say": "turn on push notifications", "verb": "edit_mobile"}
+{"say": "the app should be portrait only on phones", "verb": "edit_mobile"}
+{"say": "send me a test notification", "verb": "test_notification"}
+{"say": "send a test push to dave@acme.com", "verb": "test_notification"}
 {"say": "remove the archive nurse thing", "verb": "remove_workflow"}
 {"say": "we don't want the Monday reminder any more", "verb": "remove_workflow"}
 {"say": "experience can't be more than 60 years", "verb": "add_rule"}

@@ -423,6 +423,13 @@ def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
         "__APP_LOCALE__": tag,
         "__APP_DIR__": "rtl" if base in _RTL_LANGUAGES else "ltr",
     }
+    # THE COLOUR THE BROWSER CHROME TAKES on a phone: the design's primary,
+    # the same the manifest declares (`project_pwa`).
+    try:
+        from services.blueprint.projection import mobile_policy
+        values["__THEME_COLOR__"] = mobile_policy(doc)["themeColor"]
+    except Exception:  # noqa: BLE001 — no palette to read: a neutral dark
+        values["__THEME_COLOR__"] = "#0f172a"
 
     out = Path(app_root)
     touched: list[str] = []
@@ -773,7 +780,7 @@ def assemble(doc: dict, app_root: str | Path, *,
     }
 
 
-_SECRET_KEYS = ("AUTH_SECRET", "NEXTAUTH_SECRET", "CRON_SECRET")
+_SECRET_KEYS = ("AUTH_SECRET", "NEXTAUTH_SECRET", "CRON_SECRET", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT")
 
 
 def existing_secrets(app_root: str | Path) -> dict[str, str]:

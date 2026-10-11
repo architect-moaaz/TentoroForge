@@ -4757,6 +4757,125 @@ def project_tenancy(doc: dict, app_root: str | Path) -> dict[str, Any]:
 SIGN_IN_POLICY_FILE = "src/lib/sign-in-policy.ts"
 
 
+def _hsl_to_hex(triplet: str | None, fallback: str) -> str:
+    """`"222 47% 11%"` → `#0f172a`; the fallback when the triplet is not one."""
+    import colorsys
+    parts = str(triplet or "").replace("%", "").split()
+    if len(parts) != 3:
+        return fallback
+    try:
+        h, s, l = (float(parts[0]) % 360) / 360, float(parts[1]) / 100, float(parts[2]) / 100
+    except ValueError:
+        return fallback
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
+
+
+MOBILE_POLICY_FILE = "src/lib/mobile.ts"
+MOBILE_ICONS = ((192, "icons/icon-192.png", False), (512, "icons/icon-512.png", False),
+                (512, "icons/maskable-512.png", True), (180, "icons/apple-touch-icon.png", False))
+
+
+def mobile_policy(doc: dict) -> dict[str, Any]:
+    """The application on a phone, as the runtime reads it: the Blueprint's
+    `mobile`, the start address (the declared landing), and the colours the
+    installed app takes from the design."""
+    mob = doc.get("mobile") if isinstance(doc.get("mobile"), dict) else {}
+    store = mob.get("store") if isinstance(mob.get("store"), dict) else {}
+    palette = resolved_palette(doc)
+    start = declared_landing(doc) or "/"
+    return {"installable": mob.get("installable") is not False,
+            "display": str(mob.get("display") or "standalone"), "orientation": str(mob.get("orientation") or "any"),
+            "push": mob.get("push") is True,
+            "store": {"enabled": store.get("enabled") is True, "bundleId": str(store["bundleId"]) if store.get("bundleId") else None},
+            "startUrl": start, "themeColor": _hsl_to_hex(palette.get("primary"), "#0f172a"),
+            "backgroundColor": _hsl_to_hex(palette.get("background"), "#ffffff")}
+
+
+def _render_icon(dest: Path, size: int, *, maskable: bool, name: str, bg_hex: str, logo: Path | None) -> None:
+    """One PNG icon: the owner's mark on the brand colour, else a monogram."""
+    from PIL import Image, ImageDraw
+    from services.mobile_branding import _contrasting_color, _draw_centered_text, _hex_to_rgb
+    bg = _hex_to_rgb(bg_hex)
+    img = Image.new("RGB", (size, size), bg)
+    safe = 0.62 if maskable else 0.8
+    drawn = False
+    if logo is not None and logo.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+        try:
+            mark = Image.open(logo).convert("RGBA")
+            box = int(size * safe)
+            mark.thumbnail((box, box))
+            img.paste(mark, ((size - mark.width) // 2, (size - mark.height) // 2), mark)
+            drawn = True
+        except Exception:  # noqa: BLE001 — an unreadable mark: the monogram
+            drawn = False
+    if not drawn:
+        initial = next((c for c in name if c.isalnum()), "A").upper()
+        _draw_centered_text(ImageDraw.Draw(img), (size, size), initial, _contrasting_color(bg), target_fraction=safe * 0.7)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    img.save(dest, format="PNG", optimize=True)
+
+
+def project_pwa(doc: dict, app_root: str | Path, output_dir: str | Path | None = None) -> dict[str, Any]:
+    """The installable application: `public/manifest.webmanifest`, its icons,
+    the service worker that keeps the shell, and `src/lib/mobile.ts`."""
+    root = Path(app_root)
+    policy = mobile_policy(doc)
+    lib = root / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    (lib / "mobile.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "// The application on a phone: installable, how it is shown, whether it\n"
+        "// sends push, and the colours the installed app takes from the design.\n"
+        "export interface MobilePolicy {\n  installable: boolean;\n"
+        "  display: \"standalone\" | \"fullscreen\" | \"minimal-ui\" | \"browser\";\n"
+        "  orientation: \"any\" | \"portrait\" | \"landscape\";\n  push: boolean;\n"
+        "  store: { enabled: boolean; bundleId: string | null };\n  startUrl: string;\n  themeColor: string;\n  backgroundColor: string;\n}\n"
+        f"export const MOBILE: MobilePolicy = {json.dumps(policy, indent=2)};\n", "utf-8")
+    files = [MOBILE_POLICY_FILE]
+    if not policy["installable"]:
+        for stale in ("public/manifest.webmanifest", "public/sw.js"):
+            if (root / stale).exists():
+                (root / stale).unlink()
+        return {"files": files, **policy}
+    name = str((doc.get("application") or {}).get("name") or "App")
+    short = name if len(name) <= 12 else "".join(w[0] for w in name.split()[:3]).upper() or name[:12]
+    public = root / "public"
+    public.mkdir(parents=True, exist_ok=True)
+    # THE MARK: the owner's logo where there is one (copied by project_brand_logo).
+    logo_path: Path | None = None
+    logo = (doc.get("designSystem") or {}).get("logo")
+    if isinstance(logo, dict) and logo.get("file"):
+        from services import brand_logo
+        base_dir = Path(output_dir) if output_dir is not None else root.parent
+        logo_path = brand_logo.path_of(base_dir, logo)
+    icons = []
+    for size, rel, maskable in MOBILE_ICONS:
+        try:
+            _render_icon(public / rel, size, maskable=maskable, name=name, bg_hex=policy["themeColor"], logo=logo_path)
+            files.append(f"public/{rel}")
+            if "apple" not in rel:
+                icons.append({"src": rel, "sizes": f"{size}x{size}", "type": "image/png", **({"purpose": "maskable"} if maskable else {})})
+        except Exception:  # noqa: BLE001 — no Pillow, or a font it cannot draw: the manifest still lists what exists
+            logger.warning("[pwa] could not render %s", rel, exc_info=True)
+    manifest = {"name": name, "short_name": short, "description": str((doc.get("application") or {}).get("description") or "")[:200],
+                "start_url": policy["startUrl"], "scope": "/", "display": policy["display"], "orientation": policy["orientation"],
+                "theme_color": policy["themeColor"], "background_color": policy["backgroundColor"], "icons": icons,
+                "lang": str((doc.get("product") or {}).get("locale") or "en")}
+    (public / "manifest.webmanifest").write_text(json.dumps(manifest, indent=2) + "\n", "utf-8")
+    files.append("public/manifest.webmanifest")
+    # THE SERVICE WORKER: the shipped one, with what install keeps.
+    sw_src = Path(__file__).resolve().parents[2] / "templates" / "runtime" / "pwa" / "sw.js"
+    if sw_src.is_file():
+        import hashlib
+        shell = ["/offline", "/manifest.webmanifest"] + [f"/{i['src']}" for i in icons]
+        version = hashlib.sha1(json.dumps([manifest, shell], sort_keys=True).encode()).hexdigest()[:10]
+        (public / "sw.js").write_text(sw_src.read_text("utf-8").replace("__BASE__", "").replace("__VERSION__", version)
+                                      .replace("__SHELL__", json.dumps(shell)), "utf-8")
+        files.append("public/sw.js")
+    return {"files": files, **policy}
+
+
 def sso_secret_names(entry_id: str) -> dict[str, str]:
     """The NAMES an identity provider is reached with, from the entry's id:
     `SSO_<ID>_ISSUER`, `SSO_<ID>_CLIENT_ID`, `SSO_<ID>_CLIENT_SECRET`."""

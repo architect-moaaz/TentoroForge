@@ -201,6 +201,11 @@ class DagNode:
     #: minutes building pages and workflows on two entities with no columns
     #: before `assemble` refused a form that inserted into nothing.
     whole: bool = False
+    #: Sections this node writes that do NOT prove it ran: an object section
+    #: whose absence means its defaults (`mobile` — installable, no push), so
+    #: a resumed build does not re-run the node over a document written
+    #: before the section existed.
+    defaulted: frozenset[str] = frozenset()
 
 
 #: The reason a run reports when a person stopped it (`should_stop`).
@@ -208,9 +213,9 @@ STOPPED_BY_PERSON = "stopped by the person"
 
 
 def _n(key, agent, depends_on=(), produces=(), note="", kind="agent",
-       fanout="", optional=False, whole=False) -> DagNode:
+       fanout="", optional=False, whole=False, defaulted=()) -> DagNode:
     return DagNode(key, agent, frozenset(depends_on), frozenset(produces),
-                   note, kind, fanout, optional, whole)
+                   note, kind, fanout, optional, whole, frozenset(defaulted))
 
 
 #: §28's graph. Tier names follow the PRD's diagram.
@@ -238,7 +243,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("domain_reference", "domain_intelligence", ("requirements",), ("domainReference",),
        note="what a practitioner expects of such a product; the model is held to it"),
     _n("application_model", "product_analysis",
-       ("requirements", "figma_intelligence", "domain_reference"), ("product",)),
+       ("requirements", "figma_intelligence", "domain_reference"), ("product", "mobile"), defaulted=("mobile",)),
 
     # left branch — data
     # ENTITIES ARE NAMED ONCE AND DETAILED ONE AT A TIME. This node names the
@@ -1043,7 +1048,7 @@ def completed_nodes(
     for key, node in nodes.items():
         if node.kind != "agent" or not node.produces:
             continue
-        if not all(_section(doc, path) for path in node.produces):
+        if not all(_section(doc, path) for path in node.produces if path not in node.defaulted):
             continue
         # SHARED SECTION, RESUMED RUN: content is not proof THIS node ran (D-07).
         # A ledger-gated node is done only if the ledger recorded it — except a
@@ -2997,7 +3002,7 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
 def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     """Everything the browser reads: page schemas, the route graph, the tokens."""
     from services.blueprint.projection import (
-        apply_frontend_projection, project_brand_logo, project_design_tokens,
+        apply_frontend_projection, project_brand_logo, project_design_tokens, project_pwa,
         project_middleware, project_public_resources, project_public_routes,
         project_nav_flow, project_root_route, project_shell, project_shell_identity,
     )
@@ -3027,6 +3032,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # — HippieKit's green (#17B65C) never reached tokens.css, so the app ran on
     # the scaffold's near-black and every button came out the wrong colour.
     project_brand_logo(svc.doc, app_root)
+    project_pwa(svc.doc, app_root)
     project_design_tokens(svc.doc, app_root)
     # THE FRAME, BESIDE THE TOKENS: the shell chrome and the sign-in
     # composition the design decided, written where the layout reads them.

@@ -62,7 +62,7 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "The colours, type and density of the whole application, the menu down "
      "the side, and your own logo in the corner of every screen — attach the "
      "image and ask.",
-     frozenset({"restyle", "edit_navigation", "set_logo", "remove_logo"})),
+     frozenset({"restyle", "edit_navigation", "set_logo", "remove_logo", "edit_mobile", "test_notification"})),
     ("What it is, and what it talks to",
      "Its name and purpose, requirements written down for later, and API "
      "endpoints. Outside services: I connect the email for real — you name "

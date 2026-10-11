@@ -395,6 +395,17 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
     # /settings/integrations. See TODO(sensitive-rotation) in
     # templates/runtime/sensitive-crypto.ts — versioned rotation is a
     # separate slice.
+    # --- Push notifications (Web Push, VAPID) --------------------------- #
+    # Synthetic "action type": the application's own key pair, generated
+    # per project by runtime_injector and kept for the life of the app; a
+    # rotated pair orphans every subscribed device, so rotation is a choice
+    # made here, in the open, not a side effect of a rebuild.
+    "__push__": [
+        ConfigKey(key="VAPID_PUBLIC_KEY", provider="push", label="Push public key (VAPID)", kind="text", required=False),
+        ConfigKey(key="VAPID_PRIVATE_KEY", provider="push", label="Push private key (VAPID)", kind="password", required=False),
+        ConfigKey(key="VAPID_SUBJECT", provider="push", label="Push contact (mailto: or https:)", kind="text", required=False),
+    ],
+
     "__encryption__": [
         ConfigKey(
             key="SENSITIVE_ENCRYPTION_KEY",
@@ -661,11 +672,15 @@ def providers_used_by_plan(plan: dict[str, Any] | None) -> list[str]:
     """
     if not isinstance(plan, dict):
         return []
+    provs: set[str] = set()
+    # An application that sends push holds its own keys (see `__push__`).
+    mobile = plan.get("mobile") if isinstance(plan.get("mobile"), dict) else {}
+    if mobile.get("push") is True:
+        provs.update(providers_for_action("__push__"))
     workflows = plan.get("workflows") or []
     if not isinstance(workflows, list):
-        return []
+        return sorted(provs)
 
-    provs: set[str] = set()
     for wf in workflows:
         if not isinstance(wf, dict):
             continue

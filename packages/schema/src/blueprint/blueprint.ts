@@ -1922,6 +1922,13 @@ export const WorkflowStep = z.object({
        * it instead of refreshing. Only on an `end` that is not refused.
        */
       redirect: z.string().optional(),
+      /**
+       * On a `send_notification`: where it reaches the person. `in_app` is the
+       * bell every signed-in person has; `push` reaches the devices they have
+       * subscribed, and needs `mobile.push` on — a push channel in an
+       * application without push is refused.
+       */
+      channels: z.array(z.enum(["in_app", "push"])).optional(),
     })
     .catchall(z.unknown())
     .default({}),
@@ -3107,6 +3114,31 @@ export const Blueprint = z.object({
   apis: z.array(ApiEndpoint).default([]),
   integrations: z.array(Integration).default([]),
   security: Security.default({}),
+  /**
+   * THE APPLICATION ON A PHONE. `installable`: it offers itself for the home
+   * screen (a manifest, icons, a service worker that keeps the shell — never
+   * the data — so it opens offline). `display` and `orientation` are the
+   * manifest's. `push`: notifications reach a person's subscribed devices,
+   * signed with the application's own keys; a `send_notification` step
+   * names `push` among its `channels` to use it. `store`: a wrapper for the
+   * app stores, set only by the owner, with the bundle id the stores know.
+   * Decided by the product analysis from the requirements: who uses it,
+   * where, and whether being told matters when the app is closed.
+   */
+  mobile: z
+    .object({
+      installable: z.boolean().default(true),
+      display: z.enum(["standalone", "fullscreen", "minimal-ui", "browser"]).default("standalone"),
+      orientation: z.enum(["any", "portrait", "landscape"]).default("any"),
+      push: z.boolean().default(false),
+      store: z
+        .object({
+          enabled: z.boolean().default(false),
+          bundleId: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z][a-zA-Z0-9]*)+$/).optional(),
+        })
+        .default({}),
+    })
+    .default({}),
 
   /** §41–§45 — designs the user connected. Empty for a prompt-only app,
    *  which is also what tells the orchestrator there is no Figma work to do. */

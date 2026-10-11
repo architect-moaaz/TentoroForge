@@ -87,6 +87,9 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "set_sign_in_method": {"change"},
     "map_sso_roles": {"change"},
     "restrict_sign_in_domains": {"change"},
+    # The application on a phone: installable, orientation, push; a test push.
+    "edit_mobile": {"change"},
+    "test_notification": {"change"},
     # Money: a refund through the payment service; the currency money is in.
     "refund": {"change"},
     "set_currency": {"change"},
@@ -357,6 +360,16 @@ VERB_HELP: dict[str, str] = {
         "Whose email domains may sign in through a provider: \"only @acme.com "
         "may sign in\", \"anyone may sign in\". Needs the domains, or that "
         "anyone may."
+    ),
+    "edit_mobile": (
+        "How the application behaves on a phone: \"make it installable\", \"turn "
+        "on push notifications\", \"portrait only\", \"full screen\", \"a store "
+        "wrapper with bundle id com.acme.app\". Needs which of these."
+    ),
+    "test_notification": (
+        "Send a test push notification to a person's subscribed devices: \"send "
+        "me a test notification\", \"send a test notification to dave@acme.com\". "
+        "Says how many devices were reached, or that none is subscribed."
     ),
     "refund": (
         "Refund a payment through the payment service: \"refund order 1234\", "
@@ -734,6 +747,14 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'restrict_sign_in_domains': (
         'only @acme.com may sign in',
         'anyone with a company Google account may sign in',
+    ),
+    'edit_mobile': (
+        'turn on push notifications',
+        'the app should be portrait only on phones',
+    ),
+    'test_notification': (
+        'send me a test notification',
+        'send a test push to dave@acme.com',
     ),
     'refund': (
         'refund order 1234',

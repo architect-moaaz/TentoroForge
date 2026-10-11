@@ -72,7 +72,8 @@ def empty(doc: dict) -> dict:
     try:
         from services.blueprint.clock_check import clocked
         from services.blueprint.payment_check import paying
-        card["criteria"]["systems"]["total"] = len(clocked(doc)) + len(paying(doc))
+        from services.blueprint.pwa_check import pushing
+        card["criteria"]["systems"]["total"] = len(clocked(doc)) + len(paying(doc)) + (1 if pushing(doc) else 0)
     except Exception:  # noqa: BLE001
         pass
     for c in CRITERIA:

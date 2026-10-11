@@ -595,6 +595,31 @@ sentences:
     source: code
     reaches: {verb: restrict_sign_in_domains, states: [change]}
 
+  # The application on a phone: installable, orientation, push; a test push.
+  - id: does-turn-on-push
+    say: "turn on push notifications"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_mobile, states: [change]}
+
+  - id: does-portrait-only
+    say: "the app should be portrait only on phones"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: edit_mobile, states: [change]}
+
+  - id: does-test-notification
+    say: "send me a test notification"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: test_notification, states: [change]}
+
+  - id: does-test-push-to-dave
+    say: "send a test push to dave@acme.com"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: test_notification, states: [change]}
+
   - id: integration-sign-in-microsoft
     say: "let people sign in with their Microsoft 365 account"
     checked: {colour: acts, via: handler}

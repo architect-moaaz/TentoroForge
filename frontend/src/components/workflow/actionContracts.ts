@@ -168,10 +168,12 @@ export const ACTION_CONTRACTS: Record<string, ActionContract> = {
         label: "Type",
       },
       { name: "entityId", type: "uuid", label: "Related entity id (optional)", advanced: true },
+      { name: "channels", type: "array", label: "Channels", help: "in_app (the bell), push (the person's devices — needs push turned on for the app)", advanced: true },
     ],
     outputs: [
       { name: "sent", type: "boolean", label: "Sent?" },
       { name: "notificationId", type: "uuid", label: "Notification id" },
+      { name: "pushed", type: "number", label: "Devices reached" },
     ],
   },
 

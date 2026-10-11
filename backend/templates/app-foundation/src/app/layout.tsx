@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
 // compileTokens converts the token groups into a flat CSS custom-property map
@@ -9,9 +9,24 @@ import { compileTokens } from "@tentoroforge/renderer";
 import { tokens } from "@/theme/tokens.server";
 import type React from "react";
 
+// THE APPLICATION ON A PHONE: the manifest that lets it be installed, the
+// icon and title the home screen shows, and the colour the browser chrome
+// takes. Paths carry the preview's prefix when there is one.
+const BASE = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
+
 export const metadata: Metadata = {
   title: "__APP_NAME__",
   description: "__APP_DESCRIPTION__",
+  manifest: `${BASE}/manifest.webmanifest`,
+  appleWebApp: { capable: true, title: "__APP_NAME__", statusBarStyle: "default" },
+  icons: { icon: `${BASE}/icons/icon-192.png`, apple: `${BASE}/icons/apple-touch-icon.png` },
+};
+
+export const viewport: Viewport = {
+  themeColor: "__THEME_COLOR__",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 // Computed once at module load time (server bundle) — tokens are static.

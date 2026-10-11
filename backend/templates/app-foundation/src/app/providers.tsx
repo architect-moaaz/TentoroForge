@@ -8,6 +8,7 @@ import { useState } from "react";
 // so any browser-side crash reports to Forge's self-healing endpoint. The
 // module SSR-guards itself, so this is safe in a server component too.
 import "@/lib/error_reporter";
+import { PwaRegister } from "@/components/PwaRegister";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -22,6 +23,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider basePath={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/auth`}>
       <QueryClientProvider client={queryClient}>
+        <PwaRegister />
         {children}
         <Toaster position="top-right" richColors />
       </QueryClientProvider>

@@ -184,6 +184,8 @@ export interface NodeConfig {
   // send_notification
   message?: string;
   channel?: string;
+  /** Where it reaches the person: the bell (`in_app`), their devices (`push`). */
+  channels?: ("in_app" | "push")[];
 
   // set_variable
   variableName?: string;

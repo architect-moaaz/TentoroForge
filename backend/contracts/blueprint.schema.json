@@ -2140,6 +2140,16 @@
                     },
                     "redirect": {
                       "type": "string"
+                    },
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "in_app",
+                          "push"
+                        ]
+                      }
                     }
                   },
                   "additionalProperties": {},
@@ -2965,6 +2975,55 @@
                 "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
               },
               "default": []
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "mobile": {
+      "type": "object",
+      "properties": {
+        "installable": {
+          "type": "boolean",
+          "default": true
+        },
+        "display": {
+          "type": "string",
+          "enum": [
+            "standalone",
+            "fullscreen",
+            "minimal-ui",
+            "browser"
+          ],
+          "default": "standalone"
+        },
+        "orientation": {
+          "type": "string",
+          "enum": [
+            "any",
+            "portrait",
+            "landscape"
+          ],
+          "default": "any"
+        },
+        "push": {
+          "type": "boolean",
+          "default": false
+        },
+        "store": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "bundleId": {
+              "type": "string",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9]*(\\.[a-zA-Z][a-zA-Z0-9]*)+$"
             }
           },
           "additionalProperties": false,

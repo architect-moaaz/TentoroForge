@@ -20,6 +20,7 @@ import { ShellStateProvider } from "@tentoroforge/renderer";
 import { MobileNav } from "./MobileNav";
 import { NotificationBell } from "./NotificationBell";
 import { OrgSwitcher } from "./OrgSwitcher";
+import { InstallButton } from "@/components/PwaRegister";
 import { LanguageSwitch } from "@/sdk/i18n";
 import { AccountMenu } from "./AccountMenu";
 import { MobileTabBar } from "./MobileTabBar";
@@ -919,6 +920,7 @@ export default async function DashboardLayout({
     <>
       <OrgSwitcher />
       <LanguageSwitch />
+      <InstallButton />
       <NotificationBell />
       <AccountMenu name={session.user.name} email={session.user.email}
                    role={(session.user as { role?: string }).role} />

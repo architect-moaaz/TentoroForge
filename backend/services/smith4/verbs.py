@@ -154,6 +154,13 @@ def tenancy(ctx: Ctx, u: dict) -> Outcome:
                      fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
 
 
+def mobile(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.mobile_change import run
+    verb = u["verb"]
+    return from_seam(run(ctx.out, verb, change=_s(u, "change") or ctx.ask, reasoning=ctx.reasoning),
+                     fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+
+
 def sign_in(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.sign_in_change import run
     verb = u["verb"]
@@ -875,6 +882,7 @@ PERFORM: dict[str, Perform] = {
     "refund": payment, "set_currency": payment,
     "add_organisation": tenancy, "move_login": tenancy,
     "set_sign_in_method": sign_in, "map_sso_roles": sign_in, "restrict_sign_in_domains": sign_in,
+    "edit_mobile": mobile, "test_notification": mobile,
     "edit_access": access,
     "add_rule": rule, "edit_rule": rule, "remove_rule": rule,
     "add_entity": entity, "remove_entity": entity,

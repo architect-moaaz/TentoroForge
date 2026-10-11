@@ -81,6 +81,8 @@ SINGLETON_SECTIONS: frozenset[str] = frozenset({
     "composition",
     # What a practitioner expects of such a product — written first, held to.
     "domainReference",
+    # The application on a phone — one object per app, like designSystem.
+    "mobile",
 })
 
 #: Lists whose members carry no id of their own, identified instead by a
