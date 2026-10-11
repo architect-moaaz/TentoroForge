@@ -3251,11 +3251,32 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
 #: the engine cannot honour that without being told which columns they are.
 _MASK_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("email",), "email"),
-    (("phone", "mobile", "tel"), "phone"),
+    (("phone", "mobile", "tel", "telephone"), "phone"),
     (("ssn", "nationalid", "taxid", "aadhaar", "passport",
       "cardnumber", "iban", "accountnumber"), "last4"),
     (("password", "secret", "token", "apikey"), "full"),
 )
+
+
+def _name_words(name: str) -> set[str]:
+    """The words of a field name, each alone and each with its neighbour:
+    `businessName` -> business, name, businessname; `cardNumber` -> card,
+    number, cardnumber. A hint is matched against these WHOLE words — as a
+    substring it found "ssn" inside "busine-ssn-ame" and masked every
+    vendor's business name to its last four letters (7ttp60zi, 2026-10-11)."""
+    words = [w.lower() for w in re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+", name or "")]
+    out = set(words)
+    out |= {a + b for a, b in zip(words, words[1:])}
+    out.add("".join(words))
+    return {w for w in out if w}
+
+
+def _mask_hint(name: str) -> str | None:
+    words = _name_words(name)
+    for hints, kind in _MASK_HINTS:
+        if any(h in words for h in hints):
+            return kind
+    return None
 
 
 def _entity_readers(doc: dict, entity: dict) -> list[str]:
@@ -3313,11 +3334,7 @@ def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
             name = synonyms.get(re.sub(r"[^a-z]", "", name.lower()), name)
             mask = field.get("mask")
             if not mask:
-                lowered = re.sub(r"[^a-z]", "", name.lower())
-                for hints, kind in _MASK_HINTS:
-                    if any(h in lowered for h in hints):
-                        mask = kind
-                        break
+                mask = _mask_hint(name)
             if not mask:
                 continue
             # A credential is never unmasked for anyone, whatever the roles say.
