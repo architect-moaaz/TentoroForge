@@ -482,14 +482,23 @@ class JournalNarrator:
             said = f"{name}: {held} of {n} statements hold" if n else f"{name} is built"
             return [pipeline_stage_event("proof", said, feature=fid, name=name, statements=n, passed=held,
                                          failing=list(row.get("failing") or []), done=True)]
+        if ev == "prove:start":
+            feats = [str(f) for f in row.get("features") or []]
+            return [pipeline_stage_event("prove", f"Trying the whole application as the people it is for "
+                                         f"({len(feats)} feature{'s' if len(feats) != 1 else ''} at once)",
+                                         features=feats)]
         if ev == "fix:start":
             fid = str(row.get("feature") or "")
             name = self._names.get(fid, "the whole application" if fid == "APP" else fid)
             n = len(row.get("statements") or [])
+            turn = int(row.get("turn") or row.get("round") or 1)
             return [pipeline_stage_event("fix", f"{name}: {n} statement{'s' if n != 1 else ''} not holding — "
-                                         f"Smith is finding the cause", feature=fid, name=name,
-                                         round=int(row.get("round") or 1),
-                                         ids=list(row.get("statements") or []))]
+                                         f"Smith is finding the cause (turn {turn})", feature=fid, name=name,
+                                         round=turn, ids=list(row.get("statements") or []))]
+        if ev == "fix:stopped":
+            return [pipeline_stage_event("fix", f"The fix turns stopped after {int(row.get('turns') or 0)}: "
+                                         f"{row.get('why') or 'nothing more was fixed'}",
+                                         turns=int(row.get("turns") or 0))]
         if ev == "mend:start":
             fid = str(row.get("feature") or "")
             name = self._names.get(fid, fid)

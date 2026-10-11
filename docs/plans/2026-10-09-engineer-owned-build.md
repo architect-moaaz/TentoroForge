@@ -703,3 +703,12 @@ name kept its slug (409); Smith's `read_rows` could not open any app's
 database; an unattended turn's out-of-steps answer contradicted its own
 try. Still to do: the paused stop says nothing to the tester; "could not
 be tried" should say why when the cause is the platform's.
+
+2026-10-11 (Ecom L1, local): the first full local run reached a built, booting
+app in 45 minutes of build time once nothing failed, after twenty-odd platform
+faults found one at a time (see the memory `ecom-l1-local-run`). Proving a
+feature at a time was an hour each, and four fix turns held four statements:
+the engineer now proves EVERY feature at once (one pass over all statements,
+the authors' look given back once over the whole) and says the result per
+feature; fix turns are capped at `FIX_TURNS` (6) a build and stop after
+`FIX_DRY_STOP` (2) turns in a row that fix nothing. Unmeasured on a real build.
