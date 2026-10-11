@@ -178,7 +178,12 @@ def _build_passed(output_dir: str | None) -> bool:
             doc = json.load(fh)
     except (OSError, ValueError):
         return False
-    return ((doc.get("runtime") or {}).get("build") or {}).get("status") == "passed"
+    # PASSED WITH ISSUES IS PASSED. The assembly records "passed_with_issues"
+    # when the build compiled and booted but a runtime note was kept for
+    # Smith (a sample row the database refused, a process that did not run
+    # through); read as not built, ECom L2 sat in draft with Publish disabled
+    # over an application that was running (2026-10-11).
+    return str(((doc.get("runtime") or {}).get("build") or {}).get("status") or "").startswith("passed")
 
 
 async def reconcile_ready_status(project: Project, db: AsyncSession) -> Project:
