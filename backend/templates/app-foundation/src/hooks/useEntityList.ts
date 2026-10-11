@@ -1,5 +1,6 @@
 "use client";
 
+import { apiPath } from "@/lib/api-path";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -35,7 +36,7 @@ export function useEntityList<T = Record<string, any>>(options: UseEntityListOpt
   const { data, isLoading, error, refetch } = useQuery<QueryResult<T>>({
     queryKey: [entity, search, filters, page],
     queryFn: async () => {
-      const res = await fetch(`/api/data/${entity}?${queryParams}`);
+      const res = await fetch(apiPath(`/api/data/${entity}?${queryParams}`));
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
@@ -44,7 +45,7 @@ export function useEntityList<T = Record<string, any>>(options: UseEntityListOpt
   const { data: stats } = useQuery<{ total: number }>({
     queryKey: [`${entity}-stats`],
     queryFn: async () => {
-      const res = await fetch(`/api/data/${entity}/stats`);
+      const res = await fetch(apiPath(`/api/data/${entity}/stats`));
       if (!res.ok) return { total: 0 };
       return res.json();
     },

@@ -2921,6 +2921,17 @@ def category_period(fields: list) -> int:
     return min(lengths) if lengths else 0
 
 
+def _number(text: str) -> float | None:
+    """`"12500"`, `"US$1,250.00"`, `"4.5"` -> a number; prose -> None."""
+    m = re.search(r"-?\d[\d,]*(?:\.\d+)?", str(text or ""))
+    if not m:
+        return None
+    try:
+        return float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
 def _seed_value(field: dict, entity_name: str, row: int,
                 tables_by_id: dict | None = None, *, period: int = 0, person: bool = False) -> Any:
     # A FOREIGN KEY IS A REFERENCE, NOT A LABEL. Written as "Committee Id 1"
@@ -2964,6 +2975,17 @@ def _seed_value(field: dict, entity_name: str, row: int,
     # editor's sampler follows the same rule; see `UNIQUE_TEXT` there).
     if examples and kind in ("string", "text", "varchar") and not _UNIQUE_TEXT.search(str(name)):
         return examples[(row - 1) % len(examples)]
+    # A NUMBER'S EXAMPLES ARE ITS VALUES TOO. Only text took its examples;
+    # an integer was seeded as the row number, so a price "in minor units"
+    # with examples 12500, 4500 became 1, 2, 3 cents, and a cart line with
+    # examples 1, 2, 1, 3 held 14 of a 7-stock coat — the cart's subtotal
+    # read US$0.00 and checkout was blocked (7ttp60zi, 2026-10-11).
+    if examples and kind in ("integer", "int", "number", "decimal", "float", "numeric", "currency", "money"):
+        numbers = [_number(x) for x in examples]
+        numbers = [n for n in numbers if n is not None]
+        if numbers:
+            value = numbers[(row - 1) % len(numbers)]
+            return int(value) if kind in ("integer", "int") and float(value).is_integer() else value
     lo, hi = field.get("min"), field.get("max")
     if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and hi >= lo \
             and kind in ("integer", "int", "number", "decimal", "float", "numeric", "currency", "money"):

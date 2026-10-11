@@ -4,6 +4,7 @@
 // here (NextAuth credentials, the signup route, the account's own fields from
 // `@/lib/account`); the page around it is the UI engineer's to design.
 
+import { apiPath } from "@/lib/api-path";
 import * as React from "react";
 import { getSession, signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -68,7 +69,7 @@ export function useSignUp() {
     try {
       const account = input.account ?? {};
       const label = ACCOUNT?.labelField ? account[ACCOUNT.labelField] : undefined;
-      const res = await fetch("/api/auth/signup", {
+      const res = await fetch(apiPath("/api/auth/signup"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: input.email, password: input.password,

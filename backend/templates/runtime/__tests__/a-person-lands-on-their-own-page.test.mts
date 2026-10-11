@@ -28,6 +28,8 @@ eqJson(m.afterSignIn(null, ""), "/", "no role yet: home");
 process.env.NEXT_PUBLIC_BASE_PATH = "/preview/abc";
 eqJson(m.appPath("/preview/abc/"), "/", "the preview's prefix is not part of the page");
 eqJson(m.afterSignIn("/preview/abc", "Admin"), "/admin/products", "so its home is still home");
+eqJson(m.afterSignIn("/preview/abc/cart?x=1", "Customer"), "/cart?x=1",
+       "a page behind the prefix is pushed without it — the router adds the prefix once");
 
 let calls = 0;
 const role = await m.roleAfterSignIn(async () => (++calls < 3 ? null : { user: { role: "Admin" } }));

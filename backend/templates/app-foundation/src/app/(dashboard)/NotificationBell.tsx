@@ -5,6 +5,7 @@
 // chrome drew a bell with no handler, the others none at all. Rendered once
 // beside the breadcrumb, so every shell has it.
 
+import { apiPath } from "@/lib/api-path";
 import * as React from "react";
 import { Bell, Check } from "lucide-react";
 
@@ -26,7 +27,7 @@ export function NotificationBell() {
 
   const load = React.useCallback(async () => {
     try {
-      const r = await fetch("/api/notifications", { cache: "no-store" });
+      const r = await fetch(apiPath("/api/notifications"), { cache: "no-store" });
       if (r.ok) setNotes(await r.json());
     } catch { /* offline — keep what is shown */ }
   }, []);
@@ -53,7 +54,7 @@ export function NotificationBell() {
   const unread = notes.filter((n) => !n.read).length;
   const mark = async (body: Record<string, unknown>) => {
     setNotes((cur) => cur.map((n) => (body.all || n.id === body.id ? { ...n, read: true } : n)));
-    try { await fetch("/api/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); } catch { /* retried on next load */ }
+    try { await fetch(apiPath("/api/notifications"), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); } catch { /* retried on next load */ }
   };
 
   return (

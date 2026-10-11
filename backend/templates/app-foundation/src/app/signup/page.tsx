@@ -1,5 +1,6 @@
 "use client";
 
+import { apiPath } from "@/lib/api-path";
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -74,7 +75,7 @@ export default function SignupPage() {
     }
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/signup", {
+      const res = await fetch(apiPath("/api/auth/signup"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(

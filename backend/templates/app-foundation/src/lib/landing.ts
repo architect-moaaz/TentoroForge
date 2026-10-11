@@ -43,7 +43,14 @@ export function afterSignIn(callbackUrl: string | null | undefined, role: string
   const to = (callbackUrl ?? "").trim();
   if (to) {
     const path = appPath(to);
-    if (path !== "/" && path !== HOME && !WAYS_IN.has(path)) return to;
+    if (path !== "/" && path !== HOME && !WAYS_IN.has(path)) {
+      // BEHIND THE PREVIEW'S PREFIX the address carries it already, and the
+      // router adds it once more: a shopper signed in to reach /cart landed
+      // on …/serve/api/projects/…/serve/cart, a 404 (ECom L4, 2026-10-11).
+      const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
+      if (base && to.startsWith(base + "/")) return to.slice(base.length);
+      return to;
+    }
   }
   return landingFor(role);
 }

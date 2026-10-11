@@ -5,6 +5,7 @@
 // input out, or a button that passes a field the workflow does not take, does
 // not compile.
 
+import { apiPath } from "@/lib/api-path";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -72,7 +73,7 @@ export function useWorkflow<I extends Json>(
     setPending(true);
     setError(null);
     try {
-      const res = await fetch(`/api/workflows/${encodeURIComponent(workflow.id)}/execute`, {
+      const res = await fetch(apiPath(`/api/workflows/${encodeURIComponent(workflow.id)}/execute`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ input }),
@@ -247,7 +248,7 @@ async function storeImage(file: File): Promise<string | null> {
   const body = new FormData();
   body.append("file", file);
   try {
-    const res = await fetch("/api/files/upload", { method: "POST", body });
+    const res = await fetch(apiPath("/api/files/upload"), { method: "POST", body });
     const ref = res.ok ? ((await res.json()) as { id?: string }) : null;
     return ref?.id ?? null;
   } catch {

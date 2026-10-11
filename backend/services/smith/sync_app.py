@@ -93,7 +93,13 @@ WORKFLOW_ROUTES: tuple[str, ...] = ("src/app/api/workflows/[id]/execute/route.ts
 
 #: The engine's typed doorway for pages, the platform's too — it carries the
 #: row type the engine returns, so the two move together.
-ENGINE_FOUNDATION_FILES: tuple[str, ...] = ("src/lib/data-engine-bridge.ts",)
+ENGINE_FOUNDATION_FILES: tuple[str, ...] = (
+    "src/lib/data-engine-bridge.ts",
+    # The app's calls to its own API under its base path, and where a sign-in
+    # lands: platform files every app carries, never an agent's.
+    "src/lib/api-path.ts", "src/lib/landing.ts", "src/lib/LiveRefresh.tsx",
+    "src/sdk/client.tsx", "src/hooks/useEntityList.ts", "src/hooks/useEntityDetail.ts",
+)
 
 
 def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
