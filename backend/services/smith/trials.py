@@ -334,11 +334,24 @@ def _http(app: Any, method: str, path: str, body: Any, cookies: list[dict]) -> t
         headers={"content-type": "application/json",
                  "cookie": "; ".join(f"{c['name']}={c['value']}" for c in cookies)})
     opener = urllib.request.build_opener(_Stay)
-    try:
-        with opener.open(req, timeout=240) as r:
-            return r.status, "", r.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        return e.code, e.headers.get("location") or "", e.read().decode("utf-8", "replace")
+    # ONE RETRY WHEN THE SERVER HANGS UP. A dev server compiling the route it
+    # was just asked for can close the connection without a reply; read as
+    # the trial's crash it took every process down as "untried" (ECom L5,
+    # 2026-10-11). A second ask a moment later is answered.
+    import http.client
+    import time as _time
+    for attempt in (1, 2):
+        try:
+            with opener.open(req, timeout=240) as r:
+                return r.status, "", r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers.get("location") or "", e.read().decode("utf-8", "replace")
+        except (http.client.RemoteDisconnected, ConnectionResetError, urllib.error.URLError) as e:
+            if attempt == 2 or isinstance(e, urllib.error.URLError) and not isinstance(
+                    getattr(e, "reason", None), (http.client.RemoteDisconnected, ConnectionResetError)):
+                raise
+            _time.sleep(3)
+    raise RuntimeError("unreachable")
 
 
 def _body(text: str) -> str:

@@ -115,3 +115,51 @@ def test_processes_the_app_could_not_run_are_untried_not_failing(tmp_path, monke
     assert turns == [] and out["left"] == []
     assert len(out["untried"]) == 2 and "would not start" in out["untried"][0]["reason"]
     assert not [i for i in svc.doc["runtime"].get("issues") or [] if i.get("kind") == "process"]
+
+
+def test_process_trials_that_crash_leave_every_process_untried_with_the_reason(tmp_path, monkeypatch):
+    """The trial server hung up mid-run on ECom L5 (2026-10-11); the loop logged
+    it and the card said "0 of 29" with no reason. The check's own crash is
+    untried, named, never red."""
+    from services.blueprint import fix_to_green as ftg
+    from services.blueprint import scorecard as sc
+    from tests.services.test_every_process_runs_through import DOC as PDOC
+    svc = _Svc(tmp_path, PDOC)
+    sc.seed_from_boot(svc)
+    monkeypatch.setattr("services.blueprint.page_repair._repair_pages", lambda *a, **k: {"fixed": [], "left": []})
+    monkeypatch.setattr("services.blueprint.app_check._check_app",
+                        lambda *a, **k: {"pages": 0, "working": 0, "fixed": [], "left": [], "untried": [], "touched": []})
+
+    def boom(*a, **k):
+        raise ConnectionResetError("Remote end closed connection without response")
+    monkeypatch.setattr("services.blueprint.process_trials._prove_processes", boom)
+    monkeypatch.setattr(ftg, "_on_a_bench", lambda *a, **k: {})
+    ftg._check_everything(svc, str(tmp_path), str(tmp_path / "app"), None, say=lambda t: None, run_turn=lambda *a, **k: {},
+                          app_factory=None, bench_factory=None, client=None, cancelled=lambda: False, record=False)
+    logic = sc.read(svc.doc)["criteria"]["logic"]
+    assert logic["red"] == [] and len(logic["untried"]) == 2
+    assert "Remote end closed" in logic["untried"][0]["why"]
+
+
+def test_a_trial_request_is_asked_again_when_the_server_hangs_up(monkeypatch):
+    import http.client
+    from types import SimpleNamespace
+    from services.smith import trials
+    calls = []
+
+    class _Resp:
+        status = 200
+        def read(self): return b"ok"
+        def __enter__(self): return self
+        def __exit__(self, *a): return None
+
+    class _Opener:
+        def open(self, req, timeout=0):
+            calls.append(req.full_url)
+            if len(calls) == 1:
+                raise http.client.RemoteDisconnected("Remote end closed connection without response")
+            return _Resp()
+    monkeypatch.setattr("urllib.request.build_opener", lambda *a: _Opener())
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    assert trials._http(SimpleNamespace(base="http://x"), "GET", "/p", None, []) == (200, "", "ok")
+    assert len(calls) == 2

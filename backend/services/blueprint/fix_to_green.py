@@ -156,8 +156,12 @@ def _check_everything(svc: Any, output_dir: str, app_root: str, report: Any, *, 
             kwargs["client"] = client
         processes = _prove_processes(svc, output_dir, run_turn=run_turn, rounds=0, record=False,
                                      cancelled=cancelled, **kwargs)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — the check's own failure: said, never red
         logger.warning("[fix-to-green] the process trials failed", exc_info=True)
+        from services.blueprint.process_trials import manual_workflows
+        processes["untried"] = [{"workflow": str(w.get("id")), "name": str(w.get("name") or w.get("id")),
+                                 "reason": f"the trial could not run: {type(exc).__name__}: {str(exc)[:160]}"}
+                                for w in manual_workflows(svc.doc)]
     try:
         from services.blueprint.app_check import _check_app
         kwargs = {"app_factory": app_factory} if app_factory is not None else {}
