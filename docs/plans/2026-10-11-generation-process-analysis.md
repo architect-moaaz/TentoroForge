@@ -218,3 +218,52 @@ path, not because the node ignored it. Re-run with credit: start a
 project from the panel, answer Smith's language question, approve the two
 reviews, Build; expect the card at ≈ the graph's end and the checks to
 report into the chat afterwards.
+
+## 8. Two builds on the fixed platform, through the panel (2026-10-11, evening)
+
+Same marketplace brief, started from the panel as a tester would, after the
+credit top-up. The hand-over, the scorecard, the background checks and the
+panel's strip worked on both.
+
+| | ECom L4 (7ttp60zi) | ECom L5 (6132cfss) |
+|---|---|---|
+| First ask → requirements | 3 min 15 s (after a colour question waited 20 min for an answer) | 2 min 30 s |
+| Product model | 2.5 min, stopped on a platform catch-22 (two login entities) | 9 min, clean |
+| Build to a booting app | 29 min graph + 7 min assembly, resumed twice (the second time after a 33-min deadlock in the database gate's repairs) | 29.5 min, uninterrupted |
+| First ask → hand-over | 1 h 44 min as it happened | **42 min** |
+| Spend to hand-over | $16.72 (381 calls incl. Smith changes: $19.22) | $16.36 (343 calls) |
+| Pages served | 22 of 22 | 21 of 21 |
+
+**Platform faults found by using L4 and fixed before L5** (all with tests,
+on smith-revamp): two login entities deadlocked the data model (`one_login`
+decides); the database gate's parallel repairs deadlocked the assembly
+(sequential, from smithv41 7612ec7d); a `role_restricted` page naming no
+role became the administrator's, so a vendor got 403 on their own
+catalogue (refused at the author); a mask hint matched "ssn" inside
+"businessName", masking every vendor's name (whole-word hints); integers
+were seeded as the row number, never their examples (prices of 1, 2, 3
+cents; a cart line of 14 against stock 7; subtotal US$0.00); the app's
+client calls to its own API ignored the preview prefix (404 on add-to-cart
+behind the proxy) and the sign-in landing doubled it; the engine's
+expression parser had no `??` (the checkout commission formula was refused
+at the opening); a crashed process trial left the logic criterion blank
+(now untried with the reason, and the trial retries a dropped connection).
+
+**What L5 showed working:** storefront, search, categories, product pages
+with variants and vendor; sign-in per role landing on its own page
+(`/`, `/vendor`, `/admin`); vendor pages gated to Vendor; admin pages gated
+to Admin; vendor names and emails as they should read; prices from the
+model's own examples; add-to-cart reaching the workflow API under the
+preview prefix (answered 422 for a guest — the app's rule, not a 404).
+
+**Still open after L5:** money fields in minor units are formatted by each
+page as major units ("$8,900.00" for 8900 cents) — a page-writer rule or an
+SDK money part is the shape; the seeded demo vendor is Pending, so the
+vendor's own catalogue says "only an approved vendor can view this page"
+(the seed should approve the demo login's own vendor record); the
+preview proxy sends a signed-out visitor of the app to the platform's own
+login; the Preview pane's "Built in N stages" card says built after a run
+that skipped everything; the panel polls `/app-model` and gets 404 on
+every tick before the app exists; 19 modules for 19 screens (one module per
+screen) from ux_architecture; the background checks' first round (one
+browser pass per role over 21 pages, controls pressed) takes 20–25 min.
