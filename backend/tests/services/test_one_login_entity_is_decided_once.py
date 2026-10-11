@@ -25,12 +25,35 @@ def _fields(name: str, key: str, **extra) -> AgentResult:
         body={"name": name, "account": True, "fields": [{"name": "displayName", "type": "string"}], **extra})])
 
 
-def test_the_first_login_entity_passes_and_the_other_is_told_who_the_login_is():
-    check_entity_fields(_fields("Shopper", "ENTITY-001"), DOC)           # the login: no refusal
+def test_a_flag_the_document_already_carries_is_not_the_field_authors_to_move():
+    """`entity_fields` re-asserts `account` from the entity set, so refusing
+    the fields for it could never be satisfied: both pass, and the clash is
+    decided when the proposals land (`one_login`)."""
+    check_entity_fields(_fields("Shopper", "ENTITY-001"), DOC)
+    check_entity_fields(_fields("VendorAccount", "ENTITY-002"), DOC)
+
+
+def test_a_new_second_login_entity_is_refused_and_told_who_the_login_is():
+    doc = {"data": {"entities": [{"id": "ENTITY-001", "name": "Shopper", "account": True, "fields": []}]}}
     with pytest.raises(InvalidEntityFields) as exc:
-        check_entity_fields(_fields("VendorAccount", "ENTITY-002"), DOC)
+        check_entity_fields(_fields("VendorAccount", "VendorAccount"), doc)
     said = str(exc.value)
     assert "already on Shopper" in said and "Drop `account` here" in said and "VendorAccount is a login" in said
+
+
+def test_the_first_login_keeps_the_flag_and_the_rest_lose_it_when_proposals_land(tmp_path):
+    from services.blueprint.agent_contract import one_login
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=str(tmp_path), app_id="m", name="Market", domain="retail")
+    svc.doc["data"] = {"entities": [
+        {"id": "ENTITY-001", "name": "Shopper", "table": "shoppers", "account": True, "fields": []},
+        {"id": "ENTITY-002", "name": "VendorAccount", "table": "vendor_accounts", "account": True, "fields": []},
+        {"id": "ENTITY-003", "name": "Product", "table": "products", "fields": []}]}
+    assert one_login(svc) == ["VendorAccount"]
+    ents = {e["name"]: e for e in svc.doc["data"]["entities"]}
+    assert ents["Shopper"].get("account") is True and "account" not in ents["VendorAccount"]
+    assert "Shopper is" in ents["VendorAccount"]["syncNote"]
+    assert one_login(svc) == []                                         # decided once; nothing to do again
 
 
 def test_two_claimants_in_one_entity_set_are_decided_in_that_reply():

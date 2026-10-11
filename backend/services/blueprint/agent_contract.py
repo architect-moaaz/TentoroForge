@@ -619,7 +619,12 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
         if not (body.get("account") or any(e.get("account") and same(e) for e in live)):
             continue
         if body.get("account"):
-            if login is not None and not same(login):
+            already = any(e.get("account") and same(e) for e in live)
+            # A flag the document already carries is not this author's to
+            # move (`entity_fields` re-asserts it from the entity set), so a
+            # refusal here could never be satisfied: the clash is decided by
+            # `one_login` when the proposals land.
+            if login is not None and not same(login) and not already:
                 problems.append(f"{name}: `account: true` is already on {login.get('name')} — one entity is the "
                                 f"person behind a login. Drop `account` here: a {name} is a login "
                                 f"({login.get('name')}) with its own role, and this entity holds what that "
@@ -1325,6 +1330,30 @@ def _canonical_key(alloc: Any, section: str, body: Mapping[str, Any],
     return canon
 
 
+def one_login(svc: BlueprintService) -> list[str]:
+    """One entity is the person behind a login. When the document holds more
+    than one marked `account: true` — a marketplace's Shopper and
+    VendorAccount (7ttp60zi, 2026-10-11) — the first keeps it and the rest
+    lose it, here, deterministically: the field author may not move the flag
+    and a refusal it cannot satisfy stopped the build at the data model
+    twice. Returns the names the flag was taken off."""
+    live = [e for e in ((svc.doc.get("data") or {}).get("entities") or [])
+            if isinstance(e, dict) and e.get("status") != "DEPRECATED" and e.get("account")]
+    if len(live) < 2:
+        return []
+    keep, rest = live[0], live[1:]
+    for e in rest:
+        e.pop("account", None)
+        note = (f"not the login — {keep.get('name')} is; a {e.get('name')} is a {keep.get('name')} with its own "
+                "role, and this record holds what they have beyond the login")
+        e["syncNote"] = note
+    names = [str(e.get("name")) for e in rest]
+    import logging
+    logging.getLogger(__name__).warning("[one-login] %s is the login; `account` taken off %s",
+                                        keep.get("name"), ", ".join(names))
+    return names
+
+
 def record_declines(svc: BlueprintService, result: AgentResult) -> list[dict]:
     """Change requests to `domainReference` carrying `proposed.declined`
     become declines by this agent; everything else is left as it was."""
@@ -1584,6 +1613,9 @@ def apply_agent_result(
         svc.doc.clear()
         svc.doc.update(snapshot)
         raise _blamed(exc, svc) from exc
+
+    if any(p.section == "data.entities" for p in result.proposals):
+        one_login(svc)
 
     if commit:
         svc.commit(
