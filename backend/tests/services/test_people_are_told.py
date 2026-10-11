@@ -50,7 +50,7 @@ def test_every_shell_has_one_working_bell():
     body = layout[layout.index("const body = ("):layout.index("const appName")]
     assert "{cluster}" in body and "!clusterInRail && !clusterInBar" in body
     bell = (_SHELL / "NotificationBell.tsx").read_text()
-    assert 'fetch("/api/notifications"' in bell and 'method: "PATCH"' in bell
+    assert 'fetch(apiPath("/api/notifications")' in bell and 'method: "PATCH"' in bell
     assert "forge:workflow-done" in bell
     assert "Bell" not in (_SHELL / "PersonaChrome.tsx").read_text().split("export")[0].split("from \"lucide-react\"")[0]
     client = (_TEMPLATES / "app-foundation" / "src" / "sdk" / "client.tsx").read_text()

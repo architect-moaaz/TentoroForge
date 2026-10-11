@@ -520,6 +520,30 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
                         f"{name}/{st.get('key')}: where {field!r} — write a comparison as "
                         f"{{\"<field>\": {{\"ne\": <value>}}}} (ne, gt, gte, lt, lte, in, notIn); "
                         "a field alone with a value means equals")
+    # WHAT AN END HANDS BACK IS DECLARED, SMALL, AND SOMEWHERE. `reply` is a
+    # map of names to templates; `redirect` is a route of this application or
+    # a template over a step's output — never free prose, never on a refused
+    # end (a refusal is told, not followed).
+    for proposal in proposals:
+        name = proposal.body.get("name") or proposal.natural_key
+        for st in with_loop_bodies(proposal.body).get("steps") or []:
+            if not isinstance(st, dict):
+                continue
+            cfg = st.get("config") if isinstance(st.get("config"), dict) else {}
+            if "reply" not in cfg and "redirect" not in cfg:
+                continue
+            key = st.get("key") or st.get("id")
+            if str(st.get("type") or "") not in ("end", "end_event"):
+                problems.append(f"{name}/{key}: `reply` and `redirect` belong on an `end` step")
+                continue
+            if cfg.get("refused") is True:
+                problems.append(f"{name}/{key}: a refused end tells the person why; it does not reply or redirect")
+            if "reply" in cfg and not isinstance(cfg.get("reply"), dict):
+                problems.append(f"{name}/{key}: `reply` maps names to values (`{{\"url\": \"{{{{checkout.url}}}}\"}}`)")
+            red = cfg.get("redirect")
+            if "redirect" in cfg and not (isinstance(red, str) and (red.startswith("/") or "{{" in red)):
+                problems.append(f"{name}/{key}: `redirect` is a route of this application (`/orders/{{{{insert_order.id}}}}`) "
+                                "or a template over a step's output (`{{{{checkout.url}}}}`)")
     # WOULD THE ENGINE RUN IT. A step whose condition the engine's parser
     # refuses, a function the engine lacks, a template naming what the engine
     # never holds — each is a workflow the author can fix now and nobody can

@@ -1845,6 +1845,21 @@ export const WorkflowStep = z.object({
       /** On a refused `end`: the sentence the person is shown. Also a
        *  notification's text on `send_notification`. */
       message: z.string().optional(),
+      /**
+       * On an `end`: the few named values the page that ran this workflow may
+       * read, each a template over what the run holds (`{{checkout.url}}`).
+       * The run's reply is a receipt, never the run — its variables are
+       * stripped on the way out (a 20 MB reply once broke the page that
+       * started it) — so what a page needs back is DECLARED here, by name.
+       */
+      reply: z.record(z.string(), z.unknown()).optional(),
+      /**
+       * On an `end`: where the person is sent when the run completes — a
+       * route of this application (`/orders/{{insert_order.id}}`) or an
+       * outside address a step produced (`{{checkout.url}}`). The page follows
+       * it instead of refreshing. Only on an `end` that is not refused.
+       */
+      redirect: z.string().optional(),
     })
     .catchall(z.unknown())
     .default({}),

@@ -3765,9 +3765,18 @@ def project_ownership_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
 #: reset, chooses a password. Gated, it would redirect the one visitor who
 #: certainly cannot sign in yet to the sign-in they cannot complete. It leaks
 #: nothing: the page shows only the email its own one-time token resolves to.
+#:
+#: `api/cron` and `api/webhooks` are the routes machines call, not people: the
+#: scheduler's tick (Vercel cron, the app's own self-ping) and another
+#: system's signed call. Each authenticates itself — the tick by `CRON_SECRET`,
+#: a webhook by its signature — and neither can hold a session, so gated they
+#: were answered with a redirect to the sign-in page and never ran: every
+#: scheduled process in every published app slept (confirmed on a built app's
+#: matcher, 2026-10-11).
 _ALWAYS_OPEN: tuple[str, ...] = (
     "api/auth", "_next", "favicon.ico",
     "login", "signup", "set-password",
+    "api/cron", "api/webhooks",
 )
 
 

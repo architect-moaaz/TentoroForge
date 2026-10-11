@@ -190,6 +190,12 @@ export async function executeWorkflow(
       };
     }
 
+    // The end the run reached, when it declared something for the page.
+    const endLog = isPaused ? undefined : ctx.log.find((l) => {
+      const o = (l as any)?.output;
+      return o && typeof o === "object" && (o.reply !== undefined || typeof o.redirect === "string");
+    });
+    const said = (endLog as any)?.output ?? {};
     return {
       workflowId: workflow.id,
       workflowName: workflow.name,
@@ -199,6 +205,8 @@ export async function executeWorkflow(
       log: ctx.log,
       output: ctx.variables,
       notices: noticesOf(ctx.log),
+      ...(said.reply !== undefined ? { reply: said.reply } : {}),
+      ...(typeof said.redirect === "string" && said.redirect ? { redirect: said.redirect } : {}),
       pausedAt: isPaused ? lastLog.nodeId : undefined,
       pendingTask: isPaused ? {
         nodeId: lastLog.nodeId,
@@ -916,6 +924,23 @@ async function executeNode(
             message: String(interpolateValue(String(endCfg.message ?? ""), ctx.variables) ?? "")
               || "This could not be done.",
           };
+        } else {
+          // WHAT THE PAGE MAY READ BACK, BY NAME. The reply is a receipt (the
+          // run's variables never leave the server), so an end that has
+          // something for the page — a checkout URL, the number it minted —
+          // declares it: `reply` is a few named templates, `redirect` is
+          // where the person goes next, in-app route or outside address.
+          const reply = endCfg.reply && typeof endCfg.reply === "object" && !Array.isArray(endCfg.reply)
+            ? Object.fromEntries(Object.entries(endCfg.reply as Record<string, unknown>).map(([k, v]) =>
+                [k, typeof v === "string" ? interpolateValue(v, ctx.variables) : v]))
+            : undefined;
+          const redirect = typeof endCfg.redirect === "string" && endCfg.redirect.trim()
+            ? String(interpolateValue(endCfg.redirect, ctx.variables) ?? "").trim()
+            : "";
+          if (reply || redirect) {
+            logEntry.output = { ...((logEntry.output as Record<string, unknown>) ?? {}),
+              ...(reply ? { reply } : {}), ...(redirect ? { redirect } : {}) };
+          }
         }
         nextEdges = [];
         break;

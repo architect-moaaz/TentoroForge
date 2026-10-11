@@ -552,7 +552,7 @@ async function rowAccessConditions(
  * Blueprint declares as ownership, and what the rules builder declares as row
  * access. One list, so both end up in the same WHERE and the same count.
  */
-async function accessConditions(
+export async function accessConditions(
   entityName: string,
   entity: { table: PgTableWithColumns<any> },
   ctx: DataEngineContext,
@@ -568,6 +568,34 @@ async function accessConditions(
 function allOf(conds: SQL[]): SQL | undefined {
   if (conds.length === 0) return undefined;
   return conds.length === 1 ? conds[0] : (and(...conds) as SQL);
+}
+
+/**
+ * The WHERE that keeps `table` to what `user` may reach, or undefined when
+ * nothing scopes it.
+ *
+ * For a workflow's own database steps. They built their WHERE from the step's
+ * config alone and never asked the ownership rules, so a process read and
+ * changed rows across people while the pages of the same application could
+ * not (2026-10-12). The rules are the same rules, read the same way as the
+ * data API reads them. A run with no acting person — a schedule, another
+ * system's event — is the application's own and is not scoped.
+ */
+export async function scopeForTable(
+  table: PgTableWithColumns<any>,
+  user: DataEngineContext["user"],
+  op: "read" | "write" = "write",
+): Promise<SQL | undefined> {
+  if (!user?.id) return undefined;
+  if (!_initialized) {
+    const init = await import("./data-init");
+    await init.ensureDataEngineInitialized();
+  }
+  for (const [name, rec] of _entities) {
+    if (rec.table !== table) continue;
+    return allOf(await accessConditions(name, rec, { user }, op));
+  }
+  return undefined;
 }
 
 

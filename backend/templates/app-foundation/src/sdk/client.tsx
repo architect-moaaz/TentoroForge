@@ -47,7 +47,8 @@ export function useLive(seconds = 10): void {
 
 export interface RunResult {
   ok: boolean;
-  /** What the workflow returned — its log, and the record it wrote if any. */
+  /** What the workflow returned — its receipt: status, the record it wrote if
+   *  any, and `reply`, the values its end declared for this page by name. */
   result: Json;
   error: string | null;
 }
@@ -98,7 +99,12 @@ export function useWorkflow<I extends Json>(
       // (`router.push(href(pages.x, { id: result.id }))` right after `await run()`)
       // navigates first; a refresh queued ahead of it could leave the page where
       // it was — SnapIT stayed on "Identifying product" with its result loaded.
-      if (options.redirectTo) router.push(options.redirectTo);
+      // THE RUN'S OWN `redirect` WINS: its end declared where the person goes
+      // next — an outside address a step produced (a hosted checkout) is
+      // left to the browser, a route of this application to the router.
+      const go = typeof result.redirect === "string" && result.redirect ? String(result.redirect) : options.redirectTo;
+      if (go && /^https?:\/\//i.test(go)) window.location.assign(go);
+      else if (go) router.push(go);
       else setTimeout(() => router.refresh(), 0);
       return { ok: true, result, error: null };
     } catch (err) {

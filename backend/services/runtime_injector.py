@@ -1442,7 +1442,11 @@ export async function POST(
     const user = su?.id
       ? { ...Object.fromEntries(Object.entries(su).filter(([, v]) => v === null || ["string", "number", "boolean"].includes(typeof v))),
           id: String(su.id), role: su.role, email: su.email ?? undefined }
-      : body.user;
+      : undefined;
+    // NOBODY ACTS AS SOMEONE ELSE BY SAYING SO. The body used to carry a
+    // `user` the route believed when no session was present, so any caller
+    // could run a process as any role or person. The actor is the session or
+    // nobody; a signed-out visitor is their guest token, below.
     // The ROLE, which is the owner's own vocabulary — never the id or the
     // email beside it, which are a person.
     actingRole = user?.role ? String(user.role) : undefined;
@@ -1706,7 +1710,9 @@ export async function POST(
     // from ctx.user.id — see the [id]/execute route).
     const session = await auth();
     const su = session?.user as { id?: string; role?: string; email?: string | null } | undefined;
-    const user = su?.id ? { id: su.id, role: su.role, email: su.email ?? undefined } : body.user;
+    // The actor is the session or nobody — never a `user` the caller wrote
+    // into the body (any caller could have acted as anyone).
+    const user = su?.id ? { id: su.id, role: su.role, email: su.email ?? undefined } : undefined;
 
     const results = await triggerWorkflowEvent(event, input, user);
 

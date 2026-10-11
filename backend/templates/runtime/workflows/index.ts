@@ -370,6 +370,11 @@ export async function persistPendingTask(
   if (result.status !== "paused" || !(result as any).pendingTask) return;
   const task = (result as any).pendingTask;
   const { assignee: _assignee, role: _role } = await _resolveAssignee(task, input, user);
+  // THE RUN KEEPS ITS ACTOR ACROSS THE PAUSE. A resumed run used to start
+  // with nobody acting — `$user.id` empty, owner columns unfilled, scoped
+  // reads returning nothing — because the pause stored the variables and
+  // not who was running. `__user` rides in the process variables and the
+  // bus hands it back to `triggerWorkflow` on resume.
   const entityId =
     (input.entityId as string) ??
     ((input.entity as any)?.id as string) ??
@@ -418,7 +423,7 @@ export async function persistPendingTask(
         ${entityId},
         ${JSON.stringify(result.output || {})},
         ${JSON.stringify(task.formBinding || {})},
-        ${JSON.stringify(result.output || {})},
+        ${JSON.stringify({ ...(result.output || {}), ...(user ? { __user: user } : {}) })},
         ${dueAt},
         ${escalateTo},
         NOW()
@@ -1023,6 +1028,21 @@ export function _finalizeInsert(
 }
 
 /** A lookup whose key is missing: it matches no row (see `_buildWhere`). */
+/**
+ * A step's WHERE, kept to what the acting person may reach. The ownership
+ * rules the data API applies are read the same way here (`scopeForTable`),
+ * so a process started by a vendor reads and changes the vendor's rows, as
+ * their pages do. A run with no acting person is the application's own.
+ */
+async function _scoped(table: any, where: any, ctx: WorkflowExecutionContext, op: "read" | "write"): Promise<any> {
+  const user = (ctx as any)?.user;
+  if (!user?.id) return where;
+  const { scopeForTable } = await import("../data-engine");
+  const scope = await scopeForTable(table, user, op);
+  if (!scope) return where;
+  return where ? and(where, scope) : scope;
+}
+
 export const MATCHES_NOTHING = Symbol("matches-nothing");
 
 /** The comparisons an object `where` value may name, and their spellings. */
@@ -1437,7 +1457,7 @@ export function registerDefaultActions(): void {
       const q = (db as any).update(table).set(raw);
       const where = _buildWhere(table, (config as any).where, ctx);
       _requireWhereOrThrow("db_update", config, where);
-      const rows = await q.where(where).returning();
+      const rows = await q.where(await _scoped(table, where, ctx, "write")).returning();
       if (Array.isArray(rows)) {
         for (const r of rows) await embedWrittenRow(table, r, null, Object.keys(raw));
       }
@@ -1476,15 +1496,16 @@ export function registerDefaultActions(): void {
       const q = (db as any).delete(table);
       const where = _buildWhere(table, (config as any).where, ctx);
       _requireWhereOrThrow("db_delete", config, where);
+      const kept = await _scoped(table, where, ctx, "write");
       // Drizzle-orm's DELETE ... RETURNING lets us honor the contract-
       // declared `deleted.count` output. Fall back to the boolean if the
       // driver doesn't support returning().
       let count = 0;
       try {
-        const rows: any = await (q.where(where) as any).returning();
+        const rows: any = await (q.where(kept) as any).returning();
         count = Array.isArray(rows) ? rows.length : 0;
       } catch {
-        await q.where(where);
+        await q.where(kept);
       }
       // A0-2: the contract advertises `deleted.count`, but `deleted` was a
       // BOOLEAN. The count was already computed — it just was not reachable
@@ -1514,7 +1535,8 @@ export function registerDefaultActions(): void {
       // _requireWhereOrThrow, so unfiltered writes remain impossible.
       const where = _buildWhere(table, (config as any).where, ctx, { strict: false });
       if (where === MATCHES_NOTHING) return queryResult([]);
-      const rows = await (where ? q.where(where) : q);
+      const kept = await _scoped(table, where, ctx, "read");
+      const rows = await (kept ? q.where(kept) : q);
       // THE ONE ROW A LOOKUP LOOKED UP, READABLE AS ITSELF. A step written to
       // fetch one record is read as that record — `check_member_verified.
       // kycStatus`, `fetch_tool_owner.ownerId`. Templates had a fallback for

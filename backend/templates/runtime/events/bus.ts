@@ -23,6 +23,14 @@
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import {
+
+/** The person a paused run was acting as, as the pause stored them. */
+function _actorOf(pv: Record<string, unknown> | undefined): { id: string; role?: string; email?: string } | undefined {
+  const u = pv?.__user;
+  if (!u || typeof u !== "object") return undefined;
+  const o = u as Record<string, unknown>;
+  return o.id ? { ...o, id: String(o.id), role: o.role as string | undefined, email: o.email as string | undefined } : undefined;
+}
   findWorkflowsForEvent,
   buildResumeInput,
   buildTimeoutResumeInput,
@@ -261,7 +269,8 @@ async function _resumeWaiters(
       evt.payload && typeof evt.payload === "object" ? evt.payload : {};
     const input = buildResumeInput(pv, task.node_id, evt.type, payload);
 
-    const result = await wfmod.triggerWorkflow(task.workflow_id, input);
+    // As whoever was running it when it paused (`__user`, stored at the pause).
+    const result = await wfmod.triggerWorkflow(task.workflow_id, input, _actorOf(pv));
     // Mark the wait row completed regardless of downstream outcome —
     // matches the /execute route, which completes the task row after the
     // resume dispatch. A failed downstream run is the run's own failure.
@@ -358,7 +367,7 @@ export async function resumeExpiredWaits(now: Date = new Date()): Promise<number
         continue;
       }
 
-      await wfmod.triggerWorkflow(task.workflow_id, input);
+      await wfmod.triggerWorkflow(task.workflow_id, input, _actorOf(pv));
       resumed += 1;
     } catch (err) {
       console.warn(`[events] timeout resume failed for task ${task.id}:`, err);

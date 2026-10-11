@@ -87,7 +87,12 @@ export function WorkflowDispatchProvider({ children }: { children: ReactNode }) 
           const away = typeof window !== "undefined"
             ? destinationAfterDelete(args, result, window.location.pathname)
             : null;
-          if (away) router.push(away);
+          // The run's end may say where the person goes next (`redirect`):
+          // an outside address is the browser's, a route is the router's.
+          const go = typeof (r as { redirect?: unknown }).redirect === "string" ? String((r as { redirect?: string }).redirect) : "";
+          if (go && /^https?:\/\//i.test(go)) window.location.assign(go);
+          else if (go) router.push(go);
+          else if (away) router.push(away);
           else router.refresh();
         },
         onError: (name, message) =>

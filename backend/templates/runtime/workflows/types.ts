@@ -355,6 +355,11 @@ export interface WorkflowExecutionResult {
   log: ExecutionLogEntry[];
   /** Final process variable state */
   output: Record<string, unknown>;
+  /** What the `end` declared for the page to read, by name (`config.reply`). */
+  reply?: Record<string, unknown>;
+  /** Where the `end` sends the person next (`config.redirect`): a route of
+   *  this application or an outside address a step produced. */
+  redirect?: string;
   /**
    * What a step could not do, in words for the person who ran it.
    *
