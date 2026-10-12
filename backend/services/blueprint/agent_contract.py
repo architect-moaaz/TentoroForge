@@ -1530,6 +1530,25 @@ def known_roles(result: "AgentResult", doc: dict | None) -> set[str]:
     return out
 
 
+def role_aliases(result: "AgentResult", doc: dict | None) -> dict[str, str]:
+    """Every spelling of a role (its id, its name) → one key, the id where
+    known. A page's `users` are role ids and the audit's `reviewers` may be
+    names; compared as written they never matched (60v142ju: users
+    ROLE-002/ROLE-003 refused against reviewers Supervisor/SystemAdmin)."""
+    out: dict[str, str] = {}
+    rows = [r for r in (doc or {}).get("roles") or [] if isinstance(r, dict)]
+    rows += [p.body for p in result.proposals if p.section == "roles" and isinstance(p.body, dict)]
+    for r in rows:
+        key = str(r.get("id") or r.get("name") or "")
+        for k in ("id", "name"):
+            if r.get(k):
+                out[str(r[k])] = key
+    for p in result.proposals:
+        if p.section == "roles":
+            out.setdefault(str(p.natural_key), out.get(str((p.body or {}).get("name") or ""), str(p.natural_key)))
+    return out
+
+
 def _security_authored(result: "AgentResult", doc: dict) -> bool:
     """The access step has spoken: roles exist, or this reply declares them."""
     return bool(doc.get("roles")) or any(p.section in ("roles", "security") for p in result.proposals)
@@ -1577,7 +1596,9 @@ def check_audit(result: "AgentResult", doc: dict | None) -> None:
                 problems.append(f"security.audit: the screens include an audit trail ({planned[0].get('name')}); "
                                 "declare the trail (`level`, `reviewers`) it shows")
     level = str(audit.get("level") or "none")
-    reviewers = {str(r) for r in audit.get("reviewers") or []}
+    alias = role_aliases(result, doc)
+    reviewers = {alias.get(str(r), str(r)) for r in audit.get("reviewers") or []}
+    reviewer_names = sorted(str(r) for r in audit.get("reviewers") or [])
     if _security_authored(result, doc):
         for p in result.proposals:
             if p.section != "pages" or not isinstance(p.body, dict):
@@ -1587,10 +1608,10 @@ def check_audit(result: "AgentResult", doc: dict | None) -> None:
             name = p.body.get("name") or p.natural_key
             if level == "none":
                 problems.append(f"{name}: an `audit_trail` page needs a trail — `security.audit.level` is none")
-            users = [str(u) for u in p.body.get("users") or []]
+            users = [alias.get(str(u), str(u)) for u in p.body.get("users") or []]
             if not users or any(u not in reviewers for u in users):
                 problems.append(f"{name}: an `audit_trail` page is for the reviewers the audit policy names; "
-                                f"`users` must be among {sorted(reviewers) or ['(none declared)']}")
+                                f"`users` must be among {reviewer_names or ['(none declared)']}")
     if problems:
         raise InvalidAudit(_all_of(problems))
 

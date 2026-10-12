@@ -76,3 +76,18 @@ def test_a_trail_screen_planned_before_access_waits_and_then_holds_access_to_it(
             ArtifactProposal(section="roles", natural_key="Admin", body={"name": "Admin"}),
             ArtifactProposal(section="security", natural_key="security", body={"audit": {"level": "none"}})]), doc)
     assert "screens include an audit trail" in str(e.value)
+
+
+def test_a_screens_users_by_id_match_reviewers_by_name():
+    """users ROLE-002/ROLE-003 were refused against reviewers
+    Supervisor/SystemAdmin — the same roles, spelled two ways (60v142ju)."""
+    import pytest
+    from services.blueprint.agent_contract import AgentResult, ArtifactProposal, InvalidAudit, check_audit
+    doc = {"roles": [{"id": "ROLE-001", "name": "Officer"}, {"id": "ROLE-002", "name": "Supervisor"}, {"id": "ROLE-003", "name": "SystemAdmin"}],
+           "security": {"audit": {"level": "regulated", "reviewers": ["Supervisor", "SystemAdmin"]}}}
+    page = lambda users: AgentResult(task_id="T", agent="page_design", proposals=[  # noqa: E731
+        ArtifactProposal(section="pages", natural_key="PAGE:/audit-log", body={"name": "Audit Trail", "pattern": "audit_trail", "users": users})])
+    check_audit(page(["ROLE-002", "ROLE-003"]), doc)
+    check_audit(page(["Supervisor"]), doc)
+    with pytest.raises(InvalidAudit):
+        check_audit(page(["ROLE-001"]), doc)
