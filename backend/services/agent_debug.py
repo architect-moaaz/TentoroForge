@@ -170,6 +170,53 @@ async def stream_run(app_url: str, secret: str | None, payload: dict[str, Any]) 
         yield event(f"The connection to the app broke: {e}")
 
 
+async def watch_stream(app_url: str, secret: str | None) -> AsyncIterator[bytes]:
+    """Every chat the app has, as it happens, passed through as the app sends it. Stays open until the builder
+    closes it; a failure or a dropped connection is one ``error`` event, so the screen can say so and reconnect."""
+    def event(message: str) -> bytes:
+        return f"data: {json.dumps({'type': 'error', 'message': message})}\n\n".encode()
+
+    try:
+        url = clean_app_url(app_url)
+    except DebugError as e:
+        yield event(str(e))
+        return
+    if not secret:
+        yield event("This app has no live-run key yet. Apply the agent once to create it.")
+        return
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:
+            async with client.stream("GET", f"{url}/api/agent/debug", params={"watch": "1"}, headers={HEADER: secret}) as r:
+                if r.status_code >= 400:
+                    body = (await r.aread()).decode("utf-8", "ignore")
+                    yield event(_message_of(body) or str(_off()))
+                    return
+                async for chunk in r.aiter_bytes():
+                    yield chunk
+    except httpx.ConnectError:
+        yield event(str(_unreachable(url)))
+    except httpx.HTTPError as e:
+        yield event(f"The connection to the app broke: {e}")
+
+
+def flow_map(graph: dict[str, Any]) -> dict[str, Any]:
+    """Which box on the canvas each thing the runtime does belongs to, so the live view can light the right one.
+
+    ``tools`` maps a tool's compiled name to its box; ``kinds`` lists the boxes of each other kind (the runtime
+    checks the message and the answer with the guardrail box(es), loads memory with the memory box, asks the model
+    with the system-prompt box, and hands over with the human-handoff box). The runtime works in a fixed order and
+    does not walk the arrows; this says which box stands for each step of it."""
+    from services.agent_check import _kind, _tool_nodes_by_name
+
+    nodes = [n for n in (graph.get("nodes") or []) if isinstance(n, dict)]
+    kinds: dict[str, list[str]] = {}
+    for n in nodes:
+        k = _kind(n)
+        if k and k != "tool":
+            kinds.setdefault(k, []).append(str(n.get("id")))
+    return {"tools": _tool_nodes_by_name(nodes), "kinds": kinds}
+
+
 def _message_of(body: str) -> str | None:
     try:
         data = json.loads(body)

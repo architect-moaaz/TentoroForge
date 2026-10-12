@@ -52,6 +52,7 @@ export async function runAgent(
 
     // 1 ── input guardrails
     const verdict = validateInput(input.message, config.guardrails.input, !!input.user);
+    deps.trace?.({ type: "phase", phase: "input_check", ok: verdict.ok, ...(verdict.reason ? { reason: verdict.reason } : {}) });
     if (!verdict.ok) {
       emit({ type: "blocked", stage: "input", reason: verdict.reason ?? "Blocked." });
       return;
@@ -90,8 +91,10 @@ export async function runAgent(
     const history = await loadHistory(deps.store, conversationId, summary, config.memory, new Set(config.tools.map((t) => t.name)));
     const messages: ModelMessage[] = [...history, { role: "user", content: input.message }];
     await deps.store.saveMessage(conversationId, { role: "user", content: input.message });
+    deps.trace?.({ type: "phase", phase: "memory", messages: history.length, summarised: summary !== null });
 
     if (handed) {
+      deps.trace?.({ type: "phase", phase: "with_person", ref: handed.ref });
       // The person is told once. After that (or once a person has written back) what they add simply reaches
       // whoever has it; repeating the notice on every message would drown a real conversation.
       const last = history[history.length - 1];
@@ -227,6 +230,7 @@ export async function runAgent(
     let final = answer;
     const out = validateOutput(final, config.guardrails.output);
     const rules = out.ok ? checkOutputRules(config.guardrails.outputRules, scope, deps.evalExpression) : out;
+    deps.trace?.({ type: "phase", phase: "output_check", ok: rules.ok, ...(rules.ok ? {} : { reason: rules.reason ?? "Blocked." }) });
     if (!rules.ok) {
       final = REFUSAL_ANSWER;
       emit({ type: "blocked", stage: "output", reason: rules.reason ?? "Blocked.", replacement: REFUSAL_ANSWER });

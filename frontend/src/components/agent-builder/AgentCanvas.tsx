@@ -24,6 +24,7 @@ import { MemoryNode } from "./nodes/MemoryNode";
 import { HumanHandoffNode } from "./nodes/HumanHandoffNode";
 import { RouterNode } from "./nodes/RouterNode";
 import { useAgentBuilderStore } from "@/stores/agent-builder";
+import { edgeLook, nodeRing, type NodeState } from "@/lib/agent-watch";
 import type {
   AgentNodeData,
   AgentNodeType,
@@ -49,6 +50,9 @@ interface AgentCanvasProps {
   onEdgesChange?: (edges: Edge[]) => void;
   /** Boxes with something wrong, by node id: they are drawn with a red or amber ring. */
   problems?: Record<string, "error" | "warning">;
+  /** While watching a live chat: which boxes are working (pulsing), done (green), failed (red) or holding (amber).
+   *  The arrows between them move while either end is working. Drawn, never stored. */
+  liveStates?: Record<string, NodeState>;
 }
 
 let nodeIdCounter = 1;
@@ -62,6 +66,7 @@ export function AgentCanvas({
   onNodesChange: onNodesChangeProp,
   onEdgesChange: onEdgesChangeProp,
   problems,
+  liveStates,
 }: AgentCanvasProps) {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { setSelectedNodeId } = useAgentBuilderStore();
@@ -219,29 +224,40 @@ export function AgentCanvas({
 
   // Drawn, not stored: a mark is derived from the latest checks each render, so it never goes into the
   // canvas's own state (which is reported back to the parent and saved).
-  const shownNodes = useMemo(
-    () =>
-      problems && Object.keys(problems).length
-        ? nodes.map((n) =>
-            problems[n.id]
-              ? {
-                  ...n,
-                  className:
-                    problems[n.id] === "error"
-                      ? "[&>div]:!ring-2 [&>div]:!ring-red-500 [&>div]:!ring-offset-1"
-                      : "[&>div]:!ring-2 [&>div]:!ring-amber-400 [&>div]:!ring-offset-1",
-                }
-              : n,
-          )
-        : nodes,
-    [nodes, problems],
-  );
+  const shownNodes = useMemo(() => {
+    const live = liveStates && Object.keys(liveStates).length > 0;
+    if (!live && !(problems && Object.keys(problems).length)) return nodes;
+    return nodes.map((n) => {
+      // What a chat is doing to a box outranks a warning about it.
+      const ring = nodeRing(liveStates?.[n.id]);
+      if (ring) return { ...n, className: ring };
+      if (problems?.[n.id]) {
+        return {
+          ...n,
+          className:
+            problems[n.id] === "error"
+              ? "[&>div]:!ring-2 [&>div]:!ring-red-500 [&>div]:!ring-offset-1"
+              : "[&>div]:!ring-2 [&>div]:!ring-amber-400 [&>div]:!ring-offset-1",
+        };
+      }
+      return n;
+    });
+  }, [nodes, problems, liveStates]);
+
+  const shownEdges = useMemo(() => {
+    if (!liveStates || Object.keys(liveStates).length === 0) return edges;
+    return edges.map((e) => {
+      const look = edgeLook(liveStates[e.source], liveStates[e.target]);
+      if (!look.animated && !look.stroke) return e;
+      return { ...e, animated: look.animated, style: { ...(e.style ?? {}), stroke: look.stroke, strokeWidth: look.width } };
+    });
+  }, [edges, liveStates]);
 
   return (
     <div ref={reactFlowWrapper} className="h-full w-full">
       <ReactFlow
         nodes={shownNodes}
-        edges={edges}
+        edges={shownEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}

@@ -40,6 +40,13 @@ class AgentDebugRun(BaseModel):
     graph: AgentDefinitionSave | None = None
 
 
+class AgentWatch(BaseModel):
+    """Watch the running app's real chats live. ``graph`` (the agent as drawn) lets the platform say which box on the
+    canvas each tool and step belongs to."""
+    app_url: str
+    graph: AgentDefinitionSave | None = None
+
+
 class AgentScenarioSave(BaseModel):
     """The saved test conversations for one agent (see services/agent_scenarios.py)."""
     scenarios: list[dict] = []

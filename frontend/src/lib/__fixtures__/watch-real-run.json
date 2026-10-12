@@ -1,0 +1,417 @@
+{
+ "map": {
+  "type": "platform_map",
+  "tools": {
+   "list_users": "tool_list_users",
+   "get_user": "tool_get_user",
+   "list_customers": "tool_list_customers",
+   "get_customer": "tool_get_customer",
+   "add_customer": "tool_add_customer",
+   "update_customer": "tool_update_customer",
+   "list_orders": "tool_list_orders",
+   "get_order": "tool_get_order",
+   "add_order": "tool_add_order",
+   "update_order": "tool_update_order",
+   "list_tickets": "tool_list_tickets",
+   "get_ticket": "tool_get_ticket",
+   "list_ticket_messages": "tool_list_ticket_messages",
+   "get_ticket_message": "tool_get_ticket_message",
+   "list_refunds": "tool_list_refunds",
+   "get_refund": "tool_get_refund",
+   "list_articles": "tool_list_articles",
+   "get_article": "tool_get_article",
+   "assign_ticket": "tool_assign_ticket",
+   "reply_to_ticket": "tool_reply_to_ticket",
+   "escalate_ticket": "tool_escalate_ticket",
+   "resolve_ticket": "tool_resolve_ticket",
+   "request_refund": "tool_request_refund",
+   "decide_refund": "tool_decide_refund",
+   "publish_article": "tool_publish_article"
+  },
+  "kinds": {
+   "system_prompt": [
+    "sp_1"
+   ],
+   "guardrail": [
+    "guard_1"
+   ],
+   "memory": [
+    "mem_1"
+   ],
+   "human_handoff": [
+    "handoff_1"
+   ]
+  }
+ },
+ "events": [
+  {
+   "type": "watch_ready",
+   "agents": [
+    {
+     "id": "app_assistant",
+     "name": "ResolveDesk Assistant"
+    }
+   ]
+  },
+  {
+   "type": "run_start",
+   "agentId": "app_assistant",
+   "agentName": "ResolveDesk Assistant",
+   "user": {
+    "id": "db95e57b-7040-495a-9277-a283ce514163",
+    "name": "Support Agent (demo)",
+    "role": "Support Agent",
+    "email": "support.agent@example.com"
+   },
+   "message": "How many open tickets are there, and who is the customer on the oldest one?",
+   "conversationId": null,
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 8
+  },
+  {
+   "type": "phase",
+   "phase": "input_check",
+   "ok": true,
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 13
+  },
+  {
+   "type": "phase",
+   "phase": "memory",
+   "messages": 0,
+   "summarised": false,
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 112
+  },
+  {
+   "type": "model_start",
+   "n": 1,
+   "messages": 1,
+   "tools": 26,
+   "systemChars": 3150,
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 131
+  },
+  {
+   "type": "text",
+   "content": "Let",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 2017
+  },
+  {
+   "type": "text",
+   "content": " me look",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 2021
+  },
+  {
+   "type": "text",
+   "content": " up the open tickets for you \u2014",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 2021
+  },
+  {
+   "type": "text",
+   "content": " I'll fetch",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 2022
+  },
+  {
+   "type": "text",
+   "content": " them",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 2023
+  },
+  {
+   "type": "text",
+   "content": " sorted",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 2023
+  },
+  {
+   "type": "text",
+   "content": " by creation",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 2025
+  },
+  {
+   "type": "text",
+   "content": " date at",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 2037
+  },
+  {
+   "type": "text",
+   "content": " the same",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 2092
+  },
+  {
+   "type": "text",
+   "content": " time.",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 2317
+  },
+  {
+   "type": "model_call",
+   "n": 1,
+   "ms": 3181,
+   "inputTokens": 5369,
+   "outputTokens": 136,
+   "messages": 1,
+   "toolsRequested": [
+    "list_tickets"
+   ],
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 3312
+  },
+  {
+   "type": "tool_call",
+   "id": "toolu_01F1mpuadtN7A8j9FuYSBqoY",
+   "tool": "list_tickets",
+   "input": {
+    "filters": {
+     "status": "open"
+    },
+    "sort": "createdAt",
+    "order": "asc",
+    "limit": 50
+   },
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 3313
+  },
+  {
+   "type": "app_call",
+   "kind": "request",
+   "label": "/api/data/tickets",
+   "method": "GET",
+   "query": {
+    "status": "open",
+    "sort": "createdAt",
+    "order": "asc",
+    "limit": 50
+   },
+   "status": 200,
+   "ms": 322,
+   "ok": true,
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 3658
+  },
+  {
+   "type": "tool_result",
+   "id": "toolu_01F1mpuadtN7A8j9FuYSBqoY",
+   "tool": "list_tickets",
+   "ok": true,
+   "result": {
+    "data": [
+     {
+      "id": "938ec5d8-b462-4cb4-93af-b7320fd55541",
+      "customerId": "291c9530-a50c-4899-b437-3c3f2367c135",
+      "orderId": "98afe6f7-1be4-4b91-9637-390fee86e765",
+      "subject": "Wrong colour delivered",
+      "body": "I ordered grey but received black.",
+      "status": "open",
+      "priority": "normal",
+      "category": "shipping",
+      "assignedToId": "a0000000-0000-4000-8000-0000000000ad",
+      "createdAt": "2026-05-26T14:00:00.000Z",
+      "resolvedAt": "2026-05-26T14:00:00.000Z",
+      "customerIdLabel": "Elena Petrova",
+      "orderIdLabel": "Yoga Mat"
+     },
+     {
+      "id": "ea22f10c-c54e-4641-9e14-4e7d7c28805b",
+      "customerId": "663ecfcd-8772-4371-a56f-4abef6f7d086",
+      "orderId": "f2df1813-1cb5-43e2-967a-6e1f93180b98",
+      "subject": "Invoice needed for the watch",
+      "body": "I need a PDF invoice for my accountant.",
+      "status": "open",
+      "priority": "low",
+      "category": "billing",
+      "assignedToId": "a0000000-0000-4000-8000-0000000000ad",
+      "createdAt": "2026-08-14T09:00:00.000Z",
+      "resolvedAt": "2026-08-14T09:00:00.000Z",
+      "customerIdLabel": "Hugo Martin",
+      "orderIdLabel": "Travel Kettle"
+     },
+     {
+      "id": "a3f45a0b-38fc-414e-a3d5-4ad0f11eef5a",
+      "customerId": "0ebf51c6-20db-41a9-badb-9aeb65c7fe67",
+      "orderId": "3bb2c44a-54df-4373-882b-4aa2ef68347a",
+      "subject": "Headphones stopped charging",
+      "body": "The left cup does not charge any more after two weeks.",
+      "status": "open",
+      "priority": "normal",
+      "category": "hardware",
+      "assignedToId": "a0000000-0000-4000-8000-0000000000ad",
+      "createdAt": "2026-09-06T10:00:00.000Z",
+      "resolvedAt": "2026-09-06T10:00:00.000Z",
+      "customerIdLabel": "Alice Moreau",
+      "orderIdLabel": "Trail Backpack"
+     },
+     {
+      "id": "c64fcf30-f820-4d0f-b87c-d20c5ee42ae0",
+      "customerId": "04fd5284-d792-4bbf-a8b8-91a7d194bb1f",
+      "orderId": null,
+      "subject": "Test from agent check",
+      "body": "x",
+      "status": "open",
+      "priority": "normal",
+      "category": null,
+      "assignedToId": null,
+      "createdAt": "2026-10-10T09:42:34.064Z",
+      "resolvedAt": null,
+      "customerIdLabel": "Farid Haddad"
+     }
+    ],
+    "total": 4,
+    "page": 1,
+    "limit": 50
+   },
+   "chars": 1831,
+   "cut": false,
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 3661
+  },
+  {
+   "type": "model_start",
+   "n": 2,
+   "messages": 3,
+   "tools": 26,
+   "systemChars": 3150,
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 3661
+  },
+  {
+   "type": "text",
+   "content": "\n\n",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 4985
+  },
+  {
+   "type": "text",
+   "content": "Here's",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 4985
+  },
+  {
+   "type": "text",
+   "content": " the summary",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 4987
+  },
+  {
+   "type": "text",
+   "content": ":",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 4988
+  },
+  {
+   "type": "text",
+   "content": "\n\n-",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 4988
+  },
+  {
+   "type": "text",
+   "content": " **Total open tickets:",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 4990
+  },
+  {
+   "type": "text",
+   "content": " 4**\n- **",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 4991
+  },
+  {
+   "type": "text",
+   "content": "Oldest ticket:**",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 4993
+  },
+  {
+   "type": "text",
+   "content": " \"",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5056
+  },
+  {
+   "type": "text",
+   "content": "Wrong colour delivered\" \u2014",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5102
+  },
+  {
+   "type": "text",
+   "content": " customer",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5143
+  },
+  {
+   "type": "text",
+   "content": " is",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5211
+  },
+  {
+   "type": "text",
+   "content": " **Elena Petrova**,",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5257
+  },
+  {
+   "type": "text",
+   "content": " created",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5305
+  },
+  {
+   "type": "text",
+   "content": " on ",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5348
+  },
+  {
+   "type": "text",
+   "content": "26",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5420
+  },
+  {
+   "type": "text",
+   "content": " May 2026.",
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5500
+  },
+  {
+   "type": "model_call",
+   "n": 2,
+   "ms": 1843,
+   "inputTokens": 6262,
+   "outputTokens": 49,
+   "messages": 3,
+   "toolsRequested": [],
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5504
+  },
+  {
+   "type": "phase",
+   "phase": "output_check",
+   "ok": true,
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5507
+  },
+  {
+   "type": "done",
+   "conversationId": "cd195076-e9a1-4560-a638-a0c209c60761",
+   "tokens": {
+    "input": 11631,
+    "output": 185
+   },
+   "turns": 2,
+   "runId": "run-mv5dwc7f-vgsiih",
+   "t": 5546
+  }
+ ]
+}
