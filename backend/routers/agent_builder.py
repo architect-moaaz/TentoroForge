@@ -20,6 +20,7 @@ from models.project import (
 )
 from schemas.agent_builder import (
     AgentDebugRun, AgentDefinitionSave, AgentListItem, AgentScenarioRun, AgentScenarioSave, AgentTestRequest,
+    AgentWatch,
 )
 from services.project_service import get_project_with_auth
 from services.git_service import git_commit
@@ -228,6 +229,35 @@ async def debug_status(
         return await status(app_url, read_debug_secret(app_root))
     except DebugError as e:
         return {"ok": False, "reason": str(e)}
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/debug/watch")
+async def debug_watch(
+    project_id: uuid.UUID,
+    req: AgentWatch,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every chat the running app has, live, as the app's own people have them: who wrote what, each step the
+    runtime takes, each model call, each tool and the real request behind it. The first event says which box on
+    the canvas each tool belongs to. Stays open until the builder closes it."""
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    from services.agent_debug import flow_map, read_debug_secret, watch_stream
+
+    project = await get_project_with_auth(project_id, user, db)
+    app_root = _debug_roots(project)
+
+    async def events():
+        if req.graph is not None:
+            yield f"data: {_json.dumps({'type': 'platform_map', **flow_map(req.graph.model_dump())})}\n\n".encode()
+        async for chunk in watch_stream(req.app_url, read_debug_secret(app_root)):
+            yield chunk
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
 
 
 @router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/debug-run")

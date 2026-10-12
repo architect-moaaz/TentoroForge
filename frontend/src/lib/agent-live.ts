@@ -46,7 +46,26 @@ export type ModelStep = {
   toolsRequested: string[];
   /** What the model said while it was working (before a tool, or its final answer). */
   said: string;
+  /** The model has been called and has not answered yet (the live view). `messages` is what it was given. */
+  running?: boolean;
+  /** How many tools it was offered, and how long its instructions are (known as the call starts). */
+  tools?: number;
+  systemChars?: number;
+  /** Why the call failed, if it did. */
+  failed?: string;
 };
+
+/** A step the runtime took that is not a model or tool call: checking the message, loading memory, checking the
+ *  answer, or finding the conversation is with a person. */
+export interface Phase {
+  phase: "input_check" | "memory" | "with_person" | "output_check";
+  t: number;
+  ok?: boolean;
+  reason?: string;
+  messages?: number;
+  summarised?: boolean;
+  ref?: string;
+}
 
 /** What a tool did in the app: a request to one of its routes (real method, path and status), a workflow, ... */
 export interface AppCall {
@@ -85,7 +104,11 @@ export type Step = ModelStep | ToolStep;
 export interface LiveRun {
   status: "idle" | "running" | "done" | "blocked" | "error";
   agent?: AgentInfo;
-  user?: { id: string; name: string; email: string | null; role: string | null };
+  user?: { id: string; name: string | null; email: string | null; role: string | null };
+  /** What the person typed, when the run was watched rather than sent from the builder. */
+  message?: string;
+  /** The runtime's own steps, in order (live view only). */
+  phases: Phase[];
   allowChanges: boolean;
   draft: boolean;
   /** Warnings from compiling the draft. */
@@ -108,6 +131,7 @@ export const emptyRun = (): LiveRun => ({
   allowChanges: false,
   draft: false,
   notes: [],
+  phases: [],
   steps: [],
   answer: "",
   pending: "",
@@ -214,7 +238,30 @@ export function applyEvent(run: LiveRun, e: LiveEvent): LiveRun {
       return { ...run, pending: run.pending + c, answer: run.answer + c };
     }
 
+    case "run_start":
+      return { ...run, user: e.user, message: e.message, seen: `${run.seen}\n${e.message ?? ""}`, conversationId: e.conversationId ?? run.conversationId };
+
+    case "phase": {
+      const { type: _t, t: _at, ...rest } = e;
+      return { ...run, phases: [...run.phases, { ...(rest as Omit<Phase, "t">), t }] };
+    }
+
+    case "model_start": {
+      const step: ModelStep = {
+        kind: "model", n: e.n, t, ms: 0, inputTokens: 0, outputTokens: 0, messages: e.messages, toolsRequested: [], said: "",
+        running: true, tools: e.tools, systemChars: e.systemChars,
+      };
+      return { ...run, steps: [...run.steps, step] };
+    }
+
+    case "model_failed": {
+      const target = [...run.steps].reverse().find((s): s is ModelStep => s.kind === "model" && s.n === e.n);
+      const steps = target ? run.steps.map((s) => (s === target ? { ...target, running: false, ms: e.ms, failed: String(e.error ?? "failed") } : s)) : run.steps;
+      return { ...run, steps };
+    }
+
     case "model_call": {
+      const open = [...run.steps].reverse().find((s): s is ModelStep => s.kind === "model" && s.n === e.n && !!s.running);
       const step: ModelStep = {
         kind: "model",
         n: e.n,
@@ -225,11 +272,13 @@ export function applyEvent(run: LiveRun, e: LiveEvent): LiveRun {
         messages: e.messages,
         toolsRequested: e.toolsRequested ?? [],
         said: run.pending.trim(),
+        ...(open ? { tools: open.tools, systemChars: open.systemChars } : {}),
       };
       return {
         ...run,
         pending: "",
-        steps: [...run.steps, step],
+        // The call announced itself when it began: its card is finished, not added again.
+        steps: open ? run.steps.map((s) => (s === open ? step : s)) : [...run.steps, step],
         totals: {
           ...run.totals,
           modelCalls: run.totals.modelCalls + 1,

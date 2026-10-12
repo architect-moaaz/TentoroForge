@@ -176,3 +176,34 @@ async def test_a_run_against_an_app_that_is_down_is_one_error_the_screen_can_sho
     fake_app(monkeypatch, down)
     events = await drain(await debug_run(project.id, "support", run_request(), _User(), None))
     assert len(events) == 1 and events[0]["type"] == "error" and "Is it running" in events[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_the_watch_starts_with_the_map_of_the_canvas_then_the_apps_feed(project, monkeypatch):
+    from routers.agent_builder import debug_watch
+    from schemas.agent_builder import AgentWatch
+
+    ensure_debug_secret(__import__("pathlib").Path(project.output_dir))
+    sent = {}
+
+    def handler(req: httpx.Request):
+        sent["secret"] = req.headers.get("x-forge-debug-secret")
+        return httpx.Response(200, content='data: {"type":"watch_ready"}\n\n', headers={"content-type": "text/event-stream"})
+
+    fake_app(monkeypatch, handler)
+    resp = await debug_watch(project.id, AgentWatch(app_url="http://localhost:3000", graph=GRAPH), _User(), None)
+    events = await drain(resp)
+    assert [e["type"] for e in events] == ["platform_map", "watch_ready"]
+    assert events[0]["tools"] == {"close_ticket": "t1", "lookup": "t2"} and events[0]["kinds"]["system_prompt"] == ["sp"]
+    assert sent["secret"], "the platform sends the key"
+
+
+@pytest.mark.asyncio
+async def test_the_watch_without_a_drawing_still_streams(project, monkeypatch):
+    from routers.agent_builder import debug_watch
+    from schemas.agent_builder import AgentWatch
+
+    ensure_debug_secret(__import__("pathlib").Path(project.output_dir))
+    fake_app(monkeypatch, lambda req: httpx.Response(200, content='data: {"type":"watch_ready"}\n\n'))
+    events = await drain(await debug_watch(project.id, AgentWatch(app_url="http://localhost:3000"), _User(), None))
+    assert [e["type"] for e in events] == ["watch_ready"]

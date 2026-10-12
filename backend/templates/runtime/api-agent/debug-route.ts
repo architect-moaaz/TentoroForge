@@ -19,6 +19,7 @@ import { db } from "@/db";
 import { debugDeps, describeAgent, instrumentIO, sameSecret, sessionStore, wireResult, type DebugEvent } from "@/lib/agents/debug";
 import { realDeps, toolIO } from "@/lib/agents/io";
 import { runAgent } from "@/lib/agents/runtime";
+import { subscribe } from "@/lib/agents/watch";
 import type { AgentEvent, AgentRuntimeConfig } from "@/lib/agents/types";
 import { sql } from "drizzle-orm";
 
@@ -78,10 +79,51 @@ async function sessionCookieFor(row: Row): Promise<string> {
   return `${sessionCookieName()}=${jwt}`;
 }
 
+/** Every chat the app has, as it happens: what the builder's live flowchart is drawn from. */
+function watchStream(req: Request): Response {
+  const encoder = new TextEncoder();
+  let stop: (() => void) | null = null;
+  let beat: ReturnType<typeof setInterval> | null = null;
+  const stream = new ReadableStream({
+    start(controller) {
+      const write = (text: string) => {
+        try {
+          controller.enqueue(encoder.encode(text));
+        } catch {
+          /* the watcher went away */
+        }
+      };
+      write(`data: ${JSON.stringify({ type: "watch_ready", agents: (AGENTS as AgentRuntimeConfig[]).map((a) => ({ id: a.id, name: a.name })) })}\n\n`);
+      stop = subscribe((e) => write(`data: ${JSON.stringify(e)}\n\n`));
+      // A quiet connection is kept open (and proven alive) with a comment every so often.
+      beat = setInterval(() => write(": ping\n\n"), 15_000);
+      req.signal.addEventListener("abort", () => cleanup());
+    },
+    cancel() {
+      cleanup();
+    },
+  });
+  function cleanup() {
+    if (beat) clearInterval(beat);
+    beat = null;
+    stop?.();
+    stop = null;
+  }
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      connection: "keep-alive",
+      "x-accel-buffering": "no",
+    },
+  });
+}
+
 export async function GET(req: Request): Promise<Response> {
   const no = await refuse(req);
   if (no) return no;
   const url = new URL(req.url);
+  if (url.searchParams.get("watch")) return watchStream(req);
   if (url.searchParams.get("users")) {
     try {
       const rows = await userRows(null);

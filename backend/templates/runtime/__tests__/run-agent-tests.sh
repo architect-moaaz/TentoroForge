@@ -13,3 +13,6 @@ node --experimental-strip-types --no-warnings "$DIR/agent-safety.test.mts"
 
 # The builder's live run: a conversation kept in memory, changes held back, every model call timed.
 node --experimental-strip-types --no-warnings "$DIR/agent-debug.test.mts"
+
+# Watching the real chat live: the feed, the observer, and the runtime's phases.
+node --experimental-strip-types --no-warnings "$DIR/agent-watch.test.mts"

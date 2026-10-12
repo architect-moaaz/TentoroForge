@@ -310,6 +310,13 @@ export interface ToolContext {
   origin: string;
 }
 
+/** Where the runtime is in its work: for whoever is watching (the builder's live view). Never needed to run. */
+export type TraceEvent =
+  | { type: "phase"; phase: "input_check"; ok: boolean; reason?: string }
+  | { type: "phase"; phase: "memory"; messages: number; summarised: boolean }
+  | { type: "phase"; phase: "with_person"; ref: string }
+  | { type: "phase"; phase: "output_check"; ok: boolean; reason?: string };
+
 export interface AgentDeps {
   callModel(req: ModelRequest, onText: (chunk: string) => void): Promise<ModelResult>;
   /** `scope` holds each tool's latest result by tool name, so a later tool's
@@ -329,6 +336,8 @@ export interface AgentDeps {
   };
   /** Usage counts for the limits. Absent (or failing: no table yet) → not limited. */
   usage?: UsageStore;
+  /** Told where the run is (checks, memory, answer check). Absent in a normal chat; the live view supplies it. */
+  trace?: (e: TraceEvent) => void;
   /** FEEL-lite. Absent → output rules are skipped. */
   evalExpression?: (expression: string, scope: Record<string, unknown>) => unknown;
   now?: () => number;

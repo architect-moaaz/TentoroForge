@@ -205,3 +205,52 @@ async def test_an_app_that_is_down_is_reported_down_and_not_as_a_wrong_address(m
     mock_app(monkeypatch, down)
     r = await status("http://localhost:3000", "mine")
     assert r["ok"] is False and "suggestedUrl" not in r and "Is it running" in r["reason"]
+
+
+# ── watching the real chats live ──────────────────────────────────────────
+
+from services.agent_debug import flow_map, watch_stream  # noqa: E402
+
+
+def test_the_map_says_which_box_each_tool_and_step_belongs_to():
+    g = graph(
+        node("sp", "system_prompt", "P", {"prompt": "x"}),
+        node("t1", "tool", "Lookup", {"tool_name": "look_up", "tool_type": "function"}),
+        node("t2", "tool", "Second", {"tool_name": "look_up", "tool_type": "function"}),
+        node("g1", "guardrail", "Guard", {}), node("g2", "guardrail", "Guard 2", {}),
+        node("m", "memory", "Mem", {}), node("h", "human_handoff", "Handoff", {}),
+    )
+    m = flow_map(g)
+    assert m["tools"] == {"look_up": "t1", "look_up_2": "t2"}, "named exactly as the compiler names them, even a repeat"
+    assert m["kinds"] == {"system_prompt": ["sp"], "guardrail": ["g1", "g2"], "memory": ["m"], "human_handoff": ["h"]}
+
+
+@pytest.mark.asyncio
+async def test_the_watch_passes_the_apps_feed_through_as_it_arrives(monkeypatch):
+    feed = 'data: {"type":"watch_ready"}\n\ndata: {"type":"run_start","runId":"r1"}\n\n'
+    seen = {}
+
+    def handler(req: httpx.Request):
+        seen["watch"] = req.url.params.get("watch")
+        seen["secret"] = req.headers.get("x-forge-debug-secret")
+        return httpx.Response(200, content=feed, headers={"content-type": "text/event-stream"})
+
+    mock_app(monkeypatch, handler)
+    events = await collect(watch_stream("http://localhost:3000", "k"))
+    assert [e["type"] for e in events] == ["watch_ready", "run_start"]
+    assert seen == {"watch": "1", "secret": "k"}
+
+
+@pytest.mark.asyncio
+async def test_the_watch_says_in_one_event_why_it_cannot_start(monkeypatch):
+    assert "this computer" in (await collect(watch_stream("http://example.com", "k")))[0]["message"]
+    assert "no live-run key" in (await collect(watch_stream("http://localhost:3000", None)))[0]["message"]
+
+    mock_app(monkeypatch, lambda req: httpx.Response(404, json={"error": "Not found."}))
+    assert "another project's app" in (await collect(watch_stream("http://localhost:3000", "k")))[0]["message"]
+
+    def down(req):
+        raise httpx.ConnectError("refused")
+
+    mock_app(monkeypatch, down)
+    assert "Is it running" in (await collect(watch_stream("http://localhost:3000", "k")))[0]["message"]
