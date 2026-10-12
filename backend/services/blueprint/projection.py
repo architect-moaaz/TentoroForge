@@ -3032,6 +3032,10 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
     # written as code reads through the server and never declares what it
     # reads, so TCommerce's categories, variants, images, cart and order items
     # came out empty and the data API answered 403 to the admin (2026-10-05).
+    # What access decided bounds what a public screen opens (anonymous_may_read).
+    for eid, e in entities.items():
+        if "*" in readers[eid] and not anonymous_may_read(doc, e):
+            readers[eid].discard("*")
     return {slug_of[eid]: {"read": sorted(readers[eid]), "write": sorted(writers[eid])}
             for eid in entities if readers[eid] or writers[eid]}
 
@@ -3478,6 +3482,23 @@ def _entity_readers(doc: dict, entity: dict) -> list[str]:
     return sorted(n for n in names if n)
 
 
+def _field_readers(doc: dict, field: dict) -> list[str]:
+    """A field's own readers, by role NAME, counting only declared roles.
+
+    The records step decides fields before the access step has made any
+    role, so a field's `readers` can name nothing that exists: 60v142ju's
+    personal details named `AdminUser` (a record type) and nobody could ever
+    see a submitter's name (2026-10-12). A list that names no declared role
+    is no override, and the record's readers — the access step's read
+    permissions — govern the field."""
+    roles = {str(r.get(k)): str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)
+             for k in ("id", "name") if r.get(k) and r.get("name")}
+    named = [roles[str(x)] for x in field.get("readers") or [] if str(x) in roles]
+    if "*" in [str(x) for x in field.get("readers") or []]:
+        named.append("*")
+    return sorted(set(named))
+
+
 def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
     """Columns the data engine masks on read.
 
@@ -3520,7 +3541,7 @@ def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
             )
             cols[name] = {"mask": mask,
                           "readers": [] if never
-                          else list(field.get("readers") or readers)}
+                          else (_field_readers(doc, field) or readers)}
         if not cols:
             continue
         name = entity.get("name") or ""
@@ -3984,6 +4005,30 @@ def access_map(doc: dict) -> dict[str, list[str]]:
     return out
 
 
+def anonymous_may_read(doc: dict, entity: dict) -> bool:
+    """A signed-out visitor may read this record type: a rule says everyone
+    reads it (`reads: "everyone"`), a rule scopes visitors to their own rows
+    (`guestColumn`), a role named Guest holds its read permission, or no read
+    permission was declared for it at all.
+
+    A PUBLIC SCREEN DOES NOT WIDEN WHAT ACCESS DECIDED. 60v142ju's public
+    intake form and confirmation screen made every submission readable by
+    anyone, while the access step had granted reading to three staff roles
+    only — a signed-out request listed every submission (2026-10-12)."""
+    keys = {str(entity.get(k) or "").lower() for k in ("id", "name", "table") if entity.get(k)}
+    for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
+        if isinstance(rule, dict) and str(rule.get("entity") or "").lower() in keys \
+                and str(rule.get("status") or "").upper() != "DEPRECATED" \
+                and (str(rule.get("reads") or "") == "everyone" or rule.get("guestColumn")):
+            return True
+    reads = [perm for perm in doc.get("permissions") or [] if isinstance(perm, dict) and perm.get("action") == "read"
+             and str(perm.get("subject") or "").lower() in keys]
+    holders = [r for r in _live(doc.get("roles")) for perm in reads if perm.get("id") in (r.get("permissions") or [])]
+    if not holders:
+        return True
+    return any(str(r.get("name") or "") == "Guest" for r in holders)
+
+
 def public_apis(doc: dict) -> list[str]:
     """The endpoints a public page has to be able to reach.
 
@@ -4018,7 +4063,7 @@ def public_apis(doc: dict) -> list[str]:
                                    .get("primaryEntity")) or {}).get("name"))
         for name in named:
             ent = by_name.get(name)
-            if ent:
+            if ent and anonymous_may_read(doc, ent):
                 slugs.add(str(ent.get("table") or str(name).lower()))
 
     out = [f"api/data/{slug}" for slug in sorted(slugs)]

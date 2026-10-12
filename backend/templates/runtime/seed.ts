@@ -866,6 +866,15 @@ async function seedDomain(adminId: string | null, imported: Set<string> = new Se
       console.log(`ℹ️  ${t.name} holds imported data — no demo rows`);
       return null;
     }
+    // THE DEMO ROWS, read before the "already has rows" path uses them: declared
+    // after it, that path threw (a use before the declaration), the catch took
+    // it for a failed count, and rows keyed by email were never added beside
+    // existing ones.
+    const isDict = (o: unknown): o is Record<string, unknown[]> =>
+      !!o && typeof o === "object" && !Array.isArray(o);
+    const bag = (isDict(plan.sample_data) ? plan.sample_data
+              : isDict(plan.seed_data) ? plan.seed_data
+              : {}) as Record<string, unknown[]>;
     try {
       const [{ c }] = await db.select({ c: sql<number>`count(*)::int` }).from(table);
       if (c > 0) {
@@ -920,11 +929,6 @@ async function seedDomain(adminId: string | null, imported: Set<string> = new Se
     // generator names that dict inconsistently — "sample_data" on some runs,
     // "seed_data" on others — so accept both. (t.seed_data is a legacy
     // per-table field, kept only as a last resort.)
-    const isDict = (o: unknown): o is Record<string, unknown[]> =>
-      !!o && typeof o === "object" && !Array.isArray(o);
-    const bag = (isDict(plan.sample_data) ? plan.sample_data
-              : isDict(plan.seed_data) ? plan.seed_data
-              : {}) as Record<string, unknown[]>;
     const rows: Record<string, unknown>[] =
       (t.seed_data as Record<string, unknown>[] | undefined) ||
       (bag[t.name] as Record<string, unknown>[] | undefined) || [];

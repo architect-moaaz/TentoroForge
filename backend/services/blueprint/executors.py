@@ -2893,7 +2893,11 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                 },
                                 "readers": {
                                     "type": "array", "items": {"type": "string"},
-                                    "description": "On a sensitive field: the roles that may see it unmasked.",
+                                    "description": (
+                                        "On a sensitive field, only when the roles already exist in the "
+                                        "document: the role names that may see it unmasked. Leave it out "
+                                        "otherwise — the roles that may read the record then may."
+                                    ),
                                 },
                                 "enumValues": {
                                     "type": "array",

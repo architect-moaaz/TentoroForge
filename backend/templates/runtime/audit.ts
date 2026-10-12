@@ -15,10 +15,17 @@
 import crypto from "node:crypto";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
+// THE POLICY, READ AT LOAD. It was imported lazily, and the questions asked of
+// it (`auditOn`, `regulated`, `reviewers`) are synchronous: a caller that
+// asked before anything had loaded it heard "none" — the audit screen said
+// "This application keeps no audit trail" on a regulated app, and sign-ins and
+// exports went unrecorded (60v142ju, 2026-10-12). Every app carries this file
+// (the projection writes it; the injector writes a "none" stub otherwise).
+import { AUDIT as PROJECTED_AUDIT } from "./audit-policy";
 
 // THE POLICY, READ ONCE. Projected beside this module; an app built before
 // the trail existed has none, which reads as level `none`.
-let AUDIT: any = { level: "none", reviewers: [], retentionDays: null, reasonRequired: [] };
+let AUDIT: any = PROJECTED_AUDIT ?? { level: "none", reviewers: [], retentionDays: null, reasonRequired: [] };
 let _policyLoaded = false;
 async function policy(): Promise<any> {
   if (_policyLoaded) return AUDIT;
@@ -187,6 +194,10 @@ export async function recordAudit(executor: any, entry: AuditEntry): Promise<{ s
   const prevHash: string | null = prev?.hash ?? null;
   const hash = rowHash({ at, actorId, action: entry.action, entity: entry.entity, entityId: entry.entityId ?? null,
     before, after, prevHash });
+  // THE CHANGED COLUMNS GO AS JSON, MADE AN ARRAY IN THE QUERY. A list
+  // interpolated into the statement is spread into separate values, and
+  // Postgres refused every row ("malformed array literal") — a regulated app
+  // recorded nothing at all, and only a real database showed it (60v142ju).
   const res = await executor.execute(sql`
     INSERT INTO forge_audit (at, actor_id, actor_role, actor_org_id, actor_kind, via, run_id, action, entity, entity_id,
                              before, after, changed, reason, request_id, ip, user_agent, prev_hash, hash)
@@ -194,7 +205,8 @@ export async function recordAudit(executor: any, entry: AuditEntry): Promise<{ s
             ${actor.kind ?? (actorId ? "user" : "system")}, ${entry.via ?? "api"}, ${entry.runId ?? null},
             ${entry.action}, ${entry.entity}, ${entry.entityId ?? null},
             ${JSON.stringify(before)}::jsonb, ${JSON.stringify(after)}::jsonb,
-            ${changed}, ${entry.reason ?? null}, ${entry.requestId ?? null}, ${entry.ip ?? null},
+            (SELECT array_agg(c) FROM jsonb_array_elements_text(${changed == null ? null : JSON.stringify(changed)}::jsonb) AS t(c)),
+            ${entry.reason ?? null}, ${entry.requestId ?? null}, ${entry.ip ?? null},
             ${entry.userAgent ?? null}, ${prevHash}, ${hash})
     RETURNING seq, hash
   `);

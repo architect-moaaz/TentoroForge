@@ -289,6 +289,14 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
       // the value leaves the engine masked unless this caller may unmask.
       if (col in record && !allowed) {
         (record as any)[col] = _maskPlain((record as any)[col], spec.mask);
+      } else if (col in record && allowed && regulated()) {
+        // LOOKING IS ON THE RECORD here too: a value held in the clear (a
+        // seeded row) was shown unmasked and nothing was written, so the
+        // trail of a regulated app missed every such read (60v142ju).
+        await recordAudit(db, { action: "read_sensitive", entity: entityName,
+          entityId: (record as any)?.id != null ? String((record as any).id) : null, changed: [col],
+          actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api" }).catch((e: unknown) =>
+            console.warn("[audit] a sensitive read could not be recorded:", e));
       }
       continue;
     }

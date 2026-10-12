@@ -113,6 +113,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ entity:
   const allowed = await readers(name);
   const isPublic = allowed?.includes("*") ?? false;
   let role: string | null = null;
+  // WHO ASKED, for the trail below as well as the check here: declared
+  // inside the check, it was out of reach of the export's audit record, and
+  // every export of a regulated app threw there, swallowed (60v142ju).
+  let user: { id?: string; role?: string } | undefined;
   if (!isPublic) {
     let session: any = null;
     try {
@@ -120,7 +124,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ entity:
     } catch {
       session = null;
     }
-    const user = session?.user as { role?: string } | undefined;
+    user = session?.user as { id?: string; role?: string } | undefined;
     if (!user) {
       return new Response("Sign in to export this data.", { status: 401 });
     }

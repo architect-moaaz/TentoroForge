@@ -1152,7 +1152,9 @@ def _inject_file_storage(output_path: Path) -> list[str]:
     if int_lib_dir.is_dir():
         int_lib_dst = output_path / "src" / "lib" / "integrations"
         int_lib_dst.mkdir(parents=True, exist_ok=True)
-        for name in ("resolver.ts", "mcpClientPool.ts"):
+        # providers.ts: how an outside system's signed call is verified — the
+        # webhooks route imports it, and an app without it does not build.
+        for name in ("resolver.ts", "mcpClientPool.ts", "providers.ts"):
             src = int_lib_dir / name
             if src.exists():
                 shutil.copy2(src, int_lib_dst / name)
