@@ -25,6 +25,21 @@ class AgentTestRequest(BaseModel):
     conversation_history: list[dict] = []
 
 
+class AgentDebugRun(BaseModel):
+    """One message of the builder's live run: the app's real chat loop, as a chosen person, streamed.
+
+    ``graph`` is the agent as drawn (edits not saved yet); with ``use_draft`` the app runs THAT, otherwise the
+    agent as installed. ``allow_changes`` lets tools that change data really run; off, they are reported as not run."""
+    app_url: str
+    message: str
+    as_user_id: str
+    session_id: str | None = None
+    conversation_id: str | None = None
+    allow_changes: bool = False
+    use_draft: bool = False
+    graph: AgentDefinitionSave | None = None
+
+
 class AgentScenarioSave(BaseModel):
     """The saved test conversations for one agent (see services/agent_scenarios.py)."""
     scenarios: list[dict] = []

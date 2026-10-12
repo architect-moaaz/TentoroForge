@@ -19,7 +19,7 @@ from models.project import (
     Version,
 )
 from schemas.agent_builder import (
-    AgentDefinitionSave, AgentListItem, AgentScenarioRun, AgentScenarioSave, AgentTestRequest,
+    AgentDebugRun, AgentDefinitionSave, AgentListItem, AgentScenarioRun, AgentScenarioSave, AgentTestRequest,
 )
 from services.project_service import get_project_with_auth
 from services.git_service import git_commit
@@ -201,6 +201,78 @@ async def save_agent_scenarios(
     if not project.output_dir:
         raise HTTPException(status_code=400, detail="No output directory")
     return {"scenarios": save_scenarios(project.output_dir, agent_id, req.scenarios)}
+
+
+def _debug_roots(project) -> Path:
+    """The app folder of a project, for the live run. A project that was never built has none."""
+    from services.agent_runtime_install import resolve_roots
+
+    if not project.output_dir:
+        raise HTTPException(status_code=400, detail="This project has not been built yet, so there is no app to run.")
+    return resolve_roots(project.output_dir)[1]
+
+
+@router.get("/api/projects/{project_id}/agent-definitions/debug/status")
+async def debug_status(
+    project_id: uuid.UUID,
+    app_url: str,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Whether the live run works against the running app, who it can run as, which agents are installed."""
+    from services.agent_debug import DebugError, read_debug_secret, status
+
+    project = await get_project_with_auth(project_id, user, db)
+    app_root = _debug_roots(project)
+    try:
+        return await status(app_url, read_debug_secret(app_root))
+    except DebugError as e:
+        return {"ok": False, "reason": str(e)}
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/debug-run")
+async def debug_run(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentDebugRun,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """One chat message through the app's real runtime, as a person the builder picks, streamed step by step:
+    the model's words, each tool call with its exact input, the real data each returned, time and tokens.
+    Tools that change data are not run unless ``allow_changes`` is on."""
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    from services.agent_debug import read_debug_secret, stream_run
+    from services.agent_runtime_config import compile_agent, safe_id
+
+    project = await get_project_with_auth(project_id, user, db)
+    app_root = _debug_roots(project)
+    payload: dict = {
+        "message": req.message,
+        "asUserId": req.as_user_id,
+        "sessionId": req.session_id,
+        "conversationId": req.conversation_id,
+        "allowChanges": req.allow_changes,
+        "agentId": safe_id(agent_id),
+    }
+    warnings: list[str] = []
+    if req.use_draft and req.graph is not None:
+        compiled = compile_agent({**req.graph.model_dump(), "id": agent_id})
+        payload["config"] = compiled.config
+        warnings = compiled.warnings
+        payload["agentId"] = compiled.config.get("id")
+
+    async def events():
+        if warnings:
+            yield f"data: {_json.dumps({'type': 'platform_note', 'warnings': warnings})}\n\n".encode()
+        async for chunk in stream_run(req.app_url, read_debug_secret(app_root), payload):
+            yield chunk
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
 
 
 @router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/tests/run")
