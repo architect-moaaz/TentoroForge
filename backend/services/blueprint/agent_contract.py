@@ -1347,8 +1347,8 @@ def check_tenancy(result: "AgentResult", doc: dict | None) -> None:
                 and str(e.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
     if len(tenants_here) + len(existing) > 1:
         problems.append(f"only ONE entity is the organisation (`tenant: true`); got {', '.join(tenants_here + existing)}")
-    roles = {str(r.get("id")) for r in doc.get("roles") or [] if isinstance(r, dict)}
-    role_names = {str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    roles = known_roles(result, doc)
+    role_names: set[str] = set()
     for p in result.proposals:
         if p.section != "security" or not isinstance(p.body, dict) or not isinstance(p.body.get("tenancy"), dict):
             continue
@@ -1446,13 +1446,7 @@ def check_sign_in(result: "AgentResult", doc: dict | None) -> None:
     role or a map; domains are domains."""
     doc = doc or {}
     problems: list[str] = []
-    roles = {str(r.get("id")) for r in doc.get("roles") or [] if isinstance(r, dict)}
-    roles |= {str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
-    for p in result.proposals:
-        if p.section == "security" and isinstance(p.body, dict):
-            for r in (p.body.get("roles") or []) if isinstance(p.body.get("roles"), list) else []:
-                if isinstance(r, dict):
-                    roles |= {str(r.get("id") or ""), str(r.get("name") or "")}
+    roles = known_roles(result, doc)
     rows = {str(r.get("id")): r for r in doc.get("integrations") or [] if isinstance(r, dict)
             and str(r.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")}
     proposed = {p.natural_key or str((p.body or {}).get("name") or ""): p.body for p in result.proposals
@@ -1511,14 +1505,47 @@ class InvalidAudit(AuthorRefusal):
     """An audit policy nobody may read, or an audit screen for the wrong people."""
 
 
+def known_roles(result: "AgentResult", doc: dict | None) -> set[str]:
+    """Every role id and name the document has, AND every role this same
+    reply declares: the security agent writes `roles` beside `security`, and
+    a check reading only the document refused reviewers it was creating in
+    that very reply (60v142ju, 2026-10-12)."""
+    doc = doc or {}
+    out = {str(r.get(k)) for r in doc.get("roles") or [] if isinstance(r, dict) for k in ("id", "name") if r.get(k)}
+    for p in result.proposals:
+        if p.section == "roles":
+            out.add(str(p.natural_key))
+            if isinstance(p.body, dict):
+                out |= {str(p.body.get(k)) for k in ("id", "name") if p.body.get(k)}
+    return out
+
+
+def _security_authored(result: "AgentResult", doc: dict) -> bool:
+    """The access step has spoken: roles exist, or this reply declares them."""
+    return bool(doc.get("roles")) or any(p.section in ("roles", "security") for p in result.proposals)
+
+
+def _audit_pages(doc: dict) -> list[dict]:
+    return [pg for pg in doc.get("pages") or [] if isinstance(pg, dict) and str(pg.get("pattern") or "") == "audit_trail"
+            and str(pg.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
+
+
 def check_audit(result: "AgentResult", doc: dict | None) -> None:
     """A trail has reviewers who are roles; reasons are required on records
     that exist; an `audit_trail` page is for the reviewers, and only where a
-    trail is declared."""
+    trail is declared.
+
+    THE ORDER OF THE TWO WRITERS. Screens are planned before the access step
+    decides roles and the trail, so a screen check made then refused every
+    planned audit screen against a policy that did not exist yet (60v142ju).
+    The page is judged once the access step has spoken; when it speaks after
+    the page, the access step is held to the page: a trail screen already
+    planned needs a trail."""
     doc = doc or {}
-    roles = {str(r.get("id")) for r in doc.get("roles") or [] if isinstance(r, dict)}
-    role_names = {str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
-    entities = {str(e.get("id")) for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)}
+    roles = known_roles(result, doc)
+    entities = {str(e.get("id")): str(e.get("name") or "") for e in (doc.get("data") or {}).get("entities") or []
+                if isinstance(e, dict)}
+    named = ", ".join(f"{k} ({v})" for k, v in sorted(entities.items())) or "none yet"
     problems: list[str] = []
     audit = ((doc.get("security") or {}).get("audit") or {}) if isinstance(doc.get("security"), dict) else {}
     for p in result.proposals:
@@ -1529,25 +1556,31 @@ def check_audit(result: "AgentResult", doc: dict | None) -> None:
             if level != "none" and not reviewers:
                 problems.append("security.audit: a trail nobody may read is write-only — name the `reviewers` (roles)")
             for r in reviewers:
-                if r not in roles | role_names:
+                if r not in roles:
                     problems.append(f"security.audit.reviewers: {r!r} is not a declared role")
             for e in audit.get("reasonRequired") or []:
                 if str(e) not in entities:
-                    problems.append(f"security.audit.reasonRequired: {e!r} is not a declared entity id")
+                    problems.append(f"security.audit.reasonRequired names RECORD TYPES by entity id, not actions: "
+                                    f"{e!r} is none of {named}")
+            planned = _audit_pages(doc)
+            if level == "none" and planned:
+                problems.append(f"security.audit: the screens include an audit trail ({planned[0].get('name')}); "
+                                "declare the trail (`level`, `reviewers`) it shows")
     level = str(audit.get("level") or "none")
     reviewers = {str(r) for r in audit.get("reviewers") or []}
-    for p in result.proposals:
-        if p.section != "pages" or not isinstance(p.body, dict):
-            continue
-        if str(p.body.get("pattern") or "") != "audit_trail":
-            continue
-        name = p.body.get("name") or p.natural_key
-        if level == "none":
-            problems.append(f"{name}: an `audit_trail` page needs a trail — `security.audit.level` is none")
-        users = [str(u) for u in p.body.get("users") or []]
-        if not users or any(u not in reviewers for u in users):
-            problems.append(f"{name}: an `audit_trail` page is for the reviewers the audit policy names; "
-                            f"`users` must be among {sorted(reviewers) or ['(none declared)']}")
+    if _security_authored(result, doc):
+        for p in result.proposals:
+            if p.section != "pages" or not isinstance(p.body, dict):
+                continue
+            if str(p.body.get("pattern") or "") != "audit_trail":
+                continue
+            name = p.body.get("name") or p.natural_key
+            if level == "none":
+                problems.append(f"{name}: an `audit_trail` page needs a trail — `security.audit.level` is none")
+            users = [str(u) for u in p.body.get("users") or []]
+            if not users or any(u not in reviewers for u in users):
+                problems.append(f"{name}: an `audit_trail` page is for the reviewers the audit policy names; "
+                                f"`users` must be among {sorted(reviewers) or ['(none declared)']}")
     if problems:
         raise InvalidAudit(_all_of(problems))
 
