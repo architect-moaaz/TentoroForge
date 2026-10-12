@@ -35,7 +35,7 @@ _NAV_MARK = "forge-handoffs-nav"
 
 #: runtime template -> destination, relative to the app root
 _CORE = ("types", "guardrails", "memory", "tools", "runtime", "io", "store", "handoff", "handoff-store", "handoff-nav",
-         "confirm", "limits", "usage-store")
+         "confirm", "limits", "usage-store", "debug")
 
 
 def resolve_roots(path: str | Path) -> tuple[Path, Path]:
@@ -126,6 +126,21 @@ def _patch_layout(app_root: Path) -> bool:
         )
     layout.write_text(txt, encoding="utf-8")
     return mounted
+
+
+def _open_debug_route(app_root: Path) -> None:
+    """Let the platform reach /api/agent/debug without a session. The app's sign-in guard would otherwise send it to
+    /login; the route guards itself (development only, the platform's secret, a plain 404 otherwise)."""
+    mw = app_root / "src" / "middleware.ts"
+    if not mw.is_file():
+        return
+    try:
+        txt = mw.read_text(encoding="utf-8")
+        if "api/agent/debug" in txt or "(?!api/auth|" not in txt:
+            return
+        mw.write_text(txt.replace("(?!api/auth|", "(?!api/auth|api/agent/debug|", 1), encoding="utf-8")
+    except OSError:
+        logger.warning("[agents] could not open the debug route in the middleware", exc_info=True)
 
 
 def _refresh_bell(app_root: Path, written: list[str]) -> None:
@@ -234,6 +249,12 @@ def install_agent_runtime(path: str | Path, *, graphs: list[dict[str, Any]] | No
     dashboard = app_root / "src" / "app" / "(dashboard)"
     if dashboard.is_dir():
         _copy(_TEMPLATES / "agents" / "assistant-page.tsx", dashboard / "assistant" / "page.tsx", written, app_root)
+    # The builder's live run (development only; shut without the platform's secret, see agents/debug.ts).
+    _copy(_TEMPLATES / "api-agent" / "debug-route.ts",
+          app_root / "src" / "app" / "api" / "agent" / "debug" / "route.ts", written, app_root)
+    from services.agent_debug import ensure_debug_secret
+    ensure_debug_secret(app_root)
+    _open_debug_route(app_root)
     # The inbox for handoffs: only where an agent has a human-handoff box. (The store and the table go in
     # always, because io.ts loads the store on demand and the build must find it.)
     if any(c.config.get("handoff") for c in compiled):

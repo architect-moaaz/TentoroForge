@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
+import { AgentLiveRun } from "./AgentLiveRun";
 import type {
   AgentNodeSerialized,
   AgentTestMessage,
@@ -42,6 +43,8 @@ export function AgentTestConsole({
   const [totalTokens, setTotalTokens] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // "quick": one model call, tools shown but never run. "live": the app's real chat, step by step, on its real data.
+  const [mode, setMode] = useState<"quick" | "live">("quick");
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -112,8 +115,41 @@ export function AgentTestConsole({
     }
   };
 
+  const modeBar = (
+    <div className="flex items-center gap-1 border-b px-3 py-1.5" role="tablist" aria-label="Test mode">
+      {([["quick", "Quick test"], ["live", "Live run"]] as const).map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          aria-selected={mode === key}
+          onClick={() => setMode(key)}
+          className={`rounded px-2 py-0.5 text-[11px] ${mode === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+        >
+          {label}
+        </button>
+      ))}
+      <span className="ml-2 text-[10px] text-muted-foreground">
+        {mode === "quick" ? "One model call. Tools are shown, never run." : "Watch it work in your running app, on real data."}
+      </span>
+    </div>
+  );
+
+  if (mode === "live") {
+    return (
+      <div className="flex h-full flex-col">
+        {modeBar}
+        <div className="min-h-0 flex-1">
+          <AgentLiveRun projectId={projectId} agentId={agentId} agentName={agentName} nodes={nodes} />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-full">
+    <div className="flex h-full flex-col">
+      {modeBar}
+      <div className="flex min-h-0 flex-1">
       {/* Left: Chat interface */}
       <div className="flex flex-1 flex-col border-r">
         <div className="flex items-center justify-between border-b px-3 py-2">
@@ -235,6 +271,7 @@ export function AgentTestConsole({
             ))
           )}
         </div>
+      </div>
       </div>
     </div>
   );
