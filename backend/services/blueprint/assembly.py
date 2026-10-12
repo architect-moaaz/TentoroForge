@@ -693,6 +693,12 @@ def assemble(doc: dict, app_root: str | Path, *,
     # operation failed` — a session issued under the old secret. An app keeps
     # its secrets across rebuilds; only an app that has none is given some.
     kept = existing_secrets(out)
+    import base64
+
+    from services.push_keys import VAPID_KEYS, generate_vapid
+    vapid = {k: kept[k] for k in VAPID_KEYS if kept.get(k)}
+    if len(vapid) != len(VAPID_KEYS):
+        vapid = generate_vapid()
     env_body = (
         f"DATABASE_URL={database_url}\n"
         f"AUTH_SECRET={kept.get('AUTH_SECRET') or secrets.token_urlsafe(32)}\n"
@@ -702,10 +708,17 @@ def assemble(doc: dict, app_root: str | Path, *,
         # self-ping and Vercel's cron both carry it. Kept across rebuilds
         # like the auth secrets, so a running schedule is not locked out.
         f"CRON_SECRET={kept.get('CRON_SECRET') or secrets.token_urlsafe(24)}\n"
+        # THE KEY SENSITIVE FIELDS ARE ENCRYPTED WITH, and the push keys. Made
+        # once and kept for the life of the app: a new encryption key makes
+        # every sealed value unreadable, a new push pair orphans every device.
+        # This file is rewritten whole on each assembly, and it carried neither
+        # — no Blueprint-built app could encrypt, or sign a push (60v142ju).
+        f"SENSITIVE_ENCRYPTION_KEY={kept.get('SENSITIVE_ENCRYPTION_KEY') or base64.b64encode(secrets.token_bytes(32)).decode('ascii')}\n"
+        + "".join(f"{k}={kept.get(k) or vapid[k]}\n" for k in VAPID_KEYS)
         # No NEXTAUTH_URL: pinning it to :3000 sent every post-login redirect
         # to a port the app is not served on. NextAuth infers the origin from
         # the request, which is correct for any port a preview lands on.
-        f"AUTH_TRUST_HOST=true\n"
+        + "AUTH_TRUST_HOST=true\n"
     )
     # THE VARIABLES A CONNECTED SERVICE READS, BY NAME AND WITH NO VALUE.
     # `.env.example` is the file a developer who exports this application
@@ -780,7 +793,8 @@ def assemble(doc: dict, app_root: str | Path, *,
     }
 
 
-_SECRET_KEYS = ("AUTH_SECRET", "NEXTAUTH_SECRET", "CRON_SECRET", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT")
+_SECRET_KEYS = ("AUTH_SECRET", "NEXTAUTH_SECRET", "CRON_SECRET", "SENSITIVE_ENCRYPTION_KEY",
+                "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT")
 
 
 def existing_secrets(app_root: str | Path) -> dict[str, str]:

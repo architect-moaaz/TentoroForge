@@ -342,6 +342,31 @@ def reconcile_platform_table(entity: dict) -> tuple[list[dict], list[str]]:
     return fields, folded
 
 
+def _sealed_fields(entity: dict, doc: dict) -> set[str]:
+    """The fields of `entity` the data engine encrypts: the sensitive-columns
+    manifest's entry for it, by any of its names — less the columns rows are
+    FOUND by, which a seal (a fresh nonce per value) would make unfindable:
+    the platform's sign-in identity (`email`, the password, already hashed)
+    and every column an ownership rule scopes or stamps by. Those stay as
+    they are, masked when read."""
+    manifest = sensitive_columns(doc)
+    fields: set[str] = set()
+    for key in (entity.get("name"), entity.get("table")):
+        if key and key in manifest:
+            fields = set(manifest[key])
+            break
+    if not fields:
+        return set()
+    keys = {str(entity.get(k) or "").lower() for k in ("id", "name", "table") if entity.get(k)}
+    found_by: set[str] = set()
+    for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
+        if isinstance(rule, dict) and str(rule.get("entity") or "").lower() in keys:
+            found_by |= {str(rule.get(k)) for k in ("column", "guestColumn") if rule.get(k)}
+    if platform_table(str(entity.get("table") or to_snake(str(entity.get("name") or "")))):
+        found_by |= {f for f in fields if re.sub(r"[^a-z]", "", f.lower()) in ("email", "password", "passwordhash")}
+    return fields - found_by
+
+
 def emit_entity_module(entity: dict, doc: dict) -> str:
     """A Drizzle table module for one entity, in the scaffold's shape."""
     entities = {e.get("id"): e for e in doc.get("data", {}).get("entities") or []}
@@ -351,9 +376,27 @@ def emit_entity_module(entity: dict, doc: dict) -> str:
         # explains why (a uuid FK cannot hold a serial id).
         fields.insert(0, {"name": "id", "type": "uuid", "primaryKey": True})
 
+    # ENCRYPTED AT REST: each field the data engine seals (`sensitive_columns`)
+    # gets `<name>_encrypted` (AES-GCM) and `<name>_mask` beside it, and its
+    # plain column becomes optional — the engine never writes it again. The
+    # Blueprint path emitted the plain column alone, so the engine sealed
+    # values into columns that did not exist: a create through the data API
+    # lost them, and every row written elsewhere sat in plain text (60v142ju,
+    # 2026-10-12). A seal cannot carry `.unique()`: each value is encrypted
+    # under a fresh nonce, so two equal values never compare equal.
+    sealed = _sealed_fields(entity, doc)
     lines, builders = [], set()
     for field in fields:
         line, builder = drizzle_column(field)
+        if str(field.get("name") or "") in sealed:
+            line = line.replace(".notNull()", "").replace(".unique()", "")
+            name = str(field.get("name"))
+            col = to_snake(name)
+            lines.append("  " + line)
+            lines.append(f'  {name}_encrypted: text("{col}_encrypted"),')
+            lines.append(f'  {name}_mask: text("{col}_mask"),')
+            builders.update({builder, "text"})
+            continue
         lines.append("  " + line)
         builders.add(builder)
 

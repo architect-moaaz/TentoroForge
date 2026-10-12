@@ -229,8 +229,16 @@ async function _encryptSensitiveOnWrite(
   // by it, so it is stored as it is. TCommerce marked its cart's guestToken
   // sensitive; encrypted, it would match no visitor ever again.
   const guestCols = new Set(ownershipRulesFor(entityName).map((r) => r.guestColumn).filter(Boolean));
+  // SEALED ONLY WHERE THE TABLE HOLDS THE SEAL. A field the table keeps in
+  // the clear (a sign-in email, a column rows are found by, an app built
+  // before its fields were sealed) was "sealed" into columns that did not
+  // exist and its value dropped: a create through the data API lost it, an
+  // edit changed nothing (60v142ju, 2026-10-12). It stays as written now, and
+  // is masked when read.
+  const tbl: any = getEntity(entityName)?.table;
   for (const col of keys) {
     if (!(col in data) || guestCols.has(col)) continue;
+    if (tbl && !(`${col}_encrypted` in tbl)) continue;
     const raw = data[col];
     // Empty / undefined = "keep existing" on update, "no value" on create.
     // Either way, we must not overwrite _encrypted / _mask with an empty
@@ -250,6 +258,17 @@ async function _encryptSensitiveOnWrite(
     data[`${col}_mask`] = mask(str, spec.mask);
     delete data[col];  // the plaintext key is never persisted.
   }
+}
+
+/** The same seal, for a writer outside the engine (a process step, the
+ *  seeder): plain sensitive values become their `_encrypted` + `_mask` pair,
+ *  in place. Returns the plain values it took out, for the caller's own use. */
+export async function sealSensitive(entityName: string, data: Record<string, any>): Promise<Record<string, unknown>> {
+  const specs = sensitiveColumnsFor(entityName);
+  const plain: Record<string, unknown> = {};
+  for (const col of Object.keys(specs)) if (col in data) plain[col] = data[col];
+  await _encryptSensitiveOnWrite(entityName, data);
+  return plain;
 }
 
 /** Read path: for every sensitive column on this entity, replace the

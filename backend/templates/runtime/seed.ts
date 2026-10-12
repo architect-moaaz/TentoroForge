@@ -1082,7 +1082,7 @@ async function recordSeedFingerprint(fp: string): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
+async function seedEverything(): Promise<void> {
   const forceSeed = /^(1|true|yes)$/i.test(String(process.env.FORCE_SEED || ""));
 
   // THE ADMIN MUST ALWAYS EXIST — the skip gates below preserve DOMAIN data,
@@ -1134,6 +1134,78 @@ async function main(): Promise<void> {
   }
   await recordSeedFingerprint(currentFp);
   console.log(`[seed] complete — fingerprint recorded (${currentFp}).`);
+}
+
+/** The app's encryption key, from its own settings when the environment
+ *  lacks it: this script is run by `tsx`, which does not read `.env.local`. */
+function _loadEncryptionKey(): boolean {
+  if (process.env.SENSITIVE_ENCRYPTION_KEY) return true;
+  for (const name of [".env.local", ".env"]) {
+    try {
+      const m = fs.readFileSync(path.join(process.cwd(), name), "utf8").match(/^SENSITIVE_ENCRYPTION_KEY=(.+)$/m);
+      if (m && m[1].trim()) { process.env.SENSITIVE_ENCRYPTION_KEY = m[1].trim(); return true; }
+    } catch { /* no such file */ }
+  }
+  return false;
+}
+
+/**
+ * NOTHING SENSITIVE STAYS IN PLAIN TEXT. Every value of a sealed field (the
+ * sensitive-columns manifest) still held in its plain column — demo rows this
+ * seed wrote, rows an app held before its fields were sealed, anything a
+ * writer outside the data engine put there — is encrypted into
+ * `<field>_encrypted`, masked into `<field>_mask`, and the plain value is
+ * cleared. Runs at the end of every start; a row already sealed is skipped,
+ * so it is a no-op once done (60v142ju, 2026-10-12).
+ */
+async function sealPlainSensitive(): Promise<void> {
+  let specsFor: (name: string) => Record<string, { mask: any }>;
+  let encrypt: (s: string) => Promise<string>;
+  let maskOf: (s: string, kind: any) => string;
+  try {
+    specsFor = (await import("../lib/sensitive-columns")).sensitiveColumnsFor as any;
+    const crypto: any = await import("../lib/sensitive-crypto");
+    encrypt = crypto.encryptSensitive; maskOf = crypto.mask;
+  } catch { return; /* an app with no sealed fields */ }
+  const { isNotNull, isNull, and } = await import("drizzle-orm");
+  let keyLoaded: boolean | null = null;
+  let sealed = 0;
+  for (const value of Object.values(schema)) {
+    const table: any = value;
+    if (!table || typeof table !== "object" || !table.id) continue;
+    let name = "";
+    try { name = (await import("drizzle-orm")).getTableName(table); } catch { continue; }
+    const specs = specsFor(name) || {};
+    for (const col of Object.keys(specs)) {
+      const enc = `${col}_encrypted`, msk = `${col}_mask`;
+      if (!table[col] || !table[enc] || !table[msk]) continue;
+      const rows: any[] = await db.select({ id: table.id, v: table[col] }).from(table)
+        .where(and(isNotNull(table[col]), isNull(table[enc])));
+      if (!rows.length) continue;
+      if (keyLoaded === null) keyLoaded = _loadEncryptionKey();
+      if (!keyLoaded) {
+        console.warn(`[seed] ${rows.length} ${name}.${col} value(s) are in plain text and SENSITIVE_ENCRYPTION_KEY is not set — left as they are.`);
+        continue;
+      }
+      for (const r of rows) {
+        const plain = r.v instanceof Date ? r.v.toISOString().slice(0, 10) : String(r.v);
+        await db.update(table).set({ [enc]: await encrypt(plain), [msk]: maskOf(plain, specs[col].mask), [col]: null } as any)
+          .where(eq(table.id, r.id));
+        sealed++;
+      }
+    }
+  }
+  if (sealed) console.log(`🔒 sealed ${sealed} sensitive value(s) that were held in plain text`);
+}
+
+async function main(): Promise<void> {
+  try {
+    await seedEverything();
+  } finally {
+    try { await sealPlainSensitive(); } catch (e: any) {
+      console.warn("[seed] sealing plain sensitive values failed:", String(e?.message || e).slice(0, 300));
+    }
+  }
 }
 
 main()

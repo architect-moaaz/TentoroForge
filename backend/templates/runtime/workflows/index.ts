@@ -932,6 +932,23 @@ export function _numberIn(text: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** SENSITIVE VALUES ARE SEALED BEFORE A STEP WRITES THEM, as the data engine
+ *  seals its own writes: a process's insert stored a citizen's name, ID and
+ *  phone in plain text beside the encrypted columns made for them (60v142ju,
+ *  2026-10-12). Returns the plain values taken out, so the row handed to the
+ *  next step can carry them in memory — never to the table or the trail. */
+async function _seal(table: any, values: Record<string, any>): Promise<Record<string, unknown>> {
+  try {
+    const { sealSensitive } = await import("../data-engine");
+    return await sealSensitive(getTableName(table), values);
+  } catch (e) {
+    // No key, or no engine: refuse rather than write a sensitive value in the clear.
+    const { sensitiveColumnsFor } = await import("../sensitive-columns");
+    if (Object.keys(sensitiveColumnsFor(getTableName(table))).some((c) => c in values)) throw e;
+    return {};
+  }
+}
+
 export function _finalizeInsert(
   table: any, values: Record<string, unknown>, ctx: WorkflowExecutionContext,
 ): Record<string, unknown> {
@@ -1318,10 +1335,11 @@ export function registerDefaultActions(): void {
           const merged = { ...staticFields, ...(item as Record<string, unknown>) };
           const values = _finalizeInsert(table, merged, ctx);
           try {
+            const plain = await _seal(table, values);
             const rows = await (db as any).insert(table).values(values).returning();
             const row = Array.isArray(rows) ? rows[0] : rows;
             await _trail(ctx, "create", table, null, row);
-            if (row) inserted.push(await embedWrittenRow(table, row));
+            if (row) inserted.push({ ...(await embedWrittenRow(table, row)), ...plain });
           } catch (err) {
             console.warn(`[workflow] db_insert (row-fanout): row failed —`, err);
           }
@@ -1364,6 +1382,7 @@ export function registerDefaultActions(): void {
             if (had == null || had === "") fill[k] = v;
           }
           if (Object.keys(fill).length) {
+            await _seal(table, fill);
             const [updated] = await (db as any).update(table).set(fill).where(cond).returning();
             if (updated) existing = updated;
           }
@@ -1373,9 +1392,11 @@ export function registerDefaultActions(): void {
         }
       }
       const values = _finalizeInsert(table, raw, ctx);
+      const plain = await _seal(table, values);
       const rows = await (db as any).insert(table).values(values).returning();
-      const row = Array.isArray(rows) ? rows[0] : rows;
-      await _trail(ctx, "create", table, null, row);
+      const sealedRow = Array.isArray(rows) ? rows[0] : rows;
+      await _trail(ctx, "create", table, null, sealedRow);
+      const row = sealedRow && typeof sealedRow === "object" ? { ...sealedRow, ...plain } : sealedRow;
       if (row && typeof row === "object") await embedWrittenRow(table, row);
       if (row && typeof row === "object") {
         // Legacy flat aliases (`scan_sessions_id`) — kept for
@@ -1497,6 +1518,7 @@ export function registerDefaultActions(): void {
         if (rs.errors.length) return { error: rs.errors.join("; ") };
         Object.assign(raw, rs.patches);
       } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
+      await _seal(table, raw);
       const q = (db as any).update(table).set(raw);
       const where = _buildWhere(table, (config as any).where, ctx);
       _requireWhereOrThrow("db_update", config, where);

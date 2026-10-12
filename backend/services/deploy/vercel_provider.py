@@ -399,10 +399,13 @@ class VercelDeployProvider:
             local_secrets = existing_secrets(Path(snapshot.output_dir))
             if "CRON_SECRET" not in existing_by_key:
                 cron_secret = local_secrets.get("CRON_SECRET") or secrets.token_urlsafe(24)
-            # THE PUSH KEYS the app already signs with: a deployment that lacks
-            # them gets the same pair, never a new one (see services/push_keys).
+            # THE APP'S OWN KEYS — the push pair it signs with and the key its
+            # sensitive fields are encrypted with: a deployment that lacks them
+            # gets the same ones, never new ones (a new encryption key makes
+            # every sealed value unreadable; see services/push_keys).
             from services.push_keys import VAPID_KEYS
-            app_secrets = {k: local_secrets[k] for k in VAPID_KEYS if local_secrets.get(k) and k not in existing_by_key}
+            app_secrets = {k: local_secrets[k] for k in (*VAPID_KEYS, "SENSITIVE_ENCRYPTION_KEY")
+                           if local_secrets.get(k) and k not in existing_by_key}
 
             # WHERE THE APP REPORTS ITS FAILURES (services/app_reporting): the
             # platform's public address and this project's id, so Smith's
