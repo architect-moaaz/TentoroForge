@@ -172,8 +172,10 @@ def prompt(output_dir: Any, *, problem: str = "") -> dict[str, Any]:
     from services.smith.ui_designer import USE_FORGE_INSTEAD
 
     lead = (f"{problem}\n\n" if problem else "Figma it is. ")
-    link_help = ("In Figma, right-click a frame and choose *Copy link to selection* for one screen, "
-                 "or copy the file's link to read its screens.")
+    link_help = ("This needs a design you have already made in Figma: I read it from its link, I do not create "
+                 "one (no design yet? choose Forge or UX Pilot instead). Paste the link to the FILE, or to the "
+                 "page that holds all your screens, with the share link from Figma without a node-id: a link to "
+                 "a single frame reads only that one screen.")
     link_field = {"label": "Link to your Figma file or screens", "placeholder": "https://www.figma.com/design/..."}
     if token_configured(output_dir):
         # The token is saved: only the link is asked for, in the card's own field (a plain input with a
