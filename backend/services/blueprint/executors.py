@@ -4309,6 +4309,28 @@ def make_executor(
         current = next((row for row in doc.get("pageCode") or []
                         if str(row.get("page")) == spec.subject), None)
         tell(reasoning, f"Writing {page.get('route')} in React.", "step", spec.node)
+        # THE DESIGNER THE PERSON CHOSE (`application.uiDesigner`, or this page's
+        # `designedBy`). When it is UX Pilot, the page's design is fetched here —
+        # outside the document's lock, since it is minutes of network, and from
+        # the ledger when its brief has not changed, so a rebuild spends nothing —
+        # and the writer adapts it. A change to an existing page is made with
+        # edits, not redrawn, so it never asks.
+        reference = None
+        if not getattr(spec, "brief", ""):
+            from services.figma import react_reference as figma_pages
+            from services.uxpilot import generate as uxpilot_pages
+
+            # A FRAME A PERSON DREW WINS, as it does for the schema pages: the page that has a
+            # `figmaFrame` stored in a connected design is adapted from that frame, whoever else
+            # was asked. Every other page — no frame, or its frame unreadable — goes on to the
+            # chosen designer exactly as before.
+            reference, said = figma_pages.reference_for(doc, page, svc.output_dir)
+            if said:
+                tell(reasoning, said, "step", spec.node)
+            if reference is None:
+                reference, said = uxpilot_pages.reference_for(doc, page, svc.output_dir)
+                if said:
+                    tell(reasoning, said, "step", spec.node)
         # THE PAGE IS LOOKED AT AS IT IS WRITTEN (`page_look`): the reviewer
         # is the page reviewer's tier, and only a client that can see an
         # image can review one.
@@ -4320,7 +4342,7 @@ def make_executor(
                 doc, page, Path(svc.output_dir) / "app", client,
                 feedback=spec.feedback or "", brief=getattr(spec, "brief", "") or "",
                 current=current if (spec.feedback or getattr(spec, "brief", "")) else None,
-                critic=critic,
+                critic=critic, reference=reference,
                 on_look=lambda v: _looked(svc, spec, page, v, reasoning))
 
         try:

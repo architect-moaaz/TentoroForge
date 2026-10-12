@@ -72,6 +72,8 @@ _advance_state_to_review = _brief_mod.advance_to_review
 #: here until they finish and discard themselves.
 from services import run_registry
 from services.smith import design_language
+from services.smith import figma_gate as ui_figma_gate
+from services.smith import ui_designer
 from services.smith.clarify_brief import (
     company_palette_option as clarify_company_option)
 from services.blueprint.run_progress import Progress
@@ -1731,7 +1733,7 @@ async def smith_chat(
         if event == "message":
             _remember(loop, project_id, "assistant", str(data.get("text") or ""),
                       {k: v for k, v in data.items()
-                       if k in ("options", "diffSummary", "status", "intent")
+                       if k in ("options", "diffSummary", "status", "intent", "secret")
                        and v},
                       lock=memory_lock)
         # The telemetry is still not written to the transcript — it would make
@@ -1873,6 +1875,63 @@ async def smith_chat(
                     return _run_dag(str(output_dir), app_root, req.message,
                                     approved=True, emit=emit,
                                     app_name=getattr(project, "name", "") or "")
+
+            # WHO DESIGNS THE SCREENS — the answer, and the key that goes with UX Pilot. Both are
+            # commands like the design-language answer above: the option or the "key saved" line
+            # arrives as an ordinary message and is recognised only when the turn before it was
+            # the question (`answer_in`, `key_saved_in`), so these words in a sentence decide
+            # nothing. Nothing here carries the key: the panel stores it straight to the
+            # organisation's integrations and says only that it did.
+            if svc is not None:
+                _history = [(t.role, t.text) for t in req.history if t.text]
+
+                # FIGMA: the link to the design, or the way forward after its coverage check. Both
+                # are recognised only by the turn before them (`figma_gate.link_in` / `choice_in`),
+                # and the token never travels here: the panel stored it before sending the link.
+                _figma_link = ui_figma_gate.link_in(req.message, _history)
+                _figma_choice = "" if _figma_link else ui_figma_gate.choice_in(req.message, _history)
+                if _figma_link or _figma_choice:
+                    if _figma_link or _figma_choice == "update":
+                        emit("message", {"text": "Reading your Figma design and checking it against "
+                                                 "the requirements…", "status": "reported"})
+                    elif _figma_choice == "check":
+                        emit("message", {"text": "Checking your Figma design against the requirements…",
+                                         "status": "reported"})
+                    _figma = ui_figma_gate.handle(svc, output_dir, link=_figma_link, choice=_figma_choice)
+                    emit("message", _figma.message)
+                    if not _figma.proceed:
+                        return {"status": "asked"}
+                    return _run_dag(str(output_dir), app_root, "",
+                                    approved=True, emit=emit,
+                                    app_name=getattr(project, "name", "") or "",
+                                    modules=_modules_picked(output_dir))
+
+                _designer = ui_designer.answer_in(req.message, _history)
+                _key_saved = (not _designer) and ui_designer.key_saved_in(req.message, _history)
+                if _designer or _key_saved:
+                    _said = ui_designer.record(svc, _designer) if _designer else ""
+                    # Figma chosen when a design was already named in the brief: it is connected
+                    # but nobody has checked it against the requirements, so that happens now.
+                    if _designer == ui_designer.FIGMA and ui_figma_gate.unchecked(svc.doc, output_dir):
+                        emit("message", {"text": "Checking your Figma design against the requirements…",
+                                         "status": "reported"})
+                        _figma = ui_figma_gate.handle(svc, output_dir)
+                        emit("message", _figma.message)
+                        if not _figma.proceed:
+                            return {"status": "asked"}
+                        return _run_dag(str(output_dir), app_root, "",
+                                        approved=True, emit=emit,
+                                        app_name=getattr(project, "name", "") or "",
+                                        modules=_modules_picked(output_dir))
+                    _stop = ui_designer.gate(svc.doc, output_dir)
+                    if _stop is not None:
+                        emit("message", _stop)
+                        return {"status": "asked"}
+                    emit("message", {"text": _said or "Key saved. Building now."})
+                    return _run_dag(str(output_dir), app_root, "",
+                                    approved=True, emit=emit,
+                                    app_name=getattr(project, "name", "") or "",
+                                    modules=_modules_picked(output_dir))
 
             # AN APPROVAL IS A COMMAND, NOT A MESSAGE TO REASON ABOUT. §25's
             # gate is answered by pressing the button, and the answer means
@@ -2407,6 +2466,18 @@ def busy_message(run: dict) -> str:
             "you'll see it here, with the offer to verify it; ask again then.")
 
 
+def _modules_picked(output_dir: Any) -> list[str] | None:
+    """The modules the person picked for this build, as `_run_dag` takes them (``None`` is all).
+
+    The continuation after a question the build stopped to ask (who designs the screens, the Figma link)
+    starts `_run_dag` again with no selection of its own; without this it ran the whole application,
+    deferred modules included."""
+    from services.blueprint.scope import chosen
+    from services.blueprint.service import BlueprintService
+
+    return chosen(BlueprintService.load(output_dir=str(output_dir)).doc)
+
+
 def _run_dag(output_dir: str, app_root: str, description: str, *,
              approved: bool, emit, app_name: str = "",
              announce_completion: bool = True,
@@ -2454,6 +2525,21 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     existing = Path(output_dir) / ".forge" / "blueprint" / "current.json"
     if existing.is_file():
         svc = BlueprintService.load(output_dir=output_dir)
+        # WHICH MODULES COME FIRST, BEFORE ANYTHING CAN STOP THE BUILD: the choice is part of what the
+        # person said yes to (see `scope`), and a build that stops below to ask who designs the screens
+        # would otherwise lose it: the answer starts the build again, and `None` means ALL. It is
+        # recorded here, and the paths that start the build again carry it (`_modules_picked`).
+        if approved and announce_completion:
+            from services.blueprint.scope import choose as _choose_modules
+            _choose_modules(svc, modules)
+        # WHO DESIGNS THE SCREENS IS SETTLED BEFORE A BUILD STARTS, WHICHEVER DOOR IT CAME
+        # THROUGH: the card, a typed "build", the product model's button. Asked once per
+        # application; and when UX Pilot is the answer, the key it needs is asked for here too.
+        if approved and announce_completion and phase == "build":
+            _stop = ui_designer.gate(svc.doc, output_dir)
+            if _stop is not None:
+                emit("message", _stop)
+                return {"status": "asked"}
         if approved and announce_completion:
             # "APPROVE AND BUILD" IS THE APPROVAL. Recorded now, against the
             # definition as it stands, so a plan approval that had gone stale
@@ -2463,10 +2549,7 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             # The review's re-compose passes announce_completion=False and
             # records nothing: nobody approved anything there.
             from services.blueprint import approval as _approval
-            # WHICH MODULES, BEFORE ANYTHING IS APPROVED: the choice is part
-            # of what the person said yes to (see `scope`). None is all.
-            from services.blueprint.scope import choose as _choose_modules
-            _choose_modules(svc, modules)
+            # (The module choice was recorded above, before the designer gate.)
             # §95 Gate 2 is the product model the person was looking at when
             # they pressed Build; Gate 3 is the build itself. One click, two
             # facts, both fingerprinted against this document.

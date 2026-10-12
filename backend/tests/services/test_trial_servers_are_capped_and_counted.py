@@ -26,7 +26,10 @@ def test_every_dev_server_runs_with_the_heap_cap():
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     review = (root / "services/blueprint/page_review.py").read_text()
-    assert "env = _capped({" in review and "start_new_session=True, env=env)" in review
+    # the server is started with the capped env, in its own process group (the portable `group_kwargs()`
+    # is `start_new_session=True` off Windows)
+    assert "env = _capped({" in review
+    assert "start_new_session=True, env=env)" in review or "**group_kwargs(), env=env)" in review
     assert "env=_capped_env({" in (root / "services/blueprint/assembly.py").read_text()
     assert (root / "services/preview_manager.py").read_text().count("env=_capped_env(env)") == 2
 

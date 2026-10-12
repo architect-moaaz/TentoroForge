@@ -25,11 +25,55 @@ const config: Config = {
         foreground: "hsl(var(--foreground))",
         primary: { DEFAULT: "hsl(var(--primary))", foreground: "hsl(var(--primary-foreground))" },
         secondary: { DEFAULT: "hsl(var(--secondary))", foreground: "hsl(var(--secondary-foreground))" },
-        destructive: { DEFAULT: "hsl(var(--destructive))", foreground: "hsl(var(--destructive-foreground))" },
+        // Each status carries the locked 4-token shape (solid + foreground + subtle +
+        // subtle-foreground), the same as app-foundation: a Badge reads `bg-success-subtle`,
+        // and a config that does not map it renders the badge with no colour at all.
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+          subtle: "hsl(var(--destructive-subtle, 0 86% 97%))",
+          "subtle-foreground": "hsl(var(--destructive-subtle-foreground, 0 74% 32%))",
+        },
         muted: { DEFAULT: "hsl(var(--muted))", foreground: "hsl(var(--muted-foreground))" },
-        accent: { DEFAULT: "hsl(var(--accent))", foreground: "hsl(var(--accent-foreground))" },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+          subtle: "hsl(var(--accent-subtle, var(--muted)))",
+          "subtle-foreground": "hsl(var(--accent-subtle-foreground, var(--foreground)))",
+        },
+        success: {
+          DEFAULT: "hsl(var(--success, var(--color-success, 142 71% 45%)))",
+          foreground: "hsl(var(--success-foreground, var(--color-success-foreground, 0 0% 100%)))",
+          subtle: "hsl(var(--success-subtle, 141 79% 93%))",
+          "subtle-foreground": "hsl(var(--success-subtle-foreground, 142 71% 22%))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning, var(--color-warning, 38 92% 50%)))",
+          foreground: "hsl(var(--warning-foreground, var(--color-warning-foreground, 0 0% 100%)))",
+          subtle: "hsl(var(--warning-subtle, 48 96% 89%))",
+          "subtle-foreground": "hsl(var(--warning-subtle-foreground, 31 92% 30%))",
+        },
+        info: {
+          DEFAULT: "hsl(var(--info, var(--color-info, 217 91% 60%)))",
+          foreground: "hsl(var(--info-foreground, var(--color-info-foreground, 0 0% 100%)))",
+          subtle: "hsl(var(--info-subtle, 204 94% 94%))",
+          "subtle-foreground": "hsl(var(--info-subtle-foreground, 201 96% 26%))",
+        },
+        // The dark surface for the one card that leads a screen, and the brand gradient's stops.
+        inverse: {
+          DEFAULT: "hsl(var(--inverse, 222 47% 11%))",
+          foreground: "hsl(var(--inverse-foreground, 210 20% 98%))",
+        },
+        "gradient-start": "hsl(var(--gradient-start, var(--primary)))",
+        "gradient-end": "hsl(var(--gradient-end, var(--accent)))",
+        "gradient-foreground": "hsl(var(--gradient-foreground, var(--primary-foreground)))",
         popover: { DEFAULT: "hsl(var(--popover))", foreground: "hsl(var(--popover-foreground))" },
         card: { DEFAULT: "hsl(var(--card))", foreground: "hsl(var(--card-foreground))" },
+      },
+      // The design's families (tokens.css): `font-heading` for titles, `font-sans` for the body.
+      fontFamily: {
+        sans: ["var(--font-body)", "ui-sans-serif", "system-ui", "sans-serif"],
+        heading: ["var(--font-heading)", "var(--font-body)", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       borderRadius: {
         lg: "var(--radius)",

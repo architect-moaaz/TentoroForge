@@ -50,13 +50,17 @@ def _server(monkeypatch, root: Path, *, build_rc: int = 0):
 
         def wait(self, timeout=None):
             return 0
+
+        def poll(self):          # `kill_group` asks whether it is still running
+            return None
     monkeypatch.setattr(page_review.subprocess, "Popen", P)
     monkeypatch.setattr(page_review.subprocess, "run",
                         lambda cmd, **kw: ran.append(list(cmd)) or SimpleNamespace(returncode=build_rc, stdout="built", stderr=""))
     monkeypatch.setattr(page_review.urllib.request, "urlopen", lambda *a, **k: None)
     monkeypatch.setattr(workbench, "served", lambda *a, **k: {})
-    monkeypatch.setattr(page_review.os, "killpg", lambda *a: None)
-    monkeypatch.setattr(page_review.os, "getpgid", lambda pid: pid)
+    # `raising=False`: Windows has neither (the server is ended with `taskkill` there)
+    monkeypatch.setattr(page_review.os, "killpg", lambda *a: None, raising=False)
+    monkeypatch.setattr(page_review.os, "getpgid", lambda pid: pid, raising=False)
     monkeypatch.setattr(app_databases, "drop", lambda name: None)
     app = page_review.RunningApp(root, mode="production", dist_dir=assembly.VERIFY_DIST_DIR)
     app.clone = ("", "app_copy", "postgresql://h/app_copy")
@@ -69,7 +73,7 @@ def test_a_fresh_build_is_served_as_it_is(monkeypatch, tmp_path):
     app, started, ran = _server(monkeypatch, root)
     app._serve()
     cmd, env = started[0]
-    assert cmd[:3] == ["npx", "next", "start"]
+    assert cmd[:3] == [page_review.tool("npx"), "next", "start"]
     assert env["NEXT_DIST_DIR"] == assembly.VERIFY_DIST_DIR and env["DATABASE_URL"] == "postgresql://h/app_copy"
     assert env["FORGE_PROJECT_ID"] == "", "a Workbench server never speaks as the app"
     assert not any("build" in c for c in ran), "built once by the assemble step; served, not built again"
@@ -85,7 +89,8 @@ def test_a_changed_source_is_built_before_it_is_served(monkeypatch, tmp_path):
     assert not assembly.build_is_fresh(root, assembly.VERIFY_DIST_DIR)
     app, started, ran = _server(monkeypatch, root)
     app._serve()
-    assert ran[0][:3] == ["npx", "next", "build"] and started[0][0][:3] == ["npx", "next", "start"]
+    npx = page_review.tool("npx")
+    assert ran[0][:3] == [npx, "next", "build"] and started[0][0][:3] == [npx, "next", "start"]
     assert assembly.build_is_fresh(root, assembly.VERIFY_DIST_DIR), "the new build is stamped with what it was made from"
 
 
@@ -103,7 +108,7 @@ def test_a_dev_server_still_takes_its_own_dist_away(monkeypatch, tmp_path):
     app, started, ran = _server(monkeypatch, root)
     app.mode, app.dist_dir = "development", ".next-review"
     app._serve()
-    assert started[0][0][:3] == ["npx", "next", "dev"]
+    assert started[0][0][:3] == [page_review.tool("npx"), "next", "dev"]
     app._stop()
     assert not (root / ".next-review").exists()
 

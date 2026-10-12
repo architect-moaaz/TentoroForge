@@ -5,6 +5,7 @@ migration on the next install" — so the screen it would build next had no
 table to save into until somebody restarted the preview.
 """
 import subprocess
+from pathlib import Path
 
 from services.blueprint import schema_push
 
@@ -29,7 +30,9 @@ def test_the_schema_is_pushed_then_seeded_against_the_apps_own_database(tmp_path
     # The publish's own chain (prepare-schema and verify-schema are skipped
     # where the app does not have them): `--force` is safe because
     # prepare-schema keeps the rows a push would otherwise destroy.
-    assert [r[0] for r in ran] == [["npx", "drizzle-kit", "push", "--force"], ["npx", "tsx", "src/db/seed.ts"]]
+    # The program is `npx` — resolved to its `.CMD` shim on Windows, left as the bare name elsewhere.
+    assert [[Path(r[0][0]).stem.lower(), *r[0][1:]] for r in ran] == [
+        ["npx", "drizzle-kit", "push", "--force"], ["npx", "tsx", "src/db/seed.ts"]]
     assert all(r[1].endswith("/app_t") for r in ran)
     assert all(r[2] == subprocess.DEVNULL for r in ran), "nothing ever waits on a terminal nobody has"
 

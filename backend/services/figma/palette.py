@@ -55,6 +55,33 @@ def _saturation(hex_colour: str) -> float:
     return 0.0 if hi == 0 else (hi - lo) / hi
 
 
+def _hue(hex_colour: str) -> float:
+    """Hue in degrees, 0-360 (0 for a grey)."""
+    h = hex_colour.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    hi, lo = max(r, g, b), min(r, g, b)
+    if hi == lo:
+        return 0.0
+    d = hi - lo
+    if hi == r:
+        out = ((g - b) / d) % 6
+    elif hi == g:
+        out = (b - r) / d + 2
+    else:
+        out = (r - g) / d + 4
+    return (out * 60.0) % 360.0
+
+
+def _hue_gap(a: float, b: float) -> float:
+    d = abs(a - b) % 360.0
+    return min(d, 360.0 - d)
+
+
+#: A fill painted at less opacity than this is a TINT over what lies behind it (a highlighted card, a
+#: scrim), not a colour of the scheme. Read as solid, a 10% orange wash became the sidebar colour.
+MIN_SOLID_ALPHA = 0.85
+
+
 def _is_serif_or_display(family: str) -> bool:
     """A heading face is the one that is not the body face; when a file uses
     two, the less-used one that is not a mono is the display face."""
@@ -186,8 +213,36 @@ def from_code(codes: Iterable[str],
     # THE RAIL IS THE LARGEST SURFACE THAT CONTRASTS WITH THE GROUND — a light
     # design has a dark sidebar (and vice versa), one per screen, tall.
     lum_bg = _luminance(background)
+
+    # A RAIL IS TALL AND NARROW. Without that, any large contrasting block qualified: on a cream design with a
+    # white sidebar, the dark-green nav button or an orange card was taken for the rail, and the colour that
+    # belonged to the accent became "sidebarBackground". Only checked when the ground has a known size.
+    ref_w, ref_h = (largest["w"] or 0.0), (largest["h"] or 0.0)
+
+    def railish(el: dict[str, Any]) -> bool:
+        """Rejected only when KNOWN to be too wide or too short. An axis the code leaves to the layout
+        (a rail that stretches in a flex row has a width and no height) is not evidence against it."""
+        if not sized or not ref_w or not ref_h:
+            return True
+        w, h = el["w"], el["h"]
+        if w is not None and w > 0.35 * ref_w:
+            return False
+        if h is not None and h < 0.6 * ref_h:
+            return False
+        return True
+
     contrasting = [el for el in surfaces
-                   if el["fill"] != background and abs(_luminance(el["fill"]) - lum_bg) > 0.4]
+                   if el["fill"] != background and abs(_luminance(el["fill"]) - lum_bg) > 0.4 and railish(el)]
+
+    # THE SURFACE IS THE LARGEST LIGHT, UNSATURATED FILL LIGHTER THAN THE GROUND — the white of cards, the
+    # header and a light sidebar on a cream page. Without it every card was painted the colour of the page.
+    lighter = [el for el in surfaces
+               if el["fill"] != background and _saturation(el["fill"]) < 0.15
+               and _luminance(el["fill"]) - lum_bg >= 0.02 and (el["area"] > 0 or not sized)]
+    if lighter:
+        paper = max(lighter, key=lambda el: (el["area"], uses[el["fill"]]))
+        colors["surface"] = paper["fill"]
+        evidence["surface"] = round(paper["area"]) if sized and paper["area"] > 0 else uses[paper["fill"]]
     if contrasting:
         # Unsized, the rail is the fill that contrasts MOST, then the one used
         # most — a light design's dark sidebar, not its gold buttons.
@@ -212,6 +267,34 @@ def from_code(codes: Iterable[str],
         colors["primary"] = accent
         colors["accent"] = accent
         evidence["primary"] = labelled.get(accent, 0) or uses[accent]
+
+        # THE ACCENT IS ANOTHER HUE WHEN THE DESIGN HAS ONE. A brand colour anchors navigation and the main
+        # button; a design with a second, clearly different colour (a green brand with orange for what needs
+        # attention) uses it as the accent. Evidence is votes from labelled fills and, doubled, from text
+        # set in it; fewer than four votes is a stray, not a second colour.
+        prim_hue = _hue(accent)
+
+        def vivid(c: str) -> bool:
+            # Saturated AND bright: a near-black warm ink is "saturated" by the arithmetic and is still ink.
+            h = c.lstrip("#")
+            return _saturation(c) > 0.4 and max(int(h[i:i + 2], 16) for i in (0, 2, 4)) / 255 >= 0.45
+
+        def another_hue(c: str) -> bool:
+            return (c != accent and c not in excluded and vivid(c)
+                    and _hue_gap(_hue(c), prim_hue) > 40)
+
+        votes: Counter = Counter()
+        for el in surfaces:
+            if el["label"] and another_hue(el["fill"]):
+                votes[el["fill"]] += 1
+        for c, n in text.items():
+            if another_hue(c):
+                votes[c] += 2 * n
+        if votes:
+            second, n_second = votes.most_common(1)[0]
+            if n_second >= 4:
+                colors["accent"] = second
+                evidence["accent"] = n_second
 
     # FOREGROUND IS THE TEXT COLOUR THAT CONTRASTS MOST WITH THE GROUND among
     # those used substantially — a dashboard writes more captions than
@@ -288,18 +371,30 @@ def _code_like(screen: Any) -> str:
     return _document_to_pseudocode(document)
 
 
-def _fill_hex(node: dict) -> str | None:
-    """The first visible solid fill of a node, as `#rrggbb`."""
-    for f in node.get("fills") or []:
+def _paint_hex(paints: Any, node: dict, *, solid_only: bool) -> str | None:
+    """The first visible SOLID paint in ``paints`` as `#rrggbb`.
+
+    With ``solid_only`` a paint that is mostly transparent is skipped: its opacity is the paint's own
+    (`opacity`), its colour's alpha (`color.a`) and the node's (`opacity`), multiplied. A tint is a wash
+    over something else, not a colour of the scheme."""
+    for f in paints or []:
         if not isinstance(f, dict) or f.get("type") != "SOLID" or f.get("visible") is False:
             continue
         c = f.get("color") or {}
         try:
             r, g, b = (int(round(float(c[k]) * 255)) for k in ("r", "g", "b"))
+            alpha = float(f.get("opacity", 1)) * float(c.get("a", 1)) * float(node.get("opacity", 1))
         except (KeyError, TypeError, ValueError):
+            continue
+        if solid_only and alpha < MIN_SOLID_ALPHA:
             continue
         return f"#{r:02x}{g:02x}{b:02x}"
     return None
+
+
+def _fill_hex(node: dict, *, solid_only: bool = True) -> str | None:
+    """The first visible solid fill of a node, as `#rrggbb`."""
+    return _paint_hex(node.get("fills"), node, solid_only=solid_only)
 
 
 def _document_to_pseudocode(document: dict) -> str:
@@ -311,10 +406,15 @@ def _document_to_pseudocode(document: dict) -> str:
             return
         bb = node.get("absoluteBoundingBox") or {}
         classes: list[str] = []
-        fill = _fill_hex(node)
         is_text = str(node.get("type") or "").upper() == "TEXT"
+        # A text colour is read whatever its opacity (translucent ink is still ink); a surface only when it
+        # is painted solid — a 10% wash over a card is not a colour of the scheme.
+        fill = _fill_hex(node, solid_only=not is_text)
         if fill:
             classes.append(f"text-[{fill}]" if is_text else f"bg-[{fill}]")
+        stroke = None if is_text else _paint_hex(node.get("strokes"), node, solid_only=True)
+        if stroke:
+            classes.append(f"border-[{stroke}]")
         try:
             w, h = float(bb.get("width")), float(bb.get("height"))
             classes.append(f"w-[{w:g}px]")

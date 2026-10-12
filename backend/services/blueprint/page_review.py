@@ -27,6 +27,7 @@ browser) is checked first — without it the review is skipped and says why.
 """
 from __future__ import annotations
 
+from services.proc_compat import group_kwargs, kill_group, link_dir, tool
 import concurrent.futures as cf
 import json
 import re
@@ -115,8 +116,8 @@ def _database_url(app_root: Path) -> str | None:
     import re as _re
     for name in (".env.local", ".env"):
         try:
-            text = (app_root / name).read_text()
-        except OSError:
+            text = (app_root / name).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
             continue
         m = _re.search(r"^DATABASE_URL=(\S+)", text, _re.M)
         if m:
@@ -221,8 +222,8 @@ def production_build(app_root: Path, dist_dir: str, *, env: dict, sink: Any) -> 
     from services.blueprint import assembly
     if assembly.build_is_fresh(app_root, dist_dir):
         return ""
-    done = subprocess.run(["npx", "next", "build"], cwd=app_root, capture_output=True, text=True,
-                          env=env, timeout=900)
+    done = subprocess.run([tool("npx"), "next", "build"], cwd=app_root, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=env, timeout=900)
     if sink is not subprocess.DEVNULL:
         try:
             sink.write(((done.stdout or "") + (done.stderr or "")).encode("utf-8", "replace"))
@@ -344,13 +345,13 @@ class RunningApp:
             if why:
                 self.__exit__(None, None, None)
                 raise ReviewUnavailable(why)
-            cmd = ["npx", "next", "start", "--port", str(self.port)]
+            cmd = [tool("npx"), "next", "start", "--port", str(self.port)]
         else:
-            cmd = ["npx", "next", "dev", "--port", str(self.port)]
+            cmd = [tool("npx"), "next", "dev", "--port", str(self.port)]
         self.proc = subprocess.Popen(
             cmd, cwd=self.root,
             stdout=sink, stderr=subprocess.STDOUT if self.log is not None else subprocess.DEVNULL,
-            start_new_session=True, env=env)
+            **group_kwargs(), env=env)
         from services import dev_servers
         dev_servers.track(self.proc.pid, port=self.port, root=self.root, kind="review")
         deadline = time.monotonic() + 180
@@ -389,9 +390,9 @@ class RunningApp:
         if self.proc is not None:
             from services import dev_servers
             dev_servers.forget(self.proc.pid)
-            for sig in (signal.SIGTERM, signal.SIGKILL):
+            for force in (False, True):
                 try:
-                    os.killpg(os.getpgid(self.proc.pid), sig)
+                    kill_group(self.proc, force=force)
                     self.proc.wait(timeout=10)
                     break
                 except Exception:  # noqa: BLE001
@@ -514,15 +515,26 @@ def run_shots(app: RunningApp, pages: list[dict], out_dir: Path, *, probe: bool 
     work.mkdir(exist_ok=True)
     link = work / "node_modules"
     if not link.exists():
-        link.symlink_to(modules)
+        link_dir(link, modules)
     script = work / "page_shots.mjs"
     shutil.copyfile(_SHOTS, script)
     env = {**os.environ}
-    env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(Path.home() / "Library/Caches/ms-playwright"))
+    # WHERE THE BROWSERS ARE: an explicit PLAYWRIGHT_BROWSERS_PATH wins; on a Mac the cache is
+    # ~/Library/Caches/ms-playwright; anywhere else Playwright knows its own default (Windows keeps them
+    # under %LOCALAPPDATA%\ms-playwright). Forcing the Mac path everywhere sent a Windows run looking for
+    # browsers in a folder that does not exist, and every page failed with Playwright's "run npx playwright
+    # install" banner (ToolShare, 2026-10-09).
+    mac_cache = Path.home() / "Library/Caches/ms-playwright"
+    if mac_cache.is_dir():
+        env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(mac_cache))
+    # node writes UTF-8; read it as that (Windows would otherwise decode with the ANSI code page, and a
+    # page with a non-ASCII character killed the reader thread, leaving stdout/stderr None).
     proc = subprocess.run(["node", str(script), str(cfg)], cwd=work, capture_output=True,
-                          text=True, timeout=180 + 240 * len(pages), env=env)
-    line = next((l for l in reversed(proc.stdout.splitlines()) if l.startswith("[") or l.startswith("{")), "")
-    result = json.loads(line) if line else {"error": _what_failed(proc.stderr)}
+                          text=True, encoding="utf-8", errors="replace",
+                          timeout=180 + 240 * len(pages), env=env)
+    out, err = proc.stdout or "", proc.stderr or ""
+    line = next((l for l in reversed(out.splitlines()) if l.startswith("[") or l.startswith("{")), "")
+    result = json.loads(line) if line else {"error": _what_failed(err)}
     if isinstance(result, dict):
         raise ReviewUnavailable(f"screenshots failed: {result.get('error')}")
     return result

@@ -44,6 +44,9 @@ def svc(tmp_path):
         {"id": "REQ-003", "description": "An admin manages doctors.", "area": "Clinic admin",
          "confidence": 0.9},
     ]
+    # Who designs the screens has been answered: these tests are about WHAT is built, and a
+    # build now stops to ask that first (`ui_designer.gate`) when nobody has.
+    s.doc["application"]["uiDesigner"] = "forge"
     s.doc["modules"] = [
         {"id": "MODULE-001", "name": "Appointments", "description": "Booking visits."},
         {"id": "MODULE-002", "name": "Clinic admin", "description": "Doctors and hours."},

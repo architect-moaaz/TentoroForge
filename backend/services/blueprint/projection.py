@@ -655,9 +655,13 @@ def project_frontend(doc: dict, app_root: str | Path,
     # sweep deleted it on every frontend projection and the layout fell back
     # to its flat menu.
     written_set = set(written) | {"src/schemas/shell.json"}
+    # POSIX KEYS: `written` is "src/schemas/books/new.json". On Windows
+    # `str(Path)` is "books\new.json", so every NESTED schema read as stale and
+    # was deleted the moment it was written — the registry then imported files
+    # that were not there and the build failed on `./books/new.json`.
     stale = sorted(
-        str(f.relative_to(root)) for f in root.rglob("*.json")
-        if f"src/schemas/{f.relative_to(root)}" not in written_set
+        f.relative_to(root).as_posix() for f in root.rglob("*.json")
+        if f"src/schemas/{f.relative_to(root).as_posix()}" not in written_set
     )
     for name in stale:
         (root / name).unlink()
