@@ -326,6 +326,10 @@ export interface AgentScenario {
   message: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   expect: AgentScenarioExpect;
+  /** One sentence a reviewer judges the reply by, when rules cannot say (set on a kept bomb). */
+  judge?: string;
+  /** The kind of bomb it came from. */
+  bomb?: string;
 }
 
 export interface AgentScenarioResult {
