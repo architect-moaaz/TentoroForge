@@ -54,6 +54,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  window.localStorage.clear(); // the screen remembers the app address; one test's must not leak into the next
   apiGet.mockReset();
   fetchMock.mockReset();
   (globalThis as any).fetch = fetchMock;
@@ -93,6 +94,21 @@ describe("AgentLiveRun", () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("Is it running?");
     expect((el("Message") as HTMLInputElement).disabled).toBe(true);
     expect(el("Run as")).toBeNull();
+  });
+
+  it("offers this project's app when the address belongs to another, and uses it in one click", async () => {
+    apiGet.mockImplementation(async (u: string) =>
+      u.includes("3001") ? STATUS_OK : { ok: false, reason: "Nothing at http://localhost:3000 accepted this project's key, but this project's app is running at http://localhost:3001.", suggestedUrl: "http://localhost:3001" });
+    await mount();
+    await click(button("Connect"));
+    await wait();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("running at http://localhost:3001");
+    await click(button("Use http://localhost:3001"));
+    await wait();
+    expect(apiGet).toHaveBeenLastCalledWith("/api/projects/p1/agent-definitions/debug/status?app_url=http%3A%2F%2Flocalhost%3A3001");
+    expect((el("App address") as HTMLInputElement).value).toBe("http://localhost:3001");
+    expect(el("Run as")).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 
   it("connects, lists the people, and says changes are not run", async () => {

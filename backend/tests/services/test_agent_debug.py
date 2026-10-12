@@ -169,3 +169,39 @@ def test_an_app_with_no_middleware_is_left_alone(tmp_path):
     project, app = make_app(tmp_path)
     r = install_agent_runtime(project, graphs=[sample_graph()])
     assert r["installed"] and not (app / "src" / "middleware.ts").exists()
+
+
+# ── the wrong address ─────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_a_refused_address_points_to_this_projects_app_running_elsewhere(monkeypatch):
+    def handler(req: httpx.Request):
+        # only the app on 3001 knows this key; every other answers a wrong key as nothing at all
+        if req.url.port == 3001 and req.headers.get("x-forge-debug-secret") == "mine":
+            if req.url.params.get("users"):
+                return httpx.Response(200, json={"users": []})
+            return httpx.Response(200, json={"agents": []})
+        return httpx.Response(404, json={"error": "Not found."})
+
+    mock_app(monkeypatch, handler)
+    r = await status("http://localhost:3000", "mine")
+    assert r["ok"] is False and r["suggestedUrl"] == "http://localhost:3001"
+    assert "http://localhost:3001" in r["reason"] and "this project's key" in r["reason"]
+    assert (await status("http://localhost:3001", "mine"))["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_with_the_app_nowhere_the_reason_is_the_plain_one(monkeypatch):
+    mock_app(monkeypatch, lambda req: httpx.Response(404, json={"error": "Not found."}))
+    r = await status("http://localhost:3000", "mine")
+    assert r["ok"] is False and "suggestedUrl" not in r and "another project's app" in r["reason"]
+
+
+@pytest.mark.asyncio
+async def test_an_app_that_is_down_is_reported_down_and_not_as_a_wrong_address(monkeypatch):
+    def down(req):
+        raise httpx.ConnectError("refused")
+
+    mock_app(monkeypatch, down)
+    r = await status("http://localhost:3000", "mine")
+    assert r["ok"] is False and "suggestedUrl" not in r and "Is it running" in r["reason"]
