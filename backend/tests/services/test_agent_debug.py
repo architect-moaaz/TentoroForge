@@ -205,6 +205,23 @@ async def test_the_watch_passes_the_apps_feed_through_as_it_arrives(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_the_watch_asks_the_app_for_only_the_role_or_person_chosen(monkeypatch):
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append(dict(req.url.params))
+        return httpx.Response(200, content='data: {"type":"watch_ready"}\n\n')
+
+    mock_app(monkeypatch, handler)
+    await collect(watch_stream("http://localhost:3000", "k"))
+    await collect(watch_stream("http://localhost:3000", "k", role="Admin"))
+    await collect(watch_stream("http://localhost:3000", "k", user_id="u-1"))
+    await collect(watch_stream("http://localhost:3000", "k", role="Admin", user_id="u-1"))
+    assert seen == [{"watch": "1"}, {"watch": "1", "role": "Admin"}, {"watch": "1", "user": "u-1"}, {"watch": "1", "user": "u-1"}], \
+        "everyone, a role, a person, and a person outranks a role"
+
+
+@pytest.mark.asyncio
 async def test_the_watch_says_in_one_event_why_it_cannot_start(monkeypatch):
     assert "this computer" in (await collect(watch_stream("http://example.com", "k")))[0]["message"]
     assert "no live-run key" in (await collect(watch_stream("http://localhost:3000", None)))[0]["message"]

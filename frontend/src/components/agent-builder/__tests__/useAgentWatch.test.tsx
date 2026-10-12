@@ -106,6 +106,18 @@ describe("useAgentWatch", () => {
     expect(api.state.ready).toBe(true);
   });
 
+  it("asks for everyone's chats, a role's, or one person's, and a person outranks a role", async () => {
+    apiGet.mockResolvedValue({ ok: true });
+    const sent: any[] = [];
+    fetchMock.mockImplementation(async (_u: string, init: RequestInit) => { sent.push(JSON.parse(init.body as string)); return controlled().response; });
+    await mount();
+    for (const who of [{}, { role: "Admin" }, { userId: "u-1" }, { role: "Admin", userId: "u-1" }] as any[]) {
+      await act(async () => { void api.connect("http://localhost:3000", who); });
+      await wait();
+    }
+    expect(sent.map((b) => [b.role, b.user_id])).toEqual([[null, null], ["Admin", null], [null, "u-1"], [null, "u-1"]]);
+  });
+
   it("collects a chat as it streams in", async () => {
     apiGet.mockResolvedValue({ ok: true });
     const s = controlled();

@@ -14,7 +14,8 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Circle, Loader2, PauseCircle, Radio, Unplug, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { checklist, stageOf, type CheckStatus, type WatchRun, type WatchState } from "@/lib/agent-watch";
+import { api } from "@/lib/api";
+import { checklist, stageOf, type CheckStatus, type WatchRun, type WatchState, type WatchWho } from "@/lib/agent-watch";
 import type { ModelStep } from "@/lib/agent-live";
 import { ModelCard, ToolCard, num, secs } from "./AgentRunCards";
 import type { Link } from "./useAgentWatch";
@@ -25,7 +26,7 @@ interface Props {
   reason: string | null;
   suggestedUrl: string | null;
   projectId: string;
-  onConnect: (appUrl: string) => void;
+  onConnect: (appUrl: string, who: WatchWho) => void;
   onDisconnect: () => void;
   onSelect: (id: string) => void;
   onFollow: () => void;
@@ -52,8 +53,20 @@ const LINK_DOT: Record<Link, string> = {
 
 const short = (text: string, n = 38) => (text.length > n ? `${text.slice(0, n)}…` : text);
 
+interface WhoOptions {
+  roles: string[];
+  people: Array<{ id: string; name: string; role: string | null }>;
+}
+
+/** The dropdown's value for a choice, and back: "all", "role:Admin" or "user:<id>". */
+const whoValue = (w: WatchWho): string => (w.userId ? `user:${w.userId}` : w.role ? `role:${w.role}` : "all");
+const whoOf = (value: string): WatchWho => (value.startsWith("user:") ? { userId: value.slice(5) } : value.startsWith("role:") ? { role: value.slice(5) } : {});
+
 export function AgentWatchPanel({ state, link, reason, suggestedUrl, projectId, onConnect, onDisconnect, onSelect, onFollow }: Props) {
   const [appUrl, setAppUrl] = useState(DEFAULT_APP);
+  const [who, setWho] = useState<WatchWho>({});
+  const [options, setOptions] = useState<WhoOptions>({ roles: [], people: [] });
+  const [optionsNote, setOptionsNote] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const run = state.selected ? state.runs[state.selected] : undefined;
   const connected = link === "connected" || link === "reconnecting";
@@ -68,16 +81,50 @@ export function AgentWatchPanel({ state, link, reason, suggestedUrl, projectId, 
     }
   }, [projectId]);
 
-  const connect = (address?: string) => {
+  // The app's own roles and people: who there is to watch.
+  useEffect(() => {
+    let live = true;
+    try {
+      const saved = window.localStorage.getItem(`forge.watch.who.${projectId}`);
+      if (saved) setWho(whoOf(saved));
+    } catch {
+      /* a convenience only */
+    }
+    api
+      .get<WhoOptions & { peopleNote?: string | null }>(`/api/projects/${projectId}/agent-definitions/handoff-options`)
+      .then((o) => {
+        if (!live) return;
+        setOptions({ roles: o.roles ?? [], people: o.people ?? [] });
+        setOptionsNote(o.peopleNote ?? null);
+      })
+      .catch(() => live && setOptionsNote("The app's roles and people could not be listed, so everyone's chats are watched."));
+    return () => {
+      live = false;
+    };
+  }, [projectId]);
+
+  const connect = (address?: string, chosen: WatchWho = who) => {
     const where = address ?? appUrl;
     if (address) setAppUrl(address);
     try {
       window.localStorage.setItem(`forge.liveRun.app.${projectId}`, where);
+      window.localStorage.setItem(`forge.watch.who.${projectId}`, whoValue(chosen));
     } catch {
       /* a convenience only */
     }
-    onConnect(where);
+    onConnect(where, chosen);
   };
+
+  // Changing whom to watch takes effect at once: while connected it reconnects to the new choice.
+  const chooseWho = (value: string) => {
+    const next = whoOf(value);
+    setWho(next);
+    if (connected || working) connect(undefined, next);
+  };
+
+  const personName = state.who.userId ? options.people.find((p) => p.id === state.who.userId)?.name ?? "that person" : null;
+  const watching = personName ? `${personName}'s chats only` : state.who.role ? `${state.who.role} chats only` : "everyone's chats";
+  const watchedName = personName ?? (state.who.role ? `anyone with the role ${state.who.role}` : "anyone");
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
@@ -118,6 +165,37 @@ export function AgentWatchPanel({ state, link, reason, suggestedUrl, projectId, 
             </Button>
           )}
         </div>
+        <label className="block text-[10px] text-muted-foreground">
+          Whose chats to watch
+          <select
+            aria-label="Who to watch"
+            className="mt-0.5 block h-7 w-full rounded border bg-transparent px-1 text-xs"
+            value={whoValue(who)}
+            onChange={(e) => chooseWho(e.target.value)}
+          >
+            <option value="all">Everyone</option>
+            {options.roles.length > 0 && (
+              <optgroup label="Anyone with the role">
+                {options.roles.map((r) => (
+                  <option key={r} value={`role:${r}`}>
+                    {r}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {options.people.length > 0 && (
+              <optgroup label="One person">
+                {options.people.map((p) => (
+                  <option key={p.id} value={`user:${p.id}`}>
+                    {p.name}
+                    {p.role ? ` (${p.role})` : ""}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </label>
+        {optionsNote && options.roles.length === 0 && options.people.length === 0 && <p className="text-[10px] text-muted-foreground">{optionsNote}</p>}
         {link === "failed" && reason && (
           <div role="alert" className="flex flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
             <span>{reason}</span>
@@ -130,23 +208,23 @@ export function AgentWatchPanel({ state, link, reason, suggestedUrl, projectId, 
         )}
         {link === "connected" && state.agents.length > 0 && (
           <p className="text-[10px] text-muted-foreground" data-testid="watch-connected-to">
-            Connected to the app's {state.agents.map((a) => a.name).join(", ")}. Verified with this project's key.
+            Connected to the app's {state.agents.map((a) => a.name).join(", ")}. Verified with this project's key. Watching {watching}.
           </p>
         )}
         <p className="text-[10px] text-muted-foreground">
-          Shows real chats from this development app, including what the tools return. It only watches: it cannot change or stop a chat.
+          Shows real chats from this development app, including what the tools return. It connects as an observer, not as any role or person: the choice above only decides whose chats are sent to you. It only watches: it cannot change or stop a chat.
         </p>
       </div>
 
       {/* Chats */}
       <div className="flex-1 space-y-2 overflow-y-auto p-3">
         {!connected && !working && state.order.length === 0 && (
-          <p className="text-[11px] text-muted-foreground">Start your app, press Connect, then chat with the assistant in the app. The flowchart will move as it works.</p>
+          <p className="text-[11px] text-muted-foreground">Start your app, choose whose chats to watch, press Connect, then chat with the assistant in the app. The flowchart will move as it works.</p>
         )}
         {connected && state.order.length === 0 && (
           <div className="flex items-center gap-2 rounded border border-dashed p-3 text-[11px] text-muted-foreground" data-testid="watch-waiting">
             <Loader2 className="h-3 w-3 animate-spin" />
-            Waiting for a chat. Open the app and send the assistant a message.
+            Waiting for a chat from {watchedName}. Open the app{state.who.role || state.who.userId ? " signed in as them" : ""} and send the assistant a message.
           </div>
         )}
 

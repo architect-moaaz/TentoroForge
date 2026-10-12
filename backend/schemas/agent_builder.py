@@ -30,6 +30,9 @@ class AgentWatch(BaseModel):
     canvas each tool and step belongs to."""
     app_url: str
     graph: AgentDefinitionSave | None = None
+    #: Whose chats to watch: everyone's (neither), those of everyone holding a role, or one person's (outranks a role).
+    role: str | None = None
+    user_id: str | None = None
 
 
 class AgentScenarioSave(BaseModel):

@@ -12,6 +12,9 @@ import React from "react";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+const apiGet = vi.fn();
+vi.mock("@/lib/api", () => ({ api: { get: (u: string) => apiGet(u), post: vi.fn(), put: vi.fn(), delete: vi.fn() }, ApiError: class extends Error {} }));
+
 import { AgentWatchPanel } from "../AgentWatchPanel";
 import { applyWatch, initialWatch, type FlowMap, type WatchState } from "@/lib/agent-watch";
 import type { LiveEvent } from "@/lib/agent-live";
@@ -31,8 +34,16 @@ let container: HTMLDivElement;
 let root: Root;
 const calls = { connect: vi.fn(), disconnect: vi.fn(), select: vi.fn(), follow: vi.fn() };
 
+const OPTIONS = {
+  roles: ["Admin", "Support Agent"],
+  people: [{ id: "u-ada", name: "Ada Admin", role: "Admin" }, { id: "u-lena", name: "Lena Ferraro", role: "Support Agent" }],
+  peopleNote: null,
+};
+
 beforeEach(() => {
   window.localStorage.clear();
+  apiGet.mockReset();
+  apiGet.mockResolvedValue(OPTIONS);
   Object.values(calls).forEach((f) => f.mockReset());
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -67,14 +78,14 @@ const click = (e: Element) => act(async () => { (e as HTMLElement).click(); });
 describe("connecting", () => {
   it("starts with instructions, and connects to the address typed, remembering it", async () => {
     await mount();
-    expect(text()).toContain("Start your app, press Connect");
+    expect(text()).toContain("Start your app, choose whose chats to watch, press Connect");
     expect(container.querySelector('[data-testid="watch-link"]')?.textContent).toContain("Not connected");
     const input = container.querySelector('[aria-label="App address"]') as HTMLInputElement;
     expect(input.value).toBe("http://localhost:3000");
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
     await act(async () => { setter.call(input, "http://localhost:3001"); input.dispatchEvent(new Event("input", { bubbles: true })); });
     await click(button("Connect"));
-    expect(calls.connect).toHaveBeenCalledWith("http://localhost:3001");
+    expect(calls.connect).toHaveBeenCalledWith("http://localhost:3001", {});
     expect(window.localStorage.getItem("forge.liveRun.app.p1")).toBe("http://localhost:3001");
   });
 
@@ -108,13 +119,87 @@ describe("connecting", () => {
     await mount({ link: "failed", reason: "Nothing at http://localhost:3000 accepted this project's key, but this project's app is running at http://localhost:3001.", suggestedUrl: "http://localhost:3001" });
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("running at http://localhost:3001");
     await click(button("Use http://localhost:3001"));
-    expect(calls.connect).toHaveBeenCalledWith("http://localhost:3001");
+    expect(calls.connect).toHaveBeenCalledWith("http://localhost:3001", {});
   });
 
-  it("is honest that it shows real chats and only watches", async () => {
+  it("is honest that it shows real chats, connects as an observer and only watches", async () => {
     await mount();
     expect(text()).toContain("real chats from this development app");
+    expect(text()).toContain("connects as an observer, not as any role or person");
     expect(text()).toContain("cannot change or stop a chat");
+  });
+});
+
+describe("whose chats to watch", () => {
+  const select = () => container.querySelector('[aria-label="Who to watch"]') as HTMLSelectElement;
+  const choose = async (value: string) => { await act(async () => { select().value = value; select().dispatchEvent(new Event("change", { bubbles: true })); }); };
+  const labels = () => [...select().querySelectorAll("option")].map((o) => o.textContent);
+  const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+
+  it("offers everyone, each role the app has, and each person, from the app itself", async () => {
+    await mount();
+    await settle();
+    expect(apiGet).toHaveBeenCalledWith("/api/projects/p1/agent-definitions/handoff-options");
+    expect(labels()).toEqual(["Everyone", "Admin", "Support Agent", "Ada Admin (Admin)", "Lena Ferraro (Support Agent)"]);
+    expect(select().value).toBe("all");
+    expect([...select().querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Anyone with the role", "One person"]);
+  });
+
+  it("connects watching the role or person chosen", async () => {
+    await mount();
+    await settle();
+    await choose("role:Admin");
+    await click(button("Connect"));
+    expect(calls.connect).toHaveBeenLastCalledWith("http://localhost:3000", { role: "Admin" });
+    await choose("user:u-lena");
+    await click(button("Connect"));
+    expect(calls.connect).toHaveBeenLastCalledWith("http://localhost:3000", { userId: "u-lena" });
+    await choose("all");
+    await click(button("Connect"));
+    expect(calls.connect).toHaveBeenLastCalledWith("http://localhost:3000", {});
+  });
+
+  it("reconnects at once to a new choice while connected, and not before then", async () => {
+    await mount({ link: "idle" });
+    await settle();
+    await choose("role:Admin");
+    expect(calls.connect).not.toHaveBeenCalled();
+    await mount({ link: "connected", state: state([]) });
+    await settle();
+    await choose("role:Support Agent");
+    expect(calls.connect).toHaveBeenLastCalledWith("http://localhost:3000", { role: "Support Agent" });
+  });
+
+  it("remembers the choice for this project", async () => {
+    await mount();
+    await settle();
+    await choose("user:u-ada");
+    await click(button("Connect"));
+    expect(window.localStorage.getItem("forge.watch.who.p1")).toBe("user:u-ada");
+    act(() => root.unmount());
+    root = createRoot(container);
+    await mount();
+    await settle();
+    expect(select().value).toBe("user:u-ada");
+  });
+
+  it("says whose chats the app confirmed it is sending, and who it is waiting for", async () => {
+    await mount({ link: "connected", state: { ...state([]), who: { role: "Admin" } } });
+    expect(container.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("Watching Admin chats only.");
+    expect(container.querySelector('[data-testid="watch-waiting"]')?.textContent).toContain("anyone with the role Admin");
+    await mount({ link: "connected", state: { ...state([]), who: { userId: "u-lena" } } });
+    await settle();
+    expect(container.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("Lena Ferraro's chats only.");
+    await mount({ link: "connected", state: state([]) });
+    expect(container.querySelector('[data-testid="watch-connected-to"]')?.textContent).toContain("Watching everyone's chats.");
+  });
+
+  it("still lets everyone be watched when the app's roles cannot be listed, and says so", async () => {
+    apiGet.mockRejectedValue(new Error("offline"));
+    await mount();
+    await settle();
+    expect(labels()).toEqual(["Everyone"]);
+    expect(text()).toContain("could not be listed, so everyone's chats are watched");
   });
 });
 

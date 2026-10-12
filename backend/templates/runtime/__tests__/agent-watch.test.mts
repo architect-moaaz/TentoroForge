@@ -199,4 +199,50 @@ console.log("a normal chat, with nothing observing, is untouched");
   ok(events.at(-1).type === "done" && !events.some((e) => e.type === "error"), "no trace hook, no problem");
 }
 
+console.log("watching only one role, or one person");
+{
+  reset();
+  const start = (runId: string, id: string, role: string | null, name = "x") =>
+    watch.publish(runId, Date.now(), { type: "run_start", agentId: "a", agentName: "A", user: { id, name, role, email: null }, message: `hello from ${name}`, conversationId: null });
+  const say = (runId: string, content: string) => watch.publish(runId, Date.now(), { type: "text", content });
+
+  const everyone: any[] = [];
+  const stopEveryone = watch.subscribe((e) => everyone.push(e));
+  const admins: any[] = [];
+  const stopAdmins = watch.subscribe((e) => admins.push(e), { role: "admin" });
+  const lena: any[] = [];
+  const stopLena = watch.subscribe((e) => lena.push(e), { userId: "u-lena" });
+
+  start("r1", "u-lena", "Support", "Lena");
+  say("r1", "lena's chat");
+  start("r2", "u-ada", "Admin", "Ada");
+  say("r2", "ada's chat");
+  start("r3", "u-anon", null, "Visitor");
+  say("r3", "a visitor's chat");
+
+  eqJson(everyone.filter((e) => e.type === "run_start").length, 3, "no filter: every chat");
+  eqJson(admins.map((e) => e.runId), ["r2", "r2"], "a role: only the chats of people holding it (whatever its capitals), start and the rest");
+  ok(!admins.some((e) => e.content === "lena's chat" || e.content === "a visitor's chat"), "and never another role's, nor a visitor's");
+  eqJson(lena.map((e) => e.runId), ["r1", "r1"], "a person: only theirs");
+
+  const lateAdmin: any[] = [];
+  const stopLate = watch.subscribe((e) => lateAdmin.push(e), { role: "Admin" });
+  eqJson(lateAdmin.map((e) => e.runId), ["r2", "r2"], "a watcher joining late is replayed only what its filter allows");
+
+  const personOverRole: any[] = [];
+  const stopBoth = watch.subscribe((e) => personOverRole.push(e), { role: "Admin", userId: "u-lena" });
+  eqJson([...new Set(personOverRole.map((e) => e.runId))], ["r1"], "a person outranks a role");
+
+  const nobody: any[] = [];
+  const stopNobody = watch.subscribe((e) => nobody.push(e), { role: "Janitor" });
+  say("r2", "more from ada");
+  eqJson(nobody.length, 0, "a role nobody holds sees nothing");
+  eqJson(admins.at(-1).content, "more from ada", "and what comes later in a watched chat still arrives");
+
+  ok(watch.matchesFilter({ id: "1", role: "Admin" }, {}) && watch.matchesFilter(null, {}), "no filter matches anyone, signed in or not");
+  ok(!watch.matchesFilter(null, { role: "Admin" }) && !watch.matchesFilter({ id: "1", role: null }, { role: "Admin" }), "a role filter never matches someone with no role");
+  stopEveryone(); stopAdmins(); stopLena(); stopLate(); stopBoth(); stopNobody();
+  reset();
+}
+
 done("watching the real chat live");

@@ -80,17 +80,45 @@ export function publish(runId: string, startedAt: number, e: WatchEvent): void {
   }
 }
 
+/** Whose chats to watch: everyone's (no filter), those of everyone holding a role, or one person's. A person outranks a
+ *  role. A role matches whatever its capitals, as the app's own access checks do. */
+export interface WatchFilter {
+  role?: string;
+  userId?: string;
+}
+
+export function matchesFilter(user: { id?: string | null; role?: string | null } | null | undefined, filter: WatchFilter): boolean {
+  if (filter.userId) return !!user && String(user.id ?? "") === filter.userId;
+  if (filter.role) return !!user?.role && user.role.toLowerCase() === filter.role.toLowerCase();
+  return true;
+}
+
 /**
  * Start watching. `onEvent` gets everything recorded so far (so a watcher that connects mid-chat sees it from its
  * start) and then every new event. The returned function stops watching; when the last watcher stops, the feed
  * forgets everything it kept.
+ *
+ * With a `filter`, only the chats of that role or person are ever passed on: a chat is judged by who began it (its
+ * `run_start`, always the first event of a chat) and the rest of its events follow it. The builder watching one role
+ * is never sent another's.
  */
-export function subscribe(onEvent: (e: Stamped) => void): () => void {
+export function subscribe(onEvent: (e: Stamped) => void, filter: WatchFilter = {}): () => void {
   const f = feed();
-  for (const run of [...f.runs.values()].sort((a, b) => a.startedAt - b.startedAt)) for (const e of run.events) onEvent(e);
-  f.subs.add(onEvent);
+  const everyone = !filter.role && !filter.userId;
+  const allowed = new Set<string>();
+  const deliver = (e: Stamped) => {
+    if (everyone) return onEvent(e);
+    if (e.type === "run_start") {
+      if (!matchesFilter((e as { user?: { id?: string; role?: string | null } }).user, filter)) return;
+      allowed.add(e.runId);
+      return onEvent(e);
+    }
+    if (allowed.has(e.runId)) onEvent(e);
+  };
+  for (const run of [...f.runs.values()].sort((a, b) => a.startedAt - b.startedAt)) for (const e of run.events) deliver(e);
+  f.subs.add(deliver);
   return () => {
-    f.subs.delete(onEvent);
+    f.subs.delete(deliver);
     if (f.subs.size === 0) f.runs.clear();
   };
 }

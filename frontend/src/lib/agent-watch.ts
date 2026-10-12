@@ -31,10 +31,18 @@ export interface WatchRun {
   seenAt: number;
 }
 
+/** Whose chats are being watched, as the app itself confirmed: everyone's (empty), a role's, or one person's. */
+export interface WatchWho {
+  role?: string;
+  userId?: string;
+}
+
 export interface WatchState {
   /** The app said hello: the connection is verified and open. */
   ready: boolean;
   agents: Array<{ id: string; name: string }>;
+  /** Whose chats the app says it is sending. */
+  who: WatchWho;
   map?: FlowMap;
   runs: Record<string, WatchRun>;
   /** Newest first. */
@@ -47,7 +55,7 @@ export interface WatchState {
   error?: string;
 }
 
-export const initialWatch = (): WatchState => ({ ready: false, agents: [], runs: {}, order: [], selected: null, follow: true });
+export const initialWatch = (): WatchState => ({ ready: false, agents: [], who: {}, runs: {}, order: [], selected: null, follow: true });
 
 const MAX_RUNS = 30;
 
@@ -56,7 +64,7 @@ export function applyWatch(state: WatchState, e: LiveEvent, now: number = Date.n
     case "platform_map":
       return { ...state, map: { tools: e.tools ?? {}, kinds: e.kinds ?? {}, toolInfo: e.toolInfo ?? {} } };
     case "watch_ready":
-      return { ...state, ready: true, agents: e.agents ?? [], error: undefined };
+      return { ...state, ready: true, agents: e.agents ?? [], who: { ...(e.filter?.role ? { role: e.filter.role } : {}), ...(e.filter?.userId ? { userId: e.filter.userId } : {}) }, error: undefined };
     case "error":
       if (!e.runId) return { ...state, ready: false, error: String(e.message ?? "The connection failed.") };
       break;

@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { applyWatch, followLatest, initialWatch, selectRun, type WatchState } from "@/lib/agent-watch";
+import { applyWatch, followLatest, initialWatch, selectRun, type WatchState, type WatchWho } from "@/lib/agent-watch";
 import { parseEvents, type LiveEvent } from "@/lib/agent-live";
 import type { AgentEdgeSerialized, AgentNodeSerialized } from "@/types/agent-builder";
 
@@ -60,6 +60,8 @@ export function useAgentWatch({ projectId, agentId, agentName, nodes, edges }: O
   const [suggestedUrl, setSuggestedUrl] = useState<string | null>(null);
   const open = useRef(false);
   const abort = useRef<AbortController | null>(null);
+  // Whose chats to watch, kept for reconnects: a dropped connection comes back watching the same people.
+  const whoRef = useRef<WatchWho>({});
   // The latest drawing, read when a connection is opened, without re-running anything when it changes.
   const drawing = useRef({ nodes, edges });
   drawing.current = { nodes, edges };
@@ -86,7 +88,12 @@ export function useAgentWatch({ projectId, agentId, agentName, nodes, edges }: O
             method: "POST",
             signal: controller.signal,
             headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-            body: JSON.stringify({ app_url: appUrl, graph: { id: agentId, name: agentName, nodes: drawing.current.nodes, edges: [] } }),
+            body: JSON.stringify({
+              app_url: appUrl,
+              graph: { id: agentId, name: agentName, nodes: drawing.current.nodes, edges: [] },
+              role: whoRef.current.userId ? null : whoRef.current.role ?? null,
+              user_id: whoRef.current.userId ?? null,
+            }),
           });
           if (!res.ok || !res.body) throw new Error((await res.text().catch(() => "")) || `The platform answered ${res.status}.`);
           const reader = res.body.getReader();
@@ -147,8 +154,9 @@ export function useAgentWatch({ projectId, agentId, agentName, nodes, edges }: O
   );
 
   const connect = useCallback(
-    async (appUrl: string) => {
+    async (appUrl: string, who: WatchWho = {}) => {
       stop();
+      whoRef.current = who;
       dispatch({ kind: "reset" });
       setReason(null);
       setSuggestedUrl(null);
