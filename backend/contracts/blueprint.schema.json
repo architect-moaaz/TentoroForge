@@ -591,6 +591,9 @@
             },
             "default": []
           },
+          "reference": {
+            "type": "string"
+          },
           "deferred": {
             "type": "boolean"
           },

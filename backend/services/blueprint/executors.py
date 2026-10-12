@@ -1148,10 +1148,11 @@ you after you reply.
 - Each entry is {{name, table, fields, description?, labelField?}} — `name` \
 PascalCase singular, `table` snake_case plural, `labelField` naming the field \
 a human reads to tell one record from another. Each field is {{name, type, \
-required?, primaryKey?, unique?, sensitive?, enumValues?, \
+required, primaryKey, unique, sensitive, enumValues?, mask?, readers?, \
 description?}}.
-- State a flag only when it is true. `"sensitive": false` on forty fields is \
-forty facts nobody asked for, and this reply has a budget.
+- `required`, `primaryKey`, `unique` and `sensitive` are on every field, \
+`false` where they do not apply. Every other optional key is stated only \
+when it says something: this reply has a budget.
 - A field has NO `references` key — the schema does not accept one. State \
 every foreign key in `relationships`, by entity name. `references` is typed \
 `^ENTITY-\\d{{3,}}$` in the Blueprint and an empty string matches nothing, so \
@@ -2844,7 +2845,13 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                         "items": {
                             "type": "object",
                             "additionalProperties": False,
-                            "required": ["name", "type"],
+                            # THE FOUR FIELD FLAGS ARE REQUIRED, `false` when they do not apply. Strict
+                            # structured outputs refuse a schema with too many OPTIONAL properties
+                            # ("Schema is too complex"): `appendOnly`, `mask` and `readers` took this one
+                            # from 20 to 23 and every data_model call was refused (pxf7qf3f, 2026-10-12).
+                            # Absent and `false` mean the same for these four, so requiring them costs
+                            # nothing and brings the count to 19. Count before adding an optional one.
+                            "required": ["name", "type", "required", "primaryKey", "unique", "sensitive"],
                             "properties": {
                                 "name": {"type": "string"},
                                 "type": {"type": "string"},

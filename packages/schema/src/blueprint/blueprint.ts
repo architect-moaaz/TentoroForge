@@ -280,6 +280,8 @@ export const Module = z.object({
   name: z.string(),
   description: z.string().default(""),
   pages: z.array(PageId).default([]),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   /**
    * The person chose, at the product-model gate, not to build this module
    * yet. Its screens are declared but not written or served; its records and
