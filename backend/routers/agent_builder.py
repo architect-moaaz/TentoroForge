@@ -19,7 +19,8 @@ from models.project import (
     Version,
 )
 from schemas.agent_builder import (
-    AgentDefinitionSave, AgentListItem, AgentScenarioRun, AgentScenarioSave, AgentTestRequest,
+    AgentBlastFixes, AgentBlastInvent, AgentBlastRun, AgentDefinitionSave, AgentListItem, AgentScenarioSave,
+    AgentTestRequest,
     AgentWatch,
 )
 from services.project_service import get_project_with_auth
@@ -261,26 +262,81 @@ async def debug_watch(
                              headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
 
 
-@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/tests/run")
-async def run_agent_scenarios(
+@router.get("/api/projects/{project_id}/agent-definitions/blast/bombs")
+async def blast_bombs(
     project_id: uuid.UUID,
-    agent_id: str,
-    req: AgentScenarioRun,
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Run test conversations against the agent as drawn: a real model call each, tools reported and
-    never executed. Pass/fail per scenario, with the reason in plain words."""
-    from services.agent_scenarios import load_scenarios, run_scenarios
+    """The kinds of bomb that can be thrown at an agent, and the limits on one blast."""
+    from services.agent_blast import BOMBS, MAX_REPEATS, MAX_TESTS, PER_BOMB_DEFAULT
 
-    project = await get_project_with_auth(project_id, user, db)
-    scenarios = req.scenarios if req.scenarios is not None else (
-        load_scenarios(project.output_dir, agent_id) if project.output_dir else [])
-    results = await run_scenarios(req.graph.model_dump(), scenarios)
-    return {"results": results,
-            "passed": sum(1 for r in results if r["status"] == "passed"),
-            "failed": sum(1 for r in results if r["status"] == "failed"),
-            "errors": sum(1 for r in results if r["status"] == "error")}
+    await get_project_with_auth(project_id, user, db)
+    return {"bombs": BOMBS, "maxTests": MAX_TESTS, "maxRepeats": MAX_REPEATS, "perBomb": PER_BOMB_DEFAULT}
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/blast/invent")
+async def blast_invent(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentBlastInvent,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Have an AI invent tricky tests for this agent as drawn. Nothing is run or saved."""
+    from services.agent_blast import invent_bombs
+
+    await get_project_with_auth(project_id, user, db)
+    try:
+        return {"tests": await invent_bombs(req.graph.model_dump(), req.bombs, req.per_bomb)}
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/blast/run")
+async def blast_run(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentBlastRun,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run tests against the agent as drawn (a real model call each; the tools it asks for are reported, never
+    executed) and report each as it finishes: ``start``, a ``result`` per test (defused or exploded, with why),
+    then ``done`` with the totals. Saved tests and invented bombs alike."""
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    from services.agent_blast import blast
+
+    await get_project_with_auth(project_id, user, db)
+
+    async def events():
+        async for e in blast(req.graph.model_dump(), req.tests, repeats=req.repeats):
+            yield f"data: {_json.dumps(e)}\n\n".encode()
+
+    return StreamingResponse(events(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/blast/fixes")
+async def blast_fixes(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentBlastFixes,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Proposed fixes for the tests that exploded: a sentence for the instructions, a clearer tool description,
+    or "ask first". Nothing is applied: the builder decides."""
+    from services.agent_blast import propose_fixes
+
+    await get_project_with_auth(project_id, user, db)
+    try:
+        return {"fixes": await propose_fixes(req.graph.model_dump(), req.results)}
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/api/projects/{project_id}/agent-definitions", status_code=201)

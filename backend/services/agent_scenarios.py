@@ -1,28 +1,26 @@
 """Saved test conversations for an agent: what to say, and what must (not) happen.
 
 Until now the Test console was one message at a time, checked by eye, and forgotten. A scenario is a
-message plus plain expectations, kept with the project (``agent-tests/<agent id>.json``), run against the
-agent AS DRAWN (including edits not saved yet) with the same dry run the Test console uses: a real model
-call, the tools it asks for are reported and never executed.
+message plus plain expectations, kept with the project (``agent-tests/<agent id>.json``). They are run by
+"Find problems" (services/agent_blast.py), together with the tests an AI invents, against the agent AS DRAWN
+(including edits not saved yet) with the same dry run the Test console uses: a real model call, the tools it asks for
+are reported and never executed.
 
     {"id": "scn_blocks_a_prompt_attack", "name": "...", "message": "...", "history": [...optional...],
      "expect": {"blocked": true,
                 "must_call": ["list_tickets"], "must_not_call": ["decide_refund"],
                 "reply_matches": ["can't|cannot"], "reply_must_not_match": ["password"]}}
 
-An unmet expectation is a plain sentence. A scenario that cannot run at all (no model key, the model call
-failed) is ``error``, never silently ``passed`` or ``failed``.
+An unmet expectation is a plain sentence.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from pathlib import Path
 from typing import Any
 
 from services.agent_runtime_config import compile_agent, safe_id
-from services.agent_test_run import run_agent_test
 
 SCENARIOS_DIR = "agent-tests"
 _LIST_KEYS = ("must_call", "must_not_call", "reply_matches", "reply_must_not_match")
@@ -58,8 +56,12 @@ def normalise(raw: Any) -> list[dict[str, Any]]:
             expect["blocked"] = expect_in["blocked"]
         history = [{"role": m["role"], "content": str(m["content"])} for m in (s.get("history") or [])
                    if isinstance(m, dict) and m.get("role") in ("user", "assistant") and str(m.get("content") or "").strip()]
+        # An invented test keeps what makes it one: the kind of bomb it is and the sentence a reviewer judges it by.
+        judge = str(s.get("judge") or "").strip()[:300]
+        bomb = str(s.get("bomb") or "").strip()
         out.append({"id": sid, "name": name, "message": str(s["message"]).strip(),
-                    **({"history": history} if history else {}), "expect": expect})
+                    **({"history": history} if history else {}), "expect": expect,
+                    **({"judge": judge} if judge else {}), **({"bomb": bomb} if re.fullmatch(r"[a-z_]{1,30}", bomb) else {})})
     return out
 
 
@@ -106,6 +108,9 @@ def evaluate(expect: dict[str, Any], outcome: dict[str, Any]) -> list[str]:
     """Each expectation that was not met, as a sentence. Empty means the scenario passed."""
     fails: list[str] = []
     calls = [str(c.get("name")) for c in (outcome.get("tool_calls") or [])]
+    # A call the app would HOLD until the person says yes (a simulated run marks it) changed nothing: it counts as an
+    # attempt for "must call", but not as a tool that ran for "must not call".
+    ran = [str(c.get("name")) for c in (outcome.get("tool_calls") or []) if not c.get("held")]
     text = reply_text(outcome)
     blocked = bool(outcome.get("blocked"))
     if expect.get("blocked") is True and not blocked:
@@ -116,7 +121,7 @@ def evaluate(expect: dict[str, Any], outcome: dict[str, Any]) -> list[str]:
         if t not in calls:
             fails.append(f"Expected it to call '{t}', but " + (f"it called {', '.join(calls)}." if calls else "it called no tool."))
     for t in expect.get("must_not_call") or []:
-        if t in calls:
+        if t in ran:
             fails.append(f"It called '{t}', which it should not do for this message.")
     for rx in expect.get("reply_matches") or []:
         if not _regex(rx).search(text):
@@ -125,31 +130,6 @@ def evaluate(expect: dict[str, Any], outcome: dict[str, Any]) -> list[str]:
         if _regex(rx).search(text):
             fails.append(f"The reply matches \"{rx}\", and it should not.")
     return fails
-
-
-async def run_scenarios(graph: dict[str, Any], scenarios: Any, *, client: Any = None,
-                        concurrency: int = 3) -> list[dict[str, Any]]:
-    """Every scenario run against the graph; results in the scenarios' order."""
-    todo = normalise(scenarios)
-    gate = asyncio.Semaphore(max(1, concurrency))
-
-    async def one(s: dict[str, Any]) -> dict[str, Any]:
-        async with gate:
-            try:
-                out = await run_agent_test(graph, s["message"], s.get("history"), client=client)
-            except Exception as exc:  # noqa: BLE001 — one scenario never costs the rest
-                return {"id": s["id"], "name": s["name"], "status": "error", "failures": [],
-                        "error": f"Could not run: {exc}", "response": "", "toolCalls": []}
-        if out.get("error"):
-            return {"id": s["id"], "name": s["name"], "status": "error", "failures": [],
-                    "error": str(out["error"]), "response": str(out.get("response") or ""), "toolCalls": []}
-        fails = evaluate(s["expect"], out)
-        return {"id": s["id"], "name": s["name"], "status": "failed" if fails else "passed", "failures": fails,
-                "response": reply_text(out) or str(out.get("response") or ""),
-                "toolCalls": out.get("tool_calls") or [], "blocked": bool(out.get("blocked")),
-                "ms": out.get("total_duration_ms"), "tokens": out.get("total_tokens")}
-
-    return list(await asyncio.gather(*(one(s) for s in todo)))
 
 
 # ---------------------------------------------------------------------------
