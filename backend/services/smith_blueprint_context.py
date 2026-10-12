@@ -359,6 +359,8 @@ def _render_workflows(bp: Blueprint) -> str:
         if run_by or run_from:
             lines.append(f"  · run by {', '.join(run_by) or 'anyone signed in'}"
                          + (f" from {', '.join(f'`{r}`' for r in run_from)}" if run_from else ""))
+        for check in w.get("checked_first") or []:
+            lines.append(f"  · checked before its steps: {check}")
         for step in w.get("steps") or []:
             lines.append(f"  · {step}")
     return "\n".join(lines)
