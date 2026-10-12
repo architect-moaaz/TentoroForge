@@ -1,4 +1,4 @@
-"""The builder's live run, through the platform's two endpoints.
+"""Watching a running app live, through the platform's two endpoints.
 
 Driven the way the other router tests drive endpoints: the function itself, with the project lookup stubbed, a
 temp app folder, and the running app faked at the HTTP layer. What is pinned: the platform keeps the secret and
@@ -65,13 +65,6 @@ async def drain(response) -> list[dict]:
     return [json.loads(line[6:]) for line in raw.split("\n") if line.startswith("data: ")]
 
 
-def run_request(**over):
-    from schemas.agent_builder import AgentDebugRun
-
-    base = {"app_url": "http://localhost:3000", "message": "close ticket 7", "as_user_id": "u9", "session_id": "s1"}
-    return AgentDebugRun(**{**base, **over})
-
-
 @pytest.mark.asyncio
 async def test_status_uses_the_apps_own_key(project, monkeypatch):
     from routers.agent_builder import debug_status
@@ -82,12 +75,12 @@ async def test_status_uses_the_apps_own_key(project, monkeypatch):
     def handler(req: httpx.Request):
         seen.append(req.headers.get("x-forge-debug-secret"))
         if req.url.params.get("users"):
-            return httpx.Response(200, json={"users": [{"id": "u9", "name": "Lena", "role": "Support"}]})
+            return httpx.Response(200, json={"users": []})
         return httpx.Response(200, json={"agents": [{"id": "support", "name": "Support Bot", "enabled": True}]})
 
     fake_app(monkeypatch, handler)
     out = await debug_status(project.id, "http://localhost:3000", _User(), None)
-    assert out["ok"] is True and out["users"][0]["name"] == "Lena"
+    assert out["ok"] is True and out["agents"][0]["id"] == "support" and "users" not in out
     assert set(seen) == {secret}, "the platform sends the key; the browser never holds it"
 
 
@@ -123,62 +116,6 @@ async def test_a_project_that_was_never_built_has_no_app_to_run(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_run_sends_the_installed_agent_when_not_asked_for_the_draft(project, monkeypatch):
-    from routers.agent_builder import debug_run
-
-    ensure_debug_secret(__import__("pathlib").Path(project.output_dir))
-    sent = {}
-
-    def handler(req: httpx.Request):
-        sent["payload"] = json.loads(req.content)
-        return httpx.Response(200, content='data: {"type":"done","t":3}\n\n', headers={"content-type": "text/event-stream"})
-
-    fake_app(monkeypatch, handler)
-    resp = await debug_run(project.id, "support", run_request(graph=GRAPH), _User(), None)
-    events = await drain(resp)
-    assert events == [{"type": "done", "t": 3}]
-    p = sent["payload"]
-    assert p["agentId"] == "support" and p["asUserId"] == "u9" and p["sessionId"] == "s1" and p["allowChanges"] is False
-    assert "config" not in p, "the installed agent runs; no draft was sent"
-
-
-@pytest.mark.asyncio
-async def test_a_run_of_the_draft_compiles_it_here_and_says_what_is_off(project, monkeypatch):
-    from routers.agent_builder import debug_run
-
-    ensure_debug_secret(__import__("pathlib").Path(project.output_dir))
-    sent = {}
-
-    def handler(req: httpx.Request):
-        sent["payload"] = json.loads(req.content)
-        return httpx.Response(200, content='data: {"type":"done","t":1}\n\n', headers={"content-type": "text/event-stream"})
-
-    fake_app(monkeypatch, handler)
-    resp = await debug_run(project.id, "support", run_request(use_draft=True, allow_changes=True, graph=GRAPH), _User(), None)
-    events = await drain(resp)
-    assert events[0]["type"] == "platform_note" and any("no code" in w for w in events[0]["warnings"])
-    assert events[-1] == {"type": "done", "t": 1}
-    cfg = sent["payload"]["config"]
-    assert cfg["systemPrompt"].startswith("You help customers.")
-    assert {t["name"]: t.get("confirm", False) for t in cfg["tools"]} == {"close_ticket": True, "lookup": False}
-    assert sent["payload"]["allowChanges"] is True and sent["payload"]["agentId"] == "support"
-
-
-@pytest.mark.asyncio
-async def test_a_run_against_an_app_that_is_down_is_one_error_the_screen_can_show(project, monkeypatch):
-    from routers.agent_builder import debug_run
-
-    ensure_debug_secret(__import__("pathlib").Path(project.output_dir))
-
-    def down(req):
-        raise httpx.ConnectError("refused")
-
-    fake_app(monkeypatch, down)
-    events = await drain(await debug_run(project.id, "support", run_request(), _User(), None))
-    assert len(events) == 1 and events[0]["type"] == "error" and "Is it running" in events[0]["message"]
-
-
-@pytest.mark.asyncio
 async def test_the_watch_starts_with_the_map_of_the_canvas_then_the_apps_feed(project, monkeypatch):
     from routers.agent_builder import debug_watch
     from schemas.agent_builder import AgentWatch
@@ -207,3 +144,12 @@ async def test_the_watch_without_a_drawing_still_streams(project, monkeypatch):
     fake_app(monkeypatch, lambda req: httpx.Response(200, content='data: {"type":"watch_ready"}\n\n'))
     events = await drain(await debug_watch(project.id, AgentWatch(app_url="http://localhost:3000"), _User(), None))
     assert [e["type"] for e in events] == ["watch_ready"]
+
+
+def test_there_is_no_way_to_send_a_message_from_the_builder():
+    """Watching is read-only: the builder cannot make the app's assistant do anything."""
+    import routers.agent_builder as r
+
+    paths = {getattr(route, "path", "") for route in r.router.routes}
+    assert not any(p.endswith("/debug-run") for p in paths)
+    assert any(p.endswith("/debug/watch") for p in paths) and any(p.endswith("/debug/status") for p in paths)

@@ -19,7 +19,7 @@ from models.project import (
     Version,
 )
 from schemas.agent_builder import (
-    AgentDebugRun, AgentDefinitionSave, AgentListItem, AgentScenarioRun, AgentScenarioSave, AgentTestRequest,
+    AgentDefinitionSave, AgentListItem, AgentScenarioRun, AgentScenarioSave, AgentTestRequest,
     AgentWatch,
 )
 from services.project_service import get_project_with_auth
@@ -220,7 +220,8 @@ async def debug_status(
     user: PlatformUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Whether the live run works against the running app, who it can run as, which agents are installed."""
+    """Whether the running app can be watched live: it is running, it accepts this project's key, and it is in
+    development. If the address is another project's, says where this project's app is."""
     from services.agent_debug import DebugError, read_debug_secret, status
 
     project = await get_project_with_auth(project_id, user, db)
@@ -254,51 +255,6 @@ async def debug_watch(
         if req.graph is not None:
             yield f"data: {_json.dumps({'type': 'platform_map', **flow_map(req.graph.model_dump())})}\n\n".encode()
         async for chunk in watch_stream(req.app_url, read_debug_secret(app_root)):
-            yield chunk
-
-    return StreamingResponse(events(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
-
-
-@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/debug-run")
-async def debug_run(
-    project_id: uuid.UUID,
-    agent_id: str,
-    req: AgentDebugRun,
-    user: PlatformUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """One chat message through the app's real runtime, as a person the builder picks, streamed step by step:
-    the model's words, each tool call with its exact input, the real data each returned, time and tokens.
-    Tools that change data are not run unless ``allow_changes`` is on."""
-    import json as _json
-
-    from fastapi.responses import StreamingResponse
-
-    from services.agent_debug import read_debug_secret, stream_run
-    from services.agent_runtime_config import compile_agent, safe_id
-
-    project = await get_project_with_auth(project_id, user, db)
-    app_root = _debug_roots(project)
-    payload: dict = {
-        "message": req.message,
-        "asUserId": req.as_user_id,
-        "sessionId": req.session_id,
-        "conversationId": req.conversation_id,
-        "allowChanges": req.allow_changes,
-        "agentId": safe_id(agent_id),
-    }
-    warnings: list[str] = []
-    if req.use_draft and req.graph is not None:
-        compiled = compile_agent({**req.graph.model_dump(), "id": agent_id})
-        payload["config"] = compiled.config
-        warnings = compiled.warnings
-        payload["agentId"] = compiled.config.get("id")
-
-    async def events():
-        if warnings:
-            yield f"data: {_json.dumps({'type': 'platform_note', 'warnings': warnings})}\n\n".encode()
-        async for chunk in stream_run(req.app_url, read_debug_secret(app_root), payload):
             yield chunk
 
     return StreamingResponse(events(), media_type="text/event-stream",
