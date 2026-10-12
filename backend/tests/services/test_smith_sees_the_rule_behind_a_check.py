@@ -44,3 +44,12 @@ def test_the_check_is_on_the_page_smith_reads():
     page = _render_workflows(bp)
     assert "checked before its steps:" in page
     assert page.index("checked before its steps") < page.index("updates submissions")
+
+
+def test_an_app_already_built_gets_the_platforms_trail_and_sealing_on_its_next_turn():
+    """Data Collector 4 kept its old audit.ts after the chain fix: the per-turn
+    refresh did not list it, so Smith patched the old copy instead."""
+    from services.smith.sync_app import RUNTIME_FILES
+    for pair in (("audit.ts", "src/lib/audit.ts"), ("sensitive-crypto.ts", "src/lib/sensitive-crypto.ts"),
+                 ("push.ts", "src/lib/push.ts"), ("tenancy.ts", "src/lib/tenancy.ts")):
+        assert pair in RUNTIME_FILES

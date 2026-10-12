@@ -71,6 +71,13 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     # per role) are the platform's logic, copied verbatim into every app.
     ("data-engine.ts", "src/lib/data-engine.ts"),
     ("seed.ts", "src/db/seed.ts"),
+    # THE TRAIL, SEALED VALUES, PUSH AND ORGANISATIONS are the platform's too.
+    # They were left off this list, so a fix to the audit chain never reached
+    # Data Collector 4: Smith patched its old copy instead (60v142ju, 2026-10-12).
+    ("audit.ts", "src/lib/audit.ts"),
+    ("sensitive-crypto.ts", "src/lib/sensitive-crypto.ts"),
+    ("push.ts", "src/lib/push.ts"),
+    ("tenancy.ts", "src/lib/tenancy.ts"),
 )
 
 #: Sign-in logic every app runs, the platform's: where a signed-in person
@@ -277,7 +284,9 @@ def refresh_frame(app_root: str | Path, doc: dict) -> list[str]:
 
 #: What an app is written out by: the projections and the files they copy.
 #: A change to any of these is a platform change an existing app has not had.
-_PLATFORM_SOURCES = ("services/blueprint", "services/smith/reproject.py",
+# This file too: what it refreshes is part of what writes an app out, and a
+# file added to its lists reached no app already stamped current (60v142ju).
+_PLATFORM_SOURCES = ("services/blueprint", "services/smith/reproject.py", "services/smith/sync_app.py",
                      "templates/runtime", "templates/app-foundation/src")
 _STAMP: dict[str, str] = {}
 STAMP_FILE = "platform-stamp"
