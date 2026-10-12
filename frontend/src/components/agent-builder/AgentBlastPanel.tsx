@@ -19,6 +19,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { parseEvents } from "@/lib/agent-live";
+import { appendLines, linesForEvent, type LogKind, type LogLine, type Printed } from "@/lib/blast-log";
+import { BlastTerminal } from "./BlastTerminal";
 import {
   emptyBlast, estimateCalls, fixKindLabel, isBad, reduceBlast, roundSummary, tally, verdict,
   type BlastFix, type BlastResult, type BlastState, type BlastTest, type Bomb,
@@ -114,6 +116,39 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix }: Props
   const allTests = useMemo(() => [...invented, ...mine] as BlastTest[], [invented, mine]);
   const testOf = (id: string) => allTests.find((t) => t.id === id);
 
+  // ── the log: what is happening, line by line, like a terminal ────────────
+
+  const [log, setLog] = useState<LogLine[]>([]);
+  const logRef = useRef<LogLine[]>([]);
+  const nextLine = useRef(1);
+  const began = useRef(Date.now());
+  const beat = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const push = useCallback((printed: Printed) => {
+    const next = appendLines(logRef.current, printed, Date.now() - began.current, nextLine.current);
+    logRef.current = next.log;
+    nextLine.current = next.nextId;
+    setLog(next.log);
+  }, []);
+  const clearLog = useCallback(() => {
+    logRef.current = [];
+    setLog([]);
+  }, []);
+  /** A new action starts a new log (or, for a re-run, carries on under a line saying so). */
+  const beginLog = (command: string, keep = false) => {
+    if (!keep) {
+      clearLog();
+      began.current = Date.now();
+    }
+    push([{ kind: "cmd", text: command }]);
+  };
+  const stopBeat = () => {
+    if (beat.current) clearInterval(beat.current);
+    beat.current = null;
+  };
+  useEffect(() => stopBeat, []);
+  const bombTitle = useCallback((key?: string | null) => (key ? bombs.find((b) => b.key === key)?.title ?? null : null), [bombs]);
+
   // ── fixes ───────────────────────────────────────────────────────────────
 
   const fetchFixes = useCallback(
@@ -121,19 +156,32 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix }: Props
       const failing = results.filter(isBad);
       if (failing.length === 0) return setFixes([]);
       update((s) => ({ ...s, phase: "fixing" }));
+      push([{ kind: "info", text: `Working out fixes for the ${failing.length} that went off…` }]);
       try {
         const r = await api.post<{ fixes?: BlastFix[] }>(`${base}/${agentId}/blast/fixes`, { graph, results: failing });
         if (!live.current) return;
-        setFixes(r?.fixes ?? []);
+        const found = r?.fixes ?? [];
+        setFixes(found);
         setHandled({});
-        if (!(r?.fixes ?? []).length) setNote("It could not think of a safe fix for these. Look at the failures below.");
+        if (found.length === 0) {
+          setNote("It could not think of a safe fix for these. Look at the failures below.");
+          push([{ kind: "warn", text: "No safe fix came to mind for these. Read the failures above." }]);
+        } else {
+          push([
+            { kind: "good", text: `Proposed ${found.length} fix${found.length === 1 ? "" : "es"}:` },
+            ...found.map((f, i) => ({ kind: "step" as LogKind, text: `  ${i + 1}. [${fixKindLabel(f.kind)}] ${f.title}` })),
+          ]);
+        }
       } catch (e) {
-        if (live.current) setNote(`Could not propose fixes: ${asMessage(e)}`);
+        if (live.current) {
+          setNote(`Could not propose fixes: ${asMessage(e)}`);
+          push([{ kind: "bad", text: `✗ Could not propose fixes: ${asMessage(e)}` }]);
+        }
       } finally {
         if (live.current) update((s) => ({ ...s, phase: "done" }));
       }
     },
-    [base, agentId, graph, update],
+    [base, agentId, graph, update, push],
   );
 
   // ── throwing ────────────────────────────────────────────────────────────
@@ -141,6 +189,7 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix }: Props
   const run = useCallback(
     async (tests: Array<BlastTest | AgentScenario>, opts: { merge?: boolean; withFixes?: boolean } = {}) => {
       const token = typeof window !== "undefined" ? window.localStorage.getItem("token") : null;
+      const ctx = { total: tests.length, bombTitle };
       update((s) => reduceBlast({ ...s, phase: "running" }, { type: "start", total: tests.length, repeats }, opts));
       try {
         const res = await fetch(`${API_BASE}${base}/${agentId}/blast/run`, {
@@ -165,15 +214,21 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix }: Props
           for (const ev of parsed.events) {
             if (ev.type === "done" || ev.type === "error") ended = true;
             update((s) => reduceBlast(s, ev, opts));
+            push(linesForEvent(ev, ctx));
           }
         }
-        if (!ended) update((s) => reduceBlast(s, { type: "error", message: "The run ended without finishing." }));
-        else if (opts.withFixes !== false) await fetchFixes(Object.values(stateRef.current.results));
+        if (!ended) {
+          update((s) => reduceBlast(s, { type: "error", message: "The run ended without finishing." }));
+          push([{ kind: "bad", text: "✗ The run ended without finishing." }]);
+        } else if (opts.withFixes !== false) await fetchFixes(Object.values(stateRef.current.results));
       } catch (e) {
-        if (live.current) update((s) => reduceBlast(s, { type: "error", message: asMessage(e) }));
+        if (live.current) {
+          update((s) => reduceBlast(s, { type: "error", message: asMessage(e) }));
+          push([{ kind: "bad", text: `✗ ${asMessage(e)}` }]);
+        }
       }
     },
-    [base, agentId, graph, repeats, fetchFixes, update],
+    [base, agentId, graph, repeats, fetchFixes, update, push, bombTitle],
   );
 
   const blast = async () => {
@@ -182,27 +237,46 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix }: Props
     setHandled({});
     setInvented([]);
     update(() => ({ ...emptyBlast(), phase: "inventing" }));
+    const name = typeof graph.name === "string" && graph.name ? graph.name : agentId;
+    beginLog(`$ blast "${name}" --kinds ${picked.size} --each ${limits.perBomb} --runs ${repeats}`);
+    push([{ kind: "info", text: `Asking the AI to write ${inventing} bombs for this agent…` }]);
+    const asked = Date.now();
+    stopBeat();
+    beat.current = setInterval(() => push([{ kind: "dim", text: `… still writing the bombs (${Math.round((Date.now() - asked) / 1000)}s)` }]), 8000);
     try {
       const r = await api.post<{ tests?: BlastTest[] }>(`${base}/${agentId}/blast/invent`, { graph, bombs: [...picked], per_bomb: limits.perBomb });
+      stopBeat();
       if (!live.current) return;
       const tests = r?.tests ?? [];
       setInvented(tests);
-      const ready = includeMine ? [...tests, ...mine.filter((s) => s.message.trim())] : tests;
-      await run(ready);
+      push([
+        { kind: "good", text: `Got ${tests.length} bombs in ${Math.round((Date.now() - asked) / 1000)}s:` },
+        ...tests.map((t) => ({ kind: "dim" as LogKind, text: `  [${bombTitle(t.bomb) ?? t.bomb ?? "test"}] ${t.name}` })),
+      ]);
+      const mineToRun = includeMine ? mine.filter((s) => s.message.trim()) : [];
+      if (mineToRun.length) push([{ kind: "info", text: `Adding your ${mineToRun.length} saved test${mineToRun.length === 1 ? "" : "s"}.` }]);
+      await run([...tests, ...mineToRun]);
     } catch (e) {
-      if (live.current) update((s) => reduceBlast(s, { type: "error", message: asMessage(e) }));
+      stopBeat();
+      if (live.current) {
+        update((s) => reduceBlast(s, { type: "error", message: asMessage(e) }));
+        push([{ kind: "bad", text: `✗ ${asMessage(e)}` }]);
+      }
     }
   };
 
   const runMine = () => {
     setNote(null);
     setFixes([]);
-    void run(mine.filter((s) => s.message.trim()));
+    const tests = mine.filter((s) => s.message.trim());
+    beginLog(`$ run my tests (${tests.length})`);
+    void run(tests);
   };
 
   const rerunBad = () => {
     setNote(null);
     const ids = new Set(bad.map((r) => r.id));
+    beginLog("— re-running the ones that went off —", true);
     void run(allTests.filter((t) => ids.has(t.id)), { merge: true });
   };
 
@@ -277,6 +351,7 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix }: Props
   const nothingYet = state.order.length === 0 && state.phase === "idle";
   const exploded = held.failed + held.flaky;
   const progress = `${state.order.length} of ${state.total}`;
+  const showTerminal = log.length > 0 || busy;
 
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="agent-blast">
@@ -343,22 +418,19 @@ export function AgentBlastPanel({ projectId, agentId, graph, onApplyFix }: Props
         )}
       </div>
 
+      {/* What is happening, line by line */}
+      {showTerminal && (
+        <div className="border-b px-3 py-2">
+          <BlastTerminal lines={log} running={busy} onClear={clearLog} />
+        </div>
+      )}
+
       {/* The round */}
       {(note || state.order.length > 0 || busy || state.error) && (
         <div className="border-b px-3 py-1.5 text-xs" role="note" data-testid="blast-status">
-          {state.phase === "inventing" && (
-            <span className="flex items-center gap-1.5 font-medium">
-              <BombIcon className="h-3.5 w-3.5 animate-pulse text-red-600" /> The AI is writing the bombs…
-            </span>
-          )}
-          {state.phase === "running" && (
-            <span className="flex items-center gap-1.5 font-medium">
-              <Flame className="h-3.5 w-3.5 animate-pulse text-orange-500" /> Throwing bombs… {progress}
-            </span>
-          )}
-          {state.phase === "fixing" && (
-            <span className="flex items-center gap-1.5 font-medium">
-              <Wrench className="h-3.5 w-3.5 animate-pulse" /> Working out fixes…
+          {busy && state.phase === "running" && (
+            <span className="font-medium text-muted-foreground" data-testid="blast-progress">
+              {progress} thrown
             </span>
           )}
           {state.phase !== "inventing" && state.order.length > 0 && !busy && (
