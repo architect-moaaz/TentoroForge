@@ -1,0 +1,171 @@
+"""The builder's live run, the platform's side.
+
+What is pinned: the secret is made once, kept out of git and never sent anywhere but this computer; the platform
+says in plain words why a live run cannot start (app not running, app too old, production build); the app's event
+stream is passed through untouched; the install brings the route, the key and the way past the sign-in guard.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import httpx
+import pytest
+
+from services import agent_debug
+from services.agent_debug import DebugError, clean_app_url, ensure_debug_secret, read_debug_secret, status, stream_run
+from services.agent_runtime_install import install_agent_runtime
+
+from tests.services.test_agent_runtime_install import graph, make_app, node, sample_graph
+
+
+REAL_CLIENT = httpx.AsyncClient  # captured before any patching, so a second mock replaces the first
+
+
+def mock_app(monkeypatch, handler):
+    """Make every httpx client in the service talk to ``handler`` instead of the network."""
+    def factory(*a, **kw):
+        kw["transport"] = httpx.MockTransport(handler)
+        return REAL_CLIENT(*a, **kw)
+
+    monkeypatch.setattr(agent_debug.httpx, "AsyncClient", factory)
+
+
+# ── the secret ────────────────────────────────────────────────────────────
+
+def test_the_secret_is_made_once_and_kept_out_of_git(tmp_path):
+    first = ensure_debug_secret(tmp_path)
+    assert len(first) >= 32 and read_debug_secret(tmp_path) == first
+    assert ensure_debug_secret(tmp_path) == first  # not changed on the next install
+    assert ".forge-debug-secret" in (tmp_path / ".gitignore").read_text().split()
+    ensure_debug_secret(tmp_path)
+    assert (tmp_path / ".gitignore").read_text().split().count(".forge-debug-secret") == 1
+
+
+def test_no_secret_reads_as_none(tmp_path):
+    assert read_debug_secret(tmp_path) is None
+
+
+# ── where the secret may be sent ──────────────────────────────────────────
+
+@pytest.mark.parametrize("url", ["http://localhost:3000", "http://127.0.0.1:3001/", "https://app.localhost:8443", "http://[::1]:3000"])
+def test_only_this_computer_is_allowed(url):
+    assert clean_app_url(url).startswith("http")
+
+
+@pytest.mark.parametrize("url", ["", "localhost:3000", "ftp://localhost", "http://example.com", "http://192.168.1.5:3000",
+                                 "http://localhost.evil.com", "http://evil.com/localhost", "javascript:alert(1)"])
+def test_anywhere_else_is_refused(url):
+    with pytest.raises(DebugError):
+        clean_app_url(url)
+
+
+def test_the_address_is_cut_down_to_scheme_and_host():
+    assert clean_app_url("http://localhost:3000/some/path?x=1") == "http://localhost:3000"
+
+
+# ── is it working? ────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_status_says_who_and_what_it_can_run(monkeypatch):
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append((req.url.path, req.url.params.get("users"), req.headers.get("x-forge-debug-secret")))
+        if req.url.params.get("users"):
+            return httpx.Response(200, json={"users": [{"id": "u1", "name": "Lena", "role": "Support"}]})
+        return httpx.Response(200, json={"debug": True, "agents": [{"id": "app_assistant", "name": "Assistant", "enabled": True}]})
+
+    mock_app(monkeypatch, handler)
+    r = await status("http://localhost:3000/", "s3cret")
+    assert r["ok"] is True and r["users"][0]["name"] == "Lena" and r["agents"][0]["id"] == "app_assistant"
+    assert all(s[2] == "s3cret" for s in seen), "the key goes with every request"
+
+
+@pytest.mark.asyncio
+async def test_status_explains_each_way_it_cannot_work(monkeypatch):
+    assert "no live-run key" in (await status("http://localhost:3000", None))["reason"]
+
+    mock_app(monkeypatch, lambda req: httpx.Response(404, json={"error": "Not found."}))
+    off = await status("http://localhost:3000", "k")
+    assert off["ok"] is False and "Apply the agent once" in off["reason"] and "development mode" in off["reason"]
+
+    def down(req):
+        raise httpx.ConnectError("refused")
+
+    mock_app(monkeypatch, down)
+    gone = await status("http://localhost:3000", "k")
+    assert gone["ok"] is False and "Is it running" in gone["reason"]
+
+
+# ── the stream ────────────────────────────────────────────────────────────
+
+async def collect(gen) -> list[dict]:
+    raw = b"".join([c async for c in gen]).decode()
+    return [json.loads(line[6:]) for line in raw.split("\n") if line.startswith("data: ")]
+
+
+@pytest.mark.asyncio
+async def test_the_apps_events_are_passed_through_untouched(monkeypatch):
+    body = 'data: {"type":"debug_start"}\n\ndata: {"type":"text","content":"hi","t":5}\n\ndata: {"type":"done","t":9}\n\n'
+    captured = {}
+
+    def handler(req: httpx.Request):
+        captured["payload"] = json.loads(req.content)
+        captured["secret"] = req.headers.get("x-forge-debug-secret")
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+
+    mock_app(monkeypatch, handler)
+    events = await collect(stream_run("http://localhost:3000", "k", {"message": "hello", "asUserId": "u1"}))
+    assert [e["type"] for e in events] == ["debug_start", "text", "done"]
+    assert captured["payload"] == {"message": "hello", "asUserId": "u1"} and captured["secret"] == "k"
+
+
+@pytest.mark.asyncio
+async def test_a_failure_is_one_error_event_the_screen_can_show(monkeypatch):
+    bad = await collect(stream_run("http://example.com", "k", {}))
+    assert bad[0]["type"] == "error" and "this computer" in bad[0]["message"]
+    none = await collect(stream_run("http://localhost:3000", None, {}))
+    assert "no live-run key" in none[0]["message"]
+
+    mock_app(monkeypatch, lambda req: httpx.Response(404, json={"error": "No such person in this app."}))
+    msg = await collect(stream_run("http://localhost:3000", "k", {}))
+    assert msg[0]["message"] == "No such person in this app."
+
+    mock_app(monkeypatch, lambda req: httpx.Response(404, json={"error": "Not found."}))
+    off = await collect(stream_run("http://localhost:3000", "k", {}))
+    assert "development mode" in off[0]["message"]
+
+    def down(req):
+        raise httpx.ConnectError("refused")
+
+    mock_app(monkeypatch, down)
+    gone = await collect(stream_run("http://localhost:3000", "k", {}))
+    assert "Is it running" in gone[0]["message"]
+
+
+# ── the install ───────────────────────────────────────────────────────────
+
+MIDDLEWARE = 'export const config = {\n  matcher: ["/((?!api/auth|_next|favicon.ico|login|signup|.*\\\\..*).*)"],\n};\n'
+
+
+def test_the_install_brings_the_route_the_key_and_the_way_past_the_sign_in_guard(tmp_path):
+    project, app = make_app(tmp_path)
+    (app / "src" / "middleware.ts").write_text(MIDDLEWARE, encoding="utf-8")
+    install_agent_runtime(project, graphs=[sample_graph()])
+    assert (app / "src" / "app" / "api" / "agent" / "debug" / "route.ts").is_file()
+    assert (app / "src" / "lib" / "agents" / "debug.ts").is_file()
+    assert read_debug_secret(app)
+    mw = (app / "src" / "middleware.ts").read_text(encoding="utf-8")
+    assert mw.count("api/agent/debug") == 1 and "(?!api/auth|api/agent/debug|" in mw
+    install_agent_runtime(project)  # again: still once, and the key does not change
+    key = read_debug_secret(app)
+    install_agent_runtime(project)
+    assert (app / "src" / "middleware.ts").read_text(encoding="utf-8").count("api/agent/debug") == 1
+    assert read_debug_secret(app) == key
+
+
+def test_an_app_with_no_middleware_is_left_alone(tmp_path):
+    project, app = make_app(tmp_path)
+    r = install_agent_runtime(project, graphs=[sample_graph()])
+    assert r["installed"] and not (app / "src" / "middleware.ts").exists()
