@@ -1104,8 +1104,16 @@ async function _trail(ctx: WorkflowExecutionContext, action: "create" | "update"
     const user = (ctx as any)?.user;
     const actor = user?.id ? actorOf(user) : { kind: "workflow" as const };
     const wid = String((ctx as any)?.workflowId ?? "");
-    await recordAudit(db, { action, entity: getTableName(table), entityId: (after ?? before)?.id != null ? String((after ?? before).id) : null,
-      before: before ?? null, after: after ?? null, actor, via: wid ? `workflow:${wid}` : "workflow",
+    // THE TRAIL KEEPS MASKS, as it does for a change made on a screen: a
+    // process handed it the sealed row, ciphertext and all (60v142ju).
+    const name = getTableName(table);
+    let snap = (row: any) => row ?? null;
+    try {
+      const { _snapshotForAudit } = await import("../data-engine");
+      snap = (row: any) => _snapshotForAudit(name, row);
+    } catch { /* no engine: the row as it is */ }
+    await recordAudit(db, { action, entity: name, entityId: (after ?? before)?.id != null ? String((after ?? before).id) : null,
+      before: snap(before), after: snap(after), actor, via: wid ? `workflow:${wid}` : "workflow",
       runId: (ctx as any)?.runId ? String((ctx as any).runId) : null });
   } catch (err) {
     console.warn("[workflow] the trail could not be written:", err);

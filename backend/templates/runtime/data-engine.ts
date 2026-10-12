@@ -192,7 +192,7 @@ function _auditUnmask(entity: string, column: string, ctx: DataEngineContext): v
 
 /** A row as the trail keeps it: every sensitive value as its mask, never
  *  the plaintext or the ciphertext. */
-function _snapshotForAudit(entityName: string, row: Record<string, any> | null | undefined): Record<string, any> | null {
+export function _snapshotForAudit(entityName: string, row: Record<string, any> | null | undefined): Record<string, any> | null {
   if (!row || typeof row !== "object") return null;
   const specs = sensitiveColumnsFor(entityName);
   const out: Record<string, any> = { ...row };
