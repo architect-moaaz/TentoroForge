@@ -36,6 +36,12 @@ describe("the connection", () => {
     expect((only(other).live.steps[0] as any).problems).toEqual([]);
   });
 
+  it("knows whose chats the app says it is sending: everyone's, a role's, or one person's", () => {
+    expect(play([{ type: "watch_ready", agents: [] }], initialWatch()).who).toEqual({});
+    expect(play([{ type: "watch_ready", agents: [], filter: { role: "Admin" } }], initialWatch()).who).toEqual({ role: "Admin" });
+    expect(play([{ type: "watch_ready", agents: [], filter: { userId: "u-1" } }], initialWatch()).who).toEqual({ userId: "u-1" });
+  });
+
   it("says why when it cannot connect, and is no longer ready", () => {
     const s = play([{ type: "watch_ready", agents: [] }, { type: "error", message: "Could not reach the app" }], initialWatch());
     expect(s).toMatchObject({ ready: false, error: "Could not reach the app" });

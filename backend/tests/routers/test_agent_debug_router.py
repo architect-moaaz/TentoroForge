@@ -136,6 +136,24 @@ async def test_the_watch_starts_with_the_map_of_the_canvas_then_the_apps_feed(pr
 
 
 @pytest.mark.asyncio
+async def test_the_watch_passes_the_chosen_role_or_person_to_the_app(project, monkeypatch):
+    from routers.agent_builder import debug_watch
+    from schemas.agent_builder import AgentWatch
+
+    ensure_debug_secret(__import__("pathlib").Path(project.output_dir))
+    seen = []
+
+    def handler(req: httpx.Request):
+        seen.append(dict(req.url.params))
+        return httpx.Response(200, content='data: {"type":"watch_ready"}\n\n')
+
+    fake_app(monkeypatch, handler)
+    await drain(await debug_watch(project.id, AgentWatch(app_url="http://localhost:3000", role="Support Agent"), _User(), None))
+    await drain(await debug_watch(project.id, AgentWatch(app_url="http://localhost:3000", user_id="u-9"), _User(), None))
+    assert seen == [{"watch": "1", "role": "Support Agent"}, {"watch": "1", "user": "u-9"}]
+
+
+@pytest.mark.asyncio
 async def test_the_watch_without_a_drawing_still_streams(project, monkeypatch):
     from routers.agent_builder import debug_watch
     from schemas.agent_builder import AgentWatch
