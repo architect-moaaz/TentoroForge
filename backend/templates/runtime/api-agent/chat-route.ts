@@ -18,7 +18,9 @@ import { auth } from "@/auth";
 import { AGENTS } from "@/agents/registry";
 import { runAgent } from "@/lib/agents/runtime";
 import { drizzleStore } from "@/lib/agents/store";
-import { realDeps } from "@/lib/agents/io";
+import { instrumentIO } from "@/lib/agents/debug";
+import { realDeps, toolIO } from "@/lib/agents/io";
+import { feedEvent, newRunId, observeDeps, publish, watching, type WatchEvent } from "@/lib/agents/watch";
 import type { AgentEvent, AgentRuntimeConfig, AgentUser } from "@/lib/agents/types";
 
 /** A change the app is holding until the person agrees. Only this fact goes to the browser, never the result. */
@@ -77,12 +79,31 @@ export async function POST(req: Request): Promise<Response> {
     : body.message.trim();
 
   const user = await sessionUser();
-  const deps = await realDeps(drizzleStore);
+
+  // A builder watching this development app live (see agents/watch.ts) is sent a COPY of what happens here. The
+  // chat itself is unchanged: `observeDeps` only reports, and nothing is kept unless someone is watching.
+  const watched = watching();
+  const runId = newRunId();
+  const startedAt = Date.now();
+  const feed = (e: WatchEvent) => publish(runId, startedAt, e);
+  const deps = watched ? observeDeps(await realDeps(drizzleStore, instrumentIO(toolIO, feed)), feed) : await realDeps(drizzleStore);
+  if (watched) {
+    const who = (await auth())?.user as { name?: unknown; email?: unknown } | undefined;
+    feed({
+      type: "run_start",
+      agentId: agent.id,
+      agentName: agent.name,
+      user: { id: user?.id ?? "anonymous", name: who?.name ? String(who.name) : null, role: user?.role ?? null, email: user?.email ?? null },
+      message: body.message.trim(),
+      conversationId: typeof body.conversationId === "string" ? body.conversationId : null,
+    });
+  }
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (e: AgentEvent) => {
+        if (watched) feed(feedEvent(e));
         // The browser is told THAT a tool ran and whether it worked — never what it
         // returned. The result is the model's to read; a person who may see a record
         // has the app's own pages for it, and a stream of raw rows is one more place

@@ -12,6 +12,7 @@ import {
   Loader2,
   FlaskConical,
   ListChecks,
+  Radio,
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,9 @@ import { AgentNodePalette } from "./AgentNodePalette";
 import { AgentNodeProperties } from "./AgentNodeProperties";
 import { AgentTemplateSelector } from "./AgentTemplateSelector";
 import { AgentTestConsole } from "./AgentTestConsole";
+import { AgentWatchPanel } from "./AgentWatchPanel";
+import { useAgentWatch } from "./useAgentWatch";
+import { nodeStates } from "@/lib/agent-watch";
 import { AgentIOSchemaEditor } from "./config/AgentIOSchemaEditor";
 import type {
   AgentDefinition,
@@ -66,6 +70,9 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   const [confirmingApply, setConfirmingApply] = useState(false);
   const [showScenarios, setShowScenarios] = useState(false);
   const [showTestConsole, setShowTestConsole] = useState(false);
+  // Watch the running app's real chats live: the canvas lights up as they happen.
+  const [showWatch, setShowWatch] = useState(false);
+  const watch = useAgentWatch({ projectId, agentId: currentAgent?.id ?? "", agentName: editName, nodes, edges });
 
   // Fetch agent list
   const { data: agents = [], isLoading } = useQuery({
@@ -218,6 +225,12 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkKey]);
+
+  // Which boxes the chat being watched is working on right now.
+  const liveStates = useMemo(() => {
+    const run = watch.state.selected ? watch.state.runs[watch.state.selected] : undefined;
+    return run ? nodeStates(run, watch.state.map) : {};
+  }, [watch.state]);
 
   // Boxes with something wrong, for the canvas: the worst thing said about each.
   const problems = useMemo(() => {
@@ -537,6 +550,20 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
           </Button>
           <Button
             size="sm"
+            variant={showWatch ? "default" : "outline"}
+            aria-pressed={showWatch}
+            onClick={() => {
+              setShowTestConsole(false);
+              setShowScenarios(false);
+              setShowWatch(!showWatch);
+            }}
+          >
+            <Radio className="mr-1 h-3.5 w-3.5" />
+            Watch live
+            {watch.link === "connected" && <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-green-500" aria-label="connected" />}
+          </Button>
+          <Button
+            size="sm"
             onClick={() => applyAgent(false)}
             disabled={isApplying}
           >
@@ -627,6 +654,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
               initialNodes={nodes}
               initialEdges={edges}
               problems={problems}
+              liveStates={liveStates}
               onNodesChange={(rf: RFNode[]) =>
                 setNodes(
                   rf.map((n) => ({
@@ -651,7 +679,20 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             />
           )}
         </div>
-        {selectedNode && !showTestConsole && (
+        {showWatch && !showTestConsole && !showScenarios && (
+          <AgentWatchPanel
+            state={watch.state}
+            link={watch.link}
+            reason={watch.reason}
+            suggestedUrl={watch.suggestedUrl}
+            projectId={projectId}
+            onConnect={watch.connect}
+            onDisconnect={watch.disconnect}
+            onSelect={watch.select}
+            onFollow={watch.follow}
+          />
+        )}
+        {selectedNode && !showTestConsole && !showWatch && (
           <AgentNodeProperties
             nodeData={selectedNode.data}
             nodeId={selectedNode.id}

@@ -67,8 +67,8 @@ const store = {
   },
 };
 
-const secs = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
-const num = (n: number) => n.toLocaleString();
+export const secs = (ms: number) => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`);
+export const num = (n: number) => n.toLocaleString();
 
 export function AgentLiveRun({ projectId, agentId, agentName, nodes }: Props) {
   const [appUrl, setAppUrl] = useState(DEFAULT_APP);
@@ -374,7 +374,30 @@ function GivenCard({ agent, run }: { agent: AgentInfo; run: LiveRun }) {
   );
 }
 
-function ModelCard({ step, last }: { step: ModelStep; last: boolean }) {
+export function ModelCard({ step, last, pending }: { step: ModelStep; last: boolean; pending?: string }) {
+  if (step.running || step.failed) {
+    return (
+      <div className={`rounded border p-2 ${step.failed ? "border-red-300 bg-red-50" : "border-purple-300 bg-purple-50"}`} data-testid="live-model-running">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="secondary" className="bg-purple-100 px-1 py-0 text-[9px] text-purple-700">Step {step.n}</Badge>
+          {step.failed ? (
+            <span className="text-[11px] font-semibold text-red-700">The AI call failed: {step.failed}</span>
+          ) : (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin text-purple-600" />
+              <span className="text-[11px] font-semibold">Calling the AI…</span>
+            </>
+          )}
+          <span className="text-[10px] text-muted-foreground">
+            {step.messages} {step.messages === 1 ? "message" : "messages"}
+            {step.tools !== undefined ? ` · ${step.tools} tools offered` : ""}
+            {step.systemChars !== undefined ? ` · instructions ${num(step.systemChars)} characters` : ""}
+          </span>
+        </div>
+        {!step.failed && pending && <p className="mt-1 whitespace-pre-wrap text-[11px] italic text-purple-900">“{pending.trim()}”</p>}
+      </div>
+    );
+  }
   return (
     <div className="rounded border border-purple-200 bg-purple-50/50 p-2" data-testid="live-model">
       <div className="flex flex-wrap items-center gap-2">
@@ -398,7 +421,7 @@ function ModelCard({ step, last }: { step: ModelStep; last: boolean }) {
   );
 }
 
-function ToolCard({ step }: { step: ToolStep }) {
+export function ToolCard({ step }: { step: ToolStep }) {
   const rows = useMemo(() => rowsOf(step.result), [step.result]);
   const json = useMemo(() => {
     try {

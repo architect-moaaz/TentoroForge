@@ -35,7 +35,7 @@ _NAV_MARK = "forge-handoffs-nav"
 
 #: runtime template -> destination, relative to the app root
 _CORE = ("types", "guardrails", "memory", "tools", "runtime", "io", "store", "handoff", "handoff-store", "handoff-nav",
-         "confirm", "limits", "usage-store", "debug")
+         "confirm", "limits", "usage-store", "debug", "watch")
 
 
 def resolve_roots(path: str | Path) -> tuple[Path, Path]:
