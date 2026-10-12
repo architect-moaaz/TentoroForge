@@ -1376,6 +1376,29 @@ def check_tenancy(result: "AgentResult", doc: dict | None) -> None:
         raise InvalidTenancy(_all_of(problems))
 
 
+class NoRequirements(AuthorRefusal):
+    """A definition that states what the application is and none of what it must do."""
+
+
+def check_requirements(result: "AgentResult", doc: dict | None) -> None:
+    """The requirement agent, on an application that has no requirements
+    yet, states at least one. Its reply once carried only the product
+    summary; the step reported success and Smith told the person "0
+    requirements" (6ysfw182, 2026-10-12). The observer does not watch this
+    node, so the shape is held here and the author is asked again."""
+    if result.agent != "requirement":
+        return
+    if any(str(r.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")
+           for r in (doc or {}).get("requirements") or [] if isinstance(r, dict)):
+        return
+    if any(p.section == "requirements" for p in result.proposals):
+        return
+    raise NoRequirements(
+        "The reply states the product and no requirements. Every application has at least one thing it "
+        "must do: return a `requirements` proposal for each one the person asked for, beside the `product` "
+        "proposal.")
+
+
 class InvalidMobile(AuthorRefusal):
     """A push channel in an application without push, or a store wrapper with no id."""
 
@@ -1844,6 +1867,7 @@ def apply_agent_result(
     check_tenancy(result, svc.doc)
     check_sign_in(result, svc.doc)
     check_mobile(result, svc.doc)
+    check_requirements(result, svc.doc)
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)
