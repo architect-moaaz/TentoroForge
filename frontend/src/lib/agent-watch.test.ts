@@ -19,8 +19,21 @@ describe("the connection", () => {
   it("is ready when the app says hello, and carries the map the platform sent", () => {
     const s = play([{ type: "platform_map", ...MAP }, { type: "watch_ready", agents: [{ id: "app_assistant", name: "Assistant" }] }], initialWatch());
     expect(s.ready).toBe(true);
-    expect(s.map).toEqual(MAP);
+    expect(s.map).toEqual({ ...MAP, toolInfo: {} });
     expect(s.agents[0].name).toBe("Assistant");
+  });
+
+  it("does not warn about a tool call when it knows nothing of the tool (no bogus 'unknown tool')", () => {
+    const s = play([START, ev({ type: "tool_call", id: "c", tool: "list_tickets", input: { status: "open" } })], { ...initialWatch(), map: MAP });
+    expect((only(s).live.steps[0] as any).problems).toEqual([]);
+  });
+
+  it("checks a tool call against the tool as drawn, when the platform sent its definition", () => {
+    const withInfo = { ...initialWatch(), map: { ...MAP, toolInfo: { update_ticket: { inputSchema: { type: "object", properties: { id: { type: "string" }, data: { type: "object" } }, required: ["id", "data"], additionalProperties: true } } } } };
+    const s = play([START, ev({ type: "tool_call", id: "c", tool: "update_ticket", input: { id: "t-1" } })], withInfo);
+    expect((only(s).live.steps[0] as any).problems.map((p: any) => [p.code, p.field])).toEqual([["missing", "data"], ["unseen_id", "id"]]);
+    const other = play([START, ev({ type: "tool_call", id: "c", tool: "list_tickets", input: {} })], withInfo);
+    expect((only(other).live.steps[0] as any).problems).toEqual([]);
   });
 
   it("says why when it cannot connect, and is no longer ready", () => {

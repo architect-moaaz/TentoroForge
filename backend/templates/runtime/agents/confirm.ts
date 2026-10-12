@@ -31,15 +31,6 @@ export function stableStringify(value: unknown): string {
 
 export const actionKey = (tool: string, input: unknown): string => `${tool}:${stableStringify(input ?? {})}`;
 
-/** Whether a tool is known to change data: a create/update/delete, a call that is not a plain read, or a workflow.
- *  The same rule the compiler uses to mark `confirm` (services/agent_runtime_config.py `changes_data`). A function
- *  or MCP tool could be either, so it is not judged here. */
-export function changesData(spec: AgentToolSpec): boolean {
-  if (spec.kind === "data") return spec.operation === "create" || spec.operation === "update" || spec.operation === "delete";
-  if (spec.kind === "api") return !["GET", "HEAD"].includes((spec.method ?? "GET").toUpperCase());
-  return spec.kind === "workflow";
-}
-
 /** Whether the person's reply says no. Anything else is taken as going ahead. */
 export const declined = (reply: string): boolean => DECLINE.test(reply);
 

@@ -1,36 +1,26 @@
 /**
- * The builder's live run: turning the app's event stream into steps a person can read, and spotting inputs that
- * are probably wrong. No React, no network: the reducer and the checks are plain functions, tested on their own.
+ * Turning the app's event stream for one chat into steps a person can read, and spotting inputs that are probably
+ * wrong. No React, no network: the reducer and the checks are plain functions, tested on their own.
  *
- * The app streams (see backend/templates/runtime/api-agent/debug-route.ts): `debug_start` (the prompt, the tools,
- * who it runs as), then per model call `text` words, a `model_call` (time, tokens, what it asked for), and for each
- * tool a `tool_call` (the exact input), maybe a `tool_faked` (it changes data, so it was not run), and a
- * `tool_result` (the real data). Every event carries `t`, the milliseconds since the run began.
+ * The app streams (see backend/templates/runtime/agents/watch.ts): `run_start` (who wrote what), the runtime's
+ * `phase`s, then per model call `model_start`, `text` words and a `model_call` (time, tokens, what it asked for), and
+ * for each tool a `tool_call` (the exact input), the `app_call`s it made (the real requests) and a `tool_result` (the
+ * real data). Every event carries `t`, the milliseconds since the chat began.
  */
 
 export type LiveEvent = { type: string; t?: number; [key: string]: any };
 
+/** A tool as the agent's drawing defines it: what its input may hold. */
 export interface ToolInfo {
   name: string;
-  kind: string;
-  description: string;
-  confirm: boolean;
-  /** Known to change data (so a debug run does not run it). */
-  changes: boolean;
+  kind?: string;
+  description?: string;
+  confirm?: boolean;
   inputSchema: { type?: string; properties?: Record<string, any>; required?: string[]; additionalProperties?: boolean };
 }
 
-export interface AgentInfo {
-  id: string;
-  name: string;
-  model: string | null;
-  systemPrompt: string;
-  maxTurns: number;
-  tools: ToolInfo[];
-}
-
 export interface InputProblem {
-  code: "unknown_tool" | "missing" | "unexpected" | "wrong_type" | "unseen_id";
+  code: "missing" | "unexpected" | "wrong_type" | "unseen_id";
   field?: string;
   message: string;
 }
@@ -86,15 +76,13 @@ export type ToolStep = {
   tool: string;
   t: number;
   input: unknown;
-  status: "running" | "ok" | "failed" | "held" | "not_run";
+  status: "running" | "ok" | "failed" | "held";
   problems: InputProblem[];
   result?: unknown;
   error?: string;
   chars?: number;
   cut?: boolean;
   ms?: number;
-  /** Why a tool that changes data was not run. */
-  notRunReason?: string;
   /** What the tool did in the app while it ran. */
   calls: AppCall[];
 };
@@ -103,16 +91,13 @@ export type Step = ModelStep | ToolStep;
 
 export interface LiveRun {
   status: "idle" | "running" | "done" | "blocked" | "error";
-  agent?: AgentInfo;
+  /** The tools as drawn, so an input can be checked against what each accepts. Absent: only the id check runs. */
+  tools?: ToolInfo[];
   user?: { id: string; name: string | null; email: string | null; role: string | null };
-  /** What the person typed, when the run was watched rather than sent from the builder. */
+  /** What the person typed. */
   message?: string;
-  /** The runtime's own steps, in order (live view only). */
+  /** The runtime's own steps, in order. */
   phases: Phase[];
-  allowChanges: boolean;
-  draft: boolean;
-  /** Warnings from compiling the draft. */
-  notes: string[];
   steps: Step[];
   answer: string;
   /** Text that arrived since the last model call; it belongs to the next one. */
@@ -128,9 +113,6 @@ export interface LiveRun {
 
 export const emptyRun = (): LiveRun => ({
   status: "idle",
-  allowChanges: false,
-  draft: false,
-  notes: [],
   phases: [],
   steps: [],
   answer: "",
@@ -138,12 +120,6 @@ export const emptyRun = (): LiveRun => ({
   seen: "",
   totals: { ms: 0, inputTokens: 0, outputTokens: 0, modelCalls: 0, toolCalls: 0 },
 });
-
-/** A new message in the same conversation: the trace starts fresh, what was seen is kept (and the new message is
- *  part of it). */
-export function beginRun(prev: LiveRun, message: string): LiveRun {
-  return { ...emptyRun(), status: "running", agent: prev.agent, user: prev.user, allowChanges: prev.allowChanges, draft: prev.draft, conversationId: prev.conversationId, seen: `${prev.seen}\n${message}` };
-}
 
 // ── input checks ──────────────────────────────────────────────────────────
 
@@ -173,25 +149,27 @@ function idValues(input: unknown, path = ""): Array<{ field: string; value: stri
  * What looks wrong with the input a tool was called with. Cheap, local, and wrong only in the safe direction (a
  * warning to look at, never a block).
  */
-export function checkInput(tool: ToolInfo | undefined, tool_name: string, input: unknown, seen: string): InputProblem[] {
-  if (!tool) return [{ code: "unknown_tool", message: `This agent has no tool called "${tool_name}".` }];
+export function checkInput(tool: ToolInfo | undefined, input: unknown, seen: string): InputProblem[] {
   const problems: InputProblem[] = [];
-  const obj = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
-  const schema = tool.inputSchema ?? {};
-  const props = schema.properties ?? {};
+  // What the tool accepts is only known when its definition is: without it, only the id check below can run.
+  if (tool) {
+    const obj = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+    const schema = tool.inputSchema ?? {};
+    const props = schema.properties ?? {};
 
-  for (const key of schema.required ?? []) {
-    const v = obj[key];
-    if (v === undefined || v === null || v === "") problems.push({ code: "missing", field: key, message: `Missing "${key}", which this tool needs.` });
-  }
-  for (const [key, v] of Object.entries(obj)) {
-    const spec = props[key];
-    if (!spec) {
-      if (schema.additionalProperties === false) problems.push({ code: "unexpected", field: key, message: `"${key}" is not something this tool accepts.` });
-      continue;
+    for (const key of schema.required ?? []) {
+      const v = obj[key];
+      if (v === undefined || v === null || v === "") problems.push({ code: "missing", field: key, message: `Missing "${key}", which this tool needs.` });
     }
-    if (spec.type && v !== undefined && v !== null && !matchesType(spec.type, v)) {
-      problems.push({ code: "wrong_type", field: key, message: `"${key}" should be ${Array.isArray(spec.type) ? spec.type.join(" or ") : spec.type}, but it is ${typeOf(v)}.` });
+    for (const [key, v] of Object.entries(obj)) {
+      const spec = props[key];
+      if (!spec) {
+        if (schema.additionalProperties === false) problems.push({ code: "unexpected", field: key, message: `"${key}" is not something this tool accepts.` });
+        continue;
+      }
+      if (spec.type && v !== undefined && v !== null && !matchesType(spec.type, v)) {
+        problems.push({ code: "wrong_type", field: key, message: `"${key}" should be ${Array.isArray(spec.type) ? spec.type.join(" or ") : spec.type}, but it is ${typeOf(v)}.` });
+      }
     }
   }
   for (const { field, value } of idValues(input)) {
@@ -227,12 +205,6 @@ const withTool = (run: LiveRun, id: string, fn: (s: ToolStep) => ToolStep): Live
 export function applyEvent(run: LiveRun, e: LiveEvent): LiveRun {
   const t = typeof e.t === "number" ? e.t : 0;
   switch (e.type) {
-    case "platform_note":
-      return { ...run, notes: [...run.notes, ...((e.warnings as string[]) ?? [])] };
-
-    case "debug_start":
-      return { ...run, agent: e.agent as AgentInfo, user: e.user, allowChanges: !!e.allowChanges, draft: !!e.draft };
-
     case "text": {
       const c = String(e.content ?? "");
       return { ...run, pending: run.pending + c, answer: run.answer + c };
@@ -289,7 +261,7 @@ export function applyEvent(run: LiveRun, e: LiveEvent): LiveRun {
     }
 
     case "tool_call": {
-      const info = run.agent?.tools.find((x) => x.name === e.tool);
+      const info = run.tools?.find((x) => x.name === e.tool);
       const step: ToolStep = {
         kind: "tool",
         id: e.id,
@@ -297,7 +269,7 @@ export function applyEvent(run: LiveRun, e: LiveEvent): LiveRun {
         t,
         input: e.input,
         status: "running",
-        problems: checkInput(info, e.tool, e.input, run.seen),
+        problems: checkInput(info, e.input, run.seen),
         calls: [],
       };
       return { ...run, steps: [...run.steps, step], totals: { ...run.totals, toolCalls: run.totals.toolCalls + 1 } };
@@ -310,17 +282,11 @@ export function applyEvent(run: LiveRun, e: LiveEvent): LiveRun {
       return target ? withTool(run, target.id, (s) => ({ ...s, calls: [...s.calls, call as AppCall] })) : run;
     }
 
-    case "tool_faked": {
-      // Arrives right after its tool_call and before its tool_result: the newest running step of that tool.
-      const target = [...run.steps].reverse().find((s): s is ToolStep => s.kind === "tool" && s.tool === e.tool && s.status === "running");
-      return target ? withTool(run, target.id, (s) => ({ ...s, notRunReason: String(e.reason ?? "it changes data") })) : run;
-    }
-
     case "tool_result": {
       const held = !!e.result && typeof e.result === "object" && (e.result as { held?: unknown }).held === true;
       const next = withTool(run, e.id, (s) => ({
         ...s,
-        status: !e.ok ? "failed" : held ? "held" : s.notRunReason ? "not_run" : "ok",
+        status: !e.ok ? "failed" : held ? "held" : "ok",
         result: e.result,
         error: e.error,
         chars: e.chars,

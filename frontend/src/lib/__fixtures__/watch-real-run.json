@@ -41,6 +41,657 @@
    "human_handoff": [
     "handoff_1"
    ]
+  },
+  "toolInfo": {
+   "list_users": {
+    "kind": "data",
+    "description": "List or search User records. Fields: id, displayName, email, role, createdAt.",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "search": {
+       "type": "string",
+       "description": "Free-text search over the records."
+      },
+      "filters": {
+       "type": "object",
+       "description": "Exact-match filters, e.g. {\"status\": \"open\"}.",
+       "additionalProperties": true
+      },
+      "limit": {
+       "type": "integer",
+       "description": "How many records (default 50)."
+      },
+      "page": {
+       "type": "integer"
+      },
+      "sort": {
+       "type": "string",
+       "description": "A field name to sort by."
+      },
+      "order": {
+       "type": "string",
+       "enum": [
+        "asc",
+        "desc"
+       ]
+      }
+     }
+    }
+   },
+   "get_user": {
+    "kind": "data",
+    "description": "Get one User record by its id. Fields: id, displayName, email, role, createdAt.",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string",
+       "description": "The record's id."
+      }
+     },
+     "required": [
+      "id"
+     ]
+    }
+   },
+   "list_customers": {
+    "kind": "data",
+    "description": "List or search Customer records. Fields: id, name, email, plan, createdAt.",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "search": {
+       "type": "string",
+       "description": "Free-text search over the records."
+      },
+      "filters": {
+       "type": "object",
+       "description": "Exact-match filters, e.g. {\"status\": \"open\"}.",
+       "additionalProperties": true
+      },
+      "limit": {
+       "type": "integer",
+       "description": "How many records (default 50)."
+      },
+      "page": {
+       "type": "integer"
+      },
+      "sort": {
+       "type": "string",
+       "description": "A field name to sort by."
+      },
+      "order": {
+       "type": "string",
+       "enum": [
+        "asc",
+        "desc"
+       ]
+      }
+     }
+    }
+   },
+   "get_customer": {
+    "kind": "data",
+    "description": "Get one Customer record by its id. Fields: id, name, email, plan, createdAt.",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string",
+       "description": "The record's id."
+      }
+     },
+     "required": [
+      "id"
+     ]
+    }
+   },
+   "add_customer": {
+    "kind": "data",
+    "description": "Create a Customer record. Fields: id, name, email, plan, createdAt.",
+    "confirm": true,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "data": {
+       "type": "object",
+       "description": "The new record's fields.",
+       "additionalProperties": true
+      }
+     },
+     "required": [
+      "data"
+     ]
+    }
+   },
+   "update_customer": {
+    "kind": "data",
+    "description": "Change a Customer record by id. Fields: id, name, email, plan, createdAt.",
+    "confirm": true,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string",
+       "description": "The record's id."
+      },
+      "data": {
+       "type": "object",
+       "description": "The fields to change.",
+       "additionalProperties": true
+      }
+     },
+     "required": [
+      "id",
+      "data"
+     ]
+    }
+   },
+   "list_orders": {
+    "kind": "data",
+    "description": "List or search Order records. Fields: id, customerId, product, amount, status, placedAt. customerId is the id of a customer (its name comes back as customerIdLabel).",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "search": {
+       "type": "string",
+       "description": "Free-text search over the records."
+      },
+      "filters": {
+       "type": "object",
+       "description": "Exact-match filters, e.g. {\"status\": \"open\"}.",
+       "additionalProperties": true
+      },
+      "limit": {
+       "type": "integer",
+       "description": "How many records (default 50)."
+      },
+      "page": {
+       "type": "integer"
+      },
+      "sort": {
+       "type": "string",
+       "description": "A field name to sort by."
+      },
+      "order": {
+       "type": "string",
+       "enum": [
+        "asc",
+        "desc"
+       ]
+      }
+     }
+    }
+   },
+   "get_order": {
+    "kind": "data",
+    "description": "Get one Order record by its id. Fields: id, customerId, product, amount, status, placedAt. customerId is the id of a customer (its name comes back as customerIdLabel).",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string",
+       "description": "The record's id."
+      }
+     },
+     "required": [
+      "id"
+     ]
+    }
+   },
+   "add_order": {
+    "kind": "data",
+    "description": "Create a Order record. Fields: id, customerId, product, amount, status, placedAt. customerId is the id of a customer (its name comes back as customerIdLabel).",
+    "confirm": true,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "data": {
+       "type": "object",
+       "description": "The new record's fields.",
+       "additionalProperties": true
+      }
+     },
+     "required": [
+      "data"
+     ]
+    }
+   },
+   "update_order": {
+    "kind": "data",
+    "description": "Change a Order record by id. Fields: id, customerId, product, amount, status, placedAt. customerId is the id of a customer (its name comes back as customerIdLabel).",
+    "confirm": true,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string",
+       "description": "The record's id."
+      },
+      "data": {
+       "type": "object",
+       "description": "The fields to change.",
+       "additionalProperties": true
+      }
+     },
+     "required": [
+      "id",
+      "data"
+     ]
+    }
+   },
+   "list_tickets": {
+    "kind": "data",
+    "description": "List or search Ticket records. Fields: id, customerId, orderId, subject, body, status, priority, category, assignedToId, createdAt, resolvedAt. customerId is the id of a customer (its name comes back as customerIdLabel); orderId is the id of an order (its name comes back as orderIdLabel); assignedToId is the id of a user (its name comes back as assignedToIdLabel).",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "search": {
+       "type": "string",
+       "description": "Free-text search over the records."
+      },
+      "filters": {
+       "type": "object",
+       "description": "Exact-match filters, e.g. {\"status\": \"open\"}.",
+       "additionalProperties": true
+      },
+      "limit": {
+       "type": "integer",
+       "description": "How many records (default 50)."
+      },
+      "page": {
+       "type": "integer"
+      },
+      "sort": {
+       "type": "string",
+       "description": "A field name to sort by."
+      },
+      "order": {
+       "type": "string",
+       "enum": [
+        "asc",
+        "desc"
+       ]
+      }
+     }
+    }
+   },
+   "get_ticket": {
+    "kind": "data",
+    "description": "Get one Ticket record by its id. Fields: id, customerId, orderId, subject, body, status, priority, category, assignedToId, createdAt, resolvedAt. customerId is the id of a customer (its name comes back as customerIdLabel); orderId is the id of an order (its name comes back as orderIdLabel); assignedToId is the id of a user (its name comes back as assignedToIdLabel).",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string",
+       "description": "The record's id."
+      }
+     },
+     "required": [
+      "id"
+     ]
+    }
+   },
+   "list_ticket_messages": {
+    "kind": "data",
+    "description": "List or search TicketMessage records. Fields: id, ticketId, authorKind, authorId, body, createdAt. ticketId is the id of a ticket (its name comes back as ticketIdLabel).",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "search": {
+       "type": "string",
+       "description": "Free-text search over the records."
+      },
+      "filters": {
+       "type": "object",
+       "description": "Exact-match filters, e.g. {\"status\": \"open\"}.",
+       "additionalProperties": true
+      },
+      "limit": {
+       "type": "integer",
+       "description": "How many records (default 50)."
+      },
+      "page": {
+       "type": "integer"
+      },
+      "sort": {
+       "type": "string",
+       "description": "A field name to sort by."
+      },
+      "order": {
+       "type": "string",
+       "enum": [
+        "asc",
+        "desc"
+       ]
+      }
+     }
+    }
+   },
+   "get_ticket_message": {
+    "kind": "data",
+    "description": "Get one TicketMessage record by its id. Fields: id, ticketId, authorKind, authorId, body, createdAt. ticketId is the id of a ticket (its name comes back as ticketIdLabel).",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string",
+       "description": "The record's id."
+      }
+     },
+     "required": [
+      "id"
+     ]
+    }
+   },
+   "list_refunds": {
+    "kind": "data",
+    "description": "List or search Refund records. Fields: id, orderId, ticketId, amount, reason, status, decidedById, createdAt. orderId is the id of an order (its name comes back as orderIdLabel); ticketId is the id of a ticket (its name comes back as ticketIdLabel); decidedById is the id of a user (its name comes back as decidedByIdLabel).",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "search": {
+       "type": "string",
+       "description": "Free-text search over the records."
+      },
+      "filters": {
+       "type": "object",
+       "description": "Exact-match filters, e.g. {\"status\": \"open\"}.",
+       "additionalProperties": true
+      },
+      "limit": {
+       "type": "integer",
+       "description": "How many records (default 50)."
+      },
+      "page": {
+       "type": "integer"
+      },
+      "sort": {
+       "type": "string",
+       "description": "A field name to sort by."
+      },
+      "order": {
+       "type": "string",
+       "enum": [
+        "asc",
+        "desc"
+       ]
+      }
+     }
+    }
+   },
+   "get_refund": {
+    "kind": "data",
+    "description": "Get one Refund record by its id. Fields: id, orderId, ticketId, amount, reason, status, decidedById, createdAt. orderId is the id of an order (its name comes back as orderIdLabel); ticketId is the id of a ticket (its name comes back as ticketIdLabel); decidedById is the id of a user (its name comes back as decidedByIdLabel).",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string",
+       "description": "The record's id."
+      }
+     },
+     "required": [
+      "id"
+     ]
+    }
+   },
+   "list_articles": {
+    "kind": "data",
+    "description": "List or search Article records. Fields: id, title, body, category, published, updatedAt.",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "search": {
+       "type": "string",
+       "description": "Free-text search over the records."
+      },
+      "filters": {
+       "type": "object",
+       "description": "Exact-match filters, e.g. {\"status\": \"open\"}.",
+       "additionalProperties": true
+      },
+      "limit": {
+       "type": "integer",
+       "description": "How many records (default 50)."
+      },
+      "page": {
+       "type": "integer"
+      },
+      "sort": {
+       "type": "string",
+       "description": "A field name to sort by."
+      },
+      "order": {
+       "type": "string",
+       "enum": [
+        "asc",
+        "desc"
+       ]
+      }
+     }
+    }
+   },
+   "get_article": {
+    "kind": "data",
+    "description": "Get one Article record by its id. Fields: id, title, body, category, published, updatedAt.",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "type": "string",
+       "description": "The record's id."
+      }
+     },
+     "required": [
+      "id"
+     ]
+    }
+   },
+   "assign_ticket": {
+    "kind": "workflow",
+    "description": "Assign a ticket to a member of staff. Rules the app enforces: A ticket can only be resolved together with a resolution note. An urgent ticket that is still open is escalated automatically every hour.",
+    "confirm": true,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "ticket": {
+       "type": "object",
+       "description": "The ticket, as {\"id\": \"<its id>\"}. Look the id up first with a list tool."
+      },
+      "assignee": {
+       "type": "object",
+       "description": "The user, as {\"id\": \"<its id>\"}. Look the id up first with a list tool."
+      }
+     },
+     "required": [
+      "ticket",
+      "assignee"
+     ]
+    }
+   },
+   "reply_to_ticket": {
+    "kind": "workflow",
+    "description": "Reply to the customer on a ticket; the reply is saved as a permanent message and the ticket waits on the customer. Rules the app enforces: A ticket message, once saved, is permanent and cannot be edited or deleted by anyone. A ticket can only be resolved together with a resolution note. An urgent ticket that is still open is escalated automatically every hour.",
+    "confirm": true,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "ticket": {
+       "type": "object",
+       "description": "The ticket, as {\"id\": \"<its id>\"}. Look the id up first with a list tool."
+      },
+      "body": {
+       "type": "string",
+       "description": "The reply to send to the customer."
+      }
+     },
+     "required": [
+      "ticket",
+      "body"
+     ]
+    }
+   },
+   "escalate_ticket": {
+    "kind": "workflow",
+    "description": "Escalate a ticket with a reason; it becomes urgent and the reason is recorded in the conversation. Rules the app enforces: A ticket message, once saved, is permanent and cannot be edited or deleted by anyone. A ticket can only be resolved together with a resolution note. An urgent ticket that is still open is escalated automatically every hour.",
+    "confirm": true,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "ticket": {
+       "type": "object",
+       "description": "The ticket, as {\"id\": \"<its id>\"}. Look the id up first with a list tool."
+      },
+      "reason": {
+       "type": "string",
+       "description": "Why the ticket needs a manager's attention."
+      }
+     },
+     "required": [
+      "ticket",
+      "reason"
+     ]
+    }
+   },
+   "resolve_ticket": {
+    "kind": "workflow",
+    "description": "Resolve a ticket with a resolution note that is added to the conversation. Rules the app enforces: A ticket message, once saved, is permanent and cannot be edited or deleted by anyone. A ticket can only be resolved together with a resolution note. An urgent ticket that is still open is escalated automatically every hour.",
+    "confirm": true,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "ticket": {
+       "type": "object",
+       "description": "The ticket, as {\"id\": \"<its id>\"}. Look the id up first with a list tool."
+      },
+      "resolution": {
+       "type": "string",
+       "description": "What was done to resolve it; this is added to the conversation."
+      }
+     },
+     "required": [
+      "ticket",
+      "resolution"
+     ]
+    }
+   },
+   "request_refund": {
+    "kind": "workflow",
+    "description": "Request a refund against an order for a ticket; the amount cannot exceed the order total, and a manager decides. Rules the app enforces: Only a manager may approve or reject a refund request. A refund request cannot be for more than the order's amount.",
+    "confirm": true,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "ticket": {
+       "type": "object",
+       "description": "The ticket, as {\"id\": \"<its id>\"}. Look the id up first with a list tool."
+      },
+      "order": {
+       "type": "object",
+       "description": "The order, as {\"id\": \"<its id>\"}. Look the id up first with a list tool."
+      },
+      "amount": {
+       "type": "number",
+       "description": "The amount to refund, in the order's currency; it cannot be more than the order total."
+      },
+      "reason": {
+       "type": "string",
+       "description": "Why the refund is being requested, in a sentence."
+      }
+     },
+     "required": [
+      "ticket",
+      "order",
+      "amount",
+      "reason"
+     ]
+    }
+   },
+   "decide_refund": {
+    "kind": "workflow",
+    "description": "A manager approves or rejects a refund request. Rules the app enforces: Only a manager may approve or reject a refund request. A refund request cannot be for more than the order's amount.",
+    "confirm": true,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "refund": {
+       "type": "object",
+       "description": "The refund, as {\"id\": \"<its id>\"}. Look the id up first with a list tool."
+      },
+      "decision": {
+       "type": "string",
+       "description": "Either \"approve\" or \"reject\" (exactly one of those two words)."
+      }
+     },
+     "required": [
+      "refund",
+      "decision"
+     ]
+    }
+   },
+   "publish_article": {
+    "kind": "workflow",
+    "description": "A manager publishes a knowledge-base article so AI answers can use it. Rules the app enforces: Only a manager may publish a knowledge-base article; unpublished articles are not used to answer customers.",
+    "confirm": true,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "article": {
+       "type": "object",
+       "description": "The article, as {\"id\": \"<its id>\"}. Look the id up first with a list tool."
+      }
+     },
+     "required": [
+      "article"
+     ]
+    }
+   },
+   "request_human": {
+    "kind": "handoff",
+    "description": "Hand this conversation to a person on the team. Use it when the person asks for a human, or when you cannot help them. Ask them first (only what they have not already told you): Why do you need a person? How urgent is it? How can we reach you? Then call this with their answers.",
+    "confirm": false,
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "reason": {
+       "type": "string",
+       "description": "Why a person is needed, in a sentence."
+      },
+      "urgency": {
+       "type": "string",
+       "enum": [
+        "low",
+        "normal",
+        "urgent"
+       ],
+       "description": "How urgent it is."
+      },
+      "contact": {
+       "type": "string",
+       "description": "How the team can reach them, if they gave a way."
+      }
+     },
+     "required": [
+      "reason"
+     ]
+    }
+   }
   }
  },
  "events": [
@@ -65,23 +716,23 @@
    },
    "message": "How many open tickets are there, and who is the customer on the oldest one?",
    "conversationId": null,
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 8
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 55
   },
   {
    "type": "phase",
    "phase": "input_check",
    "ok": true,
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 13
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 60
   },
   {
    "type": "phase",
    "phase": "memory",
    "messages": 0,
    "summarised": false,
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 112
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 2507
   },
   {
    "type": "model_start",
@@ -89,96 +740,36 @@
    "messages": 1,
    "tools": 26,
    "systemChars": 3150,
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 131
-  },
-  {
-   "type": "text",
-   "content": "Let",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 2017
-  },
-  {
-   "type": "text",
-   "content": " me look",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 2021
-  },
-  {
-   "type": "text",
-   "content": " up the open tickets for you \u2014",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 2021
-  },
-  {
-   "type": "text",
-   "content": " I'll fetch",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 2022
-  },
-  {
-   "type": "text",
-   "content": " them",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 2023
-  },
-  {
-   "type": "text",
-   "content": " sorted",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 2023
-  },
-  {
-   "type": "text",
-   "content": " by creation",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 2025
-  },
-  {
-   "type": "text",
-   "content": " date at",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 2037
-  },
-  {
-   "type": "text",
-   "content": " the same",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 2092
-  },
-  {
-   "type": "text",
-   "content": " time.",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 2317
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 2545
   },
   {
    "type": "model_call",
    "n": 1,
-   "ms": 3181,
+   "ms": 3852,
    "inputTokens": 5369,
-   "outputTokens": 136,
+   "outputTokens": 113,
    "messages": 1,
    "toolsRequested": [
     "list_tickets"
    ],
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 3312
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 6398
   },
   {
    "type": "tool_call",
-   "id": "toolu_01F1mpuadtN7A8j9FuYSBqoY",
+   "id": "toolu_01C32xWa27Bs8tW78SPrRT3n",
    "tool": "list_tickets",
    "input": {
     "filters": {
      "status": "open"
     },
+    "limit": 50,
     "sort": "createdAt",
-    "order": "asc",
-    "limit": 50
+    "order": "asc"
    },
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 3313
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 6399
   },
   {
    "type": "app_call",
@@ -187,19 +778,19 @@
    "method": "GET",
    "query": {
     "status": "open",
+    "limit": 50,
     "sort": "createdAt",
-    "order": "asc",
-    "limit": 50
+    "order": "asc"
    },
    "status": 200,
-   "ms": 322,
+   "ms": 21442,
    "ok": true,
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 3658
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 27859
   },
   {
    "type": "tool_result",
-   "id": "toolu_01F1mpuadtN7A8j9FuYSBqoY",
+   "id": "toolu_01C32xWa27Bs8tW78SPrRT3n",
    "tool": "list_tickets",
    "ok": true,
    "result": {
@@ -270,8 +861,8 @@
    },
    "chars": 1831,
    "cut": false,
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 3661
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 27863
   },
   {
    "type": "model_start",
@@ -279,139 +870,115 @@
    "messages": 3,
    "tools": 26,
    "systemChars": 3150,
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 3661
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 27863
   },
   {
    "type": "text",
-   "content": "\n\n",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 4985
+   "content": "There",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 29163
   },
   {
    "type": "text",
-   "content": "Here's",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 4985
+   "content": " are **",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30537
   },
   {
    "type": "text",
-   "content": " the summary",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 4987
+   "content": "4 open tickets** in total",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30542
   },
   {
    "type": "text",
-   "content": ":",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 4988
+   "content": ". The",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30543
   },
   {
    "type": "text",
-   "content": "\n\n-",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 4988
+   "content": " oldest one was",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30544
   },
   {
    "type": "text",
-   "content": " **Total open tickets:",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 4990
+   "content": " created on **26",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30548
   },
   {
    "type": "text",
-   "content": " 4**\n- **",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 4991
+   "content": " May 2026**,",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30552
   },
   {
    "type": "text",
-   "content": "Oldest ticket:**",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 4993
+   "content": " and",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30557
   },
   {
    "type": "text",
-   "content": " \"",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5056
-  },
-  {
-   "type": "text",
-   "content": "Wrong colour delivered\" \u2014",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5102
-  },
-  {
-   "type": "text",
-   "content": " customer",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5143
+   "content": " the customer",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30562
   },
   {
    "type": "text",
    "content": " is",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5211
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30567
   },
   {
    "type": "text",
-   "content": " **Elena Petrova**,",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5257
+   "content": " **Elena",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30572
   },
   {
    "type": "text",
-   "content": " created",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5305
+   "content": " Petrova** (subject",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30576
   },
   {
    "type": "text",
-   "content": " on ",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5348
-  },
-  {
-   "type": "text",
-   "content": "26",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5420
-  },
-  {
-   "type": "text",
-   "content": " May 2026.",
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5500
+   "content": ": \"Wrong colour delivered\").",
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30580
   },
   {
    "type": "model_call",
    "n": 2,
-   "ms": 1843,
-   "inputTokens": 6262,
-   "outputTokens": 49,
+   "ms": 2729,
+   "inputTokens": 6239,
+   "outputTokens": 46,
    "messages": 3,
    "toolsRequested": [],
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5504
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30593
   },
   {
    "type": "phase",
    "phase": "output_check",
    "ok": true,
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5507
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 30594
   },
   {
    "type": "done",
-   "conversationId": "cd195076-e9a1-4560-a638-a0c209c60761",
+   "conversationId": "961411fb-e0ae-4a72-a4a3-ccdc74a2e853",
    "tokens": {
-    "input": 11631,
-    "output": 185
+    "input": 11608,
+    "output": 159
    },
    "turns": 2,
-   "runId": "run-mv5dwc7f-vgsiih",
-   "t": 5546
+   "runId": "run-mv5fa2ju-2rnnxt",
+   "t": 33899
   }
  ]
 }

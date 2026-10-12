@@ -11,7 +11,7 @@ node --experimental-strip-types --no-warnings "$DIR/agent-handoff.test.mts"
 # Confirm before changing, and per-person limits.
 node --experimental-strip-types --no-warnings "$DIR/agent-safety.test.mts"
 
-# The builder's live run: a conversation kept in memory, changes held back, every model call timed.
+# Watching the app live: the secret, what goes to the builder, and what the tools did in the app.
 node --experimental-strip-types --no-warnings "$DIR/agent-debug.test.mts"
 
 # Watching the real chat live: the feed, the observer, and the runtime's phases.

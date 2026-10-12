@@ -1,4 +1,4 @@
-"""The builder's live run, the platform's side.
+"""Watching a running app live, the platform's side.
 
 What is pinned: the secret is made once, kept out of git and never sent anywhere but this computer; the platform
 says in plain words why a live run cannot start (app not running, app too old, production build); the app's event
@@ -13,7 +13,7 @@ import httpx
 import pytest
 
 from services import agent_debug
-from services.agent_debug import DebugError, clean_app_url, ensure_debug_secret, read_debug_secret, status, stream_run
+from services.agent_debug import DebugError, clean_app_url, ensure_debug_secret, read_debug_secret, status
 from services.agent_runtime_install import install_agent_runtime
 
 from tests.services.test_agent_runtime_install import graph, make_app, node, sample_graph
@@ -67,18 +67,18 @@ def test_the_address_is_cut_down_to_scheme_and_host():
 # ── is it working? ────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_status_says_who_and_what_it_can_run(monkeypatch):
+async def test_status_says_the_app_can_be_watched(monkeypatch):
     seen = []
 
     def handler(req: httpx.Request):
         seen.append((req.url.path, req.url.params.get("users"), req.headers.get("x-forge-debug-secret")))
         if req.url.params.get("users"):
-            return httpx.Response(200, json={"users": [{"id": "u1", "name": "Lena", "role": "Support"}]})
+            raise AssertionError("the people of the app are no longer asked for")
         return httpx.Response(200, json={"debug": True, "agents": [{"id": "app_assistant", "name": "Assistant", "enabled": True}]})
 
     mock_app(monkeypatch, handler)
     r = await status("http://localhost:3000/", "s3cret")
-    assert r["ok"] is True and r["users"][0]["name"] == "Lena" and r["agents"][0]["id"] == "app_assistant"
+    assert r["ok"] is True and r["agents"][0]["id"] == "app_assistant" and "users" not in r
     assert all(s[2] == "s3cret" for s in seen), "the key goes with every request"
 
 
@@ -103,45 +103,6 @@ async def test_status_explains_each_way_it_cannot_work(monkeypatch):
 async def collect(gen) -> list[dict]:
     raw = b"".join([c async for c in gen]).decode()
     return [json.loads(line[6:]) for line in raw.split("\n") if line.startswith("data: ")]
-
-
-@pytest.mark.asyncio
-async def test_the_apps_events_are_passed_through_untouched(monkeypatch):
-    body = 'data: {"type":"debug_start"}\n\ndata: {"type":"text","content":"hi","t":5}\n\ndata: {"type":"done","t":9}\n\n'
-    captured = {}
-
-    def handler(req: httpx.Request):
-        captured["payload"] = json.loads(req.content)
-        captured["secret"] = req.headers.get("x-forge-debug-secret")
-        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
-
-    mock_app(monkeypatch, handler)
-    events = await collect(stream_run("http://localhost:3000", "k", {"message": "hello", "asUserId": "u1"}))
-    assert [e["type"] for e in events] == ["debug_start", "text", "done"]
-    assert captured["payload"] == {"message": "hello", "asUserId": "u1"} and captured["secret"] == "k"
-
-
-@pytest.mark.asyncio
-async def test_a_failure_is_one_error_event_the_screen_can_show(monkeypatch):
-    bad = await collect(stream_run("http://example.com", "k", {}))
-    assert bad[0]["type"] == "error" and "this computer" in bad[0]["message"]
-    none = await collect(stream_run("http://localhost:3000", None, {}))
-    assert "no live-run key" in none[0]["message"]
-
-    mock_app(monkeypatch, lambda req: httpx.Response(404, json={"error": "No such person in this app."}))
-    msg = await collect(stream_run("http://localhost:3000", "k", {}))
-    assert msg[0]["message"] == "No such person in this app."
-
-    mock_app(monkeypatch, lambda req: httpx.Response(404, json={"error": "Not found."}))
-    off = await collect(stream_run("http://localhost:3000", "k", {}))
-    assert "development mode" in off[0]["message"]
-
-    def down(req):
-        raise httpx.ConnectError("refused")
-
-    mock_app(monkeypatch, down)
-    gone = await collect(stream_run("http://localhost:3000", "k", {}))
-    assert "Is it running" in gone[0]["message"]
 
 
 # ── the install ───────────────────────────────────────────────────────────
@@ -222,6 +183,8 @@ def test_the_map_says_which_box_each_tool_and_step_belongs_to():
     )
     m = flow_map(g)
     assert m["tools"] == {"look_up": "t1", "look_up_2": "t2"}, "named exactly as the compiler names them, even a repeat"
+    assert set(m["toolInfo"]) == {"look_up", "look_up_2", "request_human"}, "and what each accepts (the handoff box adds its own tool), so a call's input can be checked"
+    assert m["toolInfo"]["look_up"]["inputSchema"]["type"] == "object"
     assert m["kinds"] == {"system_prompt": ["sp"], "guardrail": ["g1", "g2"], "memory": ["m"], "human_handoff": ["h"]}
 
 
