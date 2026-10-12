@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from typing import Any, Callable
 
 from services.smith import loop as loop_mod
@@ -331,6 +332,17 @@ def _unproven(observations: list[Observation]) -> str:
             "end with `answer` and say so.")
 
 
+def _app_exists(ctx: Any) -> bool:
+    """There is an application to try. Before the first build there is only
+    a definition: `open_page` then has no app to start, and the try-first
+    rules sent every define turn into one (FileNotFoundError on `app/`,
+    60v142ju and 6ysfw182, 2026-10-12) before it could say what it wrote."""
+    try:
+        return (Path(ctx.out) / "app" / "package.json").is_file()
+    except Exception:  # noqa: BLE001 — no output dir: nothing to try
+        return False
+
+
 def _before_done(observations: list[Observation], landed: list[str]) -> str:
     """What `done` must hear first, once each: nothing tried, or not shown to work."""
     said = {o.said.split(":", 1)[0] for o in observations if o.status == "error" and o.tool == "done"}
@@ -479,7 +491,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 "I could not reach my reasoning service just now, so I stopped here"
                 + (" — what is above is done and kept." if landed else " and nothing was changed.")
                 + " Please try again in a few minutes.")))
-        if tool == "answer" and not landed:
+        if tool == "answer" and not landed and _app_exists(ctx):
             heard = [o.said or "" for o in observations if o.tool == "answer" and o.status == "error"]
             if not any(tools.is_trial(o.tool) for o in observations):
                 # AN ANSWER ABOUT WHAT THE APP DOES COMES FROM USING IT. TCommerce's
@@ -494,7 +506,7 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 observations.append(Observation(tool=tool, args=args, status="error",
                                                 said=ANSWER_CHANGES_NOTHING))
                 continue
-        if tool == "done":
+        if tool == "done" and _app_exists(ctx):
             first = _before_done(observations, landed)
             if first:
                 observations.append(Observation(tool=tool, args=args, status="error", said=first))

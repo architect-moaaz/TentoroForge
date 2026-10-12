@@ -356,3 +356,19 @@ def test_the_prompt_forbids_the_platforms_own_words():
     from services.smith.loop import _PROMPT
     assert "SPEAK THE PERSON'S LANGUAGE" in _PROMPT
     assert 'never "the Blueprint"' in _PROMPT and "PAGE-014" in _PROMPT
+
+
+def test_before_the_first_build_a_turn_finishes_without_trying_an_app(tmp_path):
+    """A define turn has no app: `open_page` failed on a missing `app/` every
+    time and the turn spent a step on it (60v142ju, 6ysfw182, 2026-10-12)."""
+    import shutil
+    _repo(tmp_path)
+    shutil.rmtree(tmp_path / "app")
+    said = {"tool": "answer", "args": {"text": "Here is what the app needs to do."}, "why": ""}
+    result = _turn(tmp_path, _Chooser(said), "what will it do?")
+    assert result.said == "Here is what the app needs to do."
+    from services.smith4.turn import _app_exists
+    from types import SimpleNamespace
+    assert not _app_exists(SimpleNamespace(out=str(tmp_path)))
+    (tmp_path / "app").mkdir(); (tmp_path / "app" / "package.json").write_text("{}")
+    assert _app_exists(SimpleNamespace(out=str(tmp_path)))
