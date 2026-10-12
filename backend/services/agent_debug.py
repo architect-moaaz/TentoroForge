@@ -1,9 +1,9 @@
-"""The builder's live run: the platform's side.
+"""Watching a running app's real chats live: the platform's side.
 
-The generated app has a debug route that runs its REAL chat loop as a chosen person and streams every step
-(see ``templates/runtime/api-agent/debug-route.ts``). It sees what a customer's chat hides and can act as any
-user, so it is shut unless the platform presents a secret kept in a file in the app's folder, and it only answers
-in development. The browser never gets that secret: it asks the platform, and the platform asks the app.
+The generated app has a debug route that streams every chat its own people have, step by step (see
+``templates/runtime/api-agent/debug-route.ts``). It shows what a customer's chat hides (what the tools returned), so
+it is shut unless the platform presents a secret kept in a file in the app's folder, and it only answers in
+development. The browser never gets that secret: it asks the platform, and the platform asks the app.
 
 This module keeps the secret, checks where the app is, and passes the stream through. It does not run an agent.
 """
@@ -117,15 +117,11 @@ async def status(app_url: str, secret: str | None) -> dict[str, Any]:
             if info.status_code == 404:
                 return await _not_here(url, secret, str(_off()))
             info.raise_for_status()
-            users = await client.get(f"{url}/api/agent/debug", params={"users": "1"}, headers=headers)
-            users.raise_for_status()
     except httpx.ConnectError:
         return await _not_here(url, secret, str(_unreachable(url)))
     except httpx.HTTPError as e:
         return {"ok": False, "appUrl": url, "reason": f"The app answered with an error: {e}"}
-    body, people = info.json(), users.json()
-    return {"ok": True, "appUrl": url, "agents": body.get("agents", []), "users": people.get("users", []),
-            "usersNote": people.get("note")}
+    return {"ok": True, "appUrl": url, "agents": info.json().get("agents", [])}
 
 
 async def _not_here(url: str, secret: str, reason: str) -> dict[str, Any]:
@@ -135,39 +131,6 @@ async def _not_here(url: str, secret: str, reason: str) -> dict[str, Any]:
         return {"ok": False, "appUrl": url, "suggestedUrl": other,
                 "reason": f"Nothing at {url} accepted this project's key, but this project's app is running at {other}."}
     return {"ok": False, "appUrl": url, "reason": reason}
-
-
-async def stream_run(app_url: str, secret: str | None, payload: dict[str, Any]) -> AsyncIterator[bytes]:
-    """The app's event stream, passed through as it arrives. Failures become one ``error`` event, so the screen
-    can show them next to the run instead of the stream just stopping."""
-    def event(message: str) -> bytes:
-        return f"data: {json.dumps({'type': 'error', 'message': message})}\n\n".encode()
-
-    try:
-        url = clean_app_url(app_url)
-    except DebugError as e:
-        yield event(str(e))
-        return
-    if not secret:
-        yield event("This app has no live-run key yet. Apply the agent once to create it.")
-        return
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10)) as client:
-            async with client.stream("POST", f"{url}/api/agent/debug", json=payload, headers={HEADER: secret}) as r:
-                if r.status_code == 404:
-                    body = (await r.aread()).decode("utf-8", "ignore")
-                    yield event(_message_of(body) or str(_off()))
-                    return
-                if r.status_code >= 400:
-                    body = (await r.aread()).decode("utf-8", "ignore")
-                    yield event(_message_of(body) or f"The app answered {r.status_code}.")
-                    return
-                async for chunk in r.aiter_bytes():
-                    yield chunk
-    except httpx.ConnectError:
-        yield event(str(_unreachable(url)))
-    except httpx.HTTPError as e:
-        yield event(f"The connection to the app broke: {e}")
 
 
 async def watch_stream(app_url: str, secret: str | None) -> AsyncIterator[bytes]:
@@ -202,11 +165,13 @@ async def watch_stream(app_url: str, secret: str | None) -> AsyncIterator[bytes]
 def flow_map(graph: dict[str, Any]) -> dict[str, Any]:
     """Which box on the canvas each thing the runtime does belongs to, so the live view can light the right one.
 
-    ``tools`` maps a tool's compiled name to its box; ``kinds`` lists the boxes of each other kind (the runtime
+    ``tools`` maps a tool's compiled name to its box; ``toolInfo`` says what each tool accepts (so a call's input can
+    be checked); ``kinds`` lists the boxes of each other kind (the runtime
     checks the message and the answer with the guardrail box(es), loads memory with the memory box, asks the model
     with the system-prompt box, and hands over with the human-handoff box). The runtime works in a fixed order and
     does not walk the arrows; this says which box stands for each step of it."""
     from services.agent_check import _kind, _tool_nodes_by_name
+    from services.agent_runtime_config import compile_agent
 
     nodes = [n for n in (graph.get("nodes") or []) if isinstance(n, dict)]
     kinds: dict[str, list[str]] = {}
@@ -214,7 +179,12 @@ def flow_map(graph: dict[str, Any]) -> dict[str, Any]:
         k = _kind(n)
         if k and k != "tool":
             kinds.setdefault(k, []).append(str(n.get("id")))
-    return {"tools": _tool_nodes_by_name(nodes), "kinds": kinds}
+    tool_info = {
+        t["name"]: {"kind": t.get("kind"), "description": t.get("description"), "confirm": bool(t.get("confirm")),
+                    "inputSchema": t.get("inputSchema")}
+        for t in compile_agent(graph).config.get("tools", [])
+    }
+    return {"tools": _tool_nodes_by_name(nodes), "kinds": kinds, "toolInfo": tool_info}
 
 
 def _message_of(body: str) -> str | None:

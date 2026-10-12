@@ -9,13 +9,15 @@
  * check the answer, reply) and does not walk the arrows the builder drew. What is lit is what really happens, put on
  * the box that stands for it.
  */
-import { applyEvent, emptyRun, type LiveEvent, type LiveRun, type ModelStep, type ToolStep } from "./agent-live";
+import { applyEvent, emptyRun, type LiveEvent, type LiveRun, type ModelStep, type ToolInfo, type ToolStep } from "./agent-live";
 
 export interface FlowMap {
   /** A tool's compiled name -> its box. */
   tools: Record<string, string>;
   /** The boxes of every other kind: system_prompt, guardrail, memory, human_handoff, router. */
   kinds: Record<string, string[]>;
+  /** What each tool accepts, as drawn, so a tool call's input can be checked. */
+  toolInfo?: Record<string, Omit<ToolInfo, "name">>;
 }
 
 export interface WatchRun {
@@ -52,7 +54,7 @@ const MAX_RUNS = 30;
 export function applyWatch(state: WatchState, e: LiveEvent, now: number = Date.now()): WatchState {
   switch (e.type) {
     case "platform_map":
-      return { ...state, map: { tools: e.tools ?? {}, kinds: e.kinds ?? {} } };
+      return { ...state, map: { tools: e.tools ?? {}, kinds: e.kinds ?? {}, toolInfo: e.toolInfo ?? {} } };
     case "watch_ready":
       return { ...state, ready: true, agents: e.agents ?? [], error: undefined };
     case "error":
@@ -69,7 +71,8 @@ export function applyWatch(state: WatchState, e: LiveEvent, now: number = Date.n
   let selected = state.selected;
   let run: WatchRun;
   if (!existing) {
-    run = { id, live: { ...emptyRun(), status: "running" }, finished: false, seenAt: now };
+    const tools = state.map?.toolInfo ? Object.entries(state.map.toolInfo).map(([name, info]) => ({ name, ...info })) : undefined;
+    run = { id, live: { ...emptyRun(), status: "running", ...(tools ? { tools } : {}) }, finished: false, seenAt: now };
     order = [id, ...order].slice(0, MAX_RUNS);
     if (state.follow || !selected) selected = id;
   } else {
@@ -171,7 +174,7 @@ export function edgeLook(source: NodeState | undefined, target: NodeState | unde
 
 // ── the checklist ─────────────────────────────────────────────────────────
 
-export type CheckStatus = "waiting" | "running" | "ok" | "failed" | "held" | "not_run";
+export type CheckStatus = "waiting" | "running" | "ok" | "failed" | "held";
 
 export interface CheckItem {
   tool: string;

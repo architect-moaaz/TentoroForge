@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { checklist, stageOf, type CheckStatus, type WatchRun, type WatchState } from "@/lib/agent-watch";
 import type { ModelStep } from "@/lib/agent-live";
-import { ModelCard, ToolCard, num, secs } from "./AgentLiveRun";
+import { ModelCard, ToolCard, num, secs } from "./AgentRunCards";
 import type { Link } from "./useAgentWatch";
 
 interface Props {
@@ -191,7 +191,6 @@ const CHECK_ICON: Record<CheckStatus, React.ReactNode> = {
   ok: <Check className="h-3.5 w-3.5 text-green-600" />,
   failed: <XCircle className="h-3.5 w-3.5 text-red-600" />,
   held: <PauseCircle className="h-3.5 w-3.5 text-amber-600" />,
-  not_run: <PauseCircle className="h-3.5 w-3.5 text-amber-600" />,
 };
 const CHECK_TEXT: Record<CheckStatus, string> = {
   waiting: "waiting",
@@ -199,7 +198,6 @@ const CHECK_TEXT: Record<CheckStatus, string> = {
   ok: "done",
   failed: "failed",
   held: "held: waiting for a yes",
-  not_run: "not run",
 };
 
 function RunView({ run }: { run: WatchRun }) {

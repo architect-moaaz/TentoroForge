@@ -1,28 +1,16 @@
 /**
- * The builder's live run — helpers. Forge runtime — do not remove.
+ * Helpers for watching the app's real chats live. Forge runtime — do not remove.
  *
- * A debug run is the app's REAL chat loop (the same `runAgent` its customers use) with a few differences, all
- * made here so the loop itself stays untouched:
- *   - it runs as a person the builder picks, with that person's own session, so the data is what they would see;
- *   - nothing is saved to the app's tables: the conversation lives in memory for a while, so a follow-up works;
- *   - usage limits and handoffs are out of it (a test must not use up anyone's allowance or page a real person);
- *   - a tool that is known to change data is NOT run unless the builder switched "run changes for real" on:
- *     the assistant gets a clear "not run" answer and carries on, so the rest of the run can still be watched;
- *   - every model call is timed and counted, so the builder can see where time and tokens go.
- *
- * The route (api-agent/debug-route.ts) is the only way in, and it only answers in development with the platform's
- * secret. Pure helpers here, tested on their own.
+ * The builder (in TTF) can watch a running development app's chats as they happen (see watch.ts and
+ * api-agent/debug-route.ts). The pieces here are the small, pure ones: comparing the platform's secret without leaking
+ * it, putting a tool's result on the wire (cut if huge, and said to be), and reporting each request a tool makes in
+ * the app so the builder sees the real method, route and status behind it.
  */
-import { changesData } from "./confirm";
-import { memoryStore } from "./memory";
 import type { ToolIO } from "./tools";
-import type { AgentDeps, AgentRuntimeConfig, AgentToolSpec, ConversationStore } from "./types";
 
-/** What a debug run says beyond the normal events. Every event also carries `t`, ms since the run began. */
+/** What a watched chat says beyond the chat's own events. */
 export type DebugEvent =
-  | { type: "debug_start"; agent: Record<string, unknown>; user: Record<string, unknown>; allowChanges: boolean; draft: boolean }
   | { type: "model_call"; n: number; ms: number; inputTokens: number; outputTokens: number; messages: number; toolsRequested: string[] }
-  | { type: "tool_faked"; tool: string; reason: string }
   | AppCall;
 
 /** One thing a tool did in the app: a request to one of its routes (with the real method, path and status), a
@@ -42,29 +30,6 @@ export interface AppCall {
   error?: string;
 }
 
-// ── conversations kept in memory ──────────────────────────────────────────
-
-const SESSION_MINUTES = 60;
-const MAX_SESSIONS = 50;
-const sessions = new Map<string, { store: ConversationStore; at: number }>();
-
-/** The conversation store for one debug session: the same one for the same id, so a follow-up (or a "yes" to a held
- *  change) finds what came before. Forgotten after an hour, and never more than MAX_SESSIONS at once. */
-export function sessionStore(id: string, now: number = Date.now()): ConversationStore {
-  for (const [k, v] of sessions) if (now - v.at > SESSION_MINUTES * 60_000) sessions.delete(k);
-  let s = sessions.get(id);
-  if (!s) {
-    if (sessions.size >= MAX_SESSIONS) {
-      const oldest = [...sessions.entries()].sort((a, b) => a[1].at - b[1].at)[0];
-      if (oldest) sessions.delete(oldest[0]);
-    }
-    s = { store: memoryStore(), at: now };
-    sessions.set(id, s);
-  }
-  s.at = now;
-  return s.store;
-}
-
 // ── the secret ────────────────────────────────────────────────────────────
 
 /** Constant-time comparison, so the secret cannot be guessed a character at a time. */
@@ -75,26 +40,7 @@ export function sameSecret(a: string, b: string): boolean {
   return diff === 0;
 }
 
-// ── what the builder is shown ─────────────────────────────────────────────
-
-/** The agent as it will run: the prompt exactly as the model gets it, and each tool with what it accepts. */
-export function describeAgent(config: AgentRuntimeConfig): Record<string, unknown> {
-  return {
-    id: config.id,
-    name: config.name,
-    model: config.model?.name ?? null,
-    systemPrompt: config.systemPrompt,
-    maxTurns: config.maxTurns,
-    tools: config.tools.map((t) => ({
-      name: t.name,
-      kind: t.kind,
-      description: t.description,
-      confirm: !!t.confirm,
-      changes: t.confirm || t.kind === "handoff" || changesData(t),
-      inputSchema: t.inputSchema,
-    })),
-  };
-}
+// ── what goes to the builder ──────────────────────────────────────────────
 
 /** Results can be large; the screen gets what fits, and is told when it was cut. */
 export const MAX_RESULT_WIRE_CHARS = 60_000;
@@ -153,51 +99,5 @@ export function instrumentIO(io: ToolIO, send: (e: DebugEvent) => void): ToolIO 
     triggerWorkflow: (id, input, user) => timed({ kind: "workflow", label: id, body: clipBody(input) }, () => io.triggerWorkflow(id, input, user)),
     callMcp: (serverId, tool, args) => timed({ kind: "mcp", label: `${serverId}/${tool}`, body: clipBody(args) }, () => io.callMcp(serverId, tool, args)),
     runAi: (action, config, input, user) => timed({ kind: "ai", label: action }, () => io.runAi(action, config, input, user)),
-  };
-}
-
-// ── the loop's dependencies, instrumented ─────────────────────────────────
-
-const refused = (spec: AgentToolSpec): string =>
-  spec.kind === "handoff"
-    ? "it would hand the conversation to a person and notify them"
-    : "it changes data";
-
-/**
- * `base` with what a debug run changes (see the header). `send` receives the extra events.
- */
-export function debugDeps(base: AgentDeps, send: (e: DebugEvent) => void, opts: { allowChanges: boolean }): AgentDeps {
-  let n = 0;
-  return {
-    ...base,
-    usage: undefined,
-    handoffs: undefined,
-
-    async callModel(req, onText) {
-      const started = Date.now();
-      const out = await base.callModel(req, onText);
-      send({
-        type: "model_call",
-        n: ++n,
-        ms: Date.now() - started,
-        inputTokens: out.usage.inputTokens,
-        outputTokens: out.usage.outputTokens,
-        messages: req.messages.length,
-        toolsRequested: out.content.filter((b) => b.type === "tool_use").map((b) => (b as { name: string }).name),
-      });
-      return out;
-    },
-
-    async runTool(spec, input, ctx, scope) {
-      if (!opts.allowChanges && (spec.kind === "handoff" || spec.confirm || changesData(spec))) {
-        send({ type: "tool_faked", tool: spec.name, reason: refused(spec) });
-        return {
-          ok: true,
-          debug_note: `Not run: this is a debug run and ${refused(spec)}. The builder can switch on "run changes for real" to let it run.`,
-          would_have_run_with: input,
-        };
-      }
-      return base.runTool(spec, input, ctx, scope);
-    },
   };
 }

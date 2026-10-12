@@ -49,6 +49,14 @@ describe("a real run, replayed", () => {
     expect(tool.result).toBeTruthy();
   });
 
+  it("checks the real tool call against the tool as drawn, and finds nothing wrong with a good one", () => {
+    const r = run(after(events.length));
+    expect(r.live.tools?.length).toBeGreaterThan(20);
+    const tool = r.live.steps.find((x) => x.kind === "tool") as any;
+    expect(tool.problems, JSON.stringify(tool.problems)).toEqual([]);
+    expect(Object.keys((fixture.map as any).toolInfo)).toContain("list_tickets");
+  });
+
   it("ends with every box the chat touched green and nothing still lit", () => {
     const s = after(events.length);
     const states = nodeStates(run(s), s.map);
