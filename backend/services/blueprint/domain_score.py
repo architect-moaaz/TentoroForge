@@ -29,8 +29,11 @@ DOMAIN_REVIEW_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
     "required": ["score", "missing", "wrong"],
     "properties": {
-        "score": {"type": "integer", "minimum": 0, "maximum": 10,
-                  "description": "How far this screen is what a practitioner in the sub-domain expects: 10 is the standard product."},
+        # NO minimum/maximum: strict structured output refuses them on an
+        # integer, and every domain score was a 400 (m1dck85j, 2026-10-12).
+        # The range is said in words; only `missing` and `wrong` are read.
+        "score": {"type": "integer",
+                  "description": "From 0 to 10: how far this screen is what a practitioner in the sub-domain expects; 10 is the standard product."},
         "missing": {"type": "array", "items": {
             "type": "object", "additionalProperties": False, "required": ["item", "why"],
             "properties": {"item": {"type": "string", "description": "A reference screen, record, process or convention this person would expect here and does not see, by its reference name when it has one."},

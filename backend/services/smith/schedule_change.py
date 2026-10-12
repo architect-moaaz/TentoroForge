@@ -39,7 +39,7 @@ SCHEDULE_SYSTEM = (
 DEADLINE_SCHEMA: dict[str, Any] = {
     "type": "object", "additionalProperties": False, "required": ["dueInMinutes", "escalateTo", "reading"],
     "properties": {
-        "dueInMinutes": {"type": "integer", "minimum": 0, "description": "How long a person has, in minutes; 0 when the sentence names no time."},
+        "dueInMinutes": {"type": "integer", "description": "How long a person has, in minutes, 0 or more; 0 when the sentence names no time."},
         "escalateTo": {"type": "string", "description": "The role an overdue task goes to, by its exact name from the list; empty when the sentence names none."},
         "reading": {"type": "string"},
     },
