@@ -80,3 +80,14 @@ def test_a_push_channel_needs_push_turned_on():
     assert "`mobile`" in NODE_TASKS["application_model"] and "`channels`" in NODE_TASKS["workflow_steps"]
     runtime = (ROOT / "templates/runtime/workflows/index.ts").read_text()
     assert 'channels.includes("push")' in runtime and 'await import("@/lib/push")' in runtime
+
+
+def test_the_layout_an_app_ships_links_the_manifest_and_the_theme_colour():
+    """The scaffold is layered and the LAST layer's root layout is the one an
+    app ships: the overlay's replaced the foundation's, which alone carried
+    the manifest, and no built app could be installed (m1dck85j, 2026-10-12)."""
+    from services.blueprint.assembly import PLACEHOLDER_PAGES, _template_dirs
+    shipped = [d / "src/app/layout.tsx" for d in _template_dirs() if (d / "src/app/layout.tsx").is_file()][-1]
+    src = shipped.read_text()
+    assert "manifest: `${BASE}/manifest.webmanifest`" in src and 'themeColor: "__THEME_COLOR__"' in src and "appleWebApp" in src
+    assert "src/app/layout.tsx" in PLACEHOLDER_PAGES, "the theme colour is filled in this file"

@@ -15,7 +15,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2] / "templates" / "runtime"
 TYPESCRIPT = Path(__file__).resolve().parents[3] / "node_modules" / "typescript"
 FOUNDATION = ROOT.parent / "app-foundation" / "src"
-FILES = sorted(p for base in (ROOT, FOUNDATION) for ext in ("*.ts", "*.tsx") for p in base.rglob(ext)
+OVERLAY = ROOT.parent / "standalone-app" / "src"
+FILES = sorted(p for base in (ROOT, FOUNDATION, OVERLAY) for ext in ("*.ts", "*.tsx") for p in base.rglob(ext)
                if "__tests__" not in p.parts and not p.name.endswith(".d.ts"))
 
 SCRIPT = r"""
@@ -24,7 +25,9 @@ const ts = require(process.argv[1]);
 const out = {};
 for (const f of JSON.parse(fs.readFileSync(0, "utf8"))) {
   try {
-    const t = ts.transpileModule(fs.readFileSync(f, "utf8"), {
+    // `{{landing_for}}` and kin are filled by assembly before an app compiles
+    // (interpolate_edge_pages); a neutral value stands in for them here.
+    const t = ts.transpileModule(fs.readFileSync(f, "utf8").replace(/\{\{[a-z_]+\}\}/g, "0"), {
       reportDiagnostics: true, fileName: f,
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX } });
     const bad = (t.diagnostics || []).map((d) => ts.flattenDiagnosticMessageText(d.messageText, " "));
