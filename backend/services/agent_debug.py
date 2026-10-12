@@ -133,9 +133,13 @@ async def _not_here(url: str, secret: str, reason: str) -> dict[str, Any]:
     return {"ok": False, "appUrl": url, "reason": reason}
 
 
-async def watch_stream(app_url: str, secret: str | None) -> AsyncIterator[bytes]:
-    """Every chat the app has, as it happens, passed through as the app sends it. Stays open until the builder
-    closes it; a failure or a dropped connection is one ``error`` event, so the screen can say so and reconnect."""
+async def watch_stream(app_url: str, secret: str | None, role: str | None = None,
+                       user_id: str | None = None) -> AsyncIterator[bytes]:
+    """The app's chats as they happen, passed through as the app sends them. Stays open until the builder closes it;
+    a failure or a dropped connection is one ``error`` event, so the screen can say so and reconnect.
+
+    With ``role`` or ``user_id`` (a person outranks a role) the APP only sends that role's or that person's chats:
+    the builder watching one role is never sent another's."""
     def event(message: str) -> bytes:
         return f"data: {json.dumps({'type': 'error', 'message': message})}\n\n".encode()
 
@@ -149,7 +153,8 @@ async def watch_stream(app_url: str, secret: str | None) -> AsyncIterator[bytes]
         return
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(None, connect=10)) as client:
-            async with client.stream("GET", f"{url}/api/agent/debug", params={"watch": "1"}, headers={HEADER: secret}) as r:
+            params = {"watch": "1", **({"user": user_id} if user_id else {"role": role} if role else {})}
+            async with client.stream("GET", f"{url}/api/agent/debug", params=params, headers={HEADER: secret}) as r:
                 if r.status_code >= 400:
                     body = (await r.aread()).decode("utf-8", "ignore")
                     yield event(_message_of(body) or str(_off()))

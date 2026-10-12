@@ -255,7 +255,7 @@ async def debug_watch(
     async def events():
         if req.graph is not None:
             yield f"data: {_json.dumps({'type': 'platform_map', **flow_map(req.graph.model_dump())})}\n\n".encode()
-        async for chunk in watch_stream(req.app_url, read_debug_secret(app_root)):
+        async for chunk in watch_stream(req.app_url, read_debug_secret(app_root), role=req.role, user_id=req.user_id):
             yield chunk
 
     return StreamingResponse(events(), media_type="text/event-stream",
