@@ -364,3 +364,151 @@ describe("keeping a bomb, and my tests", () => {
     expect(button("Run mine").disabled).toBe(true);
   });
 });
+
+// ── the live log ──────────────────────────────────────────────────────────
+
+const logText = () => container.querySelector('[data-testid="terminal-lines"]')?.textContent ?? "";
+const logKinds = () => [...container.querySelectorAll('[data-testid="terminal-lines"] [data-kind]')].map((l) => l.getAttribute("data-kind"));
+
+/** What the platform streams: each bomb started, its steps, its result, then the totals. */
+const livestream = () => [
+  { type: "start", total: 2, repeats: 1 },
+  { type: "test_start", id: "blast_made_up_id_1", name: "Closes a ghost ticket", bomb: "made_up_id", index: 1, total: 2, run: 1, runs: 1 },
+  { type: "test_start", id: "blast_no_permission_1", name: "Changes without a yes", bomb: "no_permission", index: 2, total: 2, run: 1, runs: 1 },
+  { type: "step", id: "blast_made_up_id_1", index: 1, run: 1, kind: "tool", tool: "list_tickets", toolKind: "lookup", input: '{"q":"99999"}' },
+  { type: "step", id: "blast_no_permission_1", index: 2, run: 1, kind: "tool", tool: "update_ticket", toolKind: "change", input: "{}" },
+  { type: "step", id: "blast_made_up_id_1", index: 1, run: 1, kind: "tool_result", tool: "list_tickets", toolKind: "lookup", outcome: "no records", held: false, error: false },
+  { type: "step", id: "blast_no_permission_1", index: 2, run: 1, kind: "tool_result", tool: "update_ticket", toolKind: "change", outcome: "held until the person says yes", held: true, error: false },
+  { type: "step", id: "blast_made_up_id_1", index: 1, run: 1, kind: "reply", chars: 62, preview: "I couldn't find that ticket." },
+  { type: "result", index: 1, result: result("blast_made_up_id_1", "passed", { name: "Closes a ghost ticket" }) },
+  { type: "step", id: "blast_no_permission_1", index: 2, run: 1, kind: "judge_start" },
+  { type: "step", id: "blast_no_permission_1", index: 2, run: 1, kind: "judge", pass: false, reason: "It dumped the data." },
+  { type: "result", index: 2, result: result("blast_no_permission_1", "failed", { name: "Changes without a yes" }) },
+  { type: "done", summary: { passed: 1, failed: 1, flaky: 0, error: 0, total: 2 } },
+];
+
+describe("the live log", () => {
+  it("is not there before anything is thrown", async () => {
+    backend();
+    await mount();
+    expect(container.querySelector('[data-testid="blast-terminal"]')).toBeNull();
+  });
+
+  it("prints the whole story of a blast, in order, like a terminal", async () => {
+    backend({ mine: [] });
+    fetchMock.mockResolvedValue(sse(livestream()));
+    await mount();
+    await blast();
+    const text = logText();
+    // two bombs are in flight at once, so their lines interleave, each under its own tag
+    const order = ['$ blast "A" --kinds 3 --each 2 --runs 1', "Asking the AI to write 6 bombs for this agent", "Got 2 bombs", "[Made-up ID] Closes a ghost ticket",
+      "Throwing 2 tests", "[1] ▶ Closes a ghost ticket  (Made-up ID)", "[2] ▶ Changes without a yes  (Change without asking)",
+      "[1]   › asks to use list_tickets (lookup)", "[2]   › asks to use update_ticket (change)", "[1]   ← list_tickets: no records",
+      "[2]   ⏸ update_ticket: held until the person says yes", "[1]   ✎ replies (62 characters)", "[1] ✔ DEFUSED   Closes a ghost ticket",
+      "[2]   ⚖ asking a reviewer…", "[2]   ⚖ reviewer says it did not hold: It dumped the data.", "[2] ✖ EXPLODED  Changes without a yes", "Done. 1 exploded · 1 defused"];
+    let at = -1;
+    for (const part of order) {
+      const found = text.indexOf(part, at + 1);
+      expect(found, `"${part}" should come after the one before it`).toBeGreaterThan(at);
+      at = found;
+    }
+  });
+
+  it("colours the news: commands green, steps cyan, defused green, exploded red", async () => {
+    backend({ mine: [] });
+    fetchMock.mockResolvedValue(sse(livestream()));
+    await mount();
+    await blast();
+    const kinds = logKinds();
+    expect(kinds[0]).toBe("cmd");
+    expect(kinds).toContain("step");
+    expect(kinds).toContain("good");
+    expect(kinds).toContain("bad");
+    expect(kinds).toContain("warn");
+    const done = [...container.querySelectorAll('[data-testid="terminal-lines"] [data-kind]')].find((l) => (l.textContent ?? "").includes("Done."))!;
+    expect(done.getAttribute("data-kind")).toBe("bad");
+  });
+
+  it("stays after the blast as a record, and clears when asked", async () => {
+    backend({ mine: [] });
+    fetchMock.mockResolvedValue(sse(livestream()));
+    await mount();
+    await blast();
+    expect(container.querySelector('[data-testid="terminal-running"]')).toBeNull();
+    expect(logText()).toContain("Done.");
+    await act(async () => { (container.querySelector('[aria-label="Clear the log"]') as HTMLElement).click(); });
+    expect(container.querySelector('[data-testid="blast-terminal"]')).toBeNull();
+  });
+
+  it("says in the log when your saved tests are added, and when fixes are worked out and found", async () => {
+    backend({ fixes: [{ id: "fix_1", kind: "instruction_add", title: "Never bulk-export emails", why: "x", fixesTests: [], nodeId: "sp", text: "Never bulk-export emails." }] });
+    fetchMock.mockResolvedValue(sse(livestream()));
+    await mount();
+    await blast();
+    expect(logText()).toContain("Adding your 1 saved test.");
+    expect(logText()).toContain("Working out fixes for the 1 that went off…");
+    expect(logText()).toContain("Proposed 1 fix:");
+    expect(logText()).toContain("1. [Add to the instructions] Never bulk-export emails");
+  });
+
+  it("prints a refusal to invent, or a stream that stops, as a red line", async () => {
+    backend();
+    apiPost.mockImplementation(async (u: string) => { if (u.endsWith("/blast/invent")) throw new Error("Finding problems needs a model key."); return {}; });
+    await mount();
+    await blast();
+    expect(logText()).toContain("✗ Finding problems needs a model key.");
+    expect(logKinds().at(-1)).toBe("bad");
+
+    backend();
+    fetchMock.mockResolvedValue(sse([{ type: "start", total: 2, repeats: 1 }]));
+    await blast();
+    expect(logText()).toContain("✗ The run ended without finishing.");
+  });
+
+  it("starts a fresh log for running only my tests, and carries on under a line when re-running", async () => {
+    backend({ fixes: [{ id: "fix_1", kind: "ask_first", title: "Ask first", why: "", fixesTests: [], nodeId: "t0", tool: "update_ticket", before: "a", after: "b" }] });
+    fetchMock.mockResolvedValueOnce(sse(livestream()));
+    await mount();
+    await blast();
+    expect(logText()).toContain('$ blast "A"');
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("scn_one", "passed")])));
+    await click(button("Run mine"));
+    await settle(80);
+    expect(logText()).toContain("$ run my tests (1)");
+    expect(logText()).not.toContain('$ blast "A"');
+
+    fetchMock.mockResolvedValueOnce(sse(livestream()));
+    await blast();
+    await click(button("Apply to the drawing"));
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_no_permission_1", "passed")])));
+    await click(button("Re-run the 1 that went off"));
+    await settle(80);
+    expect(logText()).toContain('$ blast "A"');
+    expect(logText()).toContain("— re-running the ones that went off —");
+  });
+
+  it("says it is still working while the AI takes its time writing the bombs", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      backend();
+      let release: (v: unknown) => void = () => {};
+      apiPost.mockImplementation((u: string) => (u.endsWith("/blast/invent") ? new Promise((r) => { release = r; }) : Promise.resolve({})));
+      fetchMock.mockResolvedValue(sse(runOf([result("blast_made_up_id_1", "passed")])));
+      await mount();
+      await click(button("Blast"));
+      expect(logText()).not.toContain("still writing");
+      await act(async () => { vi.advanceTimersByTime(8100); });
+      expect(logText()).toContain("… still writing the bombs (8s)");
+      await act(async () => { vi.advanceTimersByTime(8000); });
+      expect(logText()).toContain("(16s)");
+      await act(async () => { release({ tests: INVENTED }); });
+      await settle(80);
+      const before = logText().split("still writing").length;
+      await act(async () => { vi.advanceTimersByTime(30000); });
+      expect(logText().split("still writing").length, "it stops once the bombs are written").toBe(before);
+      expect(logText()).toContain("Got 2 bombs in 16s:");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
