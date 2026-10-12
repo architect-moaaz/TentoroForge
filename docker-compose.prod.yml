@@ -228,7 +228,10 @@ services:
   # Started only under the `sso` profile (`docker compose --profile sso up -d`),
   # so a plain `up -d` is unchanged. The backend reaches it by JACKSON_URL with
   # JACKSON_API_KEY; the enterprise reaches it at EXTERNAL_URL. Its own tables
-  # live in the platform's Postgres under a database of their own.
+  # live in the platform's Postgres under a database of their own. The two
+  # variables are optional here, not `:?` — compose checks every service's
+  # variables, profile or not, and a required one would stop every command
+  # on a host that does not host the bridge.
   jackson:
     image: boxyhq/jackson:1.30.0
     profiles: ["sso"]
@@ -240,8 +243,8 @@ services:
       DB_ENGINE: sql
       DB_TYPE: postgres
       DB_URL: postgres://${POSTGRES_USER:-tentoroforge}:${POSTGRES_PASSWORD}@postgres:5432/jackson
-      JACKSON_API_KEYS: ${JACKSON_API_KEY:?Set JACKSON_API_KEY in .env to host the SAML bridge}
-      EXTERNAL_URL: ${JACKSON_EXTERNAL_URL:?Set JACKSON_EXTERNAL_URL (the bridge's public address)}
+      JACKSON_API_KEYS: ${JACKSON_API_KEY:-}
+      EXTERNAL_URL: ${JACKSON_EXTERNAL_URL:-}
       NEXTAUTH_URL: ${JACKSON_EXTERNAL_URL}
       NEXTAUTH_SECRET: ${JACKSON_ADMIN_SECRET:-${SECRET_KEY}}
       NEXTAUTH_ADMIN_CREDENTIALS: ${JACKSON_ADMIN_CREDENTIALS:-}
