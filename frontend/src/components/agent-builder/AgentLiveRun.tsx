@@ -40,6 +40,8 @@ interface Props {
 interface Status {
   ok: boolean;
   reason?: string;
+  /** This project's app, found running at another address. */
+  suggestedUrl?: string;
   agents?: Array<{ id: string; name: string; enabled: boolean }>;
   users?: Array<{ id: string; name: string; email: string | null; role: string | null }>;
   usersNote?: string | null;
@@ -93,11 +95,13 @@ export function AgentLiveRun({ projectId, agentId, agentName, nodes }: Props) {
     endRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
   }, [run.steps.length, run.answer, run.status]);
 
-  const check = useCallback(async () => {
+  const check = useCallback(async (address?: string) => {
+    const where = address ?? appUrl;
     setChecking(true);
-    store.set(`forge.liveRun.app.${projectId}`, appUrl);
+    if (address) setAppUrl(address);
+    store.set(`forge.liveRun.app.${projectId}`, where);
     try {
-      const s = await api.get<Status>(`/api/projects/${projectId}/agent-definitions/debug/status?app_url=${encodeURIComponent(appUrl)}`);
+      const s = await api.get<Status>(`/api/projects/${projectId}/agent-definitions/debug/status?app_url=${encodeURIComponent(where)}`);
       setStatus(s);
       if (s.ok && s.users?.length) {
         setAsUserId((cur) => (cur && s.users!.some((u) => u.id === cur) ? cur : s.users![0].id));
@@ -176,7 +180,7 @@ export function AgentLiveRun({ projectId, agentId, agentName, nodes }: Props) {
               onKeyDown={(e) => e.key === "Enter" && check()}
             />
           </label>
-          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={check} disabled={checking}>
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => check()} disabled={checking}>
             {checking ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
             Connect
           </Button>
@@ -225,9 +229,14 @@ export function AgentLiveRun({ projectId, agentId, agentName, nodes }: Props) {
           )}
         </div>
         {status && !status.ok && (
-          <p role="alert" className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
-            {status.reason}
-          </p>
+          <div role="alert" className="flex flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+            <span>{status.reason}</span>
+            {status.suggestedUrl && (
+              <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={() => check(status.suggestedUrl)}>
+                Use {status.suggestedUrl}
+              </Button>
+            )}
+          </div>
         )}
         {status?.ok && (
           <p className="text-[10px] text-muted-foreground">
