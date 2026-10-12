@@ -69,7 +69,16 @@ def _artifacts(doc: dict, kind: str) -> list[dict]:
     return _live(doc.get(section))
 
 
-def _answers(artifact: dict, item_name: str) -> bool:
+#: A reference screen of these kinds is answered by the platform's own
+#: auth page of that kind (`account_model.AUTH_PAGES`): no author writes a
+#: `reference` on a page the platform builds, so "Admin Login" stayed open
+#: and the journeys step was sent back twice for it (60v142ju, 2026-10-12).
+_AUTH_KINDS = {"sign_in": "login", "sign_up": "signup"}
+
+
+def _answers(artifact: dict, item_name: str, item_kind: str = "") -> bool:
+    if item_kind in _AUTH_KINDS and str(artifact.get("pattern") or "") == "auth":
+        return str(artifact.get("auth") or "") == _AUTH_KINDS[item_kind]
     ref = str(artifact.get("reference") or "").strip().lower()
     if ref:
         return ref == item_name.strip().lower()
@@ -89,7 +98,7 @@ def coverage(doc: dict, kinds: tuple[str, ...] = tuple(KINDS)) -> list[CoverageI
             if not isinstance(item, dict) or not item.get("name"):
                 continue
             name = str(item["name"])
-            by = next((a for a in artifacts if _answers(a, name)), None)
+            by = next((a for a in artifacts if _answers(a, name, str(item.get("kind") or "") if kind == "screen" else "")), None)
             declined = next((d for d in declines if d.get("kind") == kind
                              and _norm(d.get("name")) == _norm(name)), None)
             out.append(CoverageItem(

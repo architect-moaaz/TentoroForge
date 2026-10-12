@@ -249,7 +249,9 @@
                   "form",
                   "workspace",
                   "public",
-                  "tool"
+                  "tool",
+                  "sign_in",
+                  "sign_up"
                 ]
               }
             },

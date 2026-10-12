@@ -129,7 +129,12 @@ export const ReferenceScreen = z.object({
   name: z.string(),
   purpose: z.string().default(""),
   forRoles: z.array(z.string()).default([]),
-  kind: z.enum(["dashboard", "list", "record", "form", "workspace", "public", "tool"]).optional(),
+  /**
+   * `sign_in` and `sign_up` are the application's own ways in: the platform
+   * builds those pages, so they answer such an item by kind, not by a
+   * `reference` an author writes on a page it does not own.
+   */
+  kind: z.enum(["dashboard", "list", "record", "form", "workspace", "public", "tool", "sign_in", "sign_up"]).optional(),
 });
 
 export const ReferenceRecord = z.object({
