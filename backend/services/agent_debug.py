@@ -9,6 +9,7 @@ This module keeps the secret, checks where the app is, and passes the stream thr
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 from pathlib import Path
@@ -78,9 +79,30 @@ def _unreachable(url: str) -> DebugError:
 
 def _off() -> DebugError:
     return DebugError(
-        "The app did not accept the live run. It needs the latest agent runtime (Apply the agent once) and has to be "
-        "running in development mode: a production build refuses it on purpose."
+        "The app at that address did not accept the live run. Either it is another project's app (each app has its own "
+        "key), or this app needs the latest agent runtime (Apply the agent once) and has to be running in development "
+        "mode: a production build refuses it on purpose."
     )
+
+
+#: The ports a development app usually runs on. Only this computer, only these.
+_USUAL_PORTS = range(3000, 3011)
+
+
+async def find_app(secret: str) -> str | None:
+    """This project's app, if it is running on one of the usual ports: the one that accepts its key. An app answers
+    a wrong key exactly as it answers nothing (a plain 404), so the key is the only way to tell them apart."""
+    async def probe(port: int) -> str | None:
+        url = f"http://localhost:{port}"
+        try:
+            async with httpx.AsyncClient(timeout=3) as client:
+                r = await client.get(f"{url}/api/agent/debug", headers={HEADER: secret})
+            return url if r.status_code == 200 else None
+        except httpx.HTTPError:
+            return None
+
+    found = await asyncio.gather(*(probe(p) for p in _USUAL_PORTS))
+    return next((u for u in found if u), None)
 
 
 async def status(app_url: str, secret: str | None) -> dict[str, Any]:
@@ -93,17 +115,26 @@ async def status(app_url: str, secret: str | None) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=60) as client:
             info = await client.get(f"{url}/api/agent/debug", headers=headers)
             if info.status_code == 404:
-                return {"ok": False, "appUrl": url, "reason": str(_off())}
+                return await _not_here(url, secret, str(_off()))
             info.raise_for_status()
             users = await client.get(f"{url}/api/agent/debug", params={"users": "1"}, headers=headers)
             users.raise_for_status()
     except httpx.ConnectError:
-        return {"ok": False, "appUrl": url, "reason": str(_unreachable(url))}
+        return await _not_here(url, secret, str(_unreachable(url)))
     except httpx.HTTPError as e:
         return {"ok": False, "appUrl": url, "reason": f"The app answered with an error: {e}"}
     body, people = info.json(), users.json()
     return {"ok": True, "appUrl": url, "agents": body.get("agents", []), "users": people.get("users", []),
             "usersNote": people.get("note")}
+
+
+async def _not_here(url: str, secret: str, reason: str) -> dict[str, Any]:
+    """The address did not work. If this project's app is running somewhere else on this computer, say where."""
+    other = await find_app(secret)
+    if other and other.rstrip("/") != url.rstrip("/"):
+        return {"ok": False, "appUrl": url, "suggestedUrl": other,
+                "reason": f"Nothing at {url} accepted this project's key, but this project's app is running at {other}."}
+    return {"ok": False, "appUrl": url, "reason": reason}
 
 
 async def stream_run(app_url: str, secret: str | None, payload: dict[str, Any]) -> AsyncIterator[bytes]:
