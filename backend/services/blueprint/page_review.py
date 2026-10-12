@@ -535,7 +535,14 @@ def run_shots(app: RunningApp, pages: list[dict], out_dir: Path, *, probe: bool 
     script = work / "page_shots.mjs"
     shutil.copyfile(_SHOTS, script)
     env = {**os.environ}
-    env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(Path.home() / "Library/Caches/ms-playwright"))
+    # WHERE THE BROWSERS ARE: an explicit PLAYWRIGHT_BROWSERS_PATH wins; on a Mac the cache is
+    # ~/Library/Caches/ms-playwright; anywhere else Playwright knows its own default (Windows keeps them
+    # under %LOCALAPPDATA%\ms-playwright). Forcing the Mac path everywhere sent a Windows run looking for
+    # browsers in a folder that does not exist, and every page failed with Playwright's "run npx playwright
+    # install" banner (ToolShare, 2026-10-09).
+    mac_cache = Path.home() / "Library/Caches/ms-playwright"
+    if mac_cache.is_dir():
+        env.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(mac_cache))
     # node writes UTF-8; read it as that (Windows would otherwise decode with the ANSI code page, and a
     # page with a non-ASCII character killed the reader thread, leaving stdout/stderr None).
     proc = subprocess.run(["node", str(script), str(cfg)], cwd=work, capture_output=True,

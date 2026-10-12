@@ -54,6 +54,28 @@ from jsonschema import Draft7Validator
 
 from services.blueprint.ids import IdAllocator, is_valid_id, parse_id
 
+
+def replace_file(tmp: Path, target: Path, *, tries: int = 12) -> None:
+    """``os.replace(tmp, target)``, patient where Windows is.
+
+    On Windows the swap is refused (`PermissionError`, WinError 5/32) for as long as anything else holds
+    ``target`` open — the panel reading the Blueprint, a virus scanner, an editor. The hold lasts
+    milliseconds, so a few short waits get through; without them a build's last step failed with
+    "Access is denied" on a file nobody was writing (ToolShare, 2026-10-09). Everywhere else the first
+    attempt is the only one, exactly as before."""
+    import time
+
+    from services.proc_compat import IS_WINDOWS
+
+    for attempt in range(1, tries + 1):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if not IS_WINDOWS or attempt == tries:
+                raise
+            time.sleep(0.05 * attempt)
+
 CONTRACT_PATH = Path(__file__).resolve().parents[2] / "contracts" / "blueprint.schema.json"
 
 #: §22. Terminal states still permit revival — a DEPRECATED artifact that comes
@@ -372,7 +394,7 @@ class BlueprintService:
         self.root.mkdir(parents=True, exist_ok=True)
         tmp = self.current_path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(self.doc, indent=2, sort_keys=True), "utf-8")
-        os.replace(tmp, self.current_path)
+        replace_file(tmp, self.current_path)
         return self.current_path
 
     # -- validation (§76) ---------------------------------------------------
