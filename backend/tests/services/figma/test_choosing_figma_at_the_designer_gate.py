@@ -217,3 +217,38 @@ def test_the_router_recognises_the_figma_turns_before_the_generic_designer_answe
     chat = inspect.getsource(blueprint_generate.smith_chat)
     assert "ui_figma_gate.link_in(" in chat and "ui_figma_gate.choice_in(" in chat
     assert chat.index("ui_figma_gate.link_in(") < chat.index("ui_designer.answer_in(")
+
+
+# --------------------------------------------------------------------------- #
+# Everyone is asked, configured or not, and each option says what it needs
+# --------------------------------------------------------------------------- #
+
+def test_every_option_is_offered_even_when_nothing_is_configured(svc, monkeypatch):
+    monkeypatch.setattr(ud, "configured", lambda _o: False)           # no UX Pilot key saved
+    monkeypatch.setattr(fg, "token_configured", lambda _o: False)     # no Figma token saved
+    assert not svc.doc.get("designSources")                           # and no design connected
+    stop = ud.gate(svc.doc, svc.output_dir)
+    assert ud.is_question(stop["text"]) and stop["options"] == ["Forge UI Designer", "UX Pilot", "Figma"]
+
+
+def test_the_question_says_what_ux_pilot_and_figma_need(svc):
+    q = ud.question(svc.doc)
+    assert "If no UX Pilot key is saved yet, I will ask for it here in the chat" in q
+    assert "only if you already have your screens designed in Figma" in q
+    assert "paste the link to your Figma file here" in q and "I do not create one" in q
+
+
+def test_ux_pilot_without_a_key_is_asked_for_it_in_the_chat(svc, monkeypatch):
+    monkeypatch.setattr(ud, "configured", lambda _o: False)
+    ud.record(svc, "uxpilot")
+    stop = ud.gate(svc.doc, svc.output_dir)
+    assert "UX Pilot API key" in stop["text"] and stop["secret"]["provider"] == "uxpilot"
+
+
+def test_the_figma_request_says_a_design_must_already_exist_and_which_link_to_paste(svc, monkeypatch):
+    monkeypatch.setattr(fg, "token_configured", lambda _o: False)
+    ud.record(svc, "figma")
+    text = ud.gate(svc.doc, svc.output_dir)["text"]
+    assert "design you have already made in Figma" in text and "I do not create one" in text
+    assert "choose Forge or UX Pilot instead" in text
+    assert "single frame reads only that one screen" in text, "a node link reads one frame"

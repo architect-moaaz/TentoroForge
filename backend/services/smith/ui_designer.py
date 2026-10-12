@@ -125,11 +125,14 @@ def question(doc: dict) -> str:
         f"together, in one visual style, using your UX Pilot workspace and API "
         f"key. Each page is then written from its drawing, wired to your data. "
         f"Richer visuals; spends {cost}, once, and again only if a page's brief "
-        f"changes.\n"
-        f"- **Figma:** you already have a design. Each screen you drew is built "
-        f"as drawn, wired to your data. I check first that your design covers "
-        f"what the application needs, and Forge designs anything it does not. "
-        f"Needs a link to your Figma file and an access token."
+        f"changes. If no UX Pilot key is saved yet, I will ask for it here in the "
+        f"chat.\n"
+        f"- **Figma:** only if you already have your screens designed in Figma. "
+        f"You paste the link to your Figma file here (with a Figma access token), "
+        f"and each screen you drew is built as drawn, wired to your data. I check "
+        f"first that your design covers what the application needs, and Forge "
+        f"designs anything it does not. I read a design from its link; I do not "
+        f"create one."
     )
 
 

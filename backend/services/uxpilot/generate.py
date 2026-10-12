@@ -58,7 +58,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +78,10 @@ _ledger_lock = threading.Lock()
 # ---------------------------------------------------------------------------
 
 def designer_for(doc: dict, page: dict) -> str:
-    """``forge`` or ``uxpilot``: the page's own override, else the application's,
-    else Forge — which is what every application built before the choice
-    existed was."""
+    """``forge``, ``uxpilot`` or (for a page) ``forge`` when Figma leads: the page's own override, else
+    the application's, else the platform default, else Forge — which is what every application built
+    before the choice existed was. The choice is asked once at the build gate
+    (`services.smith.ui_designer`) and recorded as `application.uiDesigner`."""
     own = str((page or {}).get("designedBy") or "").strip()
     if own in ("forge", "uxpilot"):
         return own
@@ -93,10 +94,10 @@ def designer_for(doc: dict, page: dict) -> str:
     if app == "figma":
         return "forge"
     # NOBODY HAS CHOSEN FOR THIS APPLICATION: the platform's default, if one is
-    # set. This is how UX Pilot is turned on until Smith asks the question
-    # itself (the approval-gate chooser was removed with the schema pages, and
-    # its replacement is a Smith verb, not yet written). A choice recorded on
-    # the application or the page always outranks it, `forge` included.
+    # set. Smith asks the question at the build gate (`ui_designer.gate`, which
+    # also honours this default by not asking), so this is what an operator sets
+    # to decide for every application on a platform. A choice recorded on the
+    # application or the page always outranks it, `forge` included.
     default = os.environ.get("FORGE_UI_DESIGNER", "").strip().lower()
     return default if default in ("forge", "uxpilot") else "forge"
 
@@ -420,6 +421,25 @@ def ledger_entry(output_dir: str | Path, page_id: str) -> dict | None:
     return entry if isinstance(entry, dict) else None
 
 
+def forget_misses(output_dir: str | Path) -> int:
+    """Take the recorded misses (``missing`` / ``failed``) out of the ledger; drawings stay.
+
+    Called when a person starts a build: what the last build could not get from UX Pilot is tried again,
+    and nothing already paid for is drawn twice. Returns how many entries went."""
+    with _ledger_lock:
+        data = _read_ledger(output_dir)
+        keep = {pid: entry for pid, entry in data.items()
+                if not (isinstance(entry, dict) and not entry.get("html")
+                        and entry.get("outcome") in ("missing", "failed"))}
+        gone = len(data) - len(keep)
+        if gone:
+            path = ledger_path(output_dir)
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(keep, indent=2, sort_keys=True), "utf-8")
+            os.replace(tmp, path)
+    return gone
+
+
 def _record(output_dir: str | Path, page_id: str, entry: dict) -> None:
     # Load-modify-save under one lock: pages generate on worker threads and
     # two of them writing the ledger unguarded would each keep only their
@@ -571,7 +591,49 @@ async def _generate_app_async(gateway: Any, prompt: str) -> list[dict]:
 # One run for the whole application
 # ---------------------------------------------------------------------------
 
-_app_lock = threading.Lock()
+#: ONE LOCK PER APPLICATION, not one for the process. A run takes minutes (up to 420 s a batch) and the
+#: lock is held for all of it: a single module-level lock made every project on the backend wait behind
+#: whichever was drawing, one after another. What must not happen twice is one application paying for
+#: the same run, so the lock is keyed by that application's folder.
+#: THE LOCKS LIVE IN THIS PROCESS. That is enough while one build of an application runs at a time and
+#: one worker follows it (`build_in_flight` refuses a second build); with several uvicorn workers two
+#: builds of the same folder could still draw twice. Moving the lock into the ledger file would fix that.
+_app_locks: dict[str, threading.Lock] = {}
+_app_locks_guard = threading.Lock()
+
+
+def _app_lock_for(output_dir: str | Path) -> threading.Lock:
+    key = str(Path(output_dir).resolve())
+    with _app_locks_guard:
+        return _app_locks.setdefault(key, threading.Lock())
+
+
+#: How long a recorded MISS is believed: a screen UX Pilot did not draw, or a run that failed. Within a
+#: build every later page writer reads the answer instead of starting another paid run; a rebuild after
+#: this long tries again (a miss is not a verdict on the brief). Longer than a build can take (the
+#: platform allows a build an hour, plus the review), or a miss would expire in the middle of the build
+#: that recorded it and the next page writer would pay again. `forget_misses` is how a NEW build tries
+#: again sooner.
+OUTCOME_TTL_S = 6 * 3600
+
+
+def _outcome(entry: Any, digest: str) -> str:
+    """What this page's ledger entry says about THIS prompt: ``design`` (a drawing), ``missing`` (UX
+    Pilot drew no screen for it), ``failed`` (the run failed), or ``""`` (nothing, or something older)."""
+    if not isinstance(entry, dict) or entry.get("briefHash") != digest:
+        return ""
+    if entry.get("html"):
+        return "design"
+    if entry.get("outcome") in ("missing", "failed"):
+        try:
+            at = datetime.fromisoformat(str(entry.get("generatedAt")))
+        except ValueError:
+            return ""
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - at).total_seconds() <= OUTCOME_TTL_S:
+            return str(entry["outcome"])
+    return ""
 
 
 def design_pages(doc: dict) -> list[dict]:
@@ -645,19 +707,34 @@ def prompt_batches(doc: dict, pages: list[dict]) -> list[list[dict]]:
     return prompt_batches(doc, pages[:mid]) + prompt_batches(doc, pages[mid:])
 
 
-def _screen_for(page: dict, screens: list[dict], taken: set[str]) -> dict | None:
-    """The screen drawn for this page: its title carries the page's name."""
+def _screen_for(page: dict, screens: list[dict], taken: set[str], others: Iterable[str] = ()) -> dict | None:
+    """The screen drawn for this page: its title carries the page's name.
+
+    An exact title wins over a partial one wherever it is in the list, and a screen whose title belongs
+    to a LONGER sibling page ("Task Detail" beside a page called "Task") is not offered to the shorter
+    one: matching in screen order gave "Task" the screen drawn for "Task Detail". ``others`` are the
+    other pages' names in the same batch."""
     want = _norm(page.get("name") or page.get("id"))
-    best = None
-    for sc in screens:
-        if sc["designId"] in taken:
-            continue
-        title = _norm(sc.get("title"))
-        if want and (title == want or title.endswith(" " + want) or title.startswith(want + " ")):
+    if not want:
+        return None
+    longer = [o for o in (_norm(x) for x in others) if o and o != want and want in o]
+
+    def claimed(title: str) -> bool:
+        return any(o == title or o in title for o in longer)
+
+    free = [sc for sc in screens if sc["designId"] not in taken]
+    for sc in free:
+        if _norm(sc.get("title")) == want:
             return sc
-        if want and want in title and best is None:
-            best = sc
-    return best
+    for sc in free:
+        title = _norm(sc.get("title"))
+        if (title.endswith(" " + want) or title.startswith(want + " ")) and not claimed(title):
+            return sc
+    for sc in free:
+        title = _norm(sc.get("title"))
+        if want in title and not claimed(title):
+            return sc
+    return None
 
 
 def app_designs(doc: dict, output_dir: str | Path, *, gateway: Any = None) -> dict[str, GeneratedDesign]:
@@ -666,7 +743,13 @@ def app_designs(doc: dict, output_dir: str | Path, *, gateway: Any = None) -> di
 
     From the ledger when no page's brief has changed since, so a rebuild spends nothing; otherwise
     one run draws every screen of its batch, which is also what keeps them one style. Safe to call
-    from parallel page writers: the first one generates, the rest wait for it and read the ledger."""
+    from parallel page writers: the first one generates, the rest wait for it and read the ledger.
+
+    EVERY RUN'S OUTCOME IS RECORDED, the misses included. A page UX Pilot drew no screen for, or a run
+    that failed, is written to the ledger against the prompt that was paid for; the next page writer
+    finds an answer for every page and starts nothing. Without that, one missing screen (or one failure)
+    meant every later page writer started another paid run: a twelve-page application could pay for
+    twelve. A miss is believed for `OUTCOME_TTL_S`, so a later rebuild tries again."""
     from services.uxpilot.credentials import UxPilotCredentialError
     from services.uxpilot.gateway import UxPilotGatewayError
 
@@ -675,40 +758,59 @@ def app_designs(doc: dict, output_dir: str | Path, *, gateway: Any = None) -> di
         return {}
     out: dict[str, GeneratedDesign] = {}
 
-    with _app_lock:
+    def record_miss(batch: list[dict], digest: str, outcome: str, reason: str, only: Iterable[str] | None = None) -> None:
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        for page in batch:
+            pid = str(page.get("id"))
+            if only is None or pid in only:
+                _record(output_dir, pid, {"page": pid, "briefHash": digest, "outcome": outcome,
+                                          "reason": reason, "generatedAt": now})
+
+    with _app_lock_for(output_dir):
         for batch in prompt_batches(doc, pages):
             prompt = fit_prompt(doc, batch) or app_prompt_for(doc, batch, level=len(_PROMPT_LEVELS) - 1)
             digest = brief_hash(prompt)
 
-            cached: dict[str, GeneratedDesign] = {}
-            for page in batch:
-                entry = ledger_entry(output_dir, str(page.get("id")))
-                if not (entry and entry.get("briefHash") == digest and entry.get("html")):
-                    cached = {}
-                    break
-                cached[str(page.get("id"))] = GeneratedDesign(
-                    page_id=str(page.get("id")), design_id=str(entry.get("designId") or ""),
-                    html=str(entry["html"]), prompt=prompt,
-                    preview_url=str(entry.get("previewUrl") or ""), reused=True)
-            if cached:
-                out.update(cached)
+            # AN ANSWER FOR EVERY PAGE OF THE BATCH — a drawing, or a recorded miss — means nothing to start.
+            entries = {str(p.get("id")): ledger_entry(output_dir, str(p.get("id"))) for p in batch}
+            states = {pid: _outcome(entry, digest) for pid, entry in entries.items()}
+            if all(states.values()):
+                failed = next((e for pid, e in entries.items() if states[pid] == "failed"), None)
+                if failed is not None:
+                    raise GenerationFailed(str(failed.get("reason") or "UX Pilot failed"))
+                for pid, entry in entries.items():
+                    if states[pid] == "design" and entry:
+                        out[pid] = GeneratedDesign(
+                            page_id=pid, design_id=str(entry.get("designId") or ""),
+                            html=str(entry["html"]), prompt=prompt,
+                            preview_url=str(entry.get("previewUrl") or ""), reused=True)
                 continue
 
             gw = gateway or gateway_for(output_dir)
             try:
                 screens = _run(_generate_app_async(gw, prompt))
             except UxPilotCredentialError as exc:
-                raise GenerationFailed(f"no UX Pilot key could be resolved ({exc})") from exc
+                failure = f"no UX Pilot key could be resolved ({exc})"
             except UxPilotGatewayError as exc:
-                raise GenerationFailed(f"UX Pilot {exc.kind}: {exc.detail}") from exc
+                failure = f"UX Pilot {exc.kind}: {exc.detail}"
             except Exception as exc:  # noqa: BLE001 - the reason travels, the page does not die
-                raise GenerationFailed(f"UX Pilot call failed: {type(exc).__name__}: {exc}") from exc
+                failure = f"UX Pilot call failed: {type(exc).__name__}: {exc}"
+            else:
+                failure = ""
+            if failure:
+                record_miss(batch, digest, "failed", failure)
+                raise GenerationFailed(failure)
+
             taken: set[str] = set()
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            drawn = [x for x in screens if x.get("html")]
+            names = {str(p.get("id")): str(p.get("name") or p.get("id")) for p in batch}
+            missed: list[str] = []
             for page in batch:
                 pid = str(page.get("id"))
-                sc = _screen_for(page, [x for x in screens if x.get("html")], taken)
+                sc = _screen_for(page, drawn, taken, [n for other, n in names.items() if other != pid])
                 if sc is None:
+                    missed.append(pid)
                     continue
                 taken.add(sc["designId"])
                 _record(output_dir, pid, {
@@ -716,6 +818,8 @@ def app_designs(doc: dict, output_dir: str | Path, *, gateway: Any = None) -> di
                     "previewUrl": sc["previewUrl"], "prompt": prompt, "generatedAt": now})
                 out[pid] = GeneratedDesign(page_id=pid, design_id=sc["designId"], html=sc["html"],
                                            prompt=prompt, preview_url=sc["previewUrl"])
+            if missed:
+                record_miss(batch, digest, "missing", "UX Pilot drew no screen for this page", only=missed)
     return out
 
 

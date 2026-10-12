@@ -130,4 +130,17 @@ def choose(svc: Any, modules: Iterable[str] | None) -> dict[str, list[str]]:
     return {"built": built, "waiting": waiting}
 
 
-__all__ = ["built_view", "choose", "deferred_modules", "deferred_page_ids", "module_of_page"]
+def chosen(doc: Mapping[str, Any]) -> list[str] | None:
+    """The modules the person picked for this build, as `choose` takes them: the ids of the live modules
+    that are not waiting, or ``None`` when none is waiting (the whole application).
+
+    A build that stops to ask something (who designs the screens) and is started again by the answer
+    must carry the selection through: `choose(svc, None)` means ALL, and would put every waiting module
+    back into the build."""
+    held = deferred_modules(doc)
+    if not held:
+        return None
+    return [str(m.get("id")) for m in _live(doc.get("modules")) if str(m.get("id")) not in held]
+
+
+__all__ = ["built_view", "choose", "chosen", "deferred_modules", "deferred_page_ids", "module_of_page"]
