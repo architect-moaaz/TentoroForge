@@ -2859,6 +2859,19 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                 "required": {"type": "boolean"},
                                 "primaryKey": {"type": "boolean"},
                                 "unique": {"type": "boolean"},
+                                # ORDER MATTERS: strict output writes keys in this order, so
+                                # `sensitive` comes before what only a sensitive field has. With
+                                # `mask` and `readers` first, the model could not go back to them
+                                # once it had said `sensitive: true`, and wrote `max: 0` on text
+                                # fields instead — every value refused (nhc0am2y, 2026-10-12).
+                                "sensitive": {
+                                    "type": "boolean",
+                                    "description": (
+                                        "Personal or financial. Downstream "
+                                        "agents cannot see this section to "
+                                        "second-guess it."
+                                    ),
+                                },
                                 "mask": {
                                     "type": "string",
                                     "enum": ["last4", "email", "phone", "full"],
@@ -2870,14 +2883,6 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                 "readers": {
                                     "type": "array", "items": {"type": "string"},
                                     "description": "On a sensitive field: the roles that may see it unmasked.",
-                                },
-                                "sensitive": {
-                                    "type": "boolean",
-                                    "description": (
-                                        "Personal or financial. Downstream "
-                                        "agents cannot see this section to "
-                                        "second-guess it."
-                                    ),
                                 },
                                 "enumValues": {
                                     "type": "array",

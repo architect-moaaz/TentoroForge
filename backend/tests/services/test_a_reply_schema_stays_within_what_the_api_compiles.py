@@ -36,3 +36,12 @@ def test_the_field_flags_are_required_so_the_audit_fields_fit():
     field = DATA_MODEL_SCHEMA["properties"]["entities"]["items"]["properties"]["fields"]["items"]
     assert {"required", "primaryKey", "unique", "sensitive"} <= set(field["required"])
     assert {"mask", "readers"} <= set(field["properties"])
+
+
+def test_sensitive_comes_before_what_only_a_sensitive_field_has():
+    """Strict output writes keys in schema order. With `mask` and `readers`
+    ahead of `sensitive`, the model could not return to them after saying
+    `sensitive: true` and wrote `max: 0` on text fields instead, so every
+    value would have been refused (nhc0am2y, 2026-10-12)."""
+    order = list(DATA_MODEL_SCHEMA["properties"]["entities"]["items"]["properties"]["fields"]["items"]["properties"])
+    assert order.index("sensitive") < order.index("mask") < order.index("readers") < order.index("min")
