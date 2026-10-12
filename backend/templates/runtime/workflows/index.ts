@@ -670,11 +670,13 @@ export function _resolveRef(ref: unknown, ctx: WorkflowExecutionContext): unknow
   // A fresh identifier for a required column nothing supplies — a case's
   // reference number before its row exists. The engine has no sequences.
   if (ref === "$uuid") return crypto.randomUUID();
-  if (ref === "$today") {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }
+  // TODAY IS A CALENDAR DATE, `YYYY-MM-DD` on the server's own calendar. It
+  // was a Date at midnight, which a `date` column (Drizzle's string mode)
+  // refuses outright — every process that filtered on today failed, e.g.
+  // AquaTrack's "Find Today's Summary" (m1dck85j, 2026-10-12) — and which
+  // reads as "Mon Oct 12 2026 00:00:00 GMT…" in any message it lands in. A
+  // timestamp column still gets a Date from it (`_coerceValue`).
+  if (ref === "$today") return _calendarDate(new Date());
   if (ref === "$user.id") return (ctx as any)?.user?.id ?? ctx.variables?.__user?.id ?? ctx.variables?.user?.id ?? null;
   // A signed-out visitor's guest token (the `forge-guest` cookie the execute
   // route hands over): what finds the cart a guest already started.
@@ -755,6 +757,24 @@ function _isDateColumn(col: unknown): boolean | undefined {
   return undefined;
 }
 
+/** A column Drizzle keeps as TEXT in JS although Postgres holds a date or a
+ *  timestamp (`date()`'s default string mode, `timestamp({ mode: "string" })`):
+ *  the driver takes a string for it and refuses a Date. */
+function _stringDateColumn(col: unknown): "date" | "timestamp" | null {
+  if (!col || typeof col !== "object") return null;
+  const c = col as { dataType?: unknown; columnType?: unknown };
+  if (c.dataType !== "string" || typeof c.columnType !== "string") return null;
+  if (/^PgDateString$/i.test(c.columnType)) return "date";
+  if (/^PgTimestampString$/i.test(c.columnType)) return "timestamp";
+  return null;
+}
+
+/** `YYYY-MM-DD` on the server's calendar. */
+export function _calendarDate(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function _isIntColumn(col: unknown): boolean {
   if (!col || typeof col !== "object") return false;
   const c = col as { dataType?: unknown; columnType?: unknown };
@@ -783,6 +803,16 @@ function _coerceValue(v: unknown, col?: unknown): unknown {
   if (typeof v === "string" && /^-?\d+\.\d+$/.test(v) && _isIntColumn(col)) {
     const n = Number(v);
     if (!isNaN(n)) return Math.round(n);
+  }
+  // A DATE HEADING FOR A COLUMN KEPT AS TEXT is written as text: the driver
+  // refuses a Date there ("The \"string\" argument must be of type string").
+  const asText = _stringDateColumn(col);
+  if (asText) {
+    const d = v instanceof Date ? v
+      : typeof v === "number" && v >= _EPOCH_MIN_MS && v <= _EPOCH_MAX_MS ? new Date(v) : null;
+    if (d && !isNaN(d.getTime())) return asText === "date" ? _calendarDate(d) : d.toISOString();
+    if (typeof v === "string" && asText === "date" && /^\d{4}-\d{2}-\d{2}T/.test(v)) return v.slice(0, 10);
+    return v;
   }
   // Already a Date — pass through.
   if (v instanceof Date) return v;
