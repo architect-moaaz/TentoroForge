@@ -11,7 +11,7 @@ import {
   ArrowLeft,
   Loader2,
   FlaskConical,
-  ListChecks,
+  Bomb,
   Radio,
   Sparkles,
 } from "lucide-react";
@@ -22,7 +22,7 @@ import { api } from "@/lib/api";
 import { useAgentBuilderStore } from "@/stores/agent-builder";
 import { AgentCanvas } from "./AgentCanvas";
 import { AgentChecksBar } from "./AgentChecksBar";
-import { AgentScenariosPanel } from "./AgentScenariosPanel";
+import { AgentBlastPanel } from "./AgentBlastPanel";
 import { AgentNodePalette } from "./AgentNodePalette";
 import { AgentNodeProperties } from "./AgentNodeProperties";
 import { AgentTemplateSelector } from "./AgentTemplateSelector";
@@ -30,6 +30,7 @@ import { AgentTestConsole } from "./AgentTestConsole";
 import { AgentWatchPanel } from "./AgentWatchPanel";
 import { useAgentWatch } from "./useAgentWatch";
 import { nodeStates } from "@/lib/agent-watch";
+import { applyFix } from "@/lib/agent-blast";
 import { AgentIOSchemaEditor } from "./config/AgentIOSchemaEditor";
 import type {
   AgentDefinition,
@@ -68,7 +69,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   const [findings, setFindings] = useState<AgentFinding[]>([]);
   const [appChecked, setAppChecked] = useState(true);
   const [confirmingApply, setConfirmingApply] = useState(false);
-  const [showScenarios, setShowScenarios] = useState(false);
+  // Find problems: bombs thrown at the agent as drawn, with fixes (it also holds the agent's saved tests).
+  const [showBlast, setShowBlast] = useState(false);
   const [showTestConsole, setShowTestConsole] = useState(false);
   // Watch the running app's real chats live: the canvas lights up as they happen.
   const [showWatch, setShowWatch] = useState(false);
@@ -530,7 +532,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             size="sm"
             variant="outline"
             onClick={() => {
-              setShowScenarios(false);
+              setShowBlast(false);
               setShowTestConsole(!showTestConsole);
             }}
           >
@@ -539,14 +541,15 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
           </Button>
           <Button
             size="sm"
-            variant="outline"
+            variant={showBlast ? "default" : "outline"}
+            aria-pressed={showBlast}
             onClick={() => {
               setShowTestConsole(false);
-              setShowScenarios(!showScenarios);
+              setShowBlast(!showBlast);
             }}
           >
-            <ListChecks className="mr-1 h-3.5 w-3.5" />
-            Scenarios
+            <Bomb className="mr-1 h-3.5 w-3.5" />
+            Find problems
           </Button>
           <Button
             size="sm"
@@ -554,7 +557,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             aria-pressed={showWatch}
             onClick={() => {
               setShowTestConsole(false);
-              setShowScenarios(false);
+              setShowBlast(false);
               setShowWatch(!showWatch);
             }}
           >
@@ -629,8 +632,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       <div className="flex flex-1 overflow-hidden">
         <AgentNodePalette />
         <div className="flex-1">
-          {showScenarios ? (
-            <AgentScenariosPanel
+          {showBlast ? (
+            <AgentBlastPanel
               projectId={projectId}
               agentId={currentAgent.id}
               graph={{
@@ -641,6 +644,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
                 edges,
                 config: currentAgent.config,
               }}
+              onApplyFix={(fix) => setNodes((current) => applyFix(current, fix))}
             />
           ) : showTestConsole ? (
             <AgentTestConsole
@@ -679,7 +683,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
             />
           )}
         </div>
-        {showWatch && !showTestConsole && !showScenarios && (
+        {showWatch && !showTestConsole && !showBlast && (
           <AgentWatchPanel
             state={watch.state}
             link={watch.link}

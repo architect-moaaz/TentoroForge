@@ -40,8 +40,22 @@ class AgentScenarioSave(BaseModel):
     scenarios: list[dict] = []
 
 
-class AgentScenarioRun(BaseModel):
-    """Run scenarios against the agent as drawn (``graph`` may hold edits that are not saved yet).
-    ``scenarios`` omitted means the saved ones."""
+class AgentBlastInvent(BaseModel):
+    """Have an AI invent tricky tests ("bombs") for the agent as drawn. ``bombs`` limits the kinds (all when omitted)."""
     graph: AgentDefinitionSave
-    scenarios: list[dict] | None = None
+    bombs: list[str] | None = None
+    per_bomb: int = 2
+
+
+class AgentBlastRun(BaseModel):
+    """Throw tests at the agent as drawn (edits that are not saved yet included): invented bombs and saved tests alike.
+    ``repeats`` runs each more than once, since answers vary."""
+    graph: AgentDefinitionSave
+    tests: list[dict] = []
+    repeats: int = 1
+
+
+class AgentBlastFixes(BaseModel):
+    """Propose fixes for the tests that exploded."""
+    graph: AgentDefinitionSave
+    results: list[dict] = []
