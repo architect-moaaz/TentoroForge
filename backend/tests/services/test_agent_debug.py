@@ -147,7 +147,7 @@ async def test_a_refused_address_points_to_this_projects_app_running_elsewhere(m
     mock_app(monkeypatch, handler)
     r = await status("http://localhost:3000", "mine")
     assert r["ok"] is False and r["suggestedUrl"] == "http://localhost:3001"
-    assert "http://localhost:3001" in r["reason"] and "this project's key" in r["reason"]
+    assert "http://localhost:3001" in r["reason"] and "this project's key" in r["reason"] and "running at http://localhost:3001" in r["reason"]
     assert (await status("http://localhost:3001", "mine"))["ok"] is True
 
 
@@ -234,3 +234,77 @@ async def test_the_watch_says_in_one_event_why_it_cannot_start(monkeypatch):
 
     mock_app(monkeypatch, down)
     assert "Is it running" in (await collect(watch_stream("http://localhost:3000", "k")))[0]["message"]
+
+
+# ── a wrong address, in every way it can be wrong ─────────────────────────
+
+def only_3001_knows_the_key(req: httpx.Request):
+    if req.url.port == 3001 and req.headers.get("x-forge-debug-secret") == "mine":
+        return httpx.Response(200, json={"agents": []})
+    raise httpx.ConnectError("refused")
+
+
+@pytest.mark.asyncio
+async def test_a_port_with_nothing_on_it_says_so_and_points_to_this_projects_app(monkeypatch):
+    mock_app(monkeypatch, only_3001_knows_the_key)
+    r = await status("http://localhost:3050", "mine")
+    assert r["ok"] is False and r["suggestedUrl"] == "http://localhost:3001"
+    assert r["reason"] == "Nothing is running at http://localhost:3050. This project's app is running at http://localhost:3001."
+
+
+@pytest.mark.asyncio
+async def test_another_program_that_answers_with_a_web_page_is_not_a_crash(monkeypatch):
+    def handler(req: httpx.Request):
+        if req.url.port == 3001:
+            return httpx.Response(200, json={"agents": []})
+        return httpx.Response(200, content="<html>hello, I am not a generated app</html>", headers={"content-type": "text/html"})
+
+    mock_app(monkeypatch, handler)
+    r = await status("http://localhost:3050", "mine")
+    assert r["ok"] is False and "not one of your apps" in r["reason"] and "3050" in r["reason"]
+    assert r["suggestedUrl"] == "http://localhost:3001" and r["reason"].endswith("This project's app is running at http://localhost:3001."), "and this project's app is still offered"
+
+    mock_app(monkeypatch, lambda req: httpx.Response(200, content="<html>nope</html>"))
+    alone = await status("http://localhost:3050", "mine")
+    assert alone["ok"] is False and "suggestedUrl" not in alone and "not one of your apps" in alone["reason"]
+
+
+@pytest.mark.asyncio
+async def test_json_that_is_not_what_a_generated_app_sends_is_refused_in_words(monkeypatch):
+    mock_app(monkeypatch, lambda req: httpx.Response(200, json=["not", "an", "object"]))
+    r = await status("http://localhost:3050", "mine")
+    assert r["ok"] is False and "not one of your apps" in r["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_program_that_errors_gets_a_plain_message_not_a_stack_of_links(monkeypatch):
+    mock_app(monkeypatch, lambda req: httpx.Response(500, content="boom"))
+    r = await status("http://localhost:3050", "mine")
+    assert r["ok"] is False and "answered with an error (500)" in r["reason"] and "mozilla" not in r["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_connection_that_breaks_midway_is_a_reason_not_a_crash(monkeypatch):
+    def broke(req):
+        raise httpx.ReadTimeout("slow")
+
+    mock_app(monkeypatch, broke)
+    r = await status("http://localhost:3050", "mine")
+    assert r["ok"] is False and "connection to http://localhost:3050 broke" in r["reason"]
+
+
+@pytest.mark.asyncio
+async def test_a_program_that_answers_200_to_everything_is_never_offered_as_this_projects_app(monkeypatch):
+    """A single-page dev server (or anything else) that says 200 to every path is not the app: only a real answer from a
+    generated app, with its agents, counts."""
+    def handler(req: httpx.Request):
+        if req.url.port == 3002:
+            return httpx.Response(200, content="<html>spa fallback</html>", headers={"content-type": "text/html"})
+        if req.url.port == 3003:
+            return httpx.Response(200, json={"hello": "some other api"})
+        raise httpx.ConnectError("refused")
+
+    mock_app(monkeypatch, handler)
+    assert await agent_debug.find_app("mine") is None
+    r = await status("http://localhost:3050", "mine")
+    assert r["ok"] is False and "suggestedUrl" not in r
