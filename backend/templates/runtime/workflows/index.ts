@@ -1085,6 +1085,16 @@ export function _comparison(ref: unknown): { name: string; value: any } | null {
   return { name: _OPS[keys[0]], value: (ref as any)[keys[0]] };
 }
 
+/** Every comparison on one field, ANDed: `{ gte: from, lte: to }` is a range.
+ *  One comparison per field could not say "between", so an export by date
+ *  applied its start and dropped its end (60v142ju, 2026-10-12). */
+export function _comparisons(ref: unknown): { name: string; value: any }[] | null {
+  if (!ref || typeof ref !== "object" || Array.isArray(ref)) return null;
+  const keys = Object.keys(ref as object);
+  if (!keys.length || !keys.every((k) => k in _OPS)) return null;
+  return keys.map((k) => ({ name: _OPS[k], value: (ref as any)[k] }));
+}
+
 export function _buildWhere(
   table: any, where: unknown, ctx: WorkflowExecutionContext,
   opts: { strict?: boolean } = { strict: true },
@@ -1104,26 +1114,31 @@ export function _buildWhere(
       // ToroCommerce's "email not already used by another customer" check
       // sent "[object Object]" as a uuid and Edit Profile failed for everyone
       // (forge-v3, 2026-10-07).
-      const op = _comparison(ref);
-      if (op) {
-        const raw = _resolveRef(op.value, ctx);
-        const list = Array.isArray(op.value) ? op.value.map((x: unknown) => _resolveRef(x, ctx)) : raw;
-        if (op.name === "in" || op.name === "notIn") {
-          const vals = (Array.isArray(list) ? list : [list]).filter((x) => x !== "" && x != null)
-            .map((x) => _coerceValue(x, table[field]));
-          if (!vals.length) return op.name === "in" ? sql`false` : undefined;
-          return op.name === "in" ? inArray(table[field], vals as any[]) : notInArray(table[field], vals as any[]);
-        }
-        if (raw === "" || raw == null) {
-          // "Not equal to nothing" holds for every row; any other comparison
-          // with nothing is not a filter anyone wrote.
-          if (op.name === "ne") return undefined;
-          emptyRefs.push(field);
-          return undefined;
-        }
-        const val = _coerceValue(raw, table[field]);
-        const fn = { ne, gt, gte, lt, lte }[op.name as "ne" | "gt" | "gte" | "lt" | "lte"];
-        return fn(table[field], val as any);
+      const ops = _comparisons(ref);
+      if (ops) {
+        const one = (op: { name: string; value: any }): any => {
+          const raw = _resolveRef(op.value, ctx);
+          const list = Array.isArray(op.value) ? op.value.map((x: unknown) => _resolveRef(x, ctx)) : raw;
+          if (op.name === "in" || op.name === "notIn") {
+            const vals = (Array.isArray(list) ? list : [list]).filter((x) => x !== "" && x != null)
+              .map((x) => _coerceValue(x, table[field]));
+            if (!vals.length) return op.name === "in" ? sql`false` : undefined;
+            return op.name === "in" ? inArray(table[field], vals as any[]) : notInArray(table[field], vals as any[]);
+          }
+          if (raw === "" || raw == null) {
+            // "Not equal to nothing" holds for every row. An open end of a
+            // range — "from" given, "to" left blank — is no bound, not a fault.
+            if (op.name === "ne" || ops.length > 1) return undefined;
+            emptyRefs.push(field);
+            return undefined;
+          }
+          const val = _coerceValue(raw, table[field]);
+          const fn = { ne, gt, gte, lt, lte }[op.name as "ne" | "gt" | "gte" | "lt" | "lte"];
+          return fn(table[field], val as any);
+        };
+        const parts = ops.map(one).filter((c) => c !== undefined);
+        if (!parts.length) return undefined;
+        return parts.length === 1 ? parts[0] : and(...parts);
       }
       // An unresolved variable reference must never become a literal in a
       // WHERE. `_resolveRef` returns the ref STRING when it names nothing,

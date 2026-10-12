@@ -514,12 +514,14 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
             where = ((st or {}).get("config") or {}).get("where") if isinstance(st, dict) else None
             for field, value in (where.items() if isinstance(where, dict) else ()):
                 bad = re.search(r"__(ne|neq|not|gt|gte|lt|lte|in|nin|notin|like)$", str(field), re.I)
-                odd = isinstance(value, dict) and not (len(value) == 1 and next(iter(value)) in WHERE_COMPARISONS)
+                # Several comparisons on one field are ANDed — a range is
+                # `{"gte": from, "lte": to}`.
+                odd = isinstance(value, dict) and not (value and all(k in WHERE_COMPARISONS for k in value))
                 if bad or odd:
                     problems.append(
                         f"{name}/{st.get('key')}: where {field!r} — write a comparison as "
-                        f"{{\"<field>\": {{\"ne\": <value>}}}} (ne, gt, gte, lt, lte, in, notIn); "
-                        "a field alone with a value means equals")
+                        f"{{\"<field>\": {{\"ne\": <value>}}}} (ne, gt, gte, lt, lte, in, notIn; several on one field "
+                        "are ANDed, a range is {{\"gte\": from, \"lte\": to}}); a field alone with a value means equals")
     # WHAT AN END HANDS BACK IS DECLARED, SMALL, AND SOMEWHERE. `reply` is a
     # map of names to templates; `redirect` is a route of this application or
     # a template over a step's output — never free prose, never on a refused
