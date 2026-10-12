@@ -307,19 +307,25 @@ async def judge_reply(client: Any, test: dict[str, Any], outcome: dict[str, Any]
 # running
 # ---------------------------------------------------------------------------
 
-async def _one_run(graph: dict[str, Any], test: dict[str, Any], client: Any) -> dict[str, Any]:
-    """One run of one test: ``{status: passed|failed|error, failures, response, toolCalls, ...}``."""
+async def _one_run(graph: dict[str, Any], test: dict[str, Any], client: Any, emit: Any = None) -> dict[str, Any]:
+    """One run of one test: ``{status: passed|failed|error, failures, response, toolCalls, ...}``. ``emit`` is told, as it
+    happens, each step: a tool asked for and what came back, the reply, the rules, the judge."""
+    note = emit or (lambda e: None)
     try:
-        out = await simulate(graph, test, client)
+        out = await simulate(graph, test, client, note)
     except Exception as exc:  # noqa: BLE001 — one run never costs the rest
         return {"status": "error", "failures": [], "error": f"Could not run: {exc}", "response": "", "toolCalls": []}
     fails = evaluate(test.get("expect") or {}, out)
+    if fails:
+        note({"kind": "rules", "failures": fails})
     verdict = "failed" if fails else "passed"
     # Rules first. The AI judge is asked only when the rules passed (a rule failure already says what went wrong)
     # and the test carries a criterion rules cannot express.
     if not fails and test.get("judge"):
+        note({"kind": "judge_start"})
         try:
             ok, why = await judge_reply(client, test, out)
+            note({"kind": "judge", "pass": ok, "reason": why})
             if not ok:
                 verdict, fails = "failed", [why or "A reviewer judged the reply not good enough."]
         except Exception as exc:  # noqa: BLE001
@@ -385,6 +391,22 @@ async def _simulate_tool(client: Any, spec: dict[str, Any], inp: Any, test: dict
     return data, False, False
 
 
+def _outcome_text(result: Any, is_error: bool, held: bool, tool_kind: str) -> str:
+    """What came back from a tool, in a few words for the live log."""
+    if held:
+        return "held until the person says yes"
+    if tool_kind == "handoff":
+        return "hand-over pretended"
+    if is_error:
+        return f"error: {str(result)[:60]}"
+    if tool_kind == "change":
+        return "change made (pretended)"
+    rows = result.get("data") if isinstance(result, dict) else result
+    if isinstance(rows, list):
+        return "no records" if not rows else f"{len(rows)} record{'s' if len(rows) != 1 else ''}"
+    return "returned data"
+
+
 def _block_dicts(content: list[Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for b in content:
@@ -395,15 +417,17 @@ def _block_dicts(content: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
-async def simulate(graph: dict[str, Any], test: dict[str, Any], client: Any) -> dict[str, Any]:
+async def simulate(graph: dict[str, Any], test: dict[str, Any], client: Any, emit: Any = None) -> dict[str, Any]:
     """One test played end to end against the agent as drawn: the message goes in, the assistant works (calling tools,
     reading what the simulated app returns, calling more) until it replies. A message the input rules refuse never
     reaches the model. Returns what ``evaluate`` and the judge need: the reply, every tool call (with ``held`` where the
     app would have held it), whether it was blocked, tokens and time."""
+    note = emit or (lambda e: None)
     cfg = compile_agent(graph).config
     started = time.perf_counter()
     refusal = check_input(test["message"], cfg)
     if refusal:
+        note({"kind": "blocked", "reason": refusal})
         return {"response": refusal, "tool_calls": [], "blocked": True, "total_tokens": 0, "total_duration_ms": 0}
     specs = {t["name"]: t for t in cfg["tools"]}
     tools = [{"name": t["name"], "description": t["description"], "input_schema": t["inputSchema"]} for t in cfg["tools"]]
@@ -435,17 +459,24 @@ async def simulate(graph: dict[str, Any], test: dict[str, Any], client: Any) -> 
             inp = dict(use.input or {})
             spec = specs.get(use.name)
             if spec is None:
+                note({"kind": "tool", "tool": use.name, "toolKind": "unknown", "input": _stable(inp)[:120]})
+                note({"kind": "tool_result", "tool": use.name, "toolKind": "unknown", "held": False, "error": True, "outcome": "no such tool"})
                 results.append({"type": "tool_result", "tool_use_id": use.id, "content": f"There is no tool called {use.name}.", "is_error": True})
                 calls.append({"name": use.name, "input": inp, "held": False})
                 continue
+            tool_kind = "handoff" if spec.get("kind") == "handoff" else "change" if (spec.get("confirm") or changes_data(spec)) else "lookup"
+            note({"kind": "tool", "tool": use.name, "toolKind": tool_kind, "input": _stable(inp)[:120]})
             result, is_error, held = await _simulate_tool(client, spec, inp, test, held_before)
-            calls.append({"name": use.name, "input": inp, "held": held,
-                          "kind": "handoff" if spec.get("kind") == "handoff" else "change" if (spec.get("confirm") or changes_data(spec)) else "lookup"})
+            note({"kind": "tool_result", "tool": use.name, "toolKind": tool_kind, "held": held, "error": is_error,
+                  "outcome": _outcome_text(result, is_error, held, tool_kind)})
+            calls.append({"name": use.name, "input": inp, "held": held, "kind": tool_kind})
             content = result if isinstance(result, str) else _stable(result)
             results.append({"type": "tool_result", "tool_use_id": use.id, "content": f"Error: {content}" if is_error else content,
                             **({"is_error": True} if is_error else {})})
         messages.append({"role": "user", "content": results})
-    return {"response": "\n\n".join(texts), "tool_calls": calls, "blocked": False, "total_tokens": tokens,
+    response = "\n\n".join(texts)
+    note({"kind": "reply", "chars": len(response), "preview": response[:110]})
+    return {"response": response, "tool_calls": calls, "blocked": False, "total_tokens": tokens,
             "total_duration_ms": int((time.perf_counter() - started) * 1000)}
 
 
@@ -487,8 +518,10 @@ def summarise(results: list[dict[str, Any]]) -> dict[str, int]:
 
 async def blast(graph: dict[str, Any], tests: Any, *, repeats: int = 1, client: Any = None,
                 concurrency: int = 4) -> AsyncIterator[dict[str, Any]]:
-    """Run the tests and report as they finish: ``start`` (how many), a ``result`` per test, then ``done`` with the
-    totals. Tests are the stored kind (saved scenarios) or invented bombs; a bomb keeps its kind and its criterion."""
+    """Run the tests and report as it goes: ``start`` (how many), then for each test ``test_start``, a ``step`` for each
+    thing it does (a tool asked for and what came back, the reply, the rules, the judge) and a ``result`` when it is
+    done, then ``done`` with the totals. Tests are the stored kind (saved scenarios) or invented bombs; a bomb keeps its
+    kind and its criterion. Several run at once, so their steps interleave: each carries its test's ``id`` and ``index``."""
     todo = _runnable(tests)[:MAX_TESTS * 2]
     times = max(1, min(int(repeats or 1), MAX_REPEATS))
     yield {"type": "start", "total": len(todo), "repeats": times}
@@ -501,17 +534,40 @@ async def blast(graph: dict[str, Any], tests: Any, *, repeats: int = 1, client: 
         yield {"type": "error", "message": str(e)}
         return
     gate = asyncio.Semaphore(max(1, concurrency))
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
-    async def one(t: dict[str, Any]) -> dict[str, Any]:
+    async def one(i: int, t: dict[str, Any]) -> dict[str, Any]:
         async with gate:
-            return combine(t, [await _one_run(graph, t, client) for _ in range(times)])
+            runs = []
+            for k in range(times):
+                queue.put_nowait({"type": "test_start", "id": t["id"], "name": t["name"], "bomb": t.get("bomb"), "index": i + 1,
+                                  "total": len(todo), "run": k + 1, "runs": times})
 
-    results: list[dict[str, Any]] = []
-    for finished in asyncio.as_completed([asyncio.ensure_future(one(t)) for t in todo]):
-        r = await finished
-        results.append(r)
-        yield {"type": "result", "result": r}
-    yield {"type": "done", "summary": summarise(results)}
+                def emit(step: dict[str, Any], _id: str = t["id"], _i: int = i, _k: int = k) -> None:
+                    queue.put_nowait({"type": "step", "id": _id, "index": _i + 1, "run": _k + 1, **step})
+
+                runs.append(await _one_run(graph, t, client, emit))
+            result = combine(t, runs)
+            queue.put_nowait({"type": "result", "result": result, "index": i + 1})
+            return result
+
+    async def produce() -> None:
+        try:
+            results = await asyncio.gather(*(one(i, t) for i, t in enumerate(todo)))
+            queue.put_nowait({"type": "done", "summary": summarise(list(results))})
+        finally:
+            queue.put_nowait(None)
+
+    worker = asyncio.create_task(produce())
+    try:
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield event
+    finally:
+        if not worker.done():
+            worker.cancel()
 
 
 def _runnable(tests: Any) -> list[dict[str, Any]]:
