@@ -354,7 +354,8 @@ series(entity, { groupBy: field; bucket?: "day" | "week" | "month"; fn?: "count"
 query(entity, { measures: { [key]: { fn: "count" } | { fn: "count_distinct" | "min" | "max", field } | { fn: "sum" | "avg", field: numericField } };
                 dimensions?: [field | { field, bucket?: "day" | "week" | "month" | "quarter" | "year" }
                               | { field: numericField, ranges: { label?, from?, to? }[] }, …at most 2];
-                where?; range?: { from?: iso; to?: iso }; timeField?; sort?: { by, order? }; limit? }): Promise<QueryRow[]>
+                where?; range?: { from?: iso; to?: iso }; timeField?; window?: "today" | "week" | "month" | "last_7_days" | "last_30_days" | "year";
+                sort?: { by, order? }; limit? }): Promise<QueryRow[]>   // `window` keeps the rows to that period on timeField
    Measures by dimensions, one GROUP BY: query("Order", { measures: { revenue: { fn: "sum", field: "total" } },
    dimensions: [{ field: "placedAt", bucket: "month" }, "region"] }) → [{ placedAt: "2026-01", region: "EU", revenue: 1840 }, …].
    A bucketed date reads "2026-03-02" / "2026-03" / "2026-Q1" / "2026"; a foreign-key dimension also carries `<field>Label`.

@@ -10,6 +10,7 @@ import { auth } from "@/auth";
 import * as engine from "@/lib/data-engine";
 import { actorCtx, resolveAggregate, resolveQuery, resolveSeries, resolveSimilar } from "@/lib/data-engine-bridge";
 import { ensureDataEngineInitialized } from "@/lib/data-init";
+import { priorWindow } from "@/lib/data-engine/aggregate-window";
 import { NUMERIC_FIELDS, READABLE_FIELDS } from "./schema";
 import type { AccountEntity, Entities, EntityName, NumericField } from "./schema";
 import { ACCOUNT } from "@/lib/account";
@@ -383,6 +384,8 @@ export interface QueryOptions<E extends EntityName, M extends string> {
   /** Narrows `timeField` (default: the bucketed dimension) to a date window. */
   range?: DateRange;
   timeField?: keyof Entities[E] & string;
+  /** Keeps the rows to this period on `timeField`, counted back from now. */
+  window?: "today" | "week" | "month" | "last_7_days" | "last_30_days" | "year";
   // NoInfer: the measure keys are what `measures` declares; a sort naming
   // one must not narrow them to itself.
   sort?: { by: NoInfer<M> | (keyof Entities[E] & string); order?: "asc" | "desc" };
@@ -408,7 +411,7 @@ export async function query<E extends EntityName, M extends string>(
   const dimensions = (opts.dimensions ?? []).map((d) => (typeof d === "string" ? { field: d } : d));
   return resolveQuery({
     name: "query", entity, op: "query", measures, dimensions,
-    filter: opts.where ?? {}, range: opts.range, timeField: opts.timeField,
+    filter: opts.where ?? {}, range: opts.range, timeField: opts.timeField, window: opts.window,
     sort: opts.sort, limit: opts.limit,
   }, await actor());
 }
@@ -453,7 +456,7 @@ export async function runWidget(
   const rows = await resolveQuery({
     name: widget.id, entity: src.entity, op: "query",
     measures: src.measures, dimensions: src.dimensions,
-    filter: { ...src.filter, ...opts.where }, timeField: src.timeField,
+    filter: { ...src.filter, ...opts.where }, timeField: src.timeField, window: src.window,
     range: opts.range, sort: src.sort, limit: src.limit,
   }, await actor());
   const single = src.dimensions.length === 0;
@@ -461,8 +464,13 @@ export async function runWidget(
   const v = single && first ? rows[0]?.[first] : null;
   const value = single ? Number(v ?? 0) : null;
   // A NUMBER WITH ITS CONTEXT. A KPI read over a window says how things
-  // stand; against the window before it says which way they are going.
-  const before = single && first && src.timeField && opts.range ? previousRange(opts.range) : null;
+  // stand; against the window before it says which way they are going. A
+  // widget with its own period ("today") is compared with the one before
+  // ("yesterday") when the page sets no range.
+  const own = !opts.range && src.window ? priorWindow(src.window) : null;
+  const before = single && first && src.timeField
+    ? (opts.range ? previousRange(opts.range) : own ? { from: own.start.toISOString(), to: own.end.toISOString() } : null)
+    : null;
   if (!before) return { rows, value };
   const prior = await resolveQuery({
     name: `${widget.id}:previous`, entity: src.entity, op: "query",

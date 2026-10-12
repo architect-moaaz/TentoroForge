@@ -1763,6 +1763,9 @@ export type QuerySource = {
   dimensions?: QueryDimension[];
   filter?: Record<string, unknown>;
   timeField?: string;
+  /** The period the widget always reads on `timeField` — "today", "week",
+   *  "month", "last_7_days", "last_30_days", "year". Applied with `range`. */
+  window?: string;
   range?: { from?: string | Date | null; to?: string | Date | null };
   sort?: { by: string; order?: "asc" | "desc" };
   limit?: number;
@@ -1876,6 +1879,10 @@ export async function resolveQuery(
     if (from) conds.push(gte(cols[timeField], from));
     if (to) conds.push(lt(cols[timeField], to));
   }
+  // THE WIDGET'S OWN PERIOD, whatever range the page has: "Entries Logged
+  // Today" counted every drink ever logged without it (m1dck85j).
+  const windowFrom = timeField ? windowStart(source.window) : null;
+  if (windowFrom) conds.push(gte(cols[timeField!], windowFrom));
 
   // Sort: an explicit measure key or dimension field; else chronological on a
   // bucketed axis; else the first measure, largest first (a ranking).

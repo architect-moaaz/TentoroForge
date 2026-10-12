@@ -301,6 +301,14 @@ console.log("filters, a date range and top N");
     range: { from: "2026-02-01", to: "2026-03-01" },
   }, admin);
   eqJson(feb, [{ revenue: 1299 }], "the range narrows the time field, half-open");
+  // A WIDGET ABOUT TODAY COUNTS TODAY: AquaTrack's "Entries Logged Today"
+  // counted every drink ever logged (m1dck85j). None of these orders is today's.
+  const all = await engine.resolveQuery({ entity: "orders", op: "query", measures: [count], timeField: "placedAt" }, admin);
+  const today = await engine.resolveQuery({ entity: "orders", op: "query", measures: [count], timeField: "placedAt", window: "today" }, admin);
+  ok((all[0] as any).orders > 0 && (today[0] as any).orders === 0, "a widget's own period keeps only that period's rows");
+  const both = await engine.resolveQuery({ entity: "orders", op: "query", measures: [revenue], timeField: "placedAt",
+    window: "year", range: { from: "2026-02-01", to: "2026-03-01" } }, admin);
+  ok(both.length === 1, "a period and a page's range apply together");
   const top = await engine.resolveQuery({
     entity: "orders", op: "query", measures: [revenue], dimensions: [{ field: "region" }], limit: 2,
   }, admin);

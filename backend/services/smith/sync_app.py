@@ -75,6 +75,8 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     # They were left off this list, so a fix to the audit chain never reached
     # Data Collector 4: Smith patched its old copy instead (60v142ju, 2026-10-12).
     ("audit.ts", "src/lib/audit.ts"),
+    # The periods a widget reads (`window`) and a metric compares against.
+    ("data-engine/aggregate-window.ts", "src/lib/data-engine/aggregate-window.ts"),
     ("sensitive-crypto.ts", "src/lib/sensitive-crypto.ts"),
     ("push.ts", "src/lib/push.ts"),
     ("tenancy.ts", "src/lib/tenancy.ts"),

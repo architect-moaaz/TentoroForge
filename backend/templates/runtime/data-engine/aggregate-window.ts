@@ -16,6 +16,10 @@ export function windowStart(window?: string): Date | null {
   if (window === "today") return d;
   if (window === "week") { d.setDate(d.getDate() - d.getDay()); return d; }
   if (window === "month") { d.setDate(1); return d; }
+  // Rolling periods include today: the last 7 days are today and the 6 before.
+  if (window === "last_7_days") { d.setDate(d.getDate() - 6); return d; }
+  if (window === "last_30_days") { d.setDate(d.getDate() - 29); return d; }
+  if (window === "year") { d.setMonth(0, 1); return d; }
   return null;
 }
 
@@ -31,8 +35,10 @@ export function priorWindow(window?: string): { start: Date; end: Date } | null 
   if (!end) return null;
   const start = new Date(end);
   if (window === "today") start.setDate(start.getDate() - 1);
-  else if (window === "week") start.setDate(start.getDate() - 7);
+  else if (window === "week" || window === "last_7_days") start.setDate(start.getDate() - 7);
   else if (window === "month") start.setMonth(start.getMonth() - 1);
+  else if (window === "last_30_days") start.setDate(start.getDate() - 30);
+  else if (window === "year") start.setFullYear(start.getFullYear() - 1);
   else return null;
   return { start, end };
 }

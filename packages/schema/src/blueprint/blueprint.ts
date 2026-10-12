@@ -1539,6 +1539,14 @@ export const QuerySource = z.object({
   /** The date column a dashboard's date range narrows. Defaults to the
    *  bucketed dimension when there is one. */
   timeField: z.string().optional(),
+  /**
+   * The period this widget always reads on `timeField`, counted back from
+   * now: a tile that says "today" is `window: "today"`. Without it a query
+   * covers every record there is, narrowed only by a page's date range —
+   * AquaTrack's "Entries Logged Today" counted every drink ever logged, and
+   * Today's Log showed 7 entries above a list of none (m1dck85j, 2026-10-12).
+   */
+  window: z.enum(["today", "week", "month", "last_7_days", "last_30_days", "year"]).optional(),
   /** A measure key or a dimension field; the default is chronological for a
    *  bucketed axis and the first measure, largest first, otherwise. */
   sort: z.object({
