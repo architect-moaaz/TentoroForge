@@ -33,6 +33,7 @@ const EVENTS = [
   { type: "text", t: 10, content: "Let me check. " },
   { type: "model_call", t: 3000, n: 1, ms: 2990, inputTokens: 5000, outputTokens: 80, messages: 1, toolsRequested: ["get_ticket", "update_ticket"] },
   { type: "tool_call", t: 3001, id: "c1", tool: "get_ticket", input: { id: "1" } },
+  { type: "app_call", t: 3100, kind: "request", label: "/api/data/tickets/1", method: "GET", status: 404, ms: 90, ok: false, error: "Not found" },
   { type: "tool_result", t: 3300, id: "c1", tool: "get_ticket", ok: true, result: { data: [{ id: "abc", subject: "Wrong colour", status: "open" }, { id: "def", subject: "Late", status: "open" }] }, chars: 120, cut: false },
   { type: "tool_call", t: 3301, id: "c2", tool: "update_ticket", input: { id: "abc", data: { status: "closed" } } },
   { type: "tool_faked", t: 3302, tool: "update_ticket", reason: "it changes data" },
@@ -154,6 +155,11 @@ describe("AgentLiveRun", () => {
     expect(tools[0].textContent).toContain('"id": "1"');
     expect(tools[0].querySelector('[data-testid="live-problems"]')?.textContent).toContain("may have been made up");
     expect(tools[0].querySelector("table")?.textContent).toContain("Wrong colour");
+    const calls = tools[0].querySelector('[data-testid="live-calls"]')!.textContent!;
+    expect(calls).toContain("GET /api/data/tickets/1");
+    expect(calls).toContain("404");
+    expect(calls).toContain("Not found");
+    expect(container.querySelector('[data-testid="live-no-tools"]')).toBeNull();
     expect(tools[1].textContent).toContain("not run");
     expect(tools[1].textContent).toContain("it changes data");
     expect(tools[1].querySelector('[data-testid="live-problems"]')).toBeNull();
@@ -161,6 +167,31 @@ describe("AgentLiveRun", () => {
     expect(container.querySelector('[data-testid="live-answer"]')?.textContent).toContain("I would close it.");
     expect(container.querySelector('[data-testid="live-totals"]')?.textContent).toContain("2 model calls");
     expect(container.querySelector('[data-testid="live-totals"]')?.textContent).toContain("10,400 tokens in");
+  });
+
+  it("says plainly when no tool was used, and does not show the same words twice", async () => {
+    const WORDS = "Haha, I wish! Here is what I can do.";
+    apiGet.mockResolvedValue(STATUS_OK);
+    fetchMock.mockResolvedValue(sse([
+      EVENTS[0],
+      { type: "text", t: 10, content: WORDS },
+      { type: "model_call", t: 3400, n: 1, ms: 3390, inputTokens: 5419, outputTokens: 133, messages: 3, toolsRequested: [] },
+      { type: "done", t: 3401, conversationId: "conv-1" },
+    ]));
+    await mount();
+    await click(button("Connect"));
+    await wait();
+    await type(el("Message"), "can you make me a coffee?");
+    await click(el("Send"));
+    await wait(60);
+    const note = container.querySelector('[data-testid="live-no-tools"]')!;
+    expect(note.textContent).toContain("No tools were used.");
+    expect(note.textContent).toContain("answered from its instructions alone");
+    expect(note.textContent).toContain("get_ticket");
+    expect(container.querySelectorAll('[data-testid="live-tool"]')).toHaveLength(0);
+    expect((text().match(/Haha, I wish!/g) ?? []).length).toBe(1);
+    expect(container.querySelector('[data-testid="live-model"]')?.textContent).toContain("Its words are below.");
+    expect(container.querySelector('[data-testid="live-answer"]')?.textContent).toContain(WORDS);
   });
 
   it("opens the instructions and the tools the AI was given", async () => {

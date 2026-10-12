@@ -12,7 +12,7 @@ import { installHarness, ok, eqJson, done } from "./_harness.mts";
 
 installHarness();
 
-const { debugDeps, describeAgent, sameSecret, sessionStore, wireResult, MAX_RESULT_WIRE_CHARS } = await import("../agents/debug.ts");
+const { debugDeps, describeAgent, instrumentIO, sameSecret, sessionStore, wireResult, MAX_RESULT_WIRE_CHARS } = await import("../agents/debug.ts");
 const { changesData } = await import("../agents/confirm.ts");
 const { runAgent } = await import("../agents/runtime.ts");
 const { memoryStore } = await import("../agents/memory.ts");
@@ -152,6 +152,47 @@ console.log("a handoff tool is never run for real in a test unless allowed");
   await runAgent(cfg, { message: "a person please", conversationId: null, user, cookie: "", origin: "" }, debugDeps(base, (e) => extra.push(e), { allowChanges: false }), () => {});
   eqJson(ran, [], "no handoff was created");
   ok(/hand the conversation to a person/.test(extra.find((e) => e.type === "tool_faked").reason), "and it says why");
+}
+
+console.log("what the tools did in the app is reported, with the real method, route and status");
+{
+  const sent: any[] = [];
+  const base: any = {
+    async fetchInternal(path: string, init: any) {
+      init.onResponse?.(path.includes("missing") ? 404 : 200);
+      if (path.includes("missing")) throw new Error("Not found");
+      return { data: [] };
+    },
+    async triggerWorkflow() { return { status: "completed" }; },
+    async callMcp() { return "ok"; },
+    async runAi() { return { label: "x" }; },
+  };
+  const io = instrumentIO(base, (e) => sent.push(e));
+
+  eqJson(await io.fetchInternal("/api/data/tickets", { method: "GET", query: { status: "open", limit: 1 } }, {} as any), { data: [] }, "the answer passes through untouched");
+  const get = sent.at(-1);
+  eqJson([get.type, get.kind, get.method, get.label, get.status, get.ok], ["app_call", "request", "GET", "/api/data/tickets", 200, true], "a read: its method, route and status");
+  eqJson(get.query, { status: "open", limit: 1 }, "with the filters it sent");
+  ok(!("body" in get) && typeof get.ms === "number", "no body for a read, and its time");
+
+  await io.fetchInternal("/api/data/tickets/t1", { method: "PUT", body: { data: { status: "closed" } } }, {} as any);
+  eqJson(sent.at(-1).body, { data: { status: "closed" } }, "a change shows what was sent");
+  eqJson(sent.at(-1).method, "PUT", "and its method");
+
+  let threw = false;
+  try { await io.fetchInternal("/api/data/missing", { method: "GET" }, {} as any); } catch { threw = true; }
+  ok(threw, "a failure still fails the tool");
+  eqJson([sent.at(-1).ok, sent.at(-1).status, sent.at(-1).error], [false, 404, "Not found"], "and is shown with its status and why");
+
+  await io.triggerWorkflow("assign_ticket", { id: "t1" }, null);
+  eqJson([sent.at(-1).kind, sent.at(-1).label, sent.at(-1).body], ["workflow", "assign_ticket", { id: "t1" }], "a workflow, by name, with its input");
+  await io.callMcp("srv", "search", { q: "x" });
+  eqJson([sent.at(-1).kind, sent.at(-1).label], ["mcp", "srv/search"], "an MCP tool");
+  await io.runAi("classify", {}, { input: "x" }, null);
+  eqJson([sent.at(-1).kind, sent.at(-1).label], ["ai", "classify"], "an AI action");
+
+  await io.fetchInternal("/api/data/x", { method: "POST", body: { blob: "y".repeat(5000) } }, {} as any);
+  ok(String(sent.at(-1).body).length <= 2002, "a huge body is cut for the screen");
 }
 
 done("the builder's live run");
