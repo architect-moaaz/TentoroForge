@@ -48,6 +48,19 @@ export type ModelStep = {
   said: string;
 };
 
+/** What a tool did in the app: a request to one of its routes (real method, path and status), a workflow, ... */
+export interface AppCall {
+  kind: "request" | "workflow" | "mcp" | "ai";
+  label: string;
+  method?: string;
+  query?: Record<string, unknown>;
+  body?: unknown;
+  status?: number;
+  ms: number;
+  ok: boolean;
+  error?: string;
+}
+
 export type ToolStep = {
   kind: "tool";
   id: string;
@@ -63,6 +76,8 @@ export type ToolStep = {
   ms?: number;
   /** Why a tool that changes data was not run. */
   notRunReason?: string;
+  /** What the tool did in the app while it ran. */
+  calls: AppCall[];
 };
 
 export type Step = ModelStep | ToolStep;
@@ -234,8 +249,16 @@ export function applyEvent(run: LiveRun, e: LiveEvent): LiveRun {
         input: e.input,
         status: "running",
         problems: checkInput(info, e.tool, e.input, run.seen),
+        calls: [],
       };
       return { ...run, steps: [...run.steps, step], totals: { ...run.totals, toolCalls: run.totals.toolCalls + 1 } };
+    }
+
+    case "app_call": {
+      // Arrives while its tool is still running: the newest running step.
+      const target = [...run.steps].reverse().find((s): s is ToolStep => s.kind === "tool" && s.status === "running");
+      const { type: _t, t: _at, ...call } = e;
+      return target ? withTool(run, target.id, (s) => ({ ...s, calls: [...s.calls, call as AppCall] })) : run;
     }
 
     case "tool_faked": {

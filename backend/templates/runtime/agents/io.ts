@@ -84,6 +84,7 @@ async function fetchInternal(path: string, init: FetchInit, ctx: ToolContext): P
     },
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
   });
+  init.onResponse?.(res.status);
   const raw = await res.text();
   let body: any = raw;
   try { body = raw ? JSON.parse(raw) : null; } catch { /* leave as text */ }
@@ -169,7 +170,7 @@ export const toolIO: ToolIO = {
 const limiter = new RateLimiter();
 
 /** The dependencies a chat request runs with. */
-export async function realDeps(store: AgentDeps["store"]): Promise<AgentDeps> {
+export async function realDeps(store: AgentDeps["store"], io: ToolIO = toolIO): Promise<AgentDeps> {
   let evalExpression: AgentDeps["evalExpression"];
   try {
     const feel: any = await import("@/lib/feel-lite");
@@ -196,5 +197,5 @@ export async function realDeps(store: AgentDeps["store"]): Promise<AgentDeps> {
   } catch {
     /* no usage store installed */
   }
-  return { callModel, runTool: createToolRunner(toolIO, limiter), store, evalExpression, handoffs, usage };
+  return { callModel, runTool: createToolRunner(io, limiter), store, evalExpression, handoffs, usage };
 }

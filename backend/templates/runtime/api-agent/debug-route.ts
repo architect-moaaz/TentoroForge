@@ -16,8 +16,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { AGENTS } from "@/agents/registry";
 import { db } from "@/db";
-import { debugDeps, describeAgent, sameSecret, sessionStore, wireResult, type DebugEvent } from "@/lib/agents/debug";
-import { realDeps } from "@/lib/agents/io";
+import { debugDeps, describeAgent, instrumentIO, sameSecret, sessionStore, wireResult, type DebugEvent } from "@/lib/agents/debug";
+import { realDeps, toolIO } from "@/lib/agents/io";
 import { runAgent } from "@/lib/agents/runtime";
 import type { AgentEvent, AgentRuntimeConfig } from "@/lib/agents/types";
 import { sql } from "drizzle-orm";
@@ -161,7 +161,7 @@ export async function POST(req: Request): Promise<Response> {
           allowChanges,
           draft: !!draft,
         });
-        const deps = debugDeps(await realDeps(store), send, { allowChanges });
+        const deps = debugDeps(await realDeps(store, instrumentIO(toolIO, send)), send, { allowChanges });
         await runAgent(
           config,
           {

@@ -268,7 +268,24 @@ export function AgentLiveRun({ projectId, agentId, agentName, nodes }: Props) {
 
         {run.agent && <GivenCard agent={run.agent} run={run} />}
 
-        {run.steps.map((s, i) => (s.kind === "model" ? <ModelCard key={i} step={s} /> : <ToolCard key={i} step={s} />))}
+        {run.steps.map((s, i) =>
+          s.kind === "model" ? (
+            <ModelCard key={i} step={s} last={i === run.steps.length - 1 && run.status === "done" && run.answer.trim() !== ""} />
+          ) : (
+            <ToolCard key={i} step={s} />
+          ),
+        )}
+
+        {(run.status === "done" || run.status === "blocked") && run.totals.toolCalls === 0 && run.agent && (
+          <div className="rounded border border-slate-300 bg-slate-50 p-2 text-[11px]" data-testid="live-no-tools">
+            <p className="font-semibold">No tools were used.</p>
+            <p className="text-muted-foreground">
+              It answered from its instructions alone, so nothing was looked up or changed in the app. If you expected a call, it could have used:{" "}
+              <span className="font-mono">{run.agent.tools.slice(0, 14).map((t) => t.name).join(", ")}</span>
+              {run.agent.tools.length > 14 ? ` and ${run.agent.tools.length - 14} more` : ""}. A tool's description is what the AI goes by when it chooses.
+            </p>
+          </div>
+        )}
 
         {running && (
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -357,7 +374,7 @@ function GivenCard({ agent, run }: { agent: AgentInfo; run: LiveRun }) {
   );
 }
 
-function ModelCard({ step }: { step: ModelStep }) {
+function ModelCard({ step, last }: { step: ModelStep; last: boolean }) {
   return (
     <div className="rounded border border-purple-200 bg-purple-50/50 p-2" data-testid="live-model">
       <div className="flex flex-wrap items-center gap-2">
@@ -367,14 +384,14 @@ function ModelCard({ step }: { step: ModelStep }) {
           {num(step.inputTokens)} tokens in · {num(step.outputTokens)} out · given {step.messages} {step.messages === 1 ? "message" : "messages"}
         </span>
       </div>
-      {step.said && <p className="mt-1 whitespace-pre-wrap text-[11px] italic text-purple-900">“{step.said}”</p>}
+      {step.said && !last && <p className="mt-1 whitespace-pre-wrap text-[11px] italic text-purple-900">“{step.said}”</p>}
       <p className="mt-1 text-[10px] text-muted-foreground">
         {step.toolsRequested.length ? (
           <>
             It decided to use: <span className="font-mono">{step.toolsRequested.join(", ")}</span>
           </>
         ) : (
-          "It had what it needed and answered."
+          last ? "It had what it needed and answered. Its words are below." : "It had what it needed and answered."
         )}
       </p>
     </div>
@@ -425,6 +442,28 @@ function ToolCard({ step }: { step: ToolStep }) {
         <p className="mt-1 text-[10px] text-amber-800">The app is holding this change until the person agrees. Reply "yes" in this conversation to release it.</p>
       )}
       {step.error && <p className="mt-1 text-[10px] text-red-700">{step.error}</p>}
+
+      {step.calls.length > 0 && (
+        <>
+          <p className="mt-1 text-[10px] font-semibold uppercase text-muted-foreground">What it did in the app</p>
+          <ul className="space-y-1" data-testid="live-calls">
+            {step.calls.map((c, i) => (
+              <li key={i} className="rounded bg-white p-1.5 text-[10px]">
+                <span className="font-mono">
+                  <span className="font-semibold">{c.kind === "request" ? c.method : c.kind}</span> {c.label}
+                  {c.query ? `?${new URLSearchParams(Object.entries(c.query).map(([k, v]) => [k, typeof v === "object" ? JSON.stringify(v) : String(v)])).toString()}` : ""}
+                </span>{" "}
+                <span className={c.ok ? "text-green-700" : "text-red-700"}>
+                  {c.status !== undefined ? c.status : c.ok ? "done" : "failed"}
+                </span>{" "}
+                <span className="text-muted-foreground">{secs(c.ms)}</span>
+                {c.error && <span className="block text-red-700">{c.error}</span>}
+                {c.body !== undefined && <pre className="mt-0.5 max-h-24 overflow-auto text-[9px] text-muted-foreground">{typeof c.body === "string" ? c.body : JSON.stringify(c.body, null, 2)}</pre>}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
 
       {step.status !== "running" && step.result !== undefined && step.result !== null && (
         <>

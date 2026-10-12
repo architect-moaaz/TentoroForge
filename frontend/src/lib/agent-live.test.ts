@@ -98,6 +98,25 @@ describe("the run, step by step", () => {
     expect(held.steps[0]).toMatchObject({ status: "held" });
   });
 
+  it("attaches what a tool did in the app to that tool, in order, with the real method and status", () => {
+    const run = play([
+      start,
+      { type: "tool_call", t: 1, id: "c1", tool: "get_ticket", input: { id: "t" } },
+      { type: "app_call", t: 2, kind: "request", label: "/api/data/tickets/t", method: "GET", status: 200, ms: 120, ok: true },
+      { type: "app_call", t: 3, kind: "request", label: "/api/data/users/u", method: "GET", status: 403, ms: 30, ok: false, error: "Not allowed" },
+      { type: "tool_result", t: 4, id: "c1", tool: "get_ticket", ok: true, result: {} },
+    ], beginRun(emptyRun(), "t"));
+    const calls = (run.steps[0] as any).calls;
+    expect(calls.map((c: any) => [c.method, c.label, c.status, c.ok])).toEqual([["GET", "/api/data/tickets/t", 200, true], ["GET", "/api/data/users/u", 403, false]]);
+    expect(calls[1].error).toBe("Not allowed");
+    expect(calls[0]).not.toHaveProperty("type");
+    expect(calls[0]).not.toHaveProperty("t");
+  });
+
+  it("ignores a call that belongs to no running tool", () => {
+    expect(play([start, { type: "app_call", t: 1, kind: "request", label: "/x", method: "GET", ms: 1, ok: true }]).steps).toEqual([]);
+  });
+
   it("marks a failed tool with its error", () => {
     const run = play([
       start,

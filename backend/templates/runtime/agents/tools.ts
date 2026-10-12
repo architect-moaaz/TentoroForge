@@ -195,6 +195,8 @@ export interface FetchInit {
   method: string;
   query?: Record<string, unknown>;
   body?: unknown;
+  /** Told the HTTP status as soon as the app answers (the builder's live run shows it). */
+  onResponse?: (status: number) => void;
 }
 
 export interface ToolIO {
