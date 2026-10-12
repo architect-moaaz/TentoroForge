@@ -449,19 +449,31 @@ def project_account(doc: dict, app_root: str | Path) -> dict[str, Any]:
 SIGN_IN_FIRST = "Please sign in first — you need an account to do this."
 
 
-def guard_nodes(doc: dict, workflow: dict) -> list[tuple[dict, dict]]:
-    """``[(query config, rule)]`` for each prerequisite gating `workflow`."""
+def guard_roles(doc: dict, rule: dict) -> list[str]:
+    """The role NAMES a prerequisite asks the signed-in person to hold — the
+    session carries the name, the definition the id."""
+    names = {str(r.get("id")): str(r.get("name")) for r in _live(doc.get("roles")) if r.get("name")}
+    return [names.get(str(r), str(r)) for r in (rule.get("requires") or {}).get("roles") or []]
+
+
+def guard_nodes(doc: dict, workflow: dict) -> list[tuple[dict | None, dict]]:
+    """``[(query config or None, rule)]`` for each prerequisite gating
+    `workflow`: the query for the record that satisfies it, or None when the
+    rule asks only for a role (`guard_roles`)."""
     ents = {str(e.get("id")): e for e in _live((doc.get("data") or {}).get("entities"))}
-    out = []
+    out: list[tuple[dict | None, dict]] = []
     for rule in prerequisites(doc):
         if str(workflow.get("id")) not in [str(g) for g in rule.get("gates") or []]:
             continue
         req = rule.get("requires") or {}
         ent = ents.get(str(req.get("entity") or ""))
-        if ent is None or not req.get("account"):
+        query = None
+        if ent is not None and req.get("account"):
+            where = {str(req["account"]): "$user.id", **{str(k): v for k, v in (req.get("where") or {}).items()}}
+            query = {"actionType": "db_query", "table": ent.get("table"), "where": where}
+        if query is None and not guard_roles(doc, rule):
             continue
-        where = {str(req["account"]): "$user.id", **{str(k): v for k, v in (req.get("where") or {}).items()}}
-        out.append(({"actionType": "db_query", "table": ent.get("table"), "where": where}, rule))
+        out.append((query, rule))
     return out
 
 
@@ -515,20 +527,31 @@ def guard_workflow(doc: dict, workflow: dict, nodes: list[dict], edges: list[dic
     for i, query, rule in guards:
         rid = rid_of(i, rule)
         q, c, stop = f"prereq_{rid}", f"prereq_{rid}_met", f"prereq_{rid}_refused"
-        nodes.append(make_node(q, "action", query, f"Check: {rule.get('name') or 'prerequisite'}"))
-        nodes.append(make_node(c, "condition", {"expression": f"{q}.count > 0"},
-                               f"Has {rule.get('name') or 'the prerequisite'}?"))
         nodes.append(make_node(stop, "end", {"refused": True,
                                              "message": rule.get("message") or rule.get("statement") or
                                              "This cannot be done yet."}, "Refused: prerequisite not met"))
-        edge(prev, q, "then" if prev != "trigger" else "default")
-        edge(q, c)
-        edge(c, stop, "else")
-        prev = c
+        roles = guard_roles(doc, rule)
+        if roles:
+            # WHO THE PERSON IS, read off the session: one condition, no lookup.
+            r = q if query is None else f"prereq_{rid}_role"
+            listed = ", ".join(json.dumps(x) for x in roles)
+            nodes.append(make_node(r, "condition", {"expression": f"user.role in [{listed}]"},
+                                   f"Holds a role {rule.get('name') or 'the prerequisite'} allows?"))
+            edge(prev, r, "then" if prev != "trigger" else "default")
+            edge(r, stop, "else")
+            prev = r
+        if query is not None:
+            nodes.append(make_node(q, "action", query, f"Check: {rule.get('name') or 'prerequisite'}"))
+            nodes.append(make_node(c, "condition", {"expression": f"{q}.count > 0"},
+                                   f"Has {rule.get('name') or 'the prerequisite'}?"))
+            edge(prev, q, "then" if prev != "trigger" else "default")
+            edge(q, c)
+            edge(c, stop, "else")
+            prev = c
     for t in targets:
         edge(prev, t, "then" if prev != "trigger" else "default")
 
 
 __all__ = ["AUTH_PAGES", "account_entity", "admin_role", "account_fields", "account_initial", "after_signup_route", "auth_page_bodies",
-           "guard_workflow", "has_sign_in", "home_route", "roles_without_a_door", "is_auth_page", "prerequisites",
+           "guard_roles", "guard_workflow", "has_sign_in", "home_route", "roles_without_a_door", "is_auth_page", "prerequisites",
            "project_account", "signup_role"]

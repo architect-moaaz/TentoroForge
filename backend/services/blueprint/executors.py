@@ -1944,7 +1944,12 @@ NODE_TASKS: dict[str, str] = {
         "`{\"status\": \"approved\"}`), `message` (what the person is told, "
         "saying what to do first) and `page` (the page where they do it; a "
         "new account is sent there first). Every gated workflow then starts "
-        "by checking it and refuses with the message when it is not met."
+        "by checking it and refuses with the message when it is not met. "
+        "When the gate is about who the person IS rather than what they have "
+        "done — only staff, only administrators — give `requires.roles`, the "
+        "roles that may pass, and no record: the role is read off the "
+        "signed-in person. A record's own `id` is an account's id only when "
+        "that record is the one people sign in as."
     ),
     "integrations": (
         "Declare each outside system this application talks to, from the "

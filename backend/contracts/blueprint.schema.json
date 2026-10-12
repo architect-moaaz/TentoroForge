@@ -2381,7 +2381,8 @@
             "type": "object",
             "properties": {
               "entity": {
-                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                "description": "Stable ENTITY identifier (§12)"
               },
               "account": {
                 "type": "string"
@@ -2396,12 +2397,14 @@
                   ]
                 },
                 "default": {}
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/properties/roles/items/properties/id"
+                }
               }
             },
-            "required": [
-              "entity",
-              "account"
-            ],
             "additionalProperties": false
           },
           "message": {

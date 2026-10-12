@@ -99,17 +99,23 @@ def _checked_first(doc: dict, w: dict) -> list[str]:
     processes' steps twice; the rule wrote it back each time, and every staff
     process still refused everyone (60v142ju, 2026-10-12)."""
     try:
-        from services.blueprint.account_model import guard_nodes
+        from services.blueprint.account_model import guard_nodes, guard_roles
     except Exception:  # noqa: BLE001 — an older tree without the account model
         return []
     ents = {str(e.get("table")): e for e in _live((doc.get("data") or {}).get("entities"))}
     out: list[str] = []
     for query, rule in guard_nodes(doc, w):
-        ent = ents.get(str(query.get("table"))) or {}
         req = rule.get("requires") or {}
-        extra = {k: v for k, v in (req.get("where") or {}).items()}
-        cond = f"the signed-in person must have a record in {ent.get('name') or query.get('table')} whose " \
-               f"`{req.get('account')}` is their own account id" + (f" and {extra}" if extra else "")
+        parts = []
+        roles = guard_roles(doc, rule)
+        if roles:
+            parts.append(f"the signed-in person must hold one of the roles {', '.join(roles)}")
+        if query is not None:
+            ent = ents.get(str(query.get("table"))) or {}
+            extra = {k: v for k, v in (req.get("where") or {}).items()}
+            parts.append(f"the signed-in person must have a record in {ent.get('name') or query.get('table')} whose "
+                         f"`{req.get('account')}` is their own account id" + (f" and {extra}" if extra else ""))
+        cond = " and ".join(parts)
         said = str(rule.get("message") or "").strip()
         out.append(f"{cond}, else it refuses" + (f" with \"{said}\"" if said else "")
                    + f". Written in by the rule **{rule.get('name') or rule.get('id')}** every time the "

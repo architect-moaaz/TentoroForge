@@ -2022,12 +2022,20 @@ export const RuleAction = z.object({
  * What satisfies a prerequisite: a row of `entity` belonging to the acting
  * account (`account` names its field that holds the account's id), matching
  * every `where` value — "a KycVerification of this member with status
- * approved".
+ * approved" — and/or the signed-in person holding one of `roles`.
+ *
+ * `roles` is for a gate that is about who the person IS, not what they have
+ * done: staff only, administrators only. Data Collector 4's "submission data
+ * is admin-only" could only be written as a record to look up, so it demanded
+ * an AdminUser whose id was the sign-in account's id — a record no account
+ * ever had — and every staff process refused every member of staff
+ * (60v142ju, 2026-10-12). Both given: both must hold.
  */
 export const PrerequisiteRequirement = z.object({
-  entity: EntityId,
-  account: z.string(),
+  entity: EntityId.optional(),
+  account: z.string().optional(),
   where: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
+  roles: z.array(RoleId).optional(),
 });
 
 export const BusinessRule = z.object({
