@@ -188,6 +188,12 @@ def _fn_now(args: list) -> datetime:
     return datetime.now()
 
 
+@_register("today")
+def _fn_today(args: list) -> str:
+    """Today as the calendar shows it where the app runs, as `$today` writes it."""
+    return date.today().isoformat()
+
+
 @_register("duration")
 def _fn_duration(args: list) -> timedelta | None:
     if not args:
@@ -328,12 +334,19 @@ def evaluate(node: ASTNode, ctx: dict) -> Any:
         return True  # Wildcard always matches
 
     if isinstance(node, Identifier):
+        # The clock by the names steps use; a variable of that name still wins.
+        if node.name in ("$today", "$now") and node.name not in ctx:
+            return date.today().isoformat() if node.name == "$today" else \
+                datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
         # Support dotted names stored as a single identifier (e.g., "person.age")
         if "." in node.name:
             parts = node.name.split(".")
             val = ctx
             for part in parts:
-                if isinstance(val, dict):
+                dp = _date_part(val, part)
+                if dp is not _NOT_TIME:
+                    val = dp
+                elif isinstance(val, dict):
                     val = val.get(part)
                 elif isinstance(val, list):
                     # A path on a list is the list of each item's value (FEEL).
@@ -420,6 +433,9 @@ def evaluate(node: ASTNode, ctx: dict) -> Any:
 
     if isinstance(node, MemberExpr):
         obj = evaluate(node.object, ctx)
+        dp = _date_part(obj, node.property)
+        if dp is not _NOT_TIME:
+            return dp
         if isinstance(obj, dict):
             return obj.get(node.property)
         if isinstance(obj, list):
@@ -625,6 +641,22 @@ def _time_arithmetic(op: str, left: Any, right: Any) -> Any:
 
 
 _NOT_TIME = object()
+
+# A DATE'S PARTS, AS FEEL NAMES THEM — `date(d).year`, `logged.month` — in UTC,
+# like the TypeScript engine; weekday is 1 (Monday) to 7 (Sunday). Data
+# Collector 4's reference numbers read each as nothing (60v142ju, 2026-10-12).
+_DATE_PARTS = {"year", "month", "day", "weekday", "hour", "minute", "second"}
+
+
+def _date_part(v: Any, part: str) -> Any:
+    if part not in _DATE_PARTS:
+        return _NOT_TIME
+    m = _as_moment(v)
+    if not m:
+        return _NOT_TIME
+    d = m[0].astimezone(timezone.utc)
+    return {"year": d.year, "month": d.month, "day": d.day, "weekday": d.isoweekday(),
+            "hour": d.hour, "minute": d.minute, "second": d.second}[part]
 
 
 def _eval_binary(op: str, left: Any, right: Any) -> Any:

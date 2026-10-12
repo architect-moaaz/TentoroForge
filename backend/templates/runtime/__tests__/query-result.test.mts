@@ -69,5 +69,17 @@ check("two dates subtract to the time between",
 check("text still joins text",
   evaluateExpression('"REF-" + n', { n: "0001" }), "REF-0001");
 
+// A DATE'S PARTS AND TODAY: Data Collector 4's reference numbers came out
+// "REF--0002" — `$today` was unknown to expressions and `.year` read nothing.
+const ref = evaluateExpression('"REF-" + string(date($today).year) + (if date($today).month < 10 then "0" else "") + string(date($today).month) + (if date($today).day < 10 then "0" else "") + string(date($today).day) + "-0002"', {}) as string;
+check("a reference built from today's date carries the date", /^REF-\d{8}-0002$/.test(ref), true);
+check("a date's parts read as numbers",
+  [evaluateExpression("d.year", { d: "2026-10-12" }), evaluateExpression("date(d).month", { d: "2026-10-12" }),
+   evaluateExpression("d.day", { d: "2026-10-12" }), evaluateExpression("d.weekday", { d: "2026-10-12" })], [2026, 10, 12, 1]);
+check("a field called year on a record is still that field",
+  evaluateExpression("car.year", { car: { year: 1999 } }), 1999);
+check("a variable named $today wins over the clock",
+  evaluateExpression("$today", { $today: "2001-01-01" }), "2001-01-01");
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

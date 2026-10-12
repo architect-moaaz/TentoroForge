@@ -365,5 +365,64 @@
       "logged": "2026-10-12"
     },
     "expected": true
+  },
+  {
+    "expr": "date(d).year",
+    "data": {
+      "d": "2026-10-12"
+    },
+    "expected": 2026
+  },
+  {
+    "expr": "d.month",
+    "data": {
+      "d": "2026-10-12"
+    },
+    "expected": 10
+  },
+  {
+    "expr": "d.day",
+    "data": {
+      "d": "2026-10-12"
+    },
+    "expected": 12
+  },
+  {
+    "expr": "d.weekday",
+    "data": {
+      "d": "2026-10-12"
+    },
+    "expected": 1
+  },
+  {
+    "expr": "date and time(\"2026-10-12T08:30:00Z\").hour",
+    "data": {},
+    "expected": 8
+  },
+  {
+    "expr": "\"REF-\" + string(date(d).year)",
+    "data": {
+      "d": "2026-10-12"
+    },
+    "expected": "REF-2026"
+  },
+  {
+    "expr": "p.name",
+    "data": {
+      "p": {
+        "name": "x"
+      }
+    },
+    "expected": "x"
+  },
+  {
+    "expr": "today() = $today",
+    "data": {},
+    "expected": true
+  },
+  {
+    "expr": "date($today).year > 2000",
+    "data": {},
+    "expected": true
   }
 ]

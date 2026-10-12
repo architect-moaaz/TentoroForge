@@ -237,8 +237,10 @@ def tokenize(input_str: str) -> List[Token]:
             continue
 
         # Identifiers and keywords
-        if ch.isalpha() or ch == "_":
+        if ch.isalpha() or ch == "_" or (ch == "$" and pos + 1 < length and input_str[pos + 1].isalpha()):
             start = pos
+            if ch == "$":
+                pos += 1  # `$today`, `$now`: the clock, by the names steps use
             while pos < length and (input_str[pos].isalnum() or input_str[pos] in ("_", ".")):
                 # Allow dots in identifiers for nested access like "person.age"
                 # But stop if it's a ".." range operator
