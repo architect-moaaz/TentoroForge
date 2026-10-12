@@ -1646,7 +1646,9 @@ export function registerDefaultActions(): void {
       // was verified, read `undefined` off `{rows, count}`, and answered "you
       // must complete identity verification" to a verified member — every
       // member, every time (0l133sp2). The first row's fields ride alongside
-      // `rows`, which keep their own names when a column shares one.
+      // `rows`, which keep their own names when a column shares one — the
+      // first row whenever there is one, the row a template reads too
+      // (`_firstRowFallback`; AquaTrack's three active goals, m1dck85j).
       return queryResult(rows);
     } catch (err) { console.error("[workflow] db_query failed:", err); return { error: String(err), rows: [], count: 0 }; }
   });

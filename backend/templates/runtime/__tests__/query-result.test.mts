@@ -19,8 +19,9 @@ check("one row is readable as the record a condition asks about",
   queryResult([member]), { id: "m1", kycStatus: "verified", rows: [member], count: 1, output: [member] });
 check("no rows is a count of nothing, and no fields to read",
   queryResult([]), { rows: [], count: 0, output: [] });
-check("many rows stay a list — there is no single record to be",
-  queryResult([member, { id: "m2" }]), { rows: [member, { id: "m2" }], count: 2, output: [member, { id: "m2" }] });
+check("many rows stay a list, and the first is readable as the record — as a template reads it",
+  queryResult([member, { id: "m2" }]),
+  { id: "m1", kycStatus: "verified", rows: [member, { id: "m2" }], count: 2, output: [member, { id: "m2" }] });
 check("a column called rows does not shadow the list",
   queryResult([{ id: "r1", rows: "some text" }]),
   { id: "r1", rows: [{ id: "r1", rows: "some text" }], count: 1, output: [{ id: "r1", rows: "some text" }] });
@@ -36,6 +37,14 @@ check("a query with a row is one",
   evaluateExpression("count(check_existing.output) > 0", { check_existing: queryResult([member]) }), true);
 check("count of nothing is none",
   evaluateExpression("count(missing)", {}), 0);
+
+// AQUATRACK'S "SET DAILY GOAL" (m1dck85j): three active goals, and the
+// condition asking whether there was one read `find_active_goal.id` as null.
+const three = queryResult([{ id: "g1" }, { id: "g2" }, { id: "g3" }]);
+check("a condition on a lookup that found several reads the first one's id",
+  evaluateExpression("find_active_goal.id != null", { find_active_goal: three }), true);
+check("and the list is still there to count",
+  evaluateExpression("find_active_goal.rows.length > 0 and count(find_active_goal.rows) = 3", { find_active_goal: three }), true);
 
 // A PATH ON A LIST: F&B's order total `sum(items.subtotal)` was 0.
 check("a field read across a list is each item's value",
