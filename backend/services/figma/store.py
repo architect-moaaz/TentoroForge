@@ -104,6 +104,15 @@ def save(ref: DesignReference, output_dir: str | Path) -> Path:
     return path
 
 
+def forget_coverage(output_dir: str | Path) -> None:
+    """Drop the stored coverage verdict. It judged the design that was connected THEN; a design read
+    again may be another one, and the old verdict would let it through unchecked."""
+    try:
+        (store_dir(output_dir) / "coverage.json").unlink()
+    except OSError:
+        pass
+
+
 def load(source_id: str, output_dir: str | Path) -> DesignReference | None:
     """Read a stored reference back, or ``None`` if it is not there.
 
@@ -126,6 +135,7 @@ def connect(svc: Any, ref: DesignReference, *, name: str = "",
     safe to retry (§103).
     """
     save(ref, svc.output_dir)
+    forget_coverage(svc.output_dir)
     record = source_record(ref, name=name, treat_as=treat_as)
     # WHAT THE SCREENS SHARE, RECORDED AS EVIDENCE (§48). The rail every
     # frame carries says which groups and destinations the designer drew, and

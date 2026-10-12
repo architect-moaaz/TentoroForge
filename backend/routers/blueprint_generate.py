@@ -71,6 +71,7 @@ _advance_state_to_review = _brief_mod.advance_to_review
 #: here until they finish and discard themselves.
 from services import run_registry
 from services.smith import design_language
+from services.smith import figma_gate as ui_figma_gate
 from services.smith import ui_designer
 from services.smith.clarify_brief import (
     company_palette_option as clarify_company_option)
@@ -2139,10 +2140,45 @@ async def smith_chat(
             # organisation's integrations and says only that it did.
             if svc is not None:
                 _history = [(t.role, t.text) for t in req.history if t.text]
+
+                # FIGMA: the link to the design, or the way forward after its coverage check. Both
+                # are recognised only by the turn before them (`figma_gate.link_in` / `choice_in`),
+                # and the token never travels here: the panel stored it before sending the link.
+                _figma_link = ui_figma_gate.link_in(req.message, _history)
+                _figma_choice = "" if _figma_link else ui_figma_gate.choice_in(req.message, _history)
+                if _figma_link or _figma_choice:
+                    if _figma_link or _figma_choice == "update":
+                        emit("message", {"text": "Reading your Figma design and checking it against "
+                                                 "the requirements…", "status": "reported"})
+                    elif _figma_choice == "check":
+                        emit("message", {"text": "Checking your Figma design against the requirements…",
+                                         "status": "reported"})
+                    _figma = ui_figma_gate.handle(svc, output_dir, link=_figma_link, choice=_figma_choice)
+                    emit("message", _figma.message)
+                    if not _figma.proceed:
+                        return {"status": "asked"}
+                    return _run_dag(str(output_dir), app_root, "",
+                                    approved=True, emit=emit,
+                                    app_name=getattr(project, "name", "") or "")
+
                 _designer = ui_designer.answer_in(req.message, _history)
                 _key_saved = (not _designer) and ui_designer.key_saved_in(req.message, _history)
                 if _designer or _key_saved:
                     _said = ui_designer.record(svc, _designer) if _designer else ""
+                    # Figma chosen when a design was already named in the brief: it is connected
+                    # but nobody has checked it against the requirements, so that happens now.
+                    if _designer == ui_designer.FIGMA and ui_figma_gate.unchecked(svc.doc, output_dir):
+                        if _said:
+                            emit("message", {"text": _said})
+                        emit("message", {"text": "Checking your Figma design against the requirements…",
+                                         "status": "reported"})
+                        _figma = ui_figma_gate.handle(svc, output_dir)
+                        emit("message", _figma.message)
+                        if not _figma.proceed:
+                            return {"status": "asked"}
+                        return _run_dag(str(output_dir), app_root, "",
+                                        approved=True, emit=emit,
+                                        app_name=getattr(project, "name", "") or "")
                     _stop = ui_designer.gate(svc.doc, output_dir)
                     if _stop is not None:
                         emit("message", _stop)
@@ -2791,8 +2827,10 @@ def start_build_in_background(loop: Any, project: Any, *, message: str, descript
 
     def background_emit(event: str, data: dict) -> None:
         if event == "message":
+            # `secret` is the key box of a question the build stops to ask (who designs the screens, the
+            # UX Pilot key): dropped here, the question would reach the panel with nothing to type into.
             _remember(loop, project_id, "assistant", str(data.get("text") or ""),
-                      {k: v for k, v in data.items() if k in ("options", "status") and v},
+                      {k: v for k, v in data.items() if k in ("options", "status", "secret") and v},
                       lock=memory_lock)
         run_registry.note(project_id, event, data)
 

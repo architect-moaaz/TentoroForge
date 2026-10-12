@@ -54,7 +54,8 @@
           "type": "string",
           "enum": [
             "forge",
-            "uxpilot"
+            "uxpilot",
+            "figma"
           ]
         },
         "designLanguage": {

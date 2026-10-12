@@ -38,7 +38,8 @@ def test_the_question_names_both_designers_and_the_cost(svc):
     assert "Forge UI Designer" in q and "UX Pilot" in q
     assert "one UX Pilot run draws every screen" in q and "9 UX Pilot credits per screen" in q
     assert "per page" not in q, "it is one run for the application now, not a credit per page"
-    assert list(ud.OPTIONS) == ["Forge UI Designer", "UX Pilot"]
+    assert list(ud.OPTIONS) == ["Forge UI Designer", "UX Pilot", "Figma"]
+    assert "**Figma:**" in q, "a person who already has a design is offered to use it"
     svc.doc["pages"] = [{"id": "PAGE-001", "name": "Tasks", "route": "/tasks", "purpose": "x"}]
     assert "(1 screen)" in ud.question(svc.doc)
 
@@ -76,7 +77,7 @@ def test_recording_writes_the_fact_and_the_citation(svc):
     ud.record(svc, "forge")
     assert len([d for d in svc.doc["decisions"] if "designed by" in d["decision"]]) == 2
     with pytest.raises(ValueError):
-        ud.record(svc, "figma")
+        ud.record(svc, "canva")
 
 
 def test_every_build_passes_the_designer_gate():

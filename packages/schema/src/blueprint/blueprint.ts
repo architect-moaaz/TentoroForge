@@ -42,14 +42,16 @@ import {
 
 /**
  * Who designs the screens: Forge's own composer (A2UI against the component
- * catalog) or UX Pilot, generating each page from its brief.
+ * catalog), UX Pilot generating each page from its brief, or the person's own
+ * design in Figma (each page that has a frame is written from it; a page with
+ * none is Forge's).
  *
- * A closed pair rather than a free string so the page-layouts node can
+ * A closed set rather than a free string so the page-layouts node can
  * dispatch on it without interpretation, and so a value nobody produces
  * cannot be written. `forge` is what every application built before the
  * choice existed was, and is what an unset value means.
  */
-export const UiDesigner = z.enum(["forge", "uxpilot"]);
+export const UiDesigner = z.enum(["forge", "uxpilot", "figma"]);
 
 /**
  * Where this application's design language comes from: the company's own,

@@ -4614,11 +4614,20 @@ def make_executor(
         # edits, not redrawn, so it never asks.
         reference = None
         if not getattr(spec, "brief", ""):
+            from services.figma import react_reference as figma_pages
             from services.uxpilot import generate as uxpilot_pages
 
-            reference, said = uxpilot_pages.reference_for(doc, page, svc.output_dir)
+            # A FRAME A PERSON DREW WINS, as it does for the schema pages: the page that has a
+            # `figmaFrame` stored in a connected design is adapted from that frame, whoever else
+            # was asked. Every other page — no frame, or its frame unreadable — goes on to the
+            # chosen designer exactly as before.
+            reference, said = figma_pages.reference_for(doc, page, svc.output_dir)
             if said:
                 tell(reasoning, said, "step", spec.node)
+            if reference is None:
+                reference, said = uxpilot_pages.reference_for(doc, page, svc.output_dir)
+                if said:
+                    tell(reasoning, said, "step", spec.node)
         # THE PAGE IS LOOKED AT AS IT IS WRITTEN (`page_look`): the reviewer
         # is the page reviewer's tier, and only a client that can see an
         # image can review one.

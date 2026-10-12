@@ -87,6 +87,11 @@ def designer_for(doc: dict, page: dict) -> str:
     app = str(((doc or {}).get("application") or {}).get("uiDesigner") or "").strip()
     if app in ("forge", "uxpilot"):
         return app
+    # FIGMA IS CHOSEN: the frames lead (`figma_pages.reference_for` adapts each page that has one,
+    # before this is asked), and a page with no frame is the Forge designer's. Without this it would
+    # fall through to a platform default meant for applications nobody has chosen for.
+    if app == "figma":
+        return "forge"
     # NOBODY HAS CHOSEN FOR THIS APPLICATION: the platform's default, if one is
     # set. This is how UX Pilot is turned on until Smith asks the question
     # itself (the approval-gate chooser was removed with the schema pages, and
