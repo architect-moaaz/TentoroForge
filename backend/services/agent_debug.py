@@ -97,8 +97,12 @@ async def find_app(secret: str) -> str | None:
         try:
             async with httpx.AsyncClient(timeout=3) as client:
                 r = await client.get(f"{url}/api/agent/debug", headers={HEADER: secret})
-            return url if r.status_code == 200 else None
-        except httpx.HTTPError:
+            if r.status_code != 200:
+                return None
+            # Not just any 200: a web page or another program's JSON is not this project's app.
+            body = r.json()
+            return url if isinstance(body, dict) and isinstance(body.get("agents"), list) else None
+        except (httpx.HTTPError, ValueError):
             return None
 
     found = await asyncio.gather(*(probe(p) for p in _USUAL_PORTS))
@@ -106,30 +110,42 @@ async def find_app(secret: str) -> str | None:
 
 
 async def status(app_url: str, secret: str | None) -> dict[str, Any]:
-    """Whether the live run works against this app, who it can run as, and which agents are installed."""
+    """Whether the running app at this address can be watched: something answers, it is one of this project's apps
+    (it accepts the key), and it is in development. Every way it can fail comes back as a reason in plain words, and
+    when this project's app is running at another address on this computer, that address is offered."""
     url = clean_app_url(app_url)
     if not secret:
         return {"ok": False, "appUrl": url, "reason": "This app has no live-run key yet. Apply the agent once to create it."}
-    headers = {HEADER: secret}
     try:
         async with httpx.AsyncClient(timeout=60) as client:
-            info = await client.get(f"{url}/api/agent/debug", headers=headers)
-            if info.status_code == 404:
-                return await _not_here(url, secret, str(_off()))
-            info.raise_for_status()
+            info = await client.get(f"{url}/api/agent/debug", headers={HEADER: secret})
     except httpx.ConnectError:
-        return await _not_here(url, secret, str(_unreachable(url)))
+        return await _not_here(url, secret, str(_unreachable(url)), said=f"Nothing is running at {url}.")
     except httpx.HTTPError as e:
-        return {"ok": False, "appUrl": url, "reason": f"The app answered with an error: {e}"}
-    return {"ok": True, "appUrl": url, "agents": info.json().get("agents", [])}
+        return await _not_here(url, secret, f"The connection to {url} broke: {e}", said=f"The connection to {url} broke.")
+    if info.status_code == 404:
+        return await _not_here(url, secret, str(_off()), said=f"Nothing at {url} accepted this project's key.")
+    if info.status_code >= 400:
+        said = f"Something at {url} answered with an error ({info.status_code}), so it does not look like one of your apps."
+        return await _not_here(url, secret, said, said=said)
+    try:
+        body = info.json()
+        agents = body.get("agents", []) if isinstance(body, dict) else None
+    except ValueError:
+        agents = None
+    if agents is None:
+        said = f"Something answered at {url}, but it is not one of your apps: it did not answer the way a generated app does."
+        return await _not_here(url, secret, said, said=said)
+    return {"ok": True, "appUrl": url, "agents": agents}
 
 
-async def _not_here(url: str, secret: str, reason: str) -> dict[str, Any]:
-    """The address did not work. If this project's app is running somewhere else on this computer, say where."""
+async def _not_here(url: str, secret: str, reason: str, said: str | None = None) -> dict[str, Any]:
+    """The address did not work. If this project's app is running somewhere else on this computer, say where: `said`
+    is what is true of this address, then where the app is. Otherwise the fuller `reason` stands alone."""
     other = await find_app(secret)
     if other and other.rstrip("/") != url.rstrip("/"):
         return {"ok": False, "appUrl": url, "suggestedUrl": other,
-                "reason": f"Nothing at {url} accepted this project's key, but this project's app is running at {other}."}
+                "reason": f"{said or reason} This project's app is running at {other}."}
     return {"ok": False, "appUrl": url, "reason": reason}
 
 
