@@ -2039,6 +2039,15 @@ NODE_TASKS: dict[str, str] = {
 WITHHELD_FIELDS = frozenset({"id", "decisions"})
 
 
+#: Sections only their own node writes, because they name what earlier nodes
+#: create. The screens step shares its agent with the journeys step and was
+#: told it could write `flows`; it wrote journeys through screens it was
+#: proposing in the same reply, by address, and the journey check refused
+#: every step as "not a screen" (60v142ju, 2026-10-12). Journeys are written
+#: by `app_flows`, once screens have ids.
+_LATER_OWNED: dict[str, set[str]] = {"flows": {"app_flows"}}
+
+
 def writable_shapes(agent: str) -> dict[str, Any]:
     """The contract slice describing what this agent is allowed to produce.
 
@@ -2324,16 +2333,17 @@ def build_prompt(
     spec = DAG[node]
     agent = agent or spec.agent
     cap = capability_for(agent)
+    writes = sorted(s for s in cap.writes if s not in _LATER_OWNED or node in _LATER_OWNED[s])
     system = SYSTEM.format(
         agent=agent,
-        writes="\n".join(f"  - {s}" for s in sorted(cap.writes)) or "  (none)",
+        writes="\n".join(f"  - {s}" for s in writes) or "  (none)",
         reply_rules=(DATA_MODEL_REPLY_RULES if node in SCHEMA_BY_NODE
                      else ENVELOPE_RULES),
         task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns.")
              + reference_hold(doc, node) + integration_adapters(node),
     )
     if inline_shapes:
-        shapes = writable_shapes(agent)
+        shapes = {k: v for k, v in writable_shapes(agent).items() if k in writes}
         if shapes:
             system += SHAPE_ADDENDUM.format(
                 shapes=json.dumps(shapes, indent=2)[:12000]

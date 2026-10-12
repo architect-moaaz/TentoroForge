@@ -407,7 +407,7 @@ def test_an_app_is_caught_up_once_per_platform_version(tmp_path, monkeypatch):
     landing; nothing re-projected it until someone changed something."""
     from services.smith import sync_app
     _built(tmp_path)
-    (tmp_path / "app").mkdir()
+    (tmp_path / "app").mkdir(exist_ok=True)
     (tmp_path / "app" / "package.json").write_text("{}")
     syncs = []
     monkeypatch.setattr(sync_app, "sync", lambda svc, root: syncs.append(root) or

@@ -34,7 +34,7 @@ def test_a_page_that_does_not_compile_is_a_finding_not_a_dead_end(tmp_path, monk
     from services.smith.compose import ComposeError
 
     _repo(tmp_path)
-    (tmp_path / "app").mkdir()
+    (tmp_path / "app").mkdir(exist_ok=True)
     briefs: list[str] = []
 
     def fake_recode(svc, route, *, app_root, request, wanted=(), **kw):
@@ -105,7 +105,7 @@ def test_a_verb_whose_composer_refused_is_a_finding_the_loop_hears(tmp_path, mon
     from services.smith.compose import ComposeError
 
     _repo(tmp_path)
-    (tmp_path / "app").mkdir()
+    (tmp_path / "app").mkdir(exist_ok=True)
     calls: list[str] = []
 
     def fake_recode(svc, route, *, app_root, request, wanted=(), **kw):
@@ -212,7 +212,7 @@ def test_a_data_change_the_apps_database_refuses_is_a_finding(tmp_path, monkeypa
     record all failed (2026-10-02). The push is part of the change."""
     import services.smith.section_change as sc
     from services.blueprint.agent_contract import ArtifactProposal
-    (tmp_path / "app").mkdir()
+    (tmp_path / "app").mkdir(exist_ok=True)
     (tmp_path / "app" / "package.json").write_text("{}")
     entity = lambda image, unique: {"name": "FoodItem", "fields": [
         {"name": "name", "type": "string", "unique": unique}, {"name": image, "type": "image"}]}
@@ -256,7 +256,7 @@ class _FieldSvc:
 
 def _set_up_field(tmp_path, monkeypatch, push):
     svc = _FieldSvc()
-    (tmp_path / "app").mkdir()
+    (tmp_path / "app").mkdir(exist_ok=True)
     (tmp_path / "app" / "package.json").write_text("{}")
     monkeypatch.setattr("services.blueprint.service.BlueprintService.load", classmethod(lambda cls, output_dir: svc))
     monkeypatch.setattr("services.smith.entity_change._project_data", lambda s, root: ["app/src/db/schema/food_item.ts"])

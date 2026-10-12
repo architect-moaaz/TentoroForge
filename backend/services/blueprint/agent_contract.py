@@ -957,6 +957,16 @@ def check_flows(result: "AgentResult", doc: dict | None) -> None:
     proposals = [p for p in result.proposals if p.section == "flows" and isinstance(p.body, dict)]
     if not proposals or not doc:
         return
+    # JOURNEYS THROUGH SCREENS THIS SAME REPLY PROPOSES are premature: the
+    # screens have no ids yet, and journeys are the journeys step's, once
+    # they do. Said as that, not as "not a screen" (60v142ju, 2026-10-12).
+    saved = {str(pg.get("id")) for pg in doc.get("pages") or [] if isinstance(pg, dict)} | \
+            {str(pg.get("route")) for pg in doc.get("pages") or [] if isinstance(pg, dict)}
+    new_pages = [p for p in result.proposals if p.section == "pages" and isinstance(p.body, dict)
+                 and str(p.body.get("route") or "") not in saved and str(p.body.get("id") or "") not in saved]
+    if new_pages:
+        raise InvalidAppFlow("Leave `flows` out of this reply: journeys are planned by their own step once the "
+                             "screens you are proposing exist and have ids. Return the screens without them.")
     problems = flow_findings({**doc, "flows": [p.body for p in proposals]})
     if problems:
         raise InvalidAppFlow("These flows name what the application does not have — mend each step:\n- "
