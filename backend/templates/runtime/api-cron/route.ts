@@ -164,7 +164,8 @@ async function handler(req: Request): Promise<Response> {
   const scheduled = (all as any[]).filter(
     (wf) => isScheduled(wf) && getTriggerContract(wf)?.kind !== "schedule",
   );
-  const now = Date.now();
+  // The tick's own time (`now`, honouring `?at=`), as a number for the sweep.
+  const nowMs = now.getTime();
   const fired: string[] = [];
 
   for (const wf of scheduled) {
@@ -174,7 +175,7 @@ async function handler(req: Request): Promise<Response> {
       const sched = rows[0];
       if (sched && sched.enabled === false) continue;
       const last = sched?.lastRunAt ? new Date(sched.lastRunAt).getTime() : 0;
-      if (now - last < iv) continue;
+      if (nowMs - last < iv) continue;
 
       await triggerWorkflow(wf.id, { scheduledAt: new Date().toISOString() });
       if (sched) {
