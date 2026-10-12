@@ -125,6 +125,16 @@ export interface SecretField {
   placeholder?: string;
   /** The words sent as the next turn once the value is stored. */
   saved: string;
+  /** The submit button's words; "Save key" when absent. */
+  action?: string;
+  /** The value is already stored: ask only for `extra` and store nothing. */
+  skipSave?: boolean;
+  /**
+   * A second, plain (not secret) field asked for with the value — a link, say. What is typed
+   * is sent in the next turn after `saved` (`"<saved>: <typed>"`): it is not a secret, so it
+   * may be part of the conversation, unlike the value above.
+   */
+  extra?: { label: string; placeholder?: string };
 }
 
 /** Something Smith said, in the order it said it. */

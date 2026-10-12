@@ -29,12 +29,22 @@ export function SecretCard({
   const params = useParams<{ orgId?: string }>();
   const orgId = params?.orgId;
   const [value, setValue] = useState("");
+  const [extra, setExtra] = useState("");
   const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState("");
+  const needsExtra = Boolean(field.extra);
+  // `skipSave`: the value is already stored, so only the plain field is asked for.
+  const needsSecret = !field.skipSave;
 
   const save = async () => {
     const typed = value.trim();
-    if (!typed || state === "saving" || state === "saved") return;
+    const typedExtra = extra.trim();
+    if ((needsSecret && !typed) || (needsExtra && !typedExtra) || state === "saving" || state === "saved") return;
+    if (!needsSecret) {
+      setState("saved");
+      onSaved(needsExtra ? `${field.saved}: ${typedExtra}` : field.saved);
+      return;
+    }
     if (!orgId) {
       setState("error");
       setError("Open this project from its organisation to save the key, or add it under Settings → Integrations.");
@@ -71,7 +81,8 @@ export function SecretCard({
       }
       setValue("");
       setState("saved");
-      onSaved(field.saved);
+      // The plain field (a link) goes with the words; the secret above never does.
+      onSaved(needsExtra ? `${field.saved}: ${typedExtra}` : field.saved);
     } catch {
       setState("error");
       setError("Could not reach the server. Try again in a moment.");
@@ -81,7 +92,7 @@ export function SecretCard({
   if (state === "saved") {
     return (
       <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-        <CheckCircle2 className="h-3.5 w-3.5" /> {field.label} saved.
+        <CheckCircle2 className="h-3.5 w-3.5" /> {needsSecret ? `${field.label} saved.` : "Link sent."}
       </p>
     );
   }
@@ -94,28 +105,55 @@ export function SecretCard({
         void save();
       }}
     >
-      <label htmlFor={`secret-${field.key}`} className="flex items-center gap-1.5 text-xs font-medium">
-        <KeyRound className="h-3.5 w-3.5" /> {field.label}
-      </label>
+      {field.extra && (
+        <>
+          <label htmlFor={`extra-${field.key}`} className="flex items-center gap-1.5 text-xs font-medium">
+            {field.extra.label}
+          </label>
+          <input
+            id={`extra-${field.key}`}
+            type="url"
+            autoComplete="off"
+            spellCheck={false}
+            value={extra}
+            disabled={disabled || state === "saving"}
+            onChange={(e) => setExtra(e.target.value)}
+            placeholder={field.extra.placeholder ?? ""}
+            className="h-8 w-full min-w-0 rounded border border-current/25 bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </>
+      )}
+      {needsSecret && (
+        <label htmlFor={`secret-${field.key}`} className="flex items-center gap-1.5 text-xs font-medium">
+          <KeyRound className="h-3.5 w-3.5" /> {field.label}
+        </label>
+      )}
       <div className="flex gap-1.5">
-        <input
-          id={`secret-${field.key}`}
-          type="password"
-          autoComplete="off"
-          spellCheck={false}
-          value={value}
-          disabled={disabled || state === "saving"}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={field.placeholder ?? ""}
-          className="h-8 min-w-0 flex-1 rounded border border-current/25 bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
+        {needsSecret && (
+          <input
+            id={`secret-${field.key}`}
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={value}
+            disabled={disabled || state === "saving"}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={field.placeholder ?? ""}
+            className="h-8 min-w-0 flex-1 rounded border border-current/25 bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        )}
         <button
           type="submit"
-          disabled={disabled || !value.trim() || state === "saving"}
-          className="inline-flex h-8 items-center gap-1.5 rounded bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
+          disabled={
+            disabled ||
+            (needsSecret && !value.trim()) ||
+            (needsExtra && !extra.trim()) ||
+            state === "saving"
+          }
+          className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
         >
           {state === "saving" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          Save key
+          {field.action ?? "Save key"}
         </button>
       </div>
       {state === "error" && (

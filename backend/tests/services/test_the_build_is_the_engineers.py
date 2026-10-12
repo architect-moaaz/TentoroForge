@@ -20,6 +20,9 @@ from services.blueprint.service import BlueprintService
 def project(tmp_path, monkeypatch):
     svc = BlueprintService.create(output_dir=tmp_path, app_id="shop", name="Shop", domain="retail")
     svc.doc["state"] = "PLAN_REVIEW"
+    # WHO DESIGNS THE SCREENS WAS ASKED AND ANSWERED (the build entry asks once, before the engineer starts);
+    # an application nobody has asked stops at that question instead of building.
+    svc.doc["application"]["uiDesigner"] = "forge"
     svc.doc["modules"] = [{"id": "MODULE-001", "name": "Catalogue", "pages": ["PAGE-001"]}]
     svc.doc["pages"] = [{"id": "PAGE-001", "route": "/", "pattern": "dashboard", "module": "MODULE-001",
                          "purpose": "home", "name": "Home"}]

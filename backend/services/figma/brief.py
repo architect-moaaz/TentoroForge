@@ -36,7 +36,14 @@ _MAX_LABELS = 40
 
 def screen_entry(screen: Any) -> dict[str, Any]:
     structure = screen.structure or {}
-    labels = list(structure.get("labels") or [])[:_MAX_LABELS]
+    labels = list(structure.get("labels") or [])
+    if not labels and isinstance(structure.get("document"), dict):
+        # A design stored from the REST API before its words were read off it: read them now, so
+        # nothing has to be fetched from Figma again.
+        from services.figma.reference import labels_from_document
+
+        labels = labels_from_document(structure["document"])
+    labels = labels[:_MAX_LABELS]
     entry: dict[str, Any] = {
         "nodeId": screen.node_id,
         "name": screen.name,

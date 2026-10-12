@@ -35,10 +35,12 @@ logger = logging.getLogger(__name__)
 
 FORGE = "forge"
 UXPILOT = "uxpilot"
+FIGMA = "figma"
 
-#: The card's two options, in the order they are shown. The first is the
+#: The card's options, in the order they are shown. The first is the
 #: default in every other sense too: what an unanswered application means.
-OPTIONS: tuple[str, str] = ("Forge UI Designer", "UX Pilot")
+OPTIONS: tuple[str, str, str] = ("Forge UI Designer", "UX Pilot", "Figma")
+LABELS: dict[str, str] = dict(zip((FORGE, UXPILOT, FIGMA), OPTIONS))
 
 #: The sentence that identifies the question in a transcript. `answer_in`
 #: accepts an option only when the turn before it carried this.
@@ -66,6 +68,7 @@ _ANSWERS: dict[str, str] = {
     "forge ui designer": FORGE, "forge": FORGE, "forge designer": FORGE,
     "ui designer": FORGE, "a2ui": FORGE,
     "ux pilot": UXPILOT, "uxpilot": UXPILOT, "ux-pilot": UXPILOT,
+    "figma": FIGMA, "figma design": FIGMA, "my figma": FIGMA, "my figma design": FIGMA,
 }
 
 KEY_TEXT = (
@@ -91,7 +94,7 @@ def live_pages(doc: dict) -> list[dict]:
 def chosen(doc: dict) -> str:
     """``forge`` / ``uxpilot`` as recorded, or "" when nobody has been asked."""
     value = str(((doc or {}).get("application") or {}).get("uiDesigner") or "").strip()
-    return value if value in (FORGE, UXPILOT) else ""
+    return value if value in (FORGE, UXPILOT, FIGMA) else ""
 
 
 def _live(items: Any) -> list[dict]:
@@ -122,7 +125,11 @@ def question(doc: dict) -> str:
         f"together, in one visual style, using your UX Pilot workspace and API "
         f"key. Each page is then written from its drawing, wired to your data. "
         f"Richer visuals; spends {cost}, once, and again only if a page's brief "
-        f"changes."
+        f"changes.\n"
+        f"- **Figma:** you already have a design. Each screen you drew is built "
+        f"as drawn, wired to your data. I check first that your design covers "
+        f"what the application needs, and Forge designs anything it does not. "
+        f"Needs a link to your Figma file and an access token."
     )
 
 
@@ -140,7 +147,9 @@ def answer_in(message: str, history: Iterable[tuple[str, str]]) -> str:
     role, text = turns[-1]
     if role not in ("smith", "assistant"):
         return ""
-    if is_key_prompt(text):
+    from services.smith import figma_gate
+
+    if is_key_prompt(text) or figma_gate.is_prompt(text) or figma_gate.is_check_pending(text):
         return FORGE if _norm(message) == _norm(USE_FORGE_INSTEAD) else ""
     if not is_question(text):
         return ""
@@ -150,10 +159,10 @@ def answer_in(message: str, history: Iterable[tuple[str, str]]) -> str:
 def record(svc: Any, choice: str, *, reason: str = "Chosen at the approval gate.") -> str:
     """Write the choice to the application and a decision row; return what
     Smith says about it."""
-    if choice not in (FORGE, UXPILOT):
+    if choice not in (FORGE, UXPILOT, FIGMA):
         raise ValueError(f"not a designer: {choice!r}")
     svc.doc.setdefault("application", {})["uiDesigner"] = choice
-    label = OPTIONS[0] if choice == FORGE else OPTIONS[1]
+    label = LABELS[choice]
     text = f"{_DECISION_PREFIX} {label}."
     try:
         # The allocator needs the document's ids bound before a new row can
@@ -190,6 +199,8 @@ def record(svc: Any, choice: str, *, reason: str = "Chosen at the approval gate.
     svc.save()
     if choice == FORGE:
         return "Forge UI Designer it is. Building now."
+    if choice == FIGMA:
+        return "Figma it is: your own design leads, and I will check it covers the application first."
     return ("UX Pilot it is: one run will draw every screen from the definition, and each page "
             "is written from its drawing. Building now.")
 
@@ -233,12 +244,17 @@ def _platform_default() -> bool:
 def gate(doc: dict, output_dir: Any) -> dict[str, Any] | None:
     """The message to show INSTEAD of starting the build, or None when it may start.
 
-    Two reasons to stop, in order: nobody has said who designs the screens, and UX Pilot was
-    chosen but there is no key to use it with."""
+    Three reasons to stop, in order: nobody has said who designs the screens; UX Pilot was chosen
+    but there is no key to use it with; Figma was chosen but no design is connected yet, or the
+    design was checked and falls short of the requirements and the person has not said what to do."""
     if undecided(doc) and not _platform_default():
         return {"text": question(doc), "options": list(OPTIONS), "status": "asked"}
     if chosen(doc) == UXPILOT and not configured(output_dir):
         return key_prompt()
+    if chosen(doc) == FIGMA:
+        from services.smith import figma_gate
+
+        return figma_gate.stop(doc, output_dir)
     return None
 
 
