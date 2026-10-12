@@ -319,6 +319,22 @@ def landing_by_role(doc: dict) -> dict[str, str]:
             continue
         for name in restricted_roles(doc, page):
             out.setdefault(str(name), route)
+    # A SHARED HOME IS A DOOR TOO. An `entry` page every signed-in person may
+    # open — a payroll app's /dashboard — is where a role with no door of its
+    # own starts, unless the page names other users. Only an entry among a
+    # role's restricted pages counted, so the author's answer was refused
+    # twice and the build ended there (payroll manager 97l5iqsp, E-commerce
+    # x6ofudhb; forge-v3, 2026-10-09). A public page is not this: that is the
+    # shop front ToroCommerce's administrator kept landing on.
+    for page in _live(doc.get("pages")):
+        route = str(page.get("route") or "")
+        if not page.get("entry") or str(page.get("access") or "authenticated") != "authenticated" \
+                or not route.startswith("/") or "[" in route:
+            continue
+        users = {str(u).strip().lower() for u in page.get("users") or []}
+        for r in roles:
+            if not users or {str(r.get("name")).strip().lower(), str(r.get("id") or "").strip().lower()} & users:
+                out.setdefault(str(r.get("name")), route)
     return out
 
 

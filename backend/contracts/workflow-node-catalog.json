@@ -294,6 +294,21 @@
           }
         },
         {
+          "key": "set_password",
+          "label": "Change Password",
+          "icon": "KeyRound",
+          "gradient": "bg-gradient-to-br from-rose-400 to-rose-600",
+          "description": "Change the signed-in person's own password: the current one is checked, the new one hashed as sign-up hashes it. The platform owns the credential; no step reads or writes a password column",
+          "config": {
+            "required": [
+              [
+                "newPassword"
+              ]
+            ],
+            "defaults": {}
+          }
+        },
+        {
           "key": "set_variable",
           "label": "Set Variable",
           "icon": "Hash",

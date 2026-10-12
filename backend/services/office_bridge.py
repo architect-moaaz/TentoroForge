@@ -80,3 +80,49 @@ def office_sink(
             log.debug("office_sink: loop closed, dropped %s", evt.get("type"))
 
     return OfficeNarrator(emit)
+
+
+# --------------------------------------------------------------------------- #
+# Which office an application's folder belongs to
+# --------------------------------------------------------------------------- #
+
+import threading
+from pathlib import Path
+
+_BOUND: dict[str, tuple[str, asyncio.AbstractEventLoop | None]] = {}
+_BOUND_LOCK = threading.Lock()
+
+
+def bind_office(output_dir: str | Path, project_id: str,
+                loop: asyncio.AbstractEventLoop | None = None) -> None:
+    """Say which project's office an application folder is shown in.
+
+    A build runs from deep inside a request (`_run_dag`, with half a dozen
+    callers) and knows its folder, not the id the browser opened
+    ``/api/projects/{id}/events`` with. The request that starts it knows
+    both, and records them here once per turn."""
+    if not project_id:
+        return
+    with _BOUND_LOCK:
+        _BOUND[str(Path(output_dir).resolve())] = (str(project_id), loop)
+
+
+def office_for(output_dir: str | Path):
+    """A function that puts one office event on screen for this folder's
+    project, or None when nobody bound one (a CLI run, a test)."""
+    with _BOUND_LOCK:
+        bound = _BOUND.get(str(Path(output_dir).resolve()))
+    if bound is None:
+        return None
+    pid, loop = bound
+
+    def emit(evt: dict) -> None:
+        payload = {"type": "office", "office": evt}
+        if loop is None or loop.is_closed():
+            publish_nowait(pid, payload)
+            return
+        try:
+            loop.call_soon_threadsafe(publish_nowait, pid, payload)
+        except RuntimeError:
+            log.debug("office_for: loop closed, dropped %s", evt.get("type"))
+    return emit

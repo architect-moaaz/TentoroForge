@@ -206,7 +206,7 @@ def test_the_executor_hands_the_writer_a_critic_and_records_its_cost():
     src = (ROOT / "services/blueprint/executors.py").read_text()
     assert 'model.for_task("page_look", "page_reviewer")' in src
     assert 'for u, elapsed, *who in spent' in src
-    assert "compose_direction(doc, client, references=references.paths(svc.output_dir))" in src
+    assert "compose_direction(doc, client, references=references.paths(svc.output_dir)," in src
 
 
 def test_a_look_lays_down_what_the_bundle_needs_before_assembly(monkeypatch, tmp_path):

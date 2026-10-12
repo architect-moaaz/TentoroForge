@@ -218,6 +218,16 @@ export const ACTION_CONTRACTS: Record<string, ActionContract> = {
       { name: "value", type: "object", label: "Assigned value" },
     ],
   },
+  set_password: {
+    label: "Change Password",
+    inputs: [
+      { name: "currentPassword", type: "string", required: false, label: "Current password (checked when given)" },
+      { name: "newPassword", type: "string", required: true, label: "New password" },
+    ],
+    outputs: [
+      { name: "changed", type: "boolean", label: "Changed" },
+    ],
+  },
   transform: {
     label: "Transform / Map",
     inputs: [

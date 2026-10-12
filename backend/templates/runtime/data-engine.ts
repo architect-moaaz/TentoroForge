@@ -779,6 +779,28 @@ function stringifyDatesForStringColumns(table: any, data: Record<string, any>): 
 }
 
 /**
+ * The other way round: a request body is JSON, so a date arrives as TEXT, and
+ * a date-mode column (`timestamp()` / `date({ mode: "date" })`) is serialised
+ * by Drizzle calling `.toISOString()` on it — on a string, which throws
+ * "value.toISOString is not a function" and fails the write. Every create of
+ * a record with such a field failed through the data API (ToroCommerce's
+ * orders, torob1, 2026-10-09). Text a date can be read from becomes a Date;
+ * an empty value becomes null; anything else is left for validation to refuse.
+ */
+function parseDatesForDateColumns(table: any, data: Record<string, any>): void {
+  for (const [k, v] of Object.entries(data)) {
+    const col = table?.[k];
+    if (!col || col.dataType !== "date") continue;
+    if (v instanceof Date || v === null || v === undefined) continue;
+    if (v === "") { data[k] = null; continue; }
+    if (typeof v === "string" || typeof v === "number") {
+      const d = new Date(v);
+      if (!isNaN(d.getTime())) data[k] = d;
+    }
+  }
+}
+
+/**
  * A container-mode (FormData) KeyValueInput submits its jsonb column as a JSON
  * STRING. Drizzle's json/jsonb columns expect an object/array, so parse any
  * string value destined for a json/jsonb column back into a value before insert.
@@ -970,6 +992,7 @@ export async function create(
 
   // Insert
   stringifyDatesForStringColumns(entity.table, validated);
+  parseDatesForDateColumns(entity.table, validated);
   const [record] = await db.insert(entity.table).values(validated as any).returning();
   await embedWrittenRow(entity.table, record);
   const event = `${entityName.toLowerCase()}_created`;
@@ -1040,6 +1063,7 @@ export async function update(
   await _encryptSensitiveOnWrite(entityName, updateData);
 
   stringifyDatesForStringColumns(entity.table, updateData);
+  parseDatesForDateColumns(entity.table, updateData);
   const [record] = await db.update(entity.table).set(updateData).where(where).returning();
   await embedWrittenRow(entity.table, record, existing);
   const event = `${entityName.toLowerCase()}_updated`;

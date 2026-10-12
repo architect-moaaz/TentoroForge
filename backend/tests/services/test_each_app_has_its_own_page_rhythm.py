@@ -4,9 +4,10 @@ The page author was handed one anatomy for every application — eyebrow and
 title, a dark leading card, KPI tiles, tables in cards — so two apps with
 different palettes still read as one product recoloured. The direction
 agent now decides five anatomy choices once per application; the page
-prompt renders each with what to do; a Blueprint whose direction states
-none gets a rhythm read off its density and personality, and only a
-Blueprint that says nothing at all gets the old anatomy.
+prompt renders each with what to do. Since 2026-10-08 each audience has
+its own (`composition.looks`, `test_each_audience_has_its_own_look`); a
+Blueprint whose direction states none gets the old anatomy — never one read
+off the personality's words.
 """
 import json
 from pathlib import Path
@@ -32,10 +33,10 @@ def test_a_stated_rhythm_wins_and_a_bad_value_is_ignored():
     assert r["header"] == RHYTHM_DEFAULT["header"]
 
 
-def test_without_a_direction_the_design_still_sets_a_rhythm():
-    assert derive_rhythm(_doc(informationDensity="compact"))["header"] == "compact"
-    assert derive_rhythm(_doc(visualPersonality="warm and friendly"))["lists"] == "cards"
-    assert derive_rhythm(_doc(visualPersonality="a stark utility"))["lead"] == "type-only"
+def test_without_a_direction_the_rhythm_is_the_default_whatever_the_words():
+    assert derive_rhythm(_doc(informationDensity="compact")) == RHYTHM_DEFAULT
+    assert derive_rhythm(_doc(visualPersonality="warm and friendly, a consumer app")) == RHYTHM_DEFAULT
+    assert derive_rhythm(_doc(visualPersonality="a stark utility")) == RHYTHM_DEFAULT
     assert derive_rhythm(_doc()) == RHYTHM_DEFAULT
 
 
@@ -45,7 +46,7 @@ def test_every_option_has_an_instruction_and_the_prompt_renders_the_choice():
             assert "`" in what or what, (key, o)
     block = _rhythm(_doc({"rhythm": dict(RHYTHM_DEFAULT, lists="rows")}))
     assert "- lists: `rows` — borderless rows separated by `divide-y`" in block
-    prompt = system_prompt(_doc(visualPersonality="warm"))
+    prompt = system_prompt(_doc({"rhythm": dict(RHYTHM_DEFAULT, header="band")}))
     assert "# Its page rhythm" in prompt and "- header: `band`" in prompt
 
 
@@ -57,16 +58,16 @@ def test_the_principles_defer_to_the_rhythm():
 
 
 def test_the_direction_agent_must_choose_and_its_choice_is_kept():
-    assert "rhythm" in DIRECTION_SCHEMA["required"]
-    assert DIRECTION_SCHEMA["properties"]["rhythm"]["properties"]["lists"]["enum"] == ["table", "cards", "rows"]
+    assert "looks" in DIRECTION_SCHEMA["required"] and "rhythm" not in DIRECTION_SCHEMA["properties"]
+    look = DIRECTION_SCHEMA["properties"]["looks"]["items"]
+    assert look["properties"]["rhythm"]["properties"]["lists"]["enum"] == ["table", "cards", "rows"]
     _, user = direction_prompts(_doc())
-    assert "AND THE PAGE RHYTHM" in user and "`gradient-band`" in user
-    reply = json.dumps({"vision": "v", "conventions": [], "rhythm": {"header": "compact", "lead": "outlined-panel",
-                                                                     "lists": "table", "figures": "strip", "sections": "dense"}})
+    assert "ONE LOOK FOR EACH AUDIENCE" in user and "`gradient-band`" in user
+    rhythm = {"header": "compact", "lead": "outlined-panel", "lists": "table", "figures": "strip", "sections": "dense"}
+    reply = json.dumps({"vision": "v", "conventions": [], "looks": [
+        {"audience": ["ROLE-1"], "experience": "x", "chrome": "wide-rail", "tone": "dark", "rhythm": rhythm, "why": "y"}]})
     body, _ = compose_direction(_doc(), lambda **_: reply)
-    assert body["rhythm"]["figures"] == "strip"
-    half = json.dumps({"vision": "v", "conventions": [], "rhythm": {"header": "compact"}})
-    assert "rhythm" not in compose_direction(_doc(), lambda **_: half)[0]
+    assert body["looks"][0]["rhythm"]["figures"] == "strip" and "rhythm" not in body
 
 
 def test_the_contract_carries_the_rhythm():

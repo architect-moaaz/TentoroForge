@@ -23,14 +23,17 @@ happen. `answer` may speak only in a turn that changed nothing.
 """
 from __future__ import annotations
 
+import os
+
 import logging
 import re
 from typing import Any, Callable
 
 from services.smith import loop as loop_mod
 from services.smith import plan as plan_mod
-from services.smith import reads, tools, trials, web, writes
+from services.smith import reads, reported, tools, trials, web, writes
 from services.smith.loop import Observation
+from services.engineer.journal import Budget, Journal
 from services.smith.verbs import missing_fields
 from services.smith4.context import opening
 from services.smith4.outcome import Outcome
@@ -40,6 +43,32 @@ logger = logging.getLogger(__name__)
 
 #: (ask, page, observations, history) -> {tool, args, why}
 Choose = Callable[[str, str, list, list], dict]
+
+#: How long a turn may run, in minutes. A turn had twenty steps and no
+#: clock: 34 minutes on one request, then "ran out of steps" (E-commerce,
+#: 2026-10-09). When the time is spent the turn ends with what it proved.
+TURN_MINUTES = float(os.environ.get("FORGE_SMITH_TURN_MINUTES") or 20)
+
+#: What a change hears when the person named the screen they were on and
+#: nothing has been tried THROUGH that screen yet — a process run directly
+#: proves nothing about the button they pressed.
+REPRODUCE_AS_REPORTED = (
+    "They saw this on {route} as {who}. Nothing has been tried through that screen yet: "
+    "open it as them (`open_page` with `route` and `as`) and do what they did before changing "
+    "anything. A process run directly (`try_workflow`) is not what they saw.")
+
+def untried_as_reported(report: dict, tried: list) -> str:
+    """When the person named the screen they were on and nothing has been
+    tried THROUGH it, what the change is told; empty otherwise. `tried` are
+    the turn's trial observations so far."""
+    route = (report or {}).get("route")
+    if not route or not tried or any(o.tool in reported.BROWSER_TRIALS for o in tried):
+        return ""
+    return REPRODUCE_AS_REPORTED.format(route=route, who=reported.who(report) or "them")
+
+
+#: Words that mean: pick up the last turn where it stopped.
+CARRY_ON = re.compile(r"^\s*(?:carry on|continue|go on|keep going|resume|proceed|pick (?:it )?up)\b", re.I)
 
 LOOK_FIRST = ("Nothing has been read this turn. Read the page (`read_page_code`, "
               "`grep`, `read_section`) or its data (`read_rows`) — the application "
@@ -71,9 +100,10 @@ ANSWER_CHANGES_NOTHING = (
 #: blamed a field it misread, and never pressed the button (2026-10-07).
 REPRODUCE_FIRST = (
     "Nothing has been tried this turn. If they said something does not work, use it first — the "
-    "screen they used, as them (`open_page`, `try_workflow`, `try_request`) — so the change answers "
-    "what happens, not what the code seems to say. If this is a change they asked for rather than a "
-    "fault, make the edit again.")
+    "screen they used, as them (`try_expectation` when a statement covers it, `open_page`, `try_workflow`, "
+    "`try_request`) — so the change answers "
+    "what happens, not what the code seems to say. If this IS the change they asked for (not a report "
+    "that something is broken), call it again with `requested: true`.")
 #: What an answer hears on a turn that has tried nothing.
 ANSWER_UNTRIED_HEAD = "Nothing has been tried this turn"
 
@@ -88,13 +118,62 @@ def answer_untried(ask: str) -> str:
             "answer again.")
 
 
+#: The writes that change code or the definition directly: the first of them
+#: in a turn that has tried nothing is asked to reproduce first. TCommerce's
+#: empty bag (measured on a copy, 2026-10-07) went straight to rewriting
+#: /cart through `write_page_code`, tried afterwards, and ran out of steps.
+REPRODUCE_BEFORE = frozenset({"edit_file", "edit_definition", "write_page_code", "rewrite_pages",
+                              "write_frame", "write_section", "set_field"})
+
+
 #: What an edit to the platform's own files hears without a failing try.
 PATCH_NEEDS_PROOF = (
     "That file is the platform's — the engine every application runs on. It is patched for this "
     "application only once a try in this turn has shown the fault it fixes, and the patch is kept only "
     "if a try after it passes. Try it first; if the try passes, the fault is not there.")
+#: What `requested: true` hears when the person's words report a fault.
+NOT_ASKED_FOR = (
+    "Their words report that something does not work; they do not ask for this change. Use it first, as "
+    "them, on the screen they used (`open_page`, `try_workflow`) and fix what the try shows.")
+#: What a change hears in a turn a check started, before a try has shown the fault.
+FAULT_NOT_SEEN = (
+    "This turn was started by a check that saw a fault, and no try in it has shown that fault yet. Use "
+    "what the check reported, as the person it names; if the try works, the fault is not there — end "
+    "with `done` and say what the try showed. Change nothing for a fault you have not seen.")
 #: A step these answered never ran: asking for it again is not a repeat.
-_NOT_RUN = frozenset({REPRODUCE_FIRST, PATCH_NEEDS_PROOF})
+_NOT_RUN = frozenset({REPRODUCE_FIRST, PATCH_NEEDS_PROOF, NOT_ASKED_FOR, FAULT_NOT_SEEN})
+
+
+def _change_said(tool: str, args: dict) -> str:
+    what = args.get("why") or args.get("brief") or args.get("replace") or ""
+    where = args.get("path") or args.get("route") or args.get("section") or args.get("file") or ""
+    return " ".join(f"{tool} {where}: {what}".split())[:400]
+
+
+#: The question behind `requested: true`, asked of a small model on its own.
+#: The acting model labelling its own change was no guard: TCommerce's "bag is
+#: empty" was rewritten as a requested change (measured, 2026-10-08).
+ASKED_FOR_MODEL = "claude-haiku-4-5-20251001"
+
+
+def asked_for(words: str, change: str) -> bool:
+    """Whether the person's words ask for `change` itself, rather than report
+    that something does not work. False when it cannot be told — the safe side
+    is to try first."""
+    words = " ".join(str(words).split())[:1500]
+    if not words or not change:
+        return False
+    try:
+        from services.llm_client import complete
+        verdict = complete(model=ASKED_FOR_MODEL, max_tokens=5, temperature=0, content=(
+            f"A person wrote to the builder of their application:\n\"{words}\"\n\n"
+            f"The builder wants to make this change: \"{change}\"\n\n"
+            "Reply with one word. REQUEST if the person's words ask for this change itself. REPORT if "
+            "they say something does not work as it should — a fault to find. OTHER otherwise."))
+    except Exception:  # noqa: BLE001 — not knowing is not a yes
+        logger.warning("smith4: the asked-for check could not run", exc_info=True)
+        return False
+    return str(verdict or "").strip().upper().startswith("REQUEST")
 #: What `done` hears when the last change has not been used since.
 TRY_AFTER = (
     "Changed, not yet tried. Use what you changed — as the person who asked, on the screen they use — "
@@ -134,14 +213,25 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
     if ctx.asked_from and ctx.asked_from not in asked:
         asked = f"{ctx.asked_from}\n(This turn does one part of it: {asked})"
     token = ASKED.set(asked)
+    rtoken = reported.REPORTED.set(dict(ctx.report or {}))
     from services.smith import file_edit
     started = {p.get("id") for p in file_edit.load_patches(ctx.out)}
+    journal = Journal(ctx.out)
+    journal.write("turn:start", message=(ctx.message or ctx.ask or "")[:300], report=dict(ctx.report or {}),
+                  unattended=ctx.unattended)
     try:
         out = _run(ctx, choose, list(history or []), observations,
-                   max_steps or loop_mod.MAX_STEPS, bench)
+                   max_steps or loop_mod.MAX_STEPS, bench, journal=journal)
     finally:
+        reported.REPORTED.reset(rtoken)
         ASKED.reset(token)
         bench.close()
+        try:
+            journal.write("turn:end", status=getattr(out, "status", "crashed") if "out" in locals() else "crashed",
+                          said=(getattr(out, "said", "") or "")[:400] if "out" in locals() else "",
+                          steps=[o.tool for o in observations])
+        except Exception:  # noqa: BLE001 — the journal never ends a turn
+            logger.warning("smith4: could not journal the turn's end", exc_info=True)
     out.steps = [o.tool for o in observations]
     # A PLATFORM PATCH IS KEPT ONLY ON PROOF: a try after the last edit that
     # passed, and nothing that failed before still failing.
@@ -159,7 +249,7 @@ def turn(ctx: Ctx, *, choose: Choose, history: list | None = None,
 
 def _trial_key(o: Observation) -> str:
     a = o.args or {}
-    return "|".join([o.tool, str(a.get("workflow") or a.get("path") or a.get("route") or ""),
+    return "|".join([o.tool, str(a.get("workflow") or a.get("path") or a.get("route") or a.get("statement") or ""),
                      str(a.get("method") or ""), str(a.get("as") or "").lower()])
 
 
@@ -183,21 +273,76 @@ def _changed_after(observations: list[Observation], i: int) -> bool:
     return any(_is_change(o) for o in observations[i + 1:])
 
 
+def _broken_controls(said: str) -> set[str]:
+    """The controls a page trial found not working: `button "Decrease quantity"`."""
+    from services.blueprint.page_review import BROKEN_OUTCOMES
+    found = set()
+    for line in (said or "").splitlines():
+        m = re.match(r'^\s+(\w+ "[^"]*"): (.*)$', line)
+        if m and any(m.group(2).startswith(v) for v in BROKEN_OUTCOMES.values()):
+            found.add(m.group(1))
+    return found
+
+
+def _failed_alike(before: str, after: str) -> bool:
+    """Whether a try after a change failed the way it did before. A page fails
+    by its controls: ToroCommerce's fixed minus button worked, its plus button
+    answered 422, and the turn said "failed the same way" (measured on a copy,
+    2026-10-07). Anything else fails as it did when both runs fail."""
+    if not (trials.failed(before) and trials.failed(after)):
+        return False
+    if trials.EXPECTATION_HEAD.match(after.split("\n", 1)[0]):
+        # A statement fails by its checks: the same check failing again is
+        # "still", a different one is what the change broke or uncovered.
+        seen = lambda s: {l.strip() for l in s.splitlines() if l.startswith("  - ")}  # noqa: E731
+        return bool(seen(before) & seen(after))
+    b, a = _broken_controls(before), _broken_controls(after)
+    if b and a is not None:
+        head = lambda s: s.split("\n", 1)[0]
+        hard = re.search(r"HTTP ([45]\d\d)", head(after))
+        return bool(b & a) or bool(hard and re.search(r"HTTP ([45]\d\d)", head(before)))
+    return True
+
+
+def _trial_runs(observations: list[Observation]) -> dict[str, list[int]]:
+    runs: dict[str, list[int]] = {}
+    for i, o in enumerate(observations):
+        if tools.is_trial(o.tool):
+            runs.setdefault(_trial_key(o), []).append(i)
+    return runs
+
+
 def _still_failing(observations: list[Observation]) -> list[str]:
-    """Trials whose latest run came after a change and still failed — the
-    change did not fix what it was for."""
+    """Trials that failed before a change and, run again after it, failed the
+    same way — the change did not fix what it was for."""
     changes = [j for j, x in enumerate(observations) if _is_change(x)]
     if not changes:
         return []
-    latest: dict[str, int] = {}
-    for i, o in enumerate(observations):
-        if tools.is_trial(o.tool):
-            latest[_trial_key(o)] = i
     out = []
-    for i in sorted(latest.values()):
-        o = observations[i]
-        if i > changes[0] and trials.failed(o.said or ""):
-            out.append(o.line().split(" ->", 1)[0].lstrip("- "))
+    for idxs in _trial_runs(observations).values():
+        last = idxs[-1]
+        prior = [c for c in changes if c < last]
+        before = [i for i in idxs if prior and i < prior[-1]]
+        if before and _failed_alike(observations[before[-1]].said or "", observations[last].said or ""):
+            out.append(observations[last].line().split(" ->", 1)[0].lstrip("- "))
+    return out
+
+
+def _new_failures(observations: list[Observation]) -> list[str]:
+    """Trials run after a change that fail in a way they did not before it —
+    found, not "still": said as what the try showed."""
+    changes = [j for j, x in enumerate(observations) if _is_change(x)]
+    if not changes:
+        return []
+    still = set(_still_failing(observations))
+    out = []
+    for idxs in _trial_runs(observations).values():
+        last = idxs[-1]
+        o = observations[last]
+        name = o.line().split(" ->", 1)[0].lstrip("- ")
+        if last > changes[0] and trials.failed(o.said or "") and name not in still:
+            broken = sorted(_broken_controls(o.said or ""))
+            out.append(name + (f" ({', '.join(broken)})" if broken else ""))
     return out
 
 
@@ -262,10 +407,14 @@ def _failing_note(observations: list[Observation]) -> str:
     """Said after what landed when a turn ends with a try still failing: a
     change is reported, and so is that it did not fix what it was for."""
     still = _still_failing(observations)
-    if not still:
-        return ""
-    return ("\n\nIt still does not work: I tried it again after the change and it failed "
-            "the same way. Say “carry on” and I will keep at it.")
+    if still:
+        return ("\n\nIt still does not work: I tried it again after the change and it failed "
+                "the same way. Say “carry on” and I will keep at it.")
+    fresh = _new_failures(observations)
+    if fresh:
+        return ("\n\nAfter the change, this was tried and does not work: " + "; ".join(fresh[:4])
+                + ". Say “carry on” and I will look at it.")
+    return ""
 
 
 def standing_faults(doc: dict | None) -> list[str]:
@@ -299,9 +448,35 @@ def standing_faults(doc: dict | None) -> list[str]:
     return out
 
 
+def _last_turn_unfinished(journal: Journal) -> list[dict]:
+    """The steps of the last turn when it did not finish — what "carry on"
+    picks up from. Empty when it finished, or there was none."""
+    rows = list(journal.rows())
+    starts = [i for i, r in enumerate(rows) if r.get("event") == "turn:start"]
+    if not starts:
+        return []
+    last = rows[starts[-1]:]
+    end = next((r for r in last if r.get("event") == "turn:end"), None)
+    if end is not None and str(end.get("status") or "") in ("resolved", "done", "asked"):
+        return []
+    return [r for r in last if r.get("event") == "turn:step"]
+
+
 def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation],
-         max_steps: int, bench: "trials.Bench | None" = None) -> Outcome:
+         max_steps: int, bench: "trials.Bench | None" = None, journal: Journal | None = None) -> Outcome:
     bench = bench or trials.Bench(ctx.out)
+    journal = journal or Journal(ctx.out)
+    # CARRY ON MEANS FROM WHERE IT STOPPED. "Carry on" started a fresh turn
+    # whose only memory was six lines of chat (E-commerce, 2026-10-09); the
+    # last turn's journal is what it picks up.
+    if not observations and CARRY_ON.match(ctx.message or ""):
+        steps = _last_turn_unfinished(journal)
+        if steps:
+            shown = "\n".join(f"- {r.get('tool')} ({r.get('status')}): {str(r.get('said') or '')[:160]}"
+                              for r in steps[-12:])
+            observations.append(Observation(tool="last_turn", status="read", said=(
+                "The last turn stopped before it finished. What it did and found, in order:\n" + shown
+                + "\nPick up from there: do not repeat what is known; try what was about to be tried.")))
     if ctx.engine_refreshed and not observations:
         # SAID, SO A PASSING TRY IS BELIEVED. F&B's duplicate check passed on
         # the first try once the engine was current; not knowing why, the
@@ -331,10 +506,21 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
 
     import time as _time
     turn_started = _time.monotonic()
+    budget = Budget(TURN_MINUTES)
+    out_of_time = False
+    journaled = 0
     for _step in range(1, max_steps + 1):
         from services.smith4.definition import brief_of
+        for o in observations[journaled:]:
+            journal.write("turn:step", tool=o.tool, status=o.status, said=(o.said or "")[:300])
+        journaled = len(observations)
+        if budget.over():
+            out_of_time = True
+            break
         t0 = _time.monotonic()
-        page = opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx))
+        # WHO SAW IT, first: the person, the screen, the viewport the
+        # problem was reported from (`services.smith.reported`).
+        page = reported.block(ctx.report) + opening(ctx.project_id, ctx.out, ctx.ask, brief=brief_of(ctx))
         t1 = _time.monotonic()
         chosen = choose(ctx.ask, page, observations, history) or {}
         t2 = _time.monotonic()
@@ -457,11 +643,31 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                 return _finished(landed, touched, step)
             continue
 
-        if tool in ("edit_file", "edit_definition"):
-            if not any(tools.is_trial(o.tool) for o in observations) \
-                    and not any(o.said == REPRODUCE_FIRST for o in observations):
-                observations.append(Observation(tool=tool, args=args, status="error", said=REPRODUCE_FIRST))
-                continue
+        if tool in REPRODUCE_BEFORE:
+            # NOT PAST THE RULE BY ASKING TWICE. TCommerce's empty bag was held
+            # once, a second rewrite went through, and the shopper stopped being
+            # sent to the cart — a change nobody asked for, the bag never tried
+            # (measured on a copy, 2026-10-07). Until a try has run, a change
+            # runs only when the call says it is the change they asked for.
+            tried = [o for o in observations if tools.is_trial(o.tool)]
+            if ctx.unattended:
+                # A TURN A CHECK STARTED IS A FAULT TO SEE, NOT A REQUEST. Nobody
+                # asked for anything, so `requested` means nothing here, and a
+                # change needs a try in this turn that fails: ToroCommerce's
+                # after-change check flagged the plus button's refusal and its
+                # repair rewrote a working workflow (measured, 2026-10-08).
+                if not any(trials.failed(o.said or "") for o in tried):
+                    observations.append(Observation(tool=tool, args=args, status="error", said=FAULT_NOT_SEEN))
+                    continue
+            elif not tried or untried_as_reported(ctx.report, tried):
+                claimed = str(args.get("requested") or "").strip().lower() in ("true", "1", "yes")
+                if not claimed:
+                    said = REPRODUCE_FIRST if not tried else untried_as_reported(ctx.report, tried)
+                    observations.append(Observation(tool=tool, args=args, status="error", said=said))
+                    continue
+                if not asked_for(ctx.message or ctx.ask or "", _change_said(tool, args)):
+                    observations.append(Observation(tool=tool, args=args, status="error", said=NOT_ASKED_FOR))
+                    continue
             if tool == "edit_file":
                 from services.smith import file_edit
                 rel, _why = file_edit._app_rel(ctx.out, str(args.get("path") or ""))
@@ -553,10 +759,11 @@ def _run(ctx: Ctx, choose: Choose, history: list, observations: list[Observation
                      if tools.is_trial(o.tool) and o.status == "read" and o.said]
             if tried:
                 said = "What I tried, and what it showed:\n" + "\n".join(f"- {t}" for t in tried[-6:])
-        tail = (f"\n\nThis turn ran out of steps ({max_steps}) before I changed anything. "
+        spent = f"time ({TURN_MINUTES:g} minutes)" if out_of_time else f"steps ({max_steps})"
+        tail = (f"\n\nThis turn ran out of {spent} before I changed anything. "
                 "Say “carry on” and I will pick up from there.")
         return Outcome(status="no_op", touched=list(touched), said=(said + tail) if said else (
-            f"I have not changed anything yet — this turn ran out of steps ({max_steps}) "
+            f"I have not changed anything yet — this turn ran out of {spent} "
             "while I was still looking into it. Say “carry on” and I will pick up from there."))
     failing = _failing_note(observations)
     if not failing and _unproven(observations).startswith(UNPROVEN):

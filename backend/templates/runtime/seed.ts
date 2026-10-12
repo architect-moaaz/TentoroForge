@@ -39,6 +39,9 @@ import * as accountModule from "../lib/account";
 import { ACCOUNT, ADMIN_ROLE, SIGNUP_ROLE } from "../lib/account";
 // Read through the module so an app projected before `ROLES` existed builds.
 const ROLES: string[] = ((accountModule as unknown as { ROLES?: string[] }).ROLES) ?? [];
+// Where a new account starts — the same values sign-up gives a person.
+const ACCOUNT_INITIAL: Record<string, unknown> =
+  ((accountModule as unknown as { ACCOUNT_INITIAL?: Record<string, unknown> }).ACCOUNT_INITIAL) ?? {};
 import { accountTable } from "../lib/account-table";
 
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@example.com";
@@ -247,7 +250,15 @@ async function resolveRequiredFks(table: any, row: Record<string, unknown>): Pro
  */
 async function ensureAccountRow(id: string | null, email: string, name: string): Promise<void> {
   if (!ACCOUNT || !accountTable || !id) return;
-  const row: Record<string, unknown> = { id };
+  // A DEMO PERSON STARTS WHERE A NEW PERSON DOES. The row was filled like any
+  // placeholder, so ToroCommerce's demo customer had status "Default Customer
+  // (demo)" where sign-up writes "active" — and every process its guard
+  // protects refused them as a disabled account (2026-10-09). The values
+  // sign-up gives (`ACCOUNT_INITIAL`) come first; the placeholder only fills
+  // what nothing decides.
+  const initial: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(ACCOUNT_INITIAL)) if (k in accountTable) initial[k] = v;
+  const row: Record<string, unknown> = { id, ...initial };
   for (const f of ACCOUNT.fields) if (f.kind === "email" && f.name in accountTable) row[f.name] = email;
   if (ACCOUNT.labelField && ACCOUNT.labelField in accountTable) row[ACCOUNT.labelField] = name;
   await resolveRequiredFks(accountTable, row);
@@ -256,6 +267,18 @@ async function ensureAccountRow(id: string | null, email: string, name: string):
     await db.insert(accountTable).values(row as any).onConflictDoNothing();
   } catch (err) {
     console.warn(`⚠️  ${ACCOUNT.entity} for ${email} not seeded:`, err);
+  }
+  // A demo row an earlier seed filled with its own placeholder ("Default
+  // <name>") where a new account starts elsewhere is put right; anything a
+  // person or a workflow wrote is left as it is.
+  if (!Object.keys(initial).length) return;
+  try {
+    const [had]: any[] = await db.select().from(accountTable).where(eq((accountTable as any).id, id)).limit(1);
+    const fix: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(initial)) if (had && had[k] === `Default ${name}`) fix[k] = v;
+    if (Object.keys(fix).length) await db.update(accountTable).set(fix as any).where(eq((accountTable as any).id, id));
+  } catch (err) {
+    console.warn(`⚠️  ${ACCOUNT.entity} for ${email} not put right:`, err);
   }
 }
 
@@ -294,6 +317,11 @@ async function seedRoleLogins(): Promise<void> {
       if (created[0]?.id) {
         await ensureAccountRow(String(created[0].id), email, `${role} (demo)`);
         console.log(`✅ demo login: ${email} (${role}, password: ${ADMIN_PASSWORD})`);
+      } else {
+        // The demo login is already there: its account row is still the
+        // seed's to put right where an earlier seed left a placeholder.
+        const [had]: any[] = await db.select().from(users).where(eq((users as any).email, email)).limit(1);
+        if (had?.id) await ensureAccountRow(String(had.id), email, `${role} (demo)`);
       }
     } catch (e) {
       console.warn(`demo login for ${role} not seeded:`, e);

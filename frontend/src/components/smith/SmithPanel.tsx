@@ -51,9 +51,11 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { MarkdownLink } from "@/components/chat/MarkdownLink";
+import { previewReport } from "@/lib/preview-report";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import { ReviewWindow } from "@/components/smith/ReviewWindow";
+import { HuddleCards } from "@/components/smith/HuddleCards";
 import { STAGE_VERB, labelFor } from "./stages";
 import { QuestMap } from "./QuestMap";
 import { progressMark, slowStepNote } from "./slowStep";
@@ -387,6 +389,10 @@ export function SmithPanel({
   }, [messages.length, run.nodesDone, run.thoughts.length]);
 
   const busy = run.status === "running";
+  // WHAT IS RUNNING, SAID AS IT IS. A build streams its plan of steps; a
+  // reply does not. The input read "Building…" under every turn — a "Not now"
+  // included — so a slow answer looked like a build nobody had asked for.
+  const building = busy && (run.nodesTotal > 0 || run.nodes.some((n) => n.state === "running"));
 
   // Discovery already asked "what would you like to build?", so the workspace
   // does not ask again — it carries that answer in as the first turn. Guarded
@@ -655,7 +661,7 @@ export function SmithPanel({
       // with every message and was dropped there.
       const prior = messages.slice(-SENT_HISTORY).map((m) => ({ role: m.role, text: m.text }));
       setMessages((m) => [...m, { role: "user", text, at: Date.now() }]);
-      void start({ description: text, evidence, history: prior });
+      void start({ description: text, evidence, history: prior, report: previewReport() });
     },
     [projectId, messages, evidence, start],
   );
@@ -708,6 +714,28 @@ export function SmithPanel({
       if (opening) sendText(opening);
     } catch {
       // A malformed trigger is not worth a broken panel.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  // BRAIN JUICE HANDS AN AGREED IDEA HERE. The person and Smith agreed the
+  // app in Brain Juice, which wrote the requirements document, made this
+  // project and navigated to it with `brain_juice_<projectId>`. Agreeing
+  // there IS both reviews, so the document goes as an APPROVED first message:
+  // a project with no definition yet is built straight through from it.
+  useEffect(() => {
+    if (!projectId) return;
+    const key = `brain_juice_${projectId}`;
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return;
+    sessionStorage.removeItem(key);
+    try {
+      const opening = String(JSON.parse(raw).opening || "").trim();
+      if (!opening) return;
+      setMessages((m) => [...m, { role: "user", text: opening, at: Date.now() }]);
+      void start({ description: opening, evidence, approved: true });
+    } catch {
+      // A malformed hand-off is not worth a broken panel.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -1094,7 +1122,11 @@ export function SmithPanel({
             rows={2}
             disabled={busy}
             placeholder={
-              busy ? "Building…" : "Describe the application, or a change to it"
+              building
+                ? "Building…"
+                : busy
+                  ? "Smith is working on your last message…"
+                  : "Describe the application, or a change to it"
             }
             className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
           />
@@ -1151,6 +1183,14 @@ export function SmithPanel({
             </button>
           )}
           <StageList run={sidePlan} projectId={projectId ?? undefined} />
+          {projectId && (
+            <HuddleCards
+              projectId={projectId}
+              tick={run.events.filter((e) => e.event === "huddle").length}
+              onOverrule={sendText}
+              className="mt-4"
+            />
+          )}
         </div>
       ) : openGate === "requirements" && gates.data ? (
         // THE FIRST REVIEW: what the app must do.

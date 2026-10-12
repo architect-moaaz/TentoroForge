@@ -84,10 +84,14 @@ export async function POST(request: Request) {
     }
 
     const hashedPassword = await bcrypt.hash(data.password, 12);
-    // The role: the one chosen, else the one self-registered people get —
-    // auth folds `accountType` into the session role, and without one a new
-    // person held a role no page or workflow names.
-    const role = data.accountType || SIGNUP_ROLE || undefined;
+    // THE ROLE IS THE APP'S TO GIVE. Only a choice the app offers
+    // (`ACCOUNT_TYPES`, from the definition) is taken from the request; with
+    // no choice offered, whatever the request says is ignored — anyone could
+    // post `accountType: "Merchant"` and sign up as the merchant (E-commerce,
+    // 2026-10-09). Else the role self-registered people get: auth folds
+    // `accountType` into the session role, and without one a new person held
+    // a role no page or workflow names.
+    const role = (ACCOUNT_TYPE_VALUES.length ? data.accountType : undefined) || SIGNUP_ROLE || undefined;
 
     // One transaction: never a login without its person, or the reverse.
     const user = await (db as any).transaction(async (tx: any) => {

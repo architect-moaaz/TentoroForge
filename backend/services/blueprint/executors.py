@@ -1281,8 +1281,11 @@ NODE_TASKS: dict[str, str] = {
         "or a dense console), `brand` (the primary colour, when the brand "
         "leads), `light` (a card beside the page, for a quiet tool), `tinted` "
         "(the ground washed with the primary, for a warm or consumer "
-        "product). Choose all three from the personality and how the product "
-        "is used, and make them agree with `navigationApproach`.\n\n"
+        "product). Choose all three from the product's field, the kind of "
+        "product it is and how it is used, and make them agree with "
+        "`navigationApproach`. This is the application's own frame and its "
+        "sign-in screen; once the screens and the roles exist, the director "
+        "gives each kind of person their own look.\n\n"
         "TYPE IS TWO DECISIONS. Name `typography.fontFamilyBase` (the body, a "
         "highly legible face) and `typography.fontFamilyHeading` (page and card "
         "titles — a display serif or a characterful sans when the personality "
@@ -1327,6 +1330,13 @@ NODE_TASKS: dict[str, str] = {
         "Then the product frame: objectives, personas, the domain vocabulary "
         "the generated app should use in its labels, and the capabilities it must "
         "offer.\n\n"
+        "SAY WHAT THE PRODUCT IS. `domain` is the field it serves, in a few "
+        "plain words as the people in it would say it; `category` is the kind "
+        "of product it is to the people who use it and how they meet it — "
+        "something they browse and buy from, a tool they work in all day, a "
+        "portal they check now and then, a service they book. When it is two "
+        "things to two kinds of people, say both. Every screen's look is "
+        "chosen from these two, so neither is ever left empty.\n\n"
         "On `locale` — set it when the request says what language the INTERFACE is in — "
         "\"Arabic-first\", \"the UI should be in French\", a brief written "
         "throughout in another language. A BCP-47 tag: `ar`, `ar-PS`, `fr`. "
@@ -1365,7 +1375,11 @@ NODE_TASKS: dict[str, str] = {
         "ever written while looking at a job from a top-level record.\n\n"
         "THE PERSON BEHIND A LOGIN. When the people who sign in have a record "
         "of their own in this application — a Member, a Customer, a Patient, "
-        "a Driver — mark exactly that one entity `account: true`. Each of its "
+        "a Driver — mark exactly that one entity `account: true`. A second kind "
+        "of signed-in person — a Vendor beside a Customer, a Doctor beside a "
+        "Patient — is a ROLE of that one account, or a record linked to it "
+        "(`VendorProfile` with `userId` → the account entity): never a second "
+        "`account: true`, which is a second login no one can sign in with. Each of its "
         "rows IS a signed-in person: its id is their account's id, it is "
         "created at signup together with their login, and every other record "
         "that points at a person points at it (`patientId`, `authorId`, "
@@ -1526,11 +1540,12 @@ NODE_TASKS: dict[str, str] = {
         "precondition: a list is a list whether or not anything has happened "
         "yet, and declaring one a page does not have makes it unreviewable "
         "for no reason.\n\n"
-        "When a page starts a business process, name it in `dispatches`: the "
-        "page that opens the drop-off wizard declares the intake workflow, so "
-        "its form can submit into it. Nothing downstream can work this out — "
-        "an intake that registers the customer first looks, by its steps, like "
-        "a Customer workflow rather than the one /jobs/new starts.\n\n"
+        "When a page starts a business process that is already declared (its "
+        "`FLOW-` id is in the workflows you are shown), name it in `dispatches`: "
+        "the page that opens the drop-off wizard declares the intake workflow, "
+        "so its form can submit into it. While no workflows are declared, leave "
+        "`dispatches` out — the processes, declared next, name the pages that "
+        "start them. Never put any other kind of id there.\n\n"
         "Say how the pages connect, not just which exist. Each page lists the "
         "pages reachable from it in `navigatesTo`, by id — that is the arrow a "
         "breadcrumb follows and the reason a list page and its detail belong to "
@@ -1572,7 +1587,8 @@ NODE_TASKS: dict[str, str] = {
         "give a `label`, the reader's "
         "question it `answers`, a `prominence` (`lead` for the one thing the "
         "page leads with, `key`, `supporting`, `reassurance` for what sits "
-        "beside the main action) and its `source`:\n"
+        "beside the main action) and its `source`, whose `kind` says where the "
+        "fact comes from — `{\"kind\": \"count\", \"entity\": …}`, never `type`:\n"
         "- `field`: a field of the page's record (`field`), or of `entity`. If "
         "the entity does not have the field a reader needs — a listing with no "
         "description, no category, nothing about what is included — propose it "
@@ -1613,6 +1629,10 @@ NODE_TASKS: dict[str, str] = {
         "decides: never invent a figure, a score or a term the description "
         "and the data model do not have, and nothing the business rules forbid."
     ),
+    # The paths people take; the text lives with what reads the flows.
+    "app_flows": __import__("services.blueprint.app_flows", fromlist=["FLOWS_PROMPT"]).FLOWS_PROMPT,
+    # What must happen; the text lives with what reads the statements.
+    "expectations": __import__("services.expects.statements", fromlist=["EXPECT_PROMPT"]).EXPECT_PROMPT,
     "analytics": (
         "Design the analytics of this application: the KPIs, charts and "
         "breakdowns each page carries, written as `widgets`. Every page and "
@@ -1729,6 +1749,12 @@ NODE_TASKS: dict[str, str] = {
         "converter's fields — does that in the browser through the page's own "
         "`clientState`, and needs no workflow, no endpoint and no table. Do "
         "not declare one per button.\n\n"
+        "A PASSWORD IS THE PLATFORM'S TO CHANGE. Changing one's own password is "
+        "a process the engine runs itself (`set_password`): declare it with "
+        "`currentPassword` and `newPassword` field inputs, launched from the "
+        "person's account page. Never model the credential as a field of an "
+        "entity — no entity holds a password, and a step that writes one is "
+        "refused.\n\n"
         "Declare the business processes as workflows: for each, its `name`, "
         "`purpose`, `trigger`, the page that launches it (`launchedFrom`, "
         "required for a manual trigger) and its `inputs`. DO NOT write "
@@ -1817,7 +1843,7 @@ NODE_TASKS: dict[str, str] = {
         "(`{{extract_listings.output[0].images ?? inputImage}}`). A field each item "
         "brings itself (its currency, its unit) is read from the item, never written as "
         "one literal for all of them.\n\n"
-        + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. The `where` of a lookup maps a field to a value, which means equals; any other comparison is that field mapped to ONE comparison — `{"id": {"ne": "{{customer.id}}"}}` (`ne`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`), never `id__neq`. A signed-out visitor is `$guest`, their guest token — a record a rule gives a `guestColumn` is stamped with it on insert by itself; `$guest` is for finding theirs (an open cart whose guest column is `$guest`). There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
+        + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. The `where` of a lookup maps a field to a value, which means equals; any other comparison is that field mapped to ONE comparison — `{"id": {"ne": "{{customer.id}}"}}` (`ne`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`), never `id__neq`. A signed-out visitor is `$guest`, their guest token — a record a rule gives a `guestColumn` is stamped with it on insert by itself; `$guest` is for finding theirs (an open cart whose guest column is `$guest`). There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. WHAT A PROCESS WRITES IS DECLARED WITH ITS STEPS: fill `writes` — each record type the steps insert or update, the fields they set and the states they put a status field in — exactly as the steps do; screens, charts and statements bind to it. A process that records an amount follows `policies.quantities` for its name: `add` means a new entry is inserted beside the period\'s others (never an update that replaces the period\'s total), `replace` means the period\'s one record is updated. A status a step sets is a move `policies.lifecycles` allows from the record\'s current state, and a new record starts in its life cycle\'s `initial` state — the engine refuses any other move. A password is changed by an `action` with `actionType: set_password`, its `newPassword` (and `currentPassword`, checked) as templates over the inputs — the platform checks and hashes it; no step reads or writes a password column. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
         + "\n\nTELL THE OTHER PERSON. When a step changes something another person "
         "must act on or would want to know — a request arrives for them, their "
         "request is approved or declined, a case is opened against them, a job "
@@ -1860,6 +1886,27 @@ NODE_TASKS: dict[str, str] = {
         "saying what to do first) and `page` (the page where they do it; a "
         "new account is sent there first). Every gated workflow then starts "
         "by checking it and refuses with the message when it is not met."
+    ),
+    "decisions": (
+        "Decide, once, the business facts every writer of this application must "
+        "agree on, from what was agreed at the reviews — the requirements, the "
+        "product, its people, its records and screens. Write them as `policies`: "
+        "`money` (the one currency every amount is shown in, from the request or "
+        "the market it names, and the rules that compute amounts — shipping, tax, "
+        "discounts — each with its formula over the record's fields, or none); "
+        "`time` (whose time zone 'today' means); `quantities` (for every process "
+        "that records an amount — a glass of water, hours slept, a payment — "
+        "whether a new entry ADDS to the period's total or REPLACES it); "
+        "`lifecycles` (for every status-like field: the state a record starts "
+        "in, every move allowed, and who may make it — the engine refuses any "
+        "other move, and screens filter by these states); `anonymous` (for every "
+        "process a signed-out visitor can reach: allowed, asked to sign in first, "
+        "or owned by their guest session — never a button anyone can press that "
+        "only a signed-in person can use); `selfRegistration` (the roles a person "
+        "may sign up as — empty means the default role only); and `decisions` for "
+        "any other fact two writers could otherwise read differently. Decide from "
+        "the domain as its practitioners would; do not ask. Name only entities, "
+        "fields, states, roles and processes the document has."
     ),
     "security": (
         "Define roles and the permissions that guard entities and endpoints. "
@@ -2305,6 +2352,39 @@ def build_prompt(
     if node == "workflow_steps":
         return _workflow_steps_prompt(doc, system, subject, feedback,
                                       output_dir=output_dir, brief=brief)
+
+    if node == "app_flows":
+        # The people, the screens and what each starts — what a path is made
+        # of — rather than the agent's whole slice.
+        from services.blueprint.app_flows import flows_brief
+        user = ("What the flows are made of:\n\n```json\n" + json.dumps(flows_brief(doc), indent=1, default=str)
+                + "\n```")
+        if doc.get("flows"):
+            user += ("\n\nThe flows as they stand — keep each one's `name` when you change it:\n```json\n"
+                     + json.dumps(doc.get("flows"), indent=1, default=str)[:20000] + "\n```")
+        if brief:
+            user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
+        if feedback:
+            user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+        return system, user
+
+    if node == "expectations":
+        # The requirements, the rules, the people and what each screen and
+        # process is — what a statement is written in — not the whole slice.
+        from services.expects.statements import expect_brief, subject_ask
+        user = ("What the statements are written from:\n\n```json\n"
+                + json.dumps(expect_brief(doc), indent=1, default=str) + "\n```")
+        ask = subject_ask(doc, subject) if subject else ""
+        if ask:
+            user += "\n\n" + ask
+        if doc.get("expectations"):
+            user += ("\n\nThe statements as they stand — keep each one's `says` when you keep it:\n```json\n"
+                     + json.dumps(doc.get("expectations"), indent=1, default=str)[:30000] + "\n```")
+        if brief:
+            user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
+        if feedback:
+            user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+        return system, user
 
     if node == "workflows":
         # The node catalog goes to `workflow_steps`, the one task that authors
@@ -3098,6 +3178,61 @@ def _page_details_prompt(doc: dict, system: str, subject: str,
     return system, user
 
 
+def drop_unknown_dispatches(result: AgentResult, doc: dict, subject: str = "") -> list[str]:
+    """A page's `dispatches` that names no process the application has is
+    left out. The page details are written before the processes are declared,
+    and the processes then say which pages start them (`launchedFrom`) — so a
+    `dispatches` written early can only be a guess. ToroCommerce's checkout
+    guessed `JOURNEY-006`, the whole document failed its contract, and every
+    page of the checkout feature lost its details (torob1, 2026-10-09).
+    Returns what was dropped, for the log."""
+    live = {str(w.get("id")) for w in doc.get("workflows") or [] if isinstance(w, dict) and w.get("id")}
+    dropped: list[str] = []
+    for proposal in getattr(result, "proposals", None) or []:
+        body = getattr(proposal, "body", None)
+        if getattr(proposal, "section", "") != "pages" or not isinstance(body, dict):
+            continue
+        named = body.get("dispatches")
+        if named and str(named) not in live:
+            body.pop("dispatches", None)
+            dropped.append(f"{body.get('route') or body.get('id')}: {named}")
+    for d in dropped:
+        logger.info("[page_details] %s: dropped a dispatches no process answers to — %s", subject, d)
+    return dropped
+
+
+def drop_values_no_list_allows(result: AgentResult, subject: str = "") -> list[str]:
+    """A page field that is a list of closed values (`states`) keeps only the
+    values the contract allows. ToroCommerce's checkout invented a
+    `noSelection` state, the whole document failed its contract, and every
+    page of the checkout feature lost its details — twice (torob2,
+    2026-10-09). One invented value costs that value, not the feature.
+    The allowed values are read from the contract itself."""
+    import json as _json
+    from services.blueprint.service import CONTRACT_PATH
+    try:
+        props = _json.loads(Path(CONTRACT_PATH).read_text("utf-8"))["properties"]["pages"]["items"]["properties"]
+    except Exception:  # noqa: BLE001 — no contract to read, nothing to drop
+        return []
+    closed = {k: set(v["items"]["enum"]) for k, v in props.items()
+              if v.get("type") == "array" and isinstance(v.get("items"), dict) and v["items"].get("enum")}
+    dropped: list[str] = []
+    for proposal in getattr(result, "proposals", None) or []:
+        body = getattr(proposal, "body", None)
+        if getattr(proposal, "section", "") != "pages" or not isinstance(body, dict):
+            continue
+        for key, allowed in closed.items():
+            values = body.get(key)
+            if isinstance(values, list):
+                bad = [v for v in values if v not in allowed]
+                if bad:
+                    body[key] = [v for v in values if v in allowed]
+                    dropped.append(f"{body.get('route') or body.get('id')}: {key} {bad}")
+    for d in dropped:
+        logger.info("[page_details] %s: dropped values the contract does not allow — %s", subject, d)
+    return dropped
+
+
 def pin_page_identity(svc: Any, subject: str, result: AgentResult) -> None:
     """Make the contract author's reply update the declared pages, and only
     those.
@@ -3578,6 +3713,11 @@ EFFORT_BY_NODE: dict[str, str] = {
     # costs a subject its correctness.
     "page_details": "medium",
     "workflow_steps": "medium",
+    # Statements over requirements, rules and screens already decided, in a
+    # shape the contract checks field by field; one group of requirements a
+    # call. At `high` one call reasoned through 32,000 tokens and answered
+    # nothing (TCommerce, 2026-10-08). A refused reply retries at `high`.
+    "expectations": "medium",
     # Tests are enumerated from what the Blueprint already claims, not invented.
     # A short list of named third parties.
     "integrations": "low",
@@ -4125,6 +4265,8 @@ def make_executor(
         elif spec.node == "page_details":
             with svc.lock:
                 pin_page_identity(svc, spec.subject, result)
+                drop_unknown_dispatches(result, svc.doc, spec.subject)
+                drop_values_no_list_allows(result, spec.subject)
         elif spec.node == "data_model":
             pin_entity_set(result)
         elif spec.node == "entity_fields":
@@ -4154,7 +4296,9 @@ def make_executor(
             doc = _copy.deepcopy(svc.doc)
         if spec.agent == "ui_director":
             t0 = time.monotonic()
-            body, u = ui_engineer.compose_direction(doc, client, references=references.paths(svc.output_dir))
+            body, u = ui_engineer.compose_direction(doc, client, references=references.paths(svc.output_dir),
+                                                    brief=getattr(spec, "brief", "") or "",
+                                                    feedback=spec.feedback or "")
             record(u, time.monotonic() - t0)
             return AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.9,
                                proposals=[ArtifactProposal(section="composition",
@@ -4388,6 +4532,8 @@ def make_executor(
             elif spec.node == "page_details":
                 with svc.lock:
                     pin_page_identity(svc, spec.subject, parsed)
+                    drop_unknown_dispatches(parsed, svc.doc, spec.subject)
+                    drop_values_no_list_allows(parsed, spec.subject)
                     if spec.attempt >= 2:
                         # The last attempt keeps the facts that resolve: a
                         # content plan with one bad source must not cost the
@@ -4400,6 +4546,9 @@ def make_executor(
             elif spec.node == "entity_fields":
                 with svc.lock:
                     pin_entity_identity(svc, spec.subject, parsed)
+            elif spec.node == "expectations":
+                # Each call is held to its own part of the statements.
+                parsed.subject = spec.subject  # type: ignore[attr-defined]
             return parsed
 
         if isinstance(last, Truncated):

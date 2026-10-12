@@ -52,4 +52,4 @@ def test_authors_are_told():
     from services.blueprint.executors import NODE_TASKS
     from services.blueprint.ui_engineer import DESIGN_PRINCIPLES
     assert "never written as one literal for all of them" in NODE_TASKS["workflow_steps"]
-    assert "MONEY SAYS ITS CURRENCY" in DESIGN_PRINCIPLES and "never a fixed symbol" in DESIGN_PRINCIPLES
+    assert "MONEY IS THE APPLICATION'S CURRENCY" in DESIGN_PRINCIPLES and "never a currency literal or symbol" in DESIGN_PRINCIPLES

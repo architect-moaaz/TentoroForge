@@ -424,6 +424,15 @@ export class OfficeRenderer {
         ctx.fillRect(x + w - 8, y + h - 6, 6, 4);
         break;
       }
+      case "meeting_table": {
+        // One tile of the Huddle Room's table: wood, edge to edge, so the
+        // tiles join into one long table.
+        ctx.fillStyle = "#92400e";
+        ctx.fillRect(px, py + 6, ts, ts - 12);
+        ctx.fillStyle = "#b45309";
+        ctx.fillRect(px, py + 8, ts, ts - 18);
+        break;
+      }
       case "plant": {
         // Pot
         ctx.fillStyle = "#a16207";

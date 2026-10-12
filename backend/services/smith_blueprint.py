@@ -157,6 +157,13 @@ class Blueprint:
             from services.smith.engine_blueprint_adapter import connection_lines
 
             bp.integrations = connection_lines(engine, output_dir)
+            # What must happen, each statement with how it last went — read
+            # here, where the results beside the application can be found.
+            try:
+                from services.expects.build import lines as expectation_lines
+                bp.expectations = expectation_lines(engine, output_dir)
+            except Exception:  # noqa: BLE001 — the context never fails on a side file
+                bp.expectations = []
             if path.exists():
                 try:
                     mine = json.loads(path.read_text(encoding="utf-8"))

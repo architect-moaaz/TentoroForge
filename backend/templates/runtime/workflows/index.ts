@@ -927,10 +927,66 @@ export function _numberIn(text: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// ---------------------------------------------------------------------------
+// Life cycles — the moves a status field may make, decided in the definition
+// ---------------------------------------------------------------------------
+//
+// An order was created "pending" and set "processing" by the same process,
+// while the merchant's list filtered "pending" and nothing stopped a
+// delivered order going back to "processing" (E-commerce, 2026-10-09). The
+// definition's `policies.lifecycles` (projected to `src/contracts/policies.json`)
+// says the state a record starts in, the moves allowed and who may make each;
+// an insert starts there, and an update that is not an allowed move is refused
+// in words. A test may put policies on `globalThis.__forgePolicies`.
+
+type LifecycleMove = { from: string; to: string; by?: string[] };
+type LifecycleRule = { table: string; entity?: string; field: string; initial: string; moves: LifecycleMove[] };
+
+function policiesOf(): any {
+  const given = (globalThis as any).__forgePolicies;
+  if (given) return given;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const p = require("@/contracts/policies.json");
+    return (p && p.default) || p || {};
+  } catch {
+    return {};
+  }
+}
+
+function lifecyclesOf(tableName: string): LifecycleRule[] {
+  const rules = (policiesOf().lifecycles || []) as LifecycleRule[];
+  const want = _canonTable(tableName);
+  return rules.filter((r) => r && r.field && (_canonTable(r.table || "") === want || _canonTable(r.entity || "") === want));
+}
+
+/** Why `from` → `to` on `field` is not allowed for this actor, or null when it is. */
+export function lifecycleRefusal(
+  tableName: string, field: string, from: unknown, to: unknown, actorRole: string | undefined,
+): string | null {
+  const rule = lifecyclesOf(tableName).find((r) => r.field === field);
+  if (!rule || to === undefined || to === null || String(from ?? "") === String(to)) return null;
+  const what = rule.entity || tableName;
+  const move = (rule.moves || []).find((m) => String(m.from) === String(from ?? "") && String(m.to) === String(to));
+  if (!move) return `${what} cannot go from ${from ?? "nothing"} to ${to}.`;
+  if (move.by && move.by.length && !(actorRole && move.by.includes(actorRole))) {
+    return `Only ${move.by.join(" or ")} may move ${what} from ${from} to ${to}.`;
+  }
+  return null;
+}
+
 export function _finalizeInsert(
   table: any, values: Record<string, unknown>, ctx: WorkflowExecutionContext,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
+  // A new record starts where its life cycle says, unless the steps say.
+  try {
+    for (const rule of lifecyclesOf(getTableName(table))) {
+      if (rule.field in table && (values[rule.field] === undefined || values[rule.field] === "")) {
+        values = { ...values, [rule.field]: rule.initial };
+      }
+    }
+  } catch { /* no table name: nothing to start */ }
   for (const [k, v] of Object.entries(values)) {
     if (!(k in table) || v === "" || v === undefined) continue;
     // Drizzle timestamp columns crash with "value.toISOString is not a
@@ -1408,6 +1464,46 @@ export function registerDefaultActions(): void {
              ...(items.length > limit ? { notice: `Only the first ${limit} of ${items.length} were processed.` } : {}) };
   });
 
+  // THE PLATFORM OWNS THE CREDENTIAL — SO IT IS THE PLATFORM THAT CHANGES IT.
+  // A process that changed a password wrote `passwordHash` on the account
+  // entity, was refused three times, and shipped with no steps behind a form
+  // that said "Password changed" (E-commerce, 2026-10-09). This is the one
+  // way: the signed-in person's own login row, the current password checked
+  // when the step names one, the new one hashed as sign-up hashes it, and a
+  // refusal in words — never a password column read or written by a step.
+  registerActionHandler("set_password", async (config, ctx) => {
+    const users = _resolveTable("users");
+    if (!users) return { error: "the users table is not in the schema" };
+    const uid = (ctx as any).user?.id;
+    if (!uid) return { refused: true, message: "Sign in to change your password." };
+    const cfg = config as any;
+    const next = String(_resolveRef(cfg.newPassword, ctx) ?? "");
+    if (next.length < 6) return { refused: true, message: "The new password must be at least 6 characters." };
+    try {
+      const bcrypt = (await import("bcryptjs")).default;
+      const [row] = await (db as any).select().from(users).where(eq((users as any).id, uid)).limit(1);
+      if (!row) return { refused: true, message: "Your login was not found." };
+      if (cfg.currentPassword !== undefined) {
+        const current = String(_resolveRef(cfg.currentPassword, ctx) ?? "");
+        if (!(await bcrypt.compare(current, String(row.password ?? "")))) {
+          return { refused: true, message: "The current password is not right." };
+        }
+      }
+      const hash = await bcrypt.hash(next, 12);
+      await (db as any).update(users).set({ password: hash }).where(eq((users as any).id, uid));
+      return { changed: true };
+    } catch (err) {
+      console.error("[workflow] set_password failed:", err);
+      reportFromError(err, {
+        kind: "workflow",
+        source_file: "src/lib/workflows/index.ts",
+        workflow_id: cfg?.__workflowId || (ctx as any)?.workflow?.id,
+        node_id: cfg?.__nodeId,
+      });
+      return { error: String(err) };
+    }
+  });
+
   registerActionHandler("db_update", async (config, ctx) => {
     const table = _resolveTable((config as any).table);
     if (!table) { console.warn("[workflow] db_update: unknown table", (config as any).table); return { error: "unknown table" }; }
@@ -1437,6 +1533,20 @@ export function registerDefaultActions(): void {
       const q = (db as any).update(table).set(raw);
       const where = _buildWhere(table, (config as any).where, ctx);
       _requireWhereOrThrow("db_update", config, where);
+      // A STATUS MOVES ONLY AS ITS LIFE CYCLE ALLOWS: each row the update
+      // reaches is read first, and a move the decision does not allow — or
+      // one this person may not make — refuses the whole step in words.
+      const guarded = lifecyclesOf(getTableName(table)).filter((r) => r.field in raw);
+      if (guarded.length) {
+        const current = await (db as any).select().from(table).where(where);
+        for (const row of Array.isArray(current) ? current : []) {
+          for (const rule of guarded) {
+            const why = lifecycleRefusal(getTableName(table), rule.field, (row as any)[rule.field], raw[rule.field],
+                                         (ctx as any).user?.role);
+            if (why) return { refused: true, message: why };
+          }
+        }
+      }
       const rows = await q.where(where).returning();
       if (Array.isArray(rows)) {
         for (const r of rows) await embedWrittenRow(table, r, null, Object.keys(raw));

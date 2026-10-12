@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import urllib.error
 import urllib.request
@@ -79,6 +80,17 @@ TRIALS = TRIALS + (
      {"kind": "string", "as": "string"}),
 )
 
+TRIALS = TRIALS + (
+    ("try_expectation",
+     "Try one of the application's statements of what must happen (`statement`: its `EXP-…` id, "
+     "listed under \"What must happen\") the way the build does: its records made, each step done in "
+     "a browser as its person, each check judged from what the app showed and stored. Shows whether it "
+     "holds and, when it does not, what was seen instead. When a statement covers what someone says "
+     "does not work, try it before changing anything; after a change, try it again to show it holds. "
+     "On a copy of the data, put back as it was afterwards.",
+     {"statement": "string"}),
+)
+
 TRIAL_NAMES: frozenset[str] = frozenset(name for name, _d, _a in TRIALS)
 
 #: A 1×1 PNG and a one-page PDF: the smallest files each picker accepts.
@@ -108,15 +120,30 @@ class TrialUnavailable(RuntimeError):
     """The app could not be started for a trial. The message is the observation."""
 
 
+#: A bench nobody has tried anything on for this long is stopped. Its dev
+#: server holds gigabytes: E-commerce's held 6-8 GB through a 34-minute Smith
+#: turn that spent most of it thinking, and with two such turns the host ran
+#: out of memory (forge-v3, 2026-10-09). Long enough that a trial and the
+#: next one that looks at what it did share one copy.
+IDLE_S = float(os.environ.get("FORGE_TRIAL_IDLE_S") or 120)
+
+
 class Bench:
     """One running copy of the application for a turn: started on the first
-    trial, stopped when the turn ends (`close`), started again after a change
-    to the data model (`reset`)."""
+    trial, stopped when the turn ends (`close`) or after `IDLE_S` with no trial,
+    started again after a change to the data model (`reset`) and on the next
+    trial after an idle stop."""
 
-    def __init__(self, output_dir: str, *, factory: Callable[..., Any] | None = None):
+    def __init__(self, output_dir: str, *, factory: Callable[..., Any] | None = None,
+                 idle_s: float | None = None):
+        import threading
         self.output_dir = output_dir
         self._factory = factory
         self._app: Any = None
+        self._lock = threading.RLock()
+        self._busy = 0
+        self._idle_s = IDLE_S if idle_s is None else idle_s
+        self._timer: Any = None
         self._log_at = 0
         self.log = Path(output_dir) / ".forge" / "trials" / "server.log"
         #: The last `try_workflow`'s tables before and after it ran.
@@ -128,6 +155,33 @@ class Bench:
         #: (2026-10-06). Every signed-out trial carries this token.
         import uuid as _uuid
         self.guest = str(_uuid.uuid4())
+
+    def begin(self) -> None:
+        """A trial is starting: the bench is not idle."""
+        with self._lock:
+            self._busy += 1
+            if self._timer is not None:
+                self._timer.cancel()
+                self._timer = None
+
+    def end(self) -> None:
+        """A trial has finished: stop the bench if no other starts soon."""
+        import threading
+        with self._lock:
+            self._busy = max(0, self._busy - 1)
+            if self._busy or self._app is None or self._idle_s <= 0:
+                return
+            self._timer = threading.Timer(self._idle_s, self._idle_stop)
+            self._timer.daemon = True
+            self._timer.start()
+
+    def _idle_stop(self) -> None:
+        with self._lock:
+            self._timer = None
+            if not self._busy and self._app is not None:
+                logger.info("[trials] %s: no trial for %.0fs; stopping its dev server",
+                            Path(self.output_dir).name, self._idle_s)
+                self.close()
 
     def app(self) -> Any:
         if self._app is None:
@@ -159,6 +213,9 @@ class Bench:
         self.close()
 
     def close(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
         if self._app is not None:
             try:
                 self._app.__exit__(None, None, None)
@@ -192,6 +249,45 @@ def _role(doc: dict, ref: str) -> tuple[str, bool]:
             return name, name == admin
     known = ", ".join(str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict))
     raise ValueError(f"no role called {want!r}; the app's roles are {known or 'none'}, or `signed out`")
+
+
+def default_person(doc: dict, *, route: str = "", flow: dict | None = None) -> str:
+    """Who a trial is when the call names nobody: the person the screen or the
+    process is FOR. It was always the administrator, and an administrator
+    cannot change a customer's cart: ToroCommerce's fixed minus button was
+    tried as Admin, refused with 422, and reported "still does not work"
+    (measured on a copy, 2026-10-07). A screen only some roles may open is
+    theirs; a process only some roles may start is theirs; anything else is
+    the application's own audience — the role people sign up as — and the
+    administrator only when there is none."""
+    from services.blueprint.account_model import admin_role, signup_role
+    from services.blueprint.projection import launch_roles, restricted_roles
+    from services.smith.reported import REPORTED, who
+
+    # THE PERSON WHO SAW IT, when the turn knows one: a signed-out shopper's
+    # fault was tried as a signed-in Customer and "the workflow works" was the
+    # answer (E-commerce, 2026-10-09).
+    reported = who(REPORTED.get() or {}, [str(r.get("name")) for r in doc.get("roles") or []
+                                           if isinstance(r, dict) and r.get("name")])
+    if reported:
+        return reported
+    admin = admin_role(doc) or "Admin"
+    audience = signup_role(doc) or admin
+    if flow is not None:
+        runs = launch_roles(doc).get(str(flow.get("id"))) or []
+        named = [r for r in runs if r not in ("*", "@signed-in")]
+        if runs and len(named) == len(runs):
+            return audience if audience in named else named[0]
+        return audience
+    path = route.split("?", 1)[0]
+    page = next((p for p in doc.get("pages") or [] if isinstance(p, dict) and str(p.get("route")) == path), None)
+    if page is not None:
+        if str(page.get("access") or "") == "public" and not page.get("users"):
+            return audience
+        mine = restricted_roles(doc, page)
+        if mine:
+            return audience if audience in mine else mine[0]
+    return audience
 
 
 def _session(app: Any, doc: dict, ref: str, guest: str | None = None) -> tuple[str, list[dict]]:
@@ -321,6 +417,7 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     if flow is None:
         return f"No process called {ref!r}. The app has: {names(flows)}."
     app = bench.app()
+    as_ = as_ or default_person(doc, flow=flow)
     who, jar = _session(app, doc, as_, bench.guest)
     tables = _tables(app)
     before = _snapshot(app, tables)
@@ -329,8 +426,22 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     # database's own clock (the copy's, not this process's).
     mark = _query(app, "select coalesce(max(created_at), 'epoch')::text from workflow_execution_log")
     started = mark[0][0] if mark and mark[0] else "epoch"
+    payload = dict(payload) if isinstance(payload, dict) else {}
+    def reach(table: str) -> list[str] | None:
+        """The ids this person reaches in `table`, through the app's own data
+        access as them (ownership rules apply); None when it would not say."""
+        code, _w, body = _http(app, "GET", f"/api/data/{table}?limit=5", None, jar)
+        if code != 200:
+            return None
+        try:
+            rows = json.loads(body).get("data")
+        except (ValueError, AttributeError):
+            return None
+        return [str(r.get("id")) for r in rows or [] if isinstance(r, dict) and r.get("id")]
+
+    filled = fill_records(app, doc, flow, payload, reach=reach)
     status, _where, text = _http(app, "POST", f"/api/workflows/{flow.get('id')}/execute",
-                                 {"input": payload if isinstance(payload, dict) else {}}, jar)
+                                 {"input": payload}, jar)
     after = _snapshot(app, tables)
     # Kept whole for whoever reads the run back (`round_trips`): the report
     # below cuts a wide row at 300 characters.
@@ -341,6 +452,8 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
                         "order by created_at, step_index limit 40")
     out = [f"{flow.get('name')} ({flow.get('id')}) run as {who}: HTTP {status}",
            f"answer: {_body(text)}"]
+    if filled:
+        out.insert(1, "filled with real records: " + "; ".join(filled))
     if status == 403:
         out += launch_rights(bench.output_dir, doc, flow)
     if steps:
@@ -361,6 +474,67 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
         out.append("the server printed:")
         out += [f"  {l}" for l in said]
     return scrub("\n".join(out))
+
+
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def _an_id(value: Any) -> bool:
+    if isinstance(value, dict):
+        value = value.get("id")
+    return isinstance(value, (str, int)) and bool(_UUID.match(str(value)) or str(value).isdigit())
+
+
+def fill_records(app: Any, doc: dict, flow: dict, payload: dict,
+                 reach: Callable[[str], list[str] | None] | None = None) -> list[str]:
+    """A required record input given nothing, or something that is not an id
+    ("first"), takes a real record of its kind from the copy — the newest —
+    and a declared `<name>Id` beside it takes the same id. TCommerce's empty
+    bag was never reproduced: Smith sent `productVariant: "first"`, was told
+    "needs productVariantId", sent that, was told "needs productVariant", and
+    ran out of steps (measured on a copy, 2026-10-07). Returns what was filled,
+    for the observation; a value that is an id is never replaced."""
+    from services.blueprint.page_review import _query
+
+    ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)}
+    declared = {str(i.get("name")): i for i in flow.get("inputs") or [] if isinstance(i, dict) and i.get("name")}
+    said: list[str] = []
+    for name, spec in declared.items():
+        ent = ents.get(str(spec.get("entity") or ""))
+        if spec.get("kind") != "record" or ent is None or _an_id(payload.get(name)):
+            continue
+        if not spec.get("required") and name not in payload:
+            continue
+        table = str(ent.get("table") or "")
+        if not table or not table.replace("_", "").isalnum():
+            continue
+        cols = {r[0] for r in _query(app, "select column_name from information_schema.columns "
+                                          f"where table_schema = 'public' and table_name = '{table}'") if r}
+        label = "".join("_" + c.lower() if c.isupper() else c for c in str(ent.get("labelField") or ""))
+        shown = f', "{label}"::text' if label and label in cols else ""
+        order = " order by created_at desc nulls last" if "created_at" in cols else ""
+        # ONE OF THEIRS. The newest row was another customer's cart line, the
+        # app refused it correctly, and the turn read the refusal as the
+        # fault (ToroCommerce copy, 2026-10-07). Read as the person when the
+        # app will say; the newest row only when it will not.
+        theirs = reach(table) if reach else None
+        if theirs is not None and not theirs:
+            said.append(f"{name}: this person has no {ent.get('name')} — make one first (as them) to try this")
+            continue
+        where = (" where id::text in (" + ", ".join("'" + t.replace("'", "") + "'" for t in theirs) + ")"
+                 if theirs else "")
+        rows = _query(app, f'select id::text{shown} from "{table}"{where}{order} limit 1')
+        if not rows or not rows[0]:
+            said.append(f"{name}: no {ent.get('name')} exists to use")
+            continue
+        rid = rows[0][0]
+        payload[name] = rid
+        said.append(f"{name} = {ent.get('name')} {rows[0][1] if len(rows[0]) > 1 and rows[0][1] else ''} ({rid})".replace("  ", " "))
+        twin = f"{name}Id"
+        if twin in declared and not _an_id(payload.get(twin)):
+            payload[twin] = rid
+            said.append(f"{twin} = the same id")
+    return said
 
 
 def launch_rights(output_dir: str, doc: dict, flow: dict) -> list[str]:
@@ -411,6 +585,12 @@ def try_request(bench: Bench, doc: dict, method: str, path: str, body: Any, as_:
     if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         return f"`method` is GET, POST, PUT, PATCH or DELETE, not {method!r}."
     app = bench.app()
+    if not as_:
+        from services.blueprint.projection import _workflow_slug
+        m = re.match(r"^/api/workflows/([^/]+)/execute", path)
+        flow = next((w for w in doc.get("workflows") or [] if isinstance(w, dict) and m
+                     and m.group(1) in (str(w.get("id")), _workflow_slug(w))), None) if m else None
+        as_ = default_person(doc, flow=flow) if flow else default_person(doc, route=path)
     who, jar = _session(app, doc, as_, bench.guest)
     tables = _tables(app) if method != "GET" else []
     before = _snapshot(app, tables) if tables else {}
@@ -441,6 +621,7 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     ent = ents.get(str(((page or {}).get("data") or {}).get("primaryEntity") or ""))
     app = bench.app()
+    as_ = as_ or default_person(doc, route=route)
     who, jar = _session(app, doc, as_, bench.guest)
     role, is_admin = _role(doc, as_)
     entry: dict[str, Any] = {"id": str((page or {}).get("id") or "trial"), "route": route,
@@ -569,6 +750,14 @@ def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
     """Carry out one trial. The observation is returned, never raised."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
     as_ = str(args.get("as") or "")
+    bench.begin()
+    try:
+        return _run(name, args, as_, bench=bench, doc=doc)
+    finally:
+        bench.end()
+
+
+def _run(name: str, args: dict, as_: str, *, bench: Bench, doc: dict) -> str:
     try:
         if name == "try_workflow":
             return try_workflow(bench, doc, str(args.get("workflow") or ""), args.get("input"), as_)
@@ -580,6 +769,8 @@ def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
         if name == "open_page":
             sign_in = str(args.get("sign_in") or "").strip().lower() in ("true", "1", "yes")
             return open_page(bench, doc, str(args.get("route") or ""), as_, sign_in=sign_in)
+        if name == "try_expectation":
+            return try_expectation(bench, doc, str(args.get("statement") or ""))
     except TrialUnavailable as exc:
         return str(exc)
     except ValueError as exc:
@@ -590,12 +781,40 @@ def run(name: str, args: dict, *, bench: Bench, doc: dict) -> str:
     raise KeyError(name)
 
 
+#: The first line of a statement tried (`expects.build.observation`).
+EXPECTATION_HEAD = re.compile(r"^EXP-\d+ (holds|does not hold|could not be tried) — ")
+
+
+def try_expectation(bench: Bench, doc: dict, ref: str) -> str:
+    """One statement, tried on the turn's running copy and put back after."""
+    from services.expects.build import observation
+    from services.expects.runner import run as run_statements
+    from services.expects.statements import expectations
+    rows = {str(st.get("id")): st for st in expectations(doc)}
+    want = ref.strip().upper()
+    if want not in rows:
+        listed = ", ".join(list(rows)[:30]) or "none"
+        return f"There is no statement {ref!r} to try. The statements are: {listed}."
+    report = run_statements(bench.app(), doc, Path(bench.output_dir), only=[want], restore=True)
+    got = (report.get("results") or [None])[0]
+    if got is None:
+        return f"{want} could not be tried — the runner returned nothing"
+    said = observation(got)
+    server = bench.server_said()
+    if server:
+        said += "\nthe server printed:\n" + "\n".join(f"  {l}" for l in server[-12:])
+    return scrub(said)
+
+
 def failed(said: str) -> bool:
     """Whether a trial's observation shows something not working: an HTTP
     error, a step that failed, a browser error, a control that does not work,
     or the server printing an error."""
     from services.blueprint.page_review import BROKEN_OUTCOMES
     head = said.split("\n", 1)[0]
+    m = EXPECTATION_HEAD.match(head)
+    if m:
+        return m.group(1) != "holds"
     m = re.search(r"HTTP (\d{3})", head)
     if m and int(m.group(1)) >= 400:
         return True
@@ -607,4 +826,4 @@ def failed(said: str) -> bool:
 
 
 __all__ = ["TRIALS", "TRIAL_NAMES", "Bench", "TrialUnavailable", "run", "failed",
-           "try_workflow", "try_request", "open_page"]
+           "try_workflow", "try_request", "open_page", "try_expectation"]

@@ -852,7 +852,9 @@ def platform_write_findings(doc: dict) -> list[dict]:
                                           f"shipped table does not have, or stores a password the "
                                           f"login cannot verify. Drop it from `values` and let the "
                                           f"account be created through sign-up; write only what the "
-                                          f"Blueprint adds to {table!r}."})
+                                          f"Blueprint adds to {table!r}. To change the signed-in "
+                                          f"person's password, use an `action` with `actionType: "
+                                          f"set_password` (`currentPassword`, `newPassword`)."})
                 elif folded in synonyms:
                     out.append({"rule": "platform-column-renamed", "page": str(wf.get("id")),
                                 "detail": f"{where}: sets {column!r} on the platform's {table!r} "
@@ -1827,7 +1829,10 @@ _TEMPLATE_RE = re.compile(r"\{\{\s*([\w.\[\]|:]+)\s*\}\}")
 _ANY_TEMPLATE_RE = re.compile(r"\{\{(.*?)\}\}")
 #: One side of `??`: a name the engine walks, or a literal.
 _NAME_RE = re.compile(r"[\w.\[\]]+")
-_LITERAL_RE = re.compile(r'"[^"]*"|\'[^\']*\'|-?\d+(\.\d+)?|true|false')
+#: The literals the engine's `??` reads (`_LITERAL` in runtime/workflows/
+#: engine.ts) — `null` with them: `{{primaryImage ?? null}}` was refused while
+#: the engine reads it (E-commerce, forge-v3, 2026-10-09).
+_LITERAL_RE = re.compile(r'"[^"]*"|\'[^\']*\'|-?\d+(\.\d+)?|true|false|null')
 _WRONG_ROOTS = {
     "now": "the sentinel `$now` as the whole value",
     "today": "the sentinel `$today` as the whole value",
@@ -1880,8 +1885,19 @@ def template_findings(doc: dict) -> list[dict]:
                             out.append({"rule": "template-unknown", "page": str(wf.get("id")),
                                         "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
                                                   f"{{{{{inner.strip()}}}}} — each side of `??` is a value the engine "
-                                                  f"holds or a literal (\"text\", a number, true/false); "
+                                                  f"holds or a literal (\"text\", a number, true/false/null); "
                                                   f"{', '.join(repr(s) for s in bad + unknown)} is neither"})
+                        continue
+                    if inner.strip().startswith("$"):
+                        # A SENTINEL IN BRACES. `{{$user.id}}` was refused as
+                        # a template that "computes" four times in one build
+                        # (Lifestyle App, forge-v3, 2026-10-09) — true, and no
+                        # help: the author never learned the braces were the
+                        # fault.
+                        out.append({"rule": "template-computes", "page": str(wf.get("id")),
+                                    "detail": f"{wf.get('name') or wf.get('id')}, step {st.get('key')!r}: "
+                                              f"{{{{{inner.strip()}}}}} — `{inner.strip()}` is a whole value, "
+                                              f"written without braces: `\"{inner.strip()}\"`"})
                         continue
                     if _TEMPLATE_RE.fullmatch("{{" + inner + "}}") is None:
                         out.append({"rule": "template-computes", "page": str(wf.get("id")),

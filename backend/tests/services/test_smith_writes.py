@@ -14,6 +14,13 @@ from services.smith.verbs import REQUIRED_BY_VERB
 from tests.services._loop_fixtures import _Chooser, _Writes, _repo, _session, _understanding
 
 
+@pytest.fixture(autouse=True)
+def _their_words_ask_for_it(monkeypatch):
+    """A scripted `requested: true` is a change the person asked for; the
+    independent check (`turn.asked_for`) is a model call, not run here."""
+    monkeypatch.setattr("services.smith4.turn.asked_for", lambda words, change: True)
+
+
 def test_write_page_code_is_a_tool_and_not_a_verb():
     assert tools.is_tool("write_page_code") and tools.is_write("write_page_code")
     assert "write_page_code" not in REQUIRED_BY_VERB
@@ -47,17 +54,19 @@ def test_a_page_that_does_not_compile_is_a_finding_not_a_dead_end(tmp_path, monk
     monkeypatch.setattr("services.blueprint.service.BlueprintService.load",
                         classmethod(lambda cls, output_dir: type("S", (), {"doc": {"pages": []}})()))
 
-    chooser = _Chooser({"tool": "write_page_code",
-                        "args": {"route": "/rentals", "brief": "add accepted to ATTENTION_STATUSES"}, "why": ""},
+    first = {"tool": "write_page_code",
+             "args": {"route": "/rentals", "brief": "add accepted to ATTENTION_STATUSES"}, "why": ""}
+    chooser = _Chooser(first, {**first, "args": {**first["args"], "requested": True}},   # asked to reproduce first
                        {"tool": "write_page_code",
-                        "args": {"route": "/rentals", "brief": "widen the Rental status union, then add accepted"}, "why": ""})
+                        "args": {"route": "/rentals", "brief": "widen the Rental status union, then add accepted",
+                                 "requested": True}, "why": ""})
     session = _session(tmp_path,
                        understanding=_understanding(target_file="src/a.json", element_label="A", new_value="A"),
                        move=_Writes(tmp_path), chooser=chooser)
 
     result = session.run_iteration("accepted rentals should need attention too")
 
-    heard = chooser.seen[1][-1]
+    heard = chooser.seen[2][-1]
     assert heard.status == "finding" and "TS2322" in heard.said
     assert len(briefs) == 2
     assert result.status == "resolved"
@@ -113,8 +122,8 @@ def test_a_verb_whose_composer_refused_is_a_finding_the_loop_hears(tmp_path, mon
     monkeypatch.setattr(compose_mod, "prepare_capabilities",
                         lambda *a, **k: {"declared": [], "created": []})
 
-    chooser = _Chooser({"tool": "write_page_code",
-                        "args": {"route": "/rentals", "brief": "sharper"}, "why": ""})
+    sharper = {"tool": "write_page_code", "args": {"route": "/rentals", "brief": "sharper"}, "why": ""}
+    chooser = _Chooser(sharper, {**sharper, "args": {**sharper["args"], "requested": True}})
     session = _session(tmp_path,
                        understanding=_understanding(verb="compose_route", route="/rentals",
                                                     target_file="/rentals"),

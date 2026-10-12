@@ -433,6 +433,15 @@ def edit_definition(output_dir: str, section: str, find: str, replace: str, why:
         svc = BlueprintService.load(output_dir=str(output_dir))
     except FileNotFoundError:
         return {"applied": False, "said": "", "touched": [], "finding": "This project has no definition yet."}
+    if section.split(".", 1)[0] == "expectations":
+        # WHAT MUST HAPPEN IS NOT WHAT GETS FIXED. A statement the app fails
+        # is the fault's description; editing it until it passes would be
+        # the fixer grading its own work. A new one is `add_expectation`.
+        return {"applied": False, "said": "", "touched": [],
+                "finding": ("The statements of what must happen are not edited to fit the app — fix the app "
+                            "until they hold. Changing what must happen is a change to the requirements: say "
+                            "so to the person. A new statement, from what they said or reported, is "
+                            "`add_expectation`.")}
     parent, key, node = _locate(svc.doc, section)
     if node is None or parent is None:
         return {"applied": False, "said": "", "touched": [],
@@ -453,6 +462,14 @@ def edit_definition(output_dir: str, section: str, find: str, replace: str, why:
     try:
         svc.validate()
         _check(root, svc.doc, value if isinstance(value, dict) else {root: value}, natural)
+        if root == "workflows":
+            # WRITTEN OUT BEFORE IT IS KEPT. A workflow the projection cannot
+            # write stops EVERY workflow of the app being written (a guard
+            # node twice did, 2026-10-07): tried in a scratch folder first.
+            import tempfile
+            from services.blueprint.projection import project_workflows
+            with tempfile.TemporaryDirectory() as scratch:
+                project_workflows(svc.doc, scratch)
         affected = [str(value.get("id"))] if isinstance(value, dict) and re.match(
             r"^[A-Z]+-\d{3,}$", str(value.get("id") or "")) else []
         svc.commit(user_request=why or f"Edit {section}", smith_interpretation=f"Edited {section}",

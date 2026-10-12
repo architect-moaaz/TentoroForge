@@ -146,3 +146,90 @@ def test_the_tree_is_ended_even_when_npm_has_already_exited():
     assert "_kill_tree()" in tail
     assert "if proc.poll() is None" not in tail, (
         "the cleanup must not be conditional on npm still running")
+
+
+def test_the_first_request_is_given_the_time_a_compile_takes():
+    """Lifestyle App (forge-v3, 2026-10-09) listened, then its first page —
+    compiled on demand by `next dev` on a host building two other apps — took
+    longer than 60 s, and a working app's build ended "did not answer: timed
+    out". The first request gets a compile's time and one more try while the
+    process lives; a refusal or a dead process still fails at once."""
+    import inspect
+
+    from services.blueprint import assembly
+
+    assert assembly.FIRST_COMPILE_S >= 180
+    src = inspect.getsource(assembly.verify_boot)
+    assert "timeout=FIRST_COMPILE_S" in src and "timeout=60)" not in src
+    assert "attempt == 1 and timed_out and proc.poll() is None" in src
+
+
+def test_an_install_that_was_cut_off_is_thrown_away_not_built_on(tmp_path):
+    """TStyle (forge-v3, 2026-10-09): the install was killed mid-write, the
+    Next compiler was 62,976 bytes of 143 MB, the next install moved on over
+    it and `next build` died with a bus error."""
+    from services.blueprint.assembly import INSTALLED_MARK, _clear_unfinished_install, _mark_install_finished
+
+    nm = tmp_path / "node_modules" / "@next" / "swc"
+    nm.mkdir(parents=True)
+    (nm / "next-swc.node").write_bytes(b"x" * 10)
+    assert _clear_unfinished_install(tmp_path) and not (tmp_path / "node_modules").exists()
+    nm.mkdir(parents=True)
+    _mark_install_finished(tmp_path)
+    assert (tmp_path / "node_modules" / INSTALLED_MARK).exists()
+    assert not _clear_unfinished_install(tmp_path), "a finished install is kept"
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    (linked / "node_modules").symlink_to(tmp_path / "node_modules")
+    (tmp_path / "node_modules" / INSTALLED_MARK).unlink()
+    assert not _clear_unfinished_install(linked), "a linked tree is never removed"
+
+
+def test_a_lockfile_npm_cannot_read_is_written_again(tmp_path):
+    """TStyle (forge-v3, 2026-10-09): a cut-off install left 28 packages in
+    the lockfile with no version, and every install after it died on
+    "Invalid Version" — whether or not `node_modules` was still there."""
+    import json
+    from services.blueprint.assembly import _drop_unreadable_lockfile
+
+    lock = tmp_path / "package-lock.json"
+    assert not _drop_unreadable_lockfile(tmp_path), "no lockfile, nothing to do"
+    whole = {"packages": {"": {"name": "app"}, "vendor/@forge/schema": {},
+                          "node_modules/next": {"version": "15.5.15"},
+                          "node_modules/@tentoroforge/engine": {"resolved": "vendor/@tentoroforge/engine", "link": True}}}
+    lock.write_text(json.dumps(whole))
+    assert not _drop_unreadable_lockfile(tmp_path) and lock.exists(), "a whole lockfile is kept"
+    whole["packages"]["node_modules/braces"] = {}
+    lock.write_text(json.dumps(whole))
+    assert _drop_unreadable_lockfile(tmp_path) and not lock.exists()
+    lock.write_text('{"packages": {"node_modules/next": {"vers')
+    assert _drop_unreadable_lockfile(tmp_path) and not lock.exists(), "a lockfile cut off mid-JSON too"
+
+
+def test_a_server_that_will_not_start_says_so(tmp_path, monkeypatch):
+    """The slot was given back twice when the dev server did not start, and
+    the second time raised AttributeError over the reason (TStyle, 2026-10-09)."""
+    from services import dev_servers
+    from services.blueprint import page_review
+
+    released = []
+
+    class Slot:
+        def acquire(self):
+            pass
+
+        def release(self):
+            released.append(1)
+
+    monkeypatch.setattr(dev_servers, "TrialSlot", Slot)
+    app = page_review.RunningApp(tmp_path)
+
+    def will_not_start():
+        app.__exit__(None, None, None)
+        raise page_review.ReviewUnavailable("the dev server did not start within 180s")
+
+    monkeypatch.setattr(app, "_enter", will_not_start)
+    monkeypatch.setattr(app, "_stop", lambda: None)
+    with pytest.raises(page_review.ReviewUnavailable, match="did not start"):
+        app.__enter__()
+    assert released == [1]

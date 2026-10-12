@@ -204,3 +204,28 @@ def test_the_dry_run_checks_what_ships_not_a_coded_pages_layout():
         "pageCode": [{"page": "PAGE-013", "load": "", "view": "run({ rental, reason })"}],
     }
     assert [d["page"] for d in dispatches(doc)] == ["PAGE-014"]
+
+
+def test_a_total_of_rows_with_nothing_to_add_up_is_their_count():
+    """forge-v3, 2026-10-09: "Total Registered" came as a `total` naming no
+    `fn` and no `field`; refused naming only `fn`, the author missed it twice
+    and a data-entry build stopped. With nothing to apply a function to, it is
+    a count, and is written as one."""
+    item = _item("Total loans", kind="total", entity=RENTAL, via="toolId")
+    page = _page(item)
+    assert content_findings(page, _doc()) == []
+    assert item["source"]["kind"] == "count", "kept as what it is"
+    half = _item("Total", kind="total", entity=RENTAL, via="toolId", fn="sum")
+    found = content_findings(_page(half), _doc())
+    assert found and "use kind `count`" in found[0] and "(it has:" in found[0]
+
+
+def test_a_source_that_says_type_is_told_its_key_is_kind():
+    """10 of 121 refusals on forge-v3 (2026-10-09) were `{"type": "count"}`,
+    told only "unknown source kind ''"."""
+    item = {"label": "Total", "answers": "how many", "source": {"type": "count", "entity": RENTAL}}
+    found = content_findings(_page(item), _doc())
+    assert len(found) == 1 and found[0].endswith("'Total': the source's key is `kind`, not `type` — write "
+                                                 "`\"kind\": \"count\"`")
+    from services.blueprint.executors import NODE_TASKS
+    assert "whose `kind` says where the fact comes from" in NODE_TASKS["page_details"]

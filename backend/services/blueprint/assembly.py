@@ -131,6 +131,8 @@ SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     # pages, which an `auth` page's code replaces — the template only fills
     # the hole, never overwrites the designed page (`app_sdk._AUTH_FLOORS`).
     "src/lib/account.ts", "src/lib/account-table.ts",
+    # Where a person lands once signed in; the SDK's sign-in imports it.
+    "src/lib/landing.ts",
     # The interface's languages (`languages.project_languages`).
     "src/lib/languages.ts",
     "src/app/login/page.tsx", "src/app/signup/page.tsx",
@@ -1097,6 +1099,16 @@ class BootFailed(RuntimeError):
     """The application compiles and will not start."""
 
 
+#: How long the first request may take: in `next dev` it is the entry page's
+#: compile, which a busy host stretches (see `verify_boot`).
+FIRST_COMPILE_S = 180
+
+
+def _capped_env(env: dict) -> dict:
+    from services.dev_servers import capped_env
+    return capped_env(env)
+
+
 def verify_boot(app_root: str | Path, *, entry: str = "/",
                 timeout: int = 120) -> dict[str, Any]:
     """Start the app and prove it serves its way in. Raise if it will not.
@@ -1149,7 +1161,7 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
     proc = subprocess.Popen(
         [_NPM, "run", "dev", "--", "--port", str(port)],
         cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, env={**os.environ, "BROWSER": "none"},
+        text=True, env=_capped_env({**os.environ, "BROWSER": "none"}),
         **group_kwargs(),
     )
     from services import dev_servers
@@ -1203,14 +1215,29 @@ def verify_boot(app_root: str | Path, *, entry: str = "/",
                 + _last_error(_stop()))
 
         url = f"http://127.0.0.1:{port}{entry if entry.startswith('/') else '/' + entry}"
-        try:
-            with urllib.request.urlopen(url, timeout=60) as reply:
-                status = reply.status
-        except urllib.error.HTTPError as exc:
-            status = exc.code          # 4xx/5xx still means it routed
-        except Exception as exc:  # noqa: BLE001
-            raise BootFailed(
-                f"{url} did not answer: {exc}; " + _last_error(_stop())) from exc
+        # THE FIRST REQUEST IS THE COMPILE. `next dev` compiles a page when it
+        # is first asked for, and on a host compiling two other apps at once
+        # (load 10 on four cores) that took longer than the 60 s this allowed:
+        # Lifestyle App listened, compiled, and its build ended "did not
+        # answer: timed out" with nothing wrong in it (forge-v3, 2026-10-09).
+        # The compile gets FIRST_COMPILE_S, and a timeout is asked once more
+        # while the process is still alive; a refusal or a dead process is
+        # still the failure it always was.
+        status = None
+        for attempt in (1, 2):
+            try:
+                with urllib.request.urlopen(url, timeout=FIRST_COMPILE_S) as reply:
+                    status = reply.status
+                break
+            except urllib.error.HTTPError as exc:
+                status = exc.code          # 4xx/5xx still means it routed
+                break
+            except Exception as exc:  # noqa: BLE001
+                timed_out = isinstance(exc, TimeoutError) or "timed out" in str(exc)
+                if attempt == 1 and timed_out and proc.poll() is None:
+                    continue
+                raise BootFailed(
+                    f"{url} did not answer: {exc}; " + _last_error(_stop())) from exc
 
         return {"port": port, "entry": entry, "status": status,
                 "seconds": round(time.monotonic() - started, 1)}
@@ -1280,6 +1307,66 @@ def check_route_tree(app_root: str | Path) -> None:
                                        for url, files in clashes[:8]))
 
 
+#: Written into `node_modules` when `npm install` has finished. A tree
+#: without it is an install that was cut off.
+INSTALLED_MARK = ".forge-installed"
+
+
+def _clear_unfinished_install(root: Path) -> bool:
+    """Throw away a `node_modules` whose install never finished.
+
+    `npm install` over an existing tree checks names and versions, not file
+    contents. TStyle's install was killed with its worker (forge-v3,
+    2026-10-09 10:55) while writing the Next compiler: 62,976 bytes of a
+    143 MB binary. The next build's install saw the package in place and moved
+    on, and `next build` died on it with "Bus error (core dumped)". A linked
+    tree (a local copy's `node_modules` pointing into another app) is never
+    removed."""
+    import shutil
+
+    nm = root / "node_modules"
+    if nm.is_symlink() or not nm.is_dir() or (nm / INSTALLED_MARK).exists():
+        return False
+    shutil.rmtree(nm, ignore_errors=True)
+    return True
+
+
+def _drop_unreadable_lockfile(root: Path) -> bool:
+    """Remove a `package-lock.json` npm cannot read; npm writes a new one
+    from `package.json`.
+
+    npm rewrites the lockfile as it installs. TStyle's install, killed with
+    its worker, left 28 installed packages recorded with no version (`{}`),
+    and every install after it died in five seconds on "Invalid Version"
+    while comparing them (forge-v3, 2026-10-09). Every package npm records
+    under `node_modules/` carries its version or is a link; one without
+    either is a lockfile cut off mid-write."""
+    import json
+
+    lock = root / "package-lock.json"
+    try:
+        packages = json.loads(lock.read_text("utf-8")).get("packages") or {}
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError, AttributeError):
+        packages = None                   # not JSON npm wrote whole
+    if packages is not None and not any(
+            k.startswith("node_modules/") and isinstance(v, dict) and not v.get("version") and not v.get("link")
+            for k, v in packages.items()):
+        return False
+    lock.unlink(missing_ok=True)
+    return True
+
+
+def _mark_install_finished(root: Path) -> None:
+    nm = root / "node_modules"
+    if nm.is_dir() and not nm.is_symlink():
+        try:
+            (nm / INSTALLED_MARK).write_text("npm install finished\n", "utf-8")
+        except OSError:
+            pass
+
+
 def verify_build(app_root: str | Path, *, timeout: int = 900,
                  install: bool = True, build: bool = True, dispatches: bool = True) -> dict[str, Any]:
     """Install and build the assembled app; raise if it does not compile.
@@ -1317,6 +1404,9 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
     env = {**os.environ, "NEXT_DIST_DIR": VERIFY_DIST_DIR}
     out: dict[str, Any] = {}
     for name, cmd in steps:
+        if name == "install":
+            _clear_unfinished_install(root)
+            _drop_unreadable_lockfile(root)
         proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
                               timeout=timeout, env=env)
         out[name] = proc.returncode
@@ -1325,6 +1415,10 @@ def verify_build(app_root: str | Path, *, timeout: int = 900,
                 f"npm {name} failed ({proc.returncode}):\n"
                 + build_message(proc.stdout, proc.stderr)
             )
+        if name == "install":
+            _mark_install_finished(root)
+        if name == "build":
+            stamp_build(root, VERIFY_DIST_DIR)
     if build and dispatches:
         out["dispatches"] = verify_dispatches(root, timeout=timeout)
     return out
@@ -1418,6 +1512,58 @@ def verify_dispatches(app_root: str | Path, *, timeout: int = 300) -> int:
 
 
 #: Where a verification build writes, beside — never inside — the served app.
+#: What a build was made from, written into its dist: the newest change
+#: under the sources it compiles. A dist whose stamp is not older than the
+#: sources is served as it is; the statements ran on ToroCommerce's
+#: production build in milliseconds a page, where a cold `next dev` capped at
+#: 2.5 GB restarted itself twenty times in 35 minutes (2026-10-09).
+BUILT_FROM = ".forge-built-from"
+#: What a build compiles: a change anywhere here makes a dist stale.
+COMPILED = ("src", "vendor", "package.json", "next.config.js", "tsconfig.json",
+            "tailwind.config.js", "tailwind.config.ts", "postcss.config.js", "postcss.config.mjs")
+
+
+def source_stamp(app_root: str | Path) -> float:
+    """The newest modification time under what a build compiles."""
+    root = Path(app_root)
+    newest = 0.0
+    for name in COMPILED:
+        top = root / name
+        try:
+            if top.is_file():
+                newest = max(newest, top.stat().st_mtime)
+                continue
+            for p in top.rglob("*"):
+                try:
+                    if p.is_file():
+                        newest = max(newest, p.stat().st_mtime)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+    return newest
+
+
+def stamp_build(app_root: str | Path, dist_dir: str) -> None:
+    """Record what the build in `dist_dir` was made from."""
+    stamp = Path(app_root) / dist_dir / BUILT_FROM
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(repr(source_stamp(app_root)), "utf-8")
+    except OSError:
+        pass
+
+
+def build_is_fresh(app_root: str | Path, dist_dir: str) -> bool:
+    """Whether the build in `dist_dir` was made from the sources as they are."""
+    root = Path(app_root)
+    try:
+        return (root / dist_dir / "BUILD_ID").is_file() and \
+            float((root / dist_dir / BUILT_FROM).read_text("utf-8")) >= source_stamp(root)
+    except (OSError, ValueError):
+        return False
+
+
 VERIFY_DIST_DIR = ".next-verify"
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")

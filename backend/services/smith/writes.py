@@ -26,6 +26,8 @@ for a widget the new code does not draw.
 """
 from __future__ import annotations
 
+import json
+
 import logging
 from pathlib import Path
 from typing import Any
@@ -71,6 +73,8 @@ SECTION_NODE: dict[str, str] = {
     "workflows": "workflow_steps",
     "designSystem": "design_system",
     "navigation": "ux_architecture",
+    "flows": "app_flows",
+    "composition": "ui_direction",
     "modules": "ux_architecture",
     "pages": "page_contracts",
     "requirements": "requirements",
@@ -94,6 +98,8 @@ SECTION_WORDS: dict[str, str] = {
     "workflows": "its processes",
     "designSystem": "how it looks",
     "navigation": "its menu",
+    "flows": "the paths people take through it",
+    "composition": "the look each kind of person gets",
     "modules": "how it is organised",
     "pages": "its screens",
     "requirements": "what it has to do",
@@ -108,7 +114,12 @@ WRITES = WRITES + (
      "FIELD's rename is `rename_field`, which moves its data; here it would drop "
      "the old field and start the new one empty), "
      "`apis`, `businessRules`, `permissions`, `workflows`, `designSystem`, "
-     "`navigation`, `pages`, `requirements`, `product`. `brief` says what "
+     "`navigation`, `pages`, `requirements`, `product`, and `flows` — the paths "
+     "people take from screen to screen and where each process leaves them "
+     "(\"after checkout, open the order\"; \"write the app flow\" for an app that has none), and "
+     "`composition` — the look each kind of person gets (their menu's kind and tone, their pages' "
+     "rhythm) and the direction every page follows (\"give the staff a dark wide rail\"). "
+     "`brief` says what "
      "should be different and what must stay, in terms of what you read "
      "(`read_section`). `subject` narrows it to one artifact's id. The reply "
      "is held to the contract and committed as one version; what changed on "
@@ -154,7 +165,8 @@ WRITES = WRITES + (
      "`read_file` under `app/`): " + _frame_files_said() + ". `brief` names the change "
      "in the code's terms. Edited, compiled, committed as one version; from then on "
      "that file is the application's own. To switch the KIND of frame (side rail, "
-     "top bar, bottom dock, its tone) use `write_section` on `designSystem`.",
+     "top bar, bottom dock, its tone) for one kind of person use `write_section` on "
+     "`composition`; for the whole app and its sign-in screen, on `designSystem`.",
      {"file": "string", "brief": "string"}),
 )
 
@@ -330,6 +342,16 @@ def _reproject(svc: Any, app_root: str, section: str) -> list[str]:
             files += list(project_shell_identity(svc.doc, app_root).get("files") or [])
             files += refresh_frame(app_root, svc.doc)
             return files
+        if section == "composition":
+            # EACH AUDIENCE'S FRAME, written where the layout and the public
+            # header read it. Pages keep the rhythm they were written to until
+            # they are written again (`rewrite_pages`).
+            from services.blueprint.projection import project_public_nav, project_shell_identity
+            from services.smith.sync_app import refresh_frame
+            files = list(project_shell_identity(svc.doc, app_root).get("files") or [])
+            files.append(project_public_nav(svc.doc, app_root))
+            files += refresh_frame(app_root, svc.doc)
+            return files
         if section in ("pages", "navigation", "modules"):
             from services.blueprint.projection import apply_frontend_projection
             return list((apply_frontend_projection(svc, app_root) or {}).get("files") or [])
@@ -471,6 +493,119 @@ WRITES = WRITES + (
      "steps, a page's access, a field, a landing page, a rule; the verbs remain for larger changes.",
      {"section": "string", "find": "string", "replace": "string", "why": "string"}),
 )
+#: WHAT MUST HAPPEN, SAID BEFORE IT IS MADE TO. A report or a request for a
+#: behaviour is recorded as a statement first (`expectations`); it fails
+#: until the app does it, and the turn is done when it holds.
+WRITES = WRITES + (
+    ("add_expectation",
+     "Record a new statement of what must happen — what the person said must happen, or the fault they "
+     "reported, as what should happen instead — so it can be tried now (`try_expectation`) and after every "
+     "change from now on. `statement` is one statement as the build writes them: `says` (one plain "
+     "sentence), `kind`, `given` (records that exist first, each with `ref`, `entity` and `values`; `@ref` "
+     "for a record's id), `steps` (`as` a role id or `guest`; `act` open/do/sign_in/sign_out/reload/"
+     "come_back/wait; `page`, `record`, `address`, `what`), `then` (`check` on/sees/not_sees/told/gets/"
+     "stored/not_stored with what it needs), `requirements`. `from`: person (they asked for it) or report "
+     "(they said something does not work). Statements already there are never changed here.",
+     {"statement": "object", "from": "string"}),
+)
+
+
+#: A FAULT IN THE PLATFORM GOES TO THE PLATFORM. About thirty of the 95
+#: requests Smith had on forge-v3 were platform faults — inverted filters, a
+#: guest cart with no owner, sign-in that did not stick — and Smith, which
+#: cannot change the platform, patched around them in the app or said nothing
+#: needed doing (2026-10-09). Reported, they reach the people who can fix it.
+WRITES = WRITES + (
+    ("report_platform_fault",
+     "Report a fault in the platform's own code — the engine, the SDK, a template, vendor/@tentoroforge — "
+     "found while trying the application: what happened (`detail`, in the words the trial showed) and "
+     "where (`where`: the route, process or file). It is recorded for the platform's people and said to "
+     "the person; the application is not patched around it. Use it when a fix would mean changing a file "
+     "`edit_file` classes as the platform's, or when the same failure shows on every screen.",
+     {"detail": "string", "where": "string"}),
+)
+
+
+def report_platform_fault(output_dir: str, detail: str, where: str = "") -> dict:
+    """Record a platform fault: an incident of kind `platform` beside the
+    app's crashes, and a `runtime.issues` row the handover and the panel
+    show. Returns what to say."""
+    from services import incident_ledger
+    from services.blueprint.service import BlueprintService
+
+    detail = " ".join(str(detail or "").split())[:600]
+    where = str(where or "")[:200]
+    if not detail:
+        return {"applied": False, "said": "", "finding": "`report_platform_fault` needs `detail`: what the trial showed."}
+    incident_ledger.record(output_dir, {"kind": incident_ledger.KIND_PLATFORM, "message": detail,
+                                        "where": where, "source": "smith"})
+    try:
+        svc = BlueprintService.load(output_dir=output_dir)
+        runtime = dict(svc.doc.get("runtime") or {})
+        issues = [i for i in runtime.get("issues") or [] if isinstance(i, dict)]
+        if not any(i.get("kind") == "platform" and i.get("detail") == detail for i in issues):
+            issues.append({"kind": "platform", "detail": detail, "where": where, "reported_by": "smith",
+                           "statements": []})
+        runtime["issues"] = issues
+        svc.doc["runtime"] = runtime
+        svc.save()
+    except Exception:  # noqa: BLE001 — the incident is recorded; the issue row is a convenience
+        logger.warning("[smith] could not record the platform fault as an issue", exc_info=True)
+    said = (f"This is a fault in the platform, not in your application: {detail}"
+            + (f" (at {where})" if where else "") + ". I have reported it to the people who maintain "
+            "the platform rather than work around it in your application.")
+    return {"applied": True, "said": said, "touched": [], "finding": ""}
+
+
+def add_expectation(output_dir: str, statement: Any, origin: str = "report") -> dict:
+    """A new statement, checked as the build checks one and recorded with
+    where it came from. One that would change or repeat an existing
+    statement is refused: what must happen is changed by the person."""
+    from services.blueprint.agent_contract import ArtifactProposal
+    from services.blueprint.service import BlueprintService
+    from services.expects.statements import expectations, statement_findings
+    from services.smith.section_change import apply
+
+    if isinstance(statement, str):
+        try:
+            statement = json.loads(statement)
+        except ValueError:
+            return _finding("`statement` must be one statement as an object.")
+    if not isinstance(statement, dict) or not str(statement.get("says") or "").strip():
+        return _finding("`statement` needs at least `says`, `kind`, `steps` and `then`.")
+    try:
+        svc = BlueprintService.load(output_dir=str(output_dir))
+    except FileNotFoundError:
+        return _finding("This project has no definition yet.")
+    body = {k: v for k, v in statement.items() if k not in ("id", "status")}
+    body["origin"] = "person" if str(origin).strip().lower() == "person" else "report"
+    said = " ".join(str(body["says"]).lower().split())
+    same = next((st for st in expectations(svc.doc) if " ".join(str(st.get("says")).lower().split()) == said), None)
+    if same is not None:
+        return _finding(f"{same.get('id')} already says that — try it with `try_expectation` {same.get('id')}. "
+                        "Statements already there are not changed here.")
+    problems = statement_findings(svc.doc, body)
+    if problems:
+        return _finding("That statement cannot be tried as written:\n- " + "\n- ".join(problems[:12]))
+    out, refusal = apply(svc, f"add the statement: {body['says']}", [ArtifactProposal("expectations", str(body["says"]), body)],
+                         interpretation="a statement of what must happen", agent="testing", app_root=None)
+    if refusal:
+        return _finding(f"The statement was not recorded: {refusal}")
+    svc = BlueprintService.load(output_dir=str(output_dir))
+    new = next((st for st in expectations(svc.doc) if " ".join(str(st.get("says")).lower().split()) == said), {})
+    sid = new.get("id") or "the statement"
+    text = f"Recorded {sid}: \"{body['says']}\". Try it now with `try_expectation` {sid}."
+    return {"applied": True, "said": text, "finding": text, "touched": [], "version": int(svc.doc.get("version") or 0)}
+
+
+#: `requested`, on every write that changes code or the definition: true only
+#: when the person asked for this change itself. Until a try has run in the
+#: turn, a write without it is sent to reproduce first (`smith4.turn`).
+_REQUESTED = {"edit_file", "edit_definition", "write_page_code", "rewrite_pages", "write_frame",
+              "write_section", "set_field"}
+WRITES = tuple((n, d + " `requested: true` only when they asked for this change itself — never when "
+                "they reported something not working.", {**a, "requested": "boolean"})
+               if n in _REQUESTED else (n, d, a) for n, d, a in WRITES)
 WRITE_NAMES = frozenset(name for name, _d, _a in WRITES)
 
 
@@ -552,6 +687,8 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
     """Carry out one write. The result's `finding` is the observation when an
     oracle refused; `said` is what the person is told."""
     args = {k: v for k, v in (args or {}).items() if v not in (None, "")}
+    if name == "report_platform_fault":
+        return report_platform_fault(output_dir, str(args.get("detail") or ""), str(args.get("where") or ""))
     if name in ("write_page_code", "rewrite_pages", "write_frame") and args.get("brief"):
         from services.smith.asked import with_their_words
         args["brief"] = with_their_words(str(args["brief"]))
@@ -584,6 +721,8 @@ def run(name: str, args: dict, *, output_dir: str, reasoning: Any = None) -> dic
         return edit_definition(output_dir, str(args.get("section") or ""), str(args.get("find") or ""),
                                str(args.get("replace") if args.get("replace") is not None else ""),
                                str(args.get("why") or ""))
+    if name == "add_expectation":
+        return add_expectation(output_dir, args.get("statement"), str(args.get("from") or "report"))
     if name == "write_section":
         return write_section(output_dir, str(args.get("section") or ""), str(args.get("brief") or ""),
                              subject=str(args.get("subject") or ""), reasoning=reasoning)

@@ -155,6 +155,12 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
     return {
         "domain": domain,
         "accounts": _accounts(doc, role_names),
+        # THE PATHS PEOPLE TAKE (`flows`), one line each, so "after checkout,
+        # show the order" is read as a change to a flow, not a guess.
+        "flows": _flow_lines(doc),
+        # HOW EACH KIND OF PERSON SEES IT (`composition.looks`), so "make the
+        # staff menu dark" is a change to one audience's look, not the app's.
+        "looks": _look_lines(doc),
         # WHAT THE APP MUST DO, AND WHERE EACH LINE CAME FROM. Smith answers
         # questions from this context, and "which requirements came from the
         # document I uploaded?" has its answer in `requirements[].evidence`
@@ -251,6 +257,46 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
             for p in _live(doc.get("pages"))
         ],
     }
+
+
+def _flow_lines(doc: dict[str, Any]) -> list[str]:
+    """`Buy something (Customer): / → [Add to cart] → /cart (offer) → [Place order] → /orders · order (go) — ends: …`"""
+    from services.blueprint.app_flows import flows
+    pages = {str(p.get("id")): p for p in doc.get("pages") or [] if isinstance(p, dict)}
+    roles = {str(r.get("id")): str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    wfs = {str(w.get("id")): str(w.get("name")) for w in doc.get("workflows") or [] if isinstance(w, dict)}
+    out = []
+    for f in flows(doc):
+        parts = []
+        for i, st in enumerate(f["steps"]):
+            where = str((pages.get(str(st.get("page"))) or {}).get("route") or st.get("page"))
+            if st.get("section"):
+                where += f" · {st['section']}"
+            parts.append(f"`{where}`")
+            if i < len(f["steps"]) - 1:
+                does = str(st.get("does") or "")
+                proc = wfs.get(str(st.get("workflow") or ""), "")
+                parts.append(f"[{does}{' — ' + proc if proc and proc.lower() != does.lower() else ''}] "
+                             f"({st.get('then') or 'go'})")
+        who = roles.get(str(f.get("role") or ""), "")
+        out.append(f"{f.get('name')}{' (' + who + ')' if who else ''}: " + " → ".join(parts)
+                   + (f" — ends: {f.get('ends')}" if f.get("ends") else ""))
+    return out
+
+
+def _look_lines(doc: dict[str, Any]) -> list[str]:
+    """`Customer, visitors — browse and buy on a phone: topbar, tinted; header band, lists cards …`"""
+    from services.blueprint.looks import resolved_looks
+    product = doc.get("product") or {}
+    out = []
+    if product.get("domain") or product.get("category"):
+        out.append("The product: " + " — ".join(str(x) for x in (product.get("domain"), product.get("category")) if x))
+    for lk in resolved_looks(doc):
+        r = lk["rhythm"]
+        out.append(f"{', '.join(lk['names'])}" + (f" — {lk['experience']}" if lk["experience"] else "")
+                   + f": {lk['chrome']}, {lk['tone']}; header {r['header']}, lead {r['lead']}, lists {r['lists']}, "
+                   f"figures {r['figures']}, sections {r['sections']}" + (f" (why: {lk['why']})" if lk["why"] else ""))
+    return out
 
 
 def _section_line(sec: dict[str, Any], entity_names: dict[str, str], role_names: dict[str, str]) -> str:

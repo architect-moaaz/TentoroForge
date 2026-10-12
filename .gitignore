@@ -89,6 +89,8 @@ backend/rules_output.json
 
 # Runtime cost log, appended to by every run — not source.
 backend/data/build-usage.jsonl
+# Brain Juice sessions: conversations, boards and pictures, not source.
+backend/data/brain_juice/
 
 # built on demand from backend/scripts/feel/entry.ts
 backend/scripts/feel/validate.cjs

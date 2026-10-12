@@ -1,5 +1,6 @@
 "use client";
 
+import { rememberPreview } from "@/lib/preview-report";
 import { useEffect, useState } from "react";
 import {
   Monitor,
@@ -177,6 +178,8 @@ export function PreviewFrame({ projectId, project }: PreviewFrameProps) {
               src={previewUrl}
               className="h-full w-full"
               title="App Preview"
+              // The screen the person is on, for the report a message carries.
+              onLoad={(e) => rememberPreview(e.currentTarget, device, deviceSize)}
             />
           </div>
         )}

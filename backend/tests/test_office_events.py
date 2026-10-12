@@ -42,9 +42,12 @@ def test_every_desk_is_in_a_declared_department():
 
 
 def test_every_department_has_someone_in_it():
-    """An empty room on the floor plan is a room the user has to explain."""
+    """An empty room on the floor plan is a room the user has to explain —
+    except a meeting room, which people come to and nobody sits in."""
+    from services.office_events import MEETING_ROOMS
     occupied = set(ROOM_OF.values())
-    assert set(DEPARTMENTS) == occupied
+    assert set(DEPARTMENTS) - MEETING_ROOMS == occupied
+    assert not occupied & MEETING_ROOMS, "nobody's desk is in a meeting room"
 
 
 def test_the_legacy_relays_agents_all_land_on_a_real_character():

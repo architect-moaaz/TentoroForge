@@ -21,26 +21,45 @@ import { PUBLIC_NAV } from "@/contracts/public-nav";
  */
 export function PublicPageFrame({ children }: { children: React.ReactNode }) {
   const { appName, items, signIn } = PUBLIC_NAV;
+  // THE VISITORS' LOOK. When the application decided how its visitors see it
+  // (`composition.looks`, projected as `paint`), the header is painted in
+  // that tone; otherwise it is the card it has always been. Read loosely: an
+  // older projected module has no `paint` in its type.
+  const paint = (PUBLIC_NAV as { paint?: { mode: string; bg: string; text: string } }).paint;
   const hasNav = items.length > 1;
   if (!BRAND_LOGO && !hasNav && !signIn) return <>{children}</>;
   return (
     <>
-      <header className="sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <header
+        data-public-tone={paint ? "" : undefined}
+        style={paint ? { background: paint.bg, color: paint.text } : undefined}
+        className={paint
+          ? "sticky top-0 z-40 border-b border-black/5"
+          : "sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80"}>
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 md:px-6">
           <Link href={items[0]?.route ?? "/"} className="flex shrink-0 items-center gap-2">
             {BRAND_LOGO ? (
               <BrandMark height={28} />
             ) : (
-              <span className="text-sm font-semibold tracking-tight text-foreground">{appName}</span>
+              <span className={paint ? "text-sm font-semibold tracking-tight" : "text-sm font-semibold tracking-tight text-foreground"}>{appName}</span>
             )}
           </Link>
           {hasNav && <PublicNavLinks items={items} />}
+          {/* The links read in the header's own colour when it is painted. */}
+          {paint && (
+            <style dangerouslySetInnerHTML={{ __html:
+              "[data-public-tone] nav a{color:inherit!important;opacity:.78;background:transparent!important}"
+              + "[data-public-tone] nav a:hover{opacity:1}"
+              + "[data-public-tone] nav a[aria-current=page]{opacity:1;background:color-mix(in srgb,currentColor 14%,transparent)!important}" }} />
+          )}
           <div className="ml-auto flex shrink-0 items-center gap-3">
             <LanguageSwitch />
             {signIn && (
               <Link
                 href="/login"
-                className="shrink-0 rounded-md border border-input px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+                className={paint
+                  ? "shrink-0 rounded-md border border-current px-3 py-1.5 text-sm font-medium opacity-90 hover:opacity-100"
+                  : "shrink-0 rounded-md border border-input px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"}
               >
                 Sign in
               </Link>

@@ -492,8 +492,9 @@ def test_foundational_nodes_are_classified_by_what_they_produce():
 
     frame = {k for k, n in DAG.items() if is_foundational(n)}
     # `ui_direction` sets the whole app's look — frame, like the design system.
+    # `decisions` — the business facts decided once — is the frame too.
     assert frame == {"application_model", "design_system", "integrations",
-                     "ux_architecture", "ui_direction"}
+                     "ux_architecture", "ui_direction", "decisions"}
 
 
 def test_service_and_projection_nodes_are_never_foundational():
@@ -1259,7 +1260,11 @@ def test_a_node_starts_the_moment_its_own_dependency_is_done(svc):
         if spec.node == "design_system":
             time.sleep(0.3)
         elif spec.node == "page_contracts":
-            return page_agent_result(spec)
+            # The page set names each screen's module — the one the
+            # architect declared just before (`check_page_modules`).
+            out = page_agent_result(spec)
+            out.proposals[0].body["module"] = "MODULE-001"
+            return out
         with lock:
             returned[spec.node] = time.monotonic()
         return _wave_result(spec)
@@ -1324,7 +1329,8 @@ def test_a_dependent_starts_before_an_unrelated_fanout_finishes(svc):
         elif spec.node == "application_model":
             out = AgentResult(task_id=spec.task_id, agent=spec.agent, confidence=0.95,
                               proposals=[ArtifactProposal(section="product", natural_key="product",
-                                                          body={"objectives": ["x"]})])
+                                                          body={"objectives": ["x"], "domain": "d",
+                                                                "category": "c"})])
         else:
             out = _wave_result(spec)
         with lock:
@@ -1592,7 +1598,7 @@ def test_workflows_are_declared_after_the_fields_the_pages_need():
     `workflows` fixes each form's inputs, so it waits for those fields — the
     form that creates a tool must ask for what the tool page shows. Measured
     on 036farqu, that costs up to the length of `page_details` (~6-7 min)."""
-    assert DAG["page_details"].depends_on == frozenset({"page_contracts"})
+    assert DAG["page_details"].depends_on == frozenset({"page_contracts", "decisions"})
     assert DAG["page_details"].fanout == "page_features"
     assert "page_contracts" in DAG["workflows"].depends_on
     assert "content_fields" in DAG["workflows"].depends_on

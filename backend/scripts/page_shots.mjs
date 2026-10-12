@@ -134,6 +134,11 @@ function watch(page) {
     const t = m.text();
     // A 404 the page asked for is not the page crashing; the status says so.
     if (/Failed to load resource: the server responded with a status of 404/.test(t)) return;
+    // React's development-only notice that some ATTRIBUTES differ between the
+    // server's HTML and the browser's (an extension, a generated id): the page
+    // renders and works, and a built app never prints it. Three ToroCommerce
+    // pages were sent to repair over it (memg8iw6, 2026-10-09).
+    if (/A tree hydrated but some attributes of the server rendered HTML didn't match/.test(t)) return;
     errors.push(t.slice(0, 400));
   });
   return errors;
@@ -150,15 +155,22 @@ async function open(context, url, { shot } = {}) {
   } catch (e) {
     errors.push(`navigation: ${e.message}`.slice(0, 400));
   }
+  // THE PICTURE IS THE CHECK'S, NOT THE PAGE'S. A screenshot that could not be
+  // taken (the page still moving under a redirect) says nothing about the
+  // page: it is the check's note, and the page is judged on what it did.
+  let checkerNote = null;
   if (shot) {
-    await unclip(page);
-    await page.waitForTimeout(250);
-    // At most MAX_SHOT_PX tall: the API refuses an image with a side over
-    // 8000, and a long list's full page passed it (wz7a99ir, 2026-10-04).
-    const tall = await page.evaluate(() => document.documentElement.scrollHeight).catch(() => viewport.height);
-    await page.screenshot({ path: shot, fullPage: true, animations: "disabled", timeout: 30000,
-                            clip: { x: 0, y: 0, width: viewport.width, height: Math.min(Math.max(tall, viewport.height), MAX_SHOT_PX) } })
-      .catch((e) => errors.push(`screenshot: ${e.message}`));
+    try {
+      await unclip(page);
+      await page.waitForTimeout(250);
+      // At most MAX_SHOT_PX tall: the API refuses an image with a side over
+      // 8000, and a long list's full page passed it (wz7a99ir, 2026-10-04).
+      const tall = await page.evaluate(() => document.documentElement.scrollHeight).catch(() => viewport.height);
+      await page.screenshot({ path: shot, fullPage: true, animations: "disabled", timeout: 30000,
+                              clip: { x: 0, y: 0, width: viewport.width, height: Math.min(Math.max(tall, viewport.height), MAX_SHOT_PX) } });
+    } catch (e) {
+      checkerNote = `no screenshot: ${String(e?.message || e).split("\n")[0].slice(0, 200)}`;
+    }
   }
   // What the page SAYS it is — streaming sends a not-found page as HTTP 200.
   const state = await page.locator("[data-forge-page-state]").first()
@@ -171,7 +183,7 @@ async function open(context, url, { shot } = {}) {
   const tabs = await page.evaluate(() => [...(document.querySelector("main") || document.body)
     .querySelectorAll("[role='tab']")].map((t) => (t.textContent || "").replace(/\s+/g, " ").trim())
     .filter(Boolean)).catch(() => []);
-  return { page, status, errors, state, landed, text, tabs };
+  return { page, status, errors, state, landed, text, tabs, checkerNote };
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +273,11 @@ async function press(context, url, control, firstIndex = null) {
     let body = {};
     try { body = await res.json(); } catch { /* not JSON */ }
     calls.push({ status: res.status(), failed: Boolean(body?.error) || body?.status === "failed",
+                 // THE APP SAID NO, ON PURPOSE: a workflow's own refusal ("not enough
+                 // stock") answers 422 with `refused`. It is the app working, said
+                 // in its words — not a control that is broken (ToroCommerce's plus
+                 // button at the stock limit, 2026-10-08).
+                 refused: body?.refused === true,
                  error: String(body?.error?.message ?? body?.error ?? "").slice(0, 200) });
   });
   try {
@@ -291,12 +308,21 @@ async function press(context, url, control, firstIndex = null) {
     await page.waitForTimeout(calls.length ? 800 : 0);            // let a workflow's reply land
     after = await fingerprint(page).catch(() => after);
     let outcome = "nothing", detail = "no navigation, no request, no visible change";
+    // The browser logs a refused workflow's 422 as a console error; that line
+    // is the refusal, not a second fault.
+    if (calls.some((c) => c.refused)) {
+      for (let i = errors.length - 1; i >= 0; i--) {
+        if (/Failed to load resource: the server responded with a status of 422/.test(errors[i])) errors.splice(i, 1);
+      }
+    }
     if (errors.length) {
       outcome = "error"; detail = errors[0];
     } else if (calls.length) {
-      const bad = calls.find((c) => c.failed || c.status >= 400);
-      outcome = bad ? "workflow-failed" : "workflow";
-      detail = bad ? `HTTP ${bad.status}${bad.error ? ": " + bad.error : ""}` : `ran (${calls.length})`;
+      const bad = calls.find((c) => (c.failed || c.status >= 400) && !c.refused);
+      const refused = calls.find((c) => c.refused);
+      outcome = bad ? "workflow-failed" : refused ? "refused" : "workflow";
+      detail = bad ? `HTTP ${bad.status}${bad.error ? ": " + bad.error : ""}`
+        : refused ? `the app refused: ${refused.error || "no reason given"}` : `ran (${calls.length})`;
     } else if (after.url !== before.url) {
       const res = await context.request.get(after.url).catch(() => null);
       const status = res?.status() ?? 0;
@@ -338,7 +364,12 @@ async function press(context, url, control, firstIndex = null) {
 
 const out = [];
 const pressedIn = new Set();          // `${group}|${control}` — a screen's control is pressed once
-for (const p of cfg.pages) {
+// ONE PAGE'S TROUBLE IS ITS OWN. A screenshot that threw on one customer
+// page ended the whole run, and every page of that person was reported "could
+// not be opened" and handed to Smith to repair — a fault in this script, sent
+// to be fixed in the app (memg8iw6, 2026-10-09). What throws here is recorded
+// against the page as the CHECK's failure (`checkerError`), never its own.
+async function visit(p) {
   if (p.signIn) {
     // SIGNING IN, THROUGH THE FORM, as a person does: where it lands is the
     // app's answer to "the admin lands on the customers' menu", and only the
@@ -375,14 +406,14 @@ for (const p of cfg.pages) {
     out.push({ id: p.id, route: p.route, url: p.route, as: p.as ?? null, status, landed, text,
                signedIn: true, errors: [...new Set(errors)].slice(0, 12), states: {} });
     await fresh.close();
-    continue;
+    return;
   }
   let url = p.route;
   const who = await contextsFor(p);
   const isRecord = /\[[^\]]+\]/.test(url);
   if (isRecord) {
     const row = await firstRow(who.ctx, p.entity);
-    if (!row?.id) { out.push({ id: p.id, route: p.route, skipped: "no record to open" }); continue; }
+    if (!row?.id) { out.push({ id: p.id, route: p.route, skipped: "no record to open" }); return; }
     url = fillRoute(url, row);
   }
   const t0 = Date.now();
@@ -390,7 +421,8 @@ for (const p of cfg.pages) {
   const main = await open(who.ctx, url, { shot: file });
   const result = { id: p.id, route: p.route, url, as: p.as ?? null, status: main.status, state: main.state,
                    landed: main.landed, text: main.text, tabs: main.tabs,
-                   file, errors: [...new Set(main.errors)].slice(0, 12), states: {} };
+                   file, errors: [...new Set(main.errors)].slice(0, 12), states: {},
+                   ...(main.checkerNote ? { checkerNote: main.checkerNote } : {}) };
   let found = [];
   if (cfg.probe) found = await controls(main.page).catch(() => []);
   await main.page.close();
@@ -438,6 +470,15 @@ for (const p of cfg.pages) {
   }
   result.ms = Date.now() - t0;
   out.push(result);
+}
+
+for (const p of cfg.pages) {
+  try {
+    await visit(p);
+  } catch (e) {
+    out.push({ id: p.id, route: p.route, as: p.as ?? null,
+               checkerError: String(e?.message || e).split("\n")[0].slice(0, 300) });
+  }
 }
 console.log(JSON.stringify(out));
 await browser.close();

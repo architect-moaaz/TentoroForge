@@ -30,6 +30,7 @@ from __future__ import annotations
 from services.proc_compat import group_kwargs, kill_group, link_dir, tool
 import concurrent.futures as cf
 import json
+import re
 import logging
 import os
 import shutil
@@ -187,12 +188,75 @@ def _listening(port: int | None) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def ensure_docker_database(app_root: Path) -> bool:
+    """The app's own database up, pushed and seeded, on a machine with Docker:
+    `start.sh --seed-only` when nothing of the app's answers on its port.
+    Returns whether it was started here. Raises `ReviewUnavailable` when it
+    cannot be.
+
+    A DATABASE THAT IS UP IS SOMEONE'S. `start.sh` finds its port taken,
+    moves the app to another one and rewrites `.env` under the running
+    server; stopping compose afterwards took the person's database down.
+    So a running database is used as it is and left running.
+    …BUT A PORT IN USE IS NOT THE APP'S DATABASE. A new app still names
+    the default 5432, and a Postgres installed on the machine answers
+    there: the review took it for the app's, started nothing, found no
+    container to copy and checked no page (wz7a99ir, 2026-10-04). Up
+    means a container serves the app's port; anything else is started,
+    and `start.sh` moves the app off a port that is taken."""
+    port = _database_port(app_root)
+    if _listening(port) and _database_container(port):
+        return False
+    if not shutil.which("docker"):
+        raise ReviewUnavailable("Docker is not available for the app's database")
+    seeded = subprocess.run(["bash", "start.sh", "--seed-only"], cwd=app_root,
+                            capture_output=True, text=True, timeout=600)
+    if seeded.returncode != 0:
+        raise ReviewUnavailable(f"start.sh --seed-only failed: {seeded.stdout[-600:]}{seeded.stderr[-400:]}")
+    return True
+
+
+def production_build(app_root: Path, dist_dir: str, *, env: dict, sink: Any) -> str:
+    """`next build` into `dist_dir`, unless the build there was made from the
+    sources as they are now. Returns "" or why it could not be built."""
+    from services.blueprint import assembly
+    if assembly.build_is_fresh(app_root, dist_dir):
+        return ""
+    done = subprocess.run([tool("npx"), "next", "build"], cwd=app_root, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=env, timeout=900)
+    if sink is not subprocess.DEVNULL:
+        try:
+            sink.write(((done.stdout or "") + (done.stderr or "")).encode("utf-8", "replace"))
+            sink.flush()
+        except (OSError, AttributeError):
+            pass
+    if done.returncode != 0:
+        return f"the production build failed ({done.returncode}): " \
+               f"{assembly.build_message(done.stdout or '', done.stderr or '')[:600]}"
+    assembly.stamp_build(app_root, dist_dir)
+    return ""
+
+
+def _capped(env: dict) -> dict:
+    from services.dev_servers import capped_env
+    return capped_env(env)
+
+
 class RunningApp:
     """The generated app, its database up and its dev server serving — beside
     whatever the person is already running, never over it."""
 
-    def __init__(self, app_root: Path, *, log: Path | None = None, dist_dir: str = REVIEW_DIST_DIR):
+    def __init__(self, app_root: Path, *, log: Path | None = None, dist_dir: str = REVIEW_DIST_DIR,
+                 mode: str = "development"):
         self.root = app_root
+        # "production": the app's production build (`next build`, kept and
+        # served again while the sources are unchanged) under `next start` —
+        # a page in milliseconds, a quarter of a gigabyte, no self-restart.
+        # "development": `next dev`, for a loop that changes code between
+        # looks. ToroCommerce's statements on a cold dev server capped at
+        # 2.5 GB: twenty restarts in 35 minutes, 17 statements failed on
+        # "connection refused" (forge-v3, 2026-10-09).
+        self.mode = mode
         # Each server builds into its own directory and deletes it after: two
         # sharing one (a review and a Smith trial on the same app) took each
         # other's build away mid-run and every page answered ENOENT.
@@ -208,37 +272,48 @@ class RunningApp:
         self._sink: Any = None
 
     def __enter__(self) -> "RunningApp":
-        from services import app_databases
+        # ONE OF A FEW AT ONCE (`dev_servers.TrialSlot`): two trial servers
+        # beside each other filled the host (forge-v3, 2026-10-09).
+        from services import dev_servers
+        self._slot = dev_servers.TrialSlot()
+        try:
+            self._slot.acquire()
+        except dev_servers.SlotUnavailable as exc:
+            self._slot = None
+            raise ReviewUnavailable(str(exc)) from exc
+        try:
+            return self._enter()
+        except BaseException:
+            # `_serve` gives the slot back itself when the server will not
+            # start (through `__exit__`); releasing it again here raised
+            # AttributeError over the reason, and Smith was told about None
+            # instead of a dev server that did not start (TStyle, 2026-10-09).
+            if self._slot is not None:
+                self._slot.release()
+                self._slot = None
+            raise
+
+    def _enter(self) -> "RunningApp":
+        # THE WORKBENCH'S DOOR. Installed, schema, seeded — proven and
+        # re-established before a server is started; a precondition the
+        # platform cannot establish is its fault, said as such, never a
+        # review of the app (TStyle, forge-v3, 2026-10-09).
+        from services import app_databases, workbench
+        try:
+            ready = workbench.prepare(self.root)
+        except workbench.PlatformFault as exc:
+            raise ReviewUnavailable(str(exc)) from exc
+        self.started_db = bool((ready.get("seeded") or {}).get("started"))
         if app_databases.server():
             # NO DOCKER IN THE PLATFORM'S CONTAINER (forge-v3): the app's
             # database lives on the apps server, and the review clicks through
             # a copy of it made there (see `services.app_databases`).
             try:
-                app_databases.ensure(self.root)
                 copy, url = app_databases.clone(self.root)
             except Exception as exc:  # noqa: BLE001 — said, not crashed
-                raise ReviewUnavailable(f"the app's database could not be prepared: {exc}") from exc
+                raise ReviewUnavailable(f"the app's database could not be copied: {exc}") from exc
             self.clone = ("", copy, url)
             return self._serve()
-        # A DATABASE THAT IS UP IS SOMEONE'S. `start.sh` finds its port taken,
-        # moves the app to another one and rewrites `.env` under the running
-        # server; stopping compose afterwards took the person's database down.
-        # So a running database is used as it is and left running.
-        # …BUT A PORT IN USE IS NOT THE APP'S DATABASE. A new app still names
-        # the default 5432, and a Postgres installed on the machine answers
-        # there: the review took it for the app's, started nothing, found no
-        # container to copy and checked no page (wz7a99ir, 2026-10-04). Up
-        # means a container serves the app's port; anything else is started,
-        # and `start.sh` moves the app off a port that is taken.
-        port = _database_port(self.root)
-        if not (_listening(port) and _database_container(port)):
-            if not shutil.which("docker"):
-                raise ReviewUnavailable("Docker is not available for the app's database")
-            seeded = subprocess.run(["bash", "start.sh", "--seed-only"], cwd=self.root,
-                                    capture_output=True, text=True, timeout=600)
-            if seeded.returncode != 0:
-                raise ReviewUnavailable(f"start.sh --seed-only failed: {seeded.stdout[-600:]}{seeded.stderr[-400:]}")
-            self.started_db = True
         self.clone = _clone_database(self.root)
         if self.clone is None:
             raise ReviewUnavailable("could not make a copy of the app's database to click through")
@@ -250,30 +325,68 @@ class RunningApp:
         if self.log is not None:
             self.log.parent.mkdir(parents=True, exist_ok=True)
             sink = self._sink = open(self.log, "ab")  # noqa: SIM115 — closed in __exit__
+        env = _capped({**os.environ, "BROWSER": "none",
+                       # The preview secret, so a session minted for a role the
+                       # administrator does not hold is a session this server accepts.
+                       **boot_env(self.base),
+                       # Also what the SDK's empty state answers to: only this server
+                       # builds into its own dist dir.
+                       "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2],
+                       # NEVER THE APP'S OWN VOICE. The app reports crashes to the
+                       # platform under its project id (`.env.local`); a server the
+                       # platform runs to try the app reported its trials' aborted
+                       # requests as the app's crashes, and self-heal turns ran on
+                       # them beside the person's own (E-commerce, 2026-10-09). An
+                       # id set empty here is kept empty: Next never overrides a
+                       # variable the process already carries.
+                       "FORGE_PROJECT_ID": ""})
+        if self.mode == "production":
+            why = production_build(self.root, self.dist_dir, env=env, sink=sink)
+            if why:
+                self.__exit__(None, None, None)
+                raise ReviewUnavailable(why)
+            cmd = [tool("npx"), "next", "start", "--port", str(self.port)]
+        else:
+            cmd = [tool("npx"), "next", "dev", "--port", str(self.port)]
         self.proc = subprocess.Popen(
-            [tool("npx"), "next", "dev", "--port", str(self.port)], cwd=self.root,
+            cmd, cwd=self.root,
             stdout=sink, stderr=subprocess.STDOUT if self.log is not None else subprocess.DEVNULL,
-            **group_kwargs(),
-            env={**os.environ, "BROWSER": "none",
-                 # The preview secret, so a session minted for a role the
-                 # administrator does not hold is a session this server accepts.
-                 **boot_env(self.base),
-                 # Also what the SDK's empty state answers to: only this server
-                 # builds into `.next-review`.
-                 "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2]})
+            **group_kwargs(), env=env)
         from services import dev_servers
         dev_servers.track(self.proc.pid, port=self.port, root=self.root, kind="review")
         deadline = time.monotonic() + 180
-        while time.monotonic() < deadline:
+        up = False
+        while time.monotonic() < deadline and not up:
             try:
                 urllib.request.urlopen(f"{self.base}/api/auth/csrf", timeout=30)
-                return self
+                up = True
             except Exception:  # noqa: BLE001 — not up yet
                 time.sleep(2)
-        self.__exit__(None, None, None)
-        raise ReviewUnavailable("the dev server did not start within 180s")
+        if not up:
+            self.__exit__(None, None, None)
+            raise ReviewUnavailable("the dev server did not start within 180s")
+        # SIGN-IN IS PROVEN BEFORE ANYTHING IS TRIED. A server that answers
+        # with a users table nobody can sign in to is not an app to review:
+        # TStyle's 18 "could not sign in" statements were the empty seed,
+        # reported as the app's (forge-v3, 2026-10-09).
+        from services import workbench
+        try:
+            workbench.served(self.base, ADMIN_EMAIL, ADMIN_PASSWORD)
+        except workbench.PlatformFault as exc:
+            self.__exit__(None, None, None)
+            raise ReviewUnavailable(str(exc)) from exc
+        return self
 
     def __exit__(self, *exc: Any) -> None:
+        try:
+            self._stop()
+        finally:
+            slot = getattr(self, "_slot", None)
+            if slot is not None:
+                slot.release()
+                self._slot = None
+
+    def _stop(self) -> None:
         if self.proc is not None:
             from services import dev_servers
             dev_servers.forget(self.proc.pid)
@@ -300,7 +413,10 @@ class RunningApp:
                                capture_output=True, timeout=120)
         if self.started_db:
             subprocess.run(["docker", "compose", "stop"], cwd=self.root, capture_output=True, timeout=120)
-        shutil.rmtree(self.root / self.dist_dir, ignore_errors=True)
+        # A production build is kept: the next run serves it as it is while
+        # the sources are unchanged. A dev server's dist is its own and goes.
+        if self.mode != "production":
+            shutil.rmtree(self.root / self.dist_dir, ignore_errors=True)
 
 
 def _query(app: RunningApp, sql: str) -> list[list[str]]:
@@ -411,10 +527,19 @@ def run_shots(app: RunningApp, pages: list[dict], out_dir: Path, *, probe: bool 
                           timeout=180 + 240 * len(pages), env=env)
     out, err = proc.stdout or "", proc.stderr or ""
     line = next((l for l in reversed(out.splitlines()) if l.startswith("[") or l.startswith("{")), "")
-    result = json.loads(line) if line else {"error": err[-400:]}
+    result = json.loads(line) if line else {"error": _what_failed(err)}
     if isinstance(result, dict):
         raise ReviewUnavailable(f"screenshots failed: {result.get('error')}")
     return result
+
+
+def _what_failed(stderr: str) -> str:
+    """The error a crashed script printed, from its first line: the tail of a
+    Node stack is file paths, and that was all a failed check ever said."""
+    lines = [l.strip() for l in (stderr or "").splitlines() if l.strip()]
+    head = next((l for l in lines if re.search(r"\b\w*Error\b|error:", l)), lines[0] if lines else "")
+    at = next((l for l in lines if l.startswith("at ")), "")
+    return (head[:300] + (f" ({at[:160]})" if at else "")) or "the browser script stopped without saying why"
 
 
 #: What a control did that means it does not work.

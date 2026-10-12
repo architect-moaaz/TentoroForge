@@ -228,7 +228,41 @@ export interface CreditsExhaustedEvent {
   message?: string;
 }
 
+/** The agents a question touches meet in the Huddle Room; the observer chairs
+ *  (`backend/services/huddle/room.py`). */
+export interface HuddleStartEvent {
+  type: "huddle_start";
+  huddleId: string;
+  kind: "review" | "deadlock";
+  topic: string;
+  participants: string[];
+  chair: string;
+}
+
+/** One agent's position, said at the table. */
+export interface HuddleSayEvent {
+  type: "huddle_say";
+  huddleId: string;
+  agent: string;
+  text: string;
+  participants: string[];
+  chair: string;
+}
+
+/** The chair's decision — or the question for the person — and back to work. */
+export interface HuddleEndEvent {
+  type: "huddle_end";
+  huddleId: string;
+  status: "decided" | "deadlock";
+  decision: string;
+  participants: string[];
+  chair: string;
+}
+
 export type OfficeEvent =
+  | HuddleStartEvent
+  | HuddleSayEvent
+  | HuddleEndEvent
   | AgentStartEvent
   | AgentStatusEvent
   | AgentHandoffEvent
@@ -271,6 +305,7 @@ export const DEPARTMENTS: Department[] = [
   { id: "security", label: "Security", color: "#DC2626", description: "Roles and the permissions that guard entities" },
   { id: "qa", label: "Verification", color: "#0891B2", description: "Tests, the verification matrix, and what the run remembers" },
   { id: "shipping", label: "Shipping", color: "#16A34A", description: "The runtime, the preview, and the deploy" },
+  { id: "huddle", label: "Huddle Room", color: "#B45309", description: "Where the agents a question touches settle it together" },
 ];
 
 export const DEPARTMENT_BY_ID: Record<string, Department> = Object.fromEntries(
@@ -338,6 +373,7 @@ export const AGENT_REGISTRY: AgentInfo[] = [
   { id: "security", name: "Security", spriteKey: "security", room: "security", role: "Sets roles and permissions", color: "#DC2626" },
 
   // ── Verification ──────────────────────────────────────────────────────
+  { id: "observer", name: "Observer", spriteKey: "appmodel_manager", room: "qa", role: "Judges each step as it lands and chairs the huddles", color: "#0F766E" },
   { id: "verification", name: "Verification", spriteKey: "validator", room: "qa", role: "Checks the blueprint against itself", color: "#7C3AED" },
   { id: "memory", name: "Memory", spriteKey: "inspector", room: "qa", role: "Records decisions and coverage", color: "#92400E" },
 

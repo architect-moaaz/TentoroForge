@@ -80,7 +80,12 @@ LEDGER_RELATIVE = Path(".forge") / "incidents.jsonl"
 #: server handler that took longer than the application was told to expect.
 KIND_CRASH = "crash"
 KIND_SLOW = "slow"
-KINDS = (KIND_CRASH, KIND_SLOW)
+#: A fault in the platform's own code, found while trying the app — Smith's
+#: or the engineer's to report, never to patch around in the app
+#: (docs/plans/2026-10-09-engineer-owned-build.md §4.9).
+KIND_PLATFORM = "platform"
+KINDS = (KIND_CRASH, KIND_SLOW, KIND_PLATFORM)
+PLATFORM_FIELDS = ("kind", "at", "where", "route", "workflow", "message", "source", "statements")
 
 #: Fields a record may carry, and nothing else. An unknown key is dropped
 #: rather than written: the reporter is code we ship, so a key we do not know
@@ -133,7 +138,7 @@ def record(output_dir: str | Path, incident: dict[str, Any]) -> dict[str, Any] |
     kind = str(incident.get("kind") or "").strip().lower()
     if kind not in KINDS:
         return None
-    allowed = CRASH_FIELDS if kind == KIND_CRASH else SLOW_FIELDS
+    allowed = {KIND_CRASH: CRASH_FIELDS, KIND_SLOW: SLOW_FIELDS, KIND_PLATFORM: PLATFORM_FIELDS}[kind]
     line = _clean({**incident, "kind": kind, "at": incident.get("at") or _now()}, allowed)
     target = path_for(output_dir)
     try:

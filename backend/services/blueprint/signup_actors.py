@@ -223,6 +223,17 @@ def derive_signup_account_types(
     scaffold default. A non-empty result is a list of ``{"value", "label",
     "description"?}`` ready to serialise into the signup page and route.
     """
+    # DECIDED, NOT DERIVED. When the engineer decided who may sign up
+    # (`policies.selfRegistration`), the choice is those roles, by name — the
+    # session role is the account type — and nothing is inferred from a field.
+    chosen = [str(r) for r in ((doc.get("policies") or {}).get("selfRegistration") or [])]
+    if chosen:
+        roles = {str(r.get("id")): r for r in doc.get("roles") or [] if isinstance(r, dict) and r.get("id")}
+        named = [roles[r] for r in chosen if r in roles]
+        if len(named) < 2:
+            return []
+        return [{"value": str(r.get("name")), "label": str(r.get("name")),
+                 "description": str(r.get("description") or "")} for r in named]
     try:
         field = _account_type_field(doc)
         if not field:

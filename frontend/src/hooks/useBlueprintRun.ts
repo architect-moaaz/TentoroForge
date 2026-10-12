@@ -236,6 +236,9 @@ export interface StartOptions {
   domain?: string;
   /** §14 — text of documents the user supplied rather than typed. */
   evidence?: string[];
+  /** Who saw the problem and where: the preview's route and device size
+   *  (`lib/preview-report`). Smith reproduces as them before changing anything. */
+  report?: { route?: string; device?: string; viewport?: { width: number; height: number } };
   /** §25 — false stops after the definition and waits to be accepted. */
   approved?: boolean;
   defineOnly?: boolean;
@@ -494,6 +497,7 @@ export function useBlueprintRun(projectId: string | null) {
               // §14 — the documents attached on /blueprint/new. Carried on
               // every turn: the definition re-reads the whole brief each time.
               evidence: opts.evidence ?? [],
+              ...(opts.report ? { report: opts.report } : {}),
               ...(opts.gate ? { gate: opts.gate } : {}),
               ...(opts.modules ? { modules: opts.modules } : {}),
             }),
@@ -877,6 +881,16 @@ export function momentOf(event: string, data: Record<string, unknown>): RunMomen
 
 function describe(event: string, data: Record<string, unknown>): string {
   switch (event) {
+    case "huddle": {
+      // The agents a question touches, meeting (backend/services/huddle).
+      const who = Array.isArray(data.participants) ? (data.participants as unknown[]).join(", ") : "";
+      const phase = String(data.phase ?? "");
+      if (phase === "start") return `Huddle ${data.id}: ${who} meet — ${data.topic}`;
+      if (phase === "position") return `Huddle ${data.id}: ${data.agent} — ${data.change || data.view}`;
+      if (phase === "decided") return `Huddle ${data.id} decided: ${data.decision}`;
+      if (phase === "deadlock") return `Huddle ${data.id} needs you: ${data.question || data.reason || "undecided"}`;
+      return `Huddle ${data.id}`;
+    }
     case "started":
       return "Run started";
     case "plan": {

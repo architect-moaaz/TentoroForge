@@ -31,6 +31,8 @@ import {
   TestId,
   WidgetId,
   WorkflowId,
+  JourneyId,
+  ExpectationId,
   artifactBase,
   ArtifactStatus,
 } from "./ids";
@@ -68,7 +70,10 @@ export const DesignLanguageSource = z.enum(["company", "custom"]);
 export const ApplicationMeta = z.object({
   id: z.string(),
   name: z.string(),
-  domain: z.string().describe("CRM | HRMS | ATS | Banking | … (§96)"),
+  domain: z.string().describe(
+    "The field this application serves, in the words the person used (§96). "
+    + "The product frame's own `product.domain` is where the build states it.",
+  ),
   description: z.string().default(""),
   /**
    * The application-wide answer to "who designs the screens", recorded when
@@ -97,6 +102,13 @@ export const ApplicationMeta = z.object({
    * nothing to offer.
    */
   designLanguage: DesignLanguageSource.optional(),
+  /**
+   * Whether the application's agents huddle — meet over a big decision or a
+   * deadlock one of them cannot settle, chaired by the observer
+   * (docs/plans/2026-10-08-huddle-room.md). Absent means yes; `false` turns
+   * them off for this application, to measure a build without them.
+   */
+  huddles: z.boolean().optional(),
 });
 
 // ===========================================================================
@@ -116,6 +128,32 @@ export const Capability = z.object({
 });
 
 export const Product = z.object({
+  /**
+   * The field this application serves and the kind of product it is, stated
+   * by the product frame and read by everything that decides how it looks.
+   * `application.domain` was never filled — every Blueprint said "unknown" —
+   * so the agents choosing the frame and the page rhythm were told the
+   * personality and the density, never what the product is; and the code
+   * filled the gap by reading words like "child" or "back-office" off the
+   * personality (2026-10-08). Stated here, the design follows the product;
+   * no table in code maps one to the other.
+   */
+  domain: z
+    .string()
+    .describe(
+      "The field this application serves, in a few plain words, as the people in it "
+      + "would say it. Not a code or a list entry.",
+    )
+    .default(""),
+  category: z
+    .string()
+    .describe(
+      "The kind of product this is, in a few words: what it is to the people who use it "
+      + "and how they meet it — for example something they browse and buy from, a tool "
+      + "they work in all day, a portal they check now and then. When it is two things "
+      + "to two kinds of people, say both.",
+    )
+    .default(""),
   objectives: z.array(z.string()).default([]),
   personas: z.array(Persona).default([]),
   /** Domain vocabulary. Drives generated copy so labels match the business. */
@@ -1303,6 +1341,36 @@ export const PageSketch = z.object({
  * still per page. The sketch is the instruction a page author is given, not a
  * gate a page is rejected against — coherence is judged, not measured.
  */
+/** The five anatomy decisions every page of one audience shares. */
+export const PageRhythm = z.object({
+  header: z.enum(["eyebrow-title", "title-only", "band", "compact"]),
+  lead: z.enum(["dark-card", "gradient-band", "outlined-panel", "type-only"]),
+  lists: z.enum(["table", "cards", "rows"]),
+  figures: z.enum(["tiles", "strip", "inline"]),
+  sections: z.enum(["cards", "open", "dense"]),
+});
+
+/** What the visitors who are not signed in are called in `AudienceLook.audience`. */
+export const PUBLIC_AUDIENCE = "public";
+
+export const AudienceLook = z.object({
+  audience: z
+    .array(z.string())
+    .min(1)
+    .describe("The role ids this look is for, or `public` for visitors who are not signed in"),
+  experience: z
+    .string()
+    .describe("What the product is to these people and how they use it — where, how often, for how long"),
+  chrome: z
+    .enum(["standard-rail", "wide-rail", "icon-rail", "floating-rail", "right-rail", "topbar", "dock"])
+    .describe("How their navigation is built. Visitors always get a header bar; this is ignored for `public`"),
+  tone: z
+    .enum(["dark", "brand", "light", "tinted"])
+    .describe("What their navigation is painted with"),
+  rhythm: PageRhythm,
+  why: z.string().describe("One sentence: why this look, from the domain, the category and these people"),
+});
+
 export const Composition = z.object({
   /** One paragraph: what the whole application should feel like to use. */
   vision: z.string().default(""),
@@ -1320,15 +1388,18 @@ export const Composition = z.object({
    * and title, a dark leading card, KPI tiles, tables in cards), which is why
    * two apps with different palettes still read as one product recoloured.
    */
-  rhythm: z
-    .object({
-      header: z.enum(["eyebrow-title", "title-only", "band", "compact"]),
-      lead: z.enum(["dark-card", "gradient-band", "outlined-panel", "type-only"]),
-      lists: z.enum(["table", "cards", "rows"]),
-      figures: z.enum(["tiles", "strip", "inline"]),
-      sections: z.enum(["cards", "open", "dense"]),
-    })
-    .optional(),
+  rhythm: PageRhythm.optional(),
+  /**
+   * ONE LOOK PER AUDIENCE. A shop's customers and its staff are two kinds of
+   * people in two kinds of product — a shop window they browse on a phone and
+   * a console they work in all day — and one frame and one rhythm for both
+   * made the storefront a console or the console a storefront. Each look is
+   * for the roles it names (and `public` for visitors who are not signed in),
+   * decided by the director from the domain, the category and how those
+   * people use it. Every role and, when there are public pages, the visitors
+   * have exactly one.
+   */
+  looks: z.array(AudienceLook).default([]),
   pages: z.array(PageSketch).default([]),
 });
 
@@ -1775,6 +1846,14 @@ export const Workflow = z.object({
     detail: z.string().default(""),
   }),
   steps: z.array(WorkflowStep).default([]),
+  /** What the process writes, declared with its steps: the records, the fields
+   *  it sets and the states it puts them in — what screens, charts and
+   *  statements bind to instead of guessing. */
+  writes: z.array(z.object({
+    entity: EntityId,
+    fields: z.array(z.string()).default([]),
+    states: z.array(z.string()).default([]),
+  })).default([]),
   /** Pages that can launch this workflow — the wiring, declared not inferred. */
   launchedFrom: z.array(PageId).default([]),
   /**
@@ -2299,8 +2378,10 @@ export const DesignSystem = z.object({
    * navigation is built (`chrome`) and how the sign-in screen is composed
    * (`auth`). Every generated app shipped the same hover-expand rail and the
    * same split sign-in because nothing carried this decision to the shell,
-   * which has six of each. Derived from `navigationApproach` and the
-   * personality when the design does not state it.
+   * which has six of each. This is the application's own frame and its
+   * sign-in screen; each audience's frame is its look (`composition.looks`).
+   * Unstated, the platform's one default — never a guess read off the
+   * personality's words.
    */
   shell: z
     .object({
@@ -2311,7 +2392,7 @@ export const DesignSystem = z.object({
        * surface), `brand` (the primary colour), `light` (a card beside the
        * page), `tinted` (the ground washed with the primary). Every rail was
        * the inverse surface — the one navy rail on a warm pediatric app and a
-       * stark tool alike. Derived from the personality when not stated.
+       * stark tool alike. Unstated, the one default (`dark`).
        */
       tone: z.enum(["dark", "brand", "light", "tinted"]).optional(),
     })
@@ -2396,7 +2477,8 @@ export const Decision = z.object({
   id: DecisionId,
   decision: z.string(),
   reason: z.string().default(""),
-  source: z.enum(["user", "smith_recommendation", "domain_default", "figma", "uxpilot"]),
+  /** `huddle` — decided by the agents that own the parts it touches, chaired by the observer (`.forge/huddles`). */
+  source: z.enum(["user", "smith_recommendation", "domain_default", "figma", "uxpilot", "huddle"]),
   approvedBy: z.enum(["user", "smith"]).default("smith"),
   version: z.number().default(1),
   supersedes: DecisionId.optional(),
@@ -2596,6 +2678,23 @@ export const Runtime = z.object({
       version: z.number().optional(),
     })
     .optional(),
+  /**
+   * The statements of what must happen (`expectations`) as last tried in the
+   * running application (`services/expects`): how many there are, how many
+   * held, which were made to hold by a repair, which still fail and which
+   * could not be set up to try. Each statement's own result, with what was
+   * seen, is kept beside the application (`.forge/expects/results.json`).
+   */
+  expectations: z
+    .object({
+      statements: z.number(),
+      passed: z.number(),
+      fixed: z.array(z.string()).default([]),
+      failing: z.array(z.string()).default([]),
+      untried: z.array(z.string()).default([]),
+      version: z.number().optional(),
+    })
+    .optional(),
 });
 
 export const Database = z.object({
@@ -2689,6 +2788,263 @@ export const ApplicationState = z.enum([
 
 export const BLUEPRINT_SCHEMA_VERSION = "1" as const;
 
+// ===========================================================================
+// App flows — the paths people take through the application
+// ===========================================================================
+
+/**
+ * One step of a flow: where the person is, what they do there, and how they
+ * get to the next step.
+ */
+export const FlowStep = z.object({
+  /** The screen they are on. */
+  page: PageId,
+  /** The part of it — a tab, the panel a record opens in — by its section key. */
+  section: z.string().optional(),
+  /**
+   * What they do here, in their words: "Choose a size", "Add to cart",
+   * "Place order". Empty on the step a flow ends on.
+   */
+  does: z.string().default(""),
+  /** The process that does it, when one does. */
+  workflow: WorkflowId.optional(),
+  /**
+   * How they reach the next step: `go` — they are taken there when this step
+   * is done (placing an order opens the order); `offer` — they stay, and are
+   * shown the way (a "View cart" after adding); `menu` — they go there
+   * themselves, by the menu or a tab.
+   */
+  then: z.enum(["go", "offer", "menu"]).default("go"),
+  /**
+   * The record the next step opens with — the one this step chose or made
+   * ("Place order" carries the Order: the next step opens that order).
+   */
+  carries: EntityId.optional(),
+});
+
+/**
+ * A path a person takes through the application to reach one of their
+ * goals: Home → a product → the cart → checkout → their order.
+ *
+ * THE APPLICATION KNEW WHERE THINGS WERE, NOT HOW ANYONE MOVED. ToroCommerce
+ * (forge-v3, 2026-10-07) had its screens, sections and processes, and two
+ * links between eleven screens: placing an order left the customer on an
+ * empty cart, a featured product opened a search for its own name, nothing
+ * offered the cart after adding to it. The journeys the planner was asked
+ * for shaped the screens and were then thrown away. A flow keeps them: the
+ * page writer is told each screen's hand-offs, each process's landing is
+ * read from it, the build walks it as its person, and it is drawn.
+ */
+export const AppFlow = z.object({
+  id: JourneyId,
+  /** "Buy something", "Fulfil an order". */
+  name: z.string(),
+  /** Who takes it — the role the person holds. */
+  role: RoleId.optional(),
+  /** The goal it reaches, in the person's terms (one of their persona's goals). */
+  goal: z.string().default(""),
+  /** In order; the last is where it ends. */
+  steps: z.array(FlowStep).min(2),
+  /** What the person sees when it is done: "their order, open, with its status". */
+  ends: z.string().default(""),
+  ...artifactBase,
+});
+
+// ===========================================================================
+// Expectations — what must happen, said by the architect, tried as the person
+// ===========================================================================
+
+/**
+ * Who a step or a check is done as: a role (`ROLE-…`) or `guest`, someone
+ * signed out. `who` tells two people of one role apart — "another shopper"
+ * must not see the first one's bag.
+ */
+export const ExpectPerson = z.union([RoleId, z.literal("guest")]);
+
+/**
+ * A record that exists before the statement starts, made through the app as
+ * its owner. `ref` is the name the statement calls it by; a value written
+ * `@ref` is that record's id ("productId": "@shirt").
+ */
+export const ExpectGiven = z.object({
+  ref: z.string().min(1),
+  entity: EntityId,
+  values: z.record(z.string(), z.unknown()).default({}),
+  /** Whose it is — the person who makes it; the administrator when left out. */
+  as: ExpectPerson.optional(),
+  who: z.string().optional(),
+  /**
+   * The person `as` themselves: their own account record, which exists
+   * already, holds `values` (a disabled account, a profile filled in). A
+   * statement about the signed-in person's own state says it here — a second
+   * record of the same type is someone else.
+   */
+  self: z.boolean().optional(),
+});
+
+/**
+ * One thing the person does. `do` is said in words — "choose size M and add
+ * it to the bag" — and the runner finds the controls on the screen that do
+ * it, the way a person would; no selector is written here.
+ */
+export const ExpectStep = z.object({
+  as: ExpectPerson,
+  who: z.string().optional(),
+  act: z.enum(["open", "do", "sign_in", "sign_out", "reload", "come_back", "wait"]),
+  /** `open`: the screen; `sign_in`: where the sign-in starts from (its form when left out). */
+  page: PageId.optional(),
+  /** `open`: the given record the screen opens on (`@ref`). */
+  record: z.string().optional(),
+  /** `open`: an address as typed, with `@ref` for a record's id — "by its address". */
+  address: z.string().optional(),
+  /** `do`: what they do, in their words; `wait`: what for. */
+  what: z.string().default(""),
+  /**
+   * `do`: the process doing it starts, when it starts one. Every process the
+   * application has is started by some statement's step — the runner checks
+   * the step really started it — so no process goes untried.
+   */
+  workflow: WorkflowId.optional(),
+});
+
+/**
+ * What must be true afterwards. Each is judged by code from what the browser
+ * and the database report — where the person is, what the screen shows,
+ * what the app answered, what was stored — never by a model.
+ */
+export const ExpectCheck = z.object({
+  check: z.enum(["on", "sees", "not_sees", "told", "gets", "stored", "not_stored", "sent"]),
+  /** Whose view; the last step's person when left out. */
+  as: ExpectPerson.optional(),
+  who: z.string().optional(),
+  /** `on`: the screen they are on; `sees`/`not_sees`: the screen opened to look (where they are, when left out); `gets`: the screen they try to open. */
+  page: PageId.optional(),
+  /** `sees`/`not_sees`/`gets`/`stored`: a given record (`@ref`). */
+  record: z.string().optional(),
+  /** `gets`: an address as typed, with `@ref` for a record's id. */
+  address: z.string().optional(),
+  /** `sees`/`not_sees`: text on the screen; `told`/`sent`: what it is about, for the person reading the result. */
+  text: z.string().optional(),
+  /** `told`: the kind of answer. */
+  told: z.enum(["success", "refusal", "error"]).optional(),
+  /** `gets`: what opening the screen gives them. */
+  gets: z.enum(["shown", "not_found", "sign_in_asked", "not_allowed"]).optional(),
+  /** `stored`/`not_stored`/`sent`: the record type. */
+  entity: EntityId.optional(),
+  /** `stored`/`not_stored`: field values the record has (`@ref` for an id); `sent`: who it goes to. */
+  values: z.record(z.string(), z.unknown()).optional(),
+});
+
+/**
+ * A statement of what must happen when someone does something — the
+ * architect's, written from the requirements and the rules before any screen
+ * is coded, and tried in the running application as the person.
+ *
+ * THE APP DID WHAT NOBODY SAID AND NOBODY TRIED IT. TCommerce's definition
+ * said shoppers only ever see active products, that a shopper can add to the
+ * cart, that the admin starts on the admin console; the app showed an
+ * inactive product, refused Add to Cart and landed the admin on the home
+ * page (forge-v3, 2026-10-07). Each requirement carried acceptance criteria
+ * in prose that only a review screen read. Every check asked whether the app
+ * was broken — none knew what right was. A statement is the answer key: one
+ * runner tries every statement as its person, and one that fails goes to
+ * whoever owns the fault. The fixer may not change a statement; changing
+ * what must happen is a change to the requirements, said to the person.
+ */
+export const Expectation = z.object({
+  id: ExpectationId,
+  /** The statement in one plain sentence — what the review shows. */
+  says: z.string().min(1),
+  kind: z.enum(["arrival", "reach", "action", "rule", "cross-person", "journey",
+                "first-use", "recovery", "background"]),
+  /** The business rules it proves (the requirements are `requirements`). */
+  rules: z.array(RuleId).default([]),
+  given: z.array(ExpectGiven).default([]),
+  steps: z.array(ExpectStep).min(1),
+  then: z.array(ExpectCheck).min(1),
+  /** What the requirements left undecided, asked at the review … */
+  question: z.string().optional(),
+  /** … and the answer this statement takes until the person gives theirs. */
+  assumed: z.string().optional(),
+  /** Where it came from: the requirements, the person's own words, or a report of a fault. */
+  origin: z.enum(["requirements", "person", "report"]).default("requirements"),
+  ...artifactBase,
+});
+
+// ===========================================================================
+// Policies — the business facts decided once, that every writer reads
+// ===========================================================================
+//
+// Currency, money rules, record life cycles, time, what a quantity means and
+// what a signed-out visitor may do had no place in the definition, so each
+// writer invented its own: an order created "pending" and set "processing" in
+// the same process while the merchant's list filtered "pending"; GBP on one
+// page and USD on the next; £6.99 shipping shown and 0 stored; a glass of
+// water logged replacing the day's total; a cart button anyone could press
+// that only a signed-in customer could use (E-commerce, TStyle, 2026-10-09).
+// Decided here, by the engineer, before anything that depends on them; the
+// platform formats money, enforces life-cycle moves, gates sign-up and the
+// anonymous rule from these fields, so no page can disagree with them.
+
+export const MoneyRule = z.object({
+  name: z.string().min(1),
+  applies: z.enum(["shipping", "tax", "discount", "fee", "other"]),
+  /** How the amount is worked out, in the engine's expression language over the
+   *  record's fields ("subtotal * 0.2", "6.99", "0") — or empty for "none". */
+  formula: z.string().default(""),
+  note: z.string().default(""),
+});
+
+export const Lifecycle = z.object({
+  entity: EntityId,
+  field: z.string().min(1),
+  /** The state a new record starts in; one of the field's enumValues. */
+  initial: z.string().min(1),
+  /** The moves allowed, and who may make each (every role when empty). */
+  moves: z.array(z.object({
+    from: z.string().min(1),
+    to: z.string().min(1),
+    by: z.array(RoleId).default([]),
+  })).default([]),
+});
+
+export const Policies = z.object({
+  money: z.object({
+    /** ISO 4217 — "USD", "GBP", "INR". Every amount in the application is shown in it. */
+    currency: z.string().default(""),
+    /** BCP-47 locale the amounts are formatted in; the interface locale when empty. */
+    locale: z.string().default(""),
+    rules: z.array(MoneyRule).default([]),
+  }).default({}),
+  time: z.object({
+    /** "person" (each person's own), "app" (one zone for all, named in `zone`), or empty for the server's. */
+    mode: z.enum(["person", "app", ""]).default(""),
+    zone: z.string().default(""),
+  }).default({}),
+  /** Per process that records an amount: whether a new entry ADDS to what is
+   *  there for the period or REPLACES it. */
+  quantities: z.array(z.object({
+    workflow: WorkflowId,
+    mode: z.enum(["add", "replace"]),
+  })).default([]),
+  lifecycles: z.array(Lifecycle).default([]),
+  /** Per process a signed-out visitor can reach: allowed as they are, asked to
+   *  sign in first, or owned by their guest session. */
+  anonymous: z.array(z.object({
+    workflow: WorkflowId,
+    rule: z.enum(["allowed", "sign_in", "guest_owned"]),
+  })).default([]),
+  /** The roles a person may sign up as. Empty: the default role only, never
+   *  one the request names. */
+  selfRegistration: z.array(RoleId).default([]),
+  /** Any other fact decided once that writers must agree on. */
+  decisions: z.array(z.object({
+    about: z.string().min(1),
+    decided: z.string().min(1),
+    why: z.string().default(""),
+  })).default([]),
+});
+
 export const Blueprint = z.object({
   schemaVersion: z.literal(BLUEPRINT_SCHEMA_VERSION),
   /** Bumped on every accepted change (§91). Indexes into changeHistory. */
@@ -2697,6 +3053,7 @@ export const Blueprint = z.object({
 
   application: ApplicationMeta,
   product: Product.default({}),
+  policies: Policies.default({}),
 
   roles: z.array(Role).default([]),
   permissions: z.array(Permission).default([]),
@@ -2708,6 +3065,10 @@ export const Blueprint = z.object({
 
   data: DataModel.default({}),
   workflows: z.array(Workflow).default([]),
+  /** The paths people take through the application (`AppFlow`). */
+  flows: z.array(AppFlow).default([]),
+  /** What must happen when someone does something, tried as them (`Expectation`). */
+  expectations: z.array(Expectation).default([]),
   businessRules: z.array(BusinessRule).default([]),
   apis: z.array(ApiEndpoint).default([]),
   integrations: z.array(Integration).default([]),

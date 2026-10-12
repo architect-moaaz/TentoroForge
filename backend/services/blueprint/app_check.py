@@ -141,7 +141,14 @@ def visits(doc: dict) -> list[dict]:
             continue
         users = [roles.get(str(u), str(u)) for u in p.get("users") or []]
         sections = [sec for sec in p.get("sections") or [] if isinstance(sec, dict) and sec.get("key")]
-        for role in (users or [admin]):
+        # A PAGE FOR NOBODY IN PARTICULAR IS ITS AUDIENCE'S: the person it is
+        # for (`trials.default_person`), not the administrator, who cannot use
+        # a customer's cart — ToroCommerce's /cart was checked as Admin and its
+        # working minus button reported broken (2026-10-07).
+        if not users:
+            from services.smith.trials import default_person
+            users = [default_person(view, route=str(p["route"]))]
+        for role in users:
             mine = [sec for sec in sections
                     if not section_audience(view, sec) or role in section_audience(view, sec)]
             hidden = [str(sec.get("label") or sec["key"]) for sec in sections
@@ -225,6 +232,76 @@ def shot_findings(shot: dict, visit: dict, doc: dict) -> list[str]:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# The flows, walked
+# --------------------------------------------------------------------------- #
+
+def _route_re(route: str) -> re.Pattern:
+    parts = [("[^/]+" if seg.startswith("[") else re.escape(seg)) for seg in route.strip("/").split("/") if seg]
+    return re.compile("^/" + "/".join(parts) + "/?$" if parts else "^/$")
+
+
+def flow_move_findings(doc: dict, visit: dict, shot: dict) -> list[str]:
+    """Each move of a flow off this screen that is only a move — no process
+    runs it — and that nothing on the screen, pressed as the flow's person,
+    takes them along. The page is checked control by control already; this
+    reads the same presses for where they went (`navigated`)."""
+    from services.blueprint.app_flows import flows
+    pages = {str(p.get("id")): p for p in doc.get("pages") or [] if isinstance(p, dict)}
+    roles = {str(r.get("id")): str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    went = []
+    for c in shot.get("controls") or []:
+        if c.get("outcome") == "navigated":
+            went.append(str(c.get("detail") or "").split(" ")[0].split("?")[0])
+    out = []
+    for f in flows(doc):
+        who = roles.get(str(f.get("role") or ""), "")
+        if who and who != visit["as"]:
+            continue
+        steps = f["steps"]
+        for i, st in enumerate(steps[:-1]):
+            nxt = steps[i + 1]
+            if str(st.get("page")) != visit["page"] or st.get("workflow") or str(st.get("then") or "go") == "menu" \
+                    or str(nxt.get("page")) == visit["page"]:
+                continue
+            target = str((pages.get(str(nxt.get("page"))) or {}).get("route") or "")
+            if not target or any(_route_re(target).match(w) for w in went):
+                continue
+            out.append(f"in the flow \"{f.get('name')}\", \"{st.get('does') or 'the next step'}\" should take a "
+                       f"{visit['as']} on to {(pages.get(str(nxt.get('page'))) or {}).get('name') or target} "
+                       f"({target}), and nothing on this screen does")
+    return out
+
+
+def arrival_findings(app: Any, doc: dict, out_dir: Path) -> list[str]:
+    """Sign in as the administrator through the form — plainly, and with
+    `?callbackUrl=/` as a link to the sign-in page carries — and see where
+    they land against where the definition says they start. ToroCommerce's
+    administrator landed on the storefront, and no check signed in through
+    the form to see it (forge-v3, 2026-10-07)."""
+    from services.blueprint.account_model import admin_role, landing_by_role
+    from services.blueprint.page_review import ReviewUnavailable, run_shots
+    admin = admin_role(doc)
+    expected = (landing_by_role(doc) or {}).get(admin or "")
+    login = next((str(p.get("route")) for p in doc.get("pages") or [] if isinstance(p, dict)
+                  and str(p.get("pattern") or "") == "auth" and str(p.get("auth") or "login") == "login"), "/login")
+    if not admin or not expected:
+        return []
+    try:
+        shots = run_shots(app, [{"id": "arrive", "route": login, "signIn": True, "as": admin},
+                                {"id": "arrive-home", "route": f"{login}?callbackUrl=%2F", "signIn": True, "as": admin}],
+                          out_dir / "arrival", probe=False, states=False)
+    except ReviewUnavailable as exc:
+        return [f"signing in through the form could not be tried: {exc}"]
+    out = []
+    for shot in shots:
+        landed = str(shot.get("landed") or "")
+        if landed and not _route_re(expected.split("?")[0]).match(landed):
+            how = "from a link that names the home page" if shot.get("id") == "arrive-home" else "through the form"
+            out.append(f"the {admin}, signing in {how}, lands on {landed} — they start on {expected}")
+    return out
+
+
 def _swallowed_by_entity(lines: list[str]) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for line in lines:
@@ -272,12 +349,19 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
     def shoot(role: str) -> tuple[str, list[dict]]:
         batch = by_role[role]
         safe = re.sub(r"[^a-z0-9]+", "-", role.lower()).strip("-") or "role"
-        try:
-            shots = run_shots(app, _entries(app, doc, batch), out_dir / safe,
-                              probe=role != "signed out", states=role != "signed out")
-        except ReviewUnavailable as exc:
-            shots = [{"id": visit_id(v), "errors": [f"the page could not be opened: {exc}"]}
-                     for v in batch]
+        # THE CHECK FAILING IS NOT THE PAGE FAILING. A crash of the browser
+        # script is tried once more; what still could not be looked at is
+        # recorded as unchecked — never a finding, never sent to be repaired
+        # (memg8iw6, 2026-10-09: six customer pages went to Smith because the
+        # screenshot step crashed).
+        shots: list[dict] = []
+        for attempt in (1, 2):
+            try:
+                shots = run_shots(app, _entries(app, doc, batch), out_dir / safe,
+                                  probe=role != "signed out", states=role != "signed out")
+                break
+            except ReviewUnavailable as exc:
+                shots = [{"id": visit_id(v), "checkerError": str(exc)} for v in batch]
         return role, shots
 
     with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
@@ -291,6 +375,9 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
         for v in by_role[role]:
             page = report.setdefault(v["page"], {"name": v["name"], "route": v["route"], "findings": []})
             shot = by_id.get(visit_id(v))
+            if shot is not None and shot.get("checkerError"):
+                page.setdefault("unchecked", []).append((role, str(shot["checkerError"])[:300]))
+                continue
             if shot is None:
                 page["findings"].append((role, (f"{v['inside']}, " if v.get("inside") else "")
                                          + "it could not be opened at all — the browser reported nothing for it"))
@@ -302,11 +389,17 @@ def check_pages(app: Any, doc: dict, todo: list[dict], out_dir: Path, *,
                 page["findings"] += [(role, f"{v['inside']}, {f}")
                                      for f in shot_findings(shot, {**v, "inside": None}, doc) if f not in plain]
                 continue                    # the server's log is read once per page and role
-            found = shot_findings(shot, v, doc)
+            found = shot_findings(shot, v, doc) + flow_move_findings(doc, v, shot)
             seen[(v["page"], role)] = set(found)
             page["findings"] += [(role, f) for f in found]
             for line in swallowed.get(str(v["entity"]), []):
                 page["findings"].append((role, f"the server could not read its {v['entity']} records: {line}"))
+    # WHERE A SIGNED-IN PERSON ARRIVES, checked with the sign-in page.
+    login = next((v for v in todo if v.get("as") == "signed out" and not v.get("inside")), None)
+    if login is not None:
+        for f in arrival_findings(app, doc, out_dir):
+            report.setdefault(login["page"], {"name": login["name"], "route": login["route"], "findings": []})
+            report[login["page"]]["findings"].append(("signing in", f))
     return report
 
 
@@ -431,9 +524,12 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
     for item in left:
         ledger_note = "; ".join(item["findings"][:3])[:600]
         logger.info("[app-check] still failing %s: %s", item["route"], ledger_note)
-    summary = {"pages": pages_total, "working": pages_total - len(left),
-               "fixed": sorted(set(fixed)), "left": left, "touched": touched}
-    _record(svc, last, left, fixed, pages_total, partial=only is not None)
+    unchecked = [{"page": pid, "name": item["name"], "route": item["route"],
+                  "why": "; ".join(f"as {w}: {f}" for w, f in item.get("unchecked", [])[:3])}
+                 for pid, item in last.items() if item.get("unchecked") and not item["findings"]]
+    summary = {"pages": pages_total, "working": pages_total - len(left) - len(unchecked),
+               "fixed": sorted(set(fixed)), "left": left, "touched": touched, "unchecked": unchecked}
+    _record(svc, last, left, fixed, pages_total, partial=only is not None, unchecked=unchecked)
     if only is not None:
         failing = list((svc.doc.get("runtime") or {}).get("check", {}).get("failing") or [t["route"] for t in left])
         summary["working"] = pages_total - len(failing)
@@ -441,7 +537,7 @@ def _check_app(svc: Any, output_dir: str, *, emit: Callable[[str, dict], None] |
 
 
 def _record(svc: Any, last: dict[str, dict], left: list[dict], fixed: list[str], pages_total: int, *,
-            partial: bool) -> None:
+            partial: bool, unchecked: list[dict] | None = None) -> None:
     """Write what the check found. A check of some pages updates those pages
     and keeps what the last check said of the rest; without a whole check to
     build on it records the failures alone, never a count it did not see."""
@@ -453,10 +549,16 @@ def _record(svc: Any, last: dict[str, dict], left: list[dict], fixed: list[str],
                       and (not partial or str(i.get("page")) in checked))]
     issues += [{"kind": "page_check", "page": t["page"], "name": t["name"], "route": t["route"],
                 "detail": " | ".join(t["findings"])[:600]} for t in left]
+    # What the check could not look at is said as that — not as a broken page.
+    issues = [i for i in issues if not (isinstance(i, dict) and i.get("kind") == "page_unchecked"
+                                        and (not partial or str(i.get("page")) in checked))]
+    issues += [{"kind": "page_unchecked", "page": t["page"], "name": t["name"], "route": t["route"],
+                "detail": t["why"][:600]} for t in unchecked or []]
     runtime["issues"] = issues
     failing = sorted({str(i.get("route")) for i in issues if isinstance(i, dict) and i.get("kind") == "page_check"})
     if not partial or prior is not None:
-        runtime["check"] = {"pages": pages_total, "working": max(pages_total - len(failing), 0),
+        not_seen = {str(i.get("route")) for i in issues if isinstance(i, dict) and i.get("kind") == "page_unchecked"}
+        runtime["check"] = {"pages": pages_total, "working": max(pages_total - len(failing) - len(not_seen - set(failing)), 0),
                             "fixed": sorted(set(list((prior or {}).get("fixed") or []) + list(fixed)))
                             if partial else sorted(set(fixed)),
                             "failing": failing,

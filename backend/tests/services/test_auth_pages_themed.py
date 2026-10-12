@@ -20,8 +20,11 @@ def test_signup_themed_and_app_name():
 
 
 def test_post_auth_redirect_is_a_real_route():
-    # /dashboard is a route GROUP (no URL); index lives at "/"
-    assert '|| "/"' in _LOGIN
+    # /dashboard is a route GROUP (no URL). Since 2026-10-07 a sign-in with no
+    # page to return to goes to the role's own page (`lib/landing.ts`), not "/".
+    assert 'get("callbackUrl") || ""' in _LOGIN
+    hook = Path("templates/app-foundation/src/hooks/useLogin.ts").read_text()
+    assert "afterSignIn(callbackUrl, await roleAfterSignIn(getSession))" in hook
     assert 'router.push("/")' in _SIGNUP
     assert "/dashboard" not in _LOGIN and "/dashboard" not in _SIGNUP
 

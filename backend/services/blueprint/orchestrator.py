@@ -286,7 +286,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # Produces `pages`, as the single node did; it writes widgets too, but a
     # produced section is what resume and impact analysis read, and an
     # application with no dashboard has none.
-    _n("page_details", "page_design", ("page_contracts",), ("pages",),
+    _n("page_details", "page_design", ("page_contracts", "decisions"), ("pages",),
        fanout="page_features",
        note="the contracts: tasks, states, views, actions, widgets, per feature"),
     # SIGNING IN IS A PAGE. `/login` and `/signup` were template files the
@@ -310,7 +310,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # `page_details`, one feature at a time, which is why a dashboard (a page
     # about every feature) so often came out empty. `page_layouts` and
     # `page_code` read what it writes; the Data Engine runs it live.
-    _n("analytics", "analytics", ("page_details", "entity_fields", "content_fields", "workflows"), ("widgets",),
+    _n("analytics", "analytics", ("page_details", "entity_fields", "content_fields", "workflows", "decisions"), ("widgets",),
        note="KPIs, charts and breakdowns per page, as measures by dimensions"),
     # §47 — the design language the connected file already states, projected
     # onto the Blueprint. Deterministic (§116): published variables *are* the
@@ -375,7 +375,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        ("page_details", "design_system", "figma_design_system", "imagery"), ("composition",),
        optional=True, note="§34; the whole app's look and conventions, one call"),
     _n("page_code", "ui_engineer",
-       ("ui_direction", "page_layouts", "workflow_steps", "install"), ("pageCode",),
+       ("ui_direction", "page_layouts", "workflow_steps", "install", "app_flows"), ("pageCode",),
        fanout="pages", optional=True,
        note="§34; each page as React, type-checked against the app SDK"),
     _n("frontend", "frontend", ("page_layouts", "page_code"), ("codeMap",), kind="projection",
@@ -398,7 +398,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # everything at its level had. A page needs a workflow's identity and
     # contract to wire a button, never its steps; `page_layouts` depends on
     # this node and not on `workflow_steps` for exactly that reason.
-    _n("workflows", "workflow", ("entity_fields", "page_contracts", "content_fields"), ("workflows",),
+    _n("workflows", "workflow", ("entity_fields", "page_contracts", "content_fields", "decisions"), ("workflows",),
        note="§107 step 16; declares each workflow's identity and contract"),
     # One call per declared workflow, in parallel, each given the node
     # catalog and one workflow to fill in. A step is a catalog node carrying
@@ -408,13 +408,35 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("workflow_steps", "workflow", ("workflows",), ("workflows",),
        fanout="workflows",
        note="§107 step 16; one authored step graph per declared workflow"),
+    # THE PATHS BETWEEN THE SCREENS. With the screens and the processes
+    # declared, each person's route to each of their goals: where they are,
+    # what they do, which process does it, where it takes them. The page
+    # writer is told each screen's hand-offs from it, so it waits on this.
+    # DECIDED ONCE, BEFORE ANYTHING DEPENDS ON IT. The business facts every
+    # writer must agree on — currency and money rules, record life cycles,
+    # time, add-or-replace, the anonymous rule, who may sign up — had no
+    # place in the document, so each writer invented its own (E-commerce,
+    # TStyle, 2026-10-09). The engineer writes them from what was agreed at
+    # the two reviews; the first build-phase node, read by the rest.
+    _n("decisions", "engineer", ("page_contracts", "entity_fields", "security"), ("policies",),
+       note="the business facts decided once: money, time, life cycles, the anonymous rule"),
+    _n("app_flows", "page_design", ("page_details", "workflows", "security"), ("flows",),
+       note="the paths people take through the app, screen to screen"),
     # AFTER THE WORKFLOWS ARE DECLARED: a prerequisite ("verified before
     # listing or buying") names the workflows it gates, and before `workflows`
     # there were none to name — 0l133sp2's KYC rule was refused for empty
     # `gates` and dropped on the retry, so nothing was enforced. Nothing waits
     # on rules but `integration` and `memory`, so this costs no time.
-    _n("business_rules", "business_rules", ("entity_fields", "workflows"), ("businessRules",),
+    _n("business_rules", "business_rules", ("entity_fields", "workflows", "decisions"), ("businessRules",),
        note="§107 step 16; not a distinct box in §28"),
+    # WHAT MUST HAPPEN, SAID BEFORE ANY SCREEN IS CODED. With the screens,
+    # the processes, the people and the rules declared, the statements the
+    # finished application is tried against — written from the requirements,
+    # so they say what is right rather than what the code happens to do.
+    # Nothing waits on them while the pages are written.
+    _n("expectations", "testing", ("page_details", "workflows", "security", "business_rules", "decisions"),
+       ("expectations",), fanout="expectation_groups", optional=True,
+       note="what must happen when someone does something, tried as the person"),
     _n("security", "security", ("entity_fields",), ("security", "roles", "permissions"),
        note="§100; placed after the data model because permissions guard entities"),
     _n("integrations", "integration", ("application_model",), ("integrations",)),
@@ -425,7 +447,8 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        (), kind="projection"),
     # NO `testing` NODE. It declared tests — names and file paths — that were
     # never written and never run; the one reader counted them against the
-    # requirements. About a tenth of a build's spend for a number. Behaviour
+    # requirements. About a tenth of a build's spend for a number. (The
+    # testing agent writes `expectations` now, above, and every one is run.) Behaviour
     # is proven where it can be: the compiler on every coded page, the dry
     # run of every control's workflow, the build, the boot, and the page
     # review looking at each page as it renders.
@@ -494,6 +517,9 @@ FANOUT: dict[str, Any] = {
     # belongs to no entity (a dashboard, a sign-in, a drawn screen with no
     # primary record) on its own.
     "page_features": lambda doc: page_features(doc),
+    # The people, then the requirements in groups with their rules.
+    "expectation_groups": lambda doc: list(
+        __import__("services.expects.statements", fromlist=["expect_subjects"]).expect_subjects(doc)),
 }
 
 
@@ -775,6 +801,10 @@ INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "pageCode",
     "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
+    # The paths between the screens follow the screens and the processes.
+    "flows",
+    # What must happen follows the screens, the processes and the rules.
+    "expectations",
     "codeMap", "database", "runtime", "roles", "permissions", "security",
 })
 
@@ -1094,12 +1124,32 @@ _SUBJECT_AUTHORED: dict[str, Callable[[Mapping[str, Any], str], bool]] = {
     "workflows": _steps_present,
     "page_features": _contracts_present,
     "entities": _fields_present,
+    "expectation_groups": lambda doc, subject: __import__(
+        "services.expects.statements", fromlist=["subject_written"]).subject_written(dict(doc), subject),
 }
 
 
 # ---------------------------------------------------------------------------
 # Execution
 # ---------------------------------------------------------------------------
+
+@dataclass
+class Scope:
+    """What of each node this run is for — one feature of the app.
+
+    The engineer builds the approved definition one feature at a time
+    (services/engineer): the same nodes, the same executors, the same checks,
+    but a node authors only the subjects that belong to the feature, and a
+    node that writes once for the whole app is told which feature this call
+    is for. Without a scope the scheduler runs every pending subject, as it
+    always has."""
+
+    def subjects(self, node: str, doc: Mapping[str, Any], pending: list[str]) -> list[str]:
+        return pending
+
+    def brief(self, node: str, subject: str) -> str:
+        return ""
+
 
 @dataclass
 class TaskSpec:
@@ -1259,6 +1309,7 @@ def run(
     app_root: str | None = None,
     observer: Callable[[dict], None] | None = None,
     observer_agent: Any = None,
+    scope: Scope | None = None,
 ) -> RunReport:
     """Execute a plan in dependency order.
 
@@ -1330,7 +1381,7 @@ def run(
         return _execute(svc, executor, order, in_plan, report, done, ledger,
                         max_attempts=max_attempts, commit=commit,
                         user_request=user_request, app_root=app_root,
-                        observer_agent=observer_agent)
+                        observer_agent=observer_agent, scope=scope)
     except BaseException as exc:
         # THE LINE THAT WAS MISSING. A run that raises out of here used to
         # leave nothing at all — the report died with the call, the registry
@@ -1357,6 +1408,7 @@ def _execute(
     user_request: str,
     app_root: str | None,
     observer_agent: Any = None,
+    scope: Scope | None = None,
 ) -> RunReport:
     """The scheduler. Split from `run` so the ledger can record a crash.
 
@@ -1536,6 +1588,7 @@ def _execute(
                 subject=subject,
                 feedback=state.feedback.get(subject, ""),
                 current=state.current.get(subject, ()),
+                brief=scope.brief(key, subject) if scope is not None else "",
             )
             leads = state.warm is not None and subject == state.leader and attempt == 1
             # After an outage, the re-send waits — on its worker, not here.
@@ -1565,6 +1618,8 @@ def _execute(
         # Only the subjects not already authored — a resume finishes the pages
         # a prior run dropped, not the ones it composed (see pending_subjects).
         subjects = pending_subjects(node, svc.doc)
+        if scope is not None:
+            subjects = scope.subjects(key, svc.doc, subjects)
         _note(ledger, "node_start", key, len(subjects))
         runs[key] = _NodeRun(subjects=subjects, pending=list(subjects),
                              queue=list(subjects))
@@ -1707,13 +1762,14 @@ def _execute(
             return
         _record_observation(report, ledger, obs)
         from services.blueprint.observer import CRITIC_EDGE as _CRITIC_EDGE
+        from services.blueprint.observer import HUDDLE_EDGE as _HUDDLE_EDGE
         # WHAT THIS NODE CANNOT FIX, SAID ONCE AND KEPT. Deferred findings
         # used to be counted and dropped. The ones the critic raised are the
         # useful kind — "no Patient entity is defined" — so they travel as
         # change requests to the report, where Smith and a person can read
         # them, instead of burning repair rounds on an author that cannot act.
         for f in getattr(obs, "deferred", ()) or ():
-            if getattr(f, "edge", "") != _CRITIC_EDGE:
+            if getattr(f, "edge", "") not in (_CRITIC_EDGE, _HUDDLE_EDGE):
                 continue
             key_ = (key, f.section, f.detail)
             if key_ in w.deferred_seen:
@@ -1872,6 +1928,7 @@ def _execute(
             advance(pool, key)
             return
         with svc.lock:
+            _for_node(outcome, key)
             refused, application = _repair_apply(
                 svc, outcome, commit=commit, user_request=user_request)
             if refused is None:
@@ -2154,6 +2211,16 @@ def _record_observation(report: RunReport, ledger: Any, obs: Any) -> None:
         hits = obs.findings.get(subject, [])
         _note(ledger, "observed", obs.node, subject, not hits, len(hits),
               obs.critic)
+
+
+def _for_node(result: Any, key: str) -> None:
+    """The reply is the node's: what it may write is decided by the node it
+    was called for (`agent_contract.check_node_sections`), not by its agent."""
+    if hasattr(result, "proposals"):
+        try:
+            result.node = key
+        except Exception:  # noqa: BLE001 — a result that cannot carry it is checked by agent alone
+            pass
 
 
 def _repair_apply(
@@ -2661,6 +2728,7 @@ def _apply_subject(
         return _rejected(_reason(outcome))
 
     try:
+        _for_node(outcome, key)
         application = apply_agent_result(
             svc, outcome, commit=commit, user_request=user_request,
         )
@@ -2875,6 +2943,7 @@ def _run_agent_subject(
             continue
 
         try:
+            _for_node(result, key)
             application = apply_agent_result(
                 svc, result, commit=commit, user_request=user_request,
             )
@@ -2961,7 +3030,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     from services.blueprint.projection import (
         apply_frontend_projection, project_brand_logo, project_design_tokens,
         project_middleware, project_public_resources, project_public_routes,
-        project_nav_flow, project_root_route, project_shell, project_shell_identity,
+        project_nav_flow, project_policies, project_root_route, project_shell, project_shell_identity,
     )
 
     # NO SECOND COMPOSER. A landing page whose composition is refused leaves no
@@ -3040,6 +3109,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # fails, the retry still happens, and what the failure destroys is now the
     # page that failed rather than everything around it.
     project_nav_flow(view, app_root)
+    project_policies(view, app_root)
     # The rail itself, from the same tree the route graph was read from:
     # `shell.json` is what the scaffold's layout builds its sidebar from, and
     # nothing wrote it, so every rail was the flat fallback.

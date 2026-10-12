@@ -50,7 +50,7 @@ ASK_USER = 0.40
 WRITABLE_SECTIONS: frozenset[str] = frozenset(
     set(ARTIFACT_SECTIONS)
     | {"data.entities", "data.relationships", "data.constraints",
-       "navigation", "designSystem", "security",
+       "navigation", "designSystem", "security", "policies",
        "runtime", "database", "deployment", "product", "codeMap",
        "pageLayouts", "pageCode", "composition", "completeness"}
 )
@@ -135,6 +135,10 @@ _READS: dict[str, set[str]] = {
 
     # Data: grounded in requirements, not in anybody's UI.
     "data_model": {"requirements"},
+    # THE ENGINEER DECIDES ONCE what every writer then reads: it sees the
+    # whole of what was agreed before the build.
+    "engineer": {"requirements", "product", "modules", "data", "pages", "roles",
+                 "permissions", "security", "workflows"},
 
     # Design language: the product and what the UI already uses.
     "accessibility": {"requirements", "pages"},
@@ -153,23 +157,34 @@ _READS: dict[str, set[str]] = {
     # Read-only, and it stays that way: the extraction is evidence (§48), and an
     # agent that could edit what the design says could make the design agree
     # with the app it just invented.
-    "page_design": {"requirements", "modules", "data", "designSystem",
-                    "roles", "permissions", "designSources"},
+    "page_design": {"policies", "requirements", "modules", "data", "designSystem",
+                    "roles", "permissions", "designSources",
+                    # The app flows are the screens' and the processes'
+                    # paths: who moves where, by which process (`flows`) —
+                    # written once the roles are (`security`).
+                    "workflows", "security"},
 
     # Behaviour: what the business does, over the data it does it to.
-    "workflow": {"requirements", "data", "pages", "businessRules", "roles"},
-    "business_rules": {"requirements", "data", "workflows"},
+    "workflow": {"policies", "requirements", "data", "pages", "businessRules", "roles"},
+    "business_rules": {"policies", "requirements", "data", "workflows"},
 
     # The analytics each page carries, over the data the pages show and the
     # processes that move it — the states a workflow changes are what a
     # dashboard counts.
-    "analytics": {"requirements", "product", "data", "pages", "roles",
+    "analytics": {"policies", "requirements", "product", "data", "pages", "roles",
                   "workflows", "security"},
 
     # §100 — permissions guard entities, pages and workflow execution.
-    "security": {"requirements", "data", "pages", "workflows"},
+    "security": {"policies", "requirements", "data", "pages", "workflows"},
 
     "integration": {"requirements"},
+
+    # What must happen when someone does something: written from the
+    # requirements and the rules, over the people, the screens, the records
+    # and the processes they name — and never the code that does it.
+    "testing": {"policies", "requirements", "businessRules", "data", "pages", "workflows",
+                "roles", "permissions", "security", "navigation", "integrations",
+                "product"},
 
     # Endpoints are derived, not authored, but the derivation reads all of this.
     "api": {"requirements", "data", "database", "workflows", "pages",
@@ -199,12 +214,13 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     "domain_intelligence": _cap("domain_intelligence", {"product"}),
     "product_analysis": _cap("product_analysis", {"product", "requirements"}),
     "solution_architecture": _cap("solution_architecture", {"modules", "navigation"}),
+    "engineer": _cap("engineer", {"policies"}),
     # §30, verbatim: may compose pages, select patterns, define UI interactions,
     # use A2UI MCP, update UI-related Blueprint information. May NOT touch
     # business rules, database schema, security rules or role permissions.
     "page_design": _cap(
         "page_design",
-        {"pages", "navigation"},
+        {"pages", "navigation", "flows"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "mcp:a2ui"},
     ),
@@ -238,8 +254,9 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
         reads={"pages", "data", "workflows", "security", "designSources"},
         tools={"blueprint:read"},
     ),
-    # §34 — the whole app's direction, once: `composition.vision` and its
-    # conventions. No model output reaches a page without passing through them.
+    # §34 — the whole app's direction, once: `composition.vision`, its
+    # conventions and each audience's look. No model output reaches a page
+    # without passing through them.
     "ui_director": _cap(
         "ui_director",
         {"composition"},
@@ -284,9 +301,10 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     # sends the ones that fall short back to the UI engineer, who rewrites
     # them. Writes nothing itself — the rewrite is the engineer's.
     "page_reviewer": _cap("page_reviewer", set(), may_set_status=True),
-    # §27's test agent. Registered because §27 names it; no node runs it now —
-    # the declarations it wrote were never written out or run (see the DAG).
-    "testing": _cap("testing", {"tests"}),
+    # §27's test agent. Its `tests` were declarations never written out or
+    # run (see the DAG); what it writes now is `expectations` — statements of
+    # what must happen, each tried in the running application as its person.
+    "testing": _cap("testing", {"tests", "expectations"}),
     "deployment": _cap(
         "deployment", {"deployment"},
         tools={"build:approved", "deploy:config", "vercel"},
@@ -374,6 +392,9 @@ class AgentResult:
     confidence: float = 1.0
     #: Populated by apply_agent_result — the IDs actually allocated.
     artifacts: list[str] = field(default_factory=list)
+    #: The DAG node this call was for, when it was a node's call: what the
+    #: reply may write is the node's (`check_node_sections`), not the agent's.
+    node: str = ""
 
     def validate(self) -> None:
         if self.status not in ("completed", "blocked", "failed"):
@@ -445,6 +466,99 @@ def check_capability(result: AgentResult) -> None:
                 f"(§30). It writes: {', '.join(sorted(cap.writes)) or '<nothing>'}. "
                 f"Return a ChangeRequest to Smith instead."
             )
+
+
+class OutsideTheNodesWork(AuthorRefusal):
+    """A call wrote a section another node of the build is responsible for."""
+
+
+#: Sections a node writes beside the ones it `produces`: the page set binds
+#: its pages into the navigation tree; the field author adds the constraints
+#: and relationships its fields imply; the contracts carry a page's widgets.
+#: Measured across every app on forge-v3 (2026-10-10): every other node wrote
+#: only what it produces.
+NODE_ALSO_WRITES: dict[str, frozenset[str]] = {
+    "page_contracts": frozenset({"navigation"}),
+    "entity_fields": frozenset({"data"}),
+    "page_details": frozenset({"widgets"}),
+}
+
+
+def node_sections(node: str) -> frozenset[str]:
+    """The top-level sections one DAG node's calls may write: what it
+    produces (`data.entities` → `data`) and what it also writes."""
+    from services.blueprint.orchestrator import DAG
+    dag_node = DAG.get(node)
+    if dag_node is None:
+        return frozenset()
+    return frozenset(p.split(".")[0] for p in dag_node.produces) | NODE_ALSO_WRITES.get(node, frozenset())
+
+
+def check_node_sections(result: AgentResult) -> None:
+    """A CALL WRITES THE NODE'S SECTIONS, NOT ITS AGENT'S. The §30 boundary
+    is the agent's — `page_design` may write pages — and one agent serves
+    several nodes: Ecommerce1's `app_flows` call, run before any page set
+    existed, declared 33 pages of its own with no module and no contract,
+    and the build composed nothing from them (forge-v3, 2026-10-10). The
+    node names what the call is for; a section it does not produce is some
+    other node's to write, and the reply is refused naming that node."""
+    node = str(getattr(result, "node", "") or "")
+    if not node:
+        return
+    from services.blueprint.orchestrator import DAG
+    if node not in DAG or DAG[node].kind != "agent":
+        return
+    allowed = node_sections(node)
+    if not allowed:
+        return
+    for p in result.proposals:
+        top = str(p.section or "").split(".")[0]
+        if top in allowed:
+            continue
+        writers = sorted(k for k, n in DAG.items() if k != node and n.kind == "agent"
+                         and top in {q.split(".")[0] for q in n.produces})
+        by = f" — {', '.join(f'`{w}`' for w in writers)} writes {top!r}" if writers else ""
+        raise OutsideTheNodesWork(
+            f"this call is `{node}`, which writes {', '.join(sorted(allowed))}; it may not write "
+            f"{p.section!r}{by}. Leave {top!r} exactly as it is and write only "
+            f"{', '.join(sorted(allowed))}."
+        )
+
+
+class PageWithoutAModule(AuthorRefusal):
+    """A page set declared a page in no module while the application has them."""
+
+
+def check_page_modules(result: AgentResult, doc: dict | None) -> None:
+    """EVERY DECLARED SCREEN NAMES ITS MODULE. The modules are what the person
+    approved and what the engineer builds one at a time; a screen in none
+    falls to "the rest of the application", and an application whose every
+    screen fell there was built as one 33-screen feature (Ecommerce1,
+    forge-v3, 2026-10-10). Held at the declaration, where the module is
+    decided — a contract or an edit to a declared page is not asked again."""
+    if str(getattr(result, "node", "") or "") != "page_contracts" or not doc:
+        return
+    modules = [m for m in doc.get("modules") or [] if isinstance(m, dict) and m.get("id")
+               and str(m.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
+    if not modules:
+        return
+    ids = {str(m["id"]) for m in modules}
+    missing: list[str] = []
+    for p in result.proposals:
+        if p.section != "pages" or not isinstance(p.body, dict):
+            continue
+        if str(p.body.get("pattern") or "") == "auth":
+            continue
+        module = str(p.body.get("module") or "")
+        if module not in ids:
+            what = str(p.body.get("route") or p.body.get("name") or p.body.get("id") or "a page")
+            missing.append(f"{what}: `module` {module!r} is not one of the application's modules"
+                           if module else f"{what}: no `module`")
+    if missing:
+        named = ", ".join(f"{m['id']} ({m['name']})" if m.get("name") else str(m["id"]) for m in modules)
+        raise PageWithoutAModule(
+            "Every page names the module it belongs to — one of: " + named + ". "
+            + _all_of(missing))
 
 
 class InvalidWorkflowStep(AuthorRefusal):
@@ -593,6 +707,20 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
     # the account is made.
     live = [e for e in ((doc or {}).get("data") or {}).get("entities") or []
             if isinstance(e, dict) and e.get("status") != "DEPRECATED"]
+    # REFUSED WHERE IT IS DECLARED. Ecommerce1's data model marked Customer AND
+    # Vendor `account: true` in one reply; the check compared each against the
+    # entities already applied (none yet) and let both through, then refused
+    # each field author twice for a flag it was told to keep — the model never
+    # finished (forge-v3, 2026-10-10). Two accounts in one reply are refused
+    # here, naming both and the way out; a field author whose declared row
+    # inherited the conflict is not the one to mend it.
+    declared = [str(p.body.get("name") or p.natural_key) for p in result.proposals
+                if p.section == "data.entities" and isinstance(p.body, dict) and p.body.get("account")]
+    if len(declared) > 1:
+        problems.append(f"{' and '.join(declared)} are each marked `account: true`, and exactly one entity is "
+                        f"the person behind a login. Keep it on the one people sign up as; make the other a "
+                        f"record linked to it (a `userId`/`accountId` reference to that entity) or a role of it, "
+                        f"never a second login")
     for proposal in (p for p in result.proposals if p.section == "data.entities"):
         body = proposal.body if isinstance(proposal.body, dict) else {}
         name = body.get("name") or proposal.natural_key
@@ -602,7 +730,8 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
         if not (body.get("account") or any(e.get("account") and same(e) for e in live)):
             continue
         other = next((e for e in live if e.get("account") and not same(e)), None)
-        if body.get("account") and other is not None:
+        inherited = any(e.get("account") and same(e) for e in live)
+        if body.get("account") and other is not None and not inherited:
             problems.append(f"{name}: `account: true` is already on {other.get('name')} — one entity is the "
                             "person behind a login")
         from services.blueprint.projection import _is_credential_field
@@ -714,6 +843,106 @@ def customer_facing(doc: dict, page: dict) -> bool:
     return len(roles) > 1 and bool(customer) and bool(users) and all(u == customer for u in users)
 
 
+class InvalidAppFlow(AuthorRefusal):
+    """A flow names a screen, a section or a process that is not there."""
+
+
+def check_flows(result: "AgentResult", doc: dict | None) -> None:
+    """A PATH THROUGH SCREENS THAT EXIST. Each proposed flow is checked as the
+    document would hold it: every step a live screen, a section that screen
+    has, a process it starts — refused naming each, so the author mends the
+    step rather than the page writer being told a hand-off to nowhere."""
+    from services.blueprint.app_flows import flow_findings
+    proposals = [p for p in result.proposals if p.section == "flows" and isinstance(p.body, dict)]
+    if not proposals or not doc:
+        return
+    # THE SCREENS IN THE SAME REPLY COUNT. The author that writes the screens
+    # may write their flows beside them; judged against the document alone,
+    # every screen it had just proposed was "not a screen of the application"
+    # and the build's screens were refused for it (forge-v3, 2026-10-09).
+    proposed = [p.body for p in result.proposals if p.section == "pages" and isinstance(p.body, dict)]
+    problems = flow_findings({**doc, "pages": [*(doc.get("pages") or []), *proposed],
+                              "flows": [p.body for p in proposals]})
+    if problems:
+        raise InvalidAppFlow("These flows name what the application does not have — mend each step:\n- "
+                             + "\n- ".join(problems[:30]))
+
+
+class InvalidExpectation(AuthorRefusal):
+    """A statement names what the application does not have, checks nothing
+    it can look at, or the set leaves a requirement, a rule or a person's
+    arrival untried."""
+
+
+def check_expectations(result: "AgentResult", doc: dict | None) -> None:
+    """A STATEMENT THE RUNNER CAN TRY. Each proposed statement is checked as
+    the document would hold it — the records it gives, the screens it opens,
+    the people it is done as, what each check looks at — and the set for
+    what it leaves untried, so the writer mends the statement rather than
+    the runner finding at the end that it names nothing."""
+    from services.expects.statements import expectation_findings
+    proposals = [p.body for p in result.proposals if p.section == "expectations" and isinstance(p.body, dict)]
+    if not proposals or not doc:
+        return
+    # One call's part of the set is held to that part (`expect_subjects`); a
+    # statement added later — the person's words, a report — is held alone.
+    subject = getattr(result, "subject", None)
+    problems = expectation_findings(doc, proposals, subject=subject or None, whole=False)
+    if problems:
+        raise InvalidExpectation("These statements cannot be tried as written — mend each one:\n- "
+                                 + "\n- ".join(problems[:40]))
+
+
+class InvalidLooks(AuthorRefusal):
+    """The director's looks leave an audience out, say one twice, or name
+    nobody this application has."""
+
+
+def check_looks(result: "AgentResult", doc: dict | None) -> None:
+    """ONE LOOK FOR EVERY AUDIENCE. The design each kind of person gets is the
+    director's decision, from the product's field and kind and how those
+    people use it — so a look missing for anyone is refused naming them,
+    rather than that person getting a frame read off the personality's words
+    (`services.blueprint.looks`)."""
+    from services.blueprint.looks import look_findings
+    if not doc:
+        return
+    for p in result.proposals:
+        if p.section != "composition" or not isinstance(p.body, dict) or result.agent != "ui_director":
+            continue
+        problems = look_findings(doc, p.body.get("looks") or [])
+        if problems:
+            raise InvalidLooks("Each audience needs exactly one look — mend these:\n- " + "\n- ".join(problems[:20]))
+
+
+class InvalidProductFrame(AuthorRefusal):
+    """The product frame does not say what field the product serves or what
+    kind of product it is."""
+
+
+def check_product_frame(result: "AgentResult", doc: dict | None) -> None:
+    """THE PRODUCT SAYS WHAT IT IS. Every look, the frame and the rhythm, is
+    chosen from the field the product serves and the kind of product it is;
+    the frame that leaves either out is asked again for it."""
+    if result.agent != "product_analysis":
+        return
+    bodies = [p.body for p in result.proposals if p.section == "product" and isinstance(p.body, dict)]
+    if not bodies:
+        return
+    # THE PRODUCT AS IT WILL STAND: a reply may add capabilities alone, and
+    # what an earlier reply already said still counts.
+    stands = dict((doc or {}).get("product") or {})
+    for body in bodies:
+        stands.update({k: v for k, v in body.items() if k in ("domain", "category") and str(v or "").strip()})
+    missing = [k for k in ("domain", "category") if not str(stands.get(k) or "").strip()]
+    if missing:
+        raise InvalidProductFrame(
+            "Say " + " and ".join({"domain": "the field this product serves (`domain`)",
+                                   "category": "what kind of product it is to the people who use it (`category`)"}[k]
+                                  for k in missing)
+            + " — the look of every screen is chosen from them.")
+
+
 def check_analytics(result: "AgentResult", doc: dict | None) -> None:
     """CHARTS SHOW UP ON EVERY RELEVANT PAGE. The analytics agent was asked
     to decide page by page and decided "none" for a product's home
@@ -734,8 +963,35 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
     over_time: set[str] = set()
     problems: list[str] = []
     known = {str(r.get("id")) for r in doc.get("requirements") or [] if isinstance(r, dict) and r.get("id")}
+    # A CHANGE IS JUDGED ON WHAT IT CHANGES. Counted from this reply alone and
+    # judged over every page, a rewrite of one screen's widgets read every
+    # other page as chartless and was refused for them — TStyle's /trends,
+    # / and /water-intake rewrites, one after another (forge-v3, 2026-10-09).
+    # The first authoring (no widgets yet) is judged on the whole app, which
+    # is what catches a dashboard decided to need none; a later change on the
+    # pages it gives widgets to, counted with the widgets already there.
+    existing = [w for w in doc.get("widgets") or []
+                if isinstance(w, dict) and w.get("status") != "DEPRECATED"]
+    changing = {str((p.body or {}).get("id") or "") for p in proposals if isinstance(p.body, dict)} - {""}
+    # The pages it gives widgets to, and the pages the widgets it changes
+    # leave — a chart moved or retired off a dashboard is a change to it.
+    touched = {str((p.body or {}).get("page") or "") for p in proposals if isinstance(p.body, dict)} | \
+              {str(w.get("page") or "") for w in existing if str(w.get("id") or "") in changing}
+    counted = [w for w in existing if str(w.get("id") or "") not in changing] + \
+              [p.body for p in proposals if isinstance(p.body, dict) and p.body.get("status") != "DEPRECATED"]
     for p in proposals:
         body = p.body if isinstance(p.body, dict) else {}
+        # EVERYTHING ON IT IS ABOUT THIS APPLICATION. A widget that cites no
+        # requirement is a number nobody asked for; one that cites a
+        # requirement that does not exist is a number nobody can check.
+        cited = [str(r) for r in body.get("requirements") or []]
+        if known and not cited:
+            problems.append(f"{body.get('id') or p.natural_key} ({body.get('label')}): names no requirement it answers; "
+                            "cite the one it does, or leave it out")
+        elif known and not any(c in known for c in cited):
+            problems.append(f"{body.get('id') or p.natural_key} ({body.get('label')}): cites {', '.join(cited)}, "
+                            "which this application does not have")
+    for body in counted:
         pid = str(body.get("page") or "")
         if str(body.get("kind") or "") == "metric":
             metrics[pid] = metrics.get(pid, 0) + 1
@@ -747,19 +1003,11 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
             src = body.get("dataSource") if isinstance(body.get("dataSource"), dict) else {}
             if any(isinstance(d, dict) and d.get("bucket") for d in src.get("dimensions") or []):
                 over_time.add(pid)
-        # EVERYTHING ON IT IS ABOUT THIS APPLICATION. A widget that cites no
-        # requirement is a number nobody asked for; one that cites a
-        # requirement that does not exist is a number nobody can check.
-        cited = [str(r) for r in body.get("requirements") or []]
-        if known and not cited:
-            problems.append(f"{body.get('id') or p.natural_key} ({body.get('label')}): names no requirement it answers; "
-                            "cite the one it does, or leave it out")
-        elif known and not any(c in known for c in cited):
-            problems.append(f"{body.get('id') or p.natural_key} ({body.get('label')}): cites {', '.join(cited)}, "
-                            "which this application does not have")
     for page in doc.get("pages") or []:
         if not isinstance(page, dict) or page.get("status") == "DEPRECATED":
             continue
+        if existing and str(page.get("id")) not in touched:
+            continue                      # a change, and not to this page
         need = CHARTS_REQUIRED.get(str(page.get("pattern") or ""), 0)
         if not need or customer_facing(doc, page):
             continue
@@ -798,6 +1046,65 @@ def check_analytics(result: "AgentResult", doc: dict | None) -> None:
             "Charts show up on every relevant page, dashboards are rich, and every widget is about this "
             "application. " + _all_of(problems)
             + " Add or amend `kind: chart` widgets for these pages (keep the metrics you have).")
+
+
+class InvalidPolicies(AuthorRefusal):
+    """A decision names something the application does not have."""
+
+
+def check_policies(result: "AgentResult", doc: dict | None) -> None:
+    """DECIDED ABOUT THINGS THAT EXIST. A life cycle over a field the entity
+    has, in states the field allows, starting in one of them; a quantity or
+    anonymous rule about a declared process; sign-up roles the application
+    has. Refused naming each, so the decision is mended where it is made."""
+    proposals = [p for p in result.proposals if p.section == "policies" and isinstance(p.body, dict)]
+    if not proposals or not doc:
+        return
+    ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []
+            if isinstance(e, dict) and e.get("status") != "DEPRECATED"}
+    names = {str(e.get("name")): str(e.get("id")) for e in ents.values()}
+    roles = {str(r.get("id")) for r in doc.get("roles") or [] if isinstance(r, dict) and r.get("id")}
+    flows = {str(w.get("id")) for w in doc.get("workflows") or [] if isinstance(w, dict) and w.get("id")}
+    problems: list[str] = []
+    for p in proposals:
+        body = p.body
+        for lc in body.get("lifecycles") or []:
+            if not isinstance(lc, dict):
+                continue
+            eid = names.get(str(lc.get("entity")), str(lc.get("entity")))
+            ent = ents.get(eid)
+            if ent is None:
+                problems.append(f"lifecycle names entity {lc.get('entity')!r}, which the data model does not have")
+                continue
+            fld = next((f for f in ent.get("fields") or [] if isinstance(f, dict)
+                        and str(f.get("name")) == str(lc.get("field"))), None)
+            if fld is None:
+                problems.append(f"lifecycle on {ent.get('name')}.{lc.get('field')}: the entity has no such field")
+                continue
+            allowed = [str(v) for v in fld.get("enumValues") or []]
+            states = {str(lc.get("initial"))} | {str(m.get(k)) for m in lc.get("moves") or []
+                                                  if isinstance(m, dict) for k in ("from", "to")}
+            if allowed:
+                unknown = sorted(st for st in states if st not in allowed)
+                if unknown:
+                    problems.append(f"lifecycle on {ent.get('name')}.{lc.get('field')}: {', '.join(unknown)} "
+                                    f"not among its values {allowed}")
+            for m in lc.get("moves") or []:
+                for r in (m or {}).get("by") or []:
+                    if str(r) not in roles:
+                        problems.append(f"lifecycle on {ent.get('name')}.{lc.get('field')}: move "
+                                        f"{m.get('from')}→{m.get('to')} names role {r!r}, which the app does not have")
+        for q in body.get("quantities") or []:
+            if isinstance(q, dict) and flows and str(q.get("workflow")) not in flows:
+                problems.append(f"quantities names process {q.get('workflow')!r}, which is not declared")
+        for a in body.get("anonymous") or []:
+            if isinstance(a, dict) and flows and str(a.get("workflow")) not in flows:
+                problems.append(f"anonymous names process {a.get('workflow')!r}, which is not declared")
+        for r in body.get("selfRegistration") or []:
+            if str(r) not in roles:
+                problems.append(f"selfRegistration names role {r!r}, which the app does not have")
+    if problems:
+        raise InvalidPolicies(_all_of(problems[:12]))
 
 
 class InvalidPageContent(AuthorRefusal):
@@ -1280,6 +1587,8 @@ def apply_agent_result(
     """
     result.validate()
     check_capability(result)
+    check_node_sections(result)
+    check_page_modules(result, svc.doc)
     # THE COMPOSERS' WORDS INTO THE CONTRACT'S, BEFORE THE CONTRACT READS THEM.
     from services.blueprint.layout_vocabulary import translate_layout_vocabulary
     translate_layout_vocabulary(result, svc.doc)
@@ -1289,10 +1598,15 @@ def apply_agent_result(
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)
+    check_policies(result, svc.doc)
     check_page_access(result, svc.doc)
     check_role_doors(result, svc.doc)
     check_navigation(result, svc.doc)
     check_analytics(result, svc.doc)
+    check_flows(result, svc.doc)
+    check_expectations(result, svc.doc)
+    check_looks(result, svc.doc)
+    check_product_frame(result, svc.doc)
     check_security(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.

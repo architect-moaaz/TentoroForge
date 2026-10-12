@@ -94,3 +94,24 @@ def test_the_trials_are_told_who_may_run_a_process_by_name():
     assert shown["FLOW-006"]["startedFrom"] == [{"route": "/admin/products", "access": "role_restricted",
                                                   "for": ["Admin"]}]
     assert "never as a stand-in for a customer" in INPUTS_SYSTEM
+
+
+def test_a_shared_signed_in_home_marked_entry_is_every_roles_door():
+    """Payroll manager and E-commerce (forge-v3, 2026-10-09): the author marked
+    /dashboard — open to everyone signed in — as `entry`; only an entry among a
+    role's restricted pages counted, so the answer was refused twice and the
+    build ended. A shared home is a door; a public page is not (the shop front
+    ToroCommerce's administrator kept landing on), nor one for other users."""
+    doc = {"roles": ROLES, "navigation": {}, "pages": []}
+    check_role_doors(_pages({"route": "/dashboard", "access": "authenticated", "entry": True},
+                            {"route": "/employees", "access": "role_restricted", "users": ["ROLE-002"]}), doc)
+    assert landing_by_role({**doc, "pages": [{"id": "P1", "route": "/dashboard", "access": "authenticated",
+                                              "entry": True}]})["Admin"] == "/dashboard"
+    with pytest.raises(RoleWithoutADoor):
+        check_role_doors(_pages({"route": "/", "access": "public", "entry": True},
+                                {"route": "/employees", "access": "role_restricted", "users": ["ROLE-002"]}), doc)
+    other = [r for r in ROLES if r.get("id") != "ROLE-002"][0]
+    with pytest.raises(RoleWithoutADoor):
+        check_role_doors(_pages({"route": "/home", "access": "authenticated", "entry": True,
+                                 "users": [other["id"]]},
+                                {"route": "/employees", "access": "role_restricted", "users": ["ROLE-002"]}), doc)

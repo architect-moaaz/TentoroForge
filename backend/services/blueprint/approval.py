@@ -181,6 +181,58 @@ def record(svc: Any, gate: str, outcome: str = "accepted", *,
     return entry
 
 
+def carry(svc: Any, gate: str, *, why: str) -> dict[str, Any] | None:
+    """Carry an approval over what the approved work itself wrote.
+
+    A build that was approved fills in the very things the fingerprint is
+    taken over — the sign-in pages, the design system, the security rules,
+    the workflows a huddle adds — so every build left its own approval stale,
+    and "rebuild" was refused with "approved at version 20, now at 68" by a
+    tester who had changed nothing (Lifestyle App, forge-v3, 2026-10-09).
+    Called by the build at its own checkpoints, only when the approval stood
+    when it started: what it wrote is what was agreed to. A change made
+    outside a build still makes the approval stale. Returns the new entry,
+    or None when there was nothing to carry."""
+    if state_of(svc.doc, gate) != "stale":
+        return None
+    last = latest(svc.doc, gate) or {}
+    if last.get("outcome") != "accepted":
+        return None
+    return record(svc, gate, note=f"carried: {why}")
+
+
+def carry_after_cut_off_build(svc: Any, output_dir: str, gate: str = "plan") -> dict[str, Any] | None:
+    """Carry an approval over a build that started under it and was cut off.
+
+    `carry` runs at the build's own checkpoints; a build whose process was
+    killed mid-way never reaches one. TStyle's build (forge-v3, 2026-10-09)
+    was killed with its worker at the screens, and its approval was left
+    stale by the steps that did land. A build run — its plan reaches
+    `assemble` — that started at or after the approval wrote what the
+    definition shows since; asked before a "rebuild" is refused as stale."""
+    from pathlib import Path
+
+    last = latest(svc.doc, gate) or {}
+    if state_of(svc.doc, gate) != "stale" or last.get("outcome") != "accepted" or not last.get("at"):
+        return None
+    approved_at = str(last["at"])[:19]
+    runs = Path(output_dir) / ".forge" / "runs"
+    for ledger in sorted(runs.glob("*.jsonl"), reverse=True):
+        if ledger.name.endswith("smith-turn.jsonl"):
+            continue
+        try:
+            head = [json.loads(line) for _, line in zip(range(2), ledger.open())]
+        except (OSError, ValueError):
+            continue
+        start = next((e for e in head if e.get("event") == "run:start"), {})
+        plan = next((e for e in head if e.get("event") == "plan"), {})
+        if str(start.get("at") or "")[:19] < approved_at:
+            break                    # every older run is older still
+        if "assemble" in (plan.get("nodes") or []):
+            return carry(svc, gate, why=f"the approved build {start.get('runId')} wrote it before it was cut off")
+    return None
+
+
 def require(doc: dict, gate: str, *, doing: str = "") -> None:
     """Raise unless ``gate`` is satisfied against the document as it stands.
 

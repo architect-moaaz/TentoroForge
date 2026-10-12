@@ -100,7 +100,10 @@ def test_a_dynamic_landing_never_reaches_the_link(tmp_path):
     doc["navigation"]["initialRoute"]["parent"] = "/children/[id]"
     project_nav_flow(doc, app)
     nav = json.loads((app / "src" / "contracts" / "nav-flow.json").read_text())
-    assert nav["initialFor"] == {"Admin": "/admin", "Doctor": "/doctor"}
+    # The dynamic landing is dropped; Parent starts at their own home, the
+    # `entry` page that is theirs (2026-10-09: a shared or own entry is a door).
+    assert nav["initialFor"] == {"Admin": "/admin", "Doctor": "/doctor", "Parent": "/"}
+    assert not any("[" in r for r in nav["initialFor"].values())
 
 
 def test_without_a_map_the_page_still_fills_and_falls_back(tmp_path):

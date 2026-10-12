@@ -26,6 +26,7 @@ import {
   Layout,
   KeyRound,
   Scale,
+  Route,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,7 @@ import { DesignEditor } from "@/components/design-editor/DesignEditor";
 import { VisualEditorWorkspace } from "@/components/visual-editor/VisualEditorWorkspace";
 import { ReactEditor } from "@/components/react-editor/ReactEditor";
 import { NavigationPanel } from "@/components/navigation/NavigationPanel";
+import { AppFlowPanel } from "@/components/app-flow/AppFlowPanel";
 import { AgentBuilderPanel } from "@/components/agent-builder/AgentBuilderPanel";
 import { AIFeaturesPanel } from "@/components/ai-features/AIFeaturesPanel";
 import { CostTrackingPanel } from "@/components/monitoring/CostTrackingPanel";
@@ -56,11 +58,12 @@ import { DeleteProjectDialog } from "@/components/projects/DeleteProjectDialog";
 import { CommandPalette } from "@/components/CommandPalette";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useChatStore } from "@/stores/chat";
+import { useAppFlowStore } from "@/stores/appFlow";
 import { VirtualOffice } from "@/components/virtual-office";
 import type { Project, ChatMessage } from "@/types/project";
 import type { CommandItem } from "@/types/portal";
 
-type Tab = "chat" | "preview" | "code" | "data" | "rules" | "business-rules" | "decisions" | "workflows" | "editor" | "schema-editor" | "design" | "design-editor" | "ir-editor" | "navigation" | "agents" | "ai" | "monitoring" | "versions" | "office";
+type Tab = "chat" | "preview" | "code" | "data" | "rules" | "business-rules" | "decisions" | "workflows" | "editor" | "schema-editor" | "design" | "design-editor" | "ir-editor" | "navigation" | "app-flow" | "agents" | "ai" | "monitoring" | "versions" | "office";
 
 // Tooltip component — positioned to the right of the icon
 function Tooltip({ children, label, shortcut }: { children: React.ReactNode; label: string; shortcut?: string }) {
@@ -85,6 +88,9 @@ function ProjectWorkspace({
   projectId: string;
 }) {
   const [activeTab, setActiveTab] = useState<Tab>("chat");
+  // "Show me this path" from Smith's side panel opens the App Flow tab on it.
+  const flowRequested = useAppFlowStore((st) => st.requested);
+  useEffect(() => { if (flowRequested) setActiveTab("app-flow"); }, [flowRequested]);
   const [showExport, setShowExport] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
@@ -231,6 +237,7 @@ function ProjectWorkspace({
     { id: "design-editor" as Tab, label: "AHTML Editor", icon: Table2 },
     { id: "ir-editor" as Tab, label: "IR Editor", icon: Building2 },
     { id: "navigation" as Tab, label: "Nav", icon: Map },
+    { id: "app-flow" as Tab, label: "App Flow", icon: Route },
     { id: "agents" as Tab, label: "Agents", icon: Bot },
     { id: "ai" as Tab, label: "AI", icon: Sparkles },
     { id: "office" as Tab, label: "Office", icon: Building2 },
@@ -263,6 +270,7 @@ function ProjectWorkspace({
       items: [
         { id: "editor" as Tab, label: "Editor", icon: Layout },
         { id: "navigation" as Tab, label: "Pages & Nav", icon: Map },
+        { id: "app-flow" as Tab, label: "App Flow", icon: Route },
       ],
     },
   ];
@@ -396,7 +404,7 @@ function ProjectWorkspace({
   };
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full overflow-clip">
       {/* Project header bar */}
       <div className="absolute top-0 left-[220px] right-0 z-10 flex h-[70px] items-center justify-between border-b border-slate-200/80 bg-white/80 backdrop-blur-sm px-4 dark:bg-slate-900/80 dark:border-slate-800">
         <div className="flex items-center gap-3">
@@ -503,7 +511,9 @@ function ProjectWorkspace({
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 overflow-hidden pt-[70px] bg-background">
+      {/* `clip`: the panes scroll inside themselves; this box is never scrolled
+          by a focus or scrollIntoView, which would shift the columns up. */}
+      <div className="flex-1 overflow-clip pt-[70px] bg-background">
         {/*
           HIDDEN, NOT UNMOUNTED. Every other tab here is safe to tear down and
           rebuild from its query cache; the chat is not. Its transcript and its
@@ -546,6 +556,9 @@ function ProjectWorkspace({
         )}
         {activeTab === "workflows" && (
           <WorkflowPanel projectId={projectId} orgId={orgId} />
+        )}
+        {activeTab === "app-flow" && (
+          <AppFlowPanel projectId={projectId} />
         )}
         {/* The Editor tab is the visual React editor over the Blueprint's coded
             pages. The schema-JSON editor stays reachable as "schema-editor"

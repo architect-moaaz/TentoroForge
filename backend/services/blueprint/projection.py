@@ -1242,6 +1242,40 @@ def project_shell(doc: dict, app_root: str | Path) -> dict[str, Any]:
     return {"files": ["src/schemas/shell.json"], "groups": len(groups)}
 
 
+def project_policies(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write ``src/contracts/policies.json``: the decided business facts the
+    platform enforces — money (the SDK's one formatter reads the currency and
+    locale), life cycles (the engine refuses any other move), time."""
+    pol = doc.get("policies") if isinstance(doc.get("policies"), dict) else {}
+    ents = {str(e.get("id")): e for e in _live((doc.get("data") or {}).get("entities")) if e.get("id")}
+    # Roles by NAME: the session carries the role's name, and the engine
+    # compares the mover against it.
+    roles = {str(r.get("id")): str(r.get("name") or r.get("id")) for r in _live(doc.get("roles")) if r.get("id")}
+    lifecycles = []
+    for lc in pol.get("lifecycles") or []:
+        if not isinstance(lc, dict):
+            continue
+        ent = ents.get(str(lc.get("entity")))
+        if ent is None:
+            continue
+        lifecycles.append({"table": str(ent.get("table") or to_snake(str(ent.get("name") or ""))),
+                           "entity": str(ent.get("name") or ""), "field": str(lc.get("field") or ""),
+                           "initial": str(lc.get("initial") or ""),
+                           "moves": [{"from": str(m.get("from")), "to": str(m.get("to")),
+                                      "by": [roles.get(str(r), str(r)) for r in m.get("by") or []]}
+                                     for m in lc.get("moves") or [] if isinstance(m, dict)]})
+    money = pol.get("money") if isinstance(pol.get("money"), dict) else {}
+    body = {"money": {"currency": str(money.get("currency") or ""),
+                      "locale": str(money.get("locale") or (doc.get("product") or {}).get("locale") or ""),
+                      "rules": [r for r in money.get("rules") or [] if isinstance(r, dict)]},
+            "time": pol.get("time") if isinstance(pol.get("time"), dict) else {},
+            "lifecycles": lifecycles}
+    out = Path(app_root) / "src" / "contracts"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "policies.json").write_text(json.dumps(body, indent=2), "utf-8")
+    return {"files": ["src/contracts/policies.json"], "lifecycles": len(lifecycles)}
+
+
 def project_nav_flow(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/contracts/nav-flow.json`` from navigation + pages.
 
@@ -1855,97 +1889,57 @@ RAIL_PAINT: dict[str, dict[str, str]] = {
 }
 
 
+#: The frame an application gets for what its design does not state — the
+#: one every app had before the frame was a decision (the hover-expand rail,
+#: the split sign-in, the rail on the inverse surface).
+SHELL_DEFAULT: dict[str, str] = {"chrome": "standard-rail", "auth": "split-editorial", "tone": "dark"}
+
+
 def derive_shell(doc: dict) -> dict[str, str]:
-    """The frame: the design's own `shell` when it states one, otherwise read
-    off what it did say — the navigation approach, the mobile style, the
-    density and the personality. Deterministic, so the same Blueprint always
-    gets the same frame."""
+    """The application's own frame: what `designSystem.shell` states, and the
+    one default (`SHELL_DEFAULT`) for what it does not.
+
+    NOTHING IS READ OFF WORDS. This used to guess a missing chrome, sign-in
+    and tone from the personality paragraph and the navigation approach —
+    "child", "family" or "consumer" made a tinted rail, "back-office" a dark
+    one — so a paediatric clinic's staff console got a consumer's frame
+    because its description mentioned children, and one reworded sentence
+    changed an app's frame (2026-10-08). The design agent names the frame;
+    the director names each audience's (`services.blueprint.looks`)."""
     design = doc.get("designSystem") or {}
     stated = design.get("shell") if isinstance(design.get("shell"), dict) else {}
     chrome = str(stated.get("chrome") or "")
     auth = str(stated.get("auth") or "")
     tone = str(stated.get("tone") or "")
-    nav = doc.get("navigation") or {}
-    approach = str(design.get("navigationApproach") or "").lower()
-    personality = str(design.get("visualPersonality") or "").lower()
     density = str(design.get("informationDensity") or "comfortable")
-    pages = [p for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("status") != "DEPRECATED"]
-
-    # WHOLE WORDS. "Persistent left sidebar on desktop" contains "top" and
-    # "bar", and read by substring it was a top bar (every app was, first
-    # time round).
-    # THE DESKTOP CLAUSE DECIDES THE FRAME. An approach reads "persistent
-    # left sidebar on desktop; collapses to a bottom tab bar on mobile" —
-    # the phone's tabs are the scaffold's own business, and read whole they
-    # made every app a dock. Only an approach that LEADS with the phone is
-    # mobile-first.
-    desktop = approach if approach.startswith(("mobile-first", "mobile first")) else \
-        re.split(r"\bcollaps|\bon (?:mobile|phones?|small screens|narrow)|\bmobile[:/]|;", approach)[0]
-    said = lambda *words: any(re.search(r"\b" + w + r"\b", desktop) for w in words)  # noqa: E731
-    if chrome not in CHROMES:
-        # `navigation.mobile: tabs` is nearly universal (a phone gets tabs
-        # either way) and says nothing about the desktop frame; only an
-        # approach that leads with the phone earns the dock.
-        if said("bottom tab bar", "tab bar", "bottom tabs", "mobile-first", "mobile first"):
-            chrome = "dock"
-        elif said("top bar", "topbar", "top nav", "top navigation", "header bar") or nav.get("style") == "topbar":
-            chrome = "topbar"
-        elif said("icon rail", "icons", "narrow rail", "minimal rail") or len(pages) <= 4:
-            chrome = "icon-rail"
-        elif said("right"):
-            chrome = "right-rail"
-        elif any(w in personality for w in ("editorial", "playful", "warm", "friendly", "calm")):
-            chrome = "floating-rail"
-        elif density == "compact" or len(pages) >= 14:
-            chrome = "wide-rail"
-        else:
-            chrome = "standard-rail"
-    if auth not in AUTH_LAYOUTS:
-        if chrome == "dock" or any(w in personality for w in ("consumer", "playful", "warm", "friendly")):
-            auth = "brand-wash"
-        elif any(w in personality for w in ("stark", "utility", "minimal", "tool")):
-            auth = "centered-minimal"
-        elif density == "compact" or any(w in personality for w in ("dense", "back-office", "operations")):
-            auth = "top-anchored"
-        elif chrome in ("right-rail", "topbar"):
-            auth = "split-reversed"
-        elif chrome == "icon-rail":
-            auth = "side-panel"
-        else:
-            auth = "split-editorial"
-    if tone not in TONES:
-        # THE RAIL'S PAINT IS THE PERSONALITY'S. Every Blueprint app's rail
-        # was the inverse surface — one navy rail on a warm pediatric app
-        # ("soft sky blue as the calm anchor for navigation", it said) and
-        # a stark tool alike. A design that says nothing gets a tone from its
-        # density, so two apps still differ.
-        # WHOLE WORDS, A SHORT LIST. A personality is a paragraph ("a warm
-        # paper background … not a complex hospital system"), and substrings
-        # read off it made every app one tone.
-        felt = lambda *words: any(re.search(r"\b" + w + r"\b", personality) for w in words)  # noqa: E731
-        if felt("stark", "utility", "minimal", "tool"):
-            tone = "light"
-        elif felt("bold", "vivid", "energetic", "confident", "brand-forward"):
-            tone = "brand"
-        elif felt("warm", "friendly", "playful", "child", "children", "family", "consumer", "gentle"):
-            tone = "tinted"
-        elif density == "compact" or felt("dense", "operations", "back-office", "console"):
-            tone = "dark"
-        else:
-            tone = {"spacious": "light", "comfortable": "tinted"}.get(density, "dark")
-    return {"chrome": chrome, "auth": auth, "tone": tone, "density": density}
+    return {"chrome": chrome if chrome in CHROMES else SHELL_DEFAULT["chrome"],
+            "auth": auth if auth in AUTH_LAYOUTS else SHELL_DEFAULT["auth"],
+            "tone": tone if tone in TONES else SHELL_DEFAULT["tone"],
+            "density": density}
 
 
 def project_shell_identity(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write the frame the shell and the sign-in page read (see
     :data:`SHELL_IDENTITY_PATH`). Idempotent: rewritten from the Blueprint on
     every projection, like tokens.css."""
+    from services.blueprint.looks import PUBLIC, resolved_looks
+
     shell = derive_shell(doc)
     out = Path(app_root) / SHELL_IDENTITY_PATH
     out.parent.mkdir(parents=True, exist_ok=True)
-    body = {"_generated": "from the Living Blueprint (designSystem.shell) — edit the Blueprint, not this file",
+    # EACH ROLE'S OWN FRAME, by the role name the session carries: the
+    # layout draws the signed-in person's look, and the application's frame
+    # for a role the director gave none.
+    by_role: dict[str, dict[str, Any]] = {}
+    for look in resolved_looks(doc):
+        for aid, name in zip(look["audience"], look["names"]):
+            if aid != PUBLIC:
+                by_role[name] = {"chrome": look["chrome"], "tone": look["tone"], **RAIL_PAINT[look["tone"]]}
+    body = {"_generated": "from the Living Blueprint (designSystem.shell, composition.looks) — edit the "
+                          "Blueprint, not this file",
             "layout": {"chrome": shell["chrome"], "auth": shell["auth"], "tone": shell["tone"],
                        "density": shell["density"]},
+            "looks": by_role,
             "skin": ""}
     out.write_text(json.dumps(body, indent=2) + "\n", "utf-8")
     return {"files": [SHELL_IDENTITY_PATH], **shell}
@@ -2593,11 +2587,24 @@ def launch_roles(doc: dict) -> dict[str, list[str] | None]:
     had just offered it."""
     names = {r.get("id"): r.get("name") for r in _live(doc.get("roles")) if r.get("id")}
     pages = {p.get("id"): p for p in _live(doc.get("pages")) if p.get("id")}
+    # DECIDED, NOT INFERRED. `policies.anonymous` says what a signed-out
+    # visitor may do with each process; a page's access only stands in when
+    # nothing was decided (an open "Add to cart" that needed a signed-in
+    # customer, E-commerce 2026-10-09).
+    decided = {str(a.get("workflow")): str(a.get("rule")) for a in
+               ((doc.get("policies") or {}).get("anonymous") or []) if isinstance(a, dict)}
     out: dict[str, list[str] | None] = {}
     for w in _live(doc.get("workflows")):
         if not w.get("id"):
             continue
         launched = [pages[pid] for pid in (w.get("launchedFrom") or []) if pid in pages]
+        rule = decided.get(str(w["id"]))
+        if rule == "sign_in":
+            out[w["id"]] = [SIGNED_IN]
+            continue
+        if rule in ("allowed", "guest_owned"):
+            out[w["id"]] = ["*"]
+            continue
         if not launched:
             out[w["id"]] = None
             continue
@@ -4424,10 +4431,18 @@ def public_nav(doc: dict) -> dict[str, Any]:
                               rank.get(str(p.get("id")), len(rank)), _live(doc.get("pages")).index(p)))
     signed_in = any((p.get("access") or "authenticated") != "public"
                     for p in _live(doc.get("pages")))
-    return {"appName": str((doc.get("application") or {}).get("name") or ""),
-            "items": [{"label": str(p.get("name") or p.get("route")), "route": str(p.get("route"))}
-                      for p in pages],
-            "signIn": signed_in}
+    out: dict[str, Any] = {
+        "appName": str((doc.get("application") or {}).get("name") or ""),
+        "items": [{"label": str(p.get("name") or p.get("route")), "route": str(p.get("route"))}
+                  for p in pages],
+        "signIn": signed_in}
+    # THE VISITORS' LOOK paints their header — only when the director decided
+    # one; otherwise the header stays the card it has always been.
+    from services.blueprint.looks import PUBLIC, stated_looks, look_for
+    if any(PUBLIC in [str(a) for a in lk.get("audience") or []] for lk in stated_looks(doc)):
+        tone = look_for(doc, PUBLIC)["tone"]
+        out["paint"] = {"tone": tone, **RAIL_PAINT[tone]}
+    return out
 
 
 def project_public_nav(doc: dict, app_root: str | Path) -> str:
@@ -4438,8 +4453,9 @@ def project_public_nav(doc: dict, app_root: str | Path) -> str:
     path.write_text(
         "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
         "// The public pages a visitor can move between; `PublicPageFrame` renders them.\n"
-        "export type PublicNavItem = { label: string; route: string };\n\n"
-        "export const PUBLIC_NAV: { appName: string; items: PublicNavItem[]; signIn: boolean } = "
+        "export type PublicNavItem = { label: string; route: string };\n"
+        "export type PublicPaint = { tone: string; mode: string; bg: string; text: string; muted: string };\n\n"
+        "export const PUBLIC_NAV: { appName: string; items: PublicNavItem[]; signIn: boolean; paint?: PublicPaint } = "
         + json.dumps(nav, indent=2) + ";\n", "utf-8")
     return str(path.relative_to(Path(app_root)))
 

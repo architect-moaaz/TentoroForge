@@ -268,43 +268,60 @@ RHYTHM_DEFAULT: dict[str, str] = {"header": "eyebrow-title", "lead": "dark-card"
                                   "figures": "tiles", "sections": "cards"}
 
 
-def derive_rhythm(doc: dict) -> dict[str, str]:
-    """The rhythm the pages follow: the direction's own when it states one;
-    otherwise read off the design (density, personality) so that even a build
-    whose direction step was skipped does not get the default anatomy."""
-    comp = doc.get("composition") or {}
-    stated = comp.get("rhythm") if isinstance(comp.get("rhythm"), dict) else {}
-    out = dict(RHYTHM_DEFAULT)
-    design = doc.get("designSystem") or {}
-    density = str(design.get("informationDensity") or "comfortable")
-    personality = str(design.get("visualPersonality") or "").lower()
-    if density == "compact":
-        out.update(header="compact", figures="strip", sections="dense", lead="outlined-panel")
-    elif any(w in personality for w in ("warm", "editorial", "playful", "friendly", "consumer")):
-        out.update(header="band", lead="gradient-band", lists="cards", sections="open", figures="inline")
-    elif any(w in personality for w in ("stark", "minimal", "utility", "quiet")):
-        out.update(header="title-only", lead="type-only", lists="rows", sections="open")
-    for key, options in RHYTHM_OPTIONS.items():
-        if str(stated.get(key) or "") in options:
-            out[key] = str(stated[key])
-    return out
+def derive_rhythm(doc: dict, page: dict | None = None) -> dict[str, str]:
+    """The rhythm a page follows: its audience's look's
+    (`composition.looks`), else the application's stated rhythm, else
+    `RHYTHM_DEFAULT`. NOTHING IS READ OFF WORDS: a missing rhythm used to be
+    guessed from the personality ("warm", "consumer" made bands and cards),
+    which put a consumer's anatomy on a staff screen whose description
+    happened to be friendly (2026-10-08)."""
+    from services.blueprint.looks import look_for_page
+    return dict(look_for_page(doc, page)["rhythm"])
 
 
-def _rhythm(doc: dict) -> str:
-    """The rhythm as the page author reads it: each decision with what to do."""
-    r = derive_rhythm(doc)
+def _rhythm_lines(r: dict[str, str]) -> str:
     return "\n".join(f"- {key}: `{r[key]}` — {RHYTHM_OPTIONS[key][r[key]]}" for key in RHYTHM_OPTIONS)
+
+
+def _rhythm(doc: dict, page: dict | None = None) -> str:
+    """The rhythm as the page author reads it: each decision with what to do.
+    Given no page and an application with a look per audience, every
+    audience's — the cached prefix is the same for every page, and the page's
+    brief says whose look it is in (`look`)."""
+    from services.blueprint.looks import resolved_looks
+    looks = resolved_looks(doc)
+    if page is not None or len(looks) < 2:
+        return _rhythm_lines(derive_rhythm(doc, page))
+    blocks = [f"For {', '.join(lk['names'])}" + (f" — {lk['experience']}" if lk["experience"] else "") + ":\n"
+              + _rhythm_lines(lk["rhythm"]) for lk in looks]
+    return ("Each kind of person has its own look; a page keeps to the rhythm of the people it is for "
+            "(its brief's `look` names them):\n\n" + "\n\n".join(blocks))
+
+
+def _look_schema() -> dict[str, Any]:
+    from services.blueprint.projection import CHROMES, TONES
+    return {
+        "type": "object", "additionalProperties": False,
+        "required": ["audience", "experience", "chrome", "tone", "rhythm", "why"],
+        "properties": {
+            "audience": {"type": "array", "items": {"type": "string"}},
+            "experience": {"type": "string"},
+            "chrome": {"type": "string", "enum": list(CHROMES)},
+            "tone": {"type": "string", "enum": list(TONES)},
+            "rhythm": {
+                "type": "object", "additionalProperties": False, "required": list(RHYTHM_OPTIONS),
+                "properties": {key: {"type": "string", "enum": list(opts)} for key, opts in RHYTHM_OPTIONS.items()},
+            },
+            "why": {"type": "string"},
+        },
+    }
 
 
 DIRECTION_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["vision", "conventions", "rhythm"],
+    "required": ["vision", "conventions", "looks"],
     "properties": {
-        "rhythm": {
-            "type": "object", "additionalProperties": False, "required": list(RHYTHM_OPTIONS),
-            "properties": {key: {"type": "string", "enum": list(opts)} for key, opts in RHYTHM_OPTIONS.items()},
-        },
         "vision": {"type": "string"},
         "conventions": {
             "type": "array",
@@ -312,6 +329,9 @@ DIRECTION_SCHEMA: dict[str, Any] = {
                       "required": ["topic", "rule"],
                       "properties": {"topic": {"type": "string"}, "rule": {"type": "string"}}},
         },
+        # ONE LOOK PER AUDIENCE (`composition.looks`): the frame and the page
+        # rhythm each kind of person gets.
+        "looks": {"type": "array", "items": _look_schema()},
     },
 }
 
@@ -391,7 +411,7 @@ useWorkflow(workflows.x, { successMessage?, redirectTo?, silent? })
    `useSignIn()` / `useSignUp()` give the same with your own inputs, if the design needs them.
 
 <WorkflowForm workflow={workflows.x} fields={{ …one entry per input… }} initial?={partial input}
-              submitLabel? cancelHref? redirectTo? successMessage? columns?={1 | 2} onDone?={(r) => …} />
+              submitLabel? cancelHref? redirectTo? successMessage? columns?={1 | 2} onDone?={(r) => … /* success only */} onRefused?={(r) => … /* refused or failed; the form keeps the input */} />
    The form marks the workflow's required inputs itself (an asterisk, and the browser holds an
    empty one back), shows the workflow's refusal, and clears after a create that stays on the
    page — do not add your own asterisks, required markers or reset logic.
@@ -439,7 +459,7 @@ const t = useT();  t({ en: "Orders", hi: "ऑर्डर" })
    A page that takes a picture or reads a code uses these: never a placeholder frame standing in for a
    camera, and never a file picker labelled as one.
 
-<WidgetView widget={widgets.x} data={props.x} height?={260} currency?="GBP" action?={<Link …/>} title?={false}
+<WidgetView widget={widgets.x} data={props.x} height?={260} action?={<Link …/>} title?={false}
             onSelect?={(s) => router.push(href(pages.list, {}, { status: s.category }))} />
    Draws a declared widget as its card: a KPI tile, a gauge, a chart with a table toggle, or a list.
    The card shows the widget's own label and description as its title. Say a chart's name ONCE:
@@ -465,7 +485,7 @@ Every one of these renders on its own with plain props; pass resolved data, neve
                    | "sunburst" | "graph" | "map"
          data={rows} xKey="placedAt" series={[{ name: "Revenue", dataKey: "revenue" }]}
          colorKey?="region" yKey? valueKey? sizeKey? labelKey? format?="number" | "currency" | "percent" | "duration"
-         currency?="GBP" encoding?={{ stacked?, horizontal?, sorted?: "asc" | "desc", topN?, valueLabels? }}
+         encoding?={{ stacked?, horizontal?, sorted?: "asc" | "desc", topN?, valueLabels? }}
          height={260} onSelect?={(s: ChartSelection) => …} />
       ECharts, themed from the app's tokens; colours come from a validated palette — do not pass them.
       Rows are QueryRow[] from `query()` (or SeriesPoint[] with xKey="label", dataKey "value").
@@ -493,7 +513,8 @@ Every one of these renders on its own with plain props; pass resolved data, neve
   <PersonCard name="Maya Patel" role="Case manager" email="maya@hotel.test" />
   <ApprovalStepper steps={[{ id: "a", label: "Submitted", status: "complete" | "current" | "pending" | "rejected" }]} />
   <KeyValueList items={[{ label: "Folio", value: "RSV-88037" }]} />      (value is text)
-  <MoneyDisplay value={1240.5} currency="GBP" />
+  <Money value={1240.5} />  and  money(1240.5)   — from "@/sdk/money": the application's one
+                                                   currency and locale, decided in its definition
   <Tag label="Urgent" variant="default" | "primary" | "success" | "warning" | "danger" />
 
 The library's props are typed loosely; the shapes above are the contract. Nothing else the
@@ -583,9 +604,9 @@ What a finished page looks like:
   (and offers the action). Every record page handles a missing optional field with
   a quiet em dash, not "null". Long text truncates with a title attribute.
 - NUMBERS WITH CONTEXT. A figure is a label, a number and, where the data allows, a
-  comparison or a sparkline, laid out as the rhythm's `figures` says. Money is
-  formatted with its currency; dates with
-  Intl.DateTimeFormat (en-GB unless the app says otherwise); relative times for
+  comparison or a sparkline, laid out as the rhythm's `figures` says. Money through
+  `money()` / `<Money>` from "@/sdk/money"; dates with Intl.DateTimeFormat in the
+  application's locale (the brief's `policies.money.locale`); relative times for
   recent events.
 - STATUS AS A SYSTEM. Map each enum value to one tone once (a Record<Enum, string> of
   classes) and use it everywhere on the page: bg-success-subtle text-success-subtle-foreground,
@@ -599,9 +620,12 @@ What a finished page looks like:
   and a real image on its record — never the id. The list of an entity that is
   "Findable by likeness" offers "Find similar": <ImageSearch /> beside the search
   box, and while ?image= (or ?q=) is set, the rows are similar()'s, closest first.
-- MONEY SAYS ITS CURRENCY. A price is shown in the currency its record carries
-  (Intl.NumberFormat with that currency), never a fixed symbol; amounts in different
-  currencies are never added, compared or put in one range — group them by currency.
+- MONEY IS THE APPLICATION'S CURRENCY. Every amount goes through `money(value)` or
+  `<Money value />` from "@/sdk/money", which formats it in the one currency decided for
+  the application (the brief's `policies.money`); never Intl.NumberFormat with a currency,
+  never a currency literal or symbol in the page. A record that carries its own currency
+  field is the one exception: pass it (`money(row.amount, { currency: row.currency })`),
+  and amounts in different currencies are never added, compared or put in one range.
 - NOTHING HIDES UNDER THE APP'S OWN BARS. On a phone the application's tab bar may sit on the
   bottom edge. A bar the page fixes to the bottom (a sticky primary action) sits above it —
   `bottom-[var(--app-bottom-inset,0px)]`, never `bottom-0` — and the page leaves that room under
@@ -804,7 +828,7 @@ the first line is how a page runs out of room and arrives empty.
 {comp.get('vision') or '(no vision stated — choose a calm, professional, information-dense style)'}
 {conventions}
 
-# Its page rhythm — decided once for this application; every page keeps to it
+# Its page rhythm — decided once; every page keeps to it
 {_rhythm(doc)}
 
 # Its look — what each colour class means here
@@ -859,9 +883,44 @@ summarises through `onSelect`. You may add a chart the brief does not list when 
 Reply with the rationale and the full contents of both files."""
 
 
+def page_policies(doc: dict, page: dict) -> dict:
+    """The decisions this page binds to: the currency and locale every amount
+    is shown in, the life cycles of the records it shows (their states, the
+    moves, who makes them — what its filters and badges are over), and
+    whether a quantity its processes record adds or replaces."""
+    pol = doc.get("policies") if isinstance(doc.get("policies"), dict) else {}
+    if not pol:
+        return {}
+    ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []
+            if isinstance(e, dict) and e.get("id")}
+    data = page.get("data") or {}
+    shown = {str(x) for x in [data.get("primaryEntity"), *(data.get("supportingEntities") or [])] if x}
+    launched = {str(w.get("id")) for w in doc.get("workflows") or []
+                if isinstance(w, dict) and str(page.get("id")) in [str(x) for x in (w.get("launchedFrom") or [])]}
+    roles = {str(r.get("id")): str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    out: dict = {}
+    money = pol.get("money") if isinstance(pol.get("money"), dict) else {}
+    if money.get("currency") or money.get("locale"):
+        out["money"] = {k: money.get(k) for k in ("currency", "locale") if money.get(k)}
+    lifecycles = [{"entity": (ents.get(str(lc.get("entity"))) or {}).get("name"), "field": lc.get("field"),
+                   "initial": lc.get("initial"),
+                   "moves": [{"from": m.get("from"), "to": m.get("to"),
+                              **({"by": [roles.get(str(r), str(r)) for r in m.get("by")]} if m.get("by") else {})}
+                             for m in lc.get("moves") or [] if isinstance(m, dict)]}
+                  for lc in pol.get("lifecycles") or [] if isinstance(lc, dict) and str(lc.get("entity")) in shown]
+    if lifecycles:
+        out["lifecycles"] = lifecycles
+    quantities = [{"workflow": q.get("workflow"), "mode": q.get("mode")}
+                  for q in pol.get("quantities") or [] if isinstance(q, dict) and str(q.get("workflow")) in launched]
+    if quantities:
+        out["quantities"] = quantities
+    return out
+
+
 def _page_brief(doc: dict, page: dict) -> dict:
     from services.blueprint.page_usage import page_requirements
     pages = {str(p.get("id")): p for p in doc.get("pages") or []}
+    from services.blueprint.app_flows import hand_offs
     from services.blueprint.app_sdk import page_keys, workflow_keys
     pkeys, wkeys = page_keys(doc), workflow_keys(doc)
     launched = [w for w in doc.get("workflows") or []
@@ -869,10 +928,16 @@ def _page_brief(doc: dict, page: dict) -> dict:
                 and w.get("status") != "DEPRECATED"]
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     data = page.get("data") or {}
+    from services.blueprint.looks import look_for_page, resolved_looks
+    look = look_for_page(doc, page) if len(resolved_looks(doc)) > 1 else None
     return {
         "page": {k: page.get(k) for k in ("id", "name", "route", "pattern", "purpose", "primaryTasks",
                                           "actions", "states", "stateNotes", "users", "access", "responsive")
                  if page.get(k) not in (None, [], "")},
+        # WHOSE LOOK THIS PAGE IS IN: the system prompt lists every
+        # audience's rhythm (it is the same for every page); this says which.
+        **({"look": {"for": ", ".join(look["names"]) or "everyone", "rhythm": look["rhythm"]}}
+           if look else {}),
         # ADDING HAPPENS HERE (`addsHere`): no page of its own exists for a new
         # record, so this page carries the form — a panel over the list, or
         # the workspace opening empty — and runs the workflow that creates it.
@@ -899,11 +964,28 @@ def _page_brief(doc: dict, page: dict) -> dict:
         "sdkKey": pkeys.get(str(page.get("id"))),
         "primaryEntity": (ents.get(str(data.get("primaryEntity"))) or {}).get("name"),
         "supportingEntities": [(ents.get(str(x)) or {}).get("name") for x in data.get("supportingEntities") or []],
+        # WHERE EACH MOVE LEADS (`flows`): placing an order opens the order;
+        # adding to a cart offers the way to it. Left to the writer, ToroCommerce
+        # placed the order and stayed on the emptied cart (2026-10-07).
+        **({"handOffs": {"rule": HAND_OFF_RULE, "moves": [
+            {**{k: v for k, v in h.items() if k in ("flow", "does", "then", "toName", "carries")},
+             "to": {"sdkKey": pkeys.get(str(h["to"])), "address": h["address"]},
+             **({"workflow": f"workflows.{wkeys.get(h['workflow'])}"} if h.get("workflow") and wkeys.get(h["workflow"]) else {})}
+            for h in hand_offs(doc, str(page.get("id")))]}}
+           if hand_offs(doc, str(page.get("id"))) else {}),
         "leadsTo": [{"page": pages[t].get("name"), "sdkKey": pkeys.get(t), "route": pages[t].get("route")}
                     for t in (str(x) for x in page.get("navigatesTo") or []) if t in pages],
         "workflowsLaunchedHere": [{"sdkKey": wkeys.get(str(w.get("id"))), "name": w.get("name"),
                                    "purpose": w.get("purpose"),
-                                   "trigger": (w.get("trigger") or {}).get("detail")} for w in launched],
+                                   "trigger": (w.get("trigger") or {}).get("detail"),
+                                   # WHAT IT WRITES, so the page reads the stored total and the
+                                   # states the process puts records in instead of recomputing
+                                   # or guessing them (E-commerce's £6.99 shown and 0 stored).
+                                   **({"writes": [{"entity": (ents.get(str(x.get("entity"))) or {}).get("name"),
+                                                   "fields": x.get("fields"), "states": x.get("states")}
+                                                  for x in w.get("writes") or [] if isinstance(x, dict)]}
+                                      if w.get("writes") else {})} for w in launched],
+        **({"policies": pol} if (pol := page_policies(doc, page)) else {}),
         "roles": [r.get("name") for r in doc.get("roles") or [] if r.get("id") in (page.get("users") or [])],
         "widgets": page_widget_brief(doc, page),
         # WHAT IT ANSWERS TO: the requirements of its module, of the processes
@@ -1297,6 +1379,27 @@ def _unwired_actions(doc: dict, page: dict, view: str) -> list[str]:
     return out
 
 
+def _unfollowed_flows(doc: dict, page: dict, view: str) -> list[str]:
+    """Each flow move off this screen (`go` or `offer`) whose target the
+    code never names. Placing an order that opens the order needs the code
+    to know the orders screen exists; one that never links there leaves the
+    person on an emptied cart (ToroCommerce, 2026-10-07)."""
+    from services.blueprint.app_flows import hand_offs
+    from services.blueprint.app_sdk import page_keys
+
+    keys = page_keys(doc)
+    out = []
+    for h in hand_offs(doc, str(page.get("id"))):
+        if h["then"] not in ("go", "offer") or h["to"] == str(page.get("id")):
+            continue
+        key = keys.get(h["to"])
+        if key and not re.search(r"\bpages\." + re.escape(key) + r"\b", view):
+            how = "take them there" if h["then"] == "go" else "show the way there"
+            out.append(f"view.tsx: in the flow \"{h['flow']}\", after \"{h['does']}\" this screen should {how} — "
+                       f"{h['toName']} (pages.{key}, {h['address']}) — and nothing on it links there.")
+    return out
+
+
 def _unread_handoffs(doc: dict, page: dict, load: str, view: str) -> list[str]:
     """What another page hands this one in its address, that this one never
     reads. F&B's Place Order was opened with the basket in `?items=` and
@@ -1333,6 +1436,24 @@ def _function_bodies(src: str) -> list[str]:
             i += 1
         bodies.append(src[m.end():i - 1])
     return bodies
+
+
+#: A currency named in a page: an Intl formatter in currency style, or a
+#: three-letter code passed as one.
+_NAMED_CURRENCY = re.compile(r'style:\s*["\']currency["\']|\bcurrency\s*[:=]\s*\{?\s*["\'][A-Z]{3}["\']')
+
+
+def _hard_coded_money(view: str) -> list[str]:
+    """A page that formats money in a currency of its own.
+
+    E-commerce showed GBP on the catalogue, US$ in the cart and $ at the
+    checkout (2026-10-09): each page had guessed. The currency is the
+    application's one decision; the SDK formats every amount in it."""
+    if _NAMED_CURRENCY.search(view):
+        return ["view.tsx: names a currency (Intl.NumberFormat in currency style, or a currency code). "
+                "Money is the application's one decision: format every amount with `money(value)` or "
+                "`<Money value />` from \"@/sdk/money\"; pass a currency only from a field the record carries."]
+    return []
 
 
 def _simulated_writes(view: str) -> list[str]:
@@ -1629,7 +1750,9 @@ def compose_page(doc: dict, page: dict, app_root: Path, client: Any, *,
         # keep the model's own pages from looking alike, and here they would
         # push the rewrite back toward the look the design was chosen to replace.
         design = [] if seeded else _design_findings(doc, page, whole)
-        errors = (_static_findings(load, view) + _simulated_writes(whole) + _unwired_actions(doc, page, whole)
+        errors = (_static_findings(load, view) + _simulated_writes(whole) + _hard_coded_money(view)
+                  + _unwired_actions(doc, page, whole)
+                  + _unfollowed_flows(doc, page, whole)
                   + _unread_handoffs(doc, page, load, whole)
                   + typecheck(doc, app_root, str(page.get("id")), load, view, parts=parts))
         if original_view:
@@ -1736,6 +1859,17 @@ PART_CODE_SCHEMA: dict[str, Any] = {
 def _part_names(parts: list[dict]) -> str:
     return "\n".join(f"  - parts/{p['key']}.tsx — {p['label']}: import {p['component']} from \"./parts/{p['key']}\";"
                      for p in parts)
+
+
+#: How a page's code honours the flows' hand-offs (`app_flows.hand_offs`).
+HAND_OFF_RULE = (
+    "Each move is something a person does on this screen and where it leads. `go`: when it is done — "
+    "its workflow succeeded, or the choice was made — take them there with router.push(href(pages.<to>, "
+    "params, query)), and when it `carries` a record, open that record there (the `{id}` in `address` is "
+    "the id of the record it chose, or the one its workflow wrote). `offer`: they stay; once it is done, "
+    "show the way there — a link or a button to it beside the confirmation. `menu`: "
+    "nothing to add; they go on by themselves. A move with no control on this screen yet needs one."
+)
 
 
 #: How a page's code honours `PageSection.roles` — the brief carries them as
@@ -1869,7 +2003,7 @@ def _write_part(doc: dict, page: dict, part: dict, app_root: Path, call: Any, wr
             continue
         code = _use_client_first(str(body.get("code") or ""))
         own = [e.replace("view.tsx", f"parts/{part['key']}.tsx") for e in _static_findings("", code)
-               if not e.startswith("load.ts:")] + _simulated_writes(code)
+               if not e.startswith("load.ts:")] + _simulated_writes(code) + _hard_coded_money(code)
         compiled = typecheck(doc, app_root, pid, load, view, parts={**siblings, part["key"]: code})
         errors = own + [e for e in compiled if e.startswith(f"parts/{part['key']}.tsx")]
         if not errors:
@@ -1975,7 +2109,8 @@ def reshape_screen(doc: dict, page: dict, app_root: Path, client: Any, current: 
     for round_ in range(COMPILE_ROUNDS):
         whole = "\n".join([view, *written.values()])
         compiled = typecheck(doc, app_root, pid, load, view, parts=written)
-        wiring = _unwired_actions(doc, page, whole) + _unread_handoffs(doc, page, load, whole)
+        wiring = (_unwired_actions(doc, page, whole) + _unread_handoffs(doc, page, load, whole)
+                  + _unfollowed_flows(doc, page, whole))
         if not compiled and not wiring:
             break
         if round_ == COMPILE_ROUNDS - 1:
@@ -2089,7 +2224,8 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
     for round_ in range(COMPILE_ROUNDS):
         whole = "\n".join([view, *written.values()])
         compiled = typecheck(doc, app_root, pid, load, view, parts=written)
-        wiring = _unwired_actions(doc, page, whole) + _unread_handoffs(doc, page, load, whole)
+        wiring = (_unwired_actions(doc, page, whole) + _unread_handoffs(doc, page, load, whole)
+                  + _unfollowed_flows(doc, page, whole))
         if not compiled and not wiring:
             break
         if round_ == COMPILE_ROUNDS - 1:
@@ -2134,27 +2270,65 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
 # The direction
 # ---------------------------------------------------------------------------
 
-def direction_prompts(doc: dict) -> tuple[str, str]:
+def _product_brief(doc: dict) -> str:
+    """What the product is — the field it serves and the kind of product it
+    is — as the product frame stated them. The look is chosen from these."""
+    product = doc.get("product") or {}
+    app = doc.get("application") or {}
+    domain = str(product.get("domain") or "").strip() or (
+        str(app.get("domain") or "").strip() if str(app.get("domain") or "").strip().lower() != "unknown" else "")
+    category = str(product.get("category") or "").strip()
+    lines = [f"Its field: {domain}" if domain else "", f"What kind of product it is: {category}" if category else ""]
+    return "\n".join(line for line in lines if line) + ("\n\n" if any(lines) else "")
+
+
+def _audiences_brief(doc: dict) -> str:
+    """Each audience the director gives a look to — every role by id, and the
+    visitors when there are public pages — with who they are and the screens
+    that are theirs."""
+    from services.blueprint.looks import PUBLIC, audiences
+    pages = [p for p in doc.get("pages") or [] if isinstance(p, dict) and p.get("status") != "DEPRECATED"]
+    personas = {str(p.get("name") or "").lower(): p for p in (doc.get("product") or {}).get("personas") or []
+                if isinstance(p, dict)}
+    roles = {str(r.get("id")): r for r in doc.get("roles") or [] if isinstance(r, dict)}
+    rows = []
+    for a in audiences(doc):
+        if a == PUBLIC:
+            theirs = [p for p in pages if str(p.get("access") or "") == "public"]
+            who = "visitors who are not signed in"
+        else:
+            role = roles.get(a) or {}
+            theirs = [p for p in pages if a in [str(u) for u in p.get("users") or []]]
+            persona = personas.get(str(role.get("name") or "").lower()) or {}
+            who = "; ".join(x for x in (str(role.get("name") or a), str(role.get("description") or ""),
+                                        str(persona.get("description") or ""),
+                                        ", ".join(str(g) for g in persona.get("goals") or [])) if x)
+        names = ", ".join(str(p.get("name") or p.get("route")) for p in theirs[:8])
+        rows.append(f"- `{a}` — {who}. Their screens ({len(theirs)}): {names or 'none of their own'}")
+    return "Who uses it — each needs a look:\n" + "\n".join(rows) + "\n\n"
+
+
+def direction_prompts(doc: dict, *, brief: str = "", feedback: str = "") -> tuple[str, str]:
     app = doc.get("application") or {}
     ds = doc.get("designSystem") or {}
     system = ("You are the design director of a software product. You decide, once, what the whole "
-              "application should feel like and the conventions every page will follow, so that "
-              "thirty pages written separately read as one product, as good as "
-              f"{bar(doc)}. Be concrete: a page author must be able to follow each rule "
-              "without guessing. Rules are about layout, hierarchy, density, tone of copy, how "
+              "application should feel like, the look each kind of person who uses it gets, and the "
+              "conventions every page will follow, so that thirty pages written separately read as "
+              f"one product, as good as {bar(doc)}. Be concrete: a page author must be able to follow "
+              "each rule without guessing. Rules are about layout, hierarchy, density, tone of copy, how "
               "status and money read, empty/loading/error states, where actions live, and how "
               "lists, records and forms are built — never about colours by hex (the design "
               "system owns the palette).")
-    pages = [{k: p.get(k) for k in ("name", "route", "pattern", "purpose")}
+    pages = [{k: p.get(k) for k in ("name", "route", "pattern", "purpose", "users", "access")}
              for p in doc.get("pages") or [] if p.get("status") != "DEPRECATED"]
-    roles = [r.get("name") for r in doc.get("roles") or []]
     user = (f"The application: {app.get('name')}\n{str(app.get('description') or '')[:2000]}\n\n"
-            f"Who uses it: {', '.join(r for r in roles if r) or 'staff'}\n\n"
+            + _product_brief(doc)
+            + _audiences_brief(doc)
             # THE DESIGN AS IT IS NAMED. This read `density` and `personality`,
             # which the design system has never had (`informationDensity`,
             # `visualPersonality`): the director saw the fonts and the radius
             # and nothing of what the product is like (2026-10-02).
-            f"Its design system (personality, density, frame, type, radius):\n"
+            + f"Its design system (personality, density, frame, type, radius):\n"
             f"{json.dumps({k: ds.get(k) for k in ('visualPersonality', 'informationDensity', 'shell', 'navigationApproach', 'typography', 'radius') if ds.get(k)}, indent=1)[:3000]}\n\n"
             + _references_brief(ds) +
             f"Its pages:\n{json.dumps(pages, indent=1)[:12000]}\n\n"
@@ -2168,14 +2342,37 @@ def direction_prompts(doc: dict) -> tuple[str, str]:
             "to the dashboard. A reading list's direction said \"tiles and charts are "
             "for the dashboard only\", the list page drew the chart its analytics "
             "required, and was marked down for it (2026-09-27).\n\n"
-            "AND THE PAGE RHYTHM — five anatomy decisions, made once, that every page then "
-            "shares and that make this product's pages differ from another's. Choose each "
-            "from its personality, its density and how it is used, not by habit:\n"
-            + "\n".join(f"- `{key}`: " + "; ".join(f"`{o}` ({what})" for o, what in opts.items())
+            "AND `looks` — ONE LOOK FOR EACH AUDIENCE ABOVE. Two kinds of people in one application "
+            "can be using two kinds of product: decide each audience's look from this product's field, "
+            "the kind of product it is, and how THOSE people use it — where, how often, on what "
+            "device, for how long, what they come to do. People who meet the product in the same way "
+            "share one look; people who do not get their own. Every audience id above appears in "
+            "exactly one look's `audience`. Each look states:\n"
+            "- `experience`: what the product is to them and how they use it, in one line;\n"
+            "- `chrome` — how their navigation is built: `wide-rail` (a labelled sidebar, for many "
+            "destinations worked all day), `icon-rail` (a narrow rail of icons, for a focused tool), "
+            "`standard-rail` (a rail that expands on hover), `floating-rail` (the rail as a raised card, "
+            "lighter), `right-rail` (navigation after the content), `topbar` (one bar across the top, for "
+            "a few destinations), `dock` (a floating dock at the bottom, for use on a phone on the go). "
+            "Visitors (`public`) always get a header bar; give them `topbar`;\n"
+            "- `tone` — what their navigation is painted with: `dark` (the inverse surface), `brand` "
+            "(the primary colour), `light` (a card beside the page), `tinted` (the ground washed with "
+            "the primary);\n"
+            "- `rhythm` — five anatomy decisions every page of theirs shares, which make this product's "
+            "pages differ from another's:\n"
+            + "\n".join(f"  - `{key}`: " + "; ".join(f"`{o}` ({what})" for o, what in opts.items())
                         for key, opts in RHYTHM_OPTIONS.items())
-            + "\nA product read all day at a desk wants a compact header, figures in a strip "
-            "and dense sections; a consumer product wants a band, cards and open sections; a "
-            "quiet tool wants a title alone and rows. Make the vision agree with what you chose.")
+            + "\n- `why`: one sentence — why this look, from the field, the kind of product and these "
+            "people.\nA screen read all day at a desk wants different anatomy from one glanced at on a "
+            "phone or browsed at leisure; choose from how it is used, not by habit, and make the vision "
+            "agree with what you chose.")
+    if brief:
+        current = {k: (doc.get("composition") or {}).get(k) for k in ("vision", "conventions", "looks")}
+        user += ("\n\nTHIS IS A CHANGE to a direction already decided. The current direction:\n"
+                 + json.dumps(current, indent=1)[:8000]
+                 + f"\n\nChange only what this asks, and return everything else exactly as it is: {brief}")
+    if feedback:
+        user += f"\n\nYOUR LAST ANSWER WAS REFUSED — mend it: {feedback}"
     return system, user
 
 
@@ -2195,12 +2392,16 @@ def _references_brief(ds: dict) -> str:
             "generated application.\n\n")
 
 
-def compose_direction(doc: dict, client: Any, *, references: Sequence[Path] = ()) -> tuple[dict, Any]:
+def compose_direction(doc: dict, client: Any, *, references: Sequence[Path] = (),
+                      brief: str = "", feedback: str = "") -> tuple[dict, Any]:
     """The director's decision — shown the user's reference images when
-    there are any, read for the feel (`references.READ_FOR["ui_direction"]`)."""
+    there are any, read for the feel (`references.READ_FOR["ui_direction"]`).
+    A look that leaves an audience out is not mended here: the composition
+    is refused by `agent_contract.check_looks`, naming what is missing, and
+    the director is asked again with that (`feedback`)."""
     from services.blueprint.references import READ_FOR
 
-    system, user = direction_prompts(doc)
+    system, user = direction_prompts(doc, brief=brief, feedback=feedback)
     shown = [str(p) for p in references] if getattr(client, "accepts_images", False) else []
     if shown:
         user += (f"\n\nThe {len(shown)} image(s) attached are what the user showed to convey what "
@@ -2209,12 +2410,20 @@ def compose_direction(doc: dict, client: Any, *, references: Sequence[Path] = ()
     else:
         reply = client(system=system, user=user, schema=DIRECTION_SCHEMA)
     body = json.loads(getattr(reply, "text", reply))
-    rhythm = body.get("rhythm") if isinstance(body.get("rhythm"), dict) else {}
-    rhythm = {k: str(v) for k, v in rhythm.items() if k in RHYTHM_OPTIONS and str(v) in RHYTHM_OPTIONS[k]}
+    looks = []
+    for lk in body.get("looks") or []:
+        if not isinstance(lk, dict):
+            continue
+        rhythm = lk.get("rhythm") if isinstance(lk.get("rhythm"), dict) else {}
+        looks.append({"audience": [str(a) for a in lk.get("audience") or [] if str(a).strip()],
+                      "experience": str(lk.get("experience") or ""),
+                      "chrome": str(lk.get("chrome") or ""), "tone": str(lk.get("tone") or ""),
+                      "rhythm": {k: str(v) for k, v in rhythm.items() if k in RHYTHM_OPTIONS},
+                      "why": str(lk.get("why") or "")})
     return ({"vision": str(body.get("vision") or ""),
              "conventions": [{"topic": str(c.get("topic")), "rule": str(c.get("rule"))}
                              for c in body.get("conventions") or []],
-             **({"rhythm": rhythm} if len(rhythm) == len(RHYTHM_OPTIONS) else {})},
+             "looks": looks},
             getattr(reply, "usage", None))
 
 

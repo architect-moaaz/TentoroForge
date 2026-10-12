@@ -6,10 +6,13 @@
 // `PublicPageFrame` imports it and an import of a missing file fails the build.
 // Listed in `assembly.SCAFFOLD_DEFAULTS`; it never overwrites the real thing.
 export type PublicNavItem = { label: string; route: string };
+export type PublicPaint = { tone: string; mode: string; bg: string; text: string; muted: string };
 
 export const PUBLIC_NAV: {
   appName: string;
   items: PublicNavItem[];
   /** The app also has pages behind sign-in. */
   signIn: boolean;
+  /** The visitors' look, when the application decided one (`composition.looks`). */
+  paint?: PublicPaint;
 } = { appName: "", items: [], signIn: false };

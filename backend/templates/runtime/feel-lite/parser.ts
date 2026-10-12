@@ -61,7 +61,19 @@ export function parse(tokens: Token[]): ASTNode {
     if (peek().type === TokenType.If) {
       return parseIfExpression();
     }
-    return parseOr();
+    return parseCoalesce();
+  }
+
+  // ── a ?? b — the loosest of all: `x.price ?? y.price * 2` is x's price, or
+  // else twice y's.
+  function parseCoalesce(): ASTNode {
+    let left = parseOr();
+    while (peek().type === TokenType.Coalesce) {
+      advance();
+      const right = parseOr();
+      left = { type: "LogicalExpression", operator: "??", left, right };
+    }
+    return left;
   }
 
   function parseIfExpression(): ASTNode {

@@ -42,7 +42,13 @@ DEPARTMENTS: dict[str, str] = {
     "security": "Security",
     "qa": "Verification",
     "shipping": "Shipping",
+    # Where the agents a question touches meet; nobody's desk is here.
+    "huddle": "Huddle Room",
 }
+
+#: Rooms people come to rather than sit in. Nobody is seated here; the agents
+#: of a huddle walk in and back (`services.huddle.room`).
+MEETING_ROOMS: frozenset[str] = frozenset({"huddle"})
 
 
 #: Which department each Blueprint agent sits in. Keys are agent names from
@@ -57,6 +63,9 @@ ROOM_OF: dict[str, str] = {
     # Architecture — modules, navigation, the seams to the outside (§28, §60)
     "solution_architecture": "architecture",
     "integration": "architecture",
+    # The engineer decides the business facts every writer reads, and owns
+    # the build feature by feature: an architect's desk.
+    "engineer": "architecture",
     # Design Studio — the design language, before anything composes (§37)
     "accessibility": "design_studio",
     "figma_intelligence": "design_studio",
@@ -115,6 +124,7 @@ NODE_LABEL: dict[str, str] = {
     "frontend": "Projecting the page schemas",
     "workflows": "Declaring the workflows",
     "workflow_steps": "Authoring each workflow's steps",
+    "app_flows": "Mapping the paths people take",
     "business_rules": "Writing the business rules",
     "security": "Setting roles and permissions",
     "integrations": "Connecting the outside services",

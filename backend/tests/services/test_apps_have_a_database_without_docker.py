@@ -70,6 +70,9 @@ def test_the_review_uses_the_apps_server_when_there_is_one(monkeypatch, tmp_path
     monkeypatch.setenv(app_databases.SERVER_ENV, "postgresql://postgres:pw@apps-db:5432")
     calls = []
     monkeypatch.setattr(app_databases, "ensure", lambda root: calls.append(("ensure", Path(root).name)))
+    # The Workbench asks the database itself for its tables and a login.
+    monkeypatch.setattr(app_databases, "_has_tables", lambda name: True)
+    monkeypatch.setattr(app_databases, "_has_a_login", lambda name: True)
     monkeypatch.setattr(app_databases, "clone", lambda root: ("app_x_review_1", "postgresql://h/app_x_review_1"))
     monkeypatch.setattr(app_databases, "drop", lambda name: calls.append(("drop", name)))
     monkeypatch.setattr(app_databases, "query", lambda name, sql: [["row"]] if name == "app_x_review_1" else [])
@@ -95,5 +98,43 @@ def test_the_preview_uses_the_apps_server_when_there_is_one(monkeypatch, tmp_pat
     monkeypatch.setenv(app_databases.SERVER_ENV, "postgresql://postgres:pw@apps-db:5432")
     seen = []
     monkeypatch.setattr(app_databases, "ensure", lambda root: seen.append(str(root)))
+    monkeypatch.setattr(app_databases, "_has_tables", lambda name: True)
+    monkeypatch.setattr(app_databases, "_has_a_login", lambda name: True)
     asyncio.run(preview._ensure_database(str(tmp_path)))
     assert seen == [str(tmp_path)]
+
+
+def test_a_database_with_tables_and_no_login_is_seeded(monkeypatch, tmp_path):
+    """TStyle (forge-v3, 2026-10-09): pushed before the app was installed, its
+    database had tables and no rows, and nothing seeded it again — the handover
+    named a login that did not exist and every statement was refused at sign-in."""
+    class Con:
+        def cursor(self):
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def execute(self, sql):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv(app_databases.SERVER_ENV, "postgresql://u:p@apps-db:5432")
+    monkeypatch.setattr(app_databases, "_connect", lambda *a: Con())
+    monkeypatch.setattr(app_databases, "_exists", lambda cur, name: True)
+    monkeypatch.setattr(app_databases, "_write_url", lambda root, url: None)
+    monkeypatch.setattr(app_databases, "_extensions", lambda root, url: None)
+    monkeypatch.setattr(app_databases, "_has_tables", lambda name: True)
+    pushed = []
+    monkeypatch.setattr("services.blueprint.schema_push.push_now",
+                        lambda root: pushed.append(root) or {"applied": True})
+    root = _app(tmp_path)
+    monkeypatch.setattr(app_databases, "_has_a_login", lambda name: False)
+    assert app_databases.ensure(root)["pushed"] and pushed == [root]
+    monkeypatch.setattr(app_databases, "_has_a_login", lambda name: True)
+    assert not app_databases.ensure(root)["pushed"] and len(pushed) == 1, "a seeded database is left as it is"
