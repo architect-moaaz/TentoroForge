@@ -253,6 +253,15 @@ def tokenize(input_str: str) -> List[Token]:
             word = input_str[start:pos]
             lower = word.lower()
 
+            # `date and time(…)` is ONE function name, FEEL's own spelling — not
+            # `date` AND `time(…)` (m1dck85j, 2026-10-12).
+            if word == "date":
+                rest = re.match(r"\s+and\s+time(?=\s*\()", input_str[pos:])
+                if rest:
+                    pos += rest.end()
+                    tokens.append(Token(TokenType.Identifier, "date and time", start))
+                    continue
+
             if lower in KEYWORDS:
                 tt = KEYWORDS[lower]
                 # Map true/false to Boolean token type as well

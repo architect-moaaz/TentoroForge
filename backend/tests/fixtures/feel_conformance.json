@@ -321,5 +321,49 @@
       }
     },
     "expected": false
+  },
+  {
+    "expr": "string(date(\"2026-10-12\") + duration(\"P1D\"))",
+    "data": {},
+    "expected": "2026-10-13"
+  },
+  {
+    "expr": "d + duration(\"P1D\")",
+    "data": {
+      "d": "2026-10-12"
+    },
+    "expected": "2026-10-13"
+  },
+  {
+    "expr": "d - duration(\"P1D\")",
+    "data": {
+      "d": "2026-10-01"
+    },
+    "expected": "2026-09-30"
+  },
+  {
+    "expr": "ts - duration(\"PT30M\")",
+    "data": {
+      "ts": "2026-10-12T08:30:00.000Z"
+    },
+    "expected": "2026-10-12T08:00:00.000Z"
+  },
+  {
+    "expr": "string(date and time(\"2026-10-12T08:30:00Z\") + duration(\"PT1H\"))",
+    "data": {},
+    "expected": "2026-10-12T09:30:00.000Z"
+  },
+  {
+    "expr": "(date(\"2026-10-13\") - date(\"2026-10-12\")) = duration(\"P1D\")",
+    "data": {},
+    "expected": true
+  },
+  {
+    "expr": "logged < string(date(d) + duration(\"P1D\"))",
+    "data": {
+      "d": "2026-10-12",
+      "logged": "2026-10-12"
+    },
+    "expected": true
   }
 ]

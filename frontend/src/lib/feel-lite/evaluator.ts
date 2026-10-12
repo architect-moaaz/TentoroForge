@@ -60,8 +60,16 @@ const BUILT_IN_FUNCTIONS: Record<string, (...args: unknown[]) => unknown> = {
     return isNaN(n) ? null : n;
   },
   date: (x: unknown) => {
-    const d = new Date(String(x));
+    const d = x instanceof Date ? x : new Date(String(x));
     return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  },
+  "date and time": (x: unknown) => {
+    const d = x instanceof Date ? x : new Date(String(x));
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  },
+  date_and_time: (x: unknown) => {
+    const d = x instanceof Date ? x : new Date(String(x));
+    return isNaN(d.getTime()) ? null : d.toISOString();
   },
   now: () => new Date().toISOString(),
   duration: (x: unknown) => {
@@ -91,6 +99,39 @@ function flattenNumbers(args: unknown[]): number[] {
   }
   return result;
 }
+
+// DATES AND MOMENTS ARE TEXT HERE (`date()` gives "2026-10-12", `now()` an ISO
+// moment) and a duration is milliseconds, so `+` saw text and a number and
+// joined them: date("2026-10-12") + duration("P1D") was "2026-10-1286400000".
+// AquaTrack's Edit Log Entry could not find the end of a day in four tries
+// (m1dck85j, 2026-10-12). A date or moment and a number of milliseconds now
+// add and subtract as time; two of them subtract to the milliseconds between.
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_MOMENT = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
+
+/** A calendar date or a moment as milliseconds, and whether it was a date. */
+function asMoment(v: unknown): { ms: number; day: boolean } | null {
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : { ms: v.getTime(), day: false };
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  if (ISO_DAY.test(s)) {
+    const ms = Date.parse(s + "T00:00:00Z");
+    return isNaN(ms) ? null : { ms, day: true };
+  }
+  if (ISO_MOMENT.test(s)) {
+    const ms = Date.parse(s);
+    return isNaN(ms) ? null : { ms, day: false };
+  }
+  return null;
+}
+
+/** Back to the form it came in: a date stays a date, a moment a moment. */
+function fromMoment(ms: number, day: boolean): string {
+  const iso = new Date(ms).toISOString();
+  return day ? iso.slice(0, 10) : iso;
+}
+
+const isDuration = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 function toNumber(x: unknown): number {
   const n = Number(x);
@@ -173,6 +214,17 @@ export function evaluate(node: ASTNode, ctx: Context): unknown {
       const right = evaluate(node.right, ctx);
       const l = toNumber(left);
       const r = toNumber(right);
+
+      const lm = asMoment(left);
+      const rm = asMoment(right);
+      if (node.operator === "+") {
+        if (lm && isDuration(right)) return fromMoment(lm.ms + right, lm.day);
+        if (rm && isDuration(left)) return fromMoment(rm.ms + left, rm.day);
+      }
+      if (node.operator === "-") {
+        if (lm && rm) return lm.ms - rm.ms;
+        if (lm && isDuration(right)) return fromMoment(lm.ms - right, lm.day);
+      }
 
       switch (node.operator) {
         case "+":

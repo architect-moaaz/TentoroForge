@@ -153,6 +153,18 @@ export function tokenize(input: string): Token[] {
         }
       }
 
+      // `date and time(…)` IS ONE FUNCTION NAME, FEEL's own spelling. It was read
+      // as `date` AND `time(…)` and answered false, so AquaTrack's Edit Log
+      // Entry could not build a moment to compare against (m1dck85j, 2026-10-12).
+      if (id === "date") {
+        const rest = input.slice(pos).match(/^\s+and\s+time(?=\s*\()/);
+        if (rest) {
+          pos += rest[0].length;
+          addToken(TokenType.Identifier, "date and time", start);
+          continue;
+        }
+      }
+
       const lower = id.toLowerCase();
       if (lower in KEYWORDS) {
         addToken(KEYWORDS[lower], id, start);

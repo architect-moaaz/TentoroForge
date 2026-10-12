@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from runtime.feel_lite.tokenizer import tokenize
@@ -132,7 +132,14 @@ def _fn_matches(args: list) -> bool:
 def _fn_string(args: list) -> str:
     if not args:
         return ""
-    return str(args[0])
+    v = args[0]
+    # A moment reads as the TypeScript engine writes it (ISO, UTC, milliseconds).
+    if isinstance(v, datetime):
+        v = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+        return v.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    if isinstance(v, date):
+        return v.isoformat()
+    return str(v) if v is not None else ""
 
 
 @_register("number")
@@ -155,6 +162,25 @@ def _fn_date(args: list) -> date | None:
         return date.fromisoformat(str(args[0]))
     except (ValueError, TypeError):
         return None
+
+
+@_register("date and time")
+def _fn_date_and_time(args: list) -> datetime | None:
+    if not args:
+        return None
+    v = args[0]
+    if isinstance(v, datetime):
+        return v
+    if isinstance(v, date):
+        return datetime(v.year, v.month, v.day, tzinfo=timezone.utc)
+    try:
+        d = datetime.fromisoformat(str(v).strip().replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
+BUILTIN_FUNCTIONS["date_and_time"] = _fn_date_and_time
 
 
 @_register("now")
@@ -535,8 +561,77 @@ def _fuzzy_equal(a: Any, b: Any) -> bool:
     return str(a).lower() == str(b).lower()
 
 
+# DATES AND MOMENTS AS TIME, not text and a number: `"2026-10-12" + duration`
+# joined the two (the shipped TypeScript engine gave "2026-10-1286400000"),
+# and AquaTrack's Edit Log Entry could not find the end of a day (m1dck85j,
+# 2026-10-12). A date or moment plus or minus a duration is a date or moment,
+# in the form it came in; two of them subtract to the time between.
+_ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ISO_MOMENT = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+
+
+def _as_moment(v: Any) -> tuple[datetime, str] | None:
+    """`(moment, kind)`: kind says how to answer — date, datetime, day text, moment text."""
+    if isinstance(v, datetime):
+        return (v if v.tzinfo else v.replace(tzinfo=timezone.utc)), "datetime"
+    if isinstance(v, date):
+        return datetime(v.year, v.month, v.day, tzinfo=timezone.utc), "date"
+    if not isinstance(v, str):
+        return None
+    s = v.strip()
+    try:
+        if _ISO_DAY.match(s):
+            d = date.fromisoformat(s)
+            return datetime(d.year, d.month, d.day, tzinfo=timezone.utc), "day"
+        if _ISO_MOMENT.match(s):
+            d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)), "moment"
+    except ValueError:
+        return None
+    return None
+
+
+def _as_duration(v: Any) -> timedelta | None:
+    if isinstance(v, timedelta):
+        return v
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+        return timedelta(milliseconds=v)
+    return None
+
+
+def _from_moment(m: datetime, kind: str) -> Any:
+    if kind == "date":
+        return m.date()
+    if kind == "datetime":
+        return m
+    if kind == "day":
+        return m.date().isoformat()
+    return m.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _time_arithmetic(op: str, left: Any, right: Any) -> Any:
+    lm, rm = _as_moment(left), _as_moment(right)
+    if op == "+":
+        if lm and _as_duration(right) is not None:
+            return _from_moment(lm[0] + _as_duration(right), lm[1])
+        if rm and _as_duration(left) is not None:
+            return _from_moment(rm[0] + _as_duration(left), rm[1])
+    if op == "-":
+        if lm and rm:
+            return lm[0] - rm[0]
+        if lm and _as_duration(right) is not None:
+            return _from_moment(lm[0] - _as_duration(right), lm[1])
+    return _NOT_TIME
+
+
+_NOT_TIME = object()
+
+
 def _eval_binary(op: str, left: Any, right: Any) -> Any:
     """Evaluate a binary arithmetic operation."""
+    timed = _time_arithmetic(op, left, right)
+    if timed is not _NOT_TIME:
+        return timed
     if op == "+":
         # String concatenation if either side is a string
         if isinstance(left, str) or isinstance(right, str):
