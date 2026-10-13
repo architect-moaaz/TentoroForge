@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/auth";
 
 // Evaluates the FORM-side business rules for a model against the current form
 // values and returns the field hints (hidden/required/readonly/recommendation)
@@ -15,7 +16,12 @@ export async function POST(request: Request) {
     if (!model) return NextResponse.json({ patches: {}, formHints: [] });
 
     const { evaluateFormRules } = await import("@/lib/rules");
-    const result = await evaluateFormRules(model, values, body?.user);
+    // The person is the SERVER session, never a `user` the form wrote into the
+    // body: a rule that reads `user.role` must see the role the caller has, or a
+    // hint (a field shown, a value filled) is one anybody could ask for as anyone.
+    const session = await auth();
+    const user = session?.user ?? undefined;
+    const result = await evaluateFormRules(model, values, user);
     return NextResponse.json({
       patches: result.patches ?? {},
       formHints: result.formHints ?? [],
