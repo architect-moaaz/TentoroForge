@@ -422,10 +422,18 @@ def _check(section_root: str, doc: dict, body: Any, natural_key: str) -> None:
         check(result, doc)
 
 
-def edit_definition(output_dir: str, section: str, find: str, replace: str, why: str = "") -> dict:
+def edit_definition(output_dir: str, section: str, find: str, replace: str, why: str = "",
+                    edits: list[dict] | None = None) -> dict:
     """Change `find` to `replace` in one part of the definition — the text
     `read_section(section)` shows — check it as the build would, record it,
-    and write the app out again from it."""
+    and write the app out again from it.
+
+    `edits` carries more of the same, `{section, find, replace}` each, applied
+    with the first as ONE change: all of them land or none do, and the app is
+    written out once. One edit was one step, so a fix that is the same change
+    in fourteen places — AquaTrack's tiles each needing the period their label
+    named — ran out of a turn's steps before half of it landed (m1dck85j,
+    2026-10-13)."""
     from services.blueprint.service import BlueprintService
     from services.smith.sync_app import sync
 
@@ -433,27 +441,45 @@ def edit_definition(output_dir: str, section: str, find: str, replace: str, why:
         svc = BlueprintService.load(output_dir=str(output_dir))
     except FileNotFoundError:
         return {"applied": False, "said": "", "touched": [], "finding": "This project has no definition yet."}
-    parent, key, node = _locate(svc.doc, section)
-    if node is None or parent is None:
-        return {"applied": False, "said": "", "touched": [],
-                "finding": f"The definition has no `{section}`. `read_section` with a top-level name lists what is there."}
-    text = json.dumps(node, indent=1, ensure_ascii=False)
-    new, why_not = _replace_once(text, find, replace, f"`{section}`")
-    if new is None:
-        return {"applied": False, "said": "", "touched": [], "finding": why_not}
-    try:
-        value = json.loads(new)
-    except ValueError as exc:
-        return {"applied": False, "said": "", "touched": [],
-                "finding": f"`{section}` would no longer be valid JSON after that edit: {exc}."}
+    wanted = [{"section": section, "find": find, "replace": replace}] if section else []
+    wanted += [e for e in (edits or []) if isinstance(e, dict)]
+    if not wanted:
+        return {"applied": False, "said": "", "touched": [], "finding": "No edit was given: name a `section`, `find` and `replace`."}
     before = svc.snapshot()
-    parent[key] = value
-    root = section.split(".")[0]
-    natural = str((value.get("name") or value.get("id")) if isinstance(value, dict) else "")
+    changed: list[tuple[str, Any]] = []
+    for i, e in enumerate(wanted):
+        sec = str(e.get("section") or "")
+        where = f"`{sec}`" + (f" (edit {i + 1} of {len(wanted)})" if len(wanted) > 1 else "")
+        parent, key, node = _locate(svc.doc, sec)
+        if node is None or parent is None:
+            svc.doc = before
+            return {"applied": False, "said": "", "touched": [],
+                    "finding": f"The definition has no {where}. `read_section` with a top-level name lists what is there."
+                               + (" Nothing was changed." if len(wanted) > 1 else "")}
+        text = json.dumps(node, indent=1, ensure_ascii=False)
+        new, why_not = _replace_once(text, str(e.get("find") or ""),
+                                     str(e.get("replace") if e.get("replace") is not None else ""), where)
+        if new is None:
+            svc.doc = before
+            return {"applied": False, "said": "", "touched": [],
+                    "finding": why_not + (" Nothing was changed." if len(wanted) > 1 else "")}
+        try:
+            value = json.loads(new)
+        except ValueError as exc:
+            svc.doc = before
+            return {"applied": False, "said": "", "touched": [],
+                    "finding": f"{where} would no longer be valid JSON after that edit: {exc}."
+                               + (" Nothing was changed." if len(wanted) > 1 else "")}
+        parent[key] = value
+        changed.append((sec, value))
+    sections = list(dict.fromkeys(sec for sec, _ in changed))
     try:
         svc.validate()
-        _check(root, svc.doc, value if isinstance(value, dict) else {root: value}, natural)
-        if root == "workflows":
+        for sec, value in changed:
+            root = sec.split(".")[0]
+            natural = str((value.get("name") or value.get("id")) if isinstance(value, dict) else "")
+            _check(root, svc.doc, value if isinstance(value, dict) else {root: value}, natural)
+        if any(sec.split(".")[0] == "workflows" for sec, _ in changed):
             # WRITTEN OUT BEFORE IT IS KEPT. A workflow the projection cannot
             # write stops EVERY workflow of the app being written (a guard
             # node twice did, 2026-10-07): tried in a scratch folder first.
@@ -461,18 +487,20 @@ def edit_definition(output_dir: str, section: str, find: str, replace: str, why:
             from services.blueprint.projection import project_workflows
             with tempfile.TemporaryDirectory() as scratch:
                 project_workflows(svc.doc, scratch)
-        affected = [str(value.get("id"))] if isinstance(value, dict) and re.match(
-            r"^[A-Z]+-\d{3,}$", str(value.get("id") or "")) else []
-        svc.commit(user_request=why or f"Edit {section}", smith_interpretation=f"Edited {section}",
+        affected = list(dict.fromkeys(str(v.get("id")) for _, v in changed if isinstance(v, dict) and re.match(
+            r"^[A-Z]+-\d{3,}$", str(v.get("id") or ""))))
+        label = ", ".join(sections)
+        svc.commit(user_request=why or f"Edit {label}", smith_interpretation=f"Edited {label}",
                    before=before, affected=affected)
     except Exception as exc:  # noqa: BLE001 — the contract's words go back to the loop
         svc.doc = before
         return {"applied": False, "said": "", "touched": [],
-                "finding": f"`{section}` was not changed — the definition refuses it: {exc}"}
+                "finding": f"`{', '.join(sections)}` was not changed — the definition refuses it: {exc}"}
     out = sync(svc, str(Path(output_dir) / "app"))
     moved = out["changed"] + out["added"] + out["removed"]
-    return {"applied": True, "said": f"Changed {section}" + (f": {' '.join(str(why).split())}" if why else "") + ".",
-            "finding": "", "touched": [f"app/{m}" for m in moved] or [f"definition:{section}"]}
+    return {"applied": True,
+            "said": f"Changed {', '.join(sections)}" + (f": {' '.join(str(why).split())}" if why else "") + ".",
+            "finding": "", "touched": [f"app/{m}" for m in moved] or [f"definition:{s}" for s in sections]}
 
 
 __all__ = ["classify", "edit_definition", "edit_file", "load_patches", "open_patches", "platform_text",

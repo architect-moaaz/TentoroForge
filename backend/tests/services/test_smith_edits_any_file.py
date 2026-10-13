@@ -454,3 +454,49 @@ def test_a_workflows_own_refusal_is_an_answer_in_the_page_check():
     assert "status of 422/.test(errors[i])" in src
     from services.blueprint.page_review import BROKEN_OUTCOMES
     assert "refused" not in BROKEN_OUTCOMES
+
+
+def test_one_fix_in_several_places_lands_as_one_edit(tmp_path, monkeypatch):
+    """AquaTrack's tiles each needed the period their label named: fourteen
+    edits, one step each, and two turns ran out of steps before any landed
+    (m1dck85j, 2026-10-13). `edits` carries them all in one step."""
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Shop", domain="retail")
+    svc.doc["workflows"] = [
+        {"id": f"FLOW-00{i}", "name": f"Flow {i}", "trigger": {"kind": "manual"}, "steps": [
+            {"key": "done", "name": "Done", "type": "end", "config": {}}]} for i in (1, 2, 3)]
+    svc.save()
+    synced: list[str] = []
+    monkeypatch.setattr("services.smith.sync_app.sync",
+                        lambda s, root: synced.append(root) or {"changed": [], "added": [], "removed": [], "database": "in step"})
+    out = file_edit.edit_definition(str(tmp_path), "workflows.FLOW-001", '"Done"', '"Finished"', "say finished",
+                                    edits=[{"section": "workflows.FLOW-002", "find": '"Done"', "replace": '"Finished"'},
+                                           {"section": "workflows.FLOW-003", "find": '"Done"', "replace": '"Finished"'}])
+    assert out["applied"], out
+    assert len(synced) == 1, "the app is written out once for the whole change"
+    names = [w["steps"][0]["name"] for w in BlueprintService.load(output_dir=tmp_path).doc["workflows"]]
+    assert names == ["Finished", "Finished", "Finished"]
+    assert "FLOW-001" in out["said"] and "FLOW-003" in out["said"]
+
+
+def test_one_edit_that_cannot_land_lands_none(tmp_path, monkeypatch):
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Shop", domain="retail")
+    svc.doc["workflows"] = [
+        {"id": f"FLOW-00{i}", "name": f"Flow {i}", "trigger": {"kind": "manual"}, "steps": [
+            {"key": "done", "name": "Done", "type": "end", "config": {}}]} for i in (1, 2)]
+    svc.save()
+    monkeypatch.setattr("services.smith.sync_app.sync",
+                        lambda s, root: {"changed": [], "added": [], "removed": [], "database": "in step"})
+    out = file_edit.edit_definition(str(tmp_path), "", "", "", "",
+                                    edits=[{"section": "workflows.FLOW-001", "find": '"Done"', "replace": '"Finished"'},
+                                           {"section": "workflows.FLOW-002", "find": '"Not there"', "replace": '"x"'}])
+    assert not out["applied"] and "edit 2 of 2" in out["finding"] and "Nothing was changed" in out["finding"]
+    names = [w["steps"][0]["name"] for w in BlueprintService.load(output_dir=tmp_path).doc["workflows"]]
+    assert names == ["Done", "Done"]
+
+
+def test_smith_is_told_it_can_edit_several_places_at_once():
+    from services.smith import tools
+    page = tools.render()
+    assert "edits: array" in page and "in one step" in page
