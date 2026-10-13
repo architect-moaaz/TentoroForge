@@ -59,9 +59,12 @@ def normalise(raw: Any) -> list[dict[str, Any]]:
         # An invented test keeps what makes it one: the kind of bomb it is and the sentence a reviewer judges it by.
         judge = str(s.get("judge") or "").strip()[:300]
         bomb = str(s.get("bomb") or "").strip()
+        # A test the AI wrote for everyday work (not an attack) says what sort it is: "missing detail", "outside its job"...
+        kind = str(s.get("kind") or "").strip()
         out.append({"id": sid, "name": name, "message": str(s["message"]).strip(),
                     **({"history": history} if history else {}), "expect": expect,
-                    **({"judge": judge} if judge else {}), **({"bomb": bomb} if re.fullmatch(r"[a-z_]{1,30}", bomb) else {})})
+                    **({"judge": judge} if judge else {}), **({"bomb": bomb} if re.fullmatch(r"[a-z_]{1,30}", bomb) else {}),
+                    **({"kind": kind} if re.fullmatch(r"[a-z_]{1,30}", kind) else {})})
     return out
 
 

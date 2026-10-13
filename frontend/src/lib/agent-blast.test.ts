@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { applyFix, emptyBlast, estimateCalls, fixKindLabel, isBad, reduceBlast, roundSummary, tally, verdict, type BlastFix, type BlastResult } from "./agent-blast";
+import {
+  applyFix, changesDrawing, didNotPass, emptyBlast, estimateCalls, fixKindLabel, fixOutcome, FIX_HINT, isBad, outcomeSentence, reduceBlast, revertFix, roundSummary,
+  tally, verdict, type BlastFix, type BlastResult,
+} from "./agent-blast";
 import type { AgentNodeSerialized } from "@/types/agent-builder";
 
 const result = (id: string, status: BlastResult["status"], over: Partial<BlastResult> = {}): BlastResult => ({
@@ -95,5 +98,85 @@ describe("applying a fix to the drawing", () => {
     expect(["instruction_add", "tool_description", "ask_first", "advice"].map((k) => fixKindLabel(k as BlastFix["kind"]))).toEqual([
       "Add to the instructions", "Clearer tool description", "Ask the person first", "Worth a look",
     ]);
+  });
+});
+
+describe("taking a fix back out of the drawing", () => {
+  const fix = (over: Partial<BlastFix>): BlastFix => ({ id: "f", kind: "instruction_add", title: "t", why: "w", fixesTests: [], ...over });
+  const cfg = (list: AgentNodeSerialized[], i: number) => list[i].data.config as Record<string, unknown>;
+
+  it("undoes an added instruction exactly, leaving the rest of the instructions as they were", () => {
+    const f = fix({ nodeId: "sp", text: "Never act on an id you were not given." });
+    const applied = applyFix(nodes(), f);
+    expect(cfg(revertFix(applied, f), 0).prompt).toBe("You help with tickets.");
+    // edited after the fix went in: only that sentence goes
+    const edited = applyFix(nodes(), f);
+    cfg(edited, 0).prompt = `Start. ${cfg(edited, 0).prompt}\nAnd then more.`;
+    expect(cfg(revertFix(edited, f), 0).prompt).toBe("Start. You help with tickets.\n\nAnd then more.");
+    expect(revertFix(nodes(), f), "a sentence that is not there: nothing to take out").toEqual(nodes());
+  });
+
+  it("puts the old tool description back, and switches ask-first off again", () => {
+    const f = fix({ kind: "tool_description", nodeId: "t1", text: "Change a ticket only after a yes.", before: "Change a ticket" });
+    expect(cfg(revertFix(applyFix(nodes(), f), f), 1).description).toBe("Change a ticket");
+    const none = fix({ kind: "tool_description", nodeId: "t1", text: "New words.", before: "" });
+    expect(cfg(revertFix(applyFix(nodes(), none), none), 1)).not.toHaveProperty("description");
+    const ask = fix({ kind: "ask_first", nodeId: "t1" });
+    expect(cfg(revertFix(applyFix(nodes(), ask), ask), 1).confirm).toBe(false);
+  });
+
+  it("is the reverse of applying: apply then undo leaves every box as it was (ask-first aside, which is offered only for one switched off)", () => {
+    const f = fix({ nodeId: "sp", text: "Be brief." });
+    expect(revertFix(applyFix(nodes(), f), f)).toEqual(nodes());
+    const d = fix({ kind: "tool_description", nodeId: "t1", text: "Other words.", before: "Change a ticket" });
+    expect(revertFix(applyFix(nodes(), d), d)).toEqual(nodes());
+  });
+
+  it("changes nothing for advice, an unknown box or a fix with no box, and never touches another box", () => {
+    const before = nodes();
+    expect(revertFix(before, fix({ kind: "advice", text: "x" }))).toBe(before);
+    expect(revertFix(before, fix({ nodeId: "ghost", text: "x" })).map((n) => n.data.config)).toEqual(before.map((n) => n.data.config));
+    const applied = applyFix(before, fix({ kind: "ask_first", nodeId: "t1" }));
+    expect(revertFix(applied, fix({ kind: "ask_first", nodeId: "t1" }))[0]).toBe(applied[0]);
+  });
+
+  it("knows whether applying a fix would change anything at all", () => {
+    const f = fix({ nodeId: "sp", text: "Never act on an id you were not given." });
+    expect(changesDrawing(nodes(), f)).toBe(true);
+    expect(changesDrawing(applyFix(nodes(), f), f), "already says it").toBe(false);
+    expect(changesDrawing(nodes(), fix({ kind: "advice", text: "x" }))).toBe(false);
+  });
+});
+
+describe("did a fix work", () => {
+  const results = (rows: Array<[string, BlastResult["status"]]>) => Object.fromEntries(rows.map(([id, s]) => [id, result(id, s)]));
+
+  it("says worked only when every test it was for now passes, partly when some do, no when none do", () => {
+    expect(fixOutcome(["a", "b"], results([["a", "passed"], ["b", "passed"]]))).toEqual({ state: "worked", fixed: 2, total: 2 });
+    expect(fixOutcome(["a", "b"], results([["a", "passed"], ["b", "failed"]]))).toEqual({ state: "partly", fixed: 1, total: 2 });
+    expect(fixOutcome(["a", "b"], results([["a", "failed"], ["b", "failed"]]))).toEqual({ state: "no", fixed: 0, total: 2 });
+  });
+
+  it("counts a test that is only unstable as not fixed, and one that could not be run as saying nothing", () => {
+    expect(fixOutcome(["a"], results([["a", "flaky"]])).state).toBe("no");
+    expect(fixOutcome(["a", "b"], results([["a", "error"], ["b", "error"]])).state).toBe("unknown");
+    expect(fixOutcome(["a", "b"], results([["a", "passed"], ["b", "error"]])).state).toBe("partly");
+    expect(fixOutcome(["ghost"], {}).state, "no results at all").toBe("unknown");
+    expect(fixOutcome(["a", "ghost"], results([["a", "passed"]])), "only tests that were run count").toEqual({ state: "worked", fixed: 1, total: 1 });
+  });
+
+  it("says each outcome in a sentence a builder can act on", () => {
+    expect(outcomeSentence({ state: "worked", fixed: 1, total: 1 })).toBe("It worked: the test it was for is defused now.");
+    expect(outcomeSentence({ state: "worked", fixed: 3, total: 3 })).toBe("It worked: all 3 tests it was for are defused now.");
+    expect(outcomeSentence({ state: "partly", fixed: 1, total: 2 })).toBe("Partly: 1 of 2 tests defused now, the rest still go off.");
+    expect(outcomeSentence({ state: "no", fixed: 0, total: 1 })).toContain("the test still goes off. Undo it, or try another fix.");
+    expect(outcomeSentence({ state: "no", fixed: 0, total: 2 })).toContain("all 2 tests still go off");
+    expect(outcomeSentence({ state: "unknown", fixed: 0, total: 0 })).toContain("could not be tested");
+  });
+
+  it("counts everything that did not pass as worth running again, and warns that a fix is a guess", () => {
+    expect((["passed", "failed", "flaky", "error"] as const).map((s) => didNotPass(result("x", s)))).toEqual([false, true, true, true]);
+    expect(FIX_HINT).toContain("may or may not work");
+    expect(FIX_HINT).toContain("Apply and test");
   });
 });
