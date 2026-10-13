@@ -55,6 +55,12 @@ class AgentBlastRun(BaseModel):
     repeats: int = 1
 
 
+class AgentBlastWrite(BaseModel):
+    """Have an AI write everyday test cases (not attacks) for the agent as drawn, each with a note on what a good reply is."""
+    graph: AgentDefinitionSave
+    count: int = 10
+
+
 class AgentBlastFixes(BaseModel):
     """Propose fixes for the tests that exploded."""
     graph: AgentDefinitionSave

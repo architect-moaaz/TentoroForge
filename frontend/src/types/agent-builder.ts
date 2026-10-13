@@ -330,6 +330,8 @@ export interface AgentScenario {
   judge?: string;
   /** The kind of bomb it came from. */
   bomb?: string;
+  /** What sort of everyday situation it is, when an AI wrote it ("missing_detail", "outside_its_job"...). */
+  kind?: string;
 }
 
 export interface AgentScenarioResult {

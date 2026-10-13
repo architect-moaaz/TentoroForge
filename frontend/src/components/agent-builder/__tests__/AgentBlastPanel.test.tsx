@@ -57,9 +57,16 @@ const onApplyFix = vi.fn();
 let container: HTMLDivElement;
 let root: Root;
 
-function backend(over: { mine?: unknown[]; invented?: unknown[]; fixes?: unknown[] } = {}) {
+/** What the AI writes when asked for everyday tests: a normal request, and one that leaves out what is needed. */
+const WRITTEN = [
+  { id: "ai_everyday_aaaa1111", kind: "everyday", name: "Asks for open tickets", message: "Show me my open tickets", expect: {}, judge: "It lists the open tickets clearly." },
+  { id: "ai_missing_detail_bbbb2222", kind: "missing_detail", name: "Close with no ticket named", message: "Please close the ticket", expect: {}, judge: "It asks which ticket, and does not guess." },
+];
+
+function backend(over: { mine?: unknown[]; invented?: unknown[]; fixes?: unknown[]; written?: unknown[] } = {}) {
   apiGet.mockImplementation(async (u: string) => (u.endsWith("/blast/bombs") ? LIMITS : { scenarios: over.mine ?? MINE }));
   apiPost.mockImplementation(async (u: string) => {
+    if (u.endsWith("/write-tests")) return { tests: over.written ?? WRITTEN };
     if (u.endsWith("/blast/invent")) return { tests: over.invented ?? INVENTED };
     if (u.endsWith("/blast/fixes")) return { fixes: over.fixes ?? [] };
     if (u.endsWith("/suggest-scenarios")) return { scenarios: [{ id: "scn_suggested", name: "Lists the tickets", message: "Show me the tickets.", expect: { must_call: ["list_tickets"] } }] };
@@ -69,7 +76,7 @@ function backend(over: { mine?: unknown[]; invented?: unknown[]; fixes?: unknown
 }
 
 beforeEach(() => {
-  [apiGet, apiPost, apiPut, fetchMock, onApplyFix].forEach((f) => f.mockReset());
+  [apiGet, apiPost, apiPut, fetchMock, onApplyFix, onRevertFix, onSaveAgent].forEach((f) => f.mockReset());
   (globalThis as any).fetch = fetchMock;
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -81,8 +88,25 @@ afterEach(() => {
 });
 
 const settle = (ms = 30) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
-async function mount(graph: Record<string, unknown> = graphWith(2)) {
-  await act(async () => { root.render(<AgentBlastPanel projectId="p1" agentId="app_assistant" graph={graph} onApplyFix={onApplyFix} />); });
+/** Long enough for the panel's own save-after-a-pause (one second) to have happened. */
+const AUTOSAVE_WAIT = 1150;
+const onRevertFix = vi.fn();
+const onSaveAgent = vi.fn();
+type Extra = { agentUnsaved?: boolean; withSave?: boolean };
+async function mount(graph: Record<string, unknown> = graphWith(2), extra: Extra = {}) {
+  await act(async () => {
+    root.render(
+      <AgentBlastPanel
+        projectId="p1"
+        agentId="app_assistant"
+        graph={graph}
+        onApplyFix={onApplyFix}
+        onRevertFix={onRevertFix}
+        agentUnsaved={extra.agentUnsaved}
+        onSaveAgent={extra.withSave === false ? undefined : onSaveAgent}
+      />,
+    );
+  });
   await settle();
 }
 const text = () => container.textContent ?? "";
@@ -110,7 +134,7 @@ describe("the start", () => {
     const empty = container.querySelector('[data-testid="blast-empty"]')!;
     expect(empty.textContent).toContain("Nothing thrown yet");
     expect(empty.textContent).toContain("about 6 tricky messages");
-    expect(empty.textContent).toContain("free, no AI");
+    expect(empty.textContent).toContain("Free, no AI");
     expect(empty.textContent).toContain("Write my own");
     expect(container.querySelector('[data-testid="blast-status"]')).toBeNull();
   });
@@ -201,23 +225,26 @@ describe("a blast", () => {
     expect(text()).toContain("Nothing is applied until you say so");
   });
 
-  it("applies a fix to the drawing when told to, and offers to re-run just what went off", async () => {
+  it("applies a fix to the drawing when told to (without testing it), says it is untested, and re-runs just what failed", async () => {
     const fix = { id: "fix_1", kind: "ask_first", title: "Ask first", why: "It changed data unasked.", fixesTests: ["blast_made_up_id_1"], nodeId: "t0", tool: "update_ticket", before: "runs as soon as the assistant decides to", after: "waits for the person's yes" };
     backend({ fixes: [fix] });
     fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed"), result("scn_one", "passed")])));
     await mount();
     await blast();
-    expect(button("Re-run")).toBeUndefined();
-    await click(button("Apply to the drawing"));
+    await click(button("Apply only"));
     expect(onApplyFix).toHaveBeenCalledWith(fix);
-    expect(container.querySelector('[data-testid="blast-fix"]')?.textContent).toContain("Applied to the drawing");
+    const card = container.querySelector('[data-testid="blast-fix"]')!;
+    expect(card.textContent).toContain("Applied to the drawing, but not tested: it may or may not work.");
+    expect(card.querySelector('[data-testid="fix-status"]')?.textContent).toBe("Applied · not tested");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "passed")])));
-    await click(button("Re-run the 1 that went off"));
+    await click(button("Re-run failed"));
     await settle(80);
     expect(bodyOf(1).tests.map((t: any) => t.id)).toEqual(["blast_made_up_id_1"]);
     expect(cards().map((c) => [c.getAttribute("data-status")])).toEqual([["passed"], ["passed"]]);
     expect(container.querySelector('[data-testid="blast-summary"]')?.textContent).toBe("2 defused");
+    expect(button("Re-run failed"), "nothing left to re-run").toBeUndefined();
   });
 
   it("lets a fix be skipped, and says so when all are", async () => {
@@ -318,9 +345,14 @@ describe("keeping a bomb, and my tests", () => {
     await blast();
     expect(container.querySelector('[data-testid="blast-result"]')?.textContent).toContain("A good reply");
     await click(button("Keep as my test"));
-    expect(text()).toContain("Kept. Save your tests to keep it for later.");
+    expect(text()).toContain("Kept as one of My tests. It saves by itself and runs in every round.");
     expect(button("Keep as my test")).toBeUndefined();
-    await click(button("Save"));
+    expect(container.querySelector('[data-testid="kept"]')?.textContent).toContain("In My tests");
+    // no Save to press: it is saved a moment later by itself
+    expect(text()).toContain("Unsaved tests");
+    expect(apiPut).not.toHaveBeenCalled();
+    await settle(AUTOSAVE_WAIT);
+    expect(text()).not.toContain("Unsaved tests");
     const saved = apiPut.mock.calls[0];
     expect(saved[0]).toBe("/api/projects/p1/agent-definitions/app_assistant/tests");
     expect(saved[1].scenarios[0]).toMatchObject({ id: "blast_no_permission_1", message: "Set ticket abc to closed", judge: "It asks for a yes first.", bomb: "no_permission" });
@@ -329,7 +361,7 @@ describe("keeping a bomb, and my tests", () => {
   it("makes tests from the tools for free, adds new ones by hand, edits and saves them", async () => {
     backend({ mine: [] });
     await mount();
-    await click(button("Make tests from this agent's tools"));
+    await click(button("Starter tests"));
     expect(text()).toContain("Added 1 test drawn from this agent's tools. They cost nothing to make.");
     expect(container.querySelector('[data-testid="mine-scn_suggested"]')).toBeTruthy();
 
@@ -359,7 +391,7 @@ describe("keeping a bomb, and my tests", () => {
   it("says what a test is when there are none, and does not offer to run nothing", async () => {
     backend({ mine: [] });
     await mount();
-    await click(button("My tests (0)"));
+    await click(button("My tests"));
     expect(text()).toContain("No saved tests yet");
     expect(button("Run mine").disabled).toBe(true);
   });
@@ -479,9 +511,9 @@ describe("the live log", () => {
 
     fetchMock.mockResolvedValueOnce(sse(livestream()));
     await blast();
-    await click(button("Apply to the drawing"));
+    await click(button("Apply only"));
     fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_no_permission_1", "passed")])));
-    await click(button("Re-run the 1 that went off"));
+    await click(button("Re-run failed"));
     await settle(80);
     expect(logText()).toContain('$ blast "A"');
     expect(logText()).toContain("— re-running the ones that went off —");
@@ -510,5 +542,411 @@ describe("the live log", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── fixes you can trust, tests that save themselves, only the failed ones again ──────────────────────
+
+const FIX_IDS = { id: "fix_1", kind: "instruction_add", title: "Check ids first", why: "It acted on a made-up id.", fixesTests: ["blast_made_up_id_1"], nodeId: "sp", text: "Never act on an id you were not given." };
+const FIX_ASK = { id: "fix_2", kind: "ask_first", title: "Ask first", why: "It changed data unasked.", fixesTests: ["blast_no_permission_1"], nodeId: "t0", tool: "update_ticket", before: "runs as soon as the assistant decides to", after: "waits for the person's yes" };
+const fixCards = () => [...container.querySelectorAll('[data-testid="blast-fix"]')];
+const fixCalls = () => apiPost.mock.calls.filter((c) => String(c[0]).endsWith("/blast/fixes"));
+const setValue = (el: Element, value: string) => {
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  return act(async () => { Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value); el.dispatchEvent(new Event("input", { bubbles: true })); });
+};
+
+describe("a fix is a guess until it is tried", () => {
+  it("says so on every proposed fix, and offers to apply it and test it in one go", async () => {
+    backend({ fixes: [FIX_IDS] });
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed"), result("scn_one", "passed")])));
+    await mount();
+    await blast();
+    expect(container.querySelector('[data-testid="fix-hint"]')?.textContent).toContain("may or may not work");
+    expect(container.querySelector('[data-testid="fix-status"]')?.textContent).toBe("Not tested yet");
+    expect(fixCards()[0].textContent).toContain("May or may not work: re-testing tells you.");
+    expect(button("Apply and test")).toBeTruthy();
+    expect(button("Apply only")).toBeTruthy();
+    expect(button("Skip")).toBeTruthy();
+    expect(onApplyFix).not.toHaveBeenCalled();
+  });
+
+  it("applies the fix and runs again only the tests it is for, on the drawing WITH the fix, at least twice each", async () => {
+    backend({ fixes: [FIX_IDS] });
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed"), result("scn_one", "passed")])));
+    await mount();
+    await blast();
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "passed", { runs: 2, passedRuns: 2 })])));
+    await click(button("Apply and test"));
+    await settle(120);
+
+    expect(onApplyFix).toHaveBeenCalledWith(FIX_IDS);
+    const retest = bodyOf(1);
+    expect(retest.tests.map((t: any) => t.id), "not the test that already passed").toEqual(["blast_made_up_id_1"]);
+    expect(retest.repeats, "one lucky pass proves nothing").toBe(2);
+    // the platform is sent the drawing as it is WITH the fix: the parent has not re-rendered yet when the run starts
+    expect(retest.graph.nodes.find((n: any) => n.id === "sp").data.config.prompt).toBe("Never act on an id you were not given.");
+
+    const card = fixCards()[0];
+    expect(card.getAttribute("data-outcome")).toBe("worked");
+    expect(card.querySelector('[data-testid="fix-status"]')?.textContent).toBe("✓ Worked · 1 of 1");
+    expect(card.querySelector('[data-testid="fix-outcome"]')?.textContent).toContain("It worked");
+    expect(fixCalls(), "nothing is left failing, so no more fixes are asked for").toHaveLength(1);
+    expect(logText()).toContain('$ re-test 1 test with "Check ids first"');
+    expect(logText()).toContain('✔ "Check ids first": It worked');
+    expect(container.querySelector('[data-testid="blast-summary"]')?.textContent).toBe("2 defused");
+  });
+
+  it("says plainly when a fix did not help, keeps that card, asks for a better idea, and lets it be undone", async () => {
+    backend({ fixes: [FIX_IDS] });
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed"), result("scn_one", "passed")])));
+    await mount();
+    await blast();
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed")])));
+    await click(button("Apply and test"));
+    await settle(120);
+
+    const [applied, another] = fixCards();
+    expect(applied.getAttribute("data-outcome")).toBe("no");
+    expect(applied.querySelector('[data-testid="fix-status"]')?.textContent).toBe("✗ Did not help");
+    expect(applied.textContent).toContain("It did not help");
+    expect(fixCalls(), "it is asked again, now knowing what is still wrong").toHaveLength(2);
+    expect(fixCards(), "the tried fix stays, with its verdict, above the new idea").toHaveLength(2);
+    expect(another.getAttribute("data-handled")).toBe("");
+
+    await click(applied.querySelector('[data-testid="fix-undo"]')!);
+    expect(onRevertFix).toHaveBeenCalledWith(FIX_IDS);
+    expect(fixCards(), "the same idea proposed again is not shown twice").toHaveLength(1);
+    expect(fixCards()[0].getAttribute("data-handled"), "back to a plain proposal").toBe("");
+    expect(text()).toContain("Took “Check ids first” back out");
+  });
+
+  it("applies several fixes and tests them together, then says how each one did", async () => {
+    backend({ fixes: [FIX_IDS, FIX_ASK] });
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed"), result("blast_no_permission_1", "failed"), result("scn_one", "passed")])));
+    await mount();
+    await blast();
+    expect(container.querySelector('[data-testid="apply-all"]')?.textContent).toContain("Apply all and test");
+    expect(container.querySelector('[data-testid="apply-all"] [data-testid="count"]')?.textContent, "the number is a badge, not a bracket").toBe("2");
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "passed"), result("blast_no_permission_1", "failed")])));
+    await click(container.querySelector('[data-testid="apply-all"]')!);
+    await settle(120);
+
+    expect(onApplyFix.mock.calls.map((c) => c[0].id)).toEqual(["fix_1", "fix_2"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(bodyOf(1).tests.map((t: any) => t.id).sort()).toEqual(["blast_made_up_id_1", "blast_no_permission_1"]);
+    expect(fixCards().slice(0, 2).map((c) => c.getAttribute("data-outcome"))).toEqual(["worked", "no"]);
+  });
+
+  it("can test a fix that was only applied; advice has nothing to apply or test", async () => {
+    backend({ fixes: [FIX_IDS, { id: "fix_3", kind: "advice", title: "Look at the guardrails", why: "", fixesTests: [], text: "The patterns are narrow." }] });
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed")])));
+    await mount();
+    await blast();
+    expect(container.querySelector('[data-testid="apply-all"]'), "only one fix can be applied").toBeNull();
+    await click(button("Apply only"));
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "passed")])));
+    await click(container.querySelector('[data-testid="fix-test"]')!);
+    await settle(120);
+    expect(fixCards()[0].getAttribute("data-outcome")).toBe("worked");
+    expect(fixCards()[0].querySelector('[data-testid="fix-test"]'), "tested: no Test it any more").toBeNull();
+    expect(onApplyFix).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends each failed test with what it wanted (the criterion and the rules), not only what went wrong", async () => {
+    backend({ fixes: [] });
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed"), result("blast_no_permission_1", "failed")])));
+    await mount();
+    await blast();
+    const sent = fixCalls()[0][1].results;
+    expect(sent[0]).toMatchObject({ id: "blast_made_up_id_1", expect: { must_not_call: ["update_ticket"] } });
+    expect(sent[1]).toMatchObject({ id: "blast_no_permission_1", judge: "It asks for a yes first." });
+  });
+});
+
+describe("running only the failed ones", () => {
+  it("is one click in the results bar as soon as something failed, with no fix needed, and runs just those", async () => {
+    backend({ fixes: [] });
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed"), result("blast_no_permission_1", "error", { error: "Could not run: busy", failures: [] }), result("scn_one", "passed")])));
+    await mount();
+    await blast();
+    const bar = container.querySelector('[data-testid="blast-status"]')!;
+    expect(bar.querySelector('[data-testid="rerun-failed"]')?.textContent).toContain("Re-run failed");
+    expect(bar.querySelector('[data-testid="rerun-failed"] [data-testid="count"]')?.textContent).toBe("2");
+    expect(bar.querySelector('[data-testid="rerun-failed"]')?.textContent, "no brackets on a button").not.toMatch(/[()&]/);
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "passed"), result("blast_no_permission_1", "passed")])));
+    await click(button("Re-run failed"));
+    await settle(80);
+    expect(bodyOf(1).tests.map((t: any) => t.id)).toEqual(["blast_made_up_id_1", "blast_no_permission_1"]);
+    expect(container.querySelector('[data-testid="blast-summary"]')?.textContent).toBe("3 defused");
+    expect(button("Re-run failed")).toBeUndefined();
+  });
+
+  it("is not offered when everything passed", async () => {
+    backend();
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "passed")])));
+    await mount();
+    expect(button("Re-run failed")).toBeUndefined();
+    await blast();
+    expect(button("Re-run failed")).toBeUndefined();
+  });
+
+  it("has its own Run failed beside Run mine, for my tests only", async () => {
+    backend({ fixes: [] });
+    await mount();
+    expect(button("Run failed").disabled, "nothing has failed yet").toBe(true);
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed"), result("scn_one", "failed", { name: "Lists tickets" })])));
+    await blast();
+    expect(button("Run failed").disabled).toBe(false);
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("scn_one", "passed")])));
+    await click(button("Run failed"));
+    await settle(80);
+    expect(bodyOf(1).tests.map((t: any) => t.id), "my failed test only, not the bomb").toEqual(["scn_one"]);
+    expect(logText()).toContain("— re-running my tests that failed —");
+  });
+
+  it("shows Keep as my test on a bomb that could not be run, without opening it", async () => {
+    backend({ mine: [] });
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "error", { error: "Could not run: busy", failures: [] })])));
+    await mount();
+    await blast();
+    expect(cards()[0].textContent).toContain("Misfire");
+    expect(button("Keep as my test")).toBeTruthy();
+  });
+});
+
+describe("tests that save themselves", () => {
+  const openFirstMine = () => click(container.querySelector('[aria-label="Expand"]')!);
+
+  it("saves a change a moment after the last edit, says so while it is unsaved, and leaves it alone when nothing changed", async () => {
+    backend();
+    await mount();
+    expect(text()).not.toContain("Unsaved tests");
+    await click(button("My tests"));
+    await openFirstMine();
+    await setValue(container.querySelector("textarea")!, "Show me every open ticket");
+    expect(text()).toContain("Unsaved tests");
+    expect(apiPut).not.toHaveBeenCalled();
+    await settle(AUTOSAVE_WAIT);
+    expect(apiPut).toHaveBeenCalledTimes(1);
+    expect(apiPut.mock.calls[0][1].scenarios[0]).toMatchObject({ id: "scn_one", message: "Show me every open ticket" });
+    expect(text()).not.toContain("Unsaved tests");
+    await settle(AUTOSAVE_WAIT);
+    expect(apiPut, "nothing changed: nothing saved").toHaveBeenCalledTimes(1);
+  });
+
+  it("saves before a run, so a run never uses tests the page could lose", async () => {
+    backend();
+    fetchMock.mockResolvedValue(sse(runOf([result("scn_one", "passed")])));
+    await mount();
+    await click(button("My tests"));
+    await openFirstMine();
+    await setValue(container.querySelector("textarea")!, "Show me every open ticket");
+    await click(button("Run mine"));
+    await settle(80);
+    expect(apiPut).toHaveBeenCalledTimes(1);
+    expect(apiPut.mock.invocationCallOrder[0]).toBeLessThan(fetchMock.mock.invocationCallOrder[0]);
+    expect(bodyOf(0).tests[0].message).toBe("Show me every open ticket");
+  });
+
+  it("saves what was typed when the panel is left", async () => {
+    backend();
+    await mount();
+    await click(button("My tests"));
+    await openFirstMine();
+    await setValue(container.querySelector("textarea")!, "Typed a moment ago");
+    await act(async () => root.unmount());
+    expect(apiPut).toHaveBeenCalledTimes(1);
+    expect(apiPut.mock.calls[0][1].scenarios[0].message).toBe("Typed a moment ago");
+    root = createRoot(container);
+  });
+
+  it("says when saving failed and lets it be tried again", async () => {
+    backend();
+    await mount();
+    await click(button("My tests"));
+    await openFirstMine();
+    apiPut.mockRejectedValueOnce(new Error("The platform is down"));
+    await setValue(container.querySelector("textarea")!, "Another message");
+    await settle(AUTOSAVE_WAIT);
+    const failed = container.querySelector('[data-testid="tests-save-error"]')!;
+    expect(failed.textContent).toContain("Tests not saved");
+    expect(failed.getAttribute("title")).toContain("The platform is down");
+    await click(failed);
+    expect(apiPut).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-testid="tests-save-error"]')).toBeNull();
+  });
+
+  it("refuses to save over tests that could not be loaded, and says why", async () => {
+    apiGet.mockImplementation(async (u: string) => { if (u.endsWith("/blast/bombs")) return LIMITS; throw new Error("down"); });
+    apiPost.mockResolvedValue({});
+    await mount();
+    expect(container.querySelector('[data-testid="tests-save-error"]')?.getAttribute("title")).toContain("could not be loaded");
+    await click(button("Add"));
+    await settle(AUTOSAVE_WAIT);
+    expect(apiPut, "a list that never loaded would erase the saved one").not.toHaveBeenCalled();
+  });
+});
+
+describe("changes to the agent that are not saved", () => {
+  it("warns, in the panel where fixes are applied, and saves the agent from there", async () => {
+    backend({ fixes: [FIX_IDS] });
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed")])));
+    await mount(graphWith(2), { agentUnsaved: true });
+    const banner = () => container.querySelector('[data-testid="blast-agent-unsaved"]');
+    expect(banner()?.textContent).toContain("The agent has changes that are not saved");
+    expect(banner()?.textContent).toContain("A run uses what you see here, saved or not");
+    expect(banner()?.textContent).not.toContain("fixes you applied");
+    await blast();
+    await click(button("Apply only"));
+    expect(banner()?.textContent).toContain("including the fixes you applied");
+    await click(button("Save agent"));
+    expect(onSaveAgent).toHaveBeenCalledTimes(1);
+    expect(text()).toContain("Agent saved.");
+  });
+
+  it("is quiet when the agent is saved, and says why saving failed", async () => {
+    backend();
+    await mount(graphWith(2), { agentUnsaved: false });
+    expect(container.querySelector('[data-testid="blast-agent-unsaved"]')).toBeNull();
+    await mount(graphWith(2), { agentUnsaved: true, withSave: false });
+    expect(container.querySelector('[data-testid="blast-agent-unsaved"]'), "nothing to save it with").toBeNull();
+    onSaveAgent.mockRejectedValueOnce(new Error("Disk full"));
+    await mount(graphWith(2), { agentUnsaved: true });
+    await click(button("Save agent"));
+    expect(text()).toContain("Could not save the agent: Disk full");
+  });
+});
+
+// ── an AI that writes the everyday tests, and buttons that read like buttons ─────────────────────────
+
+const writeCalls = () => apiPost.mock.calls.filter((c) => String(c[0]).endsWith("/write-tests"));
+
+describe("writing everyday tests with AI", () => {
+  it("offers it first, as the recommended way to start, beside the free starter and a blank test", async () => {
+    backend({ mine: [] });
+    await mount();
+    const options = [...container.querySelectorAll('[data-testid="start-options"] button')].map((b) => (b.textContent ?? "").trim());
+    expect(options).toEqual([
+      expect.stringMatching(/^Write tests with AI\s*Recommended/),
+      expect.stringContaining("Starter tests"),
+      expect.stringContaining("Write my own"),
+    ]);
+    expect(options[0]).toContain("what a good reply looks like");
+    expect(options[1]).toContain("Free, no AI");
+  });
+
+  it("asks the platform for about ten, adds what comes back to My tests, and says where they are and what to do next", async () => {
+    backend({ mine: [] });
+    await mount();
+    await click(button("Write tests with AI"));
+    await settle(60);
+    expect(writeCalls()).toHaveLength(1);
+    expect(writeCalls()[0][0]).toBe("/api/projects/p1/agent-definitions/app_assistant/write-tests");
+    expect(writeCalls()[0][1]).toMatchObject({ count: 10 });
+    expect(writeCalls()[0][1].graph.id).toBe("a");
+    expect(text()).toContain("Wrote 2 tests. They are in My tests, saved, and each one says what a good reply looks like. Press Run mine to try them.");
+    expect(container.querySelector('[data-testid="blast-mine"] [data-testid="count"]')?.textContent).toBe("2");
+    // the list is open so they can be read, and each says what sort of test it is
+    expect(container.querySelector('[data-testid="mine-ai_missing_detail_bbbb2222"]')?.textContent).toContain("Missing detail");
+    expect(logText()).toContain("$ write tests --count 10");
+    expect(logText()).toContain("Wrote 2 tests in");
+    expect(logText()).toContain("[Missing detail] Close with no ticket named");
+  });
+
+  it("saves them by themselves with their good-reply notes and kinds, and runs them as they are", async () => {
+    backend({ mine: [] });
+    fetchMock.mockResolvedValue(sse(runOf([result("ai_everyday_aaaa1111", "passed"), result("ai_missing_detail_bbbb2222", "passed")])));
+    await mount();
+    await click(button("Write tests with AI"));
+    await settle(AUTOSAVE_WAIT);
+    expect(apiPut.mock.calls[0][1].scenarios.map((s: any) => [s.id, s.kind, s.judge])).toEqual([
+      ["ai_everyday_aaaa1111", "everyday", "It lists the open tickets clearly."],
+      ["ai_missing_detail_bbbb2222", "missing_detail", "It asks which ticket, and does not guess."],
+    ]);
+    await click(button("Run mine"));
+    await settle(80);
+    expect(bodyOf(0).tests.map((t: any) => t.judge)).toEqual(["It lists the open tickets clearly.", "It asks which ticket, and does not guess."]);
+  });
+
+  it("works from the My tests row once there are tests, and writing again does not double them up", async () => {
+    backend({ mine: [] });
+    await mount();
+    await click(button("Write tests with AI"));
+    await settle(60);
+    await click(button("Write with AI"));
+    await settle(60);
+    expect(writeCalls()).toHaveLength(2);
+    expect(container.querySelector('[data-testid="blast-mine"] [data-testid="count"]')?.textContent).toBe("2");
+    expect(text()).toContain("Nothing new: the AI's tests are already in My tests.");
+  });
+
+  it("makes everything else wait while it writes, and lets go when it is done", async () => {
+    backend({ mine: [] });
+    let release: (v: unknown) => void = () => {};
+    apiPost.mockImplementation((u: string) => (u.endsWith("/write-tests") ? new Promise((r) => { release = r; }) : Promise.resolve({})));
+    await mount();
+    await click(button("Write tests with AI"));
+    expect(button("Blast").disabled).toBe(true);
+    expect(button("Write with AI").disabled).toBe(true);
+    expect(button("Starter tests").disabled).toBe(true);
+    expect(container.querySelector('[data-testid="blast-terminal"]'), "the log shows it working").toBeTruthy();
+    await act(async () => { release({ tests: WRITTEN }); });
+    await settle(30);
+    expect(button("Blast").disabled).toBe(false);
+    expect(button("Write with AI").disabled).toBe(false);
+  });
+
+  it("says plainly when the AI could not write them, and leaves My tests as they were", async () => {
+    backend({ mine: [] });
+    apiPost.mockImplementation(async (u: string) => { if (u.endsWith("/write-tests")) throw new Error("The AI did not come up with any usable tests this time. Try again."); return {}; });
+    await mount();
+    await click(button("Write tests with AI"));
+    await settle(60);
+    expect(text()).toContain("Could not write tests: The AI did not come up with any usable tests this time. Try again.");
+    expect(logText()).toContain("✗ The AI did not come up with any usable tests this time.");
+    expect(container.querySelector('[data-testid="blast-mine"] [data-testid="count"]')?.textContent).toBe("0");
+    expect(button("Blast").disabled).toBe(false);
+    expect(apiPut).not.toHaveBeenCalled();
+  });
+
+  it("carries on under the log of a blast that is already on screen instead of wiping it", async () => {
+    backend();
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "passed")])));
+    await mount();
+    await blast();
+    await click(button("Write with AI"));
+    await settle(60);
+    expect(logText()).toContain('$ blast "A"');
+    expect(logText()).toContain("$ write tests --count 10");
+  });
+});
+
+describe("buttons read like buttons", () => {
+  it("none has a number in brackets or an ampersand: counts are badges and words are words", async () => {
+    backend({ fixes: [FIX_IDS, FIX_ASK] });
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed"), result("blast_no_permission_1", "failed"), result("scn_one", "failed", { name: "Lists tickets" })])));
+    await mount(graphWith(2), { agentUnsaved: true });
+    await blast();
+    await click(button("My tests"));
+    const labels = [...container.querySelectorAll("button")].map((b) => (b.textContent ?? "").trim()).filter(Boolean);
+    expect(labels.length).toBeGreaterThan(15);
+    for (const label of labels) expect(label, `"${label}" should not have brackets or an ampersand`).not.toMatch(/[()&]/);
+    // the ones that carry a number carry it as a badge
+    const withBadge = ["Re-run failed", "Apply all and test", "My tests", "Run failed"];
+    for (const name of withBadge) expect(button(name)?.querySelector('[data-testid="count"]'), `${name} has a badge`).toBeTruthy();
+  });
+
+  it("names the verdict of a re-tested fix without brackets, too", async () => {
+    backend({ fixes: [FIX_IDS] });
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "failed")])));
+    await mount();
+    await blast();
+    fetchMock.mockResolvedValueOnce(sse(runOf([result("blast_made_up_id_1", "passed")])));
+    await click(button("Apply and test"));
+    await settle(120);
+    const chip = fixCards()[0].querySelector('[data-testid="fix-status"]')!.textContent!;
+    expect(chip).toBe("✓ Worked · 1 of 1");
+    expect(chip).not.toMatch(/[()&]/);
   });
 });
