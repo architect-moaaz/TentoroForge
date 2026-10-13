@@ -19,7 +19,7 @@ from models.project import (
     Version,
 )
 from schemas.agent_builder import (
-    AgentBlastFixes, AgentBlastInvent, AgentBlastRun, AgentDefinitionSave, AgentListItem, AgentScenarioSave,
+    AgentBlastFixes, AgentBlastInvent, AgentBlastRun, AgentBlastWrite, AgentDefinitionSave, AgentListItem, AgentScenarioSave,
     AgentTestRequest,
     AgentWatch,
 )
@@ -289,6 +289,25 @@ async def blast_invent(
     await get_project_with_auth(project_id, user, db)
     try:
         return {"tests": await invent_bombs(req.graph.model_dump(), req.bombs, req.per_bomb)}
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/projects/{project_id}/agent-definitions/{agent_id}/write-tests")
+async def write_agent_tests(
+    project_id: uuid.UUID,
+    agent_id: str,
+    req: AgentBlastWrite,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Have an AI write everyday test cases for this agent as drawn, each with a note on what a good reply does. One
+    model call. Nothing is run or saved here: the builder keeps them in My tests."""
+    from services.agent_blast import write_tests
+
+    await get_project_with_auth(project_id, user, db)
+    try:
+        return {"tests": await write_tests(req.graph.model_dump(), req.count)}
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

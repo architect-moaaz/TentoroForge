@@ -24,6 +24,14 @@ export interface BlastTest {
   /** One sentence a reviewer judges the reply by, when rules cannot say. */
   judge?: string;
   bomb?: string;
+  /** What sort of everyday situation it is, when an AI wrote it as a normal test rather than an attack. */
+  kind?: string;
+}
+
+/** A kind of test in plain words: "missing_detail" becomes "Missing detail". */
+export function kindWords(kind?: string | null): string {
+  const words = String(kind ?? "").replace(/_/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "";
 }
 
 export type BlastStatus = "passed" | "failed" | "flaky" | "error";
@@ -165,7 +173,73 @@ export function applyFix(nodes: AgentNodeSerialized[], fix: BlastFix): AgentNode
   });
 }
 
+/** Whether applying a fix would change the drawing at all (it would not if the drawing already says it). */
+export function changesDrawing(nodes: AgentNodeSerialized[], fix: BlastFix): boolean {
+  return JSON.stringify(applyFix(nodes, fix)) !== JSON.stringify(nodes);
+}
+
+/**
+ * A fix taken back out of the drawing: the reverse of `applyFix`. The sentence it added is removed, the old tool
+ * description is put back, and "ask first" goes back to off (it only ever offers itself for a tool that was switched off).
+ */
+export function revertFix(nodes: AgentNodeSerialized[], fix: BlastFix): AgentNodeSerialized[] {
+  if (!fix.nodeId) return nodes;
+  return nodes.map((n) => {
+    if (n.id !== fix.nodeId) return n;
+    const config = { ...((n.data.config as Record<string, unknown>) ?? {}) };
+    if (fix.kind === "instruction_add" && fix.text) {
+      const current = String(config.prompt ?? "");
+      const at = current.lastIndexOf(fix.text);
+      if (at < 0) return n;
+      config.prompt = `${current.slice(0, at)}${current.slice(at + fix.text.length)}`.replace(/\s+$/, "");
+    } else if (fix.kind === "tool_description") {
+      if (fix.before) config.description = fix.before;
+      else delete config.description;
+    } else if (fix.kind === "ask_first") {
+      config.confirm = false;
+    } else {
+      return n;
+    }
+    return { ...n, data: { ...n.data, config } as AgentNodeSerialized["data"] };
+  });
+}
+
 /** What a fix does, in a phrase. */
 export function fixKindLabel(kind: BlastFix["kind"]): string {
   return { instruction_add: "Add to the instructions", tool_description: "Clearer tool description", ask_first: "Ask the person first", advice: "Worth a look" }[kind];
+}
+
+/** Said on every proposed fix: it is a guess until it has been tried. */
+export const FIX_HINT = "An AI's guess: it may or may not work. “Apply and test” tries it on the tests that failed and tells you; you can undo it.";
+
+/** Everything that did not pass, and so is worth running again: exploded, unstable, or could not be run. */
+export const didNotPass = (r: BlastResult) => r.status !== "passed";
+
+export interface FixOutcome {
+  state: "worked" | "partly" | "no" | "unknown";
+  /** How many of the re-tested tests now hold. */
+  fixed: number;
+  total: number;
+}
+
+/**
+ * Did a fix work? Looks at the tests it was meant to help, after they were run again. A test that is only unstable still
+ * counts as not fixed, and a test that could not be run says nothing either way.
+ */
+export function fixOutcome(testIds: string[], results: Record<string, BlastResult>): FixOutcome {
+  const seen = testIds.map((id) => results[id]).filter(Boolean);
+  const fixed = seen.filter((r) => r.status === "passed").length;
+  if (seen.length === 0 || seen.every((r) => r.status === "error")) return { state: "unknown", fixed, total: seen.length };
+  return { state: fixed === seen.length ? "worked" : fixed === 0 ? "no" : "partly", fixed, total: seen.length };
+}
+
+/** The outcome of a fix in a sentence. */
+export function outcomeSentence(o: FixOutcome): string {
+  const n = (k: number) => `${k} test${k === 1 ? "" : "s"}`;
+  switch (o.state) {
+    case "worked": return `It worked: ${o.total === 1 ? "the test it was for is" : `all ${n(o.total)} it was for are`} defused now.`;
+    case "partly": return `Partly: ${o.fixed} of ${n(o.total)} defused now, the rest still go off.`;
+    case "no": return `It did not help: ${o.total === 1 ? "the test still goes" : `all ${n(o.total)} still go`} off. Undo it, or try another fix.`;
+    default: return "It could not be tested: the tests could not be run. Try again.";
+  }
 }

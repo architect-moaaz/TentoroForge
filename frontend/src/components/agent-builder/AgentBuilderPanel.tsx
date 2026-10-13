@@ -30,7 +30,7 @@ import { AgentTestConsole } from "./AgentTestConsole";
 import { AgentWatchPanel } from "./AgentWatchPanel";
 import { useAgentWatch } from "./useAgentWatch";
 import { nodeStates } from "@/lib/agent-watch";
-import { applyFix } from "@/lib/agent-blast";
+import { applyFix, revertFix } from "@/lib/agent-blast";
 import { AgentIOSchemaEditor } from "./config/AgentIOSchemaEditor";
 import type {
   AgentDefinition,
@@ -46,6 +46,15 @@ import type {
 interface AgentBuilderPanelProps {
   projectId: string;
   orgId?: string;
+}
+
+/**
+ * What an agent is, for telling whether it has changed since it was saved: its name, description, the boxes' settings,
+ * what connects to what, and the agent-level config. Box positions and what is selected are left out on purpose: moving
+ * a box is not a change worth warning about (the same reason the check below is keyed on data, not on positions).
+ */
+function draftKeyOf(name: string, description: string, nodes: AgentNodeSerialized[], edges: AgentEdgeSerialized[], config: unknown): string {
+  return JSON.stringify([name, description, nodes.map((n) => [n.id, n.data]), edges.map((e) => [e.source, e.target]), config ?? null]);
 }
 
 export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) {
@@ -71,6 +80,8 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
   const [confirmingApply, setConfirmingApply] = useState(false);
   // Find problems: bombs thrown at the agent as drawn, with fixes (it also holds the agent's saved tests).
   const [showBlast, setShowBlast] = useState(false);
+  // The agent as last saved (see draftKeyOf), or null for one that was only just drawn and never saved.
+  const [savedKey, setSavedKey] = useState<string | null>(null);
   const [showTestConsole, setShowTestConsole] = useState(false);
   // Watch the running app's real chats live: the canvas lights up as they happen.
   const [showWatch, setShowWatch] = useState(false);
@@ -94,6 +105,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       setEditDescription(agent.description || "");
       setNodes(agent.nodes || []);
       setEdges(agent.edges || []);
+      setSavedKey(draftKeyOf(agent.name, agent.description || "", agent.nodes || [], agent.edges || [], agent.config));
       setSelectedNodeId(null);
       setShowTestConsole(false);
       setApplyStatus(null);
@@ -129,6 +141,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
     setEditDescription("");
     setNodes(newAgent.nodes);
     setEdges(newAgent.edges);
+    setSavedKey(null);
     setSelectedNodeId(null);
     setShowTestConsole(false);
     setApplyStatus(null);
@@ -150,6 +163,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       setEditDescription(newAgent.description || "");
       setNodes(newAgent.nodes);
       setEdges(newAgent.edges);
+      setSavedKey(null);
       setSelectedNodeId(null);
       setShowTestConsole(false);
       setApplyStatus(null);
@@ -172,6 +186,7 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       setEditDescription(suggested.description || "");
       setNodes(suggested.nodes);
       setEdges(suggested.edges);
+      setSavedKey(null);
       setSelectedNodeId(null);
       setShowTestConsole(false);
       setApplyStatus(null);
@@ -256,10 +271,17 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
       config: currentAgent.config,
     };
     await api.post(`/api/projects/${projectId}/agent-definitions`, payload);
+    setSavedKey(draftKeyOf(editName, editDescription, nodes, edges, currentAgent.config));
     queryClient.invalidateQueries({
       queryKey: ["project", projectId, "agent-definitions"],
     });
   }, [currentAgent, editName, editDescription, nodes, edges, projectId, queryClient]);
+
+  // Has the agent changed since it was last saved? Said inside Find problems, where fixes are applied.
+  const agentUnsaved = useMemo(
+    () => !!currentAgent && savedKey !== draftKeyOf(editName, editDescription, nodes, edges, currentAgent.config),
+    [currentAgent, savedKey, editName, editDescription, nodes, edges],
+  );
 
   // Save, from the toolbar button: the outcome is shown in the status bar.
   const handleSave = useCallback(async () => {
@@ -645,6 +667,12 @@ export function AgentBuilderPanel({ projectId, orgId }: AgentBuilderPanelProps) 
                 config: currentAgent.config,
               }}
               onApplyFix={(fix) => setNodes((current) => applyFix(current, fix))}
+              onRevertFix={(fix) => setNodes((current) => revertFix(current, fix))}
+              agentUnsaved={agentUnsaved}
+              onSaveAgent={async () => {
+                await saveAgent();
+                setApplyStatus("Saved.");
+              }}
             />
           ) : showTestConsole ? (
             <AgentTestConsole
