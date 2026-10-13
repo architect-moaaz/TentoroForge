@@ -95,6 +95,8 @@ KEYED_LIST_SECTIONS: dict[str, tuple[str, ...]] = {
     "pageLayouts": ("page",),
     # One page module per page, the same way.
     "pageCode": ("page",),
+    # …and one native screen per page, the same way.
+    "nativeCode": ("page",),
     "data.relationships": ("from", "to", "kind"),
     "data.constraints": ("entity", "kind", "expression"),
 }

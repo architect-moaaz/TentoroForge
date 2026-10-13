@@ -52,7 +52,7 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "pageLayouts", "pageCode", "composition", "completeness",
+       "pageLayouts", "pageCode", "nativeCode", "composition", "completeness",
        "domainReference", "mobile"}
 )
 
@@ -258,6 +258,15 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
     "ui_engineer": _cap(
         "ui_engineer",
         {"pageCode"},
+        tools={"blueprint:read", "page_contract:read", "design_system:read",
+               "sdk:read", "tsc:check"},
+    ),
+    # One native screen per page, written as React Native against the native SDK
+    # and kit, beside `ui_engineer`'s web page. It writes `nativeCode` and
+    # nothing else, and only for an application whose `mobile.native` is on.
+    "native_engineer": _cap(
+        "native_engineer",
+        {"nativeCode"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "sdk:read", "tsc:check"},
     ),
@@ -1427,6 +1436,18 @@ def check_mobile(result: "AgentResult", doc: dict | None) -> None:
             store = p.body.get("store") if isinstance(p.body.get("store"), dict) else {}
             if store.get("enabled") is True and not store.get("bundleId"):
                 problems.append("mobile.store: a store wrapper names its `bundleId` (com.example.app)")
+    native = mobile.get("native") if isinstance(mobile.get("native"), dict) else {}
+    if native.get("enabled") is True:
+        store = mobile.get("store") if isinstance(mobile.get("store"), dict) else {}
+        if not store.get("bundleId"):
+            problems.append("mobile.native: a native app names its bundle id — set `mobile.store.bundleId` (com.example.app)")
+        signin = ((doc.get("security") or {}).get("signIn") or {}) if isinstance(doc.get("security"), dict) else {}
+        for p in result.proposals:
+            if p.section == "security" and isinstance(p.body, dict) and isinstance(p.body.get("signIn"), dict):
+                signin = {**signin, **p.body["signIn"]}
+        if signin.get("password") is False:
+            problems.append("mobile.native: the phone signs in with email and password, and `security.signIn.password` is off — "
+                            "turn password sign-in on, or turn the native app off")
     push_on = mobile.get("push") is True
     for p in result.proposals:
         if p.section != "workflows" or not isinstance(p.body, dict):
