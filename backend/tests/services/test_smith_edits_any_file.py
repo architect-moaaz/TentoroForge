@@ -500,3 +500,52 @@ def test_smith_is_told_it_can_edit_several_places_at_once():
     from services.smith import tools
     page = tools.render()
     assert "edits: array" in page and "in one step" in page
+
+
+def test_a_list_of_edits_under_one_section_lands(tmp_path, monkeypatch):
+    """Smith sent `section: "widgets"` with the edits in the list and no outer
+    find; every attempt was refused as "find is empty" (m1dck85j)."""
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Shop", domain="retail")
+    svc.doc["workflows"] = [
+        {"id": f"FLOW-00{i}", "name": f"Flow {i}", "trigger": {"kind": "manual"}, "steps": [
+            {"key": "done", "name": "Done", "type": "end", "config": {}}]} for i in (1, 2)]
+    svc.save()
+    monkeypatch.setattr("services.smith.sync_app.sync",
+                        lambda s, root: {"changed": [], "added": [], "removed": [], "database": "in step"})
+    out = file_edit.edit_definition(str(tmp_path), "workflows", "", "", "both say finished",
+                                    edits=[{"section": "FLOW-001", "find": '"Done"', "replace": '"Finished"'},
+                                           {"section": "workflows.FLOW-002", "find": '"Done"', "replace": '"Finished"'}])
+    assert out["applied"], out
+    names = [w["steps"][0]["name"] for w in BlueprintService.load(output_dir=tmp_path).doc["workflows"]]
+    assert names == ["Finished", "Finished"]
+
+
+def test_one_widget_edited_is_checked_with_the_rest(tmp_path, monkeypatch):
+    """One edited widget checked alone read as an app with no charts, and every
+    widget edit was refused (m1dck85j, 2026-10-13)."""
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=tmp_path, app_id="t", name="Shop", domain="retail")
+    svc.doc["data"] = {"entities": [{"id": "ENTITY-001", "name": "Order", "table": "orders", "fields": [
+        {"name": "id", "type": "uuid"}, {"name": "status", "type": "enum", "enumValues": ["OPEN", "PAID"]},
+        {"name": "total", "type": "number"}, {"name": "placedAt", "type": "datetime"}]}]}
+    svc.doc["pages"] = [{"id": "PAGE-001", "name": "Dashboard", "route": "/", "pattern": "dashboard", "purpose": "How sales stand",
+                         "access": "authenticated"}]
+    src = {"op": "query", "entity": "ENTITY-001", "filter": {}, "measures": [{"aggregation": "count", "key": "orders"}]}
+    svc.doc["widgets"] = [
+        {"id": "WIDGET-001", "key": "ordersToday", "kind": "metric", "label": "Orders Today", "page": "PAGE-001",
+         "dataSource": {**src, "timeField": "placedAt"}},
+        *[{"id": f"WIDGET-00{i}", "key": f"m{i}", "kind": "metric", "label": f"Metric {i}", "page": "PAGE-001",
+           "dataSource": {**src, "timeField": "placedAt"}} for i in (5, 6)],
+        *[{"id": f"WIDGET-00{i}", "key": f"c{i}", "kind": "chart", "label": f"Chart {i}", "page": "PAGE-001",
+           "chart": {"mark": mark}, "dataSource": {**src, "dimensions": [dim]}}
+          for i, mark, dim in ((2, "line", {"field": "placedAt", "bucket": "month"}), (3, "donut", {"field": "status"}),
+                               (4, "bar", {"field": "status"}))]]
+    svc.save()
+    monkeypatch.setattr("services.smith.sync_app.sync",
+                        lambda s, root: {"changed": [], "added": [], "removed": [], "database": "in step"})
+    out = file_edit.edit_definition(str(tmp_path), "widgets.WIDGET-001", '"timeField": "placedAt"',
+                                    '"timeField": "placedAt", "window": "today"', "count today's orders")
+    assert out["applied"], out
+    w = BlueprintService.load(output_dir=tmp_path).doc["widgets"][0]
+    assert w["dataSource"]["window"] == "today"

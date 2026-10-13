@@ -414,8 +414,16 @@ def _locate(doc: dict, name: str) -> tuple[Any, Any, Any]:
 def _check(section_root: str, doc: dict, body: Any, natural_key: str) -> None:
     from services.blueprint import agent_contract as ac
     sec = {"data": "data.entities"}.get(section_root, section_root)
-    result = ac.AgentResult(task_id="smith-edit", agent="smith", proposals=[
-        ac.ArtifactProposal(section=sec, natural_key=natural_key or sec, body=body)])
+    proposals = [ac.ArtifactProposal(section=sec, natural_key=natural_key or sec, body=body)]
+    if sec == "widgets":
+        # THE WIDGETS ARE CHECKED AS A SET: every page's charts and metrics are
+        # counted across all of them. One edited widget checked alone read as
+        # an app with no charts, and every widget edit was refused (m1dck85j,
+        # 2026-10-13). The set as it stands after the edit goes instead.
+        proposals = [ac.ArtifactProposal(section="widgets", natural_key=str(w.get("id") or w.get("key") or ""), body=w)
+                     for w in doc.get("widgets") or [] if isinstance(w, dict)
+                     and str(w.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
+    result = ac.AgentResult(task_id="smith-edit", agent="smith", proposals=proposals)
     for check in (ac.check_workflow_steps, ac.check_business_rules, ac.check_entity_fields,
                   ac.check_page_content, ac.check_page_access, ac.check_role_doors, ac.check_navigation,
                   ac.check_analytics, ac.check_security):
@@ -441,8 +449,21 @@ def edit_definition(output_dir: str, section: str, find: str, replace: str, why:
         svc = BlueprintService.load(output_dir=str(output_dir))
     except FileNotFoundError:
         return {"applied": False, "said": "", "touched": [], "finding": "This project has no definition yet."}
-    wanted = [{"section": section, "find": find, "replace": replace}] if section else []
-    wanted += [e for e in (edits or []) if isinstance(e, dict)]
+    # THE OUTER SECTION IS AN EDIT ONLY WHEN IT CARRIES TEXT TO FIND. Smith
+    # sent `section: "widgets"` with the edits in the list, and the empty outer
+    # find refused all of them, five times (m1dck85j, 2026-10-13). Without a
+    # find it is where the list's edits are: an entry without a section takes
+    # it, and an entry's short name ("WIDGET-007") is read inside it.
+    wanted = [{"section": section, "find": find, "replace": replace}] if section and find else []
+    for e in edits or []:
+        if not isinstance(e, dict):
+            continue
+        own = str(e.get("section") or "")
+        if not own:
+            own = section
+        elif section and _locate(svc.doc, own)[2] is None and _locate(svc.doc, f"{section}.{own}")[2] is not None:
+            own = f"{section}.{own}"
+        wanted.append({**e, "section": own})
     if not wanted:
         return {"applied": False, "said": "", "touched": [], "finding": "No edit was given: name a `section`, `find` and `replace`."}
     before = svc.snapshot()
