@@ -2510,7 +2510,7 @@
               "form",
               "server"
             ],
-            "default": "form"
+            "default": "entity"
           },
           "salience": {
             "type": "integer",

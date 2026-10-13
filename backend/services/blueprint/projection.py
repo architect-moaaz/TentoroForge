@@ -5210,7 +5210,13 @@ def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 "whenFeel": rule.get("when") or rule.get("expression") or "true",
                 "then": [{"id": f"{rule.get('id')}-then-{i}", **a} for i, a in enumerate(rule.get("then") or [])],
                 "otherwise": [{"id": f"{rule.get('id')}-else-{i}", **a} for i, a in enumerate(rule.get("otherwise") or [])],
-                "scope": rule.get("scope") or "form",
+                # A RULE THAT SAYS NOTHING OF ITS SCOPE IS THE ENTITY'S. `form`
+                # rules run only as hints in a browser; a `show_error` of one
+                # never refused a write, so "reject if the total is under 10"
+                # held for nobody. `entity` runs on every write (server) and
+                # still answers the form's hints. A rule that means a form
+                # only says `form`.
+                "scope": rule.get("scope") or "entity",
                 "salience": int(rule.get("salience") or 0),
             },
         })

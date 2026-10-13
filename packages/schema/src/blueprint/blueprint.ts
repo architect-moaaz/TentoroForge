@@ -2069,7 +2069,7 @@ export const BusinessRule = z.object({
   when: z.string().optional(),
   then: z.array(RuleAction).default([]),
   otherwise: z.array(RuleAction).default([]),
-  scope: z.enum(["entity", "form", "server"]).default("form"),
+  scope: z.enum(["entity", "form", "server"]).default("entity"),
   salience: z.number().int().default(0),
   ...artifactBase,
 });
