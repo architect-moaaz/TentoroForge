@@ -42,7 +42,11 @@ def test_an_application_that_does_not_ask_has_nothing_to_write():
 def test_an_application_that_asks_gets_a_screen_for_each_page_the_web_writes():
     doc = _doc(native={"enabled": True})
     assert native_page_subjects(doc) == ["PAGE-001", "PAGE-002"], "one-to-one with page_code's pages"
-    assert native_page_subjects(doc) == subjects_for(DAG["page_code"], doc)
+    web = subjects_for(DAG["page_code"], doc)
+    assert native_page_subjects(doc) == web
+    # …except the sign-in and sign-up pages: signing in is the native SDK's own screen.
+    doc["pages"] = doc["pages"] + [{"id": "PAGE-005", "route": "/login", "pattern": "auth"}]
+    assert "PAGE-005" in subjects_for(DAG["page_code"], doc) and "PAGE-005" not in native_page_subjects(doc)
 
 
 def test_a_page_with_a_screen_is_not_written_again():

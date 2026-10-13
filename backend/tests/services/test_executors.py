@@ -1613,7 +1613,7 @@ def test_headroom_goes_only_to_nodes_measured_at_the_ceiling():
                                        "security", "workflows", "requirements",
                                        "business_rules", "analytics", "workflow_steps",
                                        "domain_reference",
-                                       "page_code"}   # a page's two whole files
+                                       "page_code", "native_code"}   # a page's two whole files
 
 
 def test_raising_the_ceiling_did_not_disturb_effort():

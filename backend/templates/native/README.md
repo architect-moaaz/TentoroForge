@@ -6,7 +6,7 @@ Produced by Tentoro Forge. There is no database here and no second set of rules:
 reads, workflows, access and tenancy are the web app's.
 
 ```bash
-cd mobile            # this folder
+cd native            # this folder
 npm install
 npm start            # Expo dev server; scan the QR with Expo Go or press i / a
 npm run typecheck    # tsc --noEmit — every screen against the app's own types

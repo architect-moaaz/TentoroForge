@@ -403,7 +403,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        ("ui_direction", "page_layouts", "workflow_steps", "install", "app_flows"), ("nativeCode",),
        fanout="native_pages", optional=True,
        note="one React Native screen per page, against the native SDK and kit (opt-in: mobile.native)"),
-    _n("frontend", "frontend", ("page_layouts", "page_code"), ("codeMap",), kind="projection",
+    _n("frontend", "frontend", ("page_layouts", "page_code", "native_code"), ("codeMap",), kind="projection",
        note="pattern templates + page contracts -> engine page schemas"),
 
     # §107 step 16 places workflow and rules alongside backend/API generation;
@@ -1105,7 +1105,9 @@ def _native_present(doc: Mapping[str, Any], page_id: str) -> bool:
 def native_page_subjects(doc: Mapping[str, Any]) -> list[str]:
     """The pages `native_code` writes a screen for: the pages the web writes
     code for, and only when the application is native (`mobile.native.enabled`).
-    One-to-one — a page with a web screen has a native one."""
+    One-to-one — a page with a web screen has a native one — except the
+    sign-in and sign-up pages: signing in is the native SDK's own screen (the
+    session cookie flow), and a page drawn over it would be a second login."""
     mobile = doc.get("mobile") if isinstance(doc.get("mobile"), dict) else {}
     native = mobile.get("native") if isinstance(mobile.get("native"), dict) else {}
     if native.get("enabled") is not True:
@@ -1113,7 +1115,7 @@ def native_page_subjects(doc: Mapping[str, Any]) -> list[str]:
     return [p["id"] for p in (doc.get("pages") or [])
             if p.get("id") and p.get("status") != "DEPRECATED"
             and p["id"] not in _deferred_pages(doc)
-            and str(p.get("pattern") or "") != "audit_trail"]
+            and str(p.get("pattern") or "") not in ("audit_trail", "auth")]
 
 
 def _fields_present(doc: Mapping[str, Any], entity_id: str) -> bool:
@@ -3161,6 +3163,16 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
             "; ".join(f"{f['page']}: {str(f['reason'])[:120]}"
                       for f in result["failed"][:6]),
         )
+    # THE PHONE'S APP, BESIDE THE WEB'S: a native project in `<output>/native`,
+    # written only when the application asks for one (`mobile.native`). It
+    # follows the web in everything but the screens it holds, so its failing
+    # costs the web nothing — logged and left for the check that every page has
+    # its screen to say.
+    try:
+        from services.blueprint.native_projection import project_native
+        project_native(svc.doc, svc.output_dir)
+    except Exception as exc:  # noqa: BLE001 — additive: never the web app's loss
+        logger.warning("[frontend] the native project was not written: %s", exc)
 
 
 def _project_integration(svc: BlueprintService, app_root: str) -> None:
