@@ -2,6 +2,17 @@
 
 Branch: `smithv5-reactNative` (from `smithv5`). Status: plan, nothing built. Written 2026-10-12.
 
+## Progress (2026-10-13)
+
+Built on `smithv5-reactNative`, in order:
+
+- **Phase 0** done except the read endpoints' type check in a real generated app: 401 JSON for `/api/*`, rules default to `entity`, the hygiene fixes, `/api/read/<op>`. `/api/config` was dropped; lifecycle moves are out of scope.
+- **Phase 1 (contract)** done: `mobile.native.enabled`, `nativeCode`, the `native_engineer` capability and refusals, the `native_code` node (a fan-out with no subjects when native is off).
+- **Phase 2 (fixed half)** done: `backend/templates/native` (Expo SDK 51 project, cookie-session SDK, component kit). Typechecked and bundled under Metro in a scratch copy; never run on a device.
+- **Phase 3 (the writer and the projection)** done: `native_engineer.py` (prompt from the template's README, platform and page rules, a compile loop against the application's own generated types through a shared toolchain) and `native_projection.py` (`<output>/native/`: the fixed half, the web's typed modules, tokens, config, a screen and route per page). Wired into the executor and the `frontend` projection step.
+
+Not built yet: the scorecard checks (every page has a screen, render smoke), the look review (no native render target), Smith verbs to turn native on and redraw a screen, a tab/drawer navigator from `navigation.mobile`, EAS build from `native/` (the Publish panel still builds `mobile/`), and a real end-to-end build.
+
 ## Decision record
 
 - **One-to-one.** Every Blueprint page that the web writes gets exactly one native screen. No native-only information architecture in v1. Reason: the Blueprint page maps directly, so parity is checkable.
