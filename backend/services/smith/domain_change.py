@@ -1,7 +1,8 @@
 """The app's own addresses, from a conversation: "put it on app.acme.com",
 "is my domain working?", "where do I point my DNS?", "remove the old domain",
 "call our address aqua" (the free address the platform gives the app),
-"add the DNS records for me" (at the DNS account the organisation connected).
+"add the DNS records for me" (at the DNS account the organisation connected),
+"give each organisation its own address under clinicapp.com".
 
 The same service the Publish dialog and App settings use
 (`services.deploy.domains`): Smith never writes a record or a key; it says
@@ -62,7 +63,8 @@ def run(output_dir: str, verb: str, *, domain: str = "", change: str = "", reaso
     said: list[str] = []
     client = None
     if not os.environ.get("VERCEL_TOKEN"):
-        if verb in ("connect_domain", "remove_domain", "rename_app_address", "add_dns_records"):
+        if verb in ("connect_domain", "remove_domain", "rename_app_address", "add_dns_records",
+                    "give_organisations_addresses"):
             return _envelope(False, reason="Publishing is not set up on this platform, so I cannot attach addresses.")
     else:
         # A status question checks now, like Check now does.
@@ -94,6 +96,23 @@ def run(output_dir: str, verb: str, *, domain: str = "", change: str = "", reaso
                 tail = (" I will say here when it is live; App settings → Domains shows its progress."
                         if view.get("status") != "live" else "")
                 return _said(view) + tail
+            if verb == "give_organisations_addresses":
+                said_mode = ""
+                if re.search(r"\b(separate|own|per[- ]organi[sz]ation)\b[^.]*\bsign[- ]?in|\bsign[- ]?in\b[^.]*\b(separate|per[- ]organi[sz]ation|each)\b",
+                             change or "", re.I):
+                    await svc.set_organisation_sign_in("per_organisation")
+                    said_mode = " Each organisation's address has its own sign-in."
+                elif re.search(r"\b(shared|one|single)\b[^.]*\bsign[- ]?in\b", change or "", re.I):
+                    await svc.set_organisation_sign_in("shared")
+                    said_mode = " One sign-in works across them all."
+                if not name:
+                    if said_mode:
+                        return said_mode.strip()
+                    raise DomainRefused("Under which domain? For example clinicapp.com, so an organisation answers at acme.clinicapp.com.")
+                view = await svc.connect_organisations(name)
+                base = view["name"][2:]
+                return (f"Each organisation will answer at its own address under {base}, such as <name>.{base}; "
+                        "its admin sees and changes it on the Organisation page. " + _said(view) + said_mode)
             if verb == "add_dns_records":
                 targets = [name] if name else [e["name"] for e in svc.entries()
                                                if e.get("kind") != "tentoro" and not e.get("redirectTo")

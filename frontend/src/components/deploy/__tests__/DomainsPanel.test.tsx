@@ -157,4 +157,23 @@ describe("DomainsPanel", () => {
     expect(host.querySelector('a[href="/org/o1/settings/integrations"]')).not.toBeNull();
     expect(button("Add the records for me")).toBeUndefined();
   });
+
+  it("gives each organisation an address when the app has several", async () => {
+    apiGet.mockImplementation(async () => ({ ...waiting, organisations: { available: true, signIn: "shared" } }));
+    apiPost.mockImplementationOnce(async () => ({ ...waiting, organisations: { available: true, signIn: "shared" } }));
+    await render();
+    const input = host.querySelector("#domain-orgs-p1") as HTMLInputElement;
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      set.call(input, "clinicapp.com");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { button("Give each organisation an address").click(); });
+    expect(apiPost).toHaveBeenCalledWith("/api/projects/p1/domains/organisations", { name: "clinicapp.com" });
+  });
+
+  it("offers no address per organisation to an app of one", async () => {
+    await render();
+    expect(host.querySelector("#domain-orgs-p1")).toBeNull();
+  });
 });

@@ -2956,6 +2956,14 @@
             },
             "nameField": {
               "type": "string"
+            },
+            "addressSignIn": {
+              "type": "string",
+              "enum": [
+                "shared",
+                "per_organisation"
+              ],
+              "default": "shared"
             }
           },
           "additionalProperties": false,
@@ -4679,7 +4687,8 @@
                 "enum": [
                   "subdomain",
                   "apex",
-                  "tentoro"
+                  "tentoro",
+                  "organisations"
                 ],
                 "default": "subdomain"
               },

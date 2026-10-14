@@ -13,7 +13,7 @@ import { apiPath } from "@/lib/api-path";
 export function OrgSwitcher() {
   const router = useRouter();
   const { update } = useSession();
-  const [state, setState] = React.useState<{ organisations: Array<{ orgId: string; orgName?: string | null }>; activeOrgId: string | null } | null>(null);
+  const [state, setState] = React.useState<{ organisations: Array<{ orgId: string; orgName?: string | null; address?: string }>; activeOrgId: string | null } | null>(null);
   React.useEffect(() => {
     let alive = true;
     fetch(apiPath("/api/org"), { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((b) => { if (alive && b) setState(b); }).catch(() => {});
@@ -24,6 +24,9 @@ export function OrgSwitcher() {
     <select aria-label="Organisation" className="rounded border border-border bg-background px-2 py-1 text-sm" value={state.activeOrgId ?? ""}
             onChange={async (e) => {
               const orgId = e.target.value;
+              // AN ORGANISATION WITH ITS OWN ADDRESS is switched to by going there.
+              const address = state.organisations.find((o) => o.orgId === orgId)?.address;
+              if (address) { window.location.href = address; return; }
               const res = await fetch(apiPath("/api/org"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orgId }) });
               if (res.ok) { setState({ ...state, activeOrgId: orgId }); await update(); router.refresh(); }
             }}>

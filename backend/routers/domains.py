@@ -166,3 +166,23 @@ async def write_records(project_id: uuid.UUID, name: str, body: WriteRecords,
         result = await svc.write_records(name, replace=body.replace)
         return {**svc.view(), "result": result}
     return await _run(project_id, user, db, act, dns=True)
+
+
+@router.post("/api/projects/{project_id}/domains/organisations")
+async def connect_organisations(project_id: uuid.UUID, body: AddDomain, user: PlatformUser = Depends(get_current_user),
+                                db: AsyncSession = Depends(get_db)):
+    """Each organisation of the app answers at its own address under this domain."""
+    async def act(svc):
+        await svc.connect_organisations(body.name)
+        return svc.view()
+    return await _run(project_id, user, db, act)
+
+
+@router.put("/api/projects/{project_id}/domains/organisations/sign-in")
+async def set_organisation_sign_in(project_id: uuid.UUID, body: OldAddress, user: PlatformUser = Depends(get_current_user),
+                                   db: AsyncSession = Depends(get_db)):
+    """`shared`: one sign-in across the organisations' addresses; `per_organisation`: one at each."""
+    async def act(svc):
+        await svc.set_organisation_sign_in(body.mode)
+        return svc.view()
+    return await _run(project_id, user, db, act)

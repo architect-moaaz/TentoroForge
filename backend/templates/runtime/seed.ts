@@ -500,6 +500,8 @@ async function seedOrganisations(): Promise<void> {
     await db.execute(sql.raw(`INSERT INTO "${policy.table}" ("${nameCol}") VALUES ('${orgName.replace(/'/g, "''")}')`));
     console.log(`✅ organisation: ${orgName}`);
   }
+  // EVERY ORGANISATION ITS ADDRESS, ready for when the app answers at one each.
+  try { await (await import("../lib/tenancy")).ensureSlugs(); } catch { /* no address table in this app yet */ }
   console.log(`✅ organisations: ${orgIds.length}, with a member per role in each`);
 }
 

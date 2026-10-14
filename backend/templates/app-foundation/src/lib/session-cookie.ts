@@ -42,21 +42,38 @@ export function sessionCookieName(): string {
   return `${isSecure() ? "__Secure-" : ""}${sessionCookiePrefix()}.session-token`;
 }
 
+/**
+ * ONE SIGN-IN ACROSS THE ORGANISATIONS' ADDRESSES, when the definition says
+ * so: the session cookie is the parent domain's (`.clinicapp.com`), so a
+ * person signed in at one organisation's address is signed in at the
+ * others. Kept per organisation (FORGE_ORG_SIGN_IN_MODE=per_organisation), or
+ * with no addresses at all, it stays the host's own. The platform sets both
+ * variables when it attaches the addresses.
+ */
+export function sharedCookieDomain(): string | undefined {
+  const base = String(process.env.FORGE_ORG_DOMAIN || "").trim().toLowerCase().replace(/^\*\./, "").replace(/\.$/, "");
+  if (!base || process.env.FORGE_ORG_SIGN_IN_MODE === "per_organisation") return undefined;
+  return `.${base}`;
+}
+
 /** The full `cookies` block for NextAuthOptions. */
 export function sessionCookies() {
   const secure = isSecure();
   const base = sessionCookiePrefix();
   const options = { httpOnly: true, sameSite: "lax" as const, path: "/", secure };
+  const domain = sharedCookieDomain();
+  const shared = domain ? { ...options, domain } : options;
   return {
-    sessionToken: { name: sessionCookieName(), options },
+    sessionToken: { name: sessionCookieName(), options: shared },
     callbackUrl: { name: `${secure ? "__Secure-" : ""}${base}.callback-url`,
-                   options: { ...options, httpOnly: false } },
+                   options: { ...shared, httpOnly: false } },
+    // `__Host-` forbids a domain: the form's token stays the host's.
     csrfToken: { name: `${secure ? "__Host-" : ""}${base}.csrf-token`, options },
     // THE SIGN-IN'S OWN COOKIES, when a person goes out to an identity
     // provider and comes back: the state, the PKCE verifier and the nonce
     // are this app's too, or two apps on one host finish each other's sign-in.
-    state: { name: `${secure ? "__Secure-" : ""}${base}.state`, options: { ...options, maxAge: 900 } },
-    pkceCodeVerifier: { name: `${secure ? "__Secure-" : ""}${base}.pkce.code_verifier`, options: { ...options, maxAge: 900 } },
-    nonce: { name: `${secure ? "__Secure-" : ""}${base}.nonce`, options },
+    state: { name: `${secure ? "__Secure-" : ""}${base}.state`, options: { ...shared, maxAge: 900 } },
+    pkceCodeVerifier: { name: `${secure ? "__Secure-" : ""}${base}.pkce.code_verifier`, options: { ...shared, maxAge: 900 } },
+    nonce: { name: `${secure ? "__Secure-" : ""}${base}.nonce`, options: shared },
   };
 }

@@ -31,7 +31,7 @@ export interface DomainRecord {
 
 export interface DomainView {
   name: string;
-  kind: "subdomain" | "apex" | "tentoro";
+  kind: "subdomain" | "apex" | "tentoro" | "organisations";
   main: boolean;
   status: "waiting" | "live" | "failed";
   detail: string;
@@ -66,12 +66,15 @@ export interface DomainsState {
   appsDomain: string;
   /** The organisation's connected DNS accounts, by name. */
   dnsAccounts: string[];
+  /** An app of several organisations can give each its own address. */
+  organisations?: { available: boolean; signIn: "shared" | "per_organisation" };
 }
 
 const KIND_LABEL: Record<DomainView["kind"], string> = {
   subdomain: "Your subdomain",
   apex: "Your domain",
   tentoro: "Tentoro address",
+  organisations: "One address per organisation",
 };
 
 function ago(iso?: string | null): string {
@@ -107,6 +110,7 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
   const [name, setName] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [written, setWritten] = useState<Record<string, WriteResult>>({});
+  const [orgDomain, setOrgDomain] = useState("");
   const params = useParams<{ orgId?: string }>();
 
   const { data, isLoading, error } = useQuery({
@@ -174,6 +178,21 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
       setRenaming(null);
       toast.success("Address renamed");
     },
+    onError: fail,
+  });
+  const connectOrganisations = useMutation({
+    mutationFn: (n: string) => api.post<DomainsState>(`/api/projects/${projectId}/domains/organisations`, { name: n }),
+    onSuccess: (next) => {
+      done(next);
+      setOrgDomain("");
+      toast.success("Set the nameservers below where the domain is registered.");
+    },
+    onError: fail,
+  });
+  const orgSignIn = useMutation({
+    mutationFn: (mode: "shared" | "per_organisation") =>
+      api.put<DomainsState>(`/api/projects/${projectId}/domains/organisations/sign-in`, { mode }),
+    onSuccess: done,
     onError: fail,
   });
   const oldAddress = useMutation({
@@ -264,7 +283,12 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
                   </table>
                 </div>
                 <p className="text-[11px] text-slate-500">It usually works within minutes and can take up to two days.</p>
-                {(data.dnsAccounts ?? []).length > 0 ? (
+                {d.kind === "organisations" ? (
+                  <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                    Nameservers are changed where the domain is registered (its registrar), not in its DNS records.
+                    Each organisation then answers at its own address, such as acme.{d.name.slice(2)}.
+                  </p>
+                ) : (data.dnsAccounts ?? []).length > 0 ? (
                   <div className="space-y-1.5 pt-1">
                     <Button
                       size="sm"
@@ -334,7 +358,7 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
                   </a>
                 </Button>
               )}
-              {!d.main && !d.redirectTo && (
+              {!d.main && !d.redirectTo && d.kind !== "organisations" && (
                 <Button size="sm" variant="outline" onClick={() => makeMain.mutate(d.name)} disabled={busy(makeMain, d.name)}>
                   <Star className="mr-1 h-3 w-3" /> Make main address
                 </Button>
@@ -404,6 +428,52 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
           Add domain
         </Button>
       </form>
+
+      {!compact && data.organisations?.available && (
+        <div className="space-y-2 border-t border-slate-200 pt-3 text-sm dark:border-slate-700">
+          <p className="font-medium">An address per organisation</p>
+          <p className="text-xs text-slate-500">
+            Each organisation answers at its own address under a domain you hold, such as acme.clinicapp.com; its admin sees and
+            changes it on the Organisation page.
+          </p>
+          {!data.domains.some((d) => d.kind === "organisations") && (
+            <form
+              className="flex flex-wrap items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (orgDomain.trim()) connectOrganisations.mutate(orgDomain.trim());
+              }}
+            >
+              <label htmlFor={`domain-orgs-${projectId}`} className="sr-only">Domain for the organisations&rsquo; addresses</label>
+              <span className="font-mono text-xs text-slate-500">&lt;organisation&gt;.</span>
+              <Input
+                id={`domain-orgs-${projectId}`}
+                value={orgDomain}
+                onChange={(e) => setOrgDomain(e.target.value)}
+                placeholder="clinicapp.com"
+                className="min-w-0 flex-1 font-mono text-sm"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Button type="submit" size="sm" variant="outline" disabled={!orgDomain.trim() || connectOrganisations.isPending}>
+                Give each organisation an address
+              </Button>
+            </form>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label htmlFor={`domain-orgs-signin-${projectId}`}>Sign-in across the organisations&rsquo; addresses</label>
+            <select
+              id={`domain-orgs-signin-${projectId}`}
+              value={data.organisations.signIn}
+              onChange={(e) => orgSignIn.mutate(e.target.value as "shared" | "per_organisation")}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="shared">One sign-in for all of them</option>
+              <option value="per_organisation">A separate sign-in at each</option>
+            </select>
+          </div>
+        </div>
+      )}
 
       {!compact && data.domains.some((d) => d.kind !== "tentoro" || d.main) && (
         <div className="space-y-2 border-t border-slate-200 pt-3 text-sm dark:border-slate-700">

@@ -18,7 +18,17 @@ export async function GET(): Promise<Response> {
   if (!tenancy.tenancyOn()) return NextResponse.json({ organisations: [], activeOrgId: null, platform: false });
   const mine = await tenancy.membershipsOf(String(user.id));
   const platform = tenancy.isPlatformRole(user.role);
-  const organisations = platform ? await tenancy.allOrganisations() : mine.map((m) => ({ orgId: m.orgId, orgName: m.orgName ?? null, role: m.role }));
+  const organisations: Array<Record<string, unknown>> = platform ? await tenancy.allOrganisations()
+    : mine.map((m) => ({ orgId: m.orgId, orgName: m.orgName ?? null, role: m.role }));
+  // WITH AN ADDRESS EACH, switching is going there.
+  if (tenancy.orgDomain()) {
+    for (const o of organisations) {
+      try {
+        const slug = await tenancy.slugOf(String(o.orgId));
+        if (slug) o.address = tenancy.addressOf(slug);
+      } catch { /* no address table yet: switching stays in place */ }
+    }
+  }
   return NextResponse.json({ organisations, activeOrgId: user.activeOrgId ?? null, platform, role: user.role ?? null });
 }
 

@@ -84,6 +84,7 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "domain_status": set(),
     "rename_app_address": {"domain"},
     "add_dns_records": set(),
+    "give_organisations_addresses": set(),
     # The audit trail: read it, export it, verify its chain, change the policy.
     # Organisations: a new one, and which one a login belongs to.
     "add_organisation": {"change"},
@@ -363,6 +364,13 @@ VERB_HELP: dict[str, str] = {
         "\"set up the DNS for app.acme.com\", \"yes, replace the old record\". Never "
         "replaces mail records; asks before replacing anything else. The address is "
         "optional; without one, every own address still waiting."
+    ),
+    "give_organisations_addresses": (
+        "Give each organisation of an app of several organisations its own address "
+        "under a domain the owner holds: \"give each organisation its own address under "
+        "clinicapp.com\", \"each clinic gets its own subdomain\", \"keep sign-in separate per "
+        "organisation\". `domain` is the domain; sign-in is shared across the addresses "
+        "unless asked otherwise."
     ),
     "rename_app_address": (
         "Rename the free address the platform gives the app (<name>.apps.tentoro.ai): "
@@ -777,6 +785,9 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     ),
     'add_dns_records': (
         'add the DNS records for me',
+    ),
+    'give_organisations_addresses': (
+        'give each organisation its own address under clinicapp.com',
     ),
     'add_organisation': (
         'add an organisation called Northside Clinic',

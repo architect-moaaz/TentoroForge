@@ -2376,6 +2376,9 @@ export const Security = z.object({
       platformRoles: z.array(z.string()).default([]),
       organisationAdminRole: z.string().optional(),
       nameField: z.string().optional(),
+      /** When each organisation answers at its own address: one sign-in
+       *  across them all (`shared`), or a separate one at each. */
+      addressSignIn: z.enum(["shared", "per_organisation"]).default("shared"),
     })
     .default({}),
   /** Superseded by `audit`; read by nothing. Kept so older documents load. */
@@ -2978,8 +2981,10 @@ export const Database = z.object({
 export const DomainEntry = z.object({
   name: z.string().min(3),
   /** `apex` is a bare domain (acme.com), `subdomain` one under it, `tentoro`
-   *  the address the platform gives the app. */
-  kind: z.enum(["subdomain", "apex", "tentoro"]).default("subdomain"),
+   *  the address the platform gives the app, `organisations` a wildcard
+   *  (`*.clinicapp.com`) under which each organisation answers at its own
+   *  address (`acme.clinicapp.com`). */
+  kind: z.enum(["subdomain", "apex", "tentoro", "organisations"]).default("subdomain"),
   /** The address sign-in, email links and the phone app use. At most one. */
   main: z.boolean().default(false),
   /** `waiting`: added, its records or its first publish not there yet;

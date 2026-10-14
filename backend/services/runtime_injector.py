@@ -968,6 +968,16 @@ def _inject_file_storage(output_path: Path) -> list[str]:
             txt = barrel.read_text(encoding="utf-8")
             if "_forge_memberships" not in txt:
                 barrel.write_text(txt.rstrip() + '\nexport { forgeMemberships } from "./_forge_memberships";\n', encoding="utf-8")
+    # The address each organisation answers at (`<slug>.<FORGE_ORG_DOMAIN>`).
+    addr_schema = _TEMPLATE_DIR / "db" / "forge-org-addresses.schema.ts"
+    if addr_schema.exists() and schema_dir.exists():
+        shutil.copy2(addr_schema, schema_dir / "_forge_org_addresses.ts")
+        written.append("src/db/schema/_forge_org_addresses.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_org_addresses" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgeOrgAddresses } from "./_forge_org_addresses";\n', encoding="utf-8")
     # 5a-vii. Push: where a person's devices listen, the module that sends,
     #         the routes a device subscribes through. The package is added
     #         to the app's dependencies; the keys are the app's own.
@@ -998,6 +1008,7 @@ def _inject_file_storage(output_path: Path) -> list[str]:
     #        the magic link (`/api/auth/magic`). The policy ships with the
     #        foundation and is rewritten by the projection.
     for sub, dst in (("api-org/route.ts", "org/route.ts"), ("api-org/members/route.ts", "org/members/route.ts"),
+                     ("api-org/address/route.ts", "org/address/route.ts"),
                      ("api-auth-methods/route.ts", "auth/methods/route.ts"), ("api-auth-magic/route.ts", "auth/magic/route.ts")):
         src = _TEMPLATE_DIR / sub
         if src.exists():

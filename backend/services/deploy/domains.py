@@ -29,6 +29,12 @@ When the owner has connected their DNS provider, `write_records` adds the
 records itself (`services.deploy.dns_providers`, with its safety rules), and
 removing the address takes away exactly what Forge wrote.
 
+An application of several organisations can give each its own address:
+`connect_organisations("clinicapp.com")` attaches `*.clinicapp.com`, whose
+nameservers must be Vercel's, and once it answers the app is told
+(FORGE_ORG_DOMAIN, FORGE_ORG_SIGN_IN_MODE) and redeployed; the app reads the host
+and opens that organisation (`templates/runtime/tenancy.ts`).
+
 A bare domain brings its `www.` companion, which sends people to it. The
 Tentoro address stays with the app: it can be renamed, not removed, and it
 is the address the app uses while none of the owner's own is live.
@@ -53,6 +59,8 @@ logger = logging.getLogger(__name__)
 #: What Vercel asks for when its configuration call says nothing better.
 VERCEL_CNAME = "cname.vercel-dns.com"
 VERCEL_A = "76.76.21.21"
+#: A wildcard needs Vercel to answer for the whole domain.
+VERCEL_NAMESERVERS = ("ns1.vercel-dns.com", "ns2.vercel-dns.com")
 
 #: Addresses that are not the owner's to add.
 _NOT_THEIRS = (".vercel.app", ".vercel-dns.com", ".vercel.com", ".now.sh", ".localhost", ".local", ".test",
@@ -173,12 +181,25 @@ def _first_value(rows: Any) -> list[str]:
     return out
 
 
+def _canon(raw: str) -> str:
+    """An address as kept: `normalise`, and `*.<domain>` for the organisations' wildcard."""
+    text = str(raw or "").strip().lower()
+    if text.startswith("*."):
+        return "*." + normalise(text[2:])
+    return normalise(text)
+
+
 def records_for(name: str, kind: str, project_domain: dict | None, config: dict | None) -> list[dict]:
     """The records the owner adds: what points the address at Vercel, and the
     TXT proof when Vercel asks for one."""
     config = config or {}
     out: list[dict] = []
-    if kind == "apex":
+    if kind == "organisations":
+        base = name.removeprefix("*.")
+        for ns in VERCEL_NAMESERVERS:
+            out.append({"host": base, "type": "NS", "value": ns,
+                        "why": f"set where {base} is registered: Vercel answers for every address under it"})
+    elif kind == "apex":
         ips = _first_value(config.get("recommendedIPv4")) or [str(v) for v in config.get("aValues") or []] or [VERCEL_A]
         for ip in ips:
             out.append({"host": name, "type": "A", "value": ip,
@@ -202,6 +223,9 @@ def state_of(name: str, project_domain: dict | None, config: dict | None) -> tup
     if project_domain.get("verified") is False:
         return "proof", f"Vercel needs the TXT record that proves {project_domain.get('apexName') or name} is yours."
     if (config or {}).get("misconfigured", True):
+        if name.startswith("*."):
+            return "records", (f"{name[2:]}'s nameservers are not Vercel's yet. Change them where the domain is "
+                               "registered; it can take up to two days to spread.")
         return "records", f"The record that points {name} at Vercel is not there yet. It can take up to two days to spread."
     return "dns-ok", ""
 
@@ -423,13 +447,13 @@ class DomainService:
         await self.refresh(www)
 
     async def remove(self, raw: str) -> None:
-        name = normalise(raw)
+        name = _canon(raw)
         entry = next((e for e in self.entries() if e["name"] == name), None)
         if entry is None:
             raise DomainRefused(f"{name} is not one of this app's addresses.")
         if entry.get("kind") == "tentoro":
             raise DomainRefused(f"{name} stays with the app: rename it, or make your own address the main one.")
-        before = self.main_address()
+        before = (self.main_address(), self.organisations_domain())
         gone = {name} | {e["name"] for e in self.entries() if e.get("redirectTo") == name}
         pid = await self.project_id()
         if pid:
@@ -449,16 +473,18 @@ class DomainService:
         for n in gone:
             led.get("domains", {}).pop(n, None)
         _write_ledger(self.output_dir, led)
-        if self.main_address() != before:
+        if (self.main_address(), self.organisations_domain()) != before:
             await self.follow()
 
     async def make_main(self, raw: str) -> dict:
-        name = normalise(raw)
+        name = _canon(raw)
         entry = next((e for e in self.entries() if e["name"] == name), None)
         if entry is None:
             raise DomainRefused(f"{name} is not one of this app's addresses; add it first.")
         if entry.get("redirectTo"):
             raise DomainRefused(f"{name} sends people to {entry['redirectTo']}; make {entry['redirectTo']} the main address.")
+        if entry.get("kind") == "organisations":
+            raise DomainRefused(f"{name} holds the organisations' own addresses; the main address is one address.")
 
         def change(dep: dict) -> None:
             for e in dep["domains"]:
@@ -473,13 +499,17 @@ class DomainService:
         Nothing is written when anything is in the way, unless `replace`; mail
         and proof records are never replaced."""
         from services.deploy.dns_providers import DnsRefused, Record, plan, said_conflicts
-        name = normalise(raw)
+        name = _canon(raw)
         entry = next((e for e in self.entries() if e["name"] == name), None)
         if entry is None:
             raise DomainRefused(f"{name} is not one of this app's addresses.")
         if entry.get("kind") == "tentoro":
             return {"written": False, "conflicts": False, "provider": "",
                     "message": f"{name} needs no records; Tentoro's DNS already points at the app."}
+        if entry.get("kind") == "organisations":
+            return {"written": False, "conflicts": False, "provider": "",
+                    "message": (f"{name[2:]}'s nameservers change where the domain is registered, not in its DNS "
+                                f"records: set them to {' and '.join(VERCEL_NAMESERVERS)} there.")}
         if not self.dns:
             where = (read_ledger(self.output_dir).get("domains") or {}).get(name, {}).get("dnsHost") or ""
             raise DomainRefused(
@@ -566,6 +596,58 @@ class DomainService:
                     logger.warning("[domains] could not take away %s %s at %s", w.get("type"), w.get("host"),
                                    w.get("provider"), exc_info=True)
 
+    def tenancy(self) -> dict:
+        try:
+            return dict(((self._svc().doc.get("security") or {}).get("tenancy")) or {})
+        except FileNotFoundError:
+            return {}
+
+    async def connect_organisations(self, raw: str) -> dict:
+        """Each organisation answers at its own address under this domain:
+        `clinicapp.com` → `*.clinicapp.com` on the app, `acme.clinicapp.com`
+        for the organisation whose address is `acme`."""
+        if self.tenancy().get("kind") != "organisation":
+            raise DomainRefused("This app serves one organisation, so there is no address per organisation to give.")
+        base = normalise(str(raw or "").strip().lower().removeprefix("*."))
+        name = f"*.{base}"
+        current = next((e for e in self.entries() if e.get("kind") == "organisations"), None)
+        if current and current["name"] == name:
+            return await self.refresh(name)
+        if current:
+            raise DomainRefused(f"Organisations already answer under {current['name'][2:]}; remove that first.")
+        pid = await self.project_id()
+        if pid:
+            try:
+                await self.client.add_project_domain(pid, name)
+            except RuntimeError as exc:
+                text = str(exc)
+                if "409" in text or "already" in text.lower() or "in use" in text.lower():
+                    raise DomainRefused(f"{name} is already used by another app or Vercel project.") from exc
+                raise
+        now = _iso(self.now())
+        self._write(lambda dep: dep["domains"].append(
+            {"name": name, "kind": "organisations", "main": False, "status": "waiting", "addedAt": now,
+             "reason": ("Checking the nameservers." if pid else
+                        "Publish the app; the address is attached at its first publish.")}),
+            f"Give each organisation an address under {base}")
+        return await self.refresh(name) if pid else self.view_of(name)
+
+    async def set_organisation_sign_in(self, mode: str) -> None:
+        """One sign-in across the organisations' addresses, or one at each."""
+        if mode not in ("shared", "per_organisation"):
+            raise DomainRefused("Sign-in is either shared across the organisations' addresses or kept per organisation.")
+        svc = self._svc()
+        before = svc.snapshot()
+        svc.doc.setdefault("security", {}).setdefault("tenancy", {})["addressSignIn"] = mode
+        why = f"Sign-in across the organisations' addresses: {mode}"
+        svc.commit(user_request=why, smith_interpretation=why, before=before)
+        await self.follow()
+
+    def organisations_domain(self) -> str:
+        """The domain the organisations' addresses sit under, once it answers."""
+        e = next((x for x in self.entries() if x.get("kind") == "organisations" and x.get("status") == "live"), None)
+        return e["name"][2:] if e else ""
+
     async def set_old_address(self, mode: str) -> None:
         if mode not in ("redirect", "keep"):
             raise DomainRefused("The old address either sends people to the main address or keeps answering.")
@@ -624,11 +706,11 @@ class DomainService:
 
     async def refresh(self, raw: str) -> dict:
         """Ask Vercel and the address itself where things stand; record it."""
-        name = normalise(raw)
+        name = _canon(raw)
         entry = next((e for e in self.entries() if e["name"] == name), None)
         if entry is None:
             raise DomainRefused(f"{name} is not one of this app's addresses.")
-        address_before = self.main_address()
+        address_before = (self.main_address(), self.organisations_domain())
         led = read_ledger(self.output_dir)
         seen = led.setdefault("domains", {}).setdefault(name, {})
         now = self.now()
@@ -677,10 +759,13 @@ class DomainService:
                 seen["dnsHost"] = await dns_providers.dns_host(name)
             except Exception:  # noqa: BLE001 — a hint, never a failure
                 seen["dnsHost"] = ""
-        if state == "dns-ok":
+        if state == "dns-ok" and entry.get("kind") == "organisations":
+            # Vercel issues each organisation's certificate when it is first opened.
+            state, reason = "live", ""
+        elif state == "dns-ok":
             ok, why = await (self.probe or https_probe)(name)
             state, reason = ("live", "") if ok else ("certificate", why)
-        if state == "live" and self.address_check is not None:
+        if state == "live" and self.address_check is not None and entry.get("kind") != "organisations":
             # IT ANSWERS; DOES IT WORK THERE? Sign-in must finish on this
             # address too. On the scorecard either way; status stays live.
             works, why = await self.address_check(name)
@@ -715,7 +800,7 @@ class DomainService:
                               if self.main_address() == f"https://{name}" else ""))
             elif status == "failed" and entry.get("status") != "failed":
                 self._tell(f"{name} is not working: {reason}")
-        if self.main_address() != address_before:
+        if (self.main_address(), self.organisations_domain()) != address_before:
             await self.follow()
         if became_apex:
             await self._companion(name)
@@ -763,18 +848,21 @@ class DomainService:
         from services.deploy.sign_in_address import sso_declared, production_alias
         main = self.main_address()
         wanted = main or (production_alias(self.project_name) if sso_declared(self.output_dir) else "")
+        org_base = self.organisations_domain()
         env = {e.get("key"): e for e in await self.client.list_env(pid)}
-        current = env.get("NEXTAUTH_URL")
         changed = False
-        if wanted and (not current or current.get("value") != wanted):
-            if current and current.get("id"):
-                await self.client.update_env(pid, current["id"], wanted, ["production"])
-            else:
-                await self.client.set_env(pid, "NEXTAUTH_URL", wanted, ["production"])
-            changed = True
-        elif not wanted and current and current.get("id"):
-            await self.client.delete_env(pid, current["id"])
-            changed = True
+        for key, value in (("NEXTAUTH_URL", wanted), ("FORGE_ORG_DOMAIN", org_base),
+                           ("FORGE_ORG_SIGN_IN_MODE", (self.tenancy().get("addressSignIn") or "shared") if org_base else "")):
+            current = env.get(key)
+            if value and (not current or current.get("value") != value):
+                if current and current.get("id"):
+                    await self.client.update_env(pid, current["id"], value, ["production"])
+                else:
+                    await self.client.set_env(pid, key, value, ["production"])
+                changed = True
+            elif not value and current and current.get("id"):
+                await self.client.delete_env(pid, current["id"])
+                changed = True
         redeployed = False
         if changed:
             latest = await self.client.latest_production_deployment(pid)
@@ -819,7 +907,9 @@ class DomainService:
         return {"domains": entries, "oldAddress": self.old_address(),
                 "vercelAddress": f"https://{self.project_name}.vercel.app",
                 "mainAddress": main, "elsewhere": elsewhere,
-                "appsDomain": apps_domain(), "dnsAccounts": list(self.dns_labels)}
+                "appsDomain": apps_domain(), "dnsAccounts": list(self.dns_labels),
+                "organisations": {"available": self.tenancy().get("kind") == "organisation",
+                                  "signIn": self.tenancy().get("addressSignIn") or "shared"}}
 
     def _tell(self, text: str) -> None:
         if self.say is not None:
