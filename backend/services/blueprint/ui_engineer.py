@@ -39,6 +39,7 @@ from typing import Any, Iterable, Sequence
 from services.blueprint.app_sdk import (
     code_page_files, project_app_sdk, sdk_reference,
 )
+from services.build_usage import carrying
 
 logger = logging.getLogger(__name__)
 
@@ -1892,8 +1893,8 @@ def reshape_screen(doc: dict, page: dict, app_root: Path, client: Any, current: 
     siblings = {**kept, **stubs}
     if new:
         with cf.ThreadPoolExecutor(min(4, len(new))) as pool:
-            results = list(pool.map(lambda p: _write_part(doc, page, p, app_root, call, client, load=load,
-                                                          view=view, siblings=siblings, brief=brief), new))
+            results = list(pool.map(carrying(lambda p: _write_part(doc, page, p, app_root, call, client, load=load,
+                                                          view=view, siblings=siblings, brief=brief)), new))
         for key, code, errors in results:
             if errors:
                 raise CompileError(f"{pid}: parts/{key}.tsx still does not compile after "
@@ -2009,7 +2010,7 @@ def compose_screen(doc: dict, page: dict, app_root: Path, client: Any, parts: li
 
     written: dict[str, str] = {}
     with cf.ThreadPoolExecutor(min(4, len(parts))) as pool:
-        for key, code, errors in pool.map(lambda p: write_part(p, feedback), parts):
+        for key, code, errors in pool.map(carrying(lambda p: write_part(p, feedback)), parts):
             if errors:
                 raise CompileError(f"{pid}: parts/{key}.tsx still does not compile after "
                                    f"{COMPILE_ROUNDS} rounds — " + "; ".join(errors[:8]))
@@ -2177,7 +2178,7 @@ def settle_code_pages(svc: Any, app_root: str | Path, client: Any = None,
         return row, typecheck(doc, root, str(row["page"]), str(row["load"]), str(row["view"]))
 
     with cf.ThreadPoolExecutor(6) as pool:
-        failing = [(r, e) for r, e in pool.map(check, rows) if e]
+        failing = [(r, e) for r, e in pool.map(carrying(check), rows) if e]
     outcome: dict[str, str] = {}
     if not failing:
         return outcome
@@ -2200,7 +2201,7 @@ def settle_code_pages(svc: Any, app_root: str | Path, client: Any = None,
         return pid, body, []
 
     with cf.ThreadPoolExecutor(6) as pool:
-        fixed = list(pool.map(fix, failing))
+        fixed = list(pool.map(carrying(fix), failing))
     with svc.lock:
         for pid, body, errors in fixed:
             if body is not None:

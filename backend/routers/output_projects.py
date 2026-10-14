@@ -392,8 +392,15 @@ async def smith_turn(project_id: str, req: SmithTurnRequest, user: PlatformUser 
     """
     from services.office_bridge import office_sink
     from services.smith.smith import Smith
+    from services import credits
+    from services.build_usage import acting
+    from services.project_service import project_for
 
-    root = await _resolve_root(project_id, user, db)
+    project = await project_for(project_id, user, db)
+    root = await _resolve_root(project.short_id, user, db)
+    # A turn the organisation cannot pay for is not started (402, in the
+    # administrator's words).
+    await credits.gate(db, org_id=project.org_id, user_email=user.email, project_short_id=project.short_id, turn=True)
     if not (root / ".forge" / "blueprint" / "current.json").exists():
         raise HTTPException(
             status_code=409,
@@ -436,7 +443,9 @@ async def smith_turn(project_id: str, req: SmithTurnRequest, user: PlatformUser 
 
     async with _turn_lock(project_id):
         try:
-            return await asyncio.to_thread(_run)
+            # `to_thread` copies the context, so the actor rides into the turn.
+            with acting(user=user.email, org=str(project.org_id)):
+                return await asyncio.to_thread(_run)
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from services.blueprint import scorecard as sc
+from services.build_usage import carrying
 
 logger = logging.getLogger(__name__)
 
@@ -415,7 +416,7 @@ def _fix(batch: list[dict], output_dir: str, *, run_turn: Callable, say: Callabl
             logger.warning("[fix-to-green] %s: %s", group["cause"], exc)
     if len(batch) > 1 and all(g["kind"] == "page" for g in batch):
         with ThreadPoolExecutor(max_workers=min(PAGE_PARALLEL, len(batch)), thread_name_prefix="forge-fix") as pool:
-            list(pool.map(one, batch))
+            list(pool.map(carrying(one), batch))
     else:
         for g in batch:
             one(g)

@@ -3675,6 +3675,10 @@ class RunUsage:
     #: ``change`` for anything asked for afterwards. Recorded per row so the
     #: two can be told apart without reading timestamps.
     phase: str = "build"
+    #: Who the run spends for, taken where the run starts: the fan-out's
+    #: worker threads do not carry the request's context.
+    user: str = ""
+    org: str = ""
 
     @classmethod
     def for_app(cls, svc: Any, *, phase: str = "build") -> "RunUsage":
@@ -3685,9 +3689,11 @@ class RunUsage:
         rather than at each of the dozen call sites that record a call, only
         some of which are in a position to know either.
         """
+        from services.build_usage import actor
         doc = getattr(svc, "doc", None) or {}
+        who = actor()
         return cls(project=str((doc.get("application") or {}).get("id") or ""),
-                   phase=phase)
+                   phase=phase, user=who.get("user", ""), org=who.get("org", ""))
 
     def record(self, *, node: str, agent: str, usage: Usage,
                elapsed_s: float, project: str = "") -> None:
@@ -3724,6 +3730,8 @@ class RunUsage:
                 duration_ms=int(elapsed_s * 1000),
                 kind="blueprint",
                 phase=self.phase,
+                user=self.user,
+                org=self.org,
             )
         except Exception:  # ledger is best-effort; never fail a run over it
             pass

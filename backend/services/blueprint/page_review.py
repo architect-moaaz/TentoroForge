@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from services.preview_session import Session, boot_env, cookies
+from services.build_usage import carrying
 
 logger = logging.getLogger(__name__)
 
@@ -624,7 +625,7 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
 
             say("analysis", round=round_)
             with cf.ThreadPoolExecutor(workers) as pool:
-                verdicts = dict(pool.map(judge, pending))
+                verdicts = dict(pool.map(carrying(judge), pending))
             failing = []
             for pid, v in verdicts.items():
                 if v is None:
@@ -663,7 +664,7 @@ def review_app(svc: Any, app_root: str | Path, client: Any, *, usage: Any = None
 
             say("fixing", round=round_, pages=[routes.get(p, p) for p in failing])
             with cf.ThreadPoolExecutor(workers) as pool:
-                rewrites = [r for r in pool.map(rewrite, failing) if r[1] is not None]
+                rewrites = [r for r in pool.map(carrying(rewrite), failing) if r[1] is not None]
             for pid, body in rewrites:
                 result = AgentResult(task_id=f"TASK-page_review-{pid}-{round_}", agent="ui_engineer",
                                      confidence=0.9,

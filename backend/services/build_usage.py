@@ -21,6 +21,7 @@ Design notes:
 from __future__ import annotations
 
 import contextvars
+import functools
 import json
 import logging
 import os
@@ -29,6 +30,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -121,6 +123,45 @@ def estimate_cost_usd(model: str | None, usage: dict[str, Any] | None) -> float:
     return round(cost, 6)
 
 
+#: WHO IS SPENDING. The person whose request the calls serve and their
+#: organisation, stamped on every row written while it is set, so spend can
+#: be read per person and per organisation and not only per application
+#: (2026-10-10: a $100 top-up read $19 and the ledger could not say whose
+#: builds it was). Set by the request that starts the work (`acting`), and
+#: carried into a run by `RunUsage` at its creation and into a pool's thread
+#: by `carrying`, because worker threads do not inherit it.
+_ACTOR: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar("forge_usage_actor", default=None)
+
+
+@contextmanager
+def acting(*, user: str = "", org: str = ""):
+    """Every row written inside names `user` (an email) and `org` (an id)."""
+    token = _ACTOR.set({"user": str(user or ""), "org": str(org or "")})
+    try:
+        yield
+    finally:
+        _ACTOR.reset(token)
+
+
+def actor() -> dict[str, str]:
+    """Who is spending right now, or nobody."""
+    return dict(_ACTOR.get() or {})
+
+
+def carrying(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """`fn`, run in a copy of the calling thread's context — the actor and
+    the usage scope with it. A `ThreadPoolExecutor` runs its work in a bare
+    context, so a row flushed from a worker thread named nobody. Each call
+    gets its own copy: one context cannot be entered by two threads at once,
+    and `pool.map` runs the calls side by side."""
+    ctx = contextvars.copy_context()
+
+    @functools.wraps(fn)
+    def run(*args: Any, **kwargs: Any) -> Any:
+        return ctx.copy().run(fn, *args, **kwargs)
+    return run
+
+
 def record_usage(
     *,
     project: str,
@@ -132,6 +173,8 @@ def record_usage(
     num_turns: int | None = None,
     kind: str = "generation",
     phase: str = "",
+    user: str = "",
+    org: str = "",
 ) -> None:
     """Append one agent-phase usage entry. Fail-open: never raises.
 
@@ -146,12 +189,15 @@ def record_usage(
     """
     try:
         usage = usage if isinstance(usage, dict) else {}
+        who = actor()
         entry = {
             "ts": round(time.time(), 2),
             "project": str(project or "unknown"),
             "agent": str(agent or "agent"),
             "kind": kind,
             "phase": str(phase or ""),
+            "user": str(user or who.get("user") or ""),
+            "org": str(org or who.get("org") or ""),
             "model": model,
             "input_tokens": int(usage.get("input_tokens") or 0),
             "output_tokens": int(usage.get("output_tokens") or 0),
@@ -188,13 +234,16 @@ def record_usage(
 # any scope is left to whoever made it, as before — never written twice.
 
 class _Scope:
-    __slots__ = ("output_dir", "project", "agent", "phase", "kind", "spent", "claimed")
+    __slots__ = ("output_dir", "project", "agent", "phase", "kind", "spent", "claimed", "who")
 
     def __init__(self, *, output_dir: str, project: str, agent: str, phase: str, kind: str):
         self.output_dir, self.project, self.agent = output_dir, project, agent
         self.phase, self.kind = phase, kind
         self.spent: list[Any] = []
         self.claimed: set[int] = set()
+        # Whose spend the scope's calls are, taken where the scope opens: the
+        # flush may run on a thread that knows nobody.
+        self.who: dict[str, str] = actor()
 
 
 _SCOPE: contextvars.ContextVar[_Scope | None] = contextvars.ContextVar("forge_usage_scope", default=None)
@@ -255,7 +304,8 @@ def _flush(scope: _Scope) -> None:
         try:
             record_usage(project=project, agent=scope.agent, model=getattr(usage, "model", None),
                          usage=usage.as_ledger_dict(), duration_ms=int(elapsed_s * 1000),
-                         kind=scope.kind, phase=scope.phase)
+                         kind=scope.kind, phase=scope.phase,
+                         user=scope.who.get("user", ""), org=scope.who.get("org", ""))
         except Exception:  # noqa: BLE001 — accounting never fails the work
             logger.debug("[build-usage] scope flush failed", exc_info=True)
 

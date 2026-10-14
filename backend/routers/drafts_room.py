@@ -492,6 +492,22 @@ async def _hand_off(session: dict, org_id: uuid.UUID, owner_id: uuid.UUID, emit)
     # ITS OWN DATABASE SESSION: this runs after the answer began streaming,
     # when the request's session may already be closed.
     async with async_session() as db:
+        # THE ORGANISATION PAYS FOR THE BUILD: refused at the door, in the
+        # administrator's words, before anything is created (`services.credits`).
+        from models.auth import PlatformUser
+        from services import credits
+        owner = await db.get(PlatformUser, owner_id)
+        owner_email = owner.email if owner else ""
+        try:
+            why = await credits.refusal(db, org_id=org_id, user_email=owner_email, project_short_id="")
+        except Exception:  # noqa: BLE001 — the check never breaks the work it guards
+            logger.warning("drafts room: the spend check could not run", exc_info=True)
+            why = []
+        if why:
+            emit("error", {"message": "Not started: " + "; ".join(why) + "."})
+            session.pop("handoff_request", None)
+            store.save(session)
+            return
         project = await create_project(org_id=org_id, owner_id=owner_id, name=name,
                                        description=description, db=db)
         await db.commit()
@@ -510,7 +526,8 @@ async def _hand_off(session: dict, org_id: uuid.UUID, owner_id: uuid.UUID, emit)
     emit("step", {"text": "Starting the build…"})
     try:
         start_build_in_background(asyncio.get_running_loop(), project, message=opening, description=description,
-                                  documents=[doc], app_name=name, output_dir=output_dir, app_root=app_root)
+                                  documents=[doc], app_name=name, output_dir=output_dir, app_root=app_root,
+                                  actor={"user": owner_email, "org": str(org_id)})
         handoff["build"] = "started"
         said = f"{name} is created and being built from the requirements document. Open it to watch."
     except Exception as exc:  # noqa: BLE001 — the app exists; the build can be asked for there
