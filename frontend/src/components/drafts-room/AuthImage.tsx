@@ -37,6 +37,29 @@ export function useFileUrl(path: string | null): string | null {
   return url;
 }
 
+const texts = new Map<string, Promise<string | null>>();
+
+/** A session document (a drawn screen) fetched with the token, as text. */
+export function useFileText(path: string | null): string | null {
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    if (!path) return;
+    let gone = false;
+    let got = texts.get(path);
+    if (!got) {
+      const token = localStorage.getItem("token");
+      got = fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+        .then((r) => (r.ok ? r.text() : null))
+        .catch(() => null);
+      got.then((t) => { if (t === null) texts.delete(path); });
+      texts.set(path, got);
+    }
+    void got.then((t) => { if (!gone) setText(t); });
+    return () => { gone = true; };
+  }, [path]);
+  return text;
+}
+
 export function AuthImage({ path, alt, className, onClick }:
   { path: string; alt: string; className?: string; onClick?: () => void }) {
   const url = useFileUrl(path);

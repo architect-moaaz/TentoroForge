@@ -1,11 +1,12 @@
-"""A the Drafts Room session on disk.
+"""A Drafts Room session on disk.
 
 One directory per session under the platform's data directory
 (`data/drafts_room/<id>/`): `session.json` holds who it belongs to, the
 conversation as the person sees it, the conversation as the model was sent it
 (`turns`, append-only so its thinking stays valid), the idea board and the
 hand-off; `files/` holds the screenshots Smith took and what the person
-dropped in. Sessions are files rather than rows: they are a working space,
+dropped in; `drawings/` holds each screen of the board drawn in the
+company's brand. Sessions are files rather than rows: they are a working space,
 not part of any application, and they carry pictures.
 """
 from __future__ import annotations
@@ -61,10 +62,15 @@ def create(org_id: str, user_id: str, title: str = "") -> dict:
     return session
 
 
+#: Held on the session while a request runs, never written: the company's
+#: brand is read afresh each turn (and carries the logo's bytes).
+TRANSIENT = ("company_brand",)
+
+
 def _write(session: dict) -> None:
     path = _dir(session["id"]) / "session.json"
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(session, default=str))
+    tmp.write_text(json.dumps({k: v for k, v in session.items() if k not in TRANSIENT}, default=str))
     tmp.replace(path)
 
 
@@ -227,6 +233,68 @@ def add_job_file(job: dict, data: bytes, *, name: str, media_type: str, caption:
     return meta
 
 
+# ── drawings ───────────────────────────────────────────────────────────────
+#
+# Each screen on the board, drawn in the company's brand: one HTML document
+# (and a picture of it when a browser was there) per screen, with an index of
+# their own (`drawings/index.json`) written only by the drawer's threads —
+# never `session.json`, which the conversation owns.
+
+_DRAWING = re.compile(r"^[0-9a-f]{16}$")
+
+
+def _drawings_dir(sid: str) -> Path:
+    return _dir(sid) / "drawings"
+
+
+def drawings(sid: str) -> list[dict]:
+    """The session's drawings, one per screen, in board order of first drawing.
+    One still `drawing` after `STALE_AFTER` is reported failed: the server
+    restarted under it."""
+    path = _drawings_dir(sid) / "index.json"
+    try:
+        rows = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return []
+    out = []
+    for row in rows:
+        if row.get("status") == "drawing" and time.time() - float(row.get("at") or 0) > STALE_AFTER:
+            row = {**row, "status": "failed", "error": row.get("error") or "the drawing stopped part-way (the server restarted)"}
+        out.append(row)
+    return out
+
+
+def save_drawing(sid: str, entry: dict, *, if_current: bool = False) -> bool:
+    """Put `entry` in the index in place of the one for the same screen.
+    With `if_current`, only while that one is this very drawing: a screen
+    redrawn while its first drawing was still running has a newer entry, and
+    the older thread's late result must not replace it."""
+    with _LOCK:
+        held = [r for r in drawings(sid) if r.get("screen") == entry.get("screen")]
+        if if_current and held and held[0].get("id") != entry.get("id"):
+            return False
+        rows = [r for r in drawings(sid) if r.get("screen") != entry.get("screen")]
+        rows.append(entry)
+        folder = _drawings_dir(sid)
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / "index.json"
+        tmp = path.with_suffix(f".{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps(rows, default=str))
+        tmp.replace(path)
+    return True
+
+
+def new_drawing_id() -> str:
+    return uuid.uuid4().hex[:16]
+
+
+def drawing_path(sid: str, did: str, kind: str) -> Path:
+    """Where a drawing's document (`html`) or picture (`png`) lives."""
+    if not _DRAWING.match(str(did or "")) or kind not in ("html", "png"):
+        raise NotFound(did)
+    return _drawings_dir(sid) / f"{did}.{kind}"
+
+
 def sniff(data: bytes) -> str:
     """What the bytes are, whatever the upload said."""
     if data[:8] == b"\x89PNG\r\n\x1a\n":
@@ -244,4 +312,4 @@ def sniff(data: bytes) -> str:
 
 __all__ = ["ROOT", "KINDS", "NotFound", "create", "load", "save", "listed", "delete", "add_file",
            "file_meta", "file_path", "sniff", "new_job", "save_job", "load_job", "jobs", "add_job_file",
-           "STALE_AFTER"]
+           "STALE_AFTER", "drawings", "save_drawing", "new_drawing_id", "drawing_path"]

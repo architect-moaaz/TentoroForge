@@ -3,21 +3,24 @@
 /**
  * The idea board: what the person and Smith have worked out so far, beside
  * the conversation. Overview (what it is, who for, features, decisions, open
- * questions), Screens, Flows (drawn by the App Flow map), Records (drawn),
+ * questions), Screens (each drawn as a page in the company's brand), Flows
+ * (drawn by the App Flow map), Records (drawn),
  * Look, the pictures studied, and — once handed off — the document.
  */
 import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ExternalLink, HelpCircle, CheckCircle2 } from "lucide-react";
+import { ExternalLink, HelpCircle, CheckCircle2, RefreshCw } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { FlowCanvas } from "@/components/app-flow/AppFlowPanel";
 import type { Flow } from "@/lib/appFlows";
 import { AuthImage } from "./AuthImage";
 import { EntityMap } from "./EntityMap";
 import { ResearchPanel } from "./ResearchPanel";
-import type { Board, FileMeta, Session } from "./types";
+import { ScreenDrawing } from "./ScreenDrawing";
+import type { Board, Drawing, FileMeta, Session } from "./types";
 
 const PRIORITY: Record<string, string> = { must: "First version", should: "Should", later: "Later" };
 
@@ -42,14 +45,26 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-sm text-muted-foreground py-6 text-center">{children}</p>;
 }
 
-export function IdeaBoard({ session, filePath, onPicture, tab, onTab }:
-  { session: Session; filePath: (id: string) => string; onPicture: (f: FileMeta) => void;
+export function brandLine(session: Pick<Session, "brand">): string {
+  const b = session.brand;
+  if (b?.source === "company" && b.company) return `${b.company}'s brand`;
+  return b?.source === "board" ? "the board's look" : "a look of Smith's own (no brand on record)";
+}
+
+export function IdeaBoard({ session, filePath, drawingPath, onPicture, onOpenDrawing, onDraw, tab, onTab }:
+  { session: Session; filePath: (id: string) => string; drawingPath: (id: string, kind: "html" | "png") => string;
+    onPicture: (f: FileMeta) => void; onOpenDrawing: (d: Drawing) => void; onDraw: (screens?: string[]) => void;
     tab: string; onTab: (tab: string) => void }) {
   const b = session.board;
   const flows = useMemo(() => flowsOf(b), [b]);
   const [chosen, setChosen] = useState<string | null>(null);
   const pictures = session.files ?? [];
   const studies = session.research ?? [];
+  const drawings = session.drawings ?? [];
+  const drawingOf = (name: string) => drawings.find((d) => d.screen === name);
+  const drawn = (b.screens ?? []).filter((s) => drawingOf(s.name)?.status === "done").length;
+  const undrawn = (b.screens ?? []).filter((s) => { const d = drawingOf(s.name); return !d || d.status === "failed" || d.stale; });
+  const drawingNow = drawings.some((d) => d.status === "drawing");
   const byPriority = (p: string) => (b.features ?? []).filter((f) => (f.priority ?? "should") === p);
 
   return (
@@ -82,6 +97,12 @@ export function IdeaBoard({ session, filePath, onPicture, tab, onTab }:
               <p className="text-xs text-muted-foreground mt-1">
                 {[b.product?.audience, b.product?.platforms?.join(", ")].filter(Boolean).join(" · ")}
               </p>
+            )}
+            {drawn > 0 && (
+              <button type="button" className="text-xs text-muted-foreground mt-1 underline-offset-2 hover:underline"
+                onClick={() => onTab("screens")}>
+                {drawn} screen{drawn === 1 ? "" : "s"} drawn in {brandLine(session)}
+              </button>
             )}
           </section>
 
@@ -167,26 +188,36 @@ export function IdeaBoard({ session, filePath, onPicture, tab, onTab }:
           <ResearchPanel studies={studies} filePath={filePath} onPicture={onPicture} />
         </TabsContent>
 
-        <TabsContent value="screens" className="mt-0">
+        <TabsContent value="screens" className="mt-0 space-y-3">
           {(b.screens ?? []).length === 0 ? <Empty>No screens yet.</Empty> : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {b.screens.map((s) => {
-                const like = s.like ? pictures.find((p) => p.id === s.like) : undefined;
-                return (
-                  <div key={s.name} className="rounded-lg border p-3 text-sm space-y-1">
-                    <div className="font-medium">{s.name}</div>
-                    {s.role && <div className="text-xs text-muted-foreground">for {s.role}</div>}
-                    {s.purpose && <div>{s.purpose}</div>}
-                    {s.shows?.length ? <div className="text-xs"><span className="text-muted-foreground">Shows: </span>{s.shows.join(", ")}</div> : null}
-                    {s.actions?.length ? <div className="text-xs"><span className="text-muted-foreground">Can: </span>{s.actions.join(", ")}</div> : null}
-                    {like && (
-                      <AuthImage path={filePath(like.id)} alt={like.name} onClick={() => onPicture(like)}
-                        className="mt-2 h-28 w-full object-cover object-top rounded border cursor-zoom-in" />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  {drawn} of {b.screens.length} drawn in {brandLine(session)}
+                  {drawingNow && <span className="ml-2 inline-block h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />}
+                </span>
+                {undrawn.length > 0 && !drawingNow && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => onDraw()}>
+                    <RefreshCw className="h-3 w-3 mr-1" /> Draw {undrawn.length === b.screens.length ? "all" : `${undrawn.length} more`}
+                  </Button>
+                )}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {b.screens.map((s) => {
+                  const d = drawingOf(s.name);
+                  return (
+                    <figure key={s.name} className="text-sm space-y-2">
+                      <ScreenDrawing drawing={d} path={drawingPath} onOpen={onOpenDrawing}
+                        onRedraw={() => onDraw([s.name])} stale={!!d?.stale} />
+                      <figcaption className="space-y-0.5">
+                        <div className="font-medium">{s.name}{s.role && <span className="text-xs text-muted-foreground font-normal"> · for {s.role}</span>}</div>
+                        {s.purpose && <div className="text-xs text-muted-foreground">{s.purpose}</div>}
+                      </figcaption>
+                    </figure>
+                  );
+                })}
+              </div>
+            </>
           )}
         </TabsContent>
 

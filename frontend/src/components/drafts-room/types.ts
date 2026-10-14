@@ -36,7 +36,7 @@ export type Board = {
   references: (Named & { url?: string; why?: string; took?: string[] })[];
   roles: (Named & { does?: string })[];
   features: (Named & { detail?: string; priority?: "must" | "should" | "later"; from?: string })[];
-  screens: (Named & { role?: string; purpose?: string; shows?: string[]; actions?: string[]; like?: string })[];
+  screens: (Named & { role?: string; purpose?: string; shows?: string[]; actions?: string[]; device?: "phone" | "desktop"; like?: string })[];
   flows: (Named & { role?: string; goal?: string; steps: { screen: string; does?: string }[] })[];
   entities: (Named & { fields?: { name: string; type?: string }[]; links?: { to: string; kind?: "one" | "many" }[] })[];
   decisions: { text: string }[];
@@ -74,6 +74,23 @@ export type Study = {
   read: boolean;
 };
 
+/** One screen of the board, drawn as a page in the company's brand. */
+export type Drawing = {
+  id: string;
+  screen: string;
+  status: "drawing" | "done" | "failed";
+  viewport: "phone" | "desktop";
+  html: boolean;
+  png: boolean;
+  caption: string;
+  brand_source: "company" | "board" | "none";
+  like?: string;
+  error?: string | null;
+  at: number;
+  /** The screen, the brand or the product changed since it was drawn. */
+  stale?: boolean;
+};
+
 export type Session = {
   id: string;
   org_id: string;
@@ -86,6 +103,8 @@ export type Session = {
   usage?: Record<string, number>;
   busy?: boolean;
   research?: Study[];
+  drawings?: Drawing[];
+  brand?: { source: "company" | "board" | "none"; company?: string };
 };
 
 export type SessionRow = {

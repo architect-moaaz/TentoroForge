@@ -5,10 +5,11 @@
  *
  * Sessions on the left; the conversation in the middle, where pictures and
  * PDFs can be dropped in and Smith's research shows as he does it; the idea
- * board on the right. When they agree and the person says to build, Smith
- * hands the idea over: the app is created and this page moves to its build,
- * which starts from the requirements document (`drafts_room_<projectId>`,
- * picked up by SmithPanel).
+ * board on the right, where each screen is drawn as a page in the company's
+ * brand as it lands. When they agree and the person says to build, Smith
+ * hands the idea over: the app is created, its build starts on the platform
+ * from the requirements document (the drawings go with it as design
+ * references), and this page moves to it.
  */
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,9 +24,10 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { AuthImage } from "@/components/drafts-room/AuthImage";
+import { DrawingFrame, VIEWPORTS } from "@/components/drafts-room/ScreenDrawing";
 import { IdeaBoard } from "@/components/drafts-room/IdeaBoard";
 import { useDraftsRoomTurn, type Handoff } from "@/components/drafts-room/useDraftsRoomTurn";
-import type { ChatEntry, FileMeta, Session, SessionRow, Study } from "@/components/drafts-room/types";
+import type { ChatEntry, Drawing, FileMeta, Session, SessionRow, Study } from "@/components/drafts-room/types";
 
 const OPENERS = [
   "I want to build an app like a well-known one — research it with me",
@@ -43,6 +45,7 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [picture, setPicture] = useState<FileMeta | null>(null);
+  const [shown, setShown] = useState<Drawing | null>(null);
   const [handingOff, setHandingOff] = useState<Handoff | null>(null);
   const [boardTab, setBoardTab] = useState("overview");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -52,6 +55,8 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
   // THE LOADED SESSION'S, NOT THE SELECTED ONE'S: between choosing a session
   // and its arrival, the old one's pictures are still on screen.
   const filePath = useCallback((fid: string) => `${base}/${session?.id}/files/${fid}`, [base, session?.id]);
+  const drawingPath = useCallback((id: string, kind: "html" | "png") => `${base}/${session?.id}/drawings/${id}.${kind}`,
+    [base, session?.id]);
 
   const { data: sessions = [] } = useQuery({
     queryKey: ["org", orgId, "drafts-room"],
@@ -81,20 +86,40 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
     return { ...s, research: [...rest, study].sort((a, b) => a.started - b.started) };
   }), []);
 
-  // A STUDY RUNS WHILE THE CONVERSATION GOES ON: while one is running, its
-  // progress is read every few seconds — the studies only, never the chat,
-  // which the turn in flight owns.
-  const running = (session?.research ?? []).some((r) => r.status === "running");
+  const putDrawing = useCallback((d: Drawing) => setSession((s) => {
+    if (!s) return s;
+    const rest = (s.drawings ?? []).filter((r) => r.screen !== d.screen);
+    return { ...s, drawings: [...rest, d] };
+  }), []);
+
+  // A STUDY OR A DRAWING RUNS WHILE THE CONVERSATION GOES ON: while one is
+  // running, its progress is read every few seconds — the studies and the
+  // drawings only, never the chat, which the turn in flight owns.
+  const running = (session?.research ?? []).some((r) => r.status === "running")
+    || (session?.drawings ?? []).some((d) => d.status === "drawing");
   useEffect(() => {
     if (!running || !session) return;
     const id = session.id;
     const t = window.setInterval(() => {
       api.get<Session>(`${base}/${id}`)
-        .then((fresh) => setSession((s) => (s && s.id === id ? { ...s, research: fresh.research } : s)))
+        .then((fresh) => setSession((s) => (s && s.id === id
+          ? { ...s, research: fresh.research, drawings: fresh.drawings, brand: fresh.brand } : s)))
         .catch(() => undefined);
     }, 4000);
     return () => window.clearInterval(t);
   }, [running, session?.id, base]);
+
+  const draw = async (screens?: string[]) => {
+    if (!session) return;
+    const id = session.id;
+    try {
+      const rows = await api.post<Drawing[]>(`${base}/${id}/draw`, { screens: screens ?? [], note: "" });
+      setSession((s) => (s && s.id === id ? { ...s, drawings: rows } : s));
+      setBoardTab("screens");
+    } catch {
+      /* the card keeps its state; the person can try again */
+    }
+  };
 
   const turn = useDraftsRoomTurn(orgId, activeId, {
     onBoard: (board) => setSession((s) => (s ? { ...s, board } : s)),
@@ -102,6 +127,7 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
     onMessage: (entry) => setSession((s) => (s ? { ...s, chat: [...s.chat, entry] } : s)),
     onHandoff,
     onStudy: (study) => { putStudy(study); if (study.status === "running") setBoardTab("research"); },
+    onDrawing: putDrawing,
   });
 
   useEffect(() => {
@@ -316,10 +342,31 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
 
           {/* Idea board */}
           <aside className="w-[42%] max-w-[720px] shrink-0 border-l p-4 overflow-hidden">
-            <IdeaBoard session={session} filePath={filePath} onPicture={setPicture} tab={boardTab} onTab={setBoardTab} />
+            <IdeaBoard session={session} filePath={filePath} drawingPath={drawingPath} onPicture={setPicture}
+              onOpenDrawing={setShown} onDraw={draw} tab={boardTab} onTab={setBoardTab} />
           </aside>
         </>
       )}
+
+      <Dialog open={!!shown} onOpenChange={(o) => { if (!o) setShown(null); }}>
+        <DialogContent className="sm:max-w-[min(96vw,1360px)]">
+          <DialogTitle className="text-sm">{shown?.caption || shown?.screen}</DialogTitle>
+          {shown && session && (
+            <div className="max-h-[80vh] overflow-auto flex gap-4 items-start">
+              <div className="shrink-0 border rounded-md overflow-hidden bg-white">
+                <DrawingFrame drawing={shown} path={drawingPath} live
+                  width={Math.min(VIEWPORTS[shown.viewport].w, shown.viewport === "phone" ? 390 : 1100)} />
+              </div>
+              {shown.like && session.files?.some((f) => f.id === shown.like) && (
+                <figure className="w-56 shrink-0 text-xs text-muted-foreground space-y-1">
+                  <AuthImage path={filePath(shown.like)} alt="modelled on" className="w-full rounded border" />
+                  <figcaption>Modelled on this screenshot — its layout only, none of its wording, logo, pictures or colours.</figcaption>
+                </figure>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!picture} onOpenChange={(o) => { if (!o) setPicture(null); }}>
         <DialogContent className="max-w-5xl">

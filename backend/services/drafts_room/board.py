@@ -125,6 +125,8 @@ SCHEMA: dict[str, Any] = {
             "name": {"type": "string"}, "role": {"type": "string"}, "purpose": {"type": "string"},
             "shows": {"type": "array", "items": {"type": "string"}},
             "actions": {"type": "array", "items": {"type": "string"}},
+            "device": {"type": "string", "enum": ["phone", "desktop"],
+                       "description": "where this screen is used; it is drawn at that size"},
             "like": {"type": "string", "description": "id of a screenshot it is modelled on"}},
             "required": ["name"]}},
         "flows": {"type": "array", "items": {"type": "object", "properties": {
