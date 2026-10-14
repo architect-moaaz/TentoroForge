@@ -11,6 +11,7 @@ import "@/lib/error_reporter";
 // Side-effect import — the app's own `/api/...` requests go under the
 // Preview's base path (a no-op wherever there is none).
 import "@/lib/base_path_fetch";
+import { PwaRegister } from "@/components/PwaRegister";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -25,6 +26,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <SessionProvider basePath={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/auth`}>
       <QueryClientProvider client={queryClient}>
+        <PwaRegister />
         {children}
         <Toaster position="top-right" richColors />
       </QueryClientProvider>

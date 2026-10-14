@@ -1,4 +1,5 @@
 "use client";
+import { apiPath } from "@/lib/api-path";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -38,7 +39,7 @@ function SetPasswordForm() {
         return;
       }
       try {
-        const res = await fetch(`/api/auth/set-password?token=${encodeURIComponent(token)}`);
+        const res = await fetch(apiPath(`/api/auth/set-password?token=${encodeURIComponent(token)}`));
         const body = await res.json();
         if (!live) return;
         if (!res.ok) {
@@ -69,7 +70,7 @@ function SetPasswordForm() {
     }
     setIsSaving(true);
     try {
-      const res = await fetch("/api/auth/set-password", {
+      const res = await fetch(apiPath("/api/auth/set-password"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, password }),

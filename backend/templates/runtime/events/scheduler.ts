@@ -60,26 +60,11 @@ export async function runDueSchedules(
       } catch {
         /* table missing on an older app — treat as never-run */
       }
-      if (!enabled) continue;
-      if (!isDue(trig.cron, lastRunAt, now)) continue;
+      // PAUSED IN THE DEFINITION OR IN THE TABLE: either says so.
+      if (!enabled || trig.enabled === false) continue;
+      if (!isDue(trig.cron, lastRunAt, now, trig.timezone)) continue;
 
-      // Record the run BEFORE dispatch so a slow workflow can't be
-      // double-fired by an overlapping cron tick.
-      try {
-        await db.execute(sql`
-          INSERT INTO forge_schedules (id, workflow_id, cadence, last_run_at, enabled)
-          VALUES (gen_random_uuid(), ${wf.id}, ${trig.cron}, ${now.toISOString()}::timestamp, true)
-          ON CONFLICT (workflow_id)
-          DO UPDATE SET last_run_at = ${now.toISOString()}::timestamp, cadence = ${trig.cron}
-        `);
-      } catch (err) {
-        console.warn(`[scheduler] could not record run for ${wf.id}:`, err);
-      }
-
-      await wfmod.triggerWorkflow(wf.id, {
-        scheduledAt: now.toISOString(),
-        trigger: "schedule",
-      });
+      await _fire(wfmod, wf.id, trig.cron, now);
       fired.push(wf.id);
     } catch (err) {
       console.warn(`[scheduler] schedule failed for ${wf.id}:`, err);
@@ -87,4 +72,44 @@ export async function runDueSchedules(
   }
 
   return { checked: scheduled.length, fired };
+}
+
+/** Record the run BEFORE dispatch so a slow workflow can't be double-fired
+ *  by an overlapping tick, then run it as the clock. */
+async function _fire(wfmod: typeof import("@/lib/workflows"), workflowId: string, cron: string, now: Date): Promise<void> {
+  try {
+    await db.execute(sql`
+      INSERT INTO forge_schedules (id, workflow_id, cadence, last_run_at, enabled)
+      VALUES (gen_random_uuid(), ${workflowId}, ${cron}, ${now.toISOString()}::timestamp, true)
+      ON CONFLICT (workflow_id)
+      DO UPDATE SET last_run_at = ${now.toISOString()}::timestamp, cadence = ${cron}
+    `);
+  } catch (err) {
+    console.warn(`[scheduler] could not record run for ${workflowId}:`, err);
+  }
+  await wfmod.triggerWorkflow(workflowId, {
+    scheduledAt: now.toISOString(),
+    trigger: "schedule",
+  });
+}
+
+/**
+ * Fire ONE scheduled workflow now, whether or not it is due — Smith's "run
+ * it now" and the clock check's proof that a schedule fires. `null` when
+ * the workflow is not one the clock runs.
+ */
+export async function fireSchedule(workflowId: string, now: Date = new Date()): Promise<{ fired: boolean; reason?: string }> {
+  let wfmod: typeof import("@/lib/workflows");
+  try {
+    wfmod = await import("@/lib/workflows");
+  } catch (err) {
+    return { fired: false, reason: `workflow runtime unavailable: ${String(err)}` };
+  }
+  const all = await wfmod.listWorkflows();
+  const wf = all.find((w) => w.id === workflowId || (w as any).blueprintId === workflowId || w.name === workflowId);
+  if (!wf) return { fired: false, reason: `no workflow '${workflowId}'` };
+  const trig = getTriggerContract(wf);
+  if (trig?.kind !== "schedule") return { fired: false, reason: `'${wf.id}' is not run by the clock` };
+  await _fire(wfmod, wf.id, trig.cron, now);
+  return { fired: true };
 }

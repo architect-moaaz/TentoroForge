@@ -124,7 +124,10 @@ async def write_env_local_from_platform(
     """
     root = app_env_dir(output_dir)
     env_path = root / ".env.local"
-    known = _known_keys()
+    # THE REGISTRY'S NAMES AND THE APPLICATION'S OWN: a secret an integration
+    # declares (`secretRefs`) is written for the app that declares it.
+    from services.declared_secrets import declared_keys_for_output_dir
+    known = _known_keys() | {e.key for e in declared_keys_for_output_dir(output_dir)}
     platform_only = platform_only_keys()
 
     res = await db.execute(

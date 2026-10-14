@@ -370,6 +370,11 @@ export async function persistPendingTask(
   if (result.status !== "paused" || !(result as any).pendingTask) return;
   const task = (result as any).pendingTask;
   const { assignee: _assignee, role: _role } = await _resolveAssignee(task, input, user);
+  // THE RUN KEEPS ITS ACTOR ACROSS THE PAUSE. A resumed run used to start
+  // with nobody acting — `$user.id` empty, owner columns unfilled, scoped
+  // reads returning nothing — because the pause stored the variables and
+  // not who was running. `__user` rides in the process variables and the
+  // bus hands it back to `triggerWorkflow` on resume.
   const entityId =
     (input.entityId as string) ??
     ((input.entity as any)?.id as string) ??
@@ -418,7 +423,7 @@ export async function persistPendingTask(
         ${entityId},
         ${JSON.stringify(result.output || {})},
         ${JSON.stringify(task.formBinding || {})},
-        ${JSON.stringify(result.output || {})},
+        ${JSON.stringify({ ...(result.output || {}), ...(user ? { __user: user } : {}) })},
         ${dueAt},
         ${escalateTo},
         NOW()
@@ -927,6 +932,23 @@ export function _numberIn(text: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** SENSITIVE VALUES ARE SEALED BEFORE A STEP WRITES THEM, as the data engine
+ *  seals its own writes: a process's insert stored a citizen's name, ID and
+ *  phone in plain text beside the encrypted columns made for them (60v142ju,
+ *  2026-10-12). Returns the plain values taken out, so the row handed to the
+ *  next step can carry them in memory — never to the table or the trail. */
+async function _seal(table: any, values: Record<string, any>): Promise<Record<string, unknown>> {
+  try {
+    const { sealSensitive } = await import("../data-engine");
+    return await sealSensitive(getTableName(table), values);
+  } catch (e) {
+    // No key, or no engine: refuse rather than write a sensitive value in the clear.
+    const { sensitiveColumnsFor } = await import("../sensitive-columns");
+    if (Object.keys(sensitiveColumnsFor(getTableName(table))).some((c) => c in values)) throw e;
+    return {};
+  }
+}
+
 export function _finalizeInsert(
   table: any, values: Record<string, unknown>, ctx: WorkflowExecutionContext,
 ): Record<string, unknown> {
@@ -1023,6 +1045,47 @@ export function _finalizeInsert(
 }
 
 /** A lookup whose key is missing: it matches no row (see `_buildWhere`). */
+/**
+ * A step's WHERE, kept to what the acting person may reach. The ownership
+ * rules the data API applies are read the same way here (`scopeForTable`),
+ * so a process started by a vendor reads and changes the vendor's rows, as
+ * their pages do. A run with no acting person is the application's own.
+ */
+async function _scoped(table: any, where: any, ctx: WorkflowExecutionContext, op: "read" | "write"): Promise<any> {
+  const user = (ctx as any)?.user;
+  if (!user?.id) return where;
+  const { scopeForTable } = await import("../data-engine");
+  const scope = await scopeForTable(table, user, op);
+  if (!scope) return where;
+  return where ? and(where, scope) : scope;
+}
+
+/**
+ * A process's own write, on the trail: `via workflow:<id>`, as whoever was
+ * running it — a schedule or an event with nobody acting is the
+ * application's own (`workflow`). Recorded after the step's write, never
+ * failing it: a trail that cannot be written is said in the log.
+ */
+async function _trail(ctx: WorkflowExecutionContext, action: "create" | "update" | "delete", table: any,
+                      before: any, after: any): Promise<void> {
+  try {
+    const { auditOn, recordAudit, actorOf } = await import("../audit");
+    if (!auditOn()) return;
+    const user = (ctx as any)?.user;
+    const actor = user?.id ? actorOf(user) : { kind: "workflow" as const };
+    const wid = String((ctx as any)?.workflowId ?? "");
+    await recordAudit(db, { action, entity: getTableName(table), entityId: (after ?? before)?.id != null ? String((after ?? before).id) : null,
+      before: before ?? null, after: after ?? null, actor, via: wid ? `workflow:${wid}` : "workflow",
+      runId: (ctx as any)?.runId ? String((ctx as any).runId) : null });
+  } catch (err) {
+    console.warn("[workflow] the trail could not be written:", err);
+  }
+}
+
+function auditOn(): boolean {
+  try { return Boolean(require("../audit").auditOn()); } catch { return false; }
+}
+
 export const MATCHES_NOTHING = Symbol("matches-nothing");
 
 /** The comparisons an object `where` value may name, and their spellings. */
@@ -1037,6 +1100,16 @@ export function _comparison(ref: unknown): { name: string; value: any } | null {
   const keys = Object.keys(ref as object);
   if (keys.length !== 1 || !(keys[0] in _OPS)) return null;
   return { name: _OPS[keys[0]], value: (ref as any)[keys[0]] };
+}
+
+/** Every comparison on one field, ANDed: `{ gte: from, lte: to }` is a range.
+ *  One comparison per field could not say "between", so an export by date
+ *  applied its start and dropped its end (60v142ju, 2026-10-12). */
+export function _comparisons(ref: unknown): { name: string; value: any }[] | null {
+  if (!ref || typeof ref !== "object" || Array.isArray(ref)) return null;
+  const keys = Object.keys(ref as object);
+  if (!keys.length || !keys.every((k) => k in _OPS)) return null;
+  return keys.map((k) => ({ name: _OPS[k], value: (ref as any)[k] }));
 }
 
 export function _buildWhere(
@@ -1058,26 +1131,31 @@ export function _buildWhere(
       // ToroCommerce's "email not already used by another customer" check
       // sent "[object Object]" as a uuid and Edit Profile failed for everyone
       // (forge-v3, 2026-10-07).
-      const op = _comparison(ref);
-      if (op) {
-        const raw = _resolveRef(op.value, ctx);
-        const list = Array.isArray(op.value) ? op.value.map((x: unknown) => _resolveRef(x, ctx)) : raw;
-        if (op.name === "in" || op.name === "notIn") {
-          const vals = (Array.isArray(list) ? list : [list]).filter((x) => x !== "" && x != null)
-            .map((x) => _coerceValue(x, table[field]));
-          if (!vals.length) return op.name === "in" ? sql`false` : undefined;
-          return op.name === "in" ? inArray(table[field], vals as any[]) : notInArray(table[field], vals as any[]);
-        }
-        if (raw === "" || raw == null) {
-          // "Not equal to nothing" holds for every row; any other comparison
-          // with nothing is not a filter anyone wrote.
-          if (op.name === "ne") return undefined;
-          emptyRefs.push(field);
-          return undefined;
-        }
-        const val = _coerceValue(raw, table[field]);
-        const fn = { ne, gt, gte, lt, lte }[op.name as "ne" | "gt" | "gte" | "lt" | "lte"];
-        return fn(table[field], val as any);
+      const ops = _comparisons(ref);
+      if (ops) {
+        const one = (op: { name: string; value: any }): any => {
+          const raw = _resolveRef(op.value, ctx);
+          const list = Array.isArray(op.value) ? op.value.map((x: unknown) => _resolveRef(x, ctx)) : raw;
+          if (op.name === "in" || op.name === "notIn") {
+            const vals = (Array.isArray(list) ? list : [list]).filter((x) => x !== "" && x != null)
+              .map((x) => _coerceValue(x, table[field]));
+            if (!vals.length) return op.name === "in" ? sql`false` : undefined;
+            return op.name === "in" ? inArray(table[field], vals as any[]) : notInArray(table[field], vals as any[]);
+          }
+          if (raw === "" || raw == null) {
+            // "Not equal to nothing" holds for every row. An open end of a
+            // range — "from" given, "to" left blank — is no bound, not a fault.
+            if (op.name === "ne" || ops.length > 1) return undefined;
+            emptyRefs.push(field);
+            return undefined;
+          }
+          const val = _coerceValue(raw, table[field]);
+          const fn = { ne, gt, gte, lt, lte }[op.name as "ne" | "gt" | "gte" | "lt" | "lte"];
+          return fn(table[field], val as any);
+        };
+        const parts = ops.map(one).filter((c) => c !== undefined);
+        if (!parts.length) return undefined;
+        return parts.length === 1 ? parts[0] : and(...parts);
       }
       // An unresolved variable reference must never become a literal in a
       // WHERE. `_resolveRef` returns the ref STRING when it names nothing,
@@ -1257,9 +1335,11 @@ export function registerDefaultActions(): void {
           const merged = { ...staticFields, ...(item as Record<string, unknown>) };
           const values = _finalizeInsert(table, merged, ctx);
           try {
+            const plain = await _seal(table, values);
             const rows = await (db as any).insert(table).values(values).returning();
             const row = Array.isArray(rows) ? rows[0] : rows;
-            if (row) inserted.push(await embedWrittenRow(table, row));
+            await _trail(ctx, "create", table, null, row);
+            if (row) inserted.push({ ...(await embedWrittenRow(table, row)), ...plain });
           } catch (err) {
             console.warn(`[workflow] db_insert (row-fanout): row failed —`, err);
           }
@@ -1302,6 +1382,7 @@ export function registerDefaultActions(): void {
             if (had == null || had === "") fill[k] = v;
           }
           if (Object.keys(fill).length) {
+            await _seal(table, fill);
             const [updated] = await (db as any).update(table).set(fill).where(cond).returning();
             if (updated) existing = updated;
           }
@@ -1311,8 +1392,11 @@ export function registerDefaultActions(): void {
         }
       }
       const values = _finalizeInsert(table, raw, ctx);
+      const plain = await _seal(table, values);
       const rows = await (db as any).insert(table).values(values).returning();
-      const row = Array.isArray(rows) ? rows[0] : rows;
+      const sealedRow = Array.isArray(rows) ? rows[0] : rows;
+      await _trail(ctx, "create", table, null, sealedRow);
+      const row = sealedRow && typeof sealedRow === "object" ? { ...sealedRow, ...plain } : sealedRow;
       if (row && typeof row === "object") await embedWrittenRow(table, row);
       if (row && typeof row === "object") {
         // Legacy flat aliases (`scan_sessions_id`) — kept for
@@ -1434,12 +1518,19 @@ export function registerDefaultActions(): void {
         if (rs.errors.length) return { error: rs.errors.join("; ") };
         Object.assign(raw, rs.patches);
       } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
+      await _seal(table, raw);
       const q = (db as any).update(table).set(raw);
       const where = _buildWhere(table, (config as any).where, ctx);
       _requireWhereOrThrow("db_update", config, where);
-      const rows = await q.where(where).returning();
+      const kept = await _scoped(table, where, ctx, "write");
+      const before: any[] = auditOn() ? await (db as any).select().from(table).where(kept) : [];
+      const rows = await q.where(kept).returning();
       if (Array.isArray(rows)) {
-        for (const r of rows) await embedWrittenRow(table, r, null, Object.keys(raw));
+        const was = new Map(before.map((b: any) => [String(b?.id), b]));
+        for (const r of rows) {
+          await embedWrittenRow(table, r, null, Object.keys(raw));
+          await _trail(ctx, "update", table, was.get(String(r?.id)) ?? null, r);
+        }
       }
       const count = Array.isArray(rows) ? rows.length : 1;
       // `updated` (the legacy scalar) + contract-declared `updated: {count, rows}`.
@@ -1476,15 +1567,17 @@ export function registerDefaultActions(): void {
       const q = (db as any).delete(table);
       const where = _buildWhere(table, (config as any).where, ctx);
       _requireWhereOrThrow("db_delete", config, where);
+      const kept = await _scoped(table, where, ctx, "write");
       // Drizzle-orm's DELETE ... RETURNING lets us honor the contract-
       // declared `deleted.count` output. Fall back to the boolean if the
       // driver doesn't support returning().
       let count = 0;
       try {
-        const rows: any = await (q.where(where) as any).returning();
+        const rows: any = await (q.where(kept) as any).returning();
         count = Array.isArray(rows) ? rows.length : 0;
+        for (const r of Array.isArray(rows) ? rows : []) await _trail(ctx, "delete", table, r, null);
       } catch {
-        await q.where(where);
+        await q.where(kept);
       }
       // A0-2: the contract advertises `deleted.count`, but `deleted` was a
       // BOOLEAN. The count was already computed — it just was not reachable
@@ -1514,7 +1607,8 @@ export function registerDefaultActions(): void {
       // _requireWhereOrThrow, so unfiltered writes remain impossible.
       const where = _buildWhere(table, (config as any).where, ctx, { strict: false });
       if (where === MATCHES_NOTHING) return queryResult([]);
-      const rows = await (where ? q.where(where) : q);
+      const kept = await _scoped(table, where, ctx, "read");
+      const rows = await (kept ? q.where(kept) : q);
       // THE ONE ROW A LOOKUP LOOKED UP, READABLE AS ITSELF. A step written to
       // fetch one record is read as that record — `check_member_verified.
       // kycStatus`, `fetch_tool_owner.ownerId`. Templates had a fallback for
@@ -1635,12 +1729,29 @@ export function registerDefaultActions(): void {
         "Content-Type": "application/json",
         ...authorHeaders,
       };
+      let url = String(resolvedUrl);
+      // THE CALL IS SIGNED WITH A SECRET NAMED, NEVER WRITTEN. `auth.secretRef`
+      // is the NAME of a variable the environment holds (declared on an
+      // integration's `secretRefs`); the value goes into the request and
+      // nowhere else — not a variable, not the log. Templates cannot reach
+      // the environment, so this is the only way a key enters a call.
+      const auth = (config as any).auth;
+      if (auth && typeof auth === "object" && auth.secretRef) {
+        const name = String(auth.secretRef);
+        const value = process.env[name];
+        if (!value) return { error: `${name} is not set in this environment`, status: 0, ok: false };
+        const where = String(auth.in || "bearer");
+        if (where === "header") headers[String(auth.name || "X-API-Key")] = value;
+        else if (where === "basic") headers["Authorization"] = `Basic ${Buffer.from(value).toString("base64")}`;
+        else if (where === "query") url += `${url.includes("?") ? "&" : "?"}${encodeURIComponent(String(auth.name || "key"))}=${encodeURIComponent(value)}`;
+        else headers["Authorization"] = `Bearer ${value}`;
+      }
       // 30 s ceiling — a hung endpoint used to hang the whole workflow run
       // indefinitely. AbortSignal.timeout is a Node 18+/browser built-in.
       const controller = new AbortController();
       const timeoutMs = Number((config as any).timeoutMs ?? 30_000) || 30_000;
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch(String(resolvedUrl), {
+      const res = await fetch(url, {
         method: String(config.method || "GET"),
         headers,
         body: resolvedBody !== undefined ? JSON.stringify(resolvedBody) : undefined,
@@ -1673,6 +1784,105 @@ export function registerDefaultActions(): void {
   // /api/notifications, displayable with ActivityFeed/Banner/List). Config keys
   // (all support {{var}} refs): title|subject, message|body, to|userId, toRole|
   // assigneeRole, type, entityId.
+  // ─── Payments ────────────────────────────────────────────────────────
+  // The run never holds a card: `create_checkout` opens a hosted page and
+  // the run's end sends the person there (`config.redirect: "{{checkout.url}}"`);
+  // the provider's signed event — or the stand-in's page — settles it.
+  registerActionHandler("create_checkout", async (config, ctx) => {
+    try {
+      const pay = await import("../payments");
+      const cfg = config as any;
+      const currency = String(_resolveRef(cfg.currency, ctx) ?? "").toUpperCase() || (await pay.currencyOf());
+      const items = Array.isArray(cfg.lineItems) ? (_resolveValueMap({ x: cfg.lineItems }, ctx) as any).x : null;
+      const lines = Array.isArray(items) ? items.map((li: any) => ({ name: String(li?.name ?? "Item"),
+        amountMinor: pay.toMinor(Number(li?.amount ?? 0), currency), quantity: Math.max(1, Number(li?.quantity ?? 1)) })) : [];
+      const amountMajor = lines.length ? lines.reduce((s: number, li: any) => s + (li.amountMinor * li.quantity), 0) / (pay.toMinor(1, currency) || 1)
+        : Number(_resolveRef(cfg.amount, ctx) ?? 0);
+      const amountMinor = lines.length ? lines.reduce((s: number, li: any) => s + li.amountMinor * li.quantity, 0) : pay.toMinor(amountMajor, currency);
+      if (!(amountMinor > 0)) return { error: "create_checkout: the amount is not above zero" };
+      const ref = cfg.reference && typeof cfg.reference === "object" ? _resolveValueMap(cfg.reference, ctx) as any : {};
+      const origin = String((ctx.variables as any).__origin ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+      const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+      const successPath = String(_resolveRef(cfg.successPage, ctx) ?? "/");
+      const cancelPath = String(_resolveRef(cfg.cancelPage, ctx) ?? successPath);
+      const { adapter, secrets, live, notice } = await pay.adapterFor();
+      const user = (ctx as any)?.user;
+      const paymentId = await pay.ledgerInsert({ provider: adapter.provider, provider_ref: null, amount_minor: amountMinor, currency,
+        entity: ref?.entity ? String(ref.entity) : null, entity_id: ref?.id != null ? String(ref.id) : null,
+        actor_id: user?.id ? String(user.id) : null, description: cfg.description ? String(_resolveRef(cfg.description, ctx) ?? "") : null,
+        success_url: `${origin}${base}${successPath}`, cancel_url: `${origin}${base}${cancelPath}`,
+        metadata: { workflow: String((ctx as any)?.workflowId ?? ""), ...(ref?.entity ? { entity: String(ref.entity) } : {}), ...(ref?.id != null ? { entityId: String(ref.id) } : {}) } });
+      const out = await adapter.createCheckout({ paymentId, amountMinor, currency, description: cfg.description ? String(_resolveRef(cfg.description, ctx) ?? "") : undefined,
+        lineItems: lines.length ? lines : undefined, customerEmail: cfg.customerEmail ? String(_resolveRef(cfg.customerEmail, ctx) ?? "") : (user?.email ? String(user.email) : undefined),
+        successUrl: `${origin}${base}${successPath}?payment=${paymentId}`, cancelUrl: `${origin}${base}${cancelPath}?payment=${paymentId}&cancelled=1`,
+        metadata: { paymentId, ...(ref?.entity ? { entity: String(ref.entity) } : {}), ...(ref?.id != null ? { entityId: String(ref.id) } : {}) },
+        transfer: cfg.transfer && typeof cfg.transfer === "object" ? _resolveValueMap(cfg.transfer, ctx) as any : undefined }, secrets, origin);
+      await pay.ledgerSet(paymentId, { provider_ref: out.providerRef });
+      return { url: out.url, sessionId: out.sessionId, paymentId, provider: adapter.provider, amount: amountMajor, currency, live,
+        ...(notice ? { notice, standIn: true } : {}) };
+    } catch (err) {
+      console.error("[workflow] create_checkout failed:", err);
+      return { error: String(err) };
+    }
+  });
+
+  registerActionHandler("refund_payment", async (config, ctx) => {
+    try {
+      const pay = await import("../payments");
+      const id = String(_resolveRef((config as any).paymentId, ctx) ?? "");
+      const row = id ? await pay.ledgerGet(id) : null;
+      if (!row) return { error: `refund_payment: no payment '${id}' on the ledger` };
+      if (row.status !== "succeeded" && row.status !== "partially_refunded") return { error: `refund_payment: the payment is ${row.status}, not paid` };
+      const amount = (config as any).amount != null ? Number(_resolveRef((config as any).amount, ctx)) : undefined;
+      const adapter = pay.ADAPTERS[row.provider] ?? pay.ADAPTERS.stand_in;
+      const { secrets } = await pay.adapterFor();
+      const out = await adapter.refund({ providerRef: String(row.provider_ref), amountMinor: amount ? pay.toMinor(amount, row.currency) : undefined }, secrets);
+      if (row.provider === "stand_in" || out.status === "succeeded") {
+        await pay.settle(String(row.metadata?.integration ?? row.provider), { type: "refund.succeeded", providerRef: String(row.provider_ref),
+          paymentId: row.id, amountMinor: amount ? pay.toMinor(amount, row.currency) : Number(row.amount_minor), currency: row.currency, metadata: {} });
+      }
+      return { refundId: out.refundId, status: out.status, paymentId: row.id };
+    } catch (err) {
+      console.error("[workflow] refund_payment failed:", err);
+      return { error: String(err) };
+    }
+  });
+
+  registerActionHandler("payment_status", async (config, ctx) => {
+    try {
+      const pay = await import("../payments");
+      const id = String(_resolveRef((config as any).paymentId, ctx) ?? "");
+      const row = id ? await pay.ledgerGet(id) : null;
+      if (!row) return { error: `payment_status: no payment '${id}' on the ledger`, status: "unknown" };
+      return { status: row.status, amount: pay.toMajor(Number(row.amount_minor), row.currency), currency: row.currency,
+        providerRef: row.provider_ref, provider: row.provider, entity: row.entity, entityId: row.entity_id };
+    } catch (err) {
+      return { error: String(err), status: "unknown" };
+    }
+  });
+
+  registerActionHandler("connect_account", async (config, ctx) => {
+    try {
+      const pay = await import("../payments");
+      const { adapter, secrets, live, notice } = await pay.adapterFor();
+      const ref = (config as any).reference && typeof (config as any).reference === "object" ? _resolveValueMap((config as any).reference, ctx) as any : {};
+      const origin = String((ctx.variables as any).__origin ?? process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+      const base = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/$/, "");
+      const returnPath = String(_resolveRef((config as any).returnPage, ctx) ?? "/");
+      if (!live || !adapter.connect) {
+        return { accountRef: `standin_acct_${String(ref?.id ?? "payee")}`, onboardingUrl: `${origin}${base}${returnPath}?onboarded=standin`,
+          standIn: true, notice: notice ?? `${adapter.provider} cannot onboard payees; a stand-in account was recorded.` };
+      }
+      const account = await adapter.connect.createAccount({ reference: `${ref?.entity ?? ""}:${ref?.id ?? ""}` }, secrets);
+      const link = await adapter.connect.onboardingLink({ accountRef: account.accountRef, returnUrl: `${origin}${base}${returnPath}?onboarded=1`,
+        refreshUrl: `${origin}${base}${returnPath}?onboarding=again` }, secrets);
+      return { accountRef: account.accountRef, onboardingUrl: link.url, provider: adapter.provider };
+    } catch (err) {
+      console.error("[workflow] connect_account failed:", err);
+      return { error: String(err) };
+    }
+  });
+
   registerActionHandler("send_notification", async (config, ctx) => {
     const title = String(_resolveRef((config as any).title ?? (config as any).subject ?? "Notification", ctx) ?? "Notification");
     const message = String(_resolveRef((config as any).message ?? (config as any).body ?? "", ctx) ?? "");
@@ -1703,8 +1913,21 @@ export function registerDefaultActions(): void {
         notificationId = row?.id ?? null;
       } catch (e) { console.warn("[workflow] send_notification persist failed:", e); }
     }
+    // TO THE PERSON'S DEVICES TOO, when the step says `push` and the
+    // application sends it: signed with its own keys, reaching every device
+    // they subscribed. Said when it could not (no device, no keys).
+    const channels = Array.isArray((config as any).channels) ? (config as any).channels.map(String) : ["in_app"];
+    let pushed: { sent: number; pruned: number; notice?: string } | null = null;
+    if (channels.includes("push")) {
+      try {
+        const { sendPush } = await import("@/lib/push");
+        pushed = await sendPush({ userIds: userId ? [String(userId)] : [], role: role ? String(role) : undefined },
+                                { title, body: message, link });
+      } catch (e) { pushed = { sent: 0, pruned: 0, notice: `push failed: ${e instanceof Error ? e.message : String(e)}` }; }
+    }
     // Contract-declared `notificationId` — was always null before.
-    return { sent: true, channel: "in_app", notificationId };
+    return { sent: true, channel: pushed && pushed.sent > 0 ? "in_app+push" : "in_app", notificationId,
+             ...(pushed ? { pushed: pushed.sent, pushNotice: pushed.notice } : {}) };
   });
 
   // Real email. THE APPLICATION KNOWS WHICH SERVICE IT IS MEANT TO SEND

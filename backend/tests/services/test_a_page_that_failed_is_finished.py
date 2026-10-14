@@ -163,10 +163,21 @@ def test_an_unattended_turn_leaves_the_persons_plan_alone(tmp_path):
     assert plan_mod.peek(tmp_path) == ["add a menu", "rename orders"]
 
 
-def test_the_build_skips_repair_when_there_is_no_tree(tmp_path):
-    from routers.blueprint_generate import _finish_unfinished_pages
-    _finish_unfinished_pages(SimpleNamespace(doc={}), str(tmp_path), str(tmp_path / "app"), _report(),
-                             lambda *_: None)          # no package.json: returns, never raises
+def test_the_build_hands_nothing_over_when_there_is_no_tree(tmp_path, monkeypatch):
+    """No package.json: nothing booted, so no hand-over and no checks."""
+    from routers import blueprint_generate as router
+    from services.blueprint.service import BlueprintService
+    svc = BlueprintService.create(output_dir=str(tmp_path), app_id="x", name="X", domain="d")
+    svc.doc["pages"] = [{"id": "PAGE-001", "name": "Home", "route": "/", "purpose": "home"}]
+    svc.doc["runtime"] = {"build": {"status": "passed"}}
+    svc.save()
+    report = SimpleNamespace(completed=["assemble"], failed=[], blocked=[], skipped=[], failed_because={},
+                             skipped_because={}, blocked_because={}, paused_because="", degraded={})
+    monkeypatch.setattr("services.blueprint.orchestrator.run", lambda *a, **k: report)
+    monkeypatch.setattr("services.smith.smith.settle_state_after_build", lambda svc, report: "IMPLEMENTATION")
+    out = router._run_dag(str(tmp_path), str(tmp_path / "app"), "", approved=True, emit=lambda *_: None,
+                          phase="build")
+    assert "checks" not in out
 
 
 def test_the_repair_keeps_its_own_ledger_so_it_never_looks_idle(tmp_path, monkeypatch):

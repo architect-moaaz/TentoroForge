@@ -52,7 +52,8 @@ WRITABLE_SECTIONS: frozenset[str] = frozenset(
     | {"data.entities", "data.relationships", "data.constraints",
        "navigation", "designSystem", "security",
        "runtime", "database", "deployment", "product", "codeMap",
-       "pageLayouts", "pageCode", "composition", "completeness"}
+       "pageLayouts", "pageCode", "composition", "completeness",
+       "domainReference", "mobile"}
 )
 
 
@@ -124,20 +125,21 @@ _READS: dict[str, set[str]] = {
     # Discovery: intent in, requirements out. Nothing designed yet exists.
     "requirement": set(),
     "domain_intelligence": {"requirements"},
-    "product_analysis": {"requirements"},
+    "product_analysis": {"requirements", "domainReference"},
 
     # Structure: modules and navigation over the pages that exist.
     # `designSources` because a connected design DRAWS the navigation — its
     # sidebar is the same subtree on every screen — and the agent that authors
     # `navigation.tree` could not see it, so every Figma app got the generic
     # sidebar with the design's own rail rendered inside each page (§48).
-    "solution_architecture": {"requirements", "pages", "designSources"},
+    "solution_architecture": {"requirements", "pages", "designSources", "domainReference", "mobile"},
 
-    # Data: grounded in requirements, not in anybody's UI.
-    "data_model": {"requirements"},
+    # Data: grounded in requirements, not in anybody's UI — and in what a
+    # practitioner expects such a product to keep (`domainReference`).
+    "data_model": {"requirements", "domainReference"},
 
     # Design language: the product and what the UI already uses.
-    "accessibility": {"requirements", "pages"},
+    "accessibility": {"requirements", "pages", "mobile"},
     "figma_intelligence": {"requirements", "pages"},
 
     # §30 verbatim — page design may compose pages and select patterns, and may
@@ -154,22 +156,26 @@ _READS: dict[str, set[str]] = {
     # agent that could edit what the design says could make the design agree
     # with the app it just invented.
     "page_design": {"requirements", "modules", "data", "designSystem",
-                    "roles", "permissions", "designSources"},
+                    "roles", "permissions", "designSources",
+                    # The app flows are the screens' and the processes'
+                    # paths: who moves where, by which process (`flows`) —
+                    # written once the roles are (`security`).
+                    "workflows", "security", "domainReference"},
 
     # Behaviour: what the business does, over the data it does it to.
-    "workflow": {"requirements", "data", "pages", "businessRules", "roles"},
-    "business_rules": {"requirements", "data", "workflows"},
+    "workflow": {"requirements", "data", "pages", "businessRules", "roles", "domainReference", "integrations"},
+    "business_rules": {"requirements", "data", "workflows", "domainReference"},
 
     # The analytics each page carries, over the data the pages show and the
     # processes that move it — the states a workflow changes are what a
     # dashboard counts.
     "analytics": {"requirements", "product", "data", "pages", "roles",
-                  "workflows", "security"},
+                  "workflows", "security", "domainReference"},
 
     # §100 — permissions guard entities, pages and workflow execution.
-    "security": {"requirements", "data", "pages", "workflows"},
+    "security": {"requirements", "data", "pages", "workflows", "integrations", "domainReference"},
 
-    "integration": {"requirements"},
+    "integration": {"requirements", "domainReference"},
 
     # Endpoints are derived, not authored, but the derivation reads all of this.
     "api": {"requirements", "data", "database", "workflows", "pages",
@@ -196,15 +202,17 @@ def _cap(agent: str, writes: Iterable[str], tools: Iterable[str] = (), **kw) -> 
 #: starting point to argue with, not scripture.
 AGENT_REGISTRY: dict[str, AgentCapability] = {
     "requirement": _cap("requirement", {"requirements", "product"}),
-    "domain_intelligence": _cap("domain_intelligence", {"product"}),
-    "product_analysis": _cap("product_analysis", {"product", "requirements"}),
+    # The domain reference: what a practitioner expects of such a product,
+    # written before the model and held to by every model node.
+    "domain_intelligence": _cap("domain_intelligence", {"domainReference"}),
+    "product_analysis": _cap("product_analysis", {"product", "requirements", "mobile"}),
     "solution_architecture": _cap("solution_architecture", {"modules", "navigation"}),
     # §30, verbatim: may compose pages, select patterns, define UI interactions,
     # use A2UI MCP, update UI-related Blueprint information. May NOT touch
     # business rules, database schema, security rules or role permissions.
     "page_design": _cap(
         "page_design",
-        {"pages", "navigation"},
+        {"pages", "navigation", "flows"},
         tools={"blueprint:read", "page_contract:read", "design_system:read",
                "mcp:a2ui"},
     ),
@@ -323,7 +331,7 @@ AGENT_REGISTRY: dict[str, AgentCapability] = {
          "pages", "components", "widgets", "data.entities",
          "data.relationships", "data.constraints", "workflows",
          "businessRules", "integrations", "roles", "permissions", "security",
-         "designSystem"},
+         "designSystem", "domainReference"},
         tools={"blueprint:read", "blueprint:write"},
     ),
     # §31/§34 — the Figma Intelligence Agent contributes evidence, not design
@@ -506,12 +514,38 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
             where = ((st or {}).get("config") or {}).get("where") if isinstance(st, dict) else None
             for field, value in (where.items() if isinstance(where, dict) else ()):
                 bad = re.search(r"__(ne|neq|not|gt|gte|lt|lte|in|nin|notin|like)$", str(field), re.I)
-                odd = isinstance(value, dict) and not (len(value) == 1 and next(iter(value)) in WHERE_COMPARISONS)
+                # Several comparisons on one field are ANDed — a range is
+                # `{"gte": from, "lte": to}`.
+                odd = isinstance(value, dict) and not (value and all(k in WHERE_COMPARISONS for k in value))
                 if bad or odd:
                     problems.append(
                         f"{name}/{st.get('key')}: where {field!r} — write a comparison as "
-                        f"{{\"<field>\": {{\"ne\": <value>}}}} (ne, gt, gte, lt, lte, in, notIn); "
-                        "a field alone with a value means equals")
+                        f"{{\"<field>\": {{\"ne\": <value>}}}} (ne, gt, gte, lt, lte, in, notIn; several on one field "
+                        "are ANDed, a range is {{\"gte\": from, \"lte\": to}}); a field alone with a value means equals")
+    # WHAT AN END HANDS BACK IS DECLARED, SMALL, AND SOMEWHERE. `reply` is a
+    # map of names to templates; `redirect` is a route of this application or
+    # a template over a step's output — never free prose, never on a refused
+    # end (a refusal is told, not followed).
+    for proposal in proposals:
+        name = proposal.body.get("name") or proposal.natural_key
+        for st in with_loop_bodies(proposal.body).get("steps") or []:
+            if not isinstance(st, dict):
+                continue
+            cfg = st.get("config") if isinstance(st.get("config"), dict) else {}
+            if "reply" not in cfg and "redirect" not in cfg:
+                continue
+            key = st.get("key") or st.get("id")
+            if str(st.get("type") or "") not in ("end", "end_event"):
+                problems.append(f"{name}/{key}: `reply` and `redirect` belong on an `end` step")
+                continue
+            if cfg.get("refused") is True:
+                problems.append(f"{name}/{key}: a refused end tells the person why; it does not reply or redirect")
+            if "reply" in cfg and not isinstance(cfg.get("reply"), dict):
+                problems.append(f"{name}/{key}: `reply` maps names to values (`{{\"url\": \"{{{{checkout.url}}}}\"}}`)")
+            red = cfg.get("redirect")
+            if "redirect" in cfg and not (isinstance(red, str) and (red.startswith("/") or "{{" in red)):
+                problems.append(f"{name}/{key}: `redirect` is a route of this application (`/orders/{{{{insert_order.id}}}}`) "
+                                "or a template over a step's output (`{{{{checkout.url}}}}`)")
     # WOULD THE ENGINE RUN IT. A step whose condition the engine's parser
     # refuses, a function the engine lacks, a template naming what the engine
     # never holds — each is a workflow the author can fix now and nobody can
@@ -522,6 +556,182 @@ def check_workflow_steps(result: "AgentResult", doc: dict | None = None,
          "data": (doc or {}).get("data") or {}}))
     if problems:
         raise InvalidWorkflowStep(_all_of(problems))
+
+
+class InvalidTrigger(AuthorRefusal):
+    """A workflow's trigger, wait or deadline is not one the clock can read."""
+
+
+def check_workflow_triggers(result: "AgentResult", doc: dict | None = None) -> None:
+    """A trigger the runtime will act on, a wait it can measure, a deadline
+    it can hand on.
+
+    A schedule used to be a sentence nothing parsed, a record change a
+    condition nothing read, and `"1 hour"` a wait of zero: each was accepted
+    at the author and silent in the app (2026-10-12). Refused here with
+    what to write instead, so the agent is asked again."""
+    proposals = [p for p in result.proposals if p.section == "workflows"]
+    if not proposals:
+        return
+    from services.blueprint.cron_expr import is_valid_cron, parse_duration_ms
+    from services.blueprint.functional_completeness import with_loop_bodies
+    doc = doc or {}
+    entities = {str(e.get("id")) for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)}
+    roles = {str(r.get("id")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    role_names = {str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)}
+    live_integrations = [i for i in doc.get("integrations") or []
+                         if isinstance(i, dict) and str(i.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
+    integrations = {str(i.get("id")) for i in live_integrations}
+    inbound_by_id = {str(i.get("id")): i.get("inbound") for i in live_integrations if isinstance(i.get("inbound"), dict)}
+    declared_refs = {str(r) for i in live_integrations for r in i.get("secretRefs") or []}
+    problems: list[str] = []
+    for proposal in proposals:
+        body = proposal.body
+        name = body.get("name") or proposal.natural_key
+        trig = body.get("trigger") if isinstance(body.get("trigger"), dict) else {}
+        kind = str(trig.get("kind") or "manual")
+        if kind == "schedule":
+            cron = str(trig.get("cron") or trig.get("detail") or "").strip()
+            if not is_valid_cron(cron):
+                problems.append(f"{name}: a schedule says when as `trigger.cron`, five fields "
+                                f"(`0 9 * * 1` is Mondays at 09:00); got {cron!r}")
+            tz = str(trig.get("timezone") or "").strip()
+            if tz:
+                try:
+                    from zoneinfo import ZoneInfo
+                    ZoneInfo(tz)
+                except Exception:  # noqa: BLE001
+                    problems.append(f"{name}: `trigger.timezone` {tz!r} is not an IANA zone (`Asia/Dubai`)")
+        elif kind == "db_change":
+            if str(trig.get("entity") or "") not in entities:
+                problems.append(f"{name}: a `db_change` trigger names the record type it watches as "
+                                f"`trigger.entity` (an entity id); got {trig.get('entity')!r}")
+            if str(trig.get("on") or "") not in ("created", "updated", "deleted"):
+                problems.append(f"{name}: a `db_change` trigger says which change as `trigger.on`: "
+                                f"created, updated or deleted; got {trig.get('on')!r}")
+        elif kind == "api_event":
+            if not str(trig.get("event") or trig.get("detail") or "").strip():
+                problems.append(f"{name}: an `api_event` trigger names its event as `trigger.event`")
+        elif kind == "webhook":
+            row = inbound_by_id.get(str(trig.get("integration") or ""))
+            if str(trig.get("integration") or "") not in integrations:
+                problems.append(f"{name}: a `webhook` trigger names the integration that calls in as "
+                                f"`trigger.integration` (one declared under `integrations`); got "
+                                f"{trig.get('integration')!r}")
+            elif row is None:
+                problems.append(f"{name}: {trig.get('integration')} does not call in — it declares no `inbound`; "
+                                "a webhook starts only from an integration with one")
+            event = str(trig.get("event") or "").strip()
+            if not event:
+                problems.append(f"{name}: a `webhook` trigger names the event the integration sends as `trigger.event`")
+            elif row is not None and event not in [str(e) for e in row.get("events") or []]:
+                problems.append(f"{name}: {trig.get('integration')} sends {', '.join(str(e) for e in row.get('events') or []) or 'nothing listed'}; "
+                                f"`trigger.event` {event!r} is not one of them")
+        for st in with_loop_bodies(body).get("steps") or []:
+            if not isinstance(st, dict):
+                continue
+            cfg = st.get("config") if isinstance(st.get("config"), dict) else {}
+            key = st.get("key") or st.get("id")
+            if str(st.get("type") or "") == "wait":
+                until = str(cfg.get("until") or "")
+                length = parse_duration_ms(cfg.get("for") if cfg.get("for") is not None
+                                           else cfg.get("duration") if cfg.get("duration") is not None
+                                           else cfg.get("durationMs"))
+                if not (length > 0 or "{{" in until):
+                    problems.append(f"{name}/{key}: a wait says how long as `config.for` (`2 days`, `PT90M`) "
+                                    "or when as `config.until` (a template to a date)")
+            if "dueIn" in cfg and not (isinstance(cfg.get("dueIn"), int) and not isinstance(cfg.get("dueIn"), bool)
+                                       and cfg["dueIn"] > 0):
+                problems.append(f"{name}/{key}: `config.dueIn` is a number of minutes")
+            if "escalateTo" in cfg and str(cfg.get("escalateTo")) not in roles | role_names:
+                problems.append(f"{name}/{key}: `config.escalateTo` names a declared role; got {cfg.get('escalateTo')!r}")
+            if str(cfg.get("actionType") or "") == "create_checkout":
+                ref = cfg.get("reference")
+                if not (isinstance(ref, dict) and ref.get("entity") and ref.get("id") is not None):
+                    problems.append(f"{name}/{key}: `create_checkout` names the record it pays for as "
+                                    "`reference: {entity, id}`")
+                if cfg.get("amount") is None and not cfg.get("lineItems"):
+                    problems.append(f"{name}/{key}: `create_checkout` says what is paid: `amount` (major units) or `lineItems`")
+                pays = [i for i in live_integrations if str(i.get("serves") or "") == "take_payment"]
+                listeners = [w for w in (doc.get("workflows") or []) + [p.body for p in proposals]
+                             if isinstance(w, dict) and str((w.get("trigger") or {}).get("kind") or "") == "webhook"
+                             and str((w.get("trigger") or {}).get("event") or "") == "payment.succeeded"]
+                if not pays:
+                    problems.append(f"{name}/{key}: no integration `serves: take_payment`; declare the payment service first")
+                elif not listeners:
+                    problems.append(f"{name}/{key}: nothing listens for `payment.succeeded` from {pays[0].get('name')} — declare "
+                                    "a workflow with a `webhook` trigger on it that records the outcome")
+            auth = cfg.get("auth")
+            if auth is not None:
+                ref = str((auth or {}).get("secretRef") or "") if isinstance(auth, dict) else ""
+                if not ref:
+                    problems.append(f"{name}/{key}: `config.auth` names the secret as `secretRef` (a NAME an integration declares)")
+                elif ref not in declared_refs:
+                    problems.append(f"{name}/{key}: `auth.secretRef` {ref!r} is declared by no integration; declare it under "
+                                    f"`integrations[].secretRefs` first" + (f" (declared: {', '.join(sorted(declared_refs))})" if declared_refs else ""))
+    if problems:
+        raise InvalidTrigger(_all_of(problems))
+
+
+class InvalidIntegration(AuthorRefusal):
+    """An integration the runtime could not carry, or a secret written where a name belongs."""
+
+
+SECRET_NAME = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
+
+
+def check_integrations(result: "AgentResult", doc: dict | None = None) -> None:
+    """A declared integration the runtime can act on: `serves` only an
+    action with an adapter (and then that adapter's provider and names),
+    secret NAMES never values, and an `inbound` that says how a call is
+    verified and by which of its names."""
+    proposals = [p for p in result.proposals if p.section == "integrations"]
+    if not proposals:
+        return
+    from services.smith.connect_service import actions, providers_of
+    from services.smith.secrets_scrub import carries_secret
+    problems: list[str] = []
+    for proposal in proposals:
+        body = proposal.body or {}
+        name = body.get("name") or proposal.natural_key
+        refs = [str(r) for r in body.get("secretRefs") or []]
+        for ref in refs:
+            if not SECRET_NAME.match(ref) or carries_secret(ref):
+                problems.append(f"{name}: `secretRefs` holds NAMES, UPPER_SNAKE (`XERO_API_KEY`); got {ref[:40]!r}")
+        serves = str(body.get("serves") or "").strip()
+        if serves:
+            if serves not in actions():
+                problems.append(f"{name}: `serves` names an action with an adapter ({', '.join(sorted(actions()))}) "
+                                f"or is empty; got {serves!r}")
+            else:
+                provider = str(body.get("provider") or "").strip().lower()
+                known = providers_of(serves)
+                from services.smith.connect_service import adapter_for
+                flexible = bool(getattr(adapter_for(serves), "FLEXIBLE_NAMES", False))
+                if provider not in known:
+                    problems.append(f"{name}: `{serves}` is carried by {', '.join(sorted(known))}; got provider {provider!r}")
+                elif flexible:
+                    # NAMES PER ENTRY (`SSO_<ID>_ISSUER/CLIENT_ID/CLIENT_SECRET`):
+                    # any complete triple reaches a provider.
+                    if not adapter_for(serves).complete_triples(refs):
+                        problems.append(f"{name}: {provider} reads a triple of names — {', '.join(known[provider])} "
+                                        "(or the same three under the entry's own id)")
+                else:
+                    missing = [k for k in known[provider] if k not in refs]
+                    if missing:
+                        problems.append(f"{name}: {provider} reads {', '.join(known[provider])} — add {', '.join(missing)} to `secretRefs`")
+        inbound = body.get("inbound")
+        if inbound is not None:
+            if not isinstance(inbound, dict):
+                problems.append(f"{name}: `inbound` is an object: events, verify, signingSecretRef")
+            else:
+                ref = str(inbound.get("signingSecretRef") or "")
+                if ref not in refs:
+                    problems.append(f"{name}: `inbound.signingSecretRef` names one of `secretRefs`; got {ref!r}")
+                if not [e for e in inbound.get("events") or [] if str(e).strip()]:
+                    problems.append(f"{name}: `inbound.events` lists the events the system sends (`payment.succeeded`)")
+    if problems:
+        raise InvalidIntegration(_all_of(problems))
 
 
 class InvalidEntityFields(AuthorRefusal):
@@ -593,6 +803,15 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
     # the account is made.
     live = [e for e in ((doc or {}).get("data") or {}).get("entities") or []
             if isinstance(e, dict) and e.get("status") != "DEPRECATED"]
+    # ONE LOGIN ENTITY, DECIDED ONCE. Two entities both marked `account`
+    # (a marketplace's Shopper and VendorAccount, 7ttp60zi 2026-10-11) were
+    # each refused because the OTHER already had the flag; each author then
+    # dropped its own flag "since the other holds it", and neither landed.
+    # The first live account entity is the login; the refusal names it and
+    # goes only to the others. Within one reply (the entity set), the first
+    # proposal that claims it is the login and the later claimants are told.
+    login = next((e for e in live if e.get("account")), None)
+    claimed_here: list[str] = []
     for proposal in (p for p in result.proposals if p.section == "data.entities"):
         body = proposal.body if isinstance(proposal.body, dict) else {}
         name = body.get("name") or proposal.natural_key
@@ -601,10 +820,23 @@ def check_entity_fields(result: "AgentResult", doc: dict | None = None) -> None:
         # later and need not repeat it.
         if not (body.get("account") or any(e.get("account") and same(e) for e in live)):
             continue
-        other = next((e for e in live if e.get("account") and not same(e)), None)
-        if body.get("account") and other is not None:
-            problems.append(f"{name}: `account: true` is already on {other.get('name')} — one entity is the "
-                            "person behind a login")
+        if body.get("account"):
+            already = any(e.get("account") and same(e) for e in live)
+            # A flag the document already carries is not this author's to
+            # move (`entity_fields` re-asserts it from the entity set), so a
+            # refusal here could never be satisfied: the clash is decided by
+            # `one_login` when the proposals land.
+            if login is not None and not same(login) and not already:
+                problems.append(f"{name}: `account: true` is already on {login.get('name')} — one entity is the "
+                                f"person behind a login. Drop `account` here: a {name} is a login "
+                                f"({login.get('name')}) with its own role, and this entity holds what that "
+                                "person has beyond the login, referencing it by a field")
+            elif login is None and claimed_here and str(name) not in claimed_here:
+                problems.append(f"{name}: `account: true` is already on {claimed_here[0]} in this reply — one "
+                                f"entity is the person behind a login. Keep it on {claimed_here[0]} and drop it "
+                                f"here; a {name} is a login with its own role plus this record of what they have")
+            elif login is None and str(name) not in claimed_here:
+                claimed_here.append(str(name))
         from services.blueprint.projection import _is_credential_field
         for f in body.get("fields") or []:
             # THE LOGIN HOLDS THE PASSWORD. 0l133sp2's Member carried a required
@@ -712,6 +944,35 @@ def customer_facing(doc: dict, page: dict) -> bool:
     customer = signup_role(doc)
     users = [roles.get(str(u), str(u)) for u in page.get("users") or []]
     return len(roles) > 1 and bool(customer) and bool(users) and all(u == customer for u in users)
+
+
+class InvalidAppFlow(AuthorRefusal):
+    """A flow names a screen, a section or a process that is not there."""
+
+
+def check_flows(result: "AgentResult", doc: dict | None) -> None:
+    """A PATH THROUGH SCREENS THAT EXIST. Each proposed flow is checked as the
+    document would hold it: every step a live screen, a section that screen
+    has, a process it starts — refused naming each, so the author mends the
+    step rather than the page writer being told a hand-off to nowhere."""
+    from services.blueprint.app_flows import flow_findings
+    proposals = [p for p in result.proposals if p.section == "flows" and isinstance(p.body, dict)]
+    if not proposals or not doc:
+        return
+    # JOURNEYS THROUGH SCREENS THIS SAME REPLY PROPOSES are premature: the
+    # screens have no ids yet, and journeys are the journeys step's, once
+    # they do. Said as that, not as "not a screen" (60v142ju, 2026-10-12).
+    saved = {str(pg.get("id")) for pg in doc.get("pages") or [] if isinstance(pg, dict)} | \
+            {str(pg.get("route")) for pg in doc.get("pages") or [] if isinstance(pg, dict)}
+    new_pages = [p for p in result.proposals if p.section == "pages" and isinstance(p.body, dict)
+                 and str(p.body.get("route") or "") not in saved and str(p.body.get("id") or "") not in saved]
+    if new_pages:
+        raise InvalidAppFlow("Leave `flows` out of this reply: journeys are planned by their own step once the "
+                             "screens you are proposing exist and have ids. Return the screens without them.")
+    problems = flow_findings({**doc, "flows": [p.body for p in proposals]})
+    if problems:
+        raise InvalidAppFlow("These flows name what the application does not have — mend each step:\n- "
+                             + "\n- ".join(problems[:30]))
 
 
 def check_analytics(result: "AgentResult", doc: dict | None) -> None:
@@ -876,6 +1137,19 @@ def check_page_access(result: "AgentResult", doc: dict | None) -> None:
             touched.add(str(merged[key].get("route") or key))
     problems = [f for f in access_findings(list(merged.values()))
                 if any(r in f for r in touched)]
+    # A RESTRICTED PAGE NAMES WHO MAY OPEN IT. Nameless, the projection makes
+    # it the administrator's (restricted means restricted) — so a vendor's
+    # Product Catalogue and Product Editor declared `role_restricted` with no
+    # `users` answered 403 to every vendor (7ttp60zi, 2026-10-11). Said to the
+    # author, in the same attempt, rather than found by a person.
+    for body in proposed:
+        key = str(body.get("id") or "") or next(
+            (k for k, v in merged.items() if v.get("route") == body.get("route")), str(body.get("route")))
+        page = merged.get(key) or body
+        if str(page.get("access") or "") == "role_restricted" and not page.get("users"):
+            problems.append(f"{page.get('route') or page.get('name')}: `access: \"role_restricted\"` names no "
+                            "role — put the roles that may open it in `users` (the people this screen is "
+                            "for); a restricted page nobody is named for is the administrator's alone")
     if problems:
         raise InconsistentPageAccess(_all_of(problems))
 
@@ -985,12 +1259,52 @@ def ownership_findings(security: dict, doc: dict) -> list[str]:
                     return e
         return None
     rules = [r for r in (security.get("ownershipRules") or []) if isinstance(r, dict)]
-    scoped = {re.sub(r"[^a-z0-9]", "", str((find(r.get("entity") or "") or {}).get("name") or "").lower())
-              for r in rules if r.get("kind", "scope") != "attribution" and not r.get("through")}
+    def key_of(name: Any) -> str:
+        return re.sub(r"[^a-z0-9]", "", str((find(str(name or "")) or {}).get("name") or "").lower())
+    scoped = {key_of(r.get("entity")) for r in rules
+              if r.get("kind", "scope") != "attribution" and not r.get("through")}
+    # A CHAIN IS SCOPED WHEN IT ENDS AT A SCOPED RECORD. The engine walks
+    # `through` up to three records deep (throughConditions), so an order
+    # item is a vendor's through its vendor order, which is the vendor's
+    # through their profile. Asked for the target to be scoped "itself",
+    # the author of Ecom L1's marketplace was refused for exactly that
+    # chain, and the edit that answered dropped the rules for Product,
+    # ProductVariant, VendorOrder and OrderItem — every vendor then saw
+    # every vendor's listings and orders (2026-10-11).
+    through_of = {key_of(r.get("entity")): key_of(r.get("through"))
+                  for r in rules if r.get("kind", "scope") != "attribution" and r.get("through")}
+    def reaches_scope(start: str) -> bool:
+        seen, at = set(), start
+        for _ in range(3):
+            if at in scoped:
+                return True
+            if at in seen or at not in through_of:
+                return False
+            seen.add(at)
+            at = through_of[at]
+        return at in scoped
     problems: list[str] = []
+    # WHERE A WORKSPACE SCOPE'S ACTOR COMES FROM: a column of the login entity
+    # (`actorColumn`), or the organisation the person acts in when the
+    # application declares `security.tenancy`. A rule saying neither
+    # compared every row to nothing and was accepted (2026-10-12).
+    tenancy_on = isinstance(doc.get("security"), dict) and \
+        str(((doc.get("security") or {}).get("tenancy") or {}).get("kind") or "none") == "organisation"
+    login_cols: set[str] = set()
+    for e in entities:
+        if isinstance(e, dict) and e.get("account") is True:
+            login_cols = {str(f.get("name")) for f in e.get("fields") or [] if isinstance(f, dict)}
     for r in rules:
         named, column = str(r.get("entity") or ""), str(r.get("column") or "")
         entity = find(named)
+        if str(r.get("scope") or "user") == "workspace" and r.get("kind", "scope") != "attribution":
+            actor = str(r.get("actorColumn") or "")
+            if not actor and not tenancy_on:
+                problems.append(f"{named}.{column}: a workspace scope says where the actor's workspace comes from — "
+                                "`actorColumn` (a field of the login entity) — or the application declares "
+                                "`security.tenancy` and the organisation is the person's active one")
+            elif actor and login_cols and actor not in login_cols:
+                problems.append(f"{named}.{column}: `actorColumn` {actor!r} is not a field of the login entity")
         if entity is None:
             problems.append(f"ownership rule for {named!r}: the data model has no such entity")
             continue
@@ -1012,10 +1326,12 @@ def ownership_findings(security: dict, doc: dict) -> list[str]:
             if target is None:
                 problems.append(f"ownership rule for {entity.get('name')}: `through` names "
                                 f"{r['through']!r}, which the data model does not have")
-            elif re.sub(r"[^a-z0-9]", "", str(target.get("name") or "").lower()) not in scoped:
+            elif not reaches_scope(re.sub(r"[^a-z0-9]", "", str(target.get("name") or "").lower())):
                 problems.append(f"ownership rule for {entity.get('name')}: it is owned through "
-                                f"{target.get('name')}, which has no scope rule of its own — scope "
-                                f"{target.get('name')} first")
+                                f"{target.get('name')}, which has no scope rule of its own — add "
+                                f"a rule for {target.get('name')} naming the field that holds its owner "
+                                f"(or the record it is owned through, up to three records deep), and keep "
+                                f"this rule")
     return problems
 
 
@@ -1025,6 +1341,281 @@ def check_security(result: "AgentResult", doc: dict | None) -> None:
                 for msg in ownership_findings(p.body, doc or {})]
     if problems:
         raise InvalidOwnershipRule(_all_of(problems))
+
+
+class InvalidTenancy(AuthorRefusal):
+    """Organisations declared in a way the runtime could not serve."""
+
+
+def check_tenancy(result: "AgentResult", doc: dict | None) -> None:
+    """One tenant entity at most; a tenancy names it; every role is a member
+    role or a platform role, never both; the admin role is a member role."""
+    doc = doc or {}
+    problems: list[str] = []
+    entities = [p.body for p in result.proposals if p.section == "data.entities" and isinstance(p.body, dict)]
+    tenants_here = [str(e.get("name")) for e in entities if e.get("tenant") is True]
+    existing = [str(e.get("name")) for e in (doc.get("data") or {}).get("entities") or []
+                if isinstance(e, dict) and e.get("tenant") is True and str(e.get("name")) not in tenants_here
+                and str(e.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
+    if len(tenants_here) + len(existing) > 1:
+        problems.append(f"only ONE entity is the organisation (`tenant: true`); got {', '.join(tenants_here + existing)}")
+    roles = known_roles(result, doc)
+    role_names: set[str] = set()
+    for p in result.proposals:
+        if p.section != "security" or not isinstance(p.body, dict) or not isinstance(p.body.get("tenancy"), dict):
+            continue
+        ten = p.body["tenancy"]
+        if str(ten.get("kind") or "none") != "organisation":
+            continue
+        has_tenant = bool(tenants_here or existing or any(isinstance(e, dict) and e.get("tenant") is True
+                                                           for e in (doc.get("data") or {}).get("entities") or []))
+        if not has_tenant:
+            problems.append("security.tenancy: `organisation` needs an entity marked `tenant: true` in the data model")
+        members = [str(r) for r in ten.get("memberRoles") or []]
+        platform = [str(r) for r in ten.get("platformRoles") or []]
+        for r in members + platform:
+            if r not in roles | role_names:
+                problems.append(f"security.tenancy: {r!r} is not a declared role")
+        both = sorted(set(members) & set(platform))
+        if both:
+            problems.append(f"security.tenancy: a role is a member role or a platform role, never both: {', '.join(both)}")
+        if not members:
+            problems.append("security.tenancy: name the `memberRoles` people hold inside an organisation")
+        admin = ten.get("organisationAdminRole")
+        if admin and str(admin) not in members:
+            problems.append(f"security.tenancy: `organisationAdminRole` {admin!r} is not one of the member roles")
+    if problems:
+        raise InvalidTenancy(_all_of(problems))
+
+
+class NoRequirements(AuthorRefusal):
+    """A definition that states what the application is and none of what it must do."""
+
+
+def check_requirements(result: "AgentResult", doc: dict | None) -> None:
+    """The requirement agent, on an application that has no requirements
+    yet, states at least one. Its reply once carried only the product
+    summary; the step reported success and Smith told the person "0
+    requirements" (6ysfw182, 2026-10-12). The observer does not watch this
+    node, so the shape is held here and the author is asked again."""
+    if result.agent != "requirement":
+        return
+    if any(str(r.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")
+           for r in (doc or {}).get("requirements") or [] if isinstance(r, dict)):
+        return
+    if any(p.section == "requirements" for p in result.proposals):
+        return
+    raise NoRequirements(
+        "The reply states the product and no requirements. Every application has at least one thing it "
+        "must do: return a `requirements` proposal for each one the person asked for, beside the `product` "
+        "proposal.")
+
+
+class InvalidMobile(AuthorRefusal):
+    """A push channel in an application without push, or a store wrapper with no id."""
+
+
+def check_mobile(result: "AgentResult", doc: dict | None) -> None:
+    """A `send_notification` step may name `push` among its channels only
+    where `mobile.push` is on; a store wrapper names its bundle id."""
+    doc = doc or {}
+    problems: list[str] = []
+    mobile = doc.get("mobile") if isinstance(doc.get("mobile"), dict) else {}
+    for p in result.proposals:
+        if p.section == "mobile" and isinstance(p.body, dict):
+            mobile = {**mobile, **p.body}
+            store = p.body.get("store") if isinstance(p.body.get("store"), dict) else {}
+            if store.get("enabled") is True and not store.get("bundleId"):
+                problems.append("mobile.store: a store wrapper names its `bundleId` (com.example.app)")
+    push_on = mobile.get("push") is True
+    for p in result.proposals:
+        if p.section != "workflows" or not isinstance(p.body, dict):
+            continue
+        for step in p.body.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            cfg = step.get("config") if isinstance(step.get("config"), dict) else {}
+            channels = cfg.get("channels")
+            if isinstance(channels, list) and "push" in [str(c) for c in channels] and not push_on:
+                problems.append(f"{p.body.get('name') or p.natural_key}: step {step.get('id') or step.get('name')!s} sends by `push`, "
+                                "and the application does not send push (`mobile.push` is off) — drop the channel or turn push on")
+    if problems:
+        raise InvalidMobile(_all_of(problems))
+
+
+class InvalidSignIn(AuthorRefusal):
+    """A way in nobody could take, or a provider with no row to reach it by."""
+
+
+_SSO_ID = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
+_DOMAIN = re.compile(r"^@?[a-z0-9-]+(\.[a-z0-9-]+)+$", re.I)
+
+
+def check_sign_in(result: "AgentResult", doc: dict | None) -> None:
+    """Password off needs another way in; every provider names an `auth`
+    integration that exists (or is proposed) and carries its three names;
+    a role map names declared roles; a just-in-time provider has a default
+    role or a map; domains are domains."""
+    doc = doc or {}
+    problems: list[str] = []
+    roles = known_roles(result, doc)
+    rows = {str(r.get("id")): r for r in doc.get("integrations") or [] if isinstance(r, dict)
+            and str(r.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")}
+    proposed = {p.natural_key or str((p.body or {}).get("name") or ""): p.body for p in result.proposals
+                if p.section == "integrations" and isinstance(p.body, dict)}
+    from services.blueprint.projection import sso_secret_names
+    for p in result.proposals:
+        if p.section != "security" or not isinstance(p.body, dict) or not isinstance(p.body.get("signIn"), dict):
+            continue
+        si = p.body["signIn"]
+        sso = [e for e in si.get("sso") or [] if isinstance(e, dict)]
+        if si.get("password") is False and not si.get("magicLink") and not sso:
+            problems.append("security.signIn: password off with no magic link and no identity provider — nobody could sign in")
+        seen: set[str] = set()
+        for e in sso:
+            eid = str(e.get("id") or "")
+            if not _SSO_ID.match(eid):
+                problems.append(f"security.signIn.sso: `id` is a short lower_snake name (entra, okta_saml); got {eid!r}")
+            if eid in seen:
+                problems.append(f"security.signIn.sso: two entries share the id {eid!r}")
+            seen.add(eid)
+            ref = str(e.get("integration") or "")
+            row = rows.get(ref) or next((b for k, b in proposed.items() if ref and (k == ref or str(b.get("id") or "") == ref)), None)
+            if row is None:
+                by_kind = [r for r in list(rows.values()) + list(proposed.values()) if str(r.get("kind") or "") == "auth"
+                           and str(r.get("serves") or "") == "sign_in"]
+                row = by_kind[0] if len(by_kind) == 1 and not ref else None
+            if row is None:
+                problems.append(f"security.signIn.sso[{eid}]: `integration` names an `auth` integration row (serves `sign_in`) "
+                                "that holds the provider's secret NAMES; none found")
+            else:
+                names = set(sso_secret_names(eid).values())
+                refs = {str(r) for r in row.get("secretRefs") or []}
+                missing = sorted(names - refs)
+                if missing:
+                    problems.append(f"security.signIn.sso[{eid}]: its integration row lists {', '.join(sorted(refs)) or 'no names'}; "
+                                    f"add {', '.join(missing)} to its `secretRefs`")
+            for d in e.get("domains") or []:
+                if not _DOMAIN.match(str(d)):
+                    problems.append(f"security.signIn.sso[{eid}]: `domains` holds domains (acme.com); got {str(d)[:40]!r}")
+            rf = e.get("roleFrom") if isinstance(e.get("roleFrom"), dict) else None
+            if rf:
+                for group, role in (rf.get("map") or {}).items():
+                    if str(role) not in roles:
+                        problems.append(f"security.signIn.sso[{eid}]: roleFrom.map[{group!r}] names an unknown role {role!r}")
+                if rf.get("default") and str(rf["default"]) not in roles:
+                    problems.append(f"security.signIn.sso[{eid}]: roleFrom.default names an unknown role {rf['default']!r}")
+            if str(e.get("provisioning") or "just_in_time") == "just_in_time" and not (rf and (rf.get("map") or rf.get("default"))) \
+                    and not p.body.get("signupRole") and not (doc.get("security") or {}).get("signupRole"):
+                problems.append(f"security.signIn.sso[{eid}]: a person made on first sign-in needs a role — set `roleFrom` "
+                                "(a group map or a default) or `signupRole`")
+    if problems:
+        raise InvalidSignIn(_all_of(problems))
+
+
+class InvalidAudit(AuthorRefusal):
+    """An audit policy nobody may read, or an audit screen for the wrong people."""
+
+
+def known_roles(result: "AgentResult", doc: dict | None) -> set[str]:
+    """Every role id and name the document has, AND every role this same
+    reply declares: the security agent writes `roles` beside `security`, and
+    a check reading only the document refused reviewers it was creating in
+    that very reply (60v142ju, 2026-10-12)."""
+    doc = doc or {}
+    out = {str(r.get(k)) for r in doc.get("roles") or [] if isinstance(r, dict) for k in ("id", "name") if r.get(k)}
+    for p in result.proposals:
+        if p.section == "roles":
+            out.add(str(p.natural_key))
+            if isinstance(p.body, dict):
+                out |= {str(p.body.get(k)) for k in ("id", "name") if p.body.get(k)}
+    return out
+
+
+def role_aliases(result: "AgentResult", doc: dict | None) -> dict[str, str]:
+    """Every spelling of a role (its id, its name) → one key, the id where
+    known. A page's `users` are role ids and the audit's `reviewers` may be
+    names; compared as written they never matched (60v142ju: users
+    ROLE-002/ROLE-003 refused against reviewers Supervisor/SystemAdmin)."""
+    out: dict[str, str] = {}
+    rows = [r for r in (doc or {}).get("roles") or [] if isinstance(r, dict)]
+    rows += [p.body for p in result.proposals if p.section == "roles" and isinstance(p.body, dict)]
+    for r in rows:
+        key = str(r.get("id") or r.get("name") or "")
+        for k in ("id", "name"):
+            if r.get(k):
+                out[str(r[k])] = key
+    for p in result.proposals:
+        if p.section == "roles":
+            out.setdefault(str(p.natural_key), out.get(str((p.body or {}).get("name") or ""), str(p.natural_key)))
+    return out
+
+
+def _security_authored(result: "AgentResult", doc: dict) -> bool:
+    """The access step has spoken: roles exist, or this reply declares them."""
+    return bool(doc.get("roles")) or any(p.section in ("roles", "security") for p in result.proposals)
+
+
+def _audit_pages(doc: dict) -> list[dict]:
+    return [pg for pg in doc.get("pages") or [] if isinstance(pg, dict) and str(pg.get("pattern") or "") == "audit_trail"
+            and str(pg.get("status") or "").upper() not in ("DEPRECATED", "REMOVED")]
+
+
+def check_audit(result: "AgentResult", doc: dict | None) -> None:
+    """A trail has reviewers who are roles; reasons are required on records
+    that exist; an `audit_trail` page is for the reviewers, and only where a
+    trail is declared.
+
+    THE ORDER OF THE TWO WRITERS. Screens are planned before the access step
+    decides roles and the trail, so a screen check made then refused every
+    planned audit screen against a policy that did not exist yet (60v142ju).
+    The page is judged once the access step has spoken; when it speaks after
+    the page, the access step is held to the page: a trail screen already
+    planned needs a trail."""
+    doc = doc or {}
+    roles = known_roles(result, doc)
+    entities = {str(e.get("id")): str(e.get("name") or "") for e in (doc.get("data") or {}).get("entities") or []
+                if isinstance(e, dict)}
+    named = ", ".join(f"{k} ({v})" for k, v in sorted(entities.items())) or "none yet"
+    problems: list[str] = []
+    audit = ((doc.get("security") or {}).get("audit") or {}) if isinstance(doc.get("security"), dict) else {}
+    for p in result.proposals:
+        if p.section == "security" and isinstance(p.body, dict) and isinstance(p.body.get("audit"), dict):
+            audit = p.body["audit"]
+            level = str(audit.get("level") or "none")
+            reviewers = [str(r) for r in audit.get("reviewers") or []]
+            if level != "none" and not reviewers:
+                problems.append("security.audit: a trail nobody may read is write-only — name the `reviewers` (roles)")
+            for r in reviewers:
+                if r not in roles:
+                    problems.append(f"security.audit.reviewers: {r!r} is not a declared role")
+            for e in audit.get("reasonRequired") or []:
+                if str(e) not in entities:
+                    problems.append(f"security.audit.reasonRequired names RECORD TYPES by entity id, not actions: "
+                                    f"{e!r} is none of {named}")
+            planned = _audit_pages(doc)
+            if level == "none" and planned:
+                problems.append(f"security.audit: the screens include an audit trail ({planned[0].get('name')}); "
+                                "declare the trail (`level`, `reviewers`) it shows")
+    level = str(audit.get("level") or "none")
+    alias = role_aliases(result, doc)
+    reviewers = {alias.get(str(r), str(r)) for r in audit.get("reviewers") or []}
+    reviewer_names = sorted(str(r) for r in audit.get("reviewers") or [])
+    if _security_authored(result, doc):
+        for p in result.proposals:
+            if p.section != "pages" or not isinstance(p.body, dict):
+                continue
+            if str(p.body.get("pattern") or "") != "audit_trail":
+                continue
+            name = p.body.get("name") or p.natural_key
+            if level == "none":
+                problems.append(f"{name}: an `audit_trail` page needs a trail — `security.audit.level` is none")
+            users = [alias.get(str(u), str(u)) for u in p.body.get("users") or []]
+            if not users or any(u not in reviewers for u in users):
+                problems.append(f"{name}: an `audit_trail` page is for the reviewers the audit policy names; "
+                                f"`users` must be among {reviewer_names or ['(none declared)']}")
+    if problems:
+        raise InvalidAudit(_all_of(problems))
 
 
 class InvalidBusinessRule(AuthorRefusal):
@@ -1257,6 +1848,50 @@ def _canonical_key(alloc: Any, section: str, body: Mapping[str, Any],
     return canon
 
 
+def one_login(svc: BlueprintService) -> list[str]:
+    """One entity is the person behind a login. When the document holds more
+    than one marked `account: true` — a marketplace's Shopper and
+    VendorAccount (7ttp60zi, 2026-10-11) — the first keeps it and the rest
+    lose it, here, deterministically: the field author may not move the flag
+    and a refusal it cannot satisfy stopped the build at the data model
+    twice. Returns the names the flag was taken off."""
+    live = [e for e in ((svc.doc.get("data") or {}).get("entities") or [])
+            if isinstance(e, dict) and e.get("status") != "DEPRECATED" and e.get("account")]
+    if len(live) < 2:
+        return []
+    keep, rest = live[0], live[1:]
+    for e in rest:
+        e.pop("account", None)
+        note = (f"not the login — {keep.get('name')} is; a {e.get('name')} is a {keep.get('name')} with its own "
+                "role, and this record holds what they have beyond the login")
+        e["syncNote"] = note
+    names = [str(e.get("name")) for e in rest]
+    import logging
+    logging.getLogger(__name__).warning("[one-login] %s is the login; `account` taken off %s",
+                                        keep.get("name"), ", ".join(names))
+    return names
+
+
+def record_declines(svc: BlueprintService, result: AgentResult) -> list[dict]:
+    """Change requests to `domainReference` carrying `proposed.declined`
+    become declines by this agent; everything else is left as it was."""
+    from services.blueprint.reference_coverage import record_declines as _record
+    added: list[dict] = []
+    for cr in result.change_requests or []:
+        if getattr(cr, "section", "") != "domainReference":
+            continue
+        declines = (cr.proposed or {}).get("declined") if isinstance(cr.proposed, dict) else None
+        if not isinstance(declines, list):
+            continue
+        for d in declines:
+            if isinstance(d, dict) and not d.get("reason") and cr.reason:
+                d = {**d, "reason": cr.reason}
+            added += _record(svc, [d], by=result.agent)
+    if added:
+        svc.save()
+    return added
+
+
 def apply_agent_result(
     svc: BlueprintService,
     result: AgentResult,
@@ -1280,12 +1915,25 @@ def apply_agent_result(
     """
     result.validate()
     check_capability(result)
+    # A REFERENCE ITEM THIS PRODUCT DOES NOT NEED, SAID WITH A REASON. An agent
+    # may not write `domainReference`; it returns a change request addressed
+    # to it (§30), and this deterministic step records the decline, by name,
+    # so the coverage check stops asking and the person sees who declined
+    # what at the model gate.
+    record_declines(svc, result)
     # THE COMPOSERS' WORDS INTO THE CONTRACT'S, BEFORE THE CONTRACT READS THEM.
     from services.blueprint.layout_vocabulary import translate_layout_vocabulary
     translate_layout_vocabulary(result, svc.doc)
     check_pattern_templates(result, svc.doc)
     from services.blueprint.mcp_catalog import load as _mcp_servers
     check_workflow_steps(result, svc.doc, _mcp_servers(getattr(svc, "output_dir", None)))
+    check_workflow_triggers(result, svc.doc)
+    check_integrations(result, svc.doc)
+    check_audit(result, svc.doc)
+    check_tenancy(result, svc.doc)
+    check_sign_in(result, svc.doc)
+    check_mobile(result, svc.doc)
+    check_requirements(result, svc.doc)
     check_business_rules(result, svc.doc)
     check_entity_fields(result, svc.doc)
     check_page_content(result, svc.doc)
@@ -1293,6 +1941,7 @@ def apply_agent_result(
     check_role_doors(result, svc.doc)
     check_navigation(result, svc.doc)
     check_analytics(result, svc.doc)
+    check_flows(result, svc.doc)
     check_security(result, svc.doc)
 
     # WHO DESIGNED THIS SCREEN, RECORDED WHERE EVERY LAYOUT PASSES.
@@ -1489,6 +2138,9 @@ def apply_agent_result(
         svc.doc.clear()
         svc.doc.update(snapshot)
         raise _blamed(exc, svc) from exc
+
+    if any(p.section == "data.entities" for p in result.proposals):
+        one_login(svc)
 
     if commit:
         svc.commit(

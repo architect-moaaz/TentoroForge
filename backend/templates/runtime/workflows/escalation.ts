@@ -126,63 +126,51 @@ export async function processEscalations(
 export async function processTaskEscalations(
   db: any,
   notify: (channel: string, target: string, payload: any) => Promise<void>,
+  now: Date = new Date(),
 ): Promise<{ escalated: number; error?: string }> {
   // Best-effort — never throw. If workflow_tasks isn't present yet
   // (older generated app), silently no-op.
+  //
+  // REAL STATEMENTS. This used to call `db.execute(text, params)`, a shape
+  // drizzle does not have, from a route nothing called: no overdue task was
+  // ever handed on (2026-10-12). The tick calls it now, with the tick's
+  // own clock so a check can advance it.
   try {
-    const res: any = await db.execute(
-      `SELECT id, workflow_id, node_label, escalate_to, assignee_role, entity_id
-         FROM workflow_tasks
-        WHERE status = 'pending'
-          AND due_at IS NOT NULL
-          AND due_at < NOW()
-          AND escalate_to IS NOT NULL`,
-    );
-    const rows: any[] = res?.rows ?? res ?? [];
+    const { sql } = await import("drizzle-orm");
+    const res: any = await db.execute(sql`
+      SELECT id, workflow_id, node_label, escalate_to, assignee_role, entity_id
+        FROM workflow_tasks
+       WHERE status = 'pending'
+         AND due_at IS NOT NULL
+         AND due_at < ${now.toISOString()}::timestamptz
+         AND escalate_to IS NOT NULL
+    `);
+    const rows: any[] = Array.isArray(res) ? res : (res?.rows ?? []);
     let escalated = 0;
     for (const row of rows) {
       const target = row.escalate_to;
       if (!target) continue;
-      await db.execute(
-        `UPDATE workflow_tasks
-            SET assignee_role = $1,
-                escalate_to = NULL,
-                due_at = NULL
-          WHERE id = $2`,
-        [target, row.id],
-      );
-      await notify("email", "escalated", {
+      await db.execute(sql`
+        UPDATE workflow_tasks
+           SET assignee_role = ${target}, escalate_to = NULL, due_at = NULL
+         WHERE id = ${row.id}::uuid AND status = 'pending'
+      `);
+      await notify("in_app", String(target), {
         workflowId: row.workflow_id,
         recordId: row.entity_id,
         escalateTo: target,
-        message: `Task "${row.node_label}" was reassigned to ${target} after SLA breach.`,
+        from: row.assignee_role,
+        taskId: row.id,
+        message: `"${row.node_label}" was not done in time and is now with ${target}.`,
       });
-      try {
-        await appendAuditEntry(db, {
-          workflowId: row.workflow_id,
-          recordId: row.entity_id,
-          timestamp: new Date().toISOString(),
-          actor: "system",
-          action: "task-escalated",
-          metadata: { taskId: row.id, from: row.assignee_role, to: target },
-        });
-      } catch {
-        // Audit failure is not a run failure.
-      }
       escalated++;
     }
     return { escalated };
   } catch (err) {
     // A hard database failure must NOT look like a healthy run with nothing
-    // to escalate.
-    //
-    // `{ escalated: 0 }` is exactly what an empty queue returns, so an
-    // unreachable database — meaning every SLA in the app has silently
-    // stopped being enforced — was indistinguishable from "all caught up".
-    // Whatever runs this on a schedule had no way to alert on it.
-    //
-    // A missing workflow_tasks table (an older generated app) is still a
-    // legitimate no-op; anything else is reported.
+    // to escalate: an unreachable database means every SLA in the app has
+    // silently stopped being enforced. A missing workflow_tasks table (an
+    // older generated app) is still a legitimate no-op.
     const msg = String((err as any)?.message ?? err);
     const tableMissing = /no such table|does not exist|relation .* does not exist|undefined table/i.test(msg);
     if (tableMissing) {

@@ -1,5 +1,6 @@
 "use client";
 
+import { apiPath } from "@/lib/api-path";
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
@@ -49,7 +50,7 @@ export function useAgentChat(): {
 
   const mutation = useMutation<AgentReply, Error, SendAgentChatOptions>({
     mutationFn: async ({ message, attachments }) => {
-      const res = await fetch("/api/agent/chat", {
+      const res = await fetch(apiPath("/api/agent/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

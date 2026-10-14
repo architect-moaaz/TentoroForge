@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLogin } from "@/hooks/useLogin";
 import { BrandMark, BRAND_LOGO } from "@/components/BrandMark";
+import { SignInMethods } from "@/sdk/auth";
 
 /**
  * Auth page — COMPOSED PER APP.
@@ -28,7 +29,7 @@ const FORM_SUB = "__AUTH_FORM_SUB__";
 function LoginForm() {
   // Honour ?callbackUrl=… and fall back to "/" — a REAL route. (The hook's own
   // default points at a route GROUP, which has no URL, so always pass one.)
-  const callbackUrl = useSearchParams().get("callbackUrl") || "/";
+  const callbackUrl = useSearchParams().get("callbackUrl") || "";
   // NOTE: the hook's contract is `isLoading` / `handleSubmit` — destructuring
   // `loading` / `onSubmit` yields undefined, the form loses its handler and
   // does a NATIVE GET submit (URL becomes "/login?" and nothing happens).
@@ -59,6 +60,7 @@ function LoginForm() {
         className="w-full rounded-[var(--radius)] bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition hover:opacity-90 disabled:opacity-50">
         {isLoading ? "Signing in…" : "Sign in"}
       </button>
+      <SignInMethods email={email} />
       <p className="text-center text-sm text-muted-foreground">
         Don&apos;t have an account? <a href="/signup" className="font-medium text-primary hover:underline">Sign up</a>
       </p>

@@ -40,4 +40,10 @@ export const forgeEvents = pgTable("forge_events", {
   // Dispatch failure message, if any (row stays processed — the error is
   // for observability, not retry bookkeeping).
   error: text("error"),
+
+  // ONE CALL, ONE EVENT. An outside system retries a webhook it did not
+  // hear an answer to; the same delivery must not start the process twice.
+  // The webhook route keys each delivery (its event id, else a hash of the
+  // body) and the insert does nothing on a key it has seen.
+  dedupeKey: text("dedupe_key").unique(),
 });

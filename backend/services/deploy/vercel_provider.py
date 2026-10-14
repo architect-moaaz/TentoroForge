@@ -390,16 +390,43 @@ class VercelDeployProvider:
             # cases where our DB claims redeploy but Vercel is empty.
             vercel_has_nextauth_secret = "NEXTAUTH_SECRET" in existing_by_key
             nextauth_secret = "" if vercel_has_nextauth_secret else secrets.token_hex(32)
+            # THE CLOCK'S KEY, THE APP'S OWN. The tick authenticates itself
+            # with CRON_SECRET; Vercel sends it on every cron call. The one the
+            # app already runs with locally travels; a Vercel row that exists
+            # is kept.
+            cron_secret = ""
+            from services.blueprint.assembly import existing_secrets
+            local_secrets = existing_secrets(Path(snapshot.output_dir))
+            if "CRON_SECRET" not in existing_by_key:
+                cron_secret = local_secrets.get("CRON_SECRET") or secrets.token_urlsafe(24)
+            # THE APP'S OWN KEYS — the push pair it signs with and the key its
+            # sensitive fields are encrypted with: a deployment that lacks them
+            # gets the same ones, never new ones (a new encryption key makes
+            # every sealed value unreadable; see services/push_keys).
+            from services.push_keys import VAPID_KEYS
+            app_secrets = {k: local_secrets[k] for k in (*VAPID_KEYS, "SENSITIVE_ENCRYPTION_KEY")
+                           if local_secrets.get(k) and k not in existing_by_key}
 
             # WHERE THE APP REPORTS ITS FAILURES (services/app_reporting): the
             # platform's public address and this project's id, so Smith's
             # inbox hears of a crash in the published app.
             from services.app_reporting import publish_env
+            # THE APP'S OWN ADDRESS, when a provider has to send people back
+            # to it: the project's production alias, stable across deploys.
+            nextauth_url = ""
+            try:
+                from services.deploy.sign_in_address import published_address
+                nextauth_url = published_address(snapshot.output_dir, _slugify(snapshot.project_slug))
+            except Exception:  # noqa: BLE001 — no Blueprint to read: no provider to tell
+                nextauth_url = ""
             env = build_deploy_env(
                 integrations={**publish_env(snapshot.project_id), **dict(snapshot.integrations)},
                 neon_url=neon_url,
-                vercel_url="",  # unused — NEXTAUTH_URL is left to VERCEL_URL
+                vercel_url="",  # unused — NEXTAUTH_URL is left to VERCEL_URL unless a provider needs it
                 nextauth_secret=nextauth_secret,
+                cron_secret=cron_secret,
+                nextauth_url=nextauth_url,
+                app_secrets=app_secrets,
                 # Reusing an existing Neon DB = a redeploy with live data;
                 # tell the build to skip schema reset + reseed.
                 keep_db_state=reused_neon,
@@ -427,7 +454,7 @@ class VercelDeployProvider:
             # `placeholder.vercel.app` here; remove it so the fallback takes
             # over rather than login building every URL against the placeholder.
             stale_nextauth = existing_by_key.get("NEXTAUTH_URL")
-            if stale_nextauth and stale_nextauth.get("id"):
+            if stale_nextauth and stale_nextauth.get("id") and not nextauth_url:
                 await self.vercel.delete_env(
                     vercel_project_id, stale_nextauth["id"]
                 )

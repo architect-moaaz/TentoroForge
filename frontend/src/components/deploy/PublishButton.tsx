@@ -47,8 +47,11 @@ export function PublishButton({ projectId, orgId, size = "sm" }: Props) {
     queryFn: () =>
       api.get<ProjectStatusInfo>(`/api/projects/${projectId}`),
     enabled: !!projectId,
+    // UNTIL IT IS READY, ASK OFTEN. The application is handed over the moment
+    // it boots, and Publish must light within seconds of that — not half a
+    // minute later, while the person reads "built" and sees a disabled button.
     refetchInterval: (q) =>
-      q.state.data?.status === "generating" ? 3_000 : 30_000,
+      q.state.data?.status === "ready" ? 30_000 : 5_000,
   });
   const projectStatus = statusData?.status;
   const isReady = projectStatus === "ready";

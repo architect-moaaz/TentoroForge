@@ -109,7 +109,9 @@ def test_without_declared_next_steps_chain_in_order(tmp_path):
     wf = _load(tmp_path)["definition"]
     assert [(e["source"], e["target"]) for e in wf["edges"]] == [
         ("trigger", "a"), ("a", "b"), ("b", "end")]
-    assert wf["nodes"][2]["data"]["config"]["duration"] == "1 hour"  # catalog default
+    # No catalog default for a wait any more: "1 hour" was `Number("1 hour")`,
+    # NaN, a wait of zero; a wait says how long as `for`/`until` or is refused.
+    assert "duration" not in wf["nodes"][2]["data"]["config"]
 
 
 def test_trigger_kind_is_a_catalog_trigger_type(tmp_path):

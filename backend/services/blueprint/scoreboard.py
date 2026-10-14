@@ -94,6 +94,13 @@ def _m_wired(doc: dict, flagged: set[str]) -> tuple[int, int]:
     return sum(1 for w in flows if w.get("id") not in flagged), len(flows)
 
 
+def _m_reference(doc: dict, flagged: set[str]) -> tuple[int, int]:
+    """Reference screens answered or declined (Reference↔Page)."""
+    from services.blueprint.reference_coverage import coverage
+    items = [it for it in coverage(doc, ("screen",)) if it.declined is None]
+    return sum(1 for it in items if it.covered_by), len(items)
+
+
 def _m_bound(doc: dict, flagged: set[str]) -> tuple[int, int]:
     """Widgets whose data contract holds up (Widget↔DataSource)."""
     widgets = _live(doc.get("widgets"))
@@ -120,6 +127,7 @@ METRICS: dict[str, tuple[str, Callable[[dict, set[str]], tuple[int, int]]]] = {
     "wired": ("Page↔Workflow", _m_wired),
     "bound": ("Widget↔DataSource", _m_bound),
     "implemented": ("Blueprint↔Implementation", _m_implemented),
+    "reference": ("Reference↔Page", _m_reference),
 }
 
 METRIC_ORDER = tuple(METRICS)

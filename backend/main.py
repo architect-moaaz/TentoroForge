@@ -75,6 +75,7 @@ from routers.runtime_exceptions import router as runtime_exceptions_router
 from routers.incidents import router as incidents_router
 from routers.notifications import router as notifications_router
 from routers.sso import router as sso_router
+from routers.mock_idp import router as mock_idp_router
 from routers.audit import router as audit_router
 from routers.attachments import router as attachments_router
 from routers.exports import router as exports_router
@@ -209,6 +210,7 @@ app.include_router(ai_features_router)
 app.include_router(portal_router)
 app.include_router(notifications_router)
 app.include_router(sso_router)
+app.include_router(mock_idp_router)
 app.include_router(audit_router)
 app.include_router(files_router)
 app.include_router(attachments_router)
@@ -309,6 +311,31 @@ async def _start_timer_scheduler():
     set_main_loop(asyncio.get_running_loop())
     app.state.timer_scheduler = TimerScheduler()
     await app.state.timer_scheduler.start()
+
+
+@app.on_event("startup")
+async def _stacks_on_signal():
+    """`kill -USR1 <pid>` writes every thread's stack to stderr. A build step
+    that made no call, ran no process and wrote no line for minutes could not
+    be looked into without root (Ecom L1, 2026-10-11)."""
+    import faulthandler
+    import signal
+
+    faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
+
+
+@app.on_event("startup")
+async def _close_orphaned_ledgers():
+    """A run ledger left open by the process before this one is closed, so
+    the panel does not read a killed build as running (`run_registry`)."""
+    import logging
+
+    from services import run_registry
+    from services.project_paths import OUTPUT_ROOT
+    closed = run_registry.close_orphaned_ledgers(OUTPUT_ROOT)
+    if closed:
+        logging.getLogger("forge.startup").info("[ledgers] closed %d left open by the last process: %s",
+                                                len(closed), ", ".join(closed[:6]))
 
 
 @app.on_event("startup")

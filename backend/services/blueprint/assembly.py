@@ -131,6 +131,8 @@ SCAFFOLD_DEFAULTS: tuple[str, ...] = (
     # pages, which an `auth` page's code replaces — the template only fills
     # the hole, never overwrites the designed page (`app_sdk._AUTH_FLOORS`).
     "src/lib/account.ts", "src/lib/account-table.ts",
+    # Where a person lands once signed in; the SDK's sign-in imports it.
+    "src/lib/landing.ts",
     # The interface's languages (`languages.project_languages`).
     "src/lib/languages.ts",
     "src/app/login/page.tsx", "src/app/signup/page.tsx",
@@ -421,6 +423,13 @@ def interpolate_edge_pages(app_root: str | Path, doc: dict) -> list[str]:
         "__APP_LOCALE__": tag,
         "__APP_DIR__": "rtl" if base in _RTL_LANGUAGES else "ltr",
     }
+    # THE COLOUR THE BROWSER CHROME TAKES on a phone: the design's primary,
+    # the same the manifest declares (`project_pwa`).
+    try:
+        from services.blueprint.projection import mobile_policy
+        values["__THEME_COLOR__"] = mobile_policy(doc)["themeColor"]
+    except Exception:  # noqa: BLE001 — no palette to read: a neutral dark
+        values["__THEME_COLOR__"] = "#0f172a"
 
     out = Path(app_root)
     touched: list[str] = []
@@ -684,14 +693,32 @@ def assemble(doc: dict, app_root: str | Path, *,
     # operation failed` — a session issued under the old secret. An app keeps
     # its secrets across rebuilds; only an app that has none is given some.
     kept = existing_secrets(out)
+    import base64
+
+    from services.push_keys import VAPID_KEYS, generate_vapid
+    vapid = {k: kept[k] for k in VAPID_KEYS if kept.get(k)}
+    if len(vapid) != len(VAPID_KEYS):
+        vapid = generate_vapid()
     env_body = (
         f"DATABASE_URL={database_url}\n"
         f"AUTH_SECRET={kept.get('AUTH_SECRET') or secrets.token_urlsafe(32)}\n"
         f"NEXTAUTH_SECRET={kept.get('NEXTAUTH_SECRET') or secrets.token_urlsafe(32)}\n"
+        # THE CLOCK'S OWN KEY. The tick (`/api/cron/tick`) is outside the
+        # sign-in gate and authenticates itself with this; the app's
+        # self-ping and Vercel's cron both carry it. Kept across rebuilds
+        # like the auth secrets, so a running schedule is not locked out.
+        f"CRON_SECRET={kept.get('CRON_SECRET') or secrets.token_urlsafe(24)}\n"
+        # THE KEY SENSITIVE FIELDS ARE ENCRYPTED WITH, and the push keys. Made
+        # once and kept for the life of the app: a new encryption key makes
+        # every sealed value unreadable, a new push pair orphans every device.
+        # This file is rewritten whole on each assembly, and it carried neither
+        # — no Blueprint-built app could encrypt, or sign a push (60v142ju).
+        f"SENSITIVE_ENCRYPTION_KEY={kept.get('SENSITIVE_ENCRYPTION_KEY') or base64.b64encode(secrets.token_bytes(32)).decode('ascii')}\n"
+        + "".join(f"{k}={kept.get(k) or vapid[k]}\n" for k in VAPID_KEYS)
         # No NEXTAUTH_URL: pinning it to :3000 sent every post-login redirect
         # to a port the app is not served on. NextAuth infers the origin from
         # the request, which is correct for any port a preview lands on.
-        f"AUTH_TRUST_HOST=true\n"
+        + "AUTH_TRUST_HOST=true\n"
     )
     # THE VARIABLES A CONNECTED SERVICE READS, BY NAME AND WITH NO VALUE.
     # `.env.example` is the file a developer who exports this application
@@ -709,6 +736,17 @@ def assemble(doc: dict, app_root: str | Path, *,
             "Settings \u2192 Integrations, or here for a local run.\n"
             + "".join(f"# {key}=\n" for key in service["keys"])
         )
+    # AND EVERY OTHER SYSTEM THE APPLICATION DECLARES: a step reaches it with
+    # `auth` naming one of these; a webhook from it is checked against one.
+    from services.blueprint.projection import declared_services
+    seen = {k for s in connected_services(doc) for k in s["keys"]}
+    for declared in declared_services(doc):
+        keys = [k for k in declared["keys"] if k not in seen]
+        if keys:
+            env_body += (f"\n# {declared['name'] or declared['slug']} — declared; set on the platform under "
+                         "Settings \u2192 Integrations, or here for a local run.\n"
+                         + "".join(f"# {key}=\n" for key in keys))
+            seen.update(keys)
     (out / ".env.example").write_text(env_body, "utf-8")
 
     # Next.js gives `.env.local` precedence over `.env`, and the scaffold ships
@@ -755,7 +793,8 @@ def assemble(doc: dict, app_root: str | Path, *,
     }
 
 
-_SECRET_KEYS = ("AUTH_SECRET", "NEXTAUTH_SECRET")
+_SECRET_KEYS = ("AUTH_SECRET", "NEXTAUTH_SECRET", "CRON_SECRET", "SENSITIVE_ENCRYPTION_KEY",
+                "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT")
 
 
 def existing_secrets(app_root: str | Path) -> dict[str, str]:

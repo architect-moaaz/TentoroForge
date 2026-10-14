@@ -119,6 +119,9 @@ class Bench:
         self._app: Any = None
         self._log_at = 0
         self.log = Path(output_dir) / ".forge" / "trials" / "server.log"
+        #: Names and values the copy's environment gets beyond the platform's
+        #: (a check's own signing secrets). Set before the first `app()`.
+        self.extra_env: dict[str, str] = {}
         #: The last `try_workflow`'s tables before and after it ran.
         self.last_written: tuple[dict[str, Any], dict[str, Any]] | None = None
         #: ONE SIGNED-OUT VISITOR FOR THE TURN. A shopper's browser keeps the
@@ -138,6 +141,7 @@ class Bench:
             self._log_at = 0
             import uuid
             app = factory(Path(self.output_dir) / "app", log=self.log,
+                          **({"extra_env": self.extra_env} if self.extra_env else {}),
                           dist_dir=f".next-trial-{uuid.uuid4().hex[:6]}")
             try:
                 self._app = app.__enter__()
@@ -180,18 +184,55 @@ def _role(doc: dict, ref: str) -> tuple[str, bool]:
     from services.blueprint.account_model import admin_role
     admin = admin_role(doc) or "Admin"
     want = (ref or "").strip()
-    if not want or want.lower() in ("admin", "administrator", admin.lower()):
+    if not want:
         return admin, True
     if want.lower() in SIGNED_OUT:
         return "", False
+    # A ROLE THE APP NAMES WINS OVER THE ALIAS. "Admin" meant the computed
+    # back-office role even when the app had a role called Admin, so on a
+    # marketplace whose back office ranked as Vendor every trial "as Admin"
+    # ran as a vendor: 200 on /vendor, refused on /admin (rwt6ef5p, 2026-10-11).
     for r in doc.get("roles") or []:
         if not isinstance(r, dict):
             continue
         if want.lower() in (str(r.get("id") or "").lower(), str(r.get("name") or "").lower()):
             name = str(r.get("name") or r.get("id"))
             return name, name == admin
+    if want.lower() in ("admin", "administrator", admin.lower()):
+        return admin, True
     known = ", ".join(str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict))
     raise ValueError(f"no role called {want!r}; the app's roles are {known or 'none'}, or `signed out`")
+
+
+def default_person(doc: dict, *, route: str = "", flow: dict | None = None) -> str:
+    """Who a trial is when the call names nobody: the person the screen or the
+    process is FOR. It was always the administrator, and an administrator
+    cannot change a customer's cart: ToroCommerce's fixed minus button was
+    tried as Admin, refused with 422, and reported "still does not work"
+    (measured on a copy, 2026-10-07). A screen only some roles may open is
+    theirs; a process only some roles may start is theirs; anything else is
+    the application's own audience — the role people sign up as — and the
+    administrator only when there is none."""
+    from services.blueprint.account_model import admin_role, signup_role
+    from services.blueprint.projection import launch_roles, restricted_roles
+
+    admin = admin_role(doc) or "Admin"
+    audience = signup_role(doc) or admin
+    if flow is not None:
+        runs = launch_roles(doc).get(str(flow.get("id"))) or []
+        named = [r for r in runs if r not in ("*", "@signed-in")]
+        if runs and len(named) == len(runs):
+            return audience if audience in named else named[0]
+        return audience
+    path = route.split("?", 1)[0]
+    page = next((p for p in doc.get("pages") or [] if isinstance(p, dict) and str(p.get("route")) == path), None)
+    if page is not None:
+        if str(page.get("access") or "") == "public" and not page.get("users"):
+            return audience
+        mine = restricted_roles(doc, page)
+        if mine:
+            return audience if audience in mine else mine[0]
+    return audience
 
 
 def _session(app: Any, doc: dict, ref: str, guest: str | None = None) -> tuple[str, list[dict]]:
@@ -212,8 +253,15 @@ def _session(app: Any, doc: dict, ref: str, guest: str | None = None) -> tuple[s
         who = Session(sub=_ADMIN_UUID, name="Admin", email=ADMIN_EMAIL, role=role)
     else:
         found = login_of_role(app, doc, role)
+        # THE ORGANISATION THEY ACT IN rides in the minted session: the app's
+        # own sign-in is not run for it, and every scoped read needs it.
+        org = ""
+        if found:
+            from services.blueprint.page_review import _query
+            rows = _query(app, f"select coalesce(active_org_id, '') from users where id = '{str(found[0]).replace(chr(39), chr(39)*2)}'")
+            org = rows[0][0] if rows and rows[0] else ""
         who = (Session(sub=found[0], name=found[1], email=f"{role.lower().replace(' ', '.')}@example.com",
-                       role=role) if found else
+                       role=role, active_org_id=org) if found else
                Session(sub=f"preview-{role.lower().replace(' ', '-')}", name=f"{role} (preview)",
                        email=f"{role.lower().replace(' ', '.')}@example.com", role=role))
     return f"{who.name} ({role})", cookies(who, base_url=app.base)
@@ -297,11 +345,24 @@ def _http(app: Any, method: str, path: str, body: Any, cookies: list[dict]) -> t
         headers={"content-type": "application/json",
                  "cookie": "; ".join(f"{c['name']}={c['value']}" for c in cookies)})
     opener = urllib.request.build_opener(_Stay)
-    try:
-        with opener.open(req, timeout=240) as r:
-            return r.status, "", r.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as e:
-        return e.code, e.headers.get("location") or "", e.read().decode("utf-8", "replace")
+    # ONE RETRY WHEN THE SERVER HANGS UP. A dev server compiling the route it
+    # was just asked for can close the connection without a reply; read as
+    # the trial's crash it took every process down as "untried" (ECom L5,
+    # 2026-10-11). A second ask a moment later is answered.
+    import http.client
+    import time as _time
+    for attempt in (1, 2):
+        try:
+            with opener.open(req, timeout=240) as r:
+                return r.status, "", r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers.get("location") or "", e.read().decode("utf-8", "replace")
+        except (http.client.RemoteDisconnected, ConnectionResetError, urllib.error.URLError) as e:
+            if attempt == 2 or isinstance(e, urllib.error.URLError) and not isinstance(
+                    getattr(e, "reason", None), (http.client.RemoteDisconnected, ConnectionResetError)):
+                raise
+            _time.sleep(3)
+    raise RuntimeError("unreachable")
 
 
 def _body(text: str) -> str:
@@ -321,6 +382,7 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     if flow is None:
         return f"No process called {ref!r}. The app has: {names(flows)}."
     app = bench.app()
+    as_ = as_ or default_person(doc, flow=flow)
     who, jar = _session(app, doc, as_, bench.guest)
     tables = _tables(app)
     before = _snapshot(app, tables)
@@ -329,8 +391,22 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
     # database's own clock (the copy's, not this process's).
     mark = _query(app, "select coalesce(max(created_at), 'epoch')::text from workflow_execution_log")
     started = mark[0][0] if mark and mark[0] else "epoch"
+    payload = dict(payload) if isinstance(payload, dict) else {}
+    def reach(table: str) -> list[str] | None:
+        """The ids this person reaches in `table`, through the app's own data
+        access as them (ownership rules apply); None when it would not say."""
+        code, _w, body = _http(app, "GET", f"/api/data/{table}?limit=5", None, jar)
+        if code != 200:
+            return None
+        try:
+            rows = json.loads(body).get("data")
+        except (ValueError, AttributeError):
+            return None
+        return [str(r.get("id")) for r in rows or [] if isinstance(r, dict) and r.get("id")]
+
+    filled = fill_records(app, doc, flow, payload, reach=reach)
     status, _where, text = _http(app, "POST", f"/api/workflows/{flow.get('id')}/execute",
-                                 {"input": payload if isinstance(payload, dict) else {}}, jar)
+                                 {"input": payload}, jar)
     after = _snapshot(app, tables)
     # Kept whole for whoever reads the run back (`round_trips`): the report
     # below cuts a wide row at 300 characters.
@@ -341,6 +417,8 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
                         "order by created_at, step_index limit 40")
     out = [f"{flow.get('name')} ({flow.get('id')}) run as {who}: HTTP {status}",
            f"answer: {_body(text)}"]
+    if filled:
+        out.insert(1, "filled with real records: " + "; ".join(filled))
     if status == 403:
         out += launch_rights(bench.output_dir, doc, flow)
     if steps:
@@ -361,6 +439,67 @@ def try_workflow(bench: Bench, doc: dict, ref: str, payload: Any, as_: str) -> s
         out.append("the server printed:")
         out += [f"  {l}" for l in said]
     return scrub("\n".join(out))
+
+
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+
+
+def _an_id(value: Any) -> bool:
+    if isinstance(value, dict):
+        value = value.get("id")
+    return isinstance(value, (str, int)) and bool(_UUID.match(str(value)) or str(value).isdigit())
+
+
+def fill_records(app: Any, doc: dict, flow: dict, payload: dict,
+                 reach: Callable[[str], list[str] | None] | None = None) -> list[str]:
+    """A required record input given nothing, or something that is not an id
+    ("first"), takes a real record of its kind from the copy — the newest —
+    and a declared `<name>Id` beside it takes the same id. TCommerce's empty
+    bag was never reproduced: Smith sent `productVariant: "first"`, was told
+    "needs productVariantId", sent that, was told "needs productVariant", and
+    ran out of steps (measured on a copy, 2026-10-07). Returns what was filled,
+    for the observation; a value that is an id is never replaced."""
+    from services.blueprint.page_review import _query
+
+    ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)}
+    declared = {str(i.get("name")): i for i in flow.get("inputs") or [] if isinstance(i, dict) and i.get("name")}
+    said: list[str] = []
+    for name, spec in declared.items():
+        ent = ents.get(str(spec.get("entity") or ""))
+        if spec.get("kind") != "record" or ent is None or _an_id(payload.get(name)):
+            continue
+        if not spec.get("required") and name not in payload:
+            continue
+        table = str(ent.get("table") or "")
+        if not table or not table.replace("_", "").isalnum():
+            continue
+        cols = {r[0] for r in _query(app, "select column_name from information_schema.columns "
+                                          f"where table_schema = 'public' and table_name = '{table}'") if r}
+        label = "".join("_" + c.lower() if c.isupper() else c for c in str(ent.get("labelField") or ""))
+        shown = f', "{label}"::text' if label and label in cols else ""
+        order = " order by created_at desc nulls last" if "created_at" in cols else ""
+        # ONE OF THEIRS. The newest row was another customer's cart line, the
+        # app refused it correctly, and the turn read the refusal as the
+        # fault (ToroCommerce copy, 2026-10-07). Read as the person when the
+        # app will say; the newest row only when it will not.
+        theirs = reach(table) if reach else None
+        if theirs is not None and not theirs:
+            said.append(f"{name}: this person has no {ent.get('name')} — make one first (as them) to try this")
+            continue
+        where = (" where id::text in (" + ", ".join("'" + t.replace("'", "") + "'" for t in theirs) + ")"
+                 if theirs else "")
+        rows = _query(app, f'select id::text{shown} from "{table}"{where}{order} limit 1')
+        if not rows or not rows[0]:
+            said.append(f"{name}: no {ent.get('name')} exists to use")
+            continue
+        rid = rows[0][0]
+        payload[name] = rid
+        said.append(f"{name} = {ent.get('name')} {rows[0][1] if len(rows[0]) > 1 and rows[0][1] else ''} ({rid})".replace("  ", " "))
+        twin = f"{name}Id"
+        if twin in declared and not _an_id(payload.get(twin)):
+            payload[twin] = rid
+            said.append(f"{twin} = the same id")
+    return said
 
 
 def launch_rights(output_dir: str, doc: dict, flow: dict) -> list[str]:
@@ -411,6 +550,12 @@ def try_request(bench: Bench, doc: dict, method: str, path: str, body: Any, as_:
     if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         return f"`method` is GET, POST, PUT, PATCH or DELETE, not {method!r}."
     app = bench.app()
+    if not as_:
+        from services.blueprint.projection import _workflow_slug
+        m = re.match(r"^/api/workflows/([^/]+)/execute", path)
+        flow = next((w for w in doc.get("workflows") or [] if isinstance(w, dict) and m
+                     and m.group(1) in (str(w.get("id")), _workflow_slug(w))), None) if m else None
+        as_ = default_person(doc, flow=flow) if flow else default_person(doc, route=path)
     who, jar = _session(app, doc, as_, bench.guest)
     tables = _tables(app) if method != "GET" else []
     before = _snapshot(app, tables) if tables else {}
@@ -441,6 +586,7 @@ def open_page(bench: Bench, doc: dict, route: str, as_: str, sign_in: bool = Fal
     ents = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     ent = ents.get(str(((page or {}).get("data") or {}).get("primaryEntity") or ""))
     app = bench.app()
+    as_ = as_ or default_person(doc, route=route)
     who, jar = _session(app, doc, as_, bench.guest)
     role, is_admin = _role(doc, as_)
     entry: dict[str, Any] = {"id": str((page or {}).get("id") or "trial"), "route": route,

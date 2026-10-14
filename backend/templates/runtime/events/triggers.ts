@@ -22,7 +22,11 @@ import { isValidCron } from "./cron";
 
 export type TriggerContract =
   | { kind: "event"; event: string }
-  | { kind: "schedule"; cron: string };
+  | { kind: "schedule"; cron: string; timezone?: string; enabled?: boolean };
+
+/** The marker a paused `wait` stores where a `wait_for_event` stores its
+ *  event: the clock, not an event, picks it up. */
+export const TIMER_EVENT = "__timer";
 
 /**
  * The process-variable name a paused wait_for_event execution stores its
@@ -58,7 +62,9 @@ export function getTriggerContract(wf: unknown): TriggerContract | null {
       return { kind: "event", event: t.event.trim() };
     }
     if (t.kind === "schedule" && typeof t.cron === "string" && isValidCron(t.cron)) {
-      return { kind: "schedule", cron: t.cron.trim() };
+      return { kind: "schedule", cron: t.cron.trim(),
+               ...(typeof t.timezone === "string" && t.timezone.trim() ? { timezone: t.timezone.trim() } : {}),
+               ...(t.enabled === false ? { enabled: false } : {}) };
     }
   }
 
@@ -147,6 +153,27 @@ export function buildTimeoutResumeInput(
     ...pv,
     event: awaitedEvent,
     timedOut: true,
+    [`__step_${nodeId}_completed`]: true,
+    [`__step_${nodeId}_output`]: output,
+  };
+  delete input[WAITING_EVENT_VAR];
+  return input;
+}
+
+/**
+ * Build the resume input for a `wait` whose time has come. The wait node's
+ * cached output says the clock ended it (`waited: true`, the moment it
+ * waited until), and the run continues downstream as whoever was running.
+ */
+export function buildTimerResumeInput(
+  processVariables: Record<string, unknown> | null | undefined,
+  nodeId: string,
+  until: string,
+): Record<string, unknown> {
+  const pv = processVariables && typeof processVariables === "object" ? processVariables : {};
+  const output = { waited: true, until };
+  const input: Record<string, unknown> = {
+    ...pv,
     [`__step_${nodeId}_completed`]: true,
     [`__step_${nodeId}_output`]: output,
   };

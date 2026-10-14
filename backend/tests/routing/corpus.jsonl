@@ -68,6 +68,46 @@
 {"say": "archiving should take them off their ward too", "verb": "edit_workflow"}
 {"say": "send the welcome email an hour later, not straight away", "verb": "edit_workflow"}
 {"say": "stop sending the welcome email", "verb": "remove_workflow"}
+{"say": "send the payment reminder every Monday at 9", "verb": "set_schedule"}
+{"say": "run the nightly digest at 6pm", "verb": "set_schedule"}
+{"say": "pause the nightly digest", "verb": "pause_schedule"}
+{"say": "stop the reminders for now", "verb": "pause_schedule"}
+{"say": "resume the reminders", "verb": "resume_schedule"}
+{"say": "start the digest again", "verb": "resume_schedule"}
+{"say": "approvals not done in 2 days go to the manager", "verb": "set_deadline"}
+{"say": "reviewers get 4 hours, then it goes to the admin", "verb": "set_deadline"}
+{"say": "run the digest now", "verb": "run_now"}
+{"say": "fire the payment reminder", "verb": "run_now"}
+{"say": "let Shopify tell the app when an order is paid", "verb": "add_webhook"}
+{"say": "accept payment.succeeded from Stripe", "verb": "add_webhook"}
+{"say": "who changed the invoices yesterday", "verb": "show_audit"}
+{"say": "show me the deletions", "verb": "show_audit"}
+{"say": "export the audit trail", "verb": "export_audit"}
+{"say": "give me the audit log for the auditors", "verb": "export_audit"}
+{"say": "is the audit trail intact", "verb": "verify_audit"}
+{"say": "verify the record", "verb": "verify_audit"}
+{"say": "keep every change on the record", "verb": "edit_audit"}
+{"say": "require a reason to change an invoice", "verb": "edit_audit"}
+{"say": "refund order 1234", "verb": "refund"}
+{"say": "give the customer their money back for booking 88", "verb": "refund"}
+{"say": "prices are in dirhams", "verb": "set_currency"}
+{"say": "use GBP", "verb": "set_currency"}
+{"say": "add an organisation called Northside Clinic", "verb": "add_organisation"}
+{"say": "we have a new branch, Riverside", "verb": "add_organisation"}
+{"say": "move dave@clinic.com to Northside as a Nurse", "verb": "move_login"}
+{"say": "put sara@shop.com in the Riverside branch", "verb": "move_login"}
+{"say": "sign in by magic link only", "verb": "set_sign_in_method"}
+{"say": "turn passwords off", "verb": "set_sign_in_method"}
+{"say": "people in the Finance group are Accountants, everyone else is a Viewer", "verb": "map_sso_roles"}
+{"say": "the Admins group signs in as Administrator", "verb": "map_sso_roles"}
+{"say": "only @acme.com may sign in", "verb": "restrict_sign_in_domains"}
+{"say": "anyone with a company Google account may sign in", "verb": "restrict_sign_in_domains"}
+{"say": "let people sign in with their Microsoft 365 account", "verb": "connect_service", "note": "sign-in through a provider is connect_service; the sign-in adapter is tried first"}
+{"say": "connect sign-in to Okta over SAML", "verb": "connect_service"}
+{"say": "turn on push notifications", "verb": "edit_mobile"}
+{"say": "the app should be portrait only on phones", "verb": "edit_mobile"}
+{"say": "send me a test notification", "verb": "test_notification"}
+{"say": "send a test push to dave@acme.com", "verb": "test_notification"}
 {"say": "remove the archive nurse thing", "verb": "remove_workflow"}
 {"say": "we don't want the Monday reminder any more", "verb": "remove_workflow"}
 {"say": "experience can't be more than 60 years", "verb": "add_rule"}
@@ -202,7 +242,6 @@
 {"say": "Drop the rule that a nurse needs at least one speciality", "verb": "remove_rule"}
 {"say": "let anyone open registration without signing in", "verb": "edit_access", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "change the theme colour to green", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
-{"say": "make it darker", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "change the theme colour from blue to green", "verb": "restyle", "note": "quoted in the catalogue as an example of this verb"}
 {"say": "Make it look nicer", "verb": "restyle"}
 {"say": "call it Nurse Directory", "verb": "edit_navigation", "note": "quoted in the catalogue as an example of this verb"}

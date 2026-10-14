@@ -25,6 +25,7 @@ endpoint count was diffed by hand.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 import hashlib
 import json
 import os
@@ -225,8 +226,8 @@ def _is_built(output_dir) -> bool:
     after it, a change to the running app (compose / mutate). DEFECT-C-03/B-09
     is the pre-build case being routed as if the app already existed.
     """
-    from pathlib import Path as _P
-    return (_P(output_dir) / "app" / "package.json").is_file()
+    from services.smith.gates import is_built
+    return is_built(output_dir)
 
 
 #: A message that asks to ADD or CHANGE something in the definition — an
@@ -760,6 +761,20 @@ def _build_complete_message(doc: dict | None) -> str | None:
 
     later += _sign_in_line(full) + _failing_processes_line(full)
 
+    # THE CARD, WHEN THE APP WAS HANDED OVER WITH ONE: what is proven so far,
+    # what is not yet, what the checks could not try; the checks fill it in
+    # after this message and say each fix as it lands.
+    from services.blueprint import scorecard
+    card = scorecard.read(full)
+    if card:
+        lead = ("Your application is built. " if not unbuilt else
+                f"Your application is built — {served} of {planned} pages are served; the rest are on the "
+                "card below and are the first thing I fix. ")
+        return (lead + "Open the preview to use it, or Publish when you're happy "
+                "with it." + later + scorecard.opening(full)
+                + ("\n\nI'm now checking every page, route, process and rule as each kind of person, "
+                   "and will report here what I fix. You can use the app meanwhile."
+                   if card.get("status") in ("checking", "fixing") else ""))
     # WHAT WAS PROVEN, NOT WHAT WAS WRITTEN. When the build used the app,
     # the message says how much of it worked, and names what did not.
     score = _check_score(full)
@@ -934,7 +949,7 @@ async def generate_via_blueprint(
         # find it. See services/run_registry.
         run_registry.note(str(project_id), event, data)
 
-    run_registry.begin(str(project_id), phase="build")
+    run_registry.begin(str(project_id), phase="build", output_dir=output_dir)
 
     async def generate() -> None:
 
@@ -1209,6 +1224,21 @@ def _interrupted_turn(project: Any, ledger: dict) -> dict:
     return ledger
 
 
+@router.post("/api/projects/{project_id}/build/stop")
+async def stop_build(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The person pressed Stop. The build in flight ends at its next step
+    and hands over what is built; the checks after a hand-over end at their
+    next page. Before this, Stop only closed the stream that watched the
+    work, and the work went on (forge-v3, 2026-10-10)."""
+    project = await get_project_with_auth(project_id, user, db)
+    run_registry.request_stop(str(project_id), _output_dir(project))
+    return {"stopping": True}
+
+
 @router.get("/api/projects/{project_id}/looks/{page_id}/{attempt}/{name}")
 async def read_look(
     project_id: uuid.UUID, page_id: str, attempt: int, name: str,
@@ -1247,6 +1277,26 @@ async def read_blueprint(
         raise HTTPException(status_code=404,
                             detail="no Blueprint for this project") from None
     return svc.doc
+
+
+@router.get("/api/projects/{project_id}/flows")
+async def read_flows(
+    project_id: uuid.UUID,
+    user: PlatformUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The App Flow view: each flow as screens and the moves between them
+    (`app_flows.graph`), with what in the flows names nothing."""
+    project = await get_project_with_auth(project_id, user, db)
+    from services.blueprint.app_flows import flow_findings, graph
+    from services.blueprint.service import BlueprintService
+
+    try:
+        svc = BlueprintService.load(output_dir=str(_output_dir(project)))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404,
+                            detail="no Blueprint for this project") from None
+    return {**graph(svc.doc), "findings": flow_findings(svc.doc)}
 
 
 @router.get("/api/projects/{project_id}/gates")
@@ -1622,7 +1672,18 @@ async def smith_chat(
     # `approved` is the difference between defining and building, and it is
     # what the panel needs to word the wait correctly.
     run_registry.begin(str(project_id),
-                       phase="build" if req.approved else "define")
+                       phase="build" if req.approved else "define", output_dir=output_dir)
+
+    def _after_turn(result: Any) -> None:
+        """A build that handed over an application starts its checks here —
+        after `done`, outside the turn, so the panel is free and the person
+        can use the app while every page, route, process and rule is tried
+        and the reds are fixed (`fix_to_green`)."""
+        checks = result.get("checks") if isinstance(result, dict) else None
+        if not isinstance(checks, dict) or not checks.get("pending"):
+            return
+        _start_checks(loop, str(project_id), checks["output_dir"], checks["app_root"],
+                      memory_lock=memory_lock, app_name=getattr(project, "name", "") or "")
 
     async def turn() -> None:
 
@@ -2066,7 +2127,9 @@ async def smith_chat(
             _inner.add_done_callback(_ledger_end)
             _fut = asyncio.shield(_inner)
             try:
-                emit("done", await asyncio.wait_for(_fut, timeout=_turn_timeout))
+                _result = await asyncio.wait_for(_fut, timeout=_turn_timeout)
+                emit("done", _result)
+                _after_turn(_result)
             except asyncio.TimeoutError:
                 logger.warning(
                     "smith turn exceeded %.0fs for %s — releasing the panel; "
@@ -2098,7 +2161,9 @@ async def smith_chat(
                 # reconnected client) needs to mark the run complete.
                 def _late_done(f: Any) -> None:
                     try:
-                        emit("done", f.result())
+                        _result = f.result()
+                        emit("done", _result)
+                        _after_turn(_result)
                     except Exception:  # noqa: BLE001 — the run already ran
                         pass
                 _inner.add_done_callback(_late_done)
@@ -2258,7 +2323,8 @@ def _adopt_design_references(output_dir: Path, project_id: str) -> list[str]:
 
 def build_in_flight(output_dir: str | Path) -> dict | None:
     """The run writing this application now, as its ledger tells it — read
-    from disk because the backend runs two workers and either may hold it."""
+    from disk because the backend runs two workers and either may hold it.
+    The checks after a hand-over count: they edit the same tree."""
     from services.run_registry import ledger_snapshot
     # Builds only: the turn asking is itself in flight, and it is not a build.
     snap = ledger_snapshot(output_dir, turns=False)
@@ -2267,11 +2333,50 @@ def build_in_flight(output_dir: str | Path) -> dict | None:
 
 def busy_message(run: dict) -> str:
     """What a person is told when they ask for work while a build is running."""
+    if str(run.get("phase") or "") == "checking":
+        return ("The application is built and I'm still checking and fixing it — every page, route, "
+                "process and rule as each kind of person. I've left that to finish rather than build "
+                "on top of it; you can use the app meanwhile, or press Stop and ask again.")
     done, total = int(run.get("nodesDone") or 0), int(run.get("nodesTotal") or 0)
     where = f" — {done} of {total} steps done" if total else ""
     return (f"The application is still being built{where}. I've left that build "
             "to finish rather than start another on top of it. When it lands "
             "you'll see it here, with the offer to verify it; ask again then.")
+
+
+def _start_checks(loop: Any, project_id: str, output_dir: str, app_root: str, *,
+                  memory_lock: Any = None, app_name: str = "") -> "asyncio.Future":
+    """The checks after a hand-over, in the background: everything they say
+    goes to the transcript (a reloaded panel reads it there) and to the run
+    registry (the panel's strip), never to the stream that has ended."""
+    from services import run_registry
+    from services.blueprint.fix_to_green import run_checks_to_green
+    from services.blueprint.service import BlueprintService
+
+    def background_emit(event: str, data: dict) -> None:
+        if event == "message":
+            _remember(loop, project_id, "assistant", str(data.get("text") or ""),
+                      {k: v for k, v in data.items() if k in ("options", "status") and v},
+                      lock=memory_lock)
+        run_registry.note(project_id, event, data)
+
+    def work() -> dict:
+        svc = BlueprintService.load(output_dir=output_dir)
+        return run_checks_to_green(svc, output_dir, app_root, SimpleNamespace(), emit=background_emit,
+                                   cancelled=lambda: run_registry.stop_requested(output_dir))
+
+    run_registry.checking(project_id)
+
+    def _ended(f: Any) -> None:
+        try:
+            out = f.result()
+            run_registry.checks_done(project_id, "stopped" if out.get("stopped") == "stopped by the person" else "done")
+        except Exception:  # noqa: BLE001 — said in the log; the app is handed over regardless
+            logger.warning("[checks] %s: the checks failed", Path(output_dir).name, exc_info=True)
+            run_registry.checks_done(project_id, "done")
+    fut = loop.run_in_executor(None, work)
+    fut.add_done_callback(_ended)
+    return fut
 
 
 def _run_dag(output_dir: str, app_root: str, description: str, *,
@@ -2295,7 +2400,9 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     from services.blueprint.executors import (
         RunUsage, make_executor, tiered_router)
     from services.blueprint.observer import anthropic_observer
-    from services.blueprint.orchestrator import DAG, completed_nodes, levels, run, nodes_recorded_done
+    from services.blueprint.orchestrator import (
+        DAG, STOPPED_BY_PERSON, completed_nodes, levels, nodes_recorded_done, run,
+    )
     from services.blueprint.plan_forecast import forecast
     from services.blueprint.service import BlueprintService
     from services.smith.smith import domain_nodes, model_nodes
@@ -2427,7 +2534,8 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
 
     report = run(svc, executor, plan=plan, commit=True,
                  user_request=description, app_root=app_root,
-                 observer=progress, observer_agent=watcher)
+                 observer=progress, observer_agent=watcher,
+                 should_stop=lambda: run_registry.stop_requested(output_dir))
     # DEFECT-B-07: a define run left the state at DISCOVERY (the DAG never calls
     # transition()), so GET /blueprint reported DISCOVERY forever and the
     # approve/build gates were unreachable. A define that produced requirements
@@ -2446,8 +2554,6 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             logger.info("[blueprint] %s: model drafted at %s", Path(output_dir).name,
                         svc.doc.get("state"))
         _gates.record_version(output_dir, _gates.PRODUCT_MODEL, svc.doc)
-    if approved and phase not in ("define", "model") and not getattr(report, "paused_because", ""):
-        _finish_unfinished_pages(svc, output_dir, app_root, report, emit)
     if exact_copy and not report.failed and not getattr(report, "paused_because", ""):
         # The source's direct edits to its files (`file_edit`) came with the
         # template; the build rewrote those files, so they are put back.
@@ -2456,6 +2562,16 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
             logger.info("[blueprint] %s: template edit %s", Path(output_dir).name, line)
         _templates.mark_built(output_dir)
     state = str(svc.doc.get("state") or "")
+    stopped = getattr(report, "paused_because", "") == STOPPED_BY_PERSON
+    built = _booted(svc.doc) and (Path(app_root) / "package.json").is_file()
+    # THE APPLICATION IS THE PERSON'S THE MOMENT IT BOOTS. The checks that
+    # used to run here — page repair, process trials, the app check, each
+    # with its own rounds — held the build turn for an hour and a half after
+    # the app served, with "Building…" on screen and Publish disabled (ECom
+    # L2, 2026-10-11). They run after this turn ends (`fix_to_green`, started
+    # by the chat turn from `checks`), and report into the conversation.
+    checks = ({"output_dir": str(output_dir), "app_root": str(app_root), "pending": True}
+              if approved and phase not in ("define", "model") and built and not stopped else None)
     if approved:
         # THE BUILD USED TO LEAVE THE STATE WHERE THE DEFINITION LEFT IT. This
         # path never called `transition`, so a compiled, served application
@@ -2473,8 +2589,13 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
         # reload shows "built" even when the stream that launched it was long
         # gone by the time it landed. Best-effort: a completion that cannot be
         # worded must not fail a build that succeeded.
-        if announce_completion and not getattr(report, "paused_because", ""):
-            _announce_build_complete(svc.doc, emit, offer_verify=approved,
+        if checks:
+            from services.blueprint import scorecard
+            scorecard.seed_from_boot(svc)
+        if stopped:
+            _announce_stopped(svc.doc, emit, built=built)
+        elif announce_completion and not getattr(report, "paused_because", ""):
+            _announce_build_complete(svc.doc, emit, offer_verify=approved and not checks,
                                      where=Path(output_dir).name)
     counts = forecast(svc.doc)
     emit("forecast", counts)
@@ -2482,49 +2603,29 @@ def _run_dag(output_dir: str, app_root: str, description: str, *,
     emit("state", {"state": state})
     return {"awaitingApproval": phase != "build", "forecast": counts,
             "state": state, "phase": phase,
-            "report": _report_payload(report, svc.doc)}
+            "report": _report_payload(report, svc.doc),
+            **({"checks": checks} if checks else {})}
 
 
-def _finish_unfinished_pages(svc: Any, output_dir: str, app_root: str, report: Any, emit) -> None:
-    """Every page the build did not finish goes to Smith with why it failed,
-    to fix the cause and write it (`page_repair`); then every process is run
-    once and what fails is fixed the same way; then every page is used as
-    each role it is for (`app_check`). Only for a built tree —
-    there is nothing to run before assembly — and never fatal: what is still
-    unfinished is recorded and said in the completion message."""
+def _booted(doc: dict) -> bool:
+    """The assembly recorded a build that passed (with issues or without) —
+    the stamp `project_service._build_passed` reads too."""
+    status = str(((doc.get("runtime") or {}).get("build") or {}).get("status") or "")
+    return status.startswith("passed")
+
+
+def _announce_stopped(doc: dict, emit, *, built: bool) -> None:
+    """A person's Stop ended the build: what is built is handed over as it
+    stands; before the app booted, how to carry on."""
     try:
-        if not (Path(app_root) / "package.json").is_file():
-            return
-        from services.blueprint.page_repair import repair_pages
-        out = repair_pages(svc, output_dir, app_root, report, emit=emit)
-        if out["fixed"] or out["left"]:
-            logger.info("[blueprint] %s: pages finished by repair %s; still unfinished %s",
-                        Path(output_dir).name, out["fixed"] or "-",
-                        [t["route"] for t in out["left"]] or "-")
-    except Exception:  # noqa: BLE001 — the build's own result stands
-        logger.warning("[blueprint] %s: page repair failed", Path(output_dir).name, exc_info=True)
-    # THEN EVERY PROCESS IS RUN THROUGH, after the pages — a page's repair
-    # may have added the process it needed (`process_trials`).
-    try:
-        from services.blueprint.process_trials import prove_processes
-        out = prove_processes(svc, output_dir, emit=emit)
-        logger.info("[blueprint] %s: processes ran %d, fixed %s, still failing %s",
-                    Path(output_dir).name, len(out["passed"]), out["fixed"] or "-",
-                    [t["name"] for t in out["left"]] or "-")
-    except Exception:  # noqa: BLE001
-        logger.warning("[blueprint] %s: process trials failed", Path(output_dir).name, exc_info=True)
-    # THEN THE WHOLE APPLICATION IS USED, as each kind of person it is for —
-    # every page opened, every control pressed, what it shows read — and
-    # what fails is fixed the same way (`app_check`). The build knew when a
-    # page was missing; only this knows when one is wrong.
-    try:
-        from services.blueprint.app_check import check_app
-        out = check_app(svc, output_dir, emit=emit)
-        logger.info("[blueprint] %s: pages working %d of %d, fixed %s, still failing %s",
-                    Path(output_dir).name, out["working"], out["pages"], out["fixed"] or "-",
-                    [t["route"] for t in out["left"]] or "-")
-    except Exception:  # noqa: BLE001
-        logger.warning("[blueprint] %s: the app check failed", Path(output_dir).name, exc_info=True)
+        if built:
+            done = _build_complete_message(doc) or "Your application is built."
+            emit("message", {"text": "Stopped, as you asked. What is built so far is yours to use:\n\n" + done})
+        else:
+            emit("message", {"text": "Stopped before the application was built. Press Build to carry on "
+                                     "from where it stopped — what landed is kept."})
+    except Exception:  # noqa: BLE001 — never let the announcement fail the stop
+        logger.warning("[blueprint] could not announce the stop", exc_info=True)
 
 
 def _approve_requirements(output_dir: str, app_root: str, *, emit, app_name: str = "",
@@ -2626,8 +2727,12 @@ def _gate_turn(svc: Any, gate: str, output_dir: str, app_root: str, req: Any, *,
             out = _gates.revise_requirements(svc, str(turn.get("brief") or ""),
                                              remove=list(turn.get("remove") or []),
                                              reword=list(turn.get("reword") or []),
-                                             request=req.message, reasoning=reasoning)
-            text = _gates.say_requirements_change(out["diff"], out["version"])
+                                             request=req.message, reasoning=reasoning,
+                                             parts=list(turn.get("parts") or []),
+                                             decline=list(turn.get("decline") or []))
+            text = _gates.say_requirements_change(out["diff"], out["version"],
+                                                  declined=list(out.get("declined") or []),
+                                                  reference=bool(out.get("reference")))
         else:
             out = _gates.revise_model(svc, turn, request=req.message, reasoning=reasoning,
                                       detail=lambda s: _detail_new_records(s, reasoning))

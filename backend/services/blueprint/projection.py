@@ -342,6 +342,31 @@ def reconcile_platform_table(entity: dict) -> tuple[list[dict], list[str]]:
     return fields, folded
 
 
+def _sealed_fields(entity: dict, doc: dict) -> set[str]:
+    """The fields of `entity` the data engine encrypts: the sensitive-columns
+    manifest's entry for it, by any of its names — less the columns rows are
+    FOUND by, which a seal (a fresh nonce per value) would make unfindable:
+    the platform's sign-in identity (`email`, the password, already hashed)
+    and every column an ownership rule scopes or stamps by. Those stay as
+    they are, masked when read."""
+    manifest = sensitive_columns(doc)
+    fields: set[str] = set()
+    for key in (entity.get("name"), entity.get("table")):
+        if key and key in manifest:
+            fields = set(manifest[key])
+            break
+    if not fields:
+        return set()
+    keys = {str(entity.get(k) or "").lower() for k in ("id", "name", "table") if entity.get(k)}
+    found_by: set[str] = set()
+    for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
+        if isinstance(rule, dict) and str(rule.get("entity") or "").lower() in keys:
+            found_by |= {str(rule.get(k)) for k in ("column", "guestColumn") if rule.get(k)}
+    if platform_table(str(entity.get("table") or to_snake(str(entity.get("name") or "")))):
+        found_by |= {f for f in fields if re.sub(r"[^a-z]", "", f.lower()) in ("email", "password", "passwordhash")}
+    return fields - found_by
+
+
 def emit_entity_module(entity: dict, doc: dict) -> str:
     """A Drizzle table module for one entity, in the scaffold's shape."""
     entities = {e.get("id"): e for e in doc.get("data", {}).get("entities") or []}
@@ -351,9 +376,27 @@ def emit_entity_module(entity: dict, doc: dict) -> str:
         # explains why (a uuid FK cannot hold a serial id).
         fields.insert(0, {"name": "id", "type": "uuid", "primaryKey": True})
 
+    # ENCRYPTED AT REST: each field the data engine seals (`sensitive_columns`)
+    # gets `<name>_encrypted` (AES-GCM) and `<name>_mask` beside it, and its
+    # plain column becomes optional — the engine never writes it again. The
+    # Blueprint path emitted the plain column alone, so the engine sealed
+    # values into columns that did not exist: a create through the data API
+    # lost them, and every row written elsewhere sat in plain text (60v142ju,
+    # 2026-10-12). A seal cannot carry `.unique()`: each value is encrypted
+    # under a fresh nonce, so two equal values never compare equal.
+    sealed = _sealed_fields(entity, doc)
     lines, builders = [], set()
     for field in fields:
         line, builder = drizzle_column(field)
+        if str(field.get("name") or "") in sealed:
+            line = line.replace(".notNull()", "").replace(".unique()", "")
+            name = str(field.get("name"))
+            col = to_snake(name)
+            lines.append("  " + line)
+            lines.append(f'  {name}_encrypted: text("{col}_encrypted"),')
+            lines.append(f'  {name}_mask: text("{col}_mask"),')
+            builders.update({builder, "text"})
+            continue
         lines.append("  " + line)
         builders.add(builder)
 
@@ -2245,7 +2288,19 @@ def feel_condition(expr: Any) -> Any:
 
 
 #: Step config keys that name a role.
-_ROLE_KEYS = ("recipientRole", "toRole", "assigneeRole", "role")
+_ROLE_KEYS = ("recipientRole", "toRole", "assigneeRole", "role", "escalateTo")
+
+
+_PAGE_KEYS = ("successPage", "cancelPage", "returnPage")
+
+
+def _pages_by_route(config: dict[str, Any], page_routes: dict[str, str]) -> dict[str, Any]:
+    """Page ids in a step's config, as the routes the browser is sent to."""
+    for key in _PAGE_KEYS:
+        value = config.get(key)
+        if isinstance(value, str) and value in page_routes:
+            config[key] = page_routes[value]
+    return config
 
 
 def _roles_by_name(config: dict[str, Any], role_names: dict[str, str]) -> dict[str, Any]:
@@ -2430,6 +2485,71 @@ def _table_of(doc: dict, entity_id: str) -> str:
     return ""
 
 
+def _trigger_contract(doc: dict, wf: dict) -> dict[str, Any] | None:
+    """The top-level `trigger` the runtime reads (`events/triggers.ts`):
+    `{kind: "schedule", cron, timezone?, enabled?}` or `{kind: "event",
+    event}`. The legacy `definition.trigger` is still written beside it.
+
+    A `db_change` used to put its sentence under `definition.trigger.
+    condition`, which nothing read, so no process ever started on a record's
+    change (2026-10-12). The event is named as the data engine emits it:
+    the table's export name, lowercased, then `.created|updated|deleted`."""
+    from services.blueprint.cron_expr import is_valid_cron
+    t = wf.get("trigger") or {}
+    kind = str(t.get("kind") or "manual")
+    if kind == "schedule":
+        cron = str(t.get("cron") or "").strip()
+        if not cron and is_valid_cron(str(t.get("detail") or "")):
+            cron = str(t.get("detail")).strip()
+        if not is_valid_cron(cron):
+            return None
+        out: dict[str, Any] = {"kind": "schedule", "cron": cron}
+        if str(t.get("timezone") or "").strip():
+            out["timezone"] = str(t["timezone"]).strip()
+        if t.get("enabled") is False:
+            out["enabled"] = False
+        return out
+    if kind == "db_change":
+        on = str(t.get("on") or "")
+        ent = next((e for e in (doc.get("data") or {}).get("entities") or []
+                    if isinstance(e, dict) and str(e.get("id")) == str(t.get("entity") or "")), None)
+        if ent is None or on not in ("created", "updated", "deleted"):
+            return None
+        return {"kind": "event", "event": f"{_var_name(ent).lower()}.{on}"}
+    if kind in ("api_event", "webhook"):
+        event = str(t.get("event") or t.get("detail") or "").strip()
+        return {"kind": "event", "event": event} if event else None
+    return None
+
+
+def _write_tick(app_root: Path, crons: list[str]) -> str | None:
+    """The app's `vercel.json` cron entry, as often as the finest schedule
+    needs (floor one minute, default every fifteen). Merged into the file
+    the runtime shipped, or the template when the app has none yet."""
+    import json as _json
+    from services.blueprint.cron_expr import tick_minutes
+    from services.runtime_injector import _TEMPLATE_DIR
+    n = tick_minutes(crons)
+    target = Path(app_root) / "vercel.json"
+    source = target if target.exists() else (_TEMPLATE_DIR / "vercel.json")
+    try:
+        body = _json.loads(source.read_text("utf-8"))
+    except Exception:  # noqa: BLE001 — a file the person wrote by hand
+        return None
+    schedule = "* * * * *" if n == 1 else f"*/{n} * * * *"
+    crons_list = body.get("crons") if isinstance(body.get("crons"), list) else []
+    tick = next((c for c in crons_list if isinstance(c, dict) and c.get("path") == "/api/cron/tick"), None)
+    if tick is None:
+        crons_list.append({"path": "/api/cron/tick", "schedule": schedule})
+    elif tick.get("schedule") == schedule and target.exists():
+        return None
+    else:
+        tick["schedule"] = schedule
+    body["crons"] = crons_list
+    target.write_text(_json.dumps(body, indent=2) + "\n", "utf-8")
+    return "vercel.json"
+
+
 def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
     """Write ``src/lib/workflows/definitions/*.json`` from the Blueprint.
 
@@ -2450,12 +2570,17 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
 
     written: list[str] = []
     code_map: list[dict] = []
+    schedule_crons: list[str] = []
     # A step names a role as the Blueprint does (`ROLE-002`); the session,
     # the inbox and /api/notifications know it by its name ("Admin"). An id
     # there matched nobody — 0l133sp2's "awaiting KYC verification" was
     # stored for role "ROLE-002" and no admin ever saw it.
     role_names = {str(r.get("id")): str(r.get("name")) for r in doc.get("roles") or []
                   if isinstance(r, dict) and r.get("id") and r.get("name")}
+    # A step names a page as the Blueprint does (`PAGE-004`); a checkout's
+    # return page is an address the browser is sent to.
+    page_routes = {str(p.get("id")): str(p.get("route") or "/") for p in doc.get("pages") or []
+                   if isinstance(p, dict) and p.get("id")}
     for wf in workflows:
         slug = to_snake(wf.get("name") or wf.get("id") or "workflow").replace("_", "-")
         declared_trigger = wf.get("trigger") or {}
@@ -2495,8 +2620,8 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
         chain = ["trigger"]
         for s in steps:
             entity = entities.get(s.get("entity")) or {}
-            config = _roles_by_name(_step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
-                                    role_names)
+            config = _pages_by_route(_roles_by_name(_step_config(s, entity, catalog, wf_id=str(wf.get("id") or slug), steps=steps),
+                                    role_names), page_routes)
             # A NOTIFICATION OPENS WHAT IT IS ABOUT: the record's address
             # (its screen's panel, or its record page) with its id.
             from services.blueprint.record_links import notification_link
@@ -2524,6 +2649,10 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
                        lambda k, t, cfg, lbl: _wf_node(k, t, len(nodes), cfg, lbl))
         _check_graph(str(wf.get("name") or wf.get("id")), nodes, edges, catalog)
 
+        contract = _trigger_contract(doc, wf)
+        if contract and contract.get("kind") == "schedule":
+            # The legacy shape carries the cron too, never the sentence.
+            trigger_cfg["cron"] = contract["cron"]
         definition = {
             "id": slug,
             "name": wf.get("name") or slug,
@@ -2548,7 +2677,10 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
             "processVariables": [],
             "definition": {"trigger": dict(trigger_cfg),
                            "nodes": nodes, "edges": edges},
+            **({"trigger": contract} if contract else {}),
         }
+        if contract and contract.get("kind") == "schedule":
+            schedule_crons.append(str(contract["cron"]))
         (out / f"{slug}.json").write_text(
             json.dumps(definition, indent=2, sort_keys=True) + "\n", "utf-8")
         rel = f"src/lib/workflows/definitions/{slug}.json"
@@ -2566,6 +2698,10 @@ def project_workflows(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 (out / f"{slug}.json").unlink(missing_ok=True)
 
     written.append(project_launch_roles(doc, app_root)["files"][0])
+    if schedule_crons:
+        tick = _write_tick(Path(app_root), schedule_crons)
+        if tick:
+            written.append(tick)
     return {"files": written, "workflows": len(written), "codeMap": code_map}
 
 
@@ -2728,6 +2864,36 @@ def project_launch_roles(doc: dict, app_root: str | Path) -> dict[str, Any]:
 CONNECTED_SERVICES_FILE = "src/lib/integrations/connected.ts"
 
 
+def integration_slug(row: dict) -> str:
+    """The URL-safe name an integration answers under (`/api/webhooks/<slug>`)."""
+    return to_snake(str(row.get("name") or row.get("id") or "integration")).replace("_", "-") or "integration"
+
+
+def inbound_services(doc: dict) -> list[dict[str, Any]]:
+    """Every live integration that CALLS THE APPLICATION, with how its call
+    is verified: names only, never a value."""
+    out: list[dict[str, Any]] = []
+    for row in _live(doc.get("integrations")):
+        inbound = row.get("inbound") if isinstance(row.get("inbound"), dict) else None
+        if not inbound or not str(inbound.get("signingSecretRef") or "").strip():
+            continue
+        out.append({"slug": integration_slug(row), "name": str(row.get("name") or ""),
+                    "provider": str(row.get("provider") or ""),
+                    "verify": str(inbound.get("verify") or "hmac_sha256"),
+                    "signingSecretRef": str(inbound["signingSecretRef"]).strip(),
+                    "events": [str(e) for e in inbound.get("events") or []]})
+    return out
+
+
+def declared_services(doc: dict) -> list[dict[str, Any]]:
+    """Every live integration, with the NAMES of its secrets — what a step's
+    `auth` may name, and what the platform's settings offer to set."""
+    return [{"slug": integration_slug(row), "name": str(row.get("name") or ""),
+             "provider": str(row.get("provider") or ""),
+             "keys": [str(k) for k in row.get("secretRefs") or []]}
+            for row in _live(doc.get("integrations"))]
+
+
 def connected_services(doc: dict) -> list[dict[str, Any]]:
     """Every integration that SERVES a workflow action, in document order.
 
@@ -2736,7 +2902,7 @@ def connected_services(doc: dict) -> list[dict[str, Any]]:
     a value never reaches a projected file any more than it reaches the
     Blueprint (§42).
     """
-    from services.smith.email_connect import FROM_KEY, LIVE_KEY
+    from services.smith.connect_service import from_key, live_key
 
     out: list[dict[str, Any]] = []
     for row in _live(doc.get("integrations")):
@@ -2745,6 +2911,8 @@ def connected_services(doc: dict) -> list[dict[str, Any]]:
             continue
         provider = str(row.get("provider") or "")
         keys = [str(k) for k in row.get("secretRefs") or []]
+        LIVE_KEY = {provider: live_key(serves, provider)} if live_key(serves, provider) else {}
+        FROM_KEY = from_key(serves)
         # NO ADAPTER, NO CONNECTION. A row may name a provider nothing in the
         # runtime can talk to — a hand-authored Blueprint can say
         # `provider: "mailchimp", serves: "send_email"` — and handing it to
@@ -2829,7 +2997,36 @@ def project_integrations(doc: dict, app_root: str | Path) -> dict[str, Any]:
         "  return CONNECTED_SERVICES[action];",
         "}",
         "",
+        "/** An outside system that CALLS the application, by the name it answers",
+        " *  under at /api/webhooks/<slug>: how its call is verified and the NAME of",
+        " *  its signing secret. */",
+        "export type InboundService = {",
+        "  name: string;",
+        "  provider: string;",
+        "  verify: string;",
+        "  signingSecretRef: string;",
+        "  events: string[];",
+        "};",
+        "",
+        "export const INBOUND: Record<string, InboundService> = {",
     ]
+    for entry in inbound_services(doc):
+        lines.append(f"  {json.dumps(entry['slug'])}: " + json.dumps({
+            "name": entry["name"], "provider": entry["provider"], "verify": entry["verify"],
+            "signingSecretRef": entry["signingSecretRef"], "events": entry["events"]}) + ",")
+    lines += [
+        "};",
+        "",
+        "/** Every system this application declares, with the NAMES of its secrets",
+        " *  (what a step's `auth.secretRef` may name). */",
+        "export type DeclaredService = { name: string; provider: string; keys: string[] };",
+        "",
+        "export const DECLARED: Record<string, DeclaredService> = {",
+    ]
+    for entry in declared_services(doc):
+        lines.append(f"  {json.dumps(entry['slug'])}: " + json.dumps({
+            "name": entry["name"], "provider": entry["provider"], "keys": entry["keys"]}) + ",")
+    lines += ["};", ""]
     out = Path(app_root) / "src" / "lib" / "integrations"
     out.mkdir(parents=True, exist_ok=True)
     (out / "connected.ts").write_text(chr(10).join(lines), "utf-8")
@@ -2878,6 +3075,10 @@ def entity_access(doc: dict) -> dict[str, dict[str, list[str]]]:
     # written as code reads through the server and never declares what it
     # reads, so TCommerce's categories, variants, images, cart and order items
     # came out empty and the data API answered 403 to the admin (2026-10-05).
+    # What access decided bounds what a public screen opens (anonymous_may_read).
+    for eid, e in entities.items():
+        if "*" in readers[eid] and not anonymous_may_read(doc, e):
+            readers[eid].discard("*")
     return {slug_of[eid]: {"read": sorted(readers[eid]), "write": sorted(writers[eid])}
             for eid in entities if readers[eid] or writers[eid]}
 
@@ -2919,6 +3120,17 @@ def category_period(fields: list) -> int:
                and not _UNIQUE_TEXT.search(str(f.get("name") or "field"))]
     lengths = [n for n in lengths if n > 1]
     return min(lengths) if lengths else 0
+
+
+def _number(text: str) -> float | None:
+    """`"12500"`, `"US$1,250.00"`, `"4.5"` -> a number; prose -> None."""
+    m = re.search(r"-?\d[\d,]*(?:\.\d+)?", str(text or ""))
+    if not m:
+        return None
+    try:
+        return float(m.group(0).replace(",", ""))
+    except ValueError:
+        return None
 
 
 def _seed_value(field: dict, entity_name: str, row: int,
@@ -2964,6 +3176,17 @@ def _seed_value(field: dict, entity_name: str, row: int,
     # editor's sampler follows the same rule; see `UNIQUE_TEXT` there).
     if examples and kind in ("string", "text", "varchar") and not _UNIQUE_TEXT.search(str(name)):
         return examples[(row - 1) % len(examples)]
+    # A NUMBER'S EXAMPLES ARE ITS VALUES TOO. Only text took its examples;
+    # an integer was seeded as the row number, so a price "in minor units"
+    # with examples 12500, 4500 became 1, 2, 3 cents, and a cart line with
+    # examples 1, 2, 1, 3 held 14 of a 7-stock coat — the cart's subtotal
+    # read US$0.00 and checkout was blocked (7ttp60zi, 2026-10-11).
+    if examples and kind in ("integer", "int", "number", "decimal", "float", "numeric", "currency", "money"):
+        numbers = [_number(x) for x in examples]
+        numbers = [n for n in numbers if n is not None]
+        if numbers:
+            value = numbers[(row - 1) % len(numbers)]
+            return int(value) if kind in ("integer", "int") and float(value).is_integer() else value
     lo, hi = field.get("min"), field.get("max")
     if isinstance(lo, (int, float)) and isinstance(hi, (int, float)) and hi >= lo \
             and kind in ("integer", "int", "number", "decimal", "float", "numeric", "currency", "money"):
@@ -3093,6 +3316,13 @@ def _link_target(doc: dict, entity: dict, field: dict) -> str | None:
     relationship, else an entity named by the field (`toolId` → Tool), else —
     an id naming a person (`ownerId`, `borrowerId`) — the account entity."""
     name = str(field.get("name") or "")
+    # A PRIMARY KEY POINTS AT NOTHING. A relationship's parent side names
+    # the parent's `id` as `toField`; read as the parent's own link, User.id
+    # and Payout.id were "sample references naming records their parent
+    # lacks", and the database gate sent their authors two rounds of repair
+    # for a fault that was not there (Ecom L1, 2026-10-11).
+    if field.get("primaryKey") or name == "id":
+        return None
     ents = [e for e in (doc.get("data") or {}).get("entities") or [] if e.get("status") != "DEPRECATED"]
     eid = str(entity.get("id") or "")
     for r in (doc.get("data") or {}).get("relationships") or []:
@@ -3109,6 +3339,10 @@ def _link_target(doc: dict, entity: dict, field: dict) -> str | None:
     for e in ents:
         if re.sub(r"[^a-z0-9]", "", str(e.get("name") or "").lower()) in (stem, stem.rstrip("s")):
             return str(e.get("id"))
+    # AN ID NAMING A PERSON is a uuid. A string `taxId` is a tax number, not
+    # the account entity; read as one it was refused for naming no User.
+    if str(field.get("type") or "").lower() not in ("uuid", ""):
+        return None
     account = next((e for e in ents if e.get("account")), None)
     return str(account.get("id")) if account and str(account.get("id")) != eid else None
 
@@ -3240,11 +3474,32 @@ def seed_rows(doc: dict, rows: int = SEED_ROWS, *, as_described: bool = True) ->
 #: the engine cannot honour that without being told which columns they are.
 _MASK_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("email",), "email"),
-    (("phone", "mobile", "tel"), "phone"),
+    (("phone", "mobile", "tel", "telephone"), "phone"),
     (("ssn", "nationalid", "taxid", "aadhaar", "passport",
       "cardnumber", "iban", "accountnumber"), "last4"),
     (("password", "secret", "token", "apikey"), "full"),
 )
+
+
+def _name_words(name: str) -> set[str]:
+    """The words of a field name, each alone and each with its neighbour:
+    `businessName` -> business, name, businessname; `cardNumber` -> card,
+    number, cardnumber. A hint is matched against these WHOLE words — as a
+    substring it found "ssn" inside "busine-ssn-ame" and masked every
+    vendor's business name to its last four letters (7ttp60zi, 2026-10-11)."""
+    words = [w.lower() for w in re.findall(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+", name or "")]
+    out = set(words)
+    out |= {a + b for a, b in zip(words, words[1:])}
+    out.add("".join(words))
+    return {w for w in out if w}
+
+
+def _mask_hint(name: str) -> str | None:
+    words = _name_words(name)
+    for hints, kind in _MASK_HINTS:
+        if any(h in words for h in hints):
+            return kind
+    return None
 
 
 def _entity_readers(doc: dict, entity: dict) -> list[str]:
@@ -3268,6 +3523,23 @@ def _entity_readers(doc: dict, entity: dict) -> list[str]:
             if perm.get("id") in (role.get("permissions") or []):
                 names.add(role.get("name"))
     return sorted(n for n in names if n)
+
+
+def _field_readers(doc: dict, field: dict) -> list[str]:
+    """A field's own readers, by role NAME, counting only declared roles.
+
+    The records step decides fields before the access step has made any
+    role, so a field's `readers` can name nothing that exists: 60v142ju's
+    personal details named `AdminUser` (a record type) and nobody could ever
+    see a submitter's name (2026-10-12). A list that names no declared role
+    is no override, and the record's readers — the access step's read
+    permissions — govern the field."""
+    roles = {str(r.get(k)): str(r.get("name")) for r in doc.get("roles") or [] if isinstance(r, dict)
+             for k in ("id", "name") if r.get(k) and r.get("name")}
+    named = [roles[str(x)] for x in field.get("readers") or [] if str(x) in roles]
+    if "*" in [str(x) for x in field.get("readers") or []]:
+        named.append("*")
+    return sorted(set(named))
 
 
 def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
@@ -3302,11 +3574,7 @@ def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
             name = synonyms.get(re.sub(r"[^a-z]", "", name.lower()), name)
             mask = field.get("mask")
             if not mask:
-                lowered = re.sub(r"[^a-z]", "", name.lower())
-                for hints, kind in _MASK_HINTS:
-                    if any(h in lowered for h in hints):
-                        mask = kind
-                        break
+                mask = _mask_hint(name)
             if not mask:
                 continue
             # A credential is never unmasked for anyone, whatever the roles say.
@@ -3316,7 +3584,7 @@ def sensitive_columns(doc: dict) -> dict[str, dict[str, dict]]:
             )
             cols[name] = {"mask": mask,
                           "readers": [] if never
-                          else list(field.get("readers") or readers)}
+                          else (_field_readers(doc, field) or readers)}
         if not cols:
             continue
         name = entity.get("name") or ""
@@ -3577,6 +3845,10 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
         # guest token, which the engine reads from the `forge-guest` cookie.
         if item.get("guestColumn"):
             rule["guestColumn"] = str(item["guestColumn"])
+        # EVERYONE READS, THE OWNER WRITES: a catalogue, a listing, a public
+        # profile. The engine lifts the rule from reads and keeps it on writes.
+        if str(item.get("reads") or "") == "everyone":
+            rule["reads"] = "everyone"
         # OWNED THROUGH ANOTHER RECORD: `column` references a record of
         # `through`, and the row is reachable when that one is. Written as
         # the target's TABLE, which the engine's registry always resolves —
@@ -3599,6 +3871,25 @@ def ownership_rules(doc: dict) -> dict[str, list[dict]]:
             out.setdefault(form, [])
             if rule not in out[form]:
                 out[form].append(rule)
+    # AN ORGANISATION'S ROWS ARE ITS OWN — derived from the data model, not
+    # authored. Every entity with a field referencing the tenant entity is
+    # scoped to the actor's active organisation; platform roles see all. A
+    # rule the author wrote for the same column stands.
+    policy = tenancy_policy(doc)
+    if policy["kind"] == "organisation":
+        for entity in entities:
+            name = entity.get("name") or ""
+            column = policy["columns"].get(str(name)) or policy["columns"].get(str(entity.get("table") or ""))
+            if not column:
+                continue
+            forms = _key_forms(name) | _key_forms(entity.get("table") or to_snake(name))
+            if any(str(r.get("column")) == column for form in forms for r in out.get(form, [])):
+                continue
+            rule = {"column": column, "kind": "scope", "scope": "workspace",
+                    "unscopedRoles": list(policy["platformRoles"]), "derived": "tenancy"}
+            for form in forms:
+                out.setdefault(form, []).append(rule)
+
     return out
 
 
@@ -3640,6 +3931,9 @@ def render_ownership_rules_module(manifest: dict[str, list[dict]]) -> str:
         "  /** For records a visitor makes before signing in: the column holding their\n"
         "   *  guest token — a signed-out visitor reaches the rows carrying theirs. */\n"
         "  guestColumn?: string;\n"
+        "  /** \"everyone\": anyone reads every row, signed in or not; the column still\n"
+        "   *  decides who may change or remove it. Absent: reads are scoped like writes. */\n"
+        '  reads?: "scoped" | "everyone";\n'
         "}\n\n"
         "export const OWNERSHIP_RULES: Record<string, OwnershipRule[]> = "
         f"{json.dumps(manifest, indent=2, sort_keys=True)};\n\n"
@@ -3708,9 +4002,21 @@ def project_ownership_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
 #: reset, chooses a password. Gated, it would redirect the one visitor who
 #: certainly cannot sign in yet to the sign-in they cannot complete. It leaks
 #: nothing: the page shows only the email its own one-time token resolves to.
+#:
+#: `api/cron` and `api/webhooks` are the routes machines call, not people: the
+#: scheduler's tick (Vercel cron, the app's own self-ping) and another
+#: system's signed call. Each authenticates itself — the tick by `CRON_SECRET`,
+#: a webhook by its signature — and neither can hold a session, so gated they
+#: were answered with a redirect to the sign-in page and never ran: every
+#: scheduled process in every published app slept (confirmed on a built app's
+#: matcher, 2026-10-11).
 _ALWAYS_OPEN: tuple[str, ...] = (
     "api/auth", "_next", "favicon.ico",
     "login", "signup", "set-password",
+    "api/cron", "api/webhooks",
+    # The stand-in checkout: a signed-out buyer (a guest cart) is sent here
+    # too; it shows an amount by a session id and charges nothing.
+    "pay", "api/pay",
 )
 
 
@@ -3740,6 +4046,30 @@ def access_map(doc: dict) -> dict[str, list[str]]:
     for key in out:
         out[key] = sorted(set(out[key]))
     return out
+
+
+def anonymous_may_read(doc: dict, entity: dict) -> bool:
+    """A signed-out visitor may read this record type: a rule says everyone
+    reads it (`reads: "everyone"`), a rule scopes visitors to their own rows
+    (`guestColumn`), a role named Guest holds its read permission, or no read
+    permission was declared for it at all.
+
+    A PUBLIC SCREEN DOES NOT WIDEN WHAT ACCESS DECIDED. 60v142ju's public
+    intake form and confirmation screen made every submission readable by
+    anyone, while the access step had granted reading to three staff roles
+    only — a signed-out request listed every submission (2026-10-12)."""
+    keys = {str(entity.get(k) or "").lower() for k in ("id", "name", "table") if entity.get(k)}
+    for rule in ((doc.get("security") or {}).get("ownershipRules") or []):
+        if isinstance(rule, dict) and str(rule.get("entity") or "").lower() in keys \
+                and str(rule.get("status") or "").upper() != "DEPRECATED" \
+                and (str(rule.get("reads") or "") == "everyone" or rule.get("guestColumn")):
+            return True
+    reads = [perm for perm in doc.get("permissions") or [] if isinstance(perm, dict) and perm.get("action") == "read"
+             and str(perm.get("subject") or "").lower() in keys]
+    holders = [r for r in _live(doc.get("roles")) for perm in reads if perm.get("id") in (r.get("permissions") or [])]
+    if not holders:
+        return True
+    return any(str(r.get("name") or "") == "Guest" for r in holders)
 
 
 def public_apis(doc: dict) -> list[str]:
@@ -3776,7 +4106,7 @@ def public_apis(doc: dict) -> list[str]:
                                    .get("primaryEntity")) or {}).get("name"))
         for name in named:
             ent = by_name.get(name)
-            if ent:
+            if ent and anonymous_may_read(doc, ent):
                 slugs.add(str(ent.get("table") or str(name).lower()))
 
     out = [f"api/data/{slug}" for slug in sorted(slugs)]
@@ -4438,6 +4768,355 @@ def project_public_nav(doc: dict, app_root: str | Path) -> str:
         "export const PUBLIC_NAV: { appName: string; items: PublicNavItem[]; signIn: boolean } = "
         + json.dumps(nav, indent=2) + ";\n", "utf-8")
     return str(path.relative_to(Path(app_root)))
+
+
+def tenant_entity(doc: dict) -> dict | None:
+    """The one entity marked `tenant: true`, live."""
+    for e in (doc.get("data") or {}).get("entities") or []:
+        if isinstance(e, dict) and e.get("tenant") is True and str(e.get("status") or "").upper() not in ("DEPRECATED", "REMOVED"):
+            return e
+    return None
+
+
+def tenancy_columns(doc: dict) -> dict[str, str]:
+    """`{table or entity name: field}` for every entity with a field that
+    references the tenant entity — the column that says which organisation a
+    row belongs to. Read from the field's own `references`, else from
+    `data.relationships` (every spelling the engine may ask by)."""
+    tenant = tenant_entity(doc)
+    if tenant is None:
+        return {}
+    tid = str(tenant.get("id"))
+    tname = str(tenant.get("name") or "")
+    out: dict[str, str] = {}
+    data = doc.get("data") or {}
+    by_id = {str(e.get("id")): e for e in data.get("entities") or [] if isinstance(e, dict)}
+    for e in by_id.values():
+        if str(e.get("id")) == tid or str(e.get("status") or "").upper() in ("DEPRECATED", "REMOVED"):
+            continue
+        field = next((str(f.get("name")) for f in e.get("fields") or []
+                      if isinstance(f, dict) and str(f.get("references") or "") == tid), None)
+        if field is None:
+            for rel in data.get("relationships") or []:
+                if not isinstance(rel, dict):
+                    continue
+                src, tgt = str(rel.get("from") or rel.get("source") or ""), str(rel.get("to") or rel.get("target") or "")
+                if src in (str(e.get("id")), str(e.get("name"))) and tgt in (tid, tname) and rel.get("field"):
+                    field = str(rel.get("field"))
+                    break
+        if field:
+            for key in {str(e.get("name") or ""), str(e.get("table") or ""), _var_name(e), str(e.get("name") or "").lower()}:
+                if key:
+                    out[key] = field
+    return out
+
+
+def tenancy_policy(doc: dict) -> dict[str, Any]:
+    """The organisations the Blueprint declares, as the runtime reads them."""
+    sec = (doc.get("security") or {}).get("tenancy") if isinstance(doc.get("security"), dict) else {}
+    sec = sec if isinstance(sec, dict) else {}
+    tenant = tenant_entity(doc)
+    kind = "organisation" if str(sec.get("kind") or "none") == "organisation" and tenant is not None else "none"
+    role_names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or [] if isinstance(r, dict)}
+    names = lambda refs: sorted({role_names.get(str(r), str(r)) for r in refs or [] if str(r)})  # noqa: E731
+    admin = sec.get("organisationAdminRole")
+    name_field = str(sec.get("nameField") or (tenant or {}).get("labelField") or "name")
+    return {"kind": kind, "entity": str(tenant.get("name")) if tenant else None,
+            "table": (str(tenant.get("table") or to_snake(str(tenant.get("name") or ""))) if tenant else None),
+            "nameColumn": to_snake(name_field) if tenant else None,
+            "memberRoles": names(sec.get("memberRoles")), "platformRoles": names(sec.get("platformRoles")),
+            "adminRole": role_names.get(str(admin), str(admin)) if admin else None,
+            "signup": str(sec.get("signup") or "both"), "columns": tenancy_columns(doc) if kind == "organisation" else {}}
+
+
+def project_tenancy(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """`src/lib/tenancy-policy.ts`: the organisations, as the runtime reads them."""
+    lib = Path(app_root) / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    policy = tenancy_policy(doc)
+    (lib / "tenancy-policy.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "// The organisations this application serves side by side: the tenant\n"
+        "// entity, who belongs (member roles) and who sees all (platform roles).\n"
+        f"export const TENANCY = {json.dumps(policy, indent=2)} as const;\n", "utf-8")
+    return {"files": ["src/lib/tenancy-policy.ts"], "kind": policy["kind"]}
+
+
+SIGN_IN_POLICY_FILE = "src/lib/sign-in-policy.ts"
+
+
+def _hsl_to_hex(triplet: str | None, fallback: str) -> str:
+    """`"222 47% 11%"` → `#0f172a`; the fallback when the triplet is not one."""
+    import colorsys
+    parts = str(triplet or "").replace("%", "").split()
+    if len(parts) != 3:
+        return fallback
+    try:
+        h, s, l = (float(parts[0]) % 360) / 360, float(parts[1]) / 100, float(parts[2]) / 100
+    except ValueError:
+        return fallback
+    r, g, b = colorsys.hls_to_rgb(h, l, s)
+    return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
+
+
+MOBILE_POLICY_FILE = "src/lib/mobile.ts"
+MOBILE_ICONS = ((192, "icons/icon-192.png", False), (512, "icons/icon-512.png", False),
+                (512, "icons/maskable-512.png", True), (180, "icons/apple-touch-icon.png", False))
+
+
+def mobile_policy(doc: dict) -> dict[str, Any]:
+    """The application on a phone, as the runtime reads it: the Blueprint's
+    `mobile`, the start address (the declared landing), and the colours the
+    installed app takes from the design."""
+    mob = doc.get("mobile") if isinstance(doc.get("mobile"), dict) else {}
+    store = mob.get("store") if isinstance(mob.get("store"), dict) else {}
+    palette = resolved_palette(doc)
+    start = declared_landing(doc) or "/"
+    return {"installable": mob.get("installable") is not False,
+            "display": str(mob.get("display") or "standalone"), "orientation": str(mob.get("orientation") or "any"),
+            "push": mob.get("push") is True,
+            "store": {"enabled": store.get("enabled") is True, "bundleId": str(store["bundleId"]) if store.get("bundleId") else None},
+            "startUrl": start, "themeColor": _hsl_to_hex(palette.get("primary"), "#0f172a"),
+            "backgroundColor": _hsl_to_hex(palette.get("background"), "#ffffff")}
+
+
+def _render_icon(dest: Path, size: int, *, maskable: bool, name: str, bg_hex: str, logo: Path | None) -> None:
+    """One PNG icon: the owner's mark on the brand colour, else a monogram."""
+    from PIL import Image, ImageDraw
+    from services.mobile_branding import _contrasting_color, _draw_centered_text, _hex_to_rgb
+    bg = _hex_to_rgb(bg_hex)
+    img = Image.new("RGB", (size, size), bg)
+    safe = 0.62 if maskable else 0.8
+    drawn = False
+    if logo is not None and logo.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
+        try:
+            mark = Image.open(logo).convert("RGBA")
+            box = int(size * safe)
+            mark.thumbnail((box, box))
+            img.paste(mark, ((size - mark.width) // 2, (size - mark.height) // 2), mark)
+            drawn = True
+        except Exception:  # noqa: BLE001 — an unreadable mark: the monogram
+            drawn = False
+    if not drawn:
+        initial = next((c for c in name if c.isalnum()), "A").upper()
+        _draw_centered_text(ImageDraw.Draw(img), (size, size), initial, _contrasting_color(bg), target_fraction=safe * 0.7)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    img.save(dest, format="PNG", optimize=True)
+
+
+def project_pwa(doc: dict, app_root: str | Path, output_dir: str | Path | None = None) -> dict[str, Any]:
+    """The installable application: `public/manifest.webmanifest`, its icons,
+    the service worker that keeps the shell, and `src/lib/mobile.ts`."""
+    root = Path(app_root)
+    policy = mobile_policy(doc)
+    lib = root / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    (lib / "mobile.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "// The application on a phone: installable, how it is shown, whether it\n"
+        "// sends push, and the colours the installed app takes from the design.\n"
+        "export interface MobilePolicy {\n  installable: boolean;\n"
+        "  display: \"standalone\" | \"fullscreen\" | \"minimal-ui\" | \"browser\";\n"
+        "  orientation: \"any\" | \"portrait\" | \"landscape\";\n  push: boolean;\n"
+        "  store: { enabled: boolean; bundleId: string | null };\n  startUrl: string;\n  themeColor: string;\n  backgroundColor: string;\n}\n"
+        f"export const MOBILE: MobilePolicy = {json.dumps(policy, indent=2)};\n", "utf-8")
+    files = [MOBILE_POLICY_FILE]
+    if not policy["installable"]:
+        for stale in ("public/manifest.webmanifest", "public/sw.js"):
+            if (root / stale).exists():
+                (root / stale).unlink()
+        return {"files": files, **policy}
+    name = str((doc.get("application") or {}).get("name") or "App")
+    short = name if len(name) <= 12 else "".join(w[0] for w in name.split()[:3]).upper() or name[:12]
+    public = root / "public"
+    public.mkdir(parents=True, exist_ok=True)
+    # THE MARK: the owner's logo where there is one (copied by project_brand_logo).
+    logo_path: Path | None = None
+    logo = (doc.get("designSystem") or {}).get("logo")
+    if isinstance(logo, dict) and logo.get("file"):
+        from services import brand_logo
+        base_dir = Path(output_dir) if output_dir is not None else root.parent
+        logo_path = brand_logo.path_of(base_dir, logo)
+    icons = []
+    for size, rel, maskable in MOBILE_ICONS:
+        try:
+            _render_icon(public / rel, size, maskable=maskable, name=name, bg_hex=policy["themeColor"], logo=logo_path)
+            files.append(f"public/{rel}")
+            if "apple" not in rel:
+                icons.append({"src": rel, "sizes": f"{size}x{size}", "type": "image/png", **({"purpose": "maskable"} if maskable else {})})
+        except Exception:  # noqa: BLE001 — no Pillow, or a font it cannot draw: the manifest still lists what exists
+            logger.warning("[pwa] could not render %s", rel, exc_info=True)
+    manifest = {"name": name, "short_name": short, "description": str((doc.get("application") or {}).get("description") or "")[:200],
+                "start_url": policy["startUrl"], "scope": "/", "display": policy["display"], "orientation": policy["orientation"],
+                "theme_color": policy["themeColor"], "background_color": policy["backgroundColor"], "icons": icons,
+                "lang": str((doc.get("product") or {}).get("locale") or "en")}
+    (public / "manifest.webmanifest").write_text(json.dumps(manifest, indent=2) + "\n", "utf-8")
+    files.append("public/manifest.webmanifest")
+    # THE SERVICE WORKER: the shipped one, with what install keeps.
+    sw_src = Path(__file__).resolve().parents[2] / "templates" / "runtime" / "pwa" / "sw.js"
+    if sw_src.is_file():
+        import hashlib
+        shell = ["/offline", "/manifest.webmanifest"] + [f"/{i['src']}" for i in icons]
+        version = hashlib.sha1(json.dumps([manifest, shell], sort_keys=True).encode()).hexdigest()[:10]
+        (public / "sw.js").write_text(sw_src.read_text("utf-8").replace("__BASE__", "").replace("__VERSION__", version)
+                                      .replace("__SHELL__", json.dumps(shell)), "utf-8")
+        files.append("public/sw.js")
+    return {"files": files, **policy}
+
+
+def sso_secret_names(entry_id: str) -> dict[str, str]:
+    """The NAMES an identity provider is reached with, from the entry's id:
+    `SSO_<ID>_ISSUER`, `SSO_<ID>_CLIENT_ID`, `SSO_<ID>_CLIENT_SECRET`."""
+    up = re.sub(r"[^A-Z0-9]+", "_", str(entry_id or "").upper()).strip("_") or "SSO"
+    return {"issuerKey": f"SSO_{up}_ISSUER", "clientIdKey": f"SSO_{up}_CLIENT_ID", "clientSecretKey": f"SSO_{up}_CLIENT_SECRET"}
+
+
+def sign_in_policy(doc: dict) -> dict[str, Any]:
+    """How people sign in, as the runtime reads it: password, magic link, and
+    each provider with the names it is reached by and its role mapping by
+    role NAME (the Blueprint says ids; the session carries names)."""
+    sec = (doc.get("security") or {}).get("signIn") if isinstance(doc.get("security"), dict) else {}
+    sec = sec if isinstance(sec, dict) else {}
+    role_names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or [] if isinstance(r, dict)}
+    name_of = lambda r: role_names.get(str(r), str(r)) if r else None  # noqa: E731
+    sso: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for e in sec.get("sso") or []:
+        if not isinstance(e, dict) or not e.get("id") or str(e["id"]) in seen:
+            continue
+        seen.add(str(e["id"]))
+        kind = "saml" if str(e.get("kind") or "oidc") == "saml" or str(e.get("provider") or "") == "saml" else "oidc"
+        rf = e.get("roleFrom") if isinstance(e.get("roleFrom"), dict) else None
+        sso.append({"id": str(e["id"]), "name": str(e.get("name") or e["id"]), "kind": kind,
+                    "provider": str(e.get("provider") or ("saml" if kind == "saml" else "oidc")),
+                    **sso_secret_names(str(e["id"])),
+                    "domains": [str(d).lower().lstrip("@") for d in e.get("domains") or [] if str(d).strip()],
+                    "roleFrom": ({"claim": str(rf.get("claim") or "groups"),
+                                  "map": {str(k): name_of(v) for k, v in (rf.get("map") or {}).items() if name_of(v)},
+                                  "default": name_of(rf.get("default"))} if rf else None),
+                    "provisioning": str(e.get("provisioning") or "just_in_time")})
+    password = sec.get("password") is not False
+    magic = sec.get("magicLink") is True
+    if not password and not magic and not sso:
+        password = True   # nobody could sign in otherwise; the contract check refuses this upstream
+    return {"password": password, "magicLink": magic, "sso": sso}
+
+
+def project_sign_in(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """`src/lib/sign-in-policy.ts`: the ways in, as `auth.ts` and the form read them."""
+    lib = Path(app_root) / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    policy = sign_in_policy(doc)
+    (lib / "sign-in-policy.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "// How people sign in: email and password, a one-time link by email, and\n"
+        "// each identity provider by the NAMES it is reached with (values live on\n"
+        "// the platform; a provider whose names are unset is said, not offered).\n"
+        "export interface SsoEntry {\n  id: string;\n  name: string;\n  kind: \"oidc\" | \"saml\";\n"
+        "  provider: \"entra\" | \"google\" | \"okta\" | \"oidc\" | \"saml\";\n"
+        "  issuerKey: string;\n  clientIdKey: string;\n  clientSecretKey: string;\n  domains: string[];\n"
+        "  roleFrom: { claim: string; map: Record<string, string>; default: string | null } | null;\n"
+        "  provisioning: \"invite_only\" | \"just_in_time\";\n}\n"
+        "export interface SignInPolicy { password: boolean; magicLink: boolean; sso: SsoEntry[] }\n"
+        f"export const SIGN_IN: SignInPolicy = {json.dumps(policy, indent=2)};\n", "utf-8")
+    return {"files": [SIGN_IN_POLICY_FILE], **policy}
+
+
+#: The currency a locale pays in, when the product does not say.
+_LOCALE_CURRENCY: dict[str, str] = {
+    "us": "USD", "gb": "GBP", "ae": "AED", "sa": "SAR", "in": "INR", "pk": "PKR", "bd": "BDT", "eg": "EGP", "ng": "NGN",
+    "ke": "KES", "za": "ZAR", "au": "AUD", "nz": "NZD", "ca": "CAD", "sg": "SGD", "my": "MYR", "id": "IDR", "ph": "PHP",
+    "jp": "JPY", "kr": "KRW", "cn": "CNY", "hk": "HKD", "tw": "TWD", "th": "THB", "vn": "VND", "br": "BRL", "mx": "MXN",
+    "ar": "ARS", "cl": "CLP", "co": "COP", "tr": "TRY", "ru": "RUB", "ch": "CHF", "se": "SEK", "no": "NOK", "dk": "DKK",
+    "pl": "PLN", "cz": "CZK", "hu": "HUF", "il": "ILS", "qa": "QAR", "kw": "KWD", "bh": "BHD", "om": "OMR", "jo": "JOD",
+    "ma": "MAD", "lk": "LKR", "np": "NPR",
+}
+_EURO = {"de", "fr", "es", "it", "nl", "be", "at", "pt", "ie", "fi", "gr", "sk", "si", "lt", "lv", "ee", "lu", "mt", "cy", "hr"}
+
+
+def currency_of(doc: dict) -> str:
+    """ISO 4217: the product's own, else the locale's region, else USD."""
+    product = doc.get("product") if isinstance(doc.get("product"), dict) else {}
+    said = str(product.get("currency") or "").strip().upper()
+    if len(said) == 3 and said.isalpha():
+        return said
+    locale = str(product.get("locale") or "en").replace("_", "-").lower()
+    region = locale.split("-")[-1] if "-" in locale else ""
+    if region in _EURO:
+        return "EUR"
+    return _LOCALE_CURRENCY.get(region, "USD")
+
+
+def project_money(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """`src/lib/money.ts`: the currency money is kept (major units) and shown in."""
+    lib = Path(app_root) / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    (lib / "money.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "// The currency money is kept and shown in. Money fields hold MAJOR units\n"
+        "// (12.50, never 1250); a payment adapter converts at the gateway.\n"
+        f"export const CURRENCY = {json.dumps(currency_of(doc))};\n", "utf-8")
+    return {"files": ["src/lib/money.ts"], "currency": currency_of(doc)}
+
+
+AUDIT_POLICY_FILE = "src/lib/audit-policy.ts"
+
+
+def audit_policy(doc: dict) -> dict[str, Any]:
+    """The trail the Blueprint declares, as the runtime reads it: the level,
+    the reviewers by role NAME, retention, and the record types a change
+    must state a reason for — by every spelling the engine may use."""
+    sec = (doc.get("security") or {}).get("audit") if isinstance(doc.get("security"), dict) else {}
+    sec = sec if isinstance(sec, dict) else {}
+    level = str(sec.get("level") or "none")
+    if level not in ("writes", "regulated"):
+        level = "none"
+    role_names = {str(r.get("id")): str(r.get("name") or "") for r in doc.get("roles") or [] if isinstance(r, dict)}
+    reviewers = sorted({role_names.get(str(r), str(r)) for r in sec.get("reviewers") or [] if str(r)})
+    entities = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or [] if isinstance(e, dict)}
+    reason: list[str] = []
+    for ref in sec.get("reasonRequired") or []:
+        ent = entities.get(str(ref))
+        if ent is None:
+            continue
+        for n in (ent.get("name"), ent.get("table"), _var_name(ent)):
+            if n and str(n).lower() not in reason:
+                reason.append(str(n).lower())
+    days = sec.get("retentionDays")
+    return {"level": level, "reviewers": reviewers, "retentionDays": int(days) if isinstance(days, int) and days > 0 else None,
+            "reasonRequired": reason}
+
+
+def project_audit(doc: dict, app_root: str | Path) -> dict[str, Any]:
+    """Write the audit policy the runtime reads, and the audit screen at the
+    route of every `audit_trail` page. A page of that pattern is a runtime
+    page, not one the page writer codes: the trail's reader is the same in
+    every application, gated to the reviewers the policy names."""
+    root = Path(app_root)
+    policy = audit_policy(doc)
+    lib = root / "src" / "lib"
+    lib.mkdir(parents=True, exist_ok=True)
+    (lib / "audit-policy.ts").write_text(
+        "// Generated from the Living Blueprint. Edit the Blueprint, not this file.\n"
+        "//\n// The audit trail this application keeps: none, every write, or regulated\n"
+        "// (writes, sensitive reads, exports, sign-ins; a reason on the records named).\n"
+        f"export const AUDIT = {json.dumps(policy, indent=2)} as const;\n", "utf-8")
+    files = [AUDIT_POLICY_FILE]
+    if policy["level"] != "none":
+        from services.runtime_injector import _TEMPLATE_DIR
+        template = _TEMPLATE_DIR / "pages" / "audit-trail" / "page.tsx"
+        for page in doc.get("pages") or []:
+            if not isinstance(page, dict) or str(page.get("pattern") or "") != "audit_trail":
+                continue
+            if str(page.get("status") or "").upper() in ("DEPRECATED", "REMOVED"):
+                continue
+            route = str(page.get("route") or "/audit").strip("/") or "audit"
+            target = root / "src" / "app" / "(dashboard)" / route / "page.tsx"
+            if template.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(template.read_text("utf-8"), "utf-8")
+                files.append(f"src/app/(dashboard)/{route}/page.tsx")
+    return {"files": files, "level": policy["level"]}
 
 
 def project_append_only_entities(doc: dict, app_root: str | Path) -> dict[str, Any]:

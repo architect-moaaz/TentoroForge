@@ -5,6 +5,8 @@
 // chrome drew a bell with no handler, the others none at all. Rendered once
 // beside the breadcrumb, so every shell has it.
 
+import { apiPath } from "@/lib/api-path";
+import { pushState, subscribeToPush } from "@/components/PwaRegister";
 import * as React from "react";
 import { Bell, Check } from "lucide-react";
 
@@ -26,7 +28,7 @@ export function NotificationBell() {
 
   const load = React.useCallback(async () => {
     try {
-      const r = await fetch("/api/notifications", { cache: "no-store" });
+      const r = await fetch(apiPath("/api/notifications"), { cache: "no-store" });
       if (r.ok) setNotes(await r.json());
     } catch { /* offline — keep what is shown */ }
   }, []);
@@ -50,10 +52,21 @@ export function NotificationBell() {
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
   }, [open]);
 
+  // PUSH TO THIS DEVICE, when the application sends it: offered until the
+  // device is subscribed; the browser asks the person's consent on the tap.
+  const [push, setPush] = React.useState<"on" | "off" | "unavailable">("unavailable");
+  const [pushSaid, setPushSaid] = React.useState<string | null>(null);
+  React.useEffect(() => { void pushState().then(setPush); }, [open]);
+  const turnOn = async () => {
+    const out = await subscribeToPush();
+    setPushSaid(out.ok ? "Notifications will reach this device." : (out.why ?? null));
+    if (out.ok) setPush("on");
+  };
+
   const unread = notes.filter((n) => !n.read).length;
   const mark = async (body: Record<string, unknown>) => {
     setNotes((cur) => cur.map((n) => (body.all || n.id === body.id ? { ...n, read: true } : n)));
-    try { await fetch("/api/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); } catch { /* retried on next load */ }
+    try { await fetch(apiPath("/api/notifications"), { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); } catch { /* retried on next load */ }
   };
 
   return (
@@ -80,6 +93,13 @@ export function NotificationBell() {
               </button>
             )}
           </div>
+          {push === "off" && (
+            <div className="border-b border-border px-4 py-2">
+              <button type="button" data-push-subscribe onClick={() => void turnOn()}
+                className="text-xs font-medium text-primary hover:underline">Turn on notifications on this device</button>
+              {pushSaid && <p className="mt-1 text-xs text-muted-foreground">{pushSaid}</p>}
+            </div>
+          )}
           <ul className="max-h-96 overflow-y-auto">
             {notes.length === 0 && (
               <li className="px-4 py-8 text-center text-sm text-muted-foreground">Nothing yet — you'll see updates here.</li>

@@ -1,5 +1,6 @@
 "use client";
 
+import { apiPath } from "@/lib/api-path";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -18,7 +19,7 @@ export function useEntityDetail<T = Record<string, any>>(options: UseEntityDetai
   const { data: item, isLoading, error, refetch } = useQuery<T>({
     queryKey: [entity, id],
     queryFn: async () => {
-      const res = await fetch(`/api/data/${entity}/${id}`);
+      const res = await fetch(apiPath(`/api/data/${entity}/${id}`));
       if (!res.ok) throw new Error("Not found");
       return res.json();
     },
@@ -27,7 +28,7 @@ export function useEntityDetail<T = Record<string, any>>(options: UseEntityDetai
 
   const updateMutation = useMutation({
     mutationFn: async (data: Partial<T>) => {
-      const res = await fetch(`/api/data/${entity}/${id}`, {
+      const res = await fetch(apiPath(`/api/data/${entity}/${id}`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -49,7 +50,7 @@ export function useEntityDetail<T = Record<string, any>>(options: UseEntityDetai
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/data/${entity}/${id}`, { method: "DELETE" });
+      const res = await fetch(apiPath(`/api/data/${entity}/${id}`), { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete");
     },
     onSuccess: () => {

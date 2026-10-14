@@ -103,6 +103,8 @@ const children = makeTable(tableOf("Child"), fieldsOf("Child"));
 const appointments = makeTable(tableOf("Appointment"), fieldsOf("Appointment"));
 const carts = makeTable(tableOf("Cart"), fieldsOf("Cart"));
 const cartItems = makeTable(tableOf("CartItem"), fieldsOf("CartItem"));
+// Listing: everyone reads, the vendor writes (`reads: "everyone"`).
+const listings = makeTable(tableOf("Listing"), fieldsOf("Listing"));
 const GUEST_ONE = "6f1c2b8e-0000-4000-8000-000000000001";
 const GUEST_TWO = "6f1c2b8e-0000-4000-8000-000000000002";
 const ST_GILES = "prop-st-giles";
@@ -141,6 +143,10 @@ const ROWS: Record<string, any[]> = {
     { id: "ci1", cartId: "cart-g1", quantity: 1, createdAt: d(1) },
     { id: "ci2", cartId: "cart-g2", quantity: 2, createdAt: d(2) },
     { id: "ci3", cartId: "cart-bob", quantity: 3, createdAt: d(3) },
+  ],
+  [listings.__name]: [
+    { id: "l1", vendorId: ALICE, title: "Alice lamp", createdAt: d(1) },
+    { id: "l2", vendorId: BOB, title: "Bob rug", createdAt: d(2) },
   ],
   [refundCases.__name]: [
     { id: "r1", propertyId: ST_GILES, guestName: "Patel", createdAt: d(1) },
@@ -328,6 +334,7 @@ engine.registerEntity(children.__name, children, { slug: children.__name });
 engine.registerEntity(appointments.__name, appointments, { slug: appointments.__name });
 engine.registerEntity(carts.__name, carts, { slug: carts.__name });
 engine.registerEntity(cartItems.__name, cartItems, { slug: cartItems.__name });
+engine.registerEntity(listings.__name, listings, { slug: listings.__name });
 
 // ── Assertions ─────────────────────────────────────────────────────────────
 
@@ -385,6 +392,22 @@ console.log("query(): a scoped entity with no actor returns nothing");
   const anon = await engine.query(invoices.__name, {}, {});
   eqJson(ids(anon.data), [], "no actor on the context → no rows");
   eqJson(anon.total, 0, "and a total that agrees");
+}
+
+console.log("query(): reads: \"everyone\" — a visitor with no actor reads every row, the owner alone writes it");
+{
+  const anon = await engine.query(listings.__name, {}, {});
+  eqJson(ids(anon.data), ["l1", "l2"], "a guest browses the whole catalogue");
+  const bob = await engine.query(listings.__name, {}, asBob);
+  eqJson(ids(bob.data), ["l1", "l2"], "and so does a signed-in vendor");
+  await throwsNamed(
+    () => engine.update(listings.__name, "l2", { title: "hijacked" }, asAlice),
+    "NotFoundError",
+    "Alice cannot change Bob's listing",
+  );
+  const own = await engine.update(listings.__name, "l1", { title: "Alice lamp v2" }, asAlice);
+  eqJson(own.data.title, "Alice lamp v2", "Alice changes her own");
+  ROWS[listings.__name].find((r) => r.id === "l1")!.title = "Alice lamp";
 }
 
 console.log("query(): a workspace scope reads the actor column the rule names");

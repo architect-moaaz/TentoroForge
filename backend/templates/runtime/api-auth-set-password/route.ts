@@ -97,6 +97,21 @@ export async function POST(request: Request): Promise<Response> {
     // `as any` the way the signup route does: the users table's shape is the
     // app's, not the platform's, so the columns are named at runtime.
     await db.update(users).set(set as any).where(eq(users.email, invite.email));
+    // AN INVITE INTO AN ORGANISATION makes the membership now, in the role it
+    // was sent for, and makes that organisation the active one.
+    try {
+      const orgId = (invite as any).orgId ?? (invite as any).org_id ?? null;
+      if (orgId) {
+        const [person] = await db.select().from(users).where(eq(users.email, invite.email)).limit(1);
+        if (person) {
+          const tenancy = await import("@/lib/tenancy");
+          await tenancy.join(String(person.id), String(orgId), String((invite as any).role ?? "member"));
+          await tenancy.setActive(String(person.id), String(orgId));
+        }
+      }
+    } catch (err) {
+      console.warn("[api/auth/set-password] the membership could not be made:", err);
+    }
 
     // ONE-TIME. The link is spent the moment the password lands, so one that
     // reaches the wrong inbox later opens nothing.

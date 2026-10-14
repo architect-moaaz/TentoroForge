@@ -1213,10 +1213,11 @@ you after you reply.
 - Each entry is {{name, table, fields, description?, labelField?}} — `name` \
 PascalCase singular, `table` snake_case plural, `labelField` naming the field \
 a human reads to tell one record from another. Each field is {{name, type, \
-required?, primaryKey?, unique?, sensitive?, enumValues?, \
+required, primaryKey, unique, sensitive, enumValues?, mask?, readers?, \
 description?}}.
-- State a flag only when it is true. `"sensitive": false` on forty fields is \
-forty facts nobody asked for, and this reply has a budget.
+- `required`, `primaryKey`, `unique` and `sensitive` are on every field, \
+`false` where they do not apply. Every other optional key is stated only \
+when it says something: this reply has a budget.
 - A field has NO `references` key — the schema does not accept one. State \
 every foreign key in `relationships`, by entity name. `references` is typed \
 `^ENTITY-\\d{{3,}}$` in the Blueprint and an empty string matches nothing, so \
@@ -1383,6 +1384,25 @@ NODE_TASKS: dict[str, str] = {
         "\"DEPRECATED\"`. Everything the brief does not touch is left out of "
         "your reply and stays exactly as it is."
     ),
+    "domain_reference": (
+        "From the requirements, name the DOMAIN and the SUB-DOMAIN this product belongs to — a "
+        "dental clinic is not a hospital; a food-ordering app is not a marketplace; a multi-vendor "
+        "marketplace is not a single-brand shop. Then write what a practitioner expects of a product "
+        "in that sub-domain, independent of what was asked for: the standard screens (each with who "
+        "it is for, what question it answers, and its `kind` — `sign_in` or `sign_up` for a way "
+        "into the application), the records such products keep (with the fields "
+        "that make them usable), the processes people run (with their steps, who runs them and what "
+        "each writes), the rules a correct product refuses to break (each with ONE concrete refused "
+        "case — an input the product must turn down), the integrations such products usually have, "
+        "the conventions of the field (units, statuses, vocabulary, regulatory habits, what a "
+        "record is called), and the three to five well-known products people would hold this one "
+        "against (`benchmarks`, with what to take from each).\n\n"
+        "BE SPECIFIC TO THE SUB-DOMAIN AND THE LOCALE: a list that would fit any application is a "
+        "failed answer. Name only what a practitioner would notice missing — eight to twenty "
+        "screens, not forty; the records and processes that define the field, not every one "
+        "imaginable. Write the `summary` as the two sentences a practitioner would use to say what "
+        "such a product is. Leave `declined` and `sources` empty: they are not yours."
+    ),
     "application_model": (
         "FIRST, THE LANGUAGE. If the request says what language the INTERFACE "
         "is in, set `locale` before anything else — a brief opening \"an "
@@ -1392,6 +1412,13 @@ NODE_TASKS: dict[str, str] = {
         "Then the product frame: objectives, personas, the domain vocabulary "
         "the generated app should use in its labels, and the capabilities it must "
         "offer.\n\n"
+        "Then the application on a phone, under `mobile`: it is `installable` "
+        "unless the requirements say it is desk-bound; `display` and "
+        "`orientation` as the people using it hold their phones (a driver's "
+        "app is portrait; a dashboard is any); `push` on when being told "
+        "matters while the app is closed — a request to answer, a shift "
+        "change, an order to pick up — and off for a product nobody expects to "
+        "buzz. `store` stays off: a store listing is the owner's decision.\n\n"
         "On `locale` — set it when the request says what language the INTERFACE is in — "
         "\"Arabic-first\", \"the UI should be in French\", a brief written "
         "throughout in another language. A BCP-47 tag: `ar`, `ar-PS`, `fr`. "
@@ -1470,6 +1497,16 @@ NODE_TASKS: dict[str, str] = {
         "human-readable label (`labelField`), which are required, unique or "
         "the primary key, which take one of a fixed set of `enumValues`, and "
         "which hold sensitive data. Mark `sensitive: true` on anything "
+        "An application several organisations use side by side has ONE entity "
+        "that IS the organisation (a Clinic, a Company, a Practice) — mark it "
+        "`tenant: true` — and every record that belongs to one carries a field "
+        "that `references` it. "
+        "An amount people pay or are paid is type `money`: MAJOR units (12.50, "
+        "never 1250), in the application's currency. "
+        "A sensitive field may say how it is shown to roles not among its "
+        "`readers` (`mask`: last4, email, phone, full). A record type whose "
+        "rows are written once and never changed or removed — a ledger, a log, "
+        "a consent — is `appendOnly: true`. "
         "personal or financial — downstream agents rely on that flag and "
         "cannot see this section to second-guess it. The foreign keys are "
         "the declared relationships: give each one its column here, named as "
@@ -1513,6 +1550,10 @@ NODE_TASKS: dict[str, str] = {
         "product."
     ),
     "page_contracts": (
+        "When the application keeps an audit trail (`security.audit.level` is "
+        "not none), declare one page of pattern `audit_trail` for its reviewers "
+        "(`users` are the reviewer roles): it is the runtime's own screen of who "
+        "did what, when, before and after; nothing else is written for it. "
         "Decide the page set, feature by feature, from the slots below: fill "
         "a feature completely or decline it completely, and for every page "
         "you keep give its `name`, `route`, a one-sentence `purpose`, its "
@@ -1637,7 +1678,8 @@ NODE_TASKS: dict[str, str] = {
         "give a `label`, the reader's "
         "question it `answers`, a `prominence` (`lead` for the one thing the "
         "page leads with, `key`, `supporting`, `reassurance` for what sits "
-        "beside the main action) and its `source`:\n"
+        "beside the main action) and its `source`, whose `kind` says where the "
+        "fact comes from — `{\"kind\": \"count\", \"entity\": …}`, never `type`:\n"
         "- `field`: a field of the page's record (`field`), or of `entity`. If "
         "the entity does not have the field a reader needs — a listing with no "
         "description, no category, nothing about what is included — propose it "
@@ -1678,6 +1720,8 @@ NODE_TASKS: dict[str, str] = {
         "decides: never invent a figure, a score or a term the description "
         "and the data model do not have, and nothing the business rules forbid."
     ),
+    # The paths people take; the text lives with what reads the flows.
+    "app_flows": __import__("services.blueprint.app_flows", fromlist=["FLOWS_PROMPT"]).FLOWS_PROMPT,
     "analytics": (
         "Design the analytics of this application: the KPIs, charts and "
         "breakdowns each page carries, written as `widgets`. Every page and "
@@ -1803,6 +1847,22 @@ NODE_TASKS: dict[str, str] = {
         "contract, because the pages are composed against this declaration "
         "at the same time as the steps are written, and a button wired to a "
         "workflow whose inputs change afterwards is a button that fails.\n\n"
+        "A process that runs on the clock declares `trigger.kind: \"schedule\"` "
+        "with `cron` (five fields) and `timezone` (an IANA zone, from the "
+        "application's locale); one that reacts to a record declares "
+        "`db_change` with `entity` (the record type's id) and `on` (created, "
+        "updated or deleted); one that another system starts declares "
+        "`webhook` with the `integration` that calls in and the `event` from "
+        "its `inbound.events`; `detail` stays the sentence. A clocked or "
+        "event-driven process has no person acting — `$user.id` is empty — so "
+        "it reads who it concerns from the record it was handed, or looks "
+        "them up.\n\n"
+        "A process that TAKES MONEY ends by sending the person to pay (its last "
+        "step is `create_checkout`, its end redirects to the checkout) and a "
+        "second process, triggered by `webhook` on the payment integration's "
+        "`payment.succeeded`, records the outcome on the record it was for; a "
+        "refund is its own process from that record. Nothing in the "
+        "application holds a card.\n\n"
         "Declare `inputs`: what the workflow needs to start. A workflow that "
         "acts on one record declares `{name, kind: \"record\", entity}`; one "
         "that takes what a person types declares `{name, kind: \"field\", "
@@ -1849,7 +1909,30 @@ NODE_TASKS: dict[str, str] = {
         "ends on an `end` with `config.refused: true` and `config.message` — "
         "the sentence the person is shown, saying what to correct — and every "
         "other end says `config.refused: false`; a refused run is reported "
-        "to the person as a failure, never as the success message. Any step "
+        "to the person as a failure, never as the success message. An end "
+        "that has something for the page that ran it declares it: "
+        "`config.reply` maps a few names to templates (`{\"url\": "
+        "\"{{checkout.url}}\"}`) and `config.redirect` is where the person is "
+        "sent when the run completes — a route of this application "
+        "(`/orders/{{insert_order.id}}`) or an outside address a step produced "
+        "(`{{checkout.url}}`); the run's own state never reaches the page, so "
+        "only what it needs back is named. A `wait` is a pause declared as "
+        "`config.for` (an ISO-8601 duration or words: `2 days`, `90 minutes`) "
+        "or `config.until` (a template to a date); the run is put down and "
+        "the clock picks it up with nobody present. A human step that must "
+        "be done in time carries `config.dueIn` (minutes) and "
+        "`config.escalateTo` (the role an overdue task is handed to). A call to "
+        "an outside system (`http_call`) carries `config.auth` naming the "
+        "secret by NAME (`{\"secretRef\": \"XERO_API_KEY\"}`, declared on an "
+        "integration's `secretRefs`); the runtime attaches the value, and a "
+        "template can never reach it. A process another system starts has no "
+        "person acting; it reads who it concerns from what it was handed. A "
+        "`create_checkout` names `amount` (major units, the application's "
+        "currency) or `lineItems`, the `reference` {entity, id} it pays for, "
+        "`successPage` and `cancelPage` (page ids), and the end that follows it "
+        "has `redirect: \"{{<its key>.url}}\"`; the outcome arrives as the "
+        "payment integration's `payment.succeeded` with `paymentId`, `entity` "
+        "and `entityId`. Any step "
         "that mutates an entity must name a real one.\n\n"
         "A `custom` or `transform` step's `code` is ONE FEEL formula the engine "
         "evaluates, never instructions in words. Work you would describe in "
@@ -1882,12 +1965,14 @@ NODE_TASKS: dict[str, str] = {
         "(`{{extract_listings.output[0].images ?? inputImage}}`). A field each item "
         "brings itself (its currency, its unit) is read from the item, never written as "
         "one literal for all of them.\n\n"
-        + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. The `where` of a lookup maps a field to a value, which means equals; any other comparison is that field mapped to ONE comparison — `{"id": {"ne": "{{customer.id}}"}}` (`ne`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`), never `id__neq`. A signed-out visitor is `$guest`, their guest token — a record a rule gives a `guestColumn` is stamped with it on insert by itself; `$guest` is for finding theirs (an open cart whose guest column is `$guest`). There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
+        + 'Conditions and gateway expressions are FEEL, read by the engine\'s parser: `=` (never `==`), `and`, `or`, `not`, names without braces (`caseType = "Refund" and refundAmount > 0`), membership as `stage in ["A", "B"]` with square brackets, never parentheses. Values in step config are templates over what the engine holds: the trigger\'s input fields by name (`{{title}}`, never `{{input.title}}`), a step\'s output under its key (`{{insert_case.id}}`), a variable a set_variable step set by its `variableName`; the current time and actor are the whole-value sentinels `$now`, `$today`, `$user.id`. The `where` of a lookup maps a field to a value, which means equals; any other comparison is that field mapped to its comparisons — `{"id": {"ne": "{{customer.id}}"}}` (`ne`, `gt`, `gte`, `lt`, `lte`, `in`, `notIn`), several ANDed, so a range is `{"submittedAt": {"gte": "{{dateFrom}}", "lte": "{{dateTo}}"}}` and a bound left blank is no bound; never `id__neq`. A signed-out visitor is `$guest`, their guest token — a record a rule gives a `guestColumn` is stamped with it on insert by itself; `$guest` is for finding theirs (an open cart whose guest column is `$guest`). There is no `now`, `currentUser`, `vars`, `steps` or `sequence` root; a template naming one is refused. The expression functions the engine has are sum, count, min, max, avg, abs, floor, ceiling, round, contains, starts with, ends with, matches, string, number, date, now, duration — nothing else (no concat, substring, uuid, upper, format); a reference number nothing supplies is `$uuid`, a fresh identifier, written in the insert itself. A db_insert supplies every field the data model marks required — an input by name, `$now`, `$user.id`, `$uuid`, or a literal starting state; one that omits a required field is refused, and a later db_update cannot rescue it.'
         + "\n\nTELL THE OTHER PERSON. When a step changes something another person "
         "must act on or would want to know — a request arrives for them, their "
         "request is approved or declined, a case is opened against them, a job "
         "they asked for is done — add an `action` step with `actionType: "
-        "send_notification`, a short `title`, a `message` in the domain's words, "
+        "send_notification`, `channels` — `[\"in_app\"]`, or `[\"in_app\", \"push\"]` "
+        "where the application sends push (`mobile.push`) and the person should hear "
+        "with the app closed — a short `title`, a `message` in the domain's words, "
         "`recipient`: that person's user id, and `entityId`: the id of the record "
         "it is about (on a step whose `entity` is that record's), so the "
         "notification opens it. Find a recipient with a `db_query` "
@@ -1926,7 +2011,53 @@ NODE_TASKS: dict[str, str] = {
         "new account is sent there first). Every gated workflow then starts "
         "by checking it and refuses with the message when it is not met."
     ),
+    "integrations": (
+        "Declare each outside system this application talks to, from the "
+        "requirements and the domain reference: `name`, `kind` (email, "
+        "storage, payment, auth, webhook, mcp, other), `provider` (the product, "
+        "in lower case) and `secretRefs` — the NAMES of the variables its "
+        "credentials live in, UPPER_SNAKE (`XERO_API_KEY`), never a value. "
+        "`serves` names the runtime action the integration carries, only from "
+        "the adapters listed below, with that adapter's provider and names; a "
+        "system with no adapter has `serves: \"\"` and is reached from a "
+        "workflow step's `auth` by one of its names. When the system CALLS THE "
+        "APPLICATION — tells it a payment settled, an order shipped — declare "
+        "`inbound`: the `events` it sends (short names, `payment.succeeded`), "
+        "how it signs (`verify`: hmac_sha256 unless the adapter says "
+        "otherwise) and `signingSecretRef`, one of `secretRefs`, the name of "
+        "its signing secret. A system the requirements and the reference do "
+        "not need is not declared."
+    ),
     "security": (
+        "Say how people sign in, under `signIn`: `password` (email and password), "
+        "`magicLink` (a one-time link by email), and `sso` — one entry per identity "
+        "provider an organisation signs in through, each naming the `auth` "
+        "integration row (from the integrations section) that holds its secret "
+        "NAMES, its `kind` (`oidc` to Entra, Google, Okta or any issuer; `saml` "
+        "through the platform's bridge), the `domains` it admits, `roleFrom` (the "
+        "claim carrying groups, a map of group name to role, a default), and "
+        "`provisioning` — made on first sign-in, or invited first. Password off "
+        "with nothing else on is refused. The requirements decide: an enterprise "
+        "that signs in through its directory says so; a consumer product does not "
+        "get a provider nobody asked for.\n\n"
+        "When the data model marks a tenant entity, declare `tenancy`: `kind: "
+        "organisation`; `memberRoles`, the roles people hold INSIDE an "
+        "organisation; `platformRoles`, the roles held platform-wide that see "
+        "every organisation; `organisationAdminRole`, the member role that "
+        "invites, removes and re-roles members; and `signup` — whether a new "
+        "person creates an organisation, joins by invite, or either. Every "
+        "role is one or the other, never both. The organisation's rows are "
+        "scoped to the person's active organisation by the data model itself; "
+        "write ownership rules only for what is a PERSON's own within it.\n\n"
+        "Say what the application keeps on the record, under `audit`: `level` "
+        "none, `writes` (every create, update and delete, with who, when, before "
+        "and after, kept so it cannot be changed) or `regulated` (writes plus "
+        "sensitive reads, exports and sign-ins, with a reason required on the "
+        "record types named in `reasonRequired`); `reviewers`, the roles that "
+        "open and export the trail (a trail nobody may read is refused); and "
+        "`retentionDays` when the field keeps records for a set time. The "
+        "domain decides the level — what its regulators, auditors and "
+        "disputes expect — not caution.\n\n"
         "Define roles and the permissions that guard entities and endpoints. "
         "Then say who reaches which rows: an entity whose rows belong to one "
         "user or one workspace needs an ownershipRules entry naming the entity "
@@ -1946,6 +2077,11 @@ NODE_TASKS: dict[str, str] = {
         "lets people act without an account — also names `guestColumn`: the "
         "entity's field holding the visitor's guest token; a signed-out visitor "
         "reaches the rows carrying theirs, and keeps them after signing in. "
+        "A record everyone browses but only its owner changes — a listing, a "
+        "catalogue, a public profile, a storefront — keeps its scope rule and says "
+        "`reads: \"everyone\"`: visitors who hold no role read every row, and the "
+        "column still decides who may change or remove it. Without it a signed-out "
+        "visitor reaches no row at all. "
         "Where authorisation really "
         "is by role and every holder sees every row, write that as a prose rule "
         "so the absence of a scoping object reads as a decision.\n\n"
@@ -1967,6 +2103,15 @@ NODE_TASKS: dict[str, str] = {
 #:                 prose, which fails validation. Rationale belongs in the §29
 #:                 envelope's ``assumptions``, and the prompt says so.
 WITHHELD_FIELDS = frozenset({"id", "decisions"})
+
+
+#: Sections only their own node writes, because they name what earlier nodes
+#: create. The screens step shares its agent with the journeys step and was
+#: told it could write `flows`; it wrote journeys through screens it was
+#: proposing in the same reply, by address, and the journey check refused
+#: every step as "not a screen" (60v142ju, 2026-10-12). Journeys are written
+#: by `app_flows`, once screens have ids.
+_LATER_OWNED: dict[str, set[str]] = {"flows": {"app_flows"}}
 
 
 def writable_shapes(agent: str) -> dict[str, Any]:
@@ -2176,6 +2321,55 @@ def _conventions_addendum(doc: dict) -> str:
     )
 
 
+#: The model nodes held to the domain reference, and the reference list each
+#: answers. `security` answers the rules too: a rule about who may do what is
+#: its to write.
+REFERENCE_HOLD: dict[str, tuple[str, str]] = {
+    "ux_architecture": ("screens", "module"),
+    "page_contracts": ("screens", "page"),
+    "data_model": ("records", "entity"),
+    "workflows": ("processes", "workflow"),
+    "business_rules": ("rules", "rule"),
+    "security": ("rules", "rule or ownership rule"),
+    "integrations": ("integrations", "integration"),
+}
+
+
+def integration_adapters(node: str) -> str:
+    """For the integrations node: the actions the runtime has adapters for,
+    their providers and the names they read — read from the adapters, so the
+    prompt never says more than the code can do."""
+    if node != "integrations":
+        return ""
+    from services.smith.connect_service import adapter_lines
+    return "\n\n" + adapter_lines()
+
+
+def reference_hold(doc: dict, node: str) -> str:
+    """The paragraph that holds a model node to the domain reference: every
+    item of its kind answered by name or declined with a reason. Empty when
+    the application has no reference, or the node answers none of it."""
+    held = REFERENCE_HOLD.get(node)
+    if not held:
+        return ""
+    list_key, artifact = held
+    items = [i for i in ((doc.get("domainReference") or {}).get(list_key) or []) if isinstance(i, dict) and i.get("name")]
+    if not items:
+        return ""
+    kind = list_key[:-1] if list_key.endswith("s") else list_key
+    names = ", ".join(f"'{i['name']}'" for i in items[:40])
+    return (
+        f"\n\nHELD TO THE DOMAIN REFERENCE. `domainReference.{list_key}` is what a practitioner expects of "
+        f"this product: {names}. Every one of them is either ANSWERED — set `reference` on the {artifact} "
+        "that answers it, to the item's exact name — or DECLINED: return a `change_request` with "
+        "`section: \"domainReference\"`, `reason` saying why this product does not need it, and "
+        f"`proposed: {{\"declined\": [{{\"kind\": \"{kind}\", \"name\": \"<its exact name>\", "
+        "\"reason\": \"<why>\"}]}}`. An item neither answered nor declined is refused back to you. "
+        "What the person asked for comes first; the reference adds what they would expect without "
+        "having said it, and a decline is the right answer when it does not fit this product."
+    )
+
+
 def build_prompt(
     doc: dict, node: str, *, inline_schema: bool = False, inline_shapes: bool = True,
     subject: str = "", feedback: str = "", references: Sequence[Path] = (),
@@ -2205,15 +2399,17 @@ def build_prompt(
     spec = DAG[node]
     agent = agent or spec.agent
     cap = capability_for(agent)
+    writes = sorted(s for s in cap.writes if s not in _LATER_OWNED or node in _LATER_OWNED[s])
     system = SYSTEM.format(
         agent=agent,
-        writes="\n".join(f"  - {s}" for s in sorted(cap.writes)) or "  (none)",
+        writes="\n".join(f"  - {s}" for s in writes) or "  (none)",
         reply_rules=(DATA_MODEL_REPLY_RULES if node in SCHEMA_BY_NODE
                      else ENVELOPE_RULES),
-        task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns."),
+        task=NODE_TASKS.get(node, f"Produce the {node} artifacts this stage owns.")
+             + reference_hold(doc, node) + integration_adapters(node),
     )
     if inline_shapes:
-        shapes = writable_shapes(agent)
+        shapes = {k: v for k, v in writable_shapes(agent).items() if k in writes}
         if shapes:
             system += SHAPE_ADDENDUM.format(
                 shapes=json.dumps(shapes, indent=2)[:12000]
@@ -2370,6 +2566,21 @@ def build_prompt(
     if node == "workflow_steps":
         return _workflow_steps_prompt(doc, system, subject, feedback,
                                       output_dir=output_dir, brief=brief)
+
+    if node == "app_flows":
+        # The people, the screens and what each starts — what a path is made
+        # of — rather than the agent's whole slice.
+        from services.blueprint.app_flows import flows_brief
+        user = ("What the flows are made of:\n\n```json\n" + json.dumps(flows_brief(doc), indent=1, default=str)
+                + "\n```")
+        if doc.get("flows"):
+            user += ("\n\nThe flows as they stand — keep each one's `name` when you change it:\n```json\n"
+                     + json.dumps(doc.get("flows"), indent=1, default=str)[:20000] + "\n```")
+        if brief:
+            user += "\n\nSmith's brief for this call — what to change and what to keep:\n\n" + brief
+        if feedback:
+            user += "\n\nYour previous attempt was rejected:\n\n" + feedback
+        return system, user
 
     if node == "workflows":
         # The node catalog goes to `workflow_steps`, the one task that authors
@@ -2689,6 +2900,13 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                             "another. Names a field below."
                         ),
                     },
+                    "appendOnly": {
+                        "type": "boolean",
+                        "description": (
+                            "True on a record type whose rows are written once and never "
+                            "changed or removed — a ledger, a log, a consent."
+                        ),
+                    },
                     "account": {
                         "type": "boolean",
                         "description": (
@@ -2703,7 +2921,13 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                         "items": {
                             "type": "object",
                             "additionalProperties": False,
-                            "required": ["name", "type"],
+                            # THE FOUR FIELD FLAGS ARE REQUIRED, `false` when they do not apply. Strict
+                            # structured outputs refuse a schema with too many OPTIONAL properties
+                            # ("Schema is too complex"): `appendOnly`, `mask` and `readers` took this one
+                            # from 20 to 23 and every data_model call was refused (pxf7qf3f, 2026-10-12).
+                            # Absent and `false` mean the same for these four, so requiring them costs
+                            # nothing and brings the count to 19. Count before adding an optional one.
+                            "required": ["name", "type", "required", "primaryKey", "unique", "sensitive"],
                             "properties": {
                                 "name": {"type": "string"},
                                 "type": {"type": "string"},
@@ -2711,12 +2935,33 @@ DATA_MODEL_SCHEMA: dict[str, Any] = {
                                 "required": {"type": "boolean"},
                                 "primaryKey": {"type": "boolean"},
                                 "unique": {"type": "boolean"},
+                                # ORDER MATTERS: strict output writes keys in this order, so
+                                # `sensitive` comes before what only a sensitive field has. With
+                                # `mask` and `readers` first, the model could not go back to them
+                                # once it had said `sensitive: true`, and wrote `max: 0` on text
+                                # fields instead — every value refused (nhc0am2y, 2026-10-12).
                                 "sensitive": {
                                     "type": "boolean",
                                     "description": (
                                         "Personal or financial. Downstream "
                                         "agents cannot see this section to "
                                         "second-guess it."
+                                    ),
+                                },
+                                "mask": {
+                                    "type": "string",
+                                    "enum": ["last4", "email", "phone", "full"],
+                                    "description": (
+                                        "On a sensitive field: how it is shown to roles not "
+                                        "among its readers."
+                                    ),
+                                },
+                                "readers": {
+                                    "type": "array", "items": {"type": "string"},
+                                    "description": (
+                                        "On a sensitive field, only when the roles already exist in the "
+                                        "document: the role names that may see it unmasked. Leave it out "
+                                        "otherwise — the roles that may read the record then may."
                                     ),
                                 },
                                 "enumValues": {
@@ -3623,6 +3868,9 @@ class RunUsage:
 #: also the one most likely to show up as worse UI, so it wants an A/B against
 #: the scoreboard rather than an assumption.
 EFFORT_BY_NODE: dict[str, str] = {
+    # What a practitioner expects of such a product: the one place the build
+    # reasons about the field itself. Everything downstream is held to it.
+    "domain_reference": "high",
     # Structure over work already decided; the shape is tightly constrained.
     "ux_architecture": "medium",
     "design_system": "medium",
@@ -3695,6 +3943,9 @@ EFFORT_BY_AGENT: dict[str, str] = {
 }
 
 MAX_TOKENS_BY_NODE: dict[str, int] = {
+    # Screens, records, processes, rules, conventions and benchmarks of a
+    # whole field in one reply; the headroom is free when unused.
+    "domain_reference": 64000,
     # Names the entities and their relationships without a field; the 64k
     # the single call needed went on fields, which `entity_fields` writes one
     # entity at a time inside the default.

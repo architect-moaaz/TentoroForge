@@ -190,8 +190,12 @@ class RunningApp:
     """The generated app, its database up and its dev server serving — beside
     whatever the person is already running, never over it."""
 
-    def __init__(self, app_root: Path, *, log: Path | None = None, dist_dir: str = REVIEW_DIST_DIR):
+    def __init__(self, app_root: Path, *, log: Path | None = None, dist_dir: str = REVIEW_DIST_DIR,
+                 extra_env: dict[str, str] | None = None):
         self.root = app_root
+        #: What this copy's environment holds beyond the platform's — a check's
+        #: own signing secrets, so no real value is ever read on a bench.
+        self.extra_env: dict[str, str] = dict(extra_env or {})
         # Each server builds into its own directory and deletes it after: two
         # sharing one (a review and a Smith trial on the same app) took each
         # other's build away mid-run and every page answered ENOENT.
@@ -259,7 +263,8 @@ class RunningApp:
                  **boot_env(self.base),
                  # Also what the SDK's empty state answers to: only this server
                  # builds into `.next-review`.
-                 "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2]})
+                 "NEXT_DIST_DIR": self.dist_dir, "DATABASE_URL": self.clone[2],
+                 **self.extra_env})
         from services import dev_servers
         dev_servers.track(self.proc.pid, port=self.port, root=self.root, kind="review")
         deadline = time.monotonic() + 180
@@ -482,6 +487,10 @@ def reviewer_system(doc: dict) -> str:
               "metric tiles are the platform's components: judge where the page puts them and what "
               "it says around them, never their internals (a field's required mark, an input's "
               "border) — the page's author cannot change those. "
+              "A picture box that shows only its alt text, or an empty image frame where a photo "
+              "should be, is a high-severity issue: seeded records carry no pictures, and the page "
+              "must show them with the platform's <Picture> (a designed stand-in when the field is "
+              "empty), never a bare <img>. "
               "Be specific: every issue names where on the page it is and exactly what to change, "
               "in terms a front-end engineer can act on without seeing the screenshot.\n\n"
               f"The app's direction:\n{comp.get('vision') or '(none stated)'}\n"

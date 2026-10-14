@@ -133,7 +133,7 @@ GATES: frozenset[str] = frozenset({"BLUEPRINT_REVIEW", "PLAN_REVIEW"})
 #: requirement does not pay for a frame built on the version they rejected.
 #: Named rather than derived, because "is this a domain claim" is a judgement
 #: about meaning and not a property of the graph.
-DOMAIN_NODES: tuple[str, ...] = ("requirements",)
+DOMAIN_NODES: tuple[str, ...] = ("requirements", "domain_reference")
 
 #: The product model — the second gate. What the application is MADE of,
 #: named and described, and nothing written in detail: the product frame, the

@@ -67,6 +67,36 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     "add_workflow": {"workflow"},
     "edit_workflow": {"workflow", "change"},
     "remove_workflow": {"workflow"},
+    # When a process runs: the clock's fields of the Blueprint (`trigger.cron`,
+    # `trigger.enabled`, a human step's `dueIn`/`escalateTo`), and one that
+    # changes nothing — "run it now".
+    "set_schedule": {"workflow", "change"},
+    "pause_schedule": {"workflow"},
+    "resume_schedule": {"workflow"},
+    "set_deadline": {"workflow", "change"},
+    "run_now": {"workflow"},
+    # An outside system that calls the application: which one, and what it
+    # tells the app (its events, in the user's words).
+    "add_webhook": {"integration", "change"},
+    # The audit trail: read it, export it, verify its chain, change the policy.
+    # Organisations: a new one, and which one a login belongs to.
+    "add_organisation": {"change"},
+    "move_login": {"change"},
+    # How people sign in: which ways in, the provider's groups as roles, whose
+    # domains may sign in through a provider.
+    "set_sign_in_method": {"change"},
+    "map_sso_roles": {"change"},
+    "restrict_sign_in_domains": {"change"},
+    # The application on a phone: installable, orientation, push; a test push.
+    "edit_mobile": {"change"},
+    "test_notification": {"change"},
+    # Money: a refund through the payment service; the currency money is in.
+    "refund": {"change"},
+    "set_currency": {"change"},
+    "show_audit": {"change"},
+    "export_audit": set(),
+    "verify_audit": set(),
+    "edit_audit": {"change"},
     # Access — roles, permissions, who reaches which screen. One verb: the
     # security agent re-decides the model and a second call the screens.
     "edit_access": {"change"},
@@ -277,6 +307,100 @@ VERB_HELP: dict[str, str] = {
     "remove_workflow": (
         "Retire a workflow and take its controls off every screen: \"remove the "
         "delete nurse workflow\". Needs which workflow."
+    ),
+    "set_schedule": (
+        "Run a process on the clock: \"send the reminder every Monday at 9\", "
+        "\"run the digest nightly at 6\", \"check for overdue invoices every "
+        "hour\". Sets when (a cron the engine keeps, in the application's "
+        "zone). Needs which process and the cadence in the user's words."
+    ),
+    "pause_schedule": (
+        "Stop a scheduled process until it is resumed: \"pause the nightly "
+        "digest\", \"stop sending the reminders for now\". Needs which process."
+    ),
+    "resume_schedule": (
+        "Start a paused schedule again: \"resume the reminders\". Needs which process."
+    ),
+    "set_deadline": (
+        "How long a person has for a step of a process, and who gets it when "
+        "they are late: \"approvals not done in 2 days go to the manager\", "
+        "\"give reviewers 4 hours\". Needs which process and the deadline in "
+        "the user's words."
+    ),
+    "run_now": (
+        "Run a scheduled process right now, on a copy of the data, and say what "
+        "happened: \"run the digest now\", \"fire the reminder\". Needs which process."
+    ),
+    "add_webhook": (
+        "Let an outside system call the application: \"let Shopify tell the app "
+        "when an order is paid\", \"accept payment.succeeded from Stripe\". Gives the "
+        "address to call, the header it signs with and the NAME of the secret to set. "
+        "Needs which system and what it tells the app."
+    ),
+    "add_organisation": (
+        "Add an organisation to an application that serves several: \"add an "
+        "organisation called Northside Clinic\". Needs its name."
+    ),
+    "move_login": (
+        "Put a login in an organisation, with a role there: \"move "
+        "dave@clinic.com to Northside as a Nurse\". Needs the email and the "
+        "organisation; the role is optional."
+    ),
+    "set_sign_in_method": (
+        "Change the ways people sign in: \"sign in by magic link only\", \"turn "
+        "passwords off\", \"turn on magic links as well\", \"passwords only\". A "
+        "change that leaves nobody a way in is refused. Connecting an identity "
+        "provider (Microsoft 365, Google, Okta, SAML) is connect_service."
+    ),
+    "map_sso_roles": (
+        "Which role a person signing in through the organisation's provider "
+        "gets, by their group: \"people in the Finance group are Accountants, "
+        "everyone else is a Viewer\". Needs at least one group or a default."
+    ),
+    "restrict_sign_in_domains": (
+        "Whose email domains may sign in through a provider: \"only @acme.com "
+        "may sign in\", \"anyone may sign in\". Needs the domains, or that "
+        "anyone may."
+    ),
+    "edit_mobile": (
+        "How the application behaves on a phone: \"make it installable\", \"turn "
+        "on push notifications\", \"portrait only\", \"full screen\", \"a store "
+        "wrapper with bundle id com.acme.app\". Needs which of these."
+    ),
+    "test_notification": (
+        "Send a test push notification to a person's subscribed devices: \"send "
+        "me a test notification\", \"send a test notification to dave@acme.com\". "
+        "Says how many devices were reached, or that none is subscribed."
+    ),
+    "refund": (
+        "Refund a payment through the payment service: \"refund order 1234\", "
+        "\"give the customer their money back for booking 88\". Runs the "
+        "application's refund process on a copy and says what it did. Needs "
+        "which payment or record."
+    ),
+    "set_currency": (
+        "The currency money is kept and shown in: \"prices are in dirhams\", "
+        "\"use GBP\". Needs the currency."
+    ),
+    "show_audit": (
+        "Read the audit trail: \"who changed the invoices yesterday\", \"what did "
+        "Dave do on 2026-10-01\", \"show me the deletions\". Answers from the "
+        "record: who, what, when, before and after. Needs what to look for, in "
+        "the user's words."
+    ),
+    "export_audit": (
+        "Export the whole audit trail as a file: \"export the audit trail\", "
+        "\"give me the audit log for the auditors\"."
+    ),
+    "verify_audit": (
+        "Check the audit trail is intact — every entry still chained to the one "
+        "before: \"is the audit trail intact\", \"verify the record\"."
+    ),
+    "edit_audit": (
+        "Change what is kept on the record: \"keep every change on the record\", "
+        "\"keep the trail for seven years\", \"let the compliance officer read "
+        "the audit trail\", \"require a reason to change an invoice\". Re-decides "
+        "the audit policy. Needs the change in the user's words."
     ),
     "edit_access": (
         "Change who can do what: \"add a Ward Manager role\", \"only admins can "
@@ -589,6 +713,82 @@ VERB_HELP: dict[str, str] = {
 #: the old classifier's prompt; there is no prompt now, so they live with the
 #: verb. The phrasebook checks each is still quoted somewhere the model reads.
 VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
+    'set_schedule': (
+        'send the payment reminder every Monday at 9',
+        'run the nightly digest at 6pm',
+    ),
+    'pause_schedule': (
+        'pause the nightly digest',
+        'stop the reminders for now',
+    ),
+    'resume_schedule': (
+        'resume the reminders',
+        'start the digest again',
+    ),
+    'set_deadline': (
+        'approvals not done in 2 days go to the manager',
+        'reviewers get 4 hours, then it goes to the admin',
+    ),
+    'run_now': (
+        'run the digest now',
+        'fire the payment reminder',
+    ),
+    'add_webhook': (
+        'let Shopify tell the app when an order is paid',
+        'accept payment.succeeded from Stripe',
+    ),
+    'add_organisation': (
+        'add an organisation called Northside Clinic',
+        'we have a new branch, Riverside',
+    ),
+    'move_login': (
+        'move dave@clinic.com to Northside as a Nurse',
+        'put sara@shop.com in the Riverside branch',
+    ),
+    'set_sign_in_method': (
+        'sign in by magic link only',
+        'turn passwords off',
+    ),
+    'map_sso_roles': (
+        'people in the Finance group are Accountants, everyone else is a Viewer',
+        'the Admins group signs in as Administrator',
+    ),
+    'restrict_sign_in_domains': (
+        'only @acme.com may sign in',
+        'anyone with a company Google account may sign in',
+    ),
+    'edit_mobile': (
+        'turn on push notifications',
+        'the app should be portrait only on phones',
+    ),
+    'test_notification': (
+        'send me a test notification',
+        'send a test push to dave@acme.com',
+    ),
+    'refund': (
+        'refund order 1234',
+        'give the customer their money back for booking 88',
+    ),
+    'set_currency': (
+        'prices are in dirhams',
+        'use GBP',
+    ),
+    'show_audit': (
+        'who changed the invoices yesterday',
+        'show me the deletions',
+    ),
+    'export_audit': (
+        'export the audit trail',
+        'give me the audit log for the auditors',
+    ),
+    'verify_audit': (
+        'is the audit trail intact',
+        'verify the record',
+    ),
+    'edit_audit': (
+        'keep every change on the record',
+        'require a reason to change an invoice',
+    ),
     'compose_route': (
         'The page is empty',
         'add a dashboard at /',

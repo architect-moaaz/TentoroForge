@@ -20,6 +20,10 @@ def _repo(tmp_path: Path) -> Path:
     subprocess.check_call(["git", "-C", str(tmp_path), "config", "user.email", "t@t.t"])
     subprocess.check_call(["git", "-C", str(tmp_path), "config", "user.name", "T"])
     (tmp_path / "seed.txt").write_text("seed")
+    # A BUILT APPLICATION: the try-first rules apply only where there is an
+    # app to try (`turn._app_exists`).
+    (tmp_path / "app").mkdir(exist_ok=True)
+    (tmp_path / "app" / "package.json").write_text("{}")
     subprocess.check_call(["git", "-C", str(tmp_path), "add", "."])
     subprocess.check_call(["git", "-C", str(tmp_path), "commit", "-qm", "seed"])
     bp = Blueprint.load(project_id="p1", output_dir=str(tmp_path))

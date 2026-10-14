@@ -261,6 +261,11 @@ async function press(context, url, control, firstIndex = null) {
     let body = {};
     try { body = await res.json(); } catch { /* not JSON */ }
     calls.push({ status: res.status(), failed: Boolean(body?.error) || body?.status === "failed",
+                 // THE APP SAID NO, ON PURPOSE: a workflow's own refusal ("not enough
+                 // stock") answers 422 with `refused`. It is the app working, said
+                 // in its words — not a control that is broken (ToroCommerce's plus
+                 // button at the stock limit, 2026-10-08).
+                 refused: body?.refused === true,
                  error: String(body?.error?.message ?? body?.error ?? "").slice(0, 200) });
   });
   try {
@@ -291,12 +296,21 @@ async function press(context, url, control, firstIndex = null) {
     await page.waitForTimeout(calls.length ? 800 : 0);            // let a workflow's reply land
     after = await fingerprint(page).catch(() => after);
     let outcome = "nothing", detail = "no navigation, no request, no visible change";
+    // The browser logs a refused workflow's 422 as a console error; that line
+    // is the refusal, not a second fault.
+    if (calls.some((c) => c.refused)) {
+      for (let i = errors.length - 1; i >= 0; i--) {
+        if (/Failed to load resource: the server responded with a status of 422/.test(errors[i])) errors.splice(i, 1);
+      }
+    }
     if (errors.length) {
       outcome = "error"; detail = errors[0];
     } else if (calls.length) {
-      const bad = calls.find((c) => c.failed || c.status >= 400);
-      outcome = bad ? "workflow-failed" : "workflow";
-      detail = bad ? `HTTP ${bad.status}${bad.error ? ": " + bad.error : ""}` : `ran (${calls.length})`;
+      const bad = calls.find((c) => (c.failed || c.status >= 400) && !c.refused);
+      const refused = calls.find((c) => c.refused);
+      outcome = bad ? "workflow-failed" : refused ? "refused" : "workflow";
+      detail = bad ? `HTTP ${bad.status}${bad.error ? ": " + bad.error : ""}`
+        : refused ? `the app refused: ${refused.error || "no reason given"}` : `ran (${calls.length})`;
     } else if (after.url !== before.url) {
       const res = await context.request.get(after.url).catch(() => null);
       const status = res?.status() ?? 0;

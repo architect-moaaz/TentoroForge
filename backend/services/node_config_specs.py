@@ -18,10 +18,10 @@ an entry here. Types that read no secrets (`db_insert`, `http_call`, `custom`,
 `[]` for them and callers skip them.
 
 Providers grouped in v1: `resend` (email), `anthropic` (AI), `s3` (uploads).
-`twilio` and `stripe` are placeholders shipped to prove the shape for future
-node types — they have no runtime handler yet, so nothing reads their keys,
-but the settings page will render their cards when a plan references
-`send_sms` / `stripe_charge` in a future release.
+A secret an application ITSELF declares (`integrations[].secretRefs`) has no
+entry here: `services.declared_secrets` registers it under the synthetic
+provider `app:<integration>` from the application's Blueprint, so it is
+settable on the platform and shipped like any other key.
 
 Design: docs/superpowers/specs/2026-07-22-integrations-settings.md.
 """
@@ -86,11 +86,29 @@ class ConfigKey:
 #   standalone-app/src/lib/workflows/index.ts  (send_email, ...)
 #   standalone-app/src/lib/workflows/ai.ts     (ai_generate, ai_classify, ai_extract, ai_decide)
 #   standalone-app/src/lib/storage.ts          (S3 uploads — indirect via file API)
+#: Payments: the Stripe adapter's keys, read by every payment action.
+_STRIPE_KEYS: list[ConfigKey] = [
+        ConfigKey(key="STRIPE_SECRET_KEY", provider="stripe", label="Stripe secret key", kind="password",
+                  required=False, help_url="https://dashboard.stripe.com/apikeys"),
+        ConfigKey(key="STRIPE_WEBHOOK_SECRET", provider="stripe", label="Stripe webhook signing secret", kind="password",
+                  required=False, help_url="https://dashboard.stripe.com/webhooks"),
+        ConfigKey(key="STRIPE_PUBLISHABLE_KEY", provider="stripe", label="Stripe publishable key", kind="text",
+                  required=False, help_url="https://dashboard.stripe.com/apikeys"),
+    ]
+
 NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
     # --- Email --------------------------------------------------------- #
     # Two providers, mutually exclusive: SMTP wins when SMTP_HOST is set,
     # Resend is used otherwise. FORGE_EMAIL_FROM is shared (it lives under
     # `resend` in the registry but the runtime reads it for either path).
+    # Payments: the Stripe adapter (`runtime/payments/stripe.ts`). The same
+    # keys carry take_payment, refund_payment, payment_status and
+    # connect_account; a second provider is its own entry here and one file
+    # in the runtime's registry.
+    "take_payment": _STRIPE_KEYS,
+    "refund_payment": _STRIPE_KEYS,
+    "payment_status": _STRIPE_KEYS,
+    "connect_account": _STRIPE_KEYS,
     "send_email": [
         # Resend
         ConfigKey(
@@ -377,6 +395,17 @@ NODE_CONFIG_SPECS: dict[str, list[ConfigKey]] = {
     # /settings/integrations. See TODO(sensitive-rotation) in
     # templates/runtime/sensitive-crypto.ts — versioned rotation is a
     # separate slice.
+    # --- Push notifications (Web Push, VAPID) --------------------------- #
+    # Synthetic "action type": the application's own key pair, generated
+    # per project by runtime_injector and kept for the life of the app; a
+    # rotated pair orphans every subscribed device, so rotation is a choice
+    # made here, in the open, not a side effect of a rebuild.
+    "__push__": [
+        ConfigKey(key="VAPID_PUBLIC_KEY", provider="push", label="Push public key (VAPID)", kind="text", required=False),
+        ConfigKey(key="VAPID_PRIVATE_KEY", provider="push", label="Push private key (VAPID)", kind="password", required=False),
+        ConfigKey(key="VAPID_SUBJECT", provider="push", label="Push contact (mailto: or https:)", kind="text", required=False),
+    ],
+
     "__encryption__": [
         ConfigKey(
             key="SENSITIVE_ENCRYPTION_KEY",
@@ -643,11 +672,15 @@ def providers_used_by_plan(plan: dict[str, Any] | None) -> list[str]:
     """
     if not isinstance(plan, dict):
         return []
+    provs: set[str] = set()
+    # An application that sends push holds its own keys (see `__push__`).
+    mobile = plan.get("mobile") if isinstance(plan.get("mobile"), dict) else {}
+    if mobile.get("push") is True:
+        provs.update(providers_for_action("__push__"))
     workflows = plan.get("workflows") or []
     if not isinstance(workflows, list):
-        return []
+        return sorted(provs)
 
-    provs: set[str] = set()
     for wf in workflows:
         if not isinstance(wf, dict):
             continue

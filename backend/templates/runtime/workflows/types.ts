@@ -49,7 +49,11 @@ export type ActionType =
   | "ai_extract"
   | "ai_decide"
   | "mcp_tool_call"
-  | "ocr_document";
+  | "ocr_document"
+  | "create_checkout"
+  | "refund_payment"
+  | "payment_status"
+  | "connect_account";
 
 export type NodeType =
   | "trigger"
@@ -180,6 +184,8 @@ export interface NodeConfig {
   // send_notification
   message?: string;
   channel?: string;
+  /** Where it reaches the person: the bell (`in_app`), their devices (`push`). */
+  channels?: ("in_app" | "push")[];
 
   // set_variable
   variableName?: string;
@@ -355,6 +361,11 @@ export interface WorkflowExecutionResult {
   log: ExecutionLogEntry[];
   /** Final process variable state */
   output: Record<string, unknown>;
+  /** What the `end` declared for the page to read, by name (`config.reply`). */
+  reply?: Record<string, unknown>;
+  /** Where the `end` sends the person next (`config.redirect`): a route of
+   *  this application or an outside address a step produced. */
+  redirect?: string;
   /**
    * What a step could not do, in words for the person who ran it.
    *

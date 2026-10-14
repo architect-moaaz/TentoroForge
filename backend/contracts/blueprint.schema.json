@@ -179,6 +179,9 @@
           },
           "default": []
         },
+        "currency": {
+          "type": "string"
+        },
         "locale": {
           "type": "string",
           "description": "BCP-47 tag for the language the INTERFACE is written in — 'ar', 'ar-PS', 'fr'. Set it when the request says what language the UI should be in; every string a reader sees is then authored in it and the document is laid out right-to-left where the script requires. A country, currency or market is not a language. Defaults to 'en'.",
@@ -190,6 +193,269 @@
             "type": "string"
           },
           "description": "BCP-47 tags of the OTHER languages people can switch the interface to, beside `locale` — ['hi'] for an English app that must also be shown in Hindi. Only when the request asks for the interface in more than one language. Empty for a single-language app.",
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "domainReference": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string",
+          "default": ""
+        },
+        "subdomain": {
+          "type": "string",
+          "default": ""
+        },
+        "summary": {
+          "type": "string",
+          "default": ""
+        },
+        "personas": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/product/properties/personas/items"
+          },
+          "default": []
+        },
+        "screens": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "forRoles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "dashboard",
+                  "list",
+                  "record",
+                  "form",
+                  "workspace",
+                  "public",
+                  "tool",
+                  "sign_in",
+                  "sign_up"
+                ]
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "statuses": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "processes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "writes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "statement": {
+                "type": "string"
+              },
+              "refusedCase": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": [
+              "name",
+              "statement"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "integrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "purpose": {
+                "type": "string",
+                "default": ""
+              },
+              "providers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "conventions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "benchmarks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "product": {
+                "type": "string"
+              },
+              "takeaway": {
+                "type": "string",
+                "default": ""
+              }
+            },
+            "required": [
+              "product"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "declined": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "screen",
+                  "record",
+                  "process",
+                  "rule",
+                  "integration"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "by": {
+                "type": "string",
+                "default": "owner"
+              }
+            },
+            "required": [
+              "kind",
+              "name",
+              "reason"
+            ],
+            "additionalProperties": false
+          },
           "default": []
         }
       },
@@ -259,7 +525,7 @@
           },
           "subject": {
             "type": "string",
-            "pattern": "^(REQ|ROLE|PERM|MODULE|PAGE|CMP|ENTITY|FLOW|RULE|API|TEST|DEC|INT|DEP|WIDGET)-\\d{3,}$",
+            "pattern": "^(REQ|ROLE|PERM|MODULE|PAGE|CMP|ENTITY|FLOW|RULE|API|TEST|DEC|INT|DEP|WIDGET|JOURNEY)-\\d{3,}$",
             "description": "Reference to any Blueprint artifact (§19)"
           },
           "action": {
@@ -326,6 +592,9 @@
               "description": "Stable PAGE identifier (§12)"
             },
             "default": []
+          },
+          "reference": {
+            "type": "string"
           },
           "deferred": {
             "type": "boolean"
@@ -396,8 +665,12 @@
               "split_view",
               "document_workspace",
               "tool",
+              "audit_trail",
               "auth"
             ]
+          },
+          "reference": {
+            "type": "string"
           },
           "auth": {
             "type": "string",
@@ -1398,6 +1671,9 @@
                 "type": "string",
                 "default": ""
               },
+              "reference": {
+                "type": "string"
+              },
               "fields": {
                 "type": "array",
                 "items": {
@@ -1430,6 +1706,21 @@
                     "sensitive": {
                       "type": "boolean",
                       "default": false
+                    },
+                    "mask": {
+                      "type": "string",
+                      "enum": [
+                        "last4",
+                        "email",
+                        "phone",
+                        "full"
+                      ]
+                    },
+                    "readers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     },
                     "references": {
                       "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
@@ -1476,6 +1767,18 @@
               },
               "labelField": {
                 "type": "string"
+              },
+              "tenant": {
+                "type": "boolean",
+                "default": false
+              },
+              "commerce": {
+                "type": "boolean",
+                "default": false
+              },
+              "appendOnly": {
+                "type": "boolean",
+                "default": false
               },
               "account": {
                 "type": "boolean"
@@ -1671,6 +1974,9 @@
             "type": "string",
             "default": ""
           },
+          "reference": {
+            "type": "string"
+          },
           "trigger": {
             "type": "object",
             "properties": {
@@ -1687,6 +1993,36 @@
               "detail": {
                 "type": "string",
                 "default": ""
+              },
+              "cron": {
+                "type": "string"
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "entity": {
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                "description": "Stable ENTITY identifier (§12)"
+              },
+              "on": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "updated",
+                  "deleted"
+                ]
+              },
+              "event": {
+                "type": "string"
+              },
+              "integration": {
+                "type": "string",
+                "pattern": "^INT-\\d{3,}$",
+                "description": "Stable INT identifier (§12)"
               }
             },
             "required": [
@@ -1760,6 +2096,65 @@
                     },
                     "message": {
                       "type": "string"
+                    },
+                    "for": {
+                      "type": "string"
+                    },
+                    "until": {
+                      "type": "string"
+                    },
+                    "timeout": {
+                      "type": "string"
+                    },
+                    "auth": {
+                      "type": "object",
+                      "properties": {
+                        "secretRef": {
+                          "type": "string"
+                        },
+                        "in": {
+                          "type": "string",
+                          "enum": [
+                            "bearer",
+                            "header",
+                            "query",
+                            "basic"
+                          ],
+                          "default": "bearer"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "secretRef"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "dueIn": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "escalateTo": {
+                      "$ref": "#/properties/roles/items/properties/id",
+                      "description": "Stable ROLE identifier (§12)"
+                    },
+                    "reply": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "redirect": {
+                      "type": "string"
+                    },
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "in_app",
+                          "push"
+                        ]
+                      }
                     }
                   },
                   "additionalProperties": {},
@@ -1847,6 +2242,96 @@
       },
       "default": []
     },
+    "flows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^JOURNEY-\\d{3,}$",
+            "description": "Stable JOURNEY identifier (§12)"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/properties/roles/items/properties/id",
+            "description": "Stable ROLE identifier (§12)"
+          },
+          "goal": {
+            "type": "string",
+            "default": ""
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "page": {
+                  "$ref": "#/properties/modules/items/properties/pages/items"
+                },
+                "section": {
+                  "type": "string"
+                },
+                "does": {
+                  "type": "string",
+                  "default": ""
+                },
+                "workflow": {
+                  "$ref": "#/properties/pages/items/properties/requires/properties/producedBy",
+                  "description": "Stable FLOW identifier (§12)"
+                },
+                "then": {
+                  "type": "string",
+                  "enum": [
+                    "go",
+                    "offer",
+                    "menu"
+                  ],
+                  "default": "go"
+                },
+                "carries": {
+                  "$ref": "#/properties/pages/items/properties/sections/items/properties/entity",
+                  "description": "Stable ENTITY identifier (§12)"
+                }
+              },
+              "required": [
+                "page"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 2
+          },
+          "ends": {
+            "type": "string",
+            "default": ""
+          },
+          "status": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/status"
+          },
+          "requirements": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/requirements"
+          },
+          "decisions": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/decisions"
+          },
+          "confidence": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/confidence"
+          },
+          "syncNote": {
+            "$ref": "#/properties/product/properties/capabilities/items/properties/syncNote"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "steps"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    },
     "businessRules": {
       "type": "array",
       "items": {
@@ -1861,6 +2346,9 @@
             "type": "string"
           },
           "statement": {
+            "type": "string"
+          },
+          "reference": {
             "type": "string"
           },
           "expression": {
@@ -2119,9 +2607,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "pattern": "^INT-\\d{3,}$",
-            "description": "Stable INT identifier (§12)"
+            "$ref": "#/properties/workflows/items/properties/trigger/properties/integration"
           },
           "name": {
             "type": "string"
@@ -2142,6 +2628,9 @@
             "type": "string",
             "default": ""
           },
+          "reference": {
+            "type": "string"
+          },
           "secretRefs": {
             "type": "array",
             "items": {
@@ -2152,6 +2641,34 @@
           "serves": {
             "type": "string",
             "default": ""
+          },
+          "inbound": {
+            "type": "object",
+            "properties": {
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "verify": {
+                "type": "string",
+                "enum": [
+                  "hmac_sha256",
+                  "bearer",
+                  "provider"
+                ],
+                "default": "hmac_sha256"
+              },
+              "signingSecretRef": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "signingSecretRef"
+            ],
+            "additionalProperties": false
           },
           "status": {
             "$ref": "#/properties/product/properties/capabilities/items/properties/status"
@@ -2199,6 +2716,101 @@
         "signupRole": {
           "$ref": "#/properties/roles/items/properties/id",
           "description": "Stable ROLE identifier (§12)"
+        },
+        "signIn": {
+          "type": "object",
+          "properties": {
+            "password": {
+              "type": "boolean",
+              "default": true
+            },
+            "magicLink": {
+              "type": "boolean",
+              "default": false
+            },
+            "sso": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]{0,23}$"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "oidc",
+                      "saml"
+                    ],
+                    "default": "oidc"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "entra",
+                      "google",
+                      "okta",
+                      "oidc",
+                      "saml"
+                    ],
+                    "default": "oidc"
+                  },
+                  "integration": {
+                    "$ref": "#/properties/workflows/items/properties/trigger/properties/integration",
+                    "description": "Stable INT identifier (§12)"
+                  },
+                  "domains": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": []
+                  },
+                  "roleFrom": {
+                    "type": "object",
+                    "properties": {
+                      "claim": {
+                        "type": "string",
+                        "default": "groups"
+                      },
+                      "map": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "$ref": "#/properties/roles/items/properties/id"
+                        },
+                        "default": {}
+                      },
+                      "default": {
+                        "$ref": "#/properties/roles/items/properties/id",
+                        "description": "Stable ROLE identifier (§12)"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "provisioning": {
+                    "type": "string",
+                    "enum": [
+                      "invite_only",
+                      "just_in_time"
+                    ],
+                    "default": "just_in_time"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
         },
         "ownershipRules": {
           "type": "array",
@@ -2253,6 +2865,15 @@
                     "type": "string",
                     "description": "When the row belongs to the actor through another record: the entity `column` references (an Appointment's childId -> \"Child\"). The row is reachable when that record is reachable under its own scope rule, which it must have. Omit when `column` holds the actor's value itself."
                   },
+                  "reads": {
+                    "type": "string",
+                    "enum": [
+                      "scoped",
+                      "everyone"
+                    ],
+                    "description": "Who may read the rows. \"scoped\": the same people who may write them (the default). \"everyone\": anyone, signed in or not, reads every row — a catalogue, a listing, a public profile — while `column` still decides who may change or remove it. Say \"everyone\" wherever visitors browse what owners manage; without it a signed-out visitor, who holds no role, reaches no row at all.",
+                    "default": "scoped"
+                  },
                   "guestColumn": {
                     "type": "string",
                     "description": "For records a visitor may make before signing in (a guest's cart): the column of this entity holding the visitor's guest token. A signed-out visitor reaches the rows carrying their own token, the platform fills it on create, and the same person keeps reaching them after signing in. Omit for records only signed-in people make."
@@ -2282,9 +2903,136 @@
           },
           "default": []
         },
+        "tenancy": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "none",
+                "organisation"
+              ],
+              "default": "none"
+            },
+            "signup": {
+              "type": "string",
+              "enum": [
+                "creates_organisation",
+                "joins_by_invite",
+                "both"
+              ],
+              "default": "both"
+            },
+            "memberRoles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "platformRoles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "organisationAdminRole": {
+              "type": "string"
+            },
+            "nameField": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
         "auditLogging": {
           "type": "boolean",
           "default": false
+        },
+        "audit": {
+          "type": "object",
+          "properties": {
+            "level": {
+              "type": "string",
+              "enum": [
+                "none",
+                "writes",
+                "regulated"
+              ],
+              "default": "none"
+            },
+            "reviewers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "retentionDays": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "reasonRequired": {
+              "type": "array",
+              "items": {
+                "$ref": "#/properties/pages/items/properties/sections/items/properties/entity"
+              },
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "mobile": {
+      "type": "object",
+      "properties": {
+        "installable": {
+          "type": "boolean",
+          "default": true
+        },
+        "display": {
+          "type": "string",
+          "enum": [
+            "standalone",
+            "fullscreen",
+            "minimal-ui",
+            "browser"
+          ],
+          "default": "standalone"
+        },
+        "orientation": {
+          "type": "string",
+          "enum": [
+            "any",
+            "portrait",
+            "landscape"
+          ],
+          "default": "any"
+        },
+        "push": {
+          "type": "boolean",
+          "default": false
+        },
+        "store": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "bundleId": {
+              "type": "string",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9]*(\\.[a-zA-Z][a-zA-Z0-9]*)+$"
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
         }
       },
       "additionalProperties": false,
@@ -3766,6 +4514,13 @@
               },
               "default": []
             },
+            "untried": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
             "version": {
               "type": "number"
             }
@@ -3774,6 +4529,85 @@
             "pages",
             "working"
           ],
+          "additionalProperties": false
+        },
+        "scorecard": {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number"
+            },
+            "at": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "checking",
+                "fixing",
+                "done",
+                "stopped"
+              ],
+              "default": "checking"
+            },
+            "criteria": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "total": {
+                    "type": "number",
+                    "default": 0
+                  },
+                  "green": {
+                    "type": "number",
+                    "default": 0
+                  },
+                  "red": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "default": []
+                  },
+                  "untried": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "default": []
+                  }
+                },
+                "additionalProperties": false
+              },
+              "default": {}
+            },
+            "fix": {
+              "type": "object",
+              "properties": {
+                "turns": {
+                  "type": "number",
+                  "default": 0
+                },
+                "yield": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "default": []
+                },
+                "stopped": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
           "additionalProperties": false
         }
       },

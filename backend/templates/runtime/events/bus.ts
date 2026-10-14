@@ -23,16 +23,29 @@
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import {
+
   findWorkflowsForEvent,
   buildResumeInput,
   buildTimeoutResumeInput,
   WAITING_EVENT_VAR,
 } from "./triggers";
+import { buildTimerResumeInput } from "./triggers";
+
+/** The person a paused run was acting as, as the pause stored them. */
+function _actorOf(pv: Record<string, unknown> | undefined): { id: string; role?: string; email?: string } | undefined {
+  const u = pv?.__user;
+  if (!u || typeof u !== "object") return undefined;
+  const o = u as Record<string, unknown>;
+  return o.id ? { ...o, id: String(o.id), role: o.role as string | undefined, email: o.email as string | undefined } : undefined;
+}
 
 export interface EmitOpts {
   entity?: string | null;
   entityId?: string | null;
   payload?: Record<string, unknown>;
+  /** A key for one delivery of this event; a second emit with the same
+   *  key is a duplicate and inserts nothing. */
+  dedupeKey?: string;
 }
 
 export interface ForgeEventRow {
@@ -54,24 +67,29 @@ function _rows(res: unknown): any[] {
 export async function emitEvent(
   type: string,
   opts: EmitOpts = {},
-): Promise<{ id: string } | null> {
+): Promise<{ id: string } | { duplicate: true } | null> {
   const t = String(type ?? "").trim();
   if (!t) return null;
   try {
+    const key = typeof opts.dedupeKey === "string" && opts.dedupeKey.trim() ? opts.dedupeKey.trim() : null;
     const res: any = await db.execute(sql`
-      INSERT INTO forge_events (id, type, entity, entity_id, payload, created_at)
+      INSERT INTO forge_events (id, type, entity, entity_id, payload, created_at, dedupe_key)
       VALUES (
         gen_random_uuid(),
         ${t},
         ${opts.entity ?? null},
         ${opts.entityId ?? null},
         ${JSON.stringify(opts.payload ?? {})}::jsonb,
-        NOW()
+        NOW(),
+        ${key}
       )
+      ON CONFLICT (dedupe_key) DO NOTHING
       RETURNING id
     `);
     const row = _rows(res)[0];
-    return row?.id ? { id: String(row.id) } : null;
+    if (row?.id) return { id: String(row.id) };
+    // A key the table has seen: the same delivery again, not a failure.
+    return key ? { duplicate: true } : null;
   } catch (err) {
     console.warn(`[events] emitEvent(${t}) failed (non-fatal):`, err);
     return null;
@@ -87,8 +105,9 @@ export async function emitEvent(
 export async function emitEventAndProcess(
   type: string,
   opts: EmitOpts = {},
-): Promise<{ id: string } | null> {
+): Promise<{ id: string } | { duplicate: true } | null> {
   const row = await emitEvent(type, opts);
+  if (row && "duplicate" in row) return row;
   if (row) {
     void _kickProcessing().catch((err) =>
       console.warn("[events] inline processing failed (cron will sweep):", err),
@@ -261,7 +280,8 @@ async function _resumeWaiters(
       evt.payload && typeof evt.payload === "object" ? evt.payload : {};
     const input = buildResumeInput(pv, task.node_id, evt.type, payload);
 
-    const result = await wfmod.triggerWorkflow(task.workflow_id, input);
+    // As whoever was running it when it paused (`__user`, stored at the pause).
+    const result = await wfmod.triggerWorkflow(task.workflow_id, input, _actorOf(pv));
     // Mark the wait row completed regardless of downstream outcome —
     // matches the /execute route, which completes the task row after the
     // resume dispatch. A failed downstream run is the run's own failure.
@@ -311,10 +331,10 @@ export async function resumeExpiredWaits(now: Date = new Date()): Promise<number
   }> = [];
   try {
     const res: any = await db.execute(sql`
-      SELECT id, workflow_id, node_id, process_variables
+      SELECT id, workflow_id, node_id, task_type, process_variables
       FROM workflow_tasks
       WHERE status = 'pending'
-        AND task_type = 'wait_for_event'
+        AND task_type IN ('wait_for_event', 'wait_timer')
         AND due_at IS NOT NULL
         AND due_at <= ${now.toISOString()}::timestamptz
       ORDER BY due_at
@@ -342,7 +362,13 @@ export async function resumeExpiredWaits(now: Date = new Date()): Promise<number
           ? JSON.parse(task.process_variables || "{}")
           : ((task.process_variables as Record<string, unknown>) ?? {});
       const awaited = String(pv?.[WAITING_EVENT_VAR] ?? "");
-      const input = buildTimeoutResumeInput(pv, task.node_id, awaited);
+      // A TIMER'S TIME CAME; AN EVENT'S WAIT RAN OUT. The first continues
+      // as planned (`waited: true`), the second on its escalation branch
+      // (`timedOut: true`).
+      const timer = String((task as any).task_type ?? "") === "wait_timer";
+      const input = timer
+        ? buildTimerResumeInput(pv, task.node_id, now.toISOString())
+        : buildTimeoutResumeInput(pv, task.node_id, awaited);
 
       // Complete the task row FIRST so a slow/failed resume can never
       // double-fire on the next sweep (mirrors the scheduler's
@@ -350,7 +376,7 @@ export async function resumeExpiredWaits(now: Date = new Date()): Promise<number
       try {
         await db.execute(sql`
           UPDATE workflow_tasks
-          SET status = 'completed', completed_at = NOW(), decision = 'timeout'
+          SET status = 'completed', completed_at = NOW(), decision = ${timer ? "elapsed" : "timeout"}
           WHERE id = ${task.id}::uuid AND status = 'pending'
         `);
       } catch (err) {
@@ -358,7 +384,7 @@ export async function resumeExpiredWaits(now: Date = new Date()): Promise<number
         continue;
       }
 
-      await wfmod.triggerWorkflow(task.workflow_id, input);
+      await wfmod.triggerWorkflow(task.workflow_id, input, _actorOf(pv));
       resumed += 1;
     } catch (err) {
       console.warn(`[events] timeout resume failed for task ${task.id}:`, err);

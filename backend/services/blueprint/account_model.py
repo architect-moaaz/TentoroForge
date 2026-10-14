@@ -147,6 +147,13 @@ def admin_role(doc: dict) -> str | None:
         only = sum(1 for p in mine if [str(u) for u in p.get("users") or []] == [rid])
         return restricted, only, len(mine)
 
+    # A ROLE CALLED ADMIN IS THE BACK OFFICE. The ranking tied Vendor (four
+    # restricted pages) with Admin (four restricted pages) and took the first,
+    # so the seeded administrator was a Vendor and the role named Admin had
+    # no login at all (rwt6ef5p, 2026-10-11).
+    named = [r for r in roles if str(r.get("name") or "").strip().lower() in ("admin", "administrator")]
+    if named:
+        return str(named[0].get("name"))
     best = max(roles, key=rank)
     return str(best.get("name")) if best.get("name") else None
 
@@ -358,18 +365,31 @@ def after_signup_route(doc: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def has_sign_in(doc: dict) -> bool:
-    return str(((doc.get("security") or {}).get("authentication")) or "email_password") != "none"
+    sec = doc.get("security") if isinstance(doc.get("security"), dict) else {}
+    if str(sec.get("authentication") or "email_password") != "none":
+        return True
+    si = sec.get("signIn") if isinstance(sec.get("signIn"), dict) else {}
+    return bool(si.get("magicLink") or si.get("sso"))
+
+
+def passwords_on(doc: dict) -> bool:
+    """People hold passwords here: the default; off when `signIn.password` is
+    false (a magic link or an identity provider is the only way in)."""
+    sec = doc.get("security") if isinstance(doc.get("security"), dict) else {}
+    si = sec.get("signIn") if isinstance(sec.get("signIn"), dict) else {}
+    return si.get("password") is not False
 
 
 def auth_page_bodies(doc: dict) -> list[dict]:
     """The `/login` and `/signup` page contracts an application with sign-in
-    has and does not have yet."""
+    has and does not have yet. No `/signup` where nobody holds a password:
+    a person arrives by link or through their organisation's provider."""
     if not has_sign_in(doc):
         return []
     have = {str(p.get("route")) for p in _live(doc.get("pages"))}
     return [{"name": a["name"], "route": a["route"], "purpose": a["purpose"], "pattern": "auth",
              "auth": a["auth"], "access": "public"}
-            for a in AUTH_PAGES if a["route"] not in have]
+            for a in AUTH_PAGES if a["route"] not in have and (a["auth"] != "signup" or passwords_on(doc))]
 
 
 def is_auth_page(page: dict) -> bool:

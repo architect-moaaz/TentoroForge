@@ -115,6 +115,7 @@ NODE_LABEL: dict[str, str] = {
     "frontend": "Projecting the page schemas",
     "workflows": "Declaring the workflows",
     "workflow_steps": "Authoring each workflow's steps",
+    "app_flows": "Mapping the paths people take",
     "business_rules": "Writing the business rules",
     "security": "Setting roles and permissions",
     "integrations": "Connecting the outside services",

@@ -24,6 +24,18 @@ import { windowStart, priorWindow } from "./data-engine/aggregate-window";
 // with no sensitive columns, so every helper below is a no-op fast-path on
 // non-sensitive entities — zero overhead for plain CRUD.
 import { sensitiveColumnsFor, type SensitiveColumnSpec } from "./sensitive-columns";
+import { actorOf, auditOn, ready as auditReady, reasonRequired, recordAudit, regulated, withAudit } from "./audit";
+
+/** Whether `entity` is a ledger — rows written once. The manifest is
+ *  projected beside this module; an app built before it existed has none. */
+async function isAppendOnly(entity: string): Promise<boolean> {
+  try {
+    const mod: any = await import("./append-only-entities");
+    return Boolean(mod?.isAppendOnly?.(entity));
+  } catch {
+    return false;
+  }
+}
 import { encryptSensitive, decryptSensitive, mask, looksMasked } from "./sensitive-crypto";
 // SEARCH-2 op:"search" — the manifest lists which `_search` tsvector columns
 // each entity carries. Empty for apps with no `search: true` columns, so
@@ -121,6 +133,14 @@ export interface DataEngineContext {
   /** A signed-out visitor's guest token (the `forge-guest` cookie): the rows
    *  a rule's `guestColumn` marks as theirs are reachable with it. */
   guest?: string;
+  /** Why this change is made — required on the records the audit policy
+   *  names (`X-Change-Reason` on the request). */
+  reason?: string;
+  /** Where the write came from, for the trail: `api` (default),
+   *  `workflow:<id>`, `event:<type>`, `seed`, `smith`. */
+  via?: string;
+  /** The run a workflow's write belongs to. */
+  runId?: string;
 }
 
 // ─── Slice-4 encrypt-at-rest helpers ─────────────────────────────────────
@@ -170,6 +190,30 @@ function _auditUnmask(entity: string, column: string, ctx: DataEngineContext): v
   console.info("[sensitive-unmask]", JSON.stringify(payload));
 }
 
+/** A row as the trail keeps it: every sensitive value as its mask, never
+ *  the plaintext or the ciphertext. */
+function _snapshotForAudit(entityName: string, row: Record<string, any> | null | undefined): Record<string, any> | null {
+  if (!row || typeof row !== "object") return null;
+  const specs = sensitiveColumnsFor(entityName);
+  const out: Record<string, any> = { ...row };
+  for (const col of Object.keys(specs)) {
+    const encKey = `${col}_encrypted`;
+    const maskKey = `${col}_mask`;
+    if (encKey in out) delete out[encKey];
+    if (col in out && out[col] != null) out[col] = out[maskKey] ?? _maskPlain(out[col], specs[col].mask);
+  }
+  return out;
+}
+
+/** The change to `entity` needs a reason the request did not carry. */
+async function _requireReason(entityName: string, ctx: DataEngineContext): Promise<void> {
+  await auditReady();
+  if (!auditOn() || !reasonRequired(entityName)) return;
+  if (!String(ctx.reason ?? "").trim()) {
+    throw new ValidationError([`A reason is required to change a ${entityName}: say why (X-Change-Reason).`]);
+  }
+}
+
 /** Write path: convert every plaintext sensitive value in `data` into the
  *  encrypted + mask column pair the DB actually holds. Idempotent — a
  *  round-tripped masked value (edit form submitted unchanged) is skipped,
@@ -185,8 +229,16 @@ async function _encryptSensitiveOnWrite(
   // by it, so it is stored as it is. TCommerce marked its cart's guestToken
   // sensitive; encrypted, it would match no visitor ever again.
   const guestCols = new Set(ownershipRulesFor(entityName).map((r) => r.guestColumn).filter(Boolean));
+  // SEALED ONLY WHERE THE TABLE HOLDS THE SEAL. A field the table keeps in
+  // the clear (a sign-in email, a column rows are found by, an app built
+  // before its fields were sealed) was "sealed" into columns that did not
+  // exist and its value dropped: a create through the data API lost it, an
+  // edit changed nothing (60v142ju, 2026-10-12). It stays as written now, and
+  // is masked when read.
+  const tbl: any = getEntity(entityName)?.table;
   for (const col of keys) {
     if (!(col in data) || guestCols.has(col)) continue;
+    if (tbl && !(`${col}_encrypted` in tbl)) continue;
     const raw = data[col];
     // Empty / undefined = "keep existing" on update, "no value" on create.
     // Either way, we must not overwrite _encrypted / _mask with an empty
@@ -206,6 +258,17 @@ async function _encryptSensitiveOnWrite(
     data[`${col}_mask`] = mask(str, spec.mask);
     delete data[col];  // the plaintext key is never persisted.
   }
+}
+
+/** The same seal, for a writer outside the engine (a process step, the
+ *  seeder): plain sensitive values become their `_encrypted` + `_mask` pair,
+ *  in place. Returns the plain values it took out, for the caller's own use. */
+export async function sealSensitive(entityName: string, data: Record<string, any>): Promise<Record<string, unknown>> {
+  const specs = sensitiveColumnsFor(entityName);
+  const plain: Record<string, unknown> = {};
+  for (const col of Object.keys(specs)) if (col in data) plain[col] = data[col];
+  await _encryptSensitiveOnWrite(entityName, data);
+  return plain;
 }
 
 /** Read path: for every sensitive column on this entity, replace the
@@ -245,6 +308,14 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
       // the value leaves the engine masked unless this caller may unmask.
       if (col in record && !allowed) {
         (record as any)[col] = _maskPlain((record as any)[col], spec.mask);
+      } else if (col in record && allowed && regulated()) {
+        // LOOKING IS ON THE RECORD here too: a value held in the clear (a
+        // seeded row) was shown unmasked and nothing was written, so the
+        // trail of a regulated app missed every such read (60v142ju).
+        await recordAudit(db, { action: "read_sensitive", entity: entityName,
+          entityId: (record as any)?.id != null ? String((record as any).id) : null, changed: [col],
+          actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api" }).catch((e: unknown) =>
+            console.warn("[audit] a sensitive read could not be recorded:", e));
       }
       continue;
     }
@@ -256,6 +327,13 @@ async function _maskOrUnmaskOnRead<T extends Record<string, any>>(
       // the incident is visible in logs.
       const blob = record[encKey];
       _auditUnmask(entityName, col, ctx);
+      if (regulated()) {
+        // LOOKING IS ON THE RECORD: who saw which column of which row.
+        await recordAudit(db, { action: "read_sensitive", entity: entityName,
+          entityId: (record as any)?.id != null ? String((record as any).id) : null, changed: [col],
+          actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api" }).catch((e: unknown) =>
+            console.warn("[audit] a sensitive read could not be recorded:", e));
+      }
       try {
         display = blob ? await decryptSensitive(String(blob)) : null;
       } catch (e) {
@@ -330,8 +408,11 @@ function actorValue(rule: OwnershipRule, ctx: DataEngineContext): unknown {
   // the value is read off it. A rule without one falls back to the session's
   // `workspaceId`, which a session may still not carry — the safe direction.
   const user = ctx.user as Record<string, unknown> | undefined;
+  // IN AN APPLICATION OF SEVERAL ORGANISATIONS the workspace is the one the
+  // person acts in (`activeOrgId`, from their membership); a rule naming an
+  // `actorColumn` reads that column of the users row instead.
   const v = rule.scope === "workspace"
-    ? (rule.actorColumn ? user?.[rule.actorColumn] : user?.workspaceId)
+    ? (rule.actorColumn ? user?.[rule.actorColumn] : (user?.activeOrgId ?? user?.workspaceId))
     : ctx.user?.id;
   return v === undefined || v === null || v === "" ? undefined : v;
 }
@@ -367,6 +448,7 @@ function scopeConditions(
   entity: { table: PgTableWithColumns<any> },
   ctx: DataEngineContext,
   depth = 0,
+  op: "read" | "write" = "write",
 ): SQL[] {
   // Tested for "not attribution" rather than "is scope" deliberately: a
   // manifest from an older projection carries no `kind`, and the safe reading
@@ -378,6 +460,11 @@ function scopeConditions(
   const cols = entity.table as any;
   const conds: SQL[] = [];
   for (const rule of rules) {
+    // EVERYONE READS, THE OWNER WRITES. A catalogue is browsed by visitors
+    // who hold no role at all; scoped to its vendor, a marketplace showed a
+    // guest no products and every category "0 products" (Ecom L1,
+    // 2026-10-11). `reads: "everyone"` lifts the rule from reads only.
+    if (op === "read" && rule.reads === "everyone") continue;
     if (role && (rule.unscopedRoles || []).includes(role)) continue;
     const col = cols[rule.column];
     if (col === undefined) {
@@ -394,7 +481,7 @@ function scopeConditions(
       // child is: `childId` must be one of the children this actor reaches
       // under Child's own rule. A target the actor reaches unscoped (no rule,
       // or a role the rule exempts) adds nothing.
-      const inner = throughConditions(rule, ctx, depth);
+      const inner = throughConditions(rule, ctx, depth, op);
       if (inner === null) {
         conds.push(sql`false`);
         continue;
@@ -430,6 +517,7 @@ function throughConditions(
   rule: OwnershipRule,
   ctx: DataEngineContext,
   depth: number,
+  op: "read" | "write" = "write",
 ): { table: PgTableWithColumns<any>; id: any; where: SQL | undefined } | null {
   const target = depth < 3 && rule.through ? getEntity(rule.through) : undefined;
   const id = (target?.table as any)?.id;
@@ -440,7 +528,7 @@ function throughConditions(
     );
     return null;
   }
-  return { table: target.table, id, where: allOf(scopeConditions(rule.through!, target, ctx, depth + 1)) };
+  return { table: target.table, id, where: allOf(scopeConditions(rule.through!, target, ctx, depth + 1, op)) };
 }
 
 /**
@@ -545,13 +633,14 @@ async function rowAccessConditions(
  * Blueprint declares as ownership, and what the rules builder declares as row
  * access. One list, so both end up in the same WHERE and the same count.
  */
-async function accessConditions(
+export async function accessConditions(
   entityName: string,
   entity: { table: PgTableWithColumns<any> },
   ctx: DataEngineContext,
+  op: "read" | "write" = "write",
 ): Promise<SQL[]> {
   return [
-    ...scopeConditions(entityName, entity, ctx),
+    ...scopeConditions(entityName, entity, ctx, 0, op),
     ...(await rowAccessConditions(entityName, entity, ctx)),
   ];
 }
@@ -560,6 +649,34 @@ async function accessConditions(
 function allOf(conds: SQL[]): SQL | undefined {
   if (conds.length === 0) return undefined;
   return conds.length === 1 ? conds[0] : (and(...conds) as SQL);
+}
+
+/**
+ * The WHERE that keeps `table` to what `user` may reach, or undefined when
+ * nothing scopes it.
+ *
+ * For a workflow's own database steps. They built their WHERE from the step's
+ * config alone and never asked the ownership rules, so a process read and
+ * changed rows across people while the pages of the same application could
+ * not (2026-10-12). The rules are the same rules, read the same way as the
+ * data API reads them. A run with no acting person — a schedule, another
+ * system's event — is the application's own and is not scoped.
+ */
+export async function scopeForTable(
+  table: PgTableWithColumns<any>,
+  user: DataEngineContext["user"],
+  op: "read" | "write" = "write",
+): Promise<SQL | undefined> {
+  if (!user?.id) return undefined;
+  if (!_initialized) {
+    const init = await import("./data-init");
+    await init.ensureDataEngineInitialized();
+  }
+  for (const [name, rec] of _entities) {
+    if (rec.table !== table) continue;
+    return allOf(await accessConditions(name, rec, { user }, op));
+  }
+  return undefined;
 }
 
 
@@ -870,30 +987,37 @@ export async function create(
   // Tenancy scoping: fill a NOT NULL workspace/tenant FK server-side (it's no
   // longer a form field) from the user's own workspace, falling back to the
   // single workspace row — so a create still satisfies the NOT NULL constraint.
-  const _tenancyFks = ["workspaceId", "tenantId", "orgId", "organizationId"];
-  const _needTenancy = _tenancyFks.filter((fk) => fk in entity.table && cleanData[fk] == null);
+  // THE ORGANISATION A ROW BELONGS TO IS THE ACTOR'S ACTIVE ONE — never the
+  // first row of some table. The old fallback picked "the single workspace"
+  // and, with two, put a new row in someone else's. A tenancy column with no
+  // active organisation is refused, not guessed.
+  const _tenancyFks = new Set(["workspaceId", "tenantId", "orgId", "organizationId"]);
+  try {
+    const ten: any = await import("./tenancy");
+    const pol = await ten.policy();
+    const col = pol?.columns?.[getTableName(entity.table as any)] ?? pol?.columns?.[entityName] ?? pol?.columns?.[entityName.toLowerCase()];
+    if (col) _tenancyFks.add(col);
+  } catch { /* no policy */ }
+  const _needTenancy = [..._tenancyFks].filter((fk) => fk in entity.table && cleanData[fk] == null);
   if (_needTenancy.length) {
-    let _wsId: any = (ctx.user as any)?.workspaceId ?? null;
+    let _wsId: any = (ctx.user as any)?.activeOrgId ?? (ctx.user as any)?.workspaceId ?? null;
     if (!_wsId && _uid) {
       try {
         const usersT = getEntity("users")?.table as any;
-        if (usersT && "workspaceId" in usersT) {
+        if (usersT) {
           const [u] = await db.select().from(usersT).where(eq(usersT.id, _uid)).limit(1);
-          _wsId = (u as any)?.workspaceId ?? null;
+          _wsId = (u as any)?.activeOrgId ?? (u as any)?.workspaceId ?? null;
         }
-      } catch { /* ignore — fall back below */ }
+      } catch { /* ignore */ }
     }
-    if (!_wsId) {
-      for (const wsName of ["workspaces", "workspace", "tenants", "organizations", "orgs"]) {
-        const wt = getEntity(wsName)?.table as any;
-        if (!wt) continue;
-        try {
-          const [w] = await db.select().from(wt).limit(1);
-          if ((w as any)?.id) { _wsId = (w as any).id; break; }
-        } catch { /* ignore */ }
+    if (_wsId) {
+      for (const fk of _needTenancy) cleanData[fk] = _wsId;
+    } else {
+      const required = _needTenancy.filter((fk) => (entity.table as any)[fk]?.notNull);
+      if (required.length) {
+        throw new ValidationError([`${entityName} belongs to an organisation and you are acting in none (${required.join(", ")}).`]);
       }
     }
-    if (_wsId) for (const fk of _needTenancy) cleanData[fk] = _wsId;
   }
 
   // Ownership on the write side — BOTH kinds of rule. The column names the
@@ -968,9 +1092,15 @@ export async function create(
   }
   await _encryptSensitiveOnWrite(entityName, validated);
 
-  // Insert
+  // Insert — and the trail's row, in the same transaction.
+  await _requireReason(entityName, ctx);
   stringifyDatesForStringColumns(entity.table, validated);
-  const [record] = await db.insert(entity.table).values(validated as any).returning();
+  const record = await withAudit(
+    async (tx: any) => (await tx.insert(entity.table).values(validated as any).returning())[0],
+    (r: any) => ({ action: "create", entity: entityName, entityId: r?.id != null ? String(r.id) : null,
+                   before: null, after: _snapshotForAudit(entityName, r), reason: ctx.reason ?? null,
+                   actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api", runId: ctx.runId ?? null }),
+  );
   await embedWrittenRow(entity.table, record);
   const event = `${entityName.toLowerCase()}_created`;
 
@@ -1002,6 +1132,11 @@ export async function update(
                        ...await accessConditions(entityName, entity, ctx)])!;
   const [existing] = await db.select().from(entity.table).where(where).limit(1);
   if (!existing) throw new NotFoundError(entityName, id);
+  // ROWS WRITTEN ONCE ARE NOT CHANGED — in the engine, not only at the route.
+  if (await isAppendOnly(entityName)) {
+    throw new ValidationError([`${entityName} is a ledger: rows are added, never changed.`]);
+  }
+  await _requireReason(entityName, ctx);
 
   // Strip system fields
   const { id: _, createdAt, updatedAt, created_at, updated_at, ...cleanData } = data;
@@ -1040,7 +1175,13 @@ export async function update(
   await _encryptSensitiveOnWrite(entityName, updateData);
 
   stringifyDatesForStringColumns(entity.table, updateData);
-  const [record] = await db.update(entity.table).set(updateData).where(where).returning();
+  const record = await withAudit(
+    async (tx: any) => (await tx.update(entity.table).set(updateData).where(where).returning())[0],
+    (r: any) => ({ action: "update", entity: entityName, entityId: String(id),
+                   before: _snapshotForAudit(entityName, existing), after: _snapshotForAudit(entityName, r),
+                   reason: ctx.reason ?? null, actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api",
+                   runId: ctx.runId ?? null }),
+  );
   await embedWrittenRow(entity.table, record, existing);
   const event = `${entityName.toLowerCase()}_updated`;
 
@@ -1065,8 +1206,17 @@ export async function remove(
                        ...await accessConditions(entityName, entity, ctx)])!;
   const [existing] = await db.select().from(entity.table).where(where).limit(1);
   if (!existing) throw new NotFoundError(entityName, id);
+  if (await isAppendOnly(entityName)) {
+    throw new ValidationError([`${entityName} is a ledger: rows are added, never removed.`]);
+  }
+  await _requireReason(entityName, ctx);
 
-  await db.delete(entity.table).where(where);
+  await withAudit(
+    async (tx: any) => { await tx.delete(entity.table).where(where); return existing; },
+    (r: any) => ({ action: "delete", entity: entityName, entityId: String(id),
+                   before: _snapshotForAudit(entityName, r), after: null, reason: ctx.reason ?? null,
+                   actor: actorOf(ctx.user, ctx.guest), via: ctx.via ?? "api", runId: ctx.runId ?? null }),
+  );
   const event = `${entityName.toLowerCase()}_deleted`;
 
   emit(event, { entityId: id, entity: existing, user: ctx.user }).catch(console.error);
@@ -1089,7 +1239,7 @@ export async function findById(
   // does not exist from one they may not see, which is what stops a detail
   // route from being an existence oracle.
   const where = allOf([eq(entity.table.id, id),
-                       ...await accessConditions(entityName, entity, ctx)])!;
+                       ...await accessConditions(entityName, entity, ctx, "read")])!;
   const [record] = await db.select().from(entity.table).where(where).limit(1);
   if (!record) throw new NotFoundError(entityName, id);
 
@@ -1122,7 +1272,7 @@ export async function query(
   // form — .where(search) then .where(filters) — silently dropped the search
   // whenever a filter was also present. Collecting the conditions and applying
   // them once removes the failure mode rather than ordering around it.
-  const conditions: SQL[] = await accessConditions(entityName, entity, ctx);
+  const conditions: SQL[] = await accessConditions(entityName, entity, ctx, "read");
 
   // Search — the OR across search fields is ONE condition, so it ANDs with the
   // filters and with the ownership predicate instead of competing with them.
@@ -1197,7 +1347,7 @@ export async function stats(
 
   // Scoped like the list it summarises. An unscoped count is a row count of
   // everyone's data wearing a number badge.
-  const where = allOf(await accessConditions(entityName, entity, ctx));
+  const where = allOf(await accessConditions(entityName, entity, ctx, "read"));
   let q: any = db.select({ total: count() }).from(entity.table);
   if (where) q = q.where(where);
   const [result] = await q;
@@ -1279,7 +1429,7 @@ async function joinedCondition(column: any, spec: unknown, ctx: DataEngineContex
     if (tcols[k] === undefined) return null;
     tconds.push(eq(tcols[k], v as any));
   }
-  tconds.push(...(await accessConditions(targetName as string, target, ctx)));
+  tconds.push(...(await accessConditions(targetName as string, target, ctx, "read")));
   const _db = _testDb ?? db;
   const sub = (_db as any).select({ id: tcols.id }).from(target.table);
   return inArray(column, tconds.length ? sub.where(and(...tconds)) : sub);
@@ -1315,7 +1465,7 @@ async function computeSimple(
   // Accumulate WHERE conditions (ownership + window / explicit range + filters).
   // A KPI tile is a read like any other: "12 open invoices" computed over every
   // tenant's invoices is the same leak as listing them, one integer at a time.
-  const conds: SQL[] = await accessConditions(entityName, entity, ctx);
+  const conds: SQL[] = await accessConditions(entityName, entity, ctx, "read");
   const dateCol = cols[m.dateField || "createdAt"];
   const start = range ? range.start : windowStart(m.window);
   if (start && dateCol) conds.push(gte(dateCol, start));
@@ -1467,7 +1617,7 @@ export async function resolveSeries(
   // A chart is a read. A revenue-by-month series over every tenant's rows
   // leaks the same data a list would, aggregated into a shape that looks
   // harmless.
-  const scope = await accessConditions(source.entity, entity, ctx);
+  const scope = await accessConditions(source.entity, entity, ctx, "read");
 
   const fn = source.agg?.fn || "count";
 
@@ -1684,7 +1834,7 @@ export async function resolveQuery(
   const entity = getEntity(source.entity);
   if (!entity) return [];
   const cols = entity.table as any;
-  const conds: SQL[] = await accessConditions(source.entity, entity, ctx);
+  const conds: SQL[] = await accessConditions(source.entity, entity, ctx, "read");
 
   const measures = (source.measures || []).filter((m) =>
     m && m.key && (m.aggregation === "count" || (m.field && cols[m.field] !== undefined)));
@@ -1945,7 +2095,7 @@ export async function resolveSearch(
     // not read hands them the contents a snippet at a time.
     const conds: SQL[] = [
       sql`${vectorExpr} @@ ${tsq}`,
-      ...await accessConditions(entityName, entity, ctx),
+      ...await accessConditions(entityName, entity, ctx, "read"),
     ];
     for (const [k, v] of Object.entries(withReader(source.filter, ctx, cols))) {
       if (cols[k] !== undefined) conds.push(eq(cols[k], v as any));
@@ -2034,7 +2184,7 @@ export async function resolveSimilar(
   const literal = `[${vector.join(",")}]`;
   const distance = sql<number>`(${column} <=> ${literal}::vector)`;
   const where = allOf([sql`${column} IS NOT NULL`,
-                       ...await accessConditions(source.entity, entity, ctx)]);
+                       ...await accessConditions(source.entity, entity, ctx, "read")]);
   const limit = Math.min(Math.max(Number(source.limit) || _SIMILAR_DEFAULT_LIMIT, 1), _SIMILAR_MAX_LIMIT);
 
   const _db = _testDb ?? db;

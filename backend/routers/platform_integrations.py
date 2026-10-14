@@ -90,9 +90,14 @@ async def _require_org_admin(
     return m
 
 
-def _key_known(provider: str, key: str) -> bool:
-    """Refuse writes for keys not declared in the spec registry. Prevents
-    a malicious/mistyped write from creating orphan rows."""
+def _key_known(provider: str, key: str, declared: list | None = None) -> bool:
+    """Refuse writes for keys not declared in the spec registry — or, under
+    the `app:<integration>` provider, by one of the org's applications
+    (`services.declared_secrets`). Prevents a malicious/mistyped write from
+    creating orphan rows."""
+    from services.declared_secrets import APP_PROVIDER, is_declared
+    if str(provider).startswith(APP_PROVIDER):
+        return is_declared(provider, key, declared or [])
     if provider not in all_providers():
         return False
     return any(e.key == key for e in keys_for_provider(provider))
@@ -159,11 +164,14 @@ async def upsert_integration(
     distinguishes 'explicitly cleared' from 'never set')."""
     await _require_org_admin(org_id, user, db)
 
-    if not _key_known(req.provider, req.key):
+    from services.declared_secrets import APP_PROVIDER, declared_keys_for_org
+    declared = await declared_keys_for_org(db, org_id) if str(req.provider).startswith(APP_PROVIDER) else []
+    if not _key_known(req.provider, req.key, declared):
         raise HTTPException(
             status_code=400,
             detail=f"unknown provider/key: {req.provider}/{req.key}. "
-                   f"Add it to services.node_config_specs first.",
+                   f"Add it to services.node_config_specs first, or declare it on one of "
+                   f"this organisation's applications.",
         )
 
     # kind=select fields must have a value from the declared options list.
@@ -289,13 +297,22 @@ async def sync_project_env(
 
 
 @router.get("/api/integrations/catalog")
-async def integrations_catalog() -> list[dict[str, Any]]:
+async def integrations_catalog(
+    org_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict[str, Any]]:
     """Return the full catalog (all providers, all keys) for the settings-page
     UI. Values are NOT included — this endpoint just tells the UI what fields
-    to render + their metadata (label, kind, required, help_url)."""
+    to render + their metadata (label, kind, required, help_url). With
+    `org_id`, the names the org's own applications declare come too, under
+    `app:<integration>` — a card per declared system."""
+    from services.declared_secrets import declared_keys_for_org
+    entries = [e for provider in all_providers() for e in keys_for_provider(provider)]
+    if org_id is not None:
+        entries += await declared_keys_for_org(db, org_id)
     out: list[dict[str, Any]] = []
-    for provider in all_providers():
-        for e in keys_for_provider(provider):
+    for e in entries:
+        if True:
             out.append({
                 "provider": e.provider,
                 "key": e.key,

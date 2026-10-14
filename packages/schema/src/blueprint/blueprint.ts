@@ -31,6 +31,7 @@ import {
   TestId,
   WidgetId,
   WorkflowId,
+  JourneyId,
   artifactBase,
   ArtifactStatus,
 } from "./ids";
@@ -115,6 +116,91 @@ export const Capability = z.object({
   ...artifactBase,
 });
 
+// ===========================================================================
+// §11b · domainReference — what a practitioner expects of such a product
+// ===========================================================================
+
+/**
+ * One screen a product in this sub-domain is expected to have, independent
+ * of what was asked for. The model answers it with a page whose `reference`
+ * names it, or declines it with a reason.
+ */
+export const ReferenceScreen = z.object({
+  name: z.string(),
+  purpose: z.string().default(""),
+  forRoles: z.array(z.string()).default([]),
+  /**
+   * `sign_in` and `sign_up` are the application's own ways in: the platform
+   * builds those pages, so they answer such an item by kind, not by a
+   * `reference` an author writes on a page it does not own.
+   */
+  kind: z.enum(["dashboard", "list", "record", "form", "workspace", "public", "tool", "sign_in", "sign_up"]).optional(),
+});
+
+export const ReferenceRecord = z.object({
+  name: z.string(),
+  purpose: z.string().default(""),
+  /** The fields that make the record usable to a practitioner. */
+  fields: z.array(z.string()).default([]),
+  statuses: z.array(z.string()).default([]),
+});
+
+export const ReferenceProcess = z.object({
+  name: z.string(),
+  purpose: z.string().default(""),
+  steps: z.array(z.string()).default([]),
+  roles: z.array(z.string()).default([]),
+  /** The records the process writes. */
+  writes: z.array(z.string()).default([]),
+});
+
+export const ReferenceRule = z.object({
+  name: z.string(),
+  statement: z.string(),
+  /** One concrete input a correct product refuses. */
+  refusedCase: z.string().default(""),
+});
+
+/** A reference item this product does not need, and why; `by` is the agent
+ *  or "owner" that declined it. A decline without a reason is a finding. */
+export const ReferenceDecline = z.object({
+  kind: z.enum(["screen", "record", "process", "rule", "integration"]),
+  name: z.string(),
+  reason: z.string().min(1),
+  by: z.string().default("owner"),
+});
+
+/**
+ * The domain reference the build writes first (`domain_reference` node,
+ * owned by `domain_intelligence`): the domain and sub-domain this product
+ * belongs to and what a practitioner expects of a product there — screens,
+ * records, processes, rules with their refused cases, integrations,
+ * conventions and benchmark products. The model nodes are held to it (every
+ * item answered by an artifact whose `reference` names it, or declined with a
+ * reason) and the finished application is scored against it
+ * (`runtime.scorecard.domain`). `sources` holds what a researcher read when
+ * one did; empty means the model's own knowledge.
+ */
+export const DomainReference = z.object({
+  domain: z.string().default(""),
+  subdomain: z.string().default(""),
+  summary: z.string().default(""),
+  personas: z.array(Persona).default([]),
+  screens: z.array(ReferenceScreen).default([]),
+  records: z.array(ReferenceRecord).default([]),
+  processes: z.array(ReferenceProcess).default([]),
+  rules: z.array(ReferenceRule).default([]),
+  integrations: z
+    .array(z.object({ name: z.string(), purpose: z.string().default(""), providers: z.array(z.string()).default([]) }))
+    .default([]),
+  /** Units, statuses, vocabulary, regulatory habits of the field. */
+  conventions: z.array(z.string()).default([]),
+  /** Well-known products people would hold this one against, and what to take from each. */
+  benchmarks: z.array(z.object({ product: z.string(), takeaway: z.string().default("") })).default([]),
+  sources: z.array(z.string()).default([]),
+  declined: z.array(ReferenceDecline).default([]),
+});
+
 export const Product = z.object({
   objectives: z.array(z.string()).default([]),
   personas: z.array(Persona).default([]),
@@ -133,6 +219,12 @@ export const Product = z.object({
    * Defaults to "en" because that is what every existing application is, and
    * a default of "unknown" would make each of them look like a question.
    */
+  /**
+   * The currency money is kept and shown in — ISO 4217 (`AED`, `GBP`). Money
+   * fields hold MAJOR units (12.50, never 1250); a payment adapter converts
+   * to minor units at the gateway. Absent, derived from `locale`.
+   */
+  currency: z.string().optional(),
   locale: z
     .string()
     .describe(
@@ -193,6 +285,8 @@ export const Module = z.object({
   name: z.string(),
   description: z.string().default(""),
   pages: z.array(PageId).default([]),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   /**
    * The person chose, at the product-model gate, not to build this module
    * yet. Its screens are declared but not written or served; its records and
@@ -257,6 +351,7 @@ export const PagePattern = z.enum([
   // build never saw — no contract, no design, not in the editor — so every
   // app opened on the same sign-in page with the same "Welcome back". As
   // pages they are written like every other; `auth` says which.
+  "audit_trail",
   "auth",
 ]);
 
@@ -413,6 +508,8 @@ export const PageContract = z.object({
   route: z.string().describe("URL path, e.g. /candidates or /candidates/[id]"),
   purpose: z.string().describe("Why this page exists, in business terms"),
   pattern: PagePattern.optional(),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   /** On an `auth` page: which of the two it is. */
   auth: z.enum(["login", "signup"]).optional(),
   module: ModuleId.optional(),
@@ -1558,6 +1655,12 @@ export const Field = z.object({
   enumValues: z.array(z.string()).optional(),
   /** Marks PII / financial data so security rules can act on it structurally. */
   sensitive: z.boolean().default(false),
+  /** How a sensitive value is shown to a role not among its `readers`:
+   *  the last four, the email's shape, the phone's last four, or nothing. */
+  mask: z.enum(["last4", "email", "phone", "full"]).optional(),
+  /** The roles that may see a sensitive value unmasked; looking is on the
+   *  record when the audit level is `regulated`. */
+  readers: z.array(z.string()).optional(),
   /**
    * The entity this field points at, when it is a foreign key.
    *
@@ -1597,6 +1700,8 @@ export const Entity = z.object({
   name: z.string(),
   table: z.string(),
   description: z.string().default(""),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   fields: z.array(Field).default([]),
   /** Field used as the human label in pickers, FK columns and breadcrumbs. */
   labelField: z.string().optional(),
@@ -1608,6 +1713,25 @@ export const Entity = z.object({
    * no Member, filled a separate public "Create Profile" form that belonged
    * to nobody, and their KYC could not be found. At most one entity.
    */
+  /**
+   * ROWS ARE WRITTEN ONCE. A ledger, a log, a consent: inserted, never
+   * changed or removed — refused by the data engine and the data API, and
+   * said so to the person. The audit trail itself is append-only by the
+   * database, not by this flag.
+   */
+  /**
+   * THE THING PEOPLE BUY. On the one entity whose rows are put in a cart
+   * and paid for; the runtime ships its cart and checkout with it.
+   */
+  /**
+   * THE ORGANISATION PEOPLE BELONG TO. On the one entity that is the tenant
+   * (a Clinic, a Company, a Practice): every entity with a field that
+   * `references` it belongs to an organisation, and its rows are scoped to
+   * the person's active one. Memberships live in a runtime table.
+   */
+  tenant: z.boolean().default(false),
+  commerce: z.boolean().default(false),
+  appendOnly: z.boolean().default(false),
   account: z.boolean().optional(),
   ...artifactBase,
 });
@@ -1760,6 +1884,58 @@ export const WorkflowStep = z.object({
       /** On a refused `end`: the sentence the person is shown. Also a
        *  notification's text on `send_notification`. */
       message: z.string().optional(),
+      /**
+       * On a `wait`: how long the run pauses — an ISO-8601 duration (`P2D`,
+       * `PT90M`) or words (`2 days`, `90 minutes`). The run is put down and
+       * picked up by the clock; nothing sleeps.
+       */
+      for: z.string().optional(),
+      /** On a `wait`: a moment to wait until, as a template to a date
+       *  (`{{booking.startsAt}}`). */
+      until: z.string().optional(),
+      /** On a `wait_for_event`: how long to wait before giving up, as `for`. */
+      timeout: z.string().optional(),
+      /**
+       * On an `http_call`: how the call is signed, naming the secret by its
+       * NAME (`secretRef`, declared on an integration's `secretRefs`); the
+       * runtime reads the value from its environment and never writes it
+       * into a variable or a log. `in`: as a bearer token (default), a
+       * header called `name`, a query parameter called `name`, or HTTP basic
+       * (the secret holds `user:password`).
+       */
+      auth: z
+        .object({
+          secretRef: z.string(),
+          in: z.enum(["bearer", "header", "query", "basic"]).default("bearer"),
+          name: z.string().optional(),
+        })
+        .optional(),
+      /** On a human step: minutes until it is overdue. */
+      dueIn: z.number().int().positive().optional(),
+      /** On a human step: the role an overdue task is handed to. */
+      escalateTo: RoleId.optional(),
+      /**
+       * On an `end`: the few named values the page that ran this workflow may
+       * read, each a template over what the run holds (`{{checkout.url}}`).
+       * The run's reply is a receipt, never the run — its variables are
+       * stripped on the way out (a 20 MB reply once broke the page that
+       * started it) — so what a page needs back is DECLARED here, by name.
+       */
+      reply: z.record(z.string(), z.unknown()).optional(),
+      /**
+       * On an `end`: where the person is sent when the run completes — a
+       * route of this application (`/orders/{{insert_order.id}}`) or an
+       * outside address a step produced (`{{checkout.url}}`). The page follows
+       * it instead of refreshing. Only on an `end` that is not refused.
+       */
+      redirect: z.string().optional(),
+      /**
+       * On a `send_notification`: where it reaches the person. `in_app` is the
+       * bell every signed-in person has; `push` reaches the devices they have
+       * subscribed, and needs `mobile.push` on — a push channel in an
+       * application without push is refused.
+       */
+      channels: z.array(z.enum(["in_app", "push"])).optional(),
     })
     .catchall(z.unknown())
     .default({}),
@@ -1769,10 +1945,31 @@ export const Workflow = z.object({
   id: WorkflowId,
   name: z.string(),
   purpose: z.string().default(""),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   trigger: z.object({
     /** A trigger variant from the workflow node catalog. */
     kind: z.enum(["manual", "webhook", "schedule", "api_event", "db_change"]),
+    /** The sentence: when and why this runs. The fields below are what the
+     *  engine reads; `detail` is for the person. */
     detail: z.string().default(""),
+    /** `schedule`: a 5-field cron (`0 9 * * 1`), read in `timezone`. */
+    cron: z.string().optional(),
+    /** `schedule`: an IANA zone (`Asia/Dubai`); the application's locale
+     *  decides the default. */
+    timezone: z.string().optional(),
+    /** `schedule`: paused when false — Smith's "stop the nightly reminder". */
+    enabled: z.boolean().default(true),
+    /** `db_change`: the record type whose change starts this. */
+    entity: EntityId.optional(),
+    /** `db_change`: which change. */
+    on: z.enum(["created", "updated", "deleted"]).optional(),
+    /** `api_event` | `webhook`: the event's name as the bus carries it
+     *  (`order.paid`; for a webhook, as the integration's `inbound.events`
+     *  list it). */
+    event: z.string().optional(),
+    /** `webhook`: the integration whose call starts this. */
+    integration: IntegrationId.optional(),
   }),
   steps: z.array(WorkflowStep).default([]),
   /** Pages that can launch this workflow — the wiring, declared not inferred. */
@@ -1838,6 +2035,8 @@ export const BusinessRule = z.object({
   name: z.string(),
   /** Human statement of the rule, e.g. "Expenses above ₹50,000 need approval". */
   statement: z.string(),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   /** Machine-evaluable form. */
   expression: z.string().optional(),
   appliesTo: z.array(AnyArtifactId).default([]),
@@ -1895,6 +2094,8 @@ export const Integration = z.object({
   name: z.string(),
   kind: z.enum(["email", "storage", "payment", "auth", "webhook", "mcp", "other"]),
   provider: z.string().default(""),
+  /** The domain reference item this answers, by its exact name (`domainReference`). */
+  reference: z.string().optional(),
   /** Names only. §42/§99 — raw credentials never live in the Blueprint. */
   secretRefs: z.array(z.string()).default([]),
   /**
@@ -1911,6 +2112,23 @@ export const Integration = z.object({
    * which service it is sending through — or that none is connected.
    */
   serves: z.string().default(""),
+  /**
+   * When the outside system CALLS THE APPLICATION. The app answers at
+   * `/api/webhooks/<integration>` and believes a call only once its
+   * signature checks out against the secret `signingSecretRef` names (one
+   * of `secretRefs`; the value lives on the platform). `events` are the
+   * names the system sends, as a `webhook` trigger's `event` names them.
+   * `verify`: `hmac_sha256` (an `X-Signature: t=<unix>,v1=<hex>` over
+   * `<t>.<body>`), `bearer` (the secret as a bearer token), or `provider`
+   * (the provider's own scheme, from its adapter).
+   */
+  inbound: z
+    .object({
+      events: z.array(z.string()).default([]),
+      verify: z.enum(["hmac_sha256", "bearer", "provider"]).default("hmac_sha256"),
+      signingSecretRef: z.string(),
+    })
+    .optional(),
   ...artifactBase,
 });
 
@@ -2015,6 +2233,17 @@ export const RecordScopeRule = z.object({
    * visitor reaches the rows carrying theirs, the platform fills it when they
    * create one, and once they sign in they still reach them.
    */
+  /** Who may READ the rows: the same people who may write them, or everyone. */
+  reads: z
+    .enum(["scoped", "everyone"])
+    .describe(
+      'Who may read the rows. "scoped": the same people who may write them (the default). ' +
+      '"everyone": anyone, signed in or not, reads every row — a catalogue, a listing, a ' +
+      "public profile — while `column` still decides who may change or remove it. Say " +
+      '"everyone" wherever visitors browse what owners manage; without it a signed-out ' +
+      "visitor, who holds no role, reaches no row at all.",
+    )
+    .default("scoped"),
   guestColumn: z
     .string()
     .describe(
@@ -2046,6 +2275,48 @@ export const Security = z.object({
    */
   signupRole: RoleId.optional(),
   /**
+   * HOW PEOPLE SIGN IN. `password`: email and password (the default).
+   * `magicLink`: a one-time link sent to the address, good for fifteen
+   * minutes, used once. `sso`: the identity providers an organisation signs
+   * in through — each an `auth` integration row holding the NAMES of its
+   * issuer, client id and client secret (`SSO_<ID>_ISSUER`,
+   * `SSO_<ID>_CLIENT_ID`, `SSO_<ID>_CLIENT_SECRET`; values live on the
+   * platform). `kind: oidc` speaks OpenID Connect to the provider itself
+   * (Entra, Google, Okta, or any issuer with discovery); `kind: saml` speaks
+   * OIDC to the platform's SAML bridge, which speaks SAML to the enterprise.
+   * `domains` limits who may sign in through it; `roleFrom` reads the role
+   * off a claim (a group name → a role id), else `default`; `provisioning`
+   * says whether a person unknown to the application is made on first
+   * sign-in (`just_in_time`) or must have been invited (`invite_only`).
+   * Password off with nothing else on is refused: nobody could sign in.
+   */
+  signIn: z
+    .object({
+      password: z.boolean().default(true),
+      magicLink: z.boolean().default(false),
+      sso: z
+        .array(
+          z.object({
+            id: z.string().regex(/^[a-z][a-z0-9_]{0,23}$/, "a short lower_snake id: entra, google, okta_saml"),
+            name: z.string(),
+            kind: z.enum(["oidc", "saml"]).default("oidc"),
+            provider: z.enum(["entra", "google", "okta", "oidc", "saml"]).default("oidc"),
+            integration: IntegrationId.optional(),
+            domains: z.array(z.string()).default([]),
+            roleFrom: z
+              .object({
+                claim: z.string().default("groups"),
+                map: z.record(z.string(), RoleId).default({}),
+                default: RoleId.optional(),
+              })
+              .optional(),
+            provisioning: z.enum(["invite_only", "just_in_time"]).default("just_in_time"),
+          }),
+        )
+        .default([]),
+    })
+    .default({}),
+  /**
    * A string states policy and enforces nothing; a {@link RecordScopeRule}
    * is enforced. An entity with no rule is readable by every authenticated
    * user — correct when authorisation is by role rather than by record, and
@@ -2073,7 +2344,45 @@ export const Security = z.object({
     )
     .default([]),
   protectedRoutes: z.array(z.string()).default([]),
+  /**
+   * SEVERAL ORGANISATIONS, SIDE BY SIDE. `organisation`: the tenant entity's
+   * rows are organisations; people join them by signup or invite and hold a
+   * role PER organisation (`memberRoles`); `platformRoles` are held
+   * platform-wide and see every organisation. `organisationAdminRole` is the
+   * member role that invites, removes and re-roles members. `signup` says
+   * whether a new person creates an organisation, joins by invite, or either.
+   */
+  tenancy: z
+    .object({
+      kind: z.enum(["none", "organisation"]).default("none"),
+      signup: z.enum(["creates_organisation", "joins_by_invite", "both"]).default("both"),
+      memberRoles: z.array(z.string()).default([]),
+      platformRoles: z.array(z.string()).default([]),
+      organisationAdminRole: z.string().optional(),
+      nameField: z.string().optional(),
+    })
+    .default({}),
+  /** Superseded by `audit`; read by nothing. Kept so older documents load. */
   auditLogging: z.boolean().default(false),
+  /**
+   * THE TRAIL. `writes`: every create, update and delete of a record, with
+   * who, when, before and after, kept in `forge_audit` — tamper-evident
+   * (a hash chain) and immutable (the database refuses to change or erase a
+   * row). `regulated`: writes plus sensitive reads (an unmasked value),
+   * exports, sign-ins and sign-in failures, and a reason required on the
+   * records named in `reasonRequired`. `reviewers` are the roles that open
+   * the audit screen, export it and verify the chain; a level with none is
+   * refused — a trail nobody may read is write-only. `retentionDays`
+   * absent keeps everything.
+   */
+  audit: z
+    .object({
+      level: z.enum(["none", "writes", "regulated"]).default("none"),
+      reviewers: z.array(z.string()).default([]),
+      retentionDays: z.number().int().positive().optional(),
+      reasonRequired: z.array(EntityId).default([]),
+    })
+    .default({}),
 });
 
 // ===========================================================================
@@ -2591,9 +2900,44 @@ export const Runtime = z.object({
       working: z.number(),
       fixed: z.array(z.string()).default([]),
       failing: z.array(z.string()).default([]),
+      /** Pages the check could not open — its own failure, never the app's; said, never repaired. */
+      untried: z.array(z.string()).default([]),
       /** The Blueprint version the check reflects; a later version is a
        *  change nobody has used the app after. */
       version: z.number().optional(),
+    })
+    .optional(),
+  /**
+   * The application scored against the definition of success, written by the
+   * checks that run after hand-over (`services/blueprint/scorecard`): pages
+   * built and working, routes answering as declared for every role, access
+   * (each role sees only its rows), logic (processes run through, rules
+   * refuse their refused case), domain (the reference answered) and smith
+   * (what the fix loop closed). `untried` is what a check could not try —
+   * its own failure, never the application's — and is never repaired.
+   */
+  scorecard: z
+    .object({
+      version: z.number().optional(),
+      at: z.string().optional(),
+      status: z.enum(["checking", "fixing", "done", "stopped"]).default("checking"),
+      criteria: z
+        .record(
+          z.object({
+            total: z.number().default(0),
+            green: z.number().default(0),
+            red: z.array(z.record(z.string(), z.unknown())).default([]),
+            untried: z.array(z.record(z.string(), z.unknown())).default([]),
+          }),
+        )
+        .default({}),
+      fix: z
+        .object({
+          turns: z.number().default(0),
+          yield: z.array(z.number()).default([]),
+          stopped: z.string().nullable().optional(),
+        })
+        .optional(),
     })
     .optional(),
 });
@@ -2689,6 +3033,68 @@ export const ApplicationState = z.enum([
 
 export const BLUEPRINT_SCHEMA_VERSION = "1" as const;
 
+// ===========================================================================
+// App flows — the paths people take through the application
+// ===========================================================================
+
+/**
+ * One step of a flow: where the person is, what they do there, and how they
+ * get to the next step.
+ */
+export const FlowStep = z.object({
+  /** The screen they are on. */
+  page: PageId,
+  /** The part of it — a tab, the panel a record opens in — by its section key. */
+  section: z.string().optional(),
+  /**
+   * What they do here, in their words: "Choose a size", "Add to cart",
+   * "Place order". Empty on the step a flow ends on.
+   */
+  does: z.string().default(""),
+  /** The process that does it, when one does. */
+  workflow: WorkflowId.optional(),
+  /**
+   * How they reach the next step: `go` — they are taken there when this step
+   * is done (placing an order opens the order); `offer` — they stay, and are
+   * shown the way (a "View cart" after adding); `menu` — they go there
+   * themselves, by the menu or a tab.
+   */
+  then: z.enum(["go", "offer", "menu"]).default("go"),
+  /**
+   * The record the next step opens with — the one this step chose or made
+   * ("Place order" carries the Order: the next step opens that order).
+   */
+  carries: EntityId.optional(),
+});
+
+/**
+ * A path a person takes through the application to reach one of their
+ * goals: Home → a product → the cart → checkout → their order.
+ *
+ * THE APPLICATION KNEW WHERE THINGS WERE, NOT HOW ANYONE MOVED. ToroCommerce
+ * (forge-v3, 2026-10-07) had its screens, sections and processes, and two
+ * links between eleven screens: placing an order left the customer on an
+ * empty cart, a featured product opened a search for its own name, nothing
+ * offered the cart after adding to it. The journeys the planner was asked
+ * for shaped the screens and were then thrown away. A flow keeps them: the
+ * page writer is told each screen's hand-offs, each process's landing is
+ * read from it, the build walks it as its person, and it is drawn.
+ */
+export const AppFlow = z.object({
+  id: JourneyId,
+  /** "Buy something", "Fulfil an order". */
+  name: z.string(),
+  /** Who takes it — the role the person holds. */
+  role: RoleId.optional(),
+  /** The goal it reaches, in the person's terms (one of their persona's goals). */
+  goal: z.string().default(""),
+  /** In order; the last is where it ends. */
+  steps: z.array(FlowStep).min(2),
+  /** What the person sees when it is done: "their order, open, with its status". */
+  ends: z.string().default(""),
+  ...artifactBase,
+});
+
 export const Blueprint = z.object({
   schemaVersion: z.literal(BLUEPRINT_SCHEMA_VERSION),
   /** Bumped on every accepted change (§91). Indexes into changeHistory. */
@@ -2697,6 +3103,7 @@ export const Blueprint = z.object({
 
   application: ApplicationMeta,
   product: Product.default({}),
+  domainReference: DomainReference.default({}),
 
   roles: z.array(Role).default([]),
   permissions: z.array(Permission).default([]),
@@ -2708,10 +3115,37 @@ export const Blueprint = z.object({
 
   data: DataModel.default({}),
   workflows: z.array(Workflow).default([]),
+  /** The paths people take through the application (`AppFlow`). */
+  flows: z.array(AppFlow).default([]),
   businessRules: z.array(BusinessRule).default([]),
   apis: z.array(ApiEndpoint).default([]),
   integrations: z.array(Integration).default([]),
   security: Security.default({}),
+  /**
+   * THE APPLICATION ON A PHONE. `installable`: it offers itself for the home
+   * screen (a manifest, icons, a service worker that keeps the shell — never
+   * the data — so it opens offline). `display` and `orientation` are the
+   * manifest's. `push`: notifications reach a person's subscribed devices,
+   * signed with the application's own keys; a `send_notification` step
+   * names `push` among its `channels` to use it. `store`: a wrapper for the
+   * app stores, set only by the owner, with the bundle id the stores know.
+   * Decided by the product analysis from the requirements: who uses it,
+   * where, and whether being told matters when the app is closed.
+   */
+  mobile: z
+    .object({
+      installable: z.boolean().default(true),
+      display: z.enum(["standalone", "fullscreen", "minimal-ui", "browser"]).default("standalone"),
+      orientation: z.enum(["any", "portrait", "landscape"]).default("any"),
+      push: z.boolean().default(false),
+      store: z
+        .object({
+          enabled: z.boolean().default(false),
+          bundleId: z.string().regex(/^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z][a-zA-Z0-9]*)+$/).optional(),
+        })
+        .default({}),
+    })
+    .default({}),
 
   /** §41–§45 — designs the user connected. Empty for a prompt-only app,
    *  which is also what tells the orchestrator there is no Figma work to do. */

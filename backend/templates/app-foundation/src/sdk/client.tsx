@@ -5,6 +5,7 @@
 // input out, or a button that passes a field the workflow does not take, does
 // not compile.
 
+import { apiPath } from "@/lib/api-path";
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -13,7 +14,7 @@ import { fileUrl } from "./files";
 import { roundPoint, isPoint, type GeoPoint } from "./geo";
 
 export { WidgetView, chartPropsFor, type WidgetViewData, type WidgetViewProps } from "./widget-view";
-export { SignInForm, SignUpForm, useSignIn, useSignUp, signupFields, type AccountField } from "./auth";
+export { SignInForm, SignInMethods, SignUpForm, useSignIn, useSignInMethods, useMagicLink, useSignUp, signupFields, type AccountField, type SignInMethods as SignInMethodList } from "./auth";
 export type { ChartSelection } from "@tentoroforge/library";
 export { distanceKm, formatDistance, parseNear, type GeoPoint } from "./geo";
 
@@ -46,7 +47,8 @@ export function useLive(seconds = 10): void {
 
 export interface RunResult {
   ok: boolean;
-  /** What the workflow returned — its log, and the record it wrote if any. */
+  /** What the workflow returned — its receipt: status, the record it wrote if
+   *  any, and `reply`, the values its end declared for this page by name. */
   result: Json;
   error: string | null;
 }
@@ -72,7 +74,7 @@ export function useWorkflow<I extends Json>(
     setPending(true);
     setError(null);
     try {
-      const res = await fetch(`/api/workflows/${encodeURIComponent(workflow.id)}/execute`, {
+      const res = await fetch(apiPath(`/api/workflows/${encodeURIComponent(workflow.id)}/execute`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ input }),
@@ -97,7 +99,12 @@ export function useWorkflow<I extends Json>(
       // (`router.push(href(pages.x, { id: result.id }))` right after `await run()`)
       // navigates first; a refresh queued ahead of it could leave the page where
       // it was — SnapIT stayed on "Identifying product" with its result loaded.
-      if (options.redirectTo) router.push(options.redirectTo);
+      // THE RUN'S OWN `redirect` WINS: its end declared where the person goes
+      // next — an outside address a step produced (a hosted checkout) is
+      // left to the browser, a route of this application to the router.
+      const go = typeof result.redirect === "string" && result.redirect ? String(result.redirect) : options.redirectTo;
+      if (go && /^https?:\/\//i.test(go)) window.location.assign(go);
+      else if (go) router.push(go);
       else setTimeout(() => router.refresh(), 0);
       return { ok: true, result, error: null };
     } catch (err) {
@@ -247,7 +254,7 @@ async function storeImage(file: File): Promise<string | null> {
   const body = new FormData();
   body.append("file", file);
   try {
-    const res = await fetch("/api/files/upload", { method: "POST", body });
+    const res = await fetch(apiPath("/api/files/upload"), { method: "POST", body });
     const ref = res.ok ? ((await res.json()) as { id?: string }) : null;
     return ref?.id ?? null;
   } catch {

@@ -104,6 +104,9 @@ _FAMILY = {
     # kanban are lists with an opinion about position, not a different job.
     "entity_list": "collection",
     "approval_inbox": "collection",
+    # The trail's reader: a list of entries with filters — the runtime's own
+    # screen (`project_audit`), judged as a collection.
+    "audit_trail": "collection",
     "kanban": "collection",
     "calendar": "collection",
     "scheduler": "collection",

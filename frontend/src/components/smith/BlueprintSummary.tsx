@@ -43,6 +43,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AppFlowSummary } from "@/components/app-flow/AppFlowSummary";
 
 type Doc = Record<string, unknown>;
 type Row = Record<string, unknown>;
@@ -375,6 +376,7 @@ export function BlueprintSummary({
   // reader checks last, after seeing what the application is.
   const [open, setOpen] = useState<Record<string, boolean>>({
     pages: true,
+    flows: true,
     entities: true,
     core: true,
     requirements: false,
@@ -390,6 +392,7 @@ export function BlueprintSummary({
   const counts = blueprintCounts(doc);
 
   const pages = rows(doc.pages);
+  const flowCount = rows(doc.flows).length;
   const entities = rows(data.entities);
   const workflows = rows(doc.workflows);
   const requirements = rows(doc.requirements);
@@ -531,6 +534,14 @@ export function BlueprintSummary({
                 })}
               </ul>
               <ShowMore hidden={pages.length - visiblePages.length} onClick={() => showAll("pages")} />
+            </Section>
+          )}
+
+          {/* THE PATHS PEOPLE TAKE through those pages, reviewed before
+              anything is built (`flows`). */}
+          {flowCount > 0 && (
+            <Section title="App flow" tone="emerald" count={flowCount} open={!!open.flows} onToggle={() => toggle("flows")}>
+              <AppFlowSummary doc={doc} />
             </Section>
           )}
 

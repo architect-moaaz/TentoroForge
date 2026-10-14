@@ -194,6 +194,19 @@ export interface BlueprintRun {
   reattachedStage?: string | null;
   /** How long the reattached run has ACTUALLY been going, per the server. */
   reattachedElapsedMs?: number | null;
+  /**
+   * THE CHECKS AFTER A HAND-OVER. The application is built and in use; the
+   * engine is opening every page, route, process and rule as each kind of
+   * person and fixing what is red. Its own phase, never `status: "running"`:
+   * a panel that said "Building…" over a handed-over app was lying.
+   */
+  checks?: RunChecks | null;
+}
+
+export interface RunChecks {
+  active: boolean;
+  phase: string;
+  scorecard?: Record<string, { total: number; green: number; red: number; untried: number }>;
 }
 
 const EMPTY: BlueprintRun = {
@@ -284,9 +297,33 @@ export function useBlueprintRun(projectId: string | null) {
         awaitingApproval?: boolean;
         status?: string;
         error?: string | null;
+        checks?: RunChecks | null;
       }>(`/api/projects/${projectId}/run`);
       if (pollCancelRef.current || ownStreamRef.current) return;
 
+      // THE APPLICATION IS HANDED OVER; THE CHECKS GO ON. Either worker says so
+      // — the one that ran the build through its registry (`checks`), the other
+      // through the checks' own ledger (`phase: "checking"`). Neither is a build
+      // in flight: the run stays complete, the input stays open, the strip says
+      // what is being checked, and the transcript is re-read for what the
+      // checks say. Polled slowly; nothing here is a step bar.
+      const checking = snap.phase === "checking" || Boolean(snap.checks?.active);
+      if (checking) {
+        idlePollsRef.current = 0;
+        dropReasonRef.current = null;
+        setRun((prev) => ({
+          ...prev,
+          status: prev.status === "running" ? "complete" : prev.status,
+          checks: {
+            active: true,
+            phase: snap.checks?.phase ?? "checking",
+            scorecard: snap.checks?.scorecard ?? prev.checks?.scorecard,
+          },
+          error: null,
+        }));
+        pollTimerRef.current = setTimeout(pollOnce, 8000);
+        return;
+      }
       if (snap.active) {
         idlePollsRef.current = 0;
         dropReasonRef.current = null;
@@ -325,6 +362,11 @@ export function useBlueprintRun(projectId: string | null) {
       } else if (snap.status === "complete") {
         idlePollsRef.current = 0;
         dropReasonRef.current = null;
+        setRun((prev) =>
+          prev.checks?.active
+            ? { ...prev, checks: { ...prev.checks, active: false, phase: snap.checks?.phase ?? "done" } }
+            : prev,
+        );
         // Apply the FINAL node states the snapshot carries — every node done,
         // preview included. Flipping only `status` left the last active poll's
         // nodes frozen, and that poll caught the run on its last node
@@ -432,7 +474,16 @@ export function useBlueprintRun(projectId: string | null) {
     ownStreamRef.current = false;
     dropReasonRef.current = null;
     idlePollsRef.current = 0;
-  }, []);
+    // AND THE WORK ITSELF. Closing the stream only stopped the watching; the
+    // build ran on, unseen (forge-v3, 2026-10-10). The engine ends the build
+    // at its next step, hands over what is built, or ends the checks at
+    // their next page. Fire-and-forget: the poll reports what happened.
+    if (projectId) {
+      void api.post(`/api/projects/${projectId}/build/stop`, {}).catch(() => {
+        /* a stop that did not reach the engine is reported by the next poll */
+      });
+    }
+  }, [projectId]);
 
   const start = useCallback(
     async (opts: StartOptions) => {
@@ -528,7 +579,15 @@ export function useBlueprintRun(projectId: string | null) {
           resumePolling();
           return;
         }
-        if (event === "done") gotTerminal = true;
+        if (event === "done") {
+          gotTerminal = true;
+          // A HAND-OVER WITH CHECKS PENDING: the turn is over, the checks run
+          // on in the background and speak through the registry and the
+          // transcript — poll for them.
+          if ((data as { checks?: { pending?: boolean } }).checks?.pending) {
+            setTimeout(() => resumePolling(), 1500);
+          }
+        }
         setRun((prev) => reduce(prev, event, data));
         try {
           const tell = useOfficeStore.getState().handleEvent;

@@ -16,6 +16,7 @@
  */
 "use client";
 
+import { apiPath } from "@/lib/api-path";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -49,7 +50,7 @@ export default function TaskDetailPage() {
     if (!params?.id) return;
     (async () => {
       try {
-        const res = await fetch(`/api/tasks/${params.id}`, { cache: "no-store" });
+        const res = await fetch(apiPath(`/api/tasks/${params.id}`), { cache: "no-store" });
         if (!res.ok) throw new Error(await res.text());
         setTask(await res.json());
       } catch (e) {
@@ -66,7 +67,7 @@ export default function TaskDetailPage() {
     setError(null);
     try {
       const res = await fetch(
-        `/api/workflows/${task.workflow_id}/execute`,
+        apiPath(`/api/workflows/${task.workflow_id}/execute`),
         {
           method: "POST",
           headers: { "content-type": "application/json" },

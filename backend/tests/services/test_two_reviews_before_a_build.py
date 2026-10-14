@@ -84,8 +84,10 @@ def svc(tmp_path):
 # Which nodes each review runs
 # --------------------------------------------------------------------------- #
 
-def test_the_first_review_is_the_requirements_alone():
-    assert domain_nodes() == ["requirements"]
+def test_the_first_review_is_the_requirements_and_what_such_products_have():
+    # The domain reference is written from the requirements and shown beside
+    # them: a wrong sub-domain is cheapest to catch at the first review.
+    assert domain_nodes() == ["requirements", "domain_reference"]
 
 
 def test_the_product_model_names_the_parts_and_writes_none_of_them_in_detail():
@@ -117,6 +119,9 @@ def test_the_state_says_which_review_is_open(svc, tmp_path):
     assert gates.current(svc.doc, tmp_path) == gates.PRODUCT_MODEL
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "package.json").write_text("{}")
+    assert gates.current(svc.doc, tmp_path) == gates.PRODUCT_MODEL, "a scaffold is not a build"
+    svc.doc["runtime"] = {"build": {"status": "passed"}}
+    svc.save()
     assert gates.current(svc.doc, tmp_path) is None
 
 
@@ -561,3 +566,16 @@ def test_a_reworded_requirement_keeps_its_id_and_is_not_restated_beside_itself(s
     from services.blueprint.ids import IdAllocator, natural_key_for
     alloc = IdAllocator.load(output_dir=svc.output_dir)
     assert alloc.lookup(natural_key_for("requirements", {"description": reqs["REQ-001"]})) == "REQ-001"
+
+
+def test_a_scaffold_without_a_build_stamp_is_not_built(svc, tmp_path):
+    """Ecom L1 (2026-10-11): the opening's install wrote package.json, the
+    opening stopped, and "Build the whole app" was answered "it is already
+    built from this definition"."""
+    app = tmp_path / "app"
+    app.mkdir(exist_ok=True)
+    (app / "package.json").write_text("{}", "utf-8")
+    assert gates.is_built(tmp_path) is False
+    svc.doc["runtime"] = {"build": {"status": "passed"}}
+    svc.save()
+    assert gates.is_built(tmp_path) is True

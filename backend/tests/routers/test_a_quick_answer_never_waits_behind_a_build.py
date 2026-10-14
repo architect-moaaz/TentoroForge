@@ -30,7 +30,11 @@ async def _built_project(client, org_id) -> dict:
     body = res.json()
     out = Path(OUTPUT_BASE) / body["short_id"]
     (out / ".forge" / "blueprint").mkdir(parents=True, exist_ok=True)
-    (out / ".forge" / "blueprint" / "current.json").write_text(FIXTURE.read_text())
+    import json
+    doc = json.loads(FIXTURE.read_text())
+    # Built means assembled: the build stamp, not only the scaffold.
+    doc.setdefault("runtime", {})["build"] = {"status": "passed"}
+    (out / ".forge" / "blueprint" / "current.json").write_text(json.dumps(doc))
     (out / "app").mkdir(exist_ok=True)
     (out / "app" / "package.json").write_text('{"name": "built"}')
     return body

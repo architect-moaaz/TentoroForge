@@ -89,6 +89,15 @@ export async function POST(request: Request) {
     // person held a role no page or workflow names.
     const role = data.accountType || SIGNUP_ROLE || undefined;
 
+    // AN ORGANISATION AT SIGNUP, when the application has several and lets a
+    // new person start one: the tenant row, the first membership (in the
+    // signup role) and the active organisation, all in the one transaction.
+    const tenancy = await import("@/lib/tenancy");
+    const tpolicy = await tenancy.policy();
+    const orgName = String((body as any)?.organisation?.name ?? (body as any)?.organisation ?? "").trim();
+    if (tpolicy.kind === "organisation" && tpolicy.signup === "creates_organisation" && !orgName) {
+      return NextResponse.json({ error: { code: "VALIDATION_ERROR", message: "Name your organisation to sign up." } }, { status: 400 });
+    }
     // One transaction: never a login without its person, or the reverse.
     const user = await (db as any).transaction(async (tx: any) => {
       const [created] = await tx
@@ -116,6 +125,13 @@ export async function POST(request: Request) {
           if (Object.keys(own).length) await tx.update(users).set(own as any).where(eq(users.id, created.id));
         } else {
           await tx.insert(accountTable).values({ ...account.values, id: created.id });
+        }
+      }
+      if (tpolicy.kind === "organisation" && orgName && tpolicy.signup !== "joins_by_invite") {
+        const orgId = await tenancy.createOrganisation(orgName);
+        if (orgId) {
+          await tenancy.join(String(created.id), orgId, role || tpolicy.memberRoles[0] || "member");
+          await tenancy.setActive(String(created.id), orgId);
         }
       }
       return created;

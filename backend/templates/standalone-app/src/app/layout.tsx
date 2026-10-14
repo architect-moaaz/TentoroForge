@@ -1,4 +1,5 @@
 import "./globals.css";
+import type { Metadata, Viewport } from "next";
 import { EngineProvider } from "@tentoroforge/engine";
 import { LiveRegion, SkipLink } from "@tentoroforge/library";
 import { Providers } from "./providers";
@@ -13,6 +14,28 @@ async function loadJson<T>(rel: string): Promise<T | null> {
     return null;
   }
 }
+
+// THE APPLICATION ON A PHONE: the manifest that lets it be installed, the
+// icon and title the home screen shows, and the colour the browser chrome
+// takes. This overlay's layout is the one an app ships — the foundation's,
+// which carried these, is replaced by it — so without them here no built app
+// could be installed (m1dck85j on forge-v3, 2026-10-12). Paths carry the
+// preview's prefix when there is one.
+const BASE = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
+
+export const metadata: Metadata = {
+  title: "__APP_NAME__",
+  manifest: `${BASE}/manifest.webmanifest`,
+  appleWebApp: { capable: true, title: "__APP_NAME__", statusBarStyle: "default" },
+  icons: { icon: `${BASE}/icons/icon-192.png`, apple: `${BASE}/icons/apple-touch-icon.png` },
+};
+
+export const viewport: Viewport = {
+  themeColor: "__THEME_COLOR__",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const designSpec = await loadJson("src/contracts/design-spec.json");

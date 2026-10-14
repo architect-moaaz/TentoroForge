@@ -239,7 +239,7 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
     # "events" = the durable event bus + cron scheduler (R1/R2/R3):
     # workflows/index.ts imports ../events/emit-node and engine resumes
     # ride through events/bus.ts, so it MUST ship with the workflows dir.
-    for subdir in ["feel-lite", "workflows", "rules", "events"]:
+    for subdir in ["feel-lite", "workflows", "rules", "events", "payments"]:
         src = _TEMPLATE_DIR / subdir
         dst = src_lib / subdir
 
@@ -283,6 +283,42 @@ def inject_runtime(output_dir: str, app_name: str | None = None, domain: str | N
             copied.append("src/lib/data-engine.ts")
         except Exception as e:
             errors.append(f"Failed to copy data-engine: {e}")
+
+    # THE TRAIL: the module the data engine, the workflow handlers, the
+    # sign-in and the export record through. Reads the projected policy
+    # (`src/lib/audit-policy.ts`, a stub below when the Blueprint declares
+    # no trail) and does nothing at level `none`.
+    audit_src = _TEMPLATE_DIR / "audit.ts"
+    if audit_src.exists():
+        try:
+            shutil.copy2(audit_src, src_lib / "audit.ts")
+            copied.append("src/lib/audit.ts")
+        except Exception as e:
+            errors.append(f"Failed to copy audit: {e}")
+    tenancy_src = _TEMPLATE_DIR / "tenancy.ts"
+    if tenancy_src.exists():
+        try:
+            shutil.copy2(tenancy_src, src_lib / "tenancy.ts")
+            copied.append("src/lib/tenancy.ts")
+        except Exception as e:
+            errors.append(f"Failed to copy tenancy: {e}")
+    tpolicy = src_lib / "tenancy-policy.ts"
+    if not tpolicy.exists():
+        tpolicy.write_text(
+            "// Written by the Blueprint projection (project_tenancy). None: this\n"
+            "// application serves one organisation.\n"
+            "export const TENANCY = { kind: \"none\", entity: null, table: null, nameColumn: null, memberRoles: [], "
+            "platformRoles: [], adminRole: null, signup: \"both\", columns: {} } as const;\n",
+            encoding="utf-8")
+        copied.append("src/lib/tenancy-policy.ts")
+    policy = src_lib / "audit-policy.ts"
+    if not policy.exists():
+        policy.write_text(
+            "// Written by the Blueprint projection (project_audit). None: this\n"
+            "// application declares no audit trail, so nothing is recorded.\n"
+            "export const AUDIT = { level: \"none\", reviewers: [], retentionDays: null, reasonRequired: [] } as const;\n",
+            encoding="utf-8")
+        copied.append("src/lib/audit-policy.ts")
 
     # Slice-4 sensitive-column encrypt-at-rest helper. Copied into every
     # generated app so the data-engine can import it even when no sensitive
@@ -704,6 +740,17 @@ def _plan_has_commerce_flag(output_path: Path) -> bool:
     error and the fix is one commerce_flag update, whereas the reverse
     ships bloat we saw on nni3wjf6).
     """
+    # THE BLUEPRINT'S OWN WORD FIRST: an entity marked `commerce` is the thing
+    # people buy, and the cart ships with it.
+    try:
+        bp = output_path.parent / ".forge" / "blueprint" / "current.json"
+        if bp.exists():
+            doc = json.loads(bp.read_text(encoding="utf-8"))
+            if any(isinstance(e, dict) and e.get("commerce") is True
+                   for e in (doc.get("data") or {}).get("entities") or []):
+                return True
+    except Exception:  # noqa: BLE001 — an unreadable document says nothing
+        pass
     try:
         plan_path = output_path / "contracts" / "plan.json"
         if not plan_path.exists():
@@ -750,6 +797,11 @@ def _ensure_connected_services_stub(output_path: Path) -> list[str]:
         "export function connectedService(action: string): ConnectedService | undefined {",
         "  return CONNECTED_SERVICES[action];",
         "}",
+        "export type InboundService = { name: string; provider: string; verify: string;"
+        " signingSecretRef: string; events: string[] };",
+        "export const INBOUND: Record<string, InboundService> = {};",
+        "export type DeclaredService = { name: string; provider: string; keys: string[] };",
+        "export const DECLARED: Record<string, DeclaredService> = {};",
         "",
     ]), encoding="utf-8")
     return ["src/lib/integrations/connected.ts"]
@@ -879,6 +931,14 @@ def _inject_file_storage(output_path: Path) -> list[str]:
         cron_dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(cron_route, cron_dst)
         written.append("src/app/api/cron/tick/route.ts")
+    # WHERE AN OUTSIDE SYSTEM CALLS IN. Signed by the secret the Blueprint
+    # names; outside the sign-in gate (the signature is the authentication).
+    hook_route = _TEMPLATE_DIR / "api-webhooks" / "route.ts"
+    if hook_route.exists():
+        hook_dst = output_path / "src" / "app" / "api" / "webhooks" / "[integration]" / "route.ts"
+        hook_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(hook_route, hook_dst)
+        written.append("src/app/api/webhooks/[integration]/route.ts")
 
     # R3 live UI: the SSE tail of the forge_events bus. LiveRefresh
     # (app-foundation src/lib/LiveRefresh.tsx, mounted by schema-page for
@@ -911,6 +971,108 @@ def _inject_file_storage(output_path: Path) -> list[str]:
                     txt.rstrip() + '\nexport { forgeEvents } from "./_forge_events";\n',
                     encoding="utf-8",
                 )
+
+    # 5a-v. forge_memberships: who belongs to which organisation; the
+    #       organisation routes. The page and the switcher ship with the
+    #       foundation and say "one organisation" when there is none.
+    mem_schema = _TEMPLATE_DIR / "db" / "forge-memberships.schema.ts"
+    if mem_schema.exists() and schema_dir.exists():
+        shutil.copy2(mem_schema, schema_dir / "_forge_memberships.ts")
+        written.append("src/db/schema/_forge_memberships.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_memberships" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgeMemberships } from "./_forge_memberships";\n', encoding="utf-8")
+    # 5a-vii. Push: where a person's devices listen, the module that sends,
+    #         the routes a device subscribes through. The package is added
+    #         to the app's dependencies; the keys are the app's own.
+    push_schema = _TEMPLATE_DIR / "db" / "forge-push-subscriptions.schema.ts"
+    if push_schema.exists() and schema_dir.exists():
+        shutil.copy2(push_schema, schema_dir / "_forge_push_subscriptions.ts")
+        written.append("src/db/schema/_forge_push_subscriptions.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_push_subscriptions" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgePushSubscriptions } from "./_forge_push_subscriptions";\n', encoding="utf-8")
+    push_src = _TEMPLATE_DIR / "push.ts"
+    if push_src.exists():
+        (output_path / "src" / "lib").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(push_src, output_path / "src" / "lib" / "push.ts")
+        written.append("src/lib/push.ts")
+        _ensure_package_deps(output_path, {"web-push": "^3.6.7"})
+    for sub, dst in (("api-push/route.ts", "push/route.ts"), ("api-push/test/route.ts", "push/test/route.ts")):
+        src = _TEMPLATE_DIR / sub
+        if src.exists():
+            target = output_path / "src" / "app" / "api" / dst
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
+            written.append(f"src/app/api/{dst}")
+
+    # 5a-vi. The ways in: what the sign-in form asks (`/api/auth/methods`) and
+    #        the magic link (`/api/auth/magic`). The policy ships with the
+    #        foundation and is rewritten by the projection.
+    for sub, dst in (("api-org/route.ts", "org/route.ts"), ("api-org/members/route.ts", "org/members/route.ts"),
+                     ("api-auth-methods/route.ts", "auth/methods/route.ts"), ("api-auth-magic/route.ts", "auth/magic/route.ts")):
+        src = _TEMPLATE_DIR / sub
+        if src.exists():
+            target = output_path / "src" / "app" / "api" / dst
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
+            written.append(f"src/app/api/{dst}")
+
+    # 5a-iv. forge_payments: the application's own ledger of payments; the
+    #        stand-in's route and page, so a checkout works before any key.
+    pay_schema = _TEMPLATE_DIR / "db" / "forge-payments.schema.ts"
+    if pay_schema.exists() and schema_dir.exists():
+        shutil.copy2(pay_schema, schema_dir / "_forge_payments.ts")
+        written.append("src/db/schema/_forge_payments.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_payments" not in txt:
+                barrel.write_text(txt.rstrip() + '\nexport { forgePayments } from "./_forge_payments";\n', encoding="utf-8")
+    standin_route = _TEMPLATE_DIR / "api-pay" / "stand-in" / "route.ts"
+    if standin_route.exists():
+        dst = output_path / "src" / "app" / "api" / "pay" / "stand-in" / "route.ts"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(standin_route, dst)
+        written.append("src/app/api/pay/stand-in/route.ts")
+    standin_page = _TEMPLATE_DIR / "pages" / "pay" / "stand-in" / "page.tsx"
+    if standin_page.exists():
+        dst = output_path / "src" / "app" / "pay" / "stand-in" / "page.tsx"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(standin_page, dst)
+        written.append("src/app/pay/stand-in/page.tsx")
+    money = output_path / "src" / "lib" / "money.ts"
+    if money.parent.exists() and not money.exists():
+        money.write_text("// Written by the Blueprint projection (project_money). The currency money is kept and shown in.\n"
+                         "export const CURRENCY = \"USD\";\n", encoding="utf-8")
+        written.append("src/lib/money.ts")
+
+    # 5a''. forge_audit table: the trail. Shipped like forge_events so
+    #       drizzle-kit creates it; the runtime guards it on first use.
+    au_schema = _TEMPLATE_DIR / "db" / "forge-audit.schema.ts"
+    if au_schema.exists() and schema_dir.exists():
+        shutil.copy2(au_schema, schema_dir / "_forge_audit.ts")
+        written.append("src/db/schema/_forge_audit.ts")
+        barrel = schema_dir / "index.ts"
+        if barrel.exists():
+            txt = barrel.read_text(encoding="utf-8")
+            if "_forge_audit" not in txt:
+                barrel.write_text(
+                    txt.rstrip() + '\nexport { forgeAudit } from "./_forge_audit";\n',
+                    encoding="utf-8",
+                )
+    for sub, dst in (("api-audit/route.ts", "audit/route.ts"), ("api-audit/export/route.ts", "audit/export/route.ts"),
+                     ("api-audit/verify/route.ts", "audit/verify/route.ts")):
+        src = _TEMPLATE_DIR / sub
+        if src.exists():
+            target = output_path / "src" / "app" / "api" / dst
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, target)
+            written.append(f"src/app/api/{dst}")
 
     # 5b. workflow_tasks table: pending human tasks emitted by user_task
     #     nodes. persistPendingTask (runtime/workflows/index.ts:186) writes
@@ -1006,7 +1168,9 @@ def _inject_file_storage(output_path: Path) -> list[str]:
     if int_lib_dir.is_dir():
         int_lib_dst = output_path / "src" / "lib" / "integrations"
         int_lib_dst.mkdir(parents=True, exist_ok=True)
-        for name in ("resolver.ts", "mcpClientPool.ts"):
+        # providers.ts: how an outside system's signed call is verified — the
+        # webhooks route imports it, and an app without it does not build.
+        for name in ("resolver.ts", "mcpClientPool.ts", "providers.ts"):
             src = int_lib_dir / name
             if src.exists():
                 shutil.copy2(src, int_lib_dst / name)
@@ -1444,6 +1608,13 @@ export async function POST(
     workflowId = id;
     const body = await request.json();
     const input = body.input || {};
+    // WHERE THE APPLICATION IS, for a step that builds an absolute address
+    // (a checkout's return pages): the request's own origin, behind a proxy too.
+    try {
+      const proto = request.headers.get("x-forwarded-proto") || new URL(request.url).protocol.replace(":", "");
+      const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || new URL(request.url).host;
+      if (host) input.__origin = `${proto}://${host}`;
+    } catch { /* no origin: the step falls back to the configured address */ }
     // THE NAMES, NEVER THE VALUES. `input` is a customer's record — an order,
     // an address, a diagnosis. Its keys say which wire broke; its values are
     // the owner's data and do not leave this process.
@@ -1458,7 +1629,11 @@ export async function POST(
     const user = su?.id
       ? { ...Object.fromEntries(Object.entries(su).filter(([, v]) => v === null || ["string", "number", "boolean"].includes(typeof v))),
           id: String(su.id), role: su.role, email: su.email ?? undefined }
-      : body.user;
+      : undefined;
+    // NOBODY ACTS AS SOMEONE ELSE BY SAYING SO. The body used to carry a
+    // `user` the route believed when no session was present, so any caller
+    // could run a process as any role or person. The actor is the session or
+    // nobody; a signed-out visitor is their guest token, below.
     // The ROLE, which is the owner's own vocabulary — never the id or the
     // email beside it, which are a person.
     actingRole = user?.role ? String(user.role) : undefined;
@@ -1697,14 +1872,16 @@ export async function POST(
  *
  * POST /api/workflows/event/[event]
  *
- * Triggers all workflows whose trigger.type === "api_event" and
- * trigger.event matches the [event] path parameter.
+ * Puts the event on the application's own bus, where every workflow whose
+ * trigger names it starts (inline, then swept by the tick). One path for an
+ * event however it arrives: the data engine's, a step's `emit_event`, a
+ * signed webhook, or this call.
  *
  * Auto-generated by Tentoro Forge runtime injector.
  */
 
 import { NextResponse } from "next/server";
-import { triggerWorkflowEvent } from "@/lib/workflows";
+import { emitEventAndProcess } from "@/lib/events/bus";
 import { initializeRuntime } from "@/lib/runtime-loader";
 import { auth } from "@/auth";
 
@@ -1722,11 +1899,13 @@ export async function POST(
     // from ctx.user.id — see the [id]/execute route).
     const session = await auth();
     const su = session?.user as { id?: string; role?: string; email?: string | null } | undefined;
-    const user = su?.id ? { id: su.id, role: su.role, email: su.email ?? undefined } : body.user;
+    // The actor is the session or nobody — never a `user` the caller wrote
+    // into the body (any caller could have acted as anyone).
+    const user = su?.id ? { id: su.id, role: su.role, email: su.email ?? undefined } : undefined;
 
-    const results = await triggerWorkflowEvent(event, input, user);
-
-    return NextResponse.json({ event, results });
+    const put = await emitEventAndProcess(event, { payload: { ...input, ...(user ? { user } : {}) } });
+    if (!put) return NextResponse.json({ error: "the event could not be recorded" }, { status: 500 });
+    return NextResponse.json({ event, accepted: true, eventId: "id" in put ? put.id : null }, { status: 202 });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
@@ -2987,6 +3166,14 @@ def _ensure_env_file(output_path: Path, project_id: str | None = None) -> None:
             "FORGE_URL": forge_url,
             "FORGE_PROJECT_ID": forge_project_id,
         })
+        # THE PUSH KEYS, once: an app assembled before push existed gets its
+        # pair now; one that has a pair keeps it (a new pair would orphan
+        # every subscribed device).
+        from services.push_keys import VAPID_KEYS, generate_vapid
+        present = {line.split("=", 1)[0].strip() for line in env_file.read_text("utf-8").splitlines() if "=" in line}
+        if not all(k in present for k in VAPID_KEYS):
+            pair = generate_vapid()
+            _upsert_env_keys(env_file, {k: v for k, v in pair.items() if k not in present})
         return
 
     # Use a concrete port: postgres-js can't expand shell vars at runtime.
@@ -3002,6 +3189,10 @@ def _ensure_env_file(output_path: Path, project_id: str | None = None) -> None:
     # platform_integrations flow). See TODO(sensitive-rotation) in
     # src/lib/sensitive-crypto.ts — versioned rotation is a future slice.
     sensitive_key = base64.b64encode(secrets.token_bytes(32)).decode("ascii")
+    # The application's own push keys (VAPID): made once, kept for the life
+    # of the app — see services/push_keys.
+    from services.push_keys import generate_vapid
+    vapid = generate_vapid()
 
     env_content = f"""# Generated by Tentoro Forge — edit as needed
 DATABASE_URL=postgresql://postgres:postgres@localhost:{db_port}/app
@@ -3013,6 +3204,13 @@ NEXTAUTH_URL=http://localhost:3000
 # existing sensitive row — out of scope for this slice; see the crypto
 # module for the TODO). NEVER commit a real key to git.
 SENSITIVE_ENCRYPTION_KEY={sensitive_key}
+
+# Push notifications (Web Push, VAPID). The app's own pair: a device subscribes
+# against the public key, so a new pair orphans every subscription. Kept across
+# rebuilds and carried to a publish.
+VAPID_PUBLIC_KEY={vapid["VAPID_PUBLIC_KEY"]}
+VAPID_PRIVATE_KEY={vapid["VAPID_PRIVATE_KEY"]}
+VAPID_SUBJECT={vapid["VAPID_SUBJECT"]}
 
 # Runtime error reporter — POSTs runtime crashes back to Forge so the
 # self-healing loop can pick them up. Both must be set; blank = reporter

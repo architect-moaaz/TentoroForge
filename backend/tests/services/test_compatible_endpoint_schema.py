@@ -31,7 +31,10 @@ def test_a_keyword_named_property_travels_under_an_alias_and_comes_back():
     sent = ex._alias_keyword_properties(schema)
     field = sent["properties"]["entities"]["items"]["properties"]["fields"]["items"]
     assert "required" not in field["properties"] and "isRequiredField" in field["properties"]
-    assert field["required"] == ["name", "type"], "the list of required keys is untouched"
+    source = schema["properties"]["entities"]["items"]["properties"]["fields"]["items"]
+    assert field["required"] == [ex._KEYWORD_PROPERTIES.get(k, k) for k in source["required"]], \
+        "the required list names each key as it was sent"
+    assert "name" in field["required"] and "type" in field["required"]
     assert schema["properties"]["entities"]["items"]["properties"]["fields"]["items"][
         "properties"]["required"], "the caller's schema is never changed"
     reply = json.dumps({"entities": [{"name": "Task", "fields": [

@@ -105,7 +105,13 @@ def load(output_dir: str | Path) -> dict:
             f"I could not read the list of people who log in ({exc}), so I "
             "have changed nothing.") from exc
     rows = doc.get("accounts") if isinstance(doc, dict) else doc
-    return {"accounts": [r for r in (rows or []) if isinstance(r, dict)]}
+    orgs = doc.get("organisations") if isinstance(doc, dict) else None
+    out = {"accounts": [r for r in (rows or []) if isinstance(r, dict)]}
+    # THE ORGANISATIONS, beside the people: ones Smith added before anyone
+    # joined them, made by the seed when the app next starts.
+    if orgs:
+        out["organisations"] = [o for o in orgs if isinstance(o, dict) and o.get("name")]
+    return out
 
 
 def save(output_dir: str | Path, roster: dict) -> None:
@@ -221,7 +227,7 @@ def _log(account: dict, did: str) -> None:
 # the three changes
 # ---------------------------------------------------------------------------
 
-def add(output_dir: str | Path, *, email: str, name: str = "", role: str = "",
+def add(output_dir: str | Path, *, email: str, name: str = "", role: str = "", organisation: str = "",
         app_root: str | Path | None = None, reasoning: Any = None) -> dict:
     """Give one person a login, waiting for the password only they will know."""
     address = " ".join(str(email or "").split()).strip().lower()
@@ -253,6 +259,8 @@ def add(output_dir: str | Path, *, email: str, name: str = "", role: str = "",
         account["name"] = " ".join(name.split())
     if role.strip():
         account["role"] = " ".join(role.split())
+    if organisation.strip():
+        account["organisation"] = " ".join(organisation.split())
     if existing is None:
         roster["accounts"].append(account)
     _log(account, "added" if existing is None else "re-added")

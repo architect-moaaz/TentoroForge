@@ -108,14 +108,16 @@ def blueprint_to_context(
     pages = _render_pages(bp)
     integrations = _render_integrations(bp)
     accounts = _render_accounts(bp)
+    flows = _render_flows(bp)
     decisions = _render_design_decisions(bp)
 
     # WHAT SURVIVES A SMALL BUDGET is what Smith answers and edits from: the
     # entities, workflows and pages. Requirements, rules, the domain prose and
     # the decisions are shortened first — the cap used to cut the END, which
     # was the pages and integrations.
-    sections = [header, domain, requirements, entities, rules, workflows, pages, integrations, decisions, accounts]
-    keep_whole = {id(header), id(entities), id(workflows), id(pages), id(integrations), id(accounts)}
+    sections = [header, domain, requirements, entities, rules, workflows, pages, integrations, decisions, accounts,
+                flows]
+    keep_whole = {id(header), id(entities), id(workflows), id(pages), id(integrations), id(accounts), id(flows)}
     over = sum(len(x) for x in sections if x) - (budget.max_chars - 200)
     if over > 0:
         for i in (8, 2, 4, 1):          # decisions, requirements, rules, domain
@@ -386,6 +388,15 @@ def _render_pages(bp: Blueprint) -> str:
                 if choice:
                     lines.append(f"  · {choice}" + (f"  ({why})" if why else ""))
     return "\n".join(lines)
+
+
+def _render_flows(bp: Blueprint) -> str:
+    """The paths people take: screens, what moves them on, where it ends."""
+    lines = [str(x) for x in getattr(bp, "flows", None) or [] if x]
+    if not lines:
+        return ""
+    return "## App flows (the paths people take — `go`: taken there, `offer`: shown the way, `menu`: by themselves)\n" \
+        + "\n".join(f"- {x}" for x in lines)
 
 
 def _render_accounts(bp: Blueprint) -> str:

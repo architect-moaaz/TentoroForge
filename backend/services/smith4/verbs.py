@@ -147,6 +147,56 @@ def workflow(ctx: Ctx, u: dict) -> Outcome:
     return step
 
 
+def tenancy(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.tenancy_change import run
+    verb = u["verb"]
+    return from_seam(run(ctx.out, verb, change=_s(u, "change") or ctx.ask, reasoning=ctx.reasoning),
+                     fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+
+
+def mobile(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.mobile_change import run
+    verb = u["verb"]
+    return from_seam(run(ctx.out, verb, change=_s(u, "change") or ctx.ask, reasoning=ctx.reasoning),
+                     fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+
+
+def sign_in(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.sign_in_change import run
+    verb = u["verb"]
+    return from_seam(run(ctx.out, verb, change=_s(u, "change") or ctx.ask, reasoning=ctx.reasoning),
+                     fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+
+
+def payment(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.payment_change import run
+    verb = u["verb"]
+    return from_seam(run(ctx.out, verb, change=_s(u, "change") or ctx.ask, reasoning=ctx.reasoning),
+                     fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+
+
+def audit(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.audit_change import run
+    verb = u["verb"]
+    return from_seam(run(ctx.out, verb, change=_s(u, "change") or ctx.ask, reasoning=ctx.reasoning),
+                     fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+
+
+def webhook(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.webhook_change import run
+    return from_seam(run(ctx.out, integration=_s(u, "integration") or ctx.ask, change=_s(u, "change") or ctx.ask,
+                         reasoning=ctx.reasoning),
+                     fail="I could not let that system call the application, and have changed nothing.")
+
+
+def schedule(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.schedule_change import run
+    verb = u["verb"]
+    return from_seam(run(ctx.out, verb, workflow=_s(u, "workflow") or ctx.ask, change=_s(u, "change") or ctx.ask,
+                         reasoning=ctx.reasoning),
+                     fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
+
+
 def access(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.access_change import run
     return from_seam(run(ctx.out, _s(u, "change") or ctx.ask, reasoning=ctx.reasoning),
@@ -491,7 +541,7 @@ def tree_edit(ctx: Ctx, u: dict) -> Outcome:
 # --------------------------------------------------------------------------- #
 
 def connect_service(ctx: Ctx, u: dict) -> Outcome:
-    from services.smith.email_connect import run
+    from services.smith.connect_service import run
     return from_seam(run(ctx.out, service=_s(u, "integration"), reasoning=ctx.reasoning),
                      fail="I could not connect that and have changed nothing.")
 
@@ -850,6 +900,14 @@ PERFORM: dict[str, Perform] = {
     "restyle": restyle, "set_logo": logo, "remove_logo": logo,
     "edit_navigation": navigation,
     "add_workflow": workflow, "edit_workflow": workflow, "remove_workflow": workflow,
+    "set_schedule": schedule, "pause_schedule": schedule, "resume_schedule": schedule,
+    "set_deadline": schedule, "run_now": schedule,
+    "add_webhook": webhook,
+    "show_audit": audit, "export_audit": audit, "verify_audit": audit, "edit_audit": audit,
+    "refund": payment, "set_currency": payment,
+    "add_organisation": tenancy, "move_login": tenancy,
+    "set_sign_in_method": sign_in, "map_sso_roles": sign_in, "restrict_sign_in_domains": sign_in,
+    "edit_mobile": mobile, "test_notification": mobile,
     "edit_access": access,
     "add_rule": rule, "edit_rule": rule, "remove_rule": rule,
     "add_entity": entity, "remove_entity": entity,

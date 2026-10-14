@@ -201,12 +201,21 @@ class DagNode:
     #: minutes building pages and workflows on two entities with no columns
     #: before `assemble` refused a form that inserted into nothing.
     whole: bool = False
+    #: Sections this node writes that do NOT prove it ran: an object section
+    #: whose absence means its defaults (`mobile` — installable, no push), so
+    #: a resumed build does not re-run the node over a document written
+    #: before the section existed.
+    defaulted: frozenset[str] = frozenset()
+
+
+#: The reason a run reports when a person stopped it (`should_stop`).
+STOPPED_BY_PERSON = "stopped by the person"
 
 
 def _n(key, agent, depends_on=(), produces=(), note="", kind="agent",
-       fanout="", optional=False, whole=False) -> DagNode:
+       fanout="", optional=False, whole=False, defaulted=()) -> DagNode:
     return DagNode(key, agent, frozenset(depends_on), frozenset(produces),
-                   note, kind, fanout, optional, whole)
+                   note, kind, fanout, optional, whole, frozenset(defaulted))
 
 
 #: §28's graph. Tier names follow the PRD's diagram.
@@ -225,8 +234,16 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("figma_intelligence", "figma_intelligence", (), ("requirements",),
        fanout="design_sources",
        note="§48-§51; design evidence, not design decisions"),
+    # THE DOMAIN REFERENCE, FIRST. What a practitioner expects of a product in
+    # this sub-domain — screens, records, processes, rules, conventions,
+    # benchmarks — written from the requirements before anything is modelled,
+    # shown at the requirements' review, and held to by every model node
+    # (`reference_coverage`): "industry-standard and relevant to its domain"
+    # is measured against this, not guessed at.
+    _n("domain_reference", "domain_intelligence", ("requirements",), ("domainReference",),
+       note="what a practitioner expects of such a product; the model is held to it"),
     _n("application_model", "product_analysis",
-       ("requirements", "figma_intelligence"), ("product",)),
+       ("requirements", "figma_intelligence", "domain_reference"), ("product", "mobile"), defaulted=("mobile",)),
 
     # left branch — data
     # ENTITIES ARE NAMED ONCE AND DETAILED ONE AT A TIME. This node names the
@@ -375,7 +392,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
        ("page_details", "design_system", "figma_design_system", "imagery"), ("composition",),
        optional=True, note="§34; the whole app's look and conventions, one call"),
     _n("page_code", "ui_engineer",
-       ("ui_direction", "page_layouts", "workflow_steps", "install"), ("pageCode",),
+       ("ui_direction", "page_layouts", "workflow_steps", "install", "app_flows"), ("pageCode",),
        fanout="pages", optional=True,
        note="§34; each page as React, type-checked against the app SDK"),
     _n("frontend", "frontend", ("page_layouts", "page_code"), ("codeMap",), kind="projection",
@@ -398,7 +415,7 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # everything at its level had. A page needs a workflow's identity and
     # contract to wire a button, never its steps; `page_layouts` depends on
     # this node and not on `workflow_steps` for exactly that reason.
-    _n("workflows", "workflow", ("entity_fields", "page_contracts", "content_fields"), ("workflows",),
+    _n("workflows", "workflow", ("entity_fields", "page_contracts", "content_fields", "integrations"), ("workflows",),
        note="§107 step 16; declares each workflow's identity and contract"),
     # One call per declared workflow, in parallel, each given the node
     # catalog and one workflow to fill in. A step is a catalog node carrying
@@ -408,6 +425,12 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     _n("workflow_steps", "workflow", ("workflows",), ("workflows",),
        fanout="workflows",
        note="§107 step 16; one authored step graph per declared workflow"),
+    # THE PATHS BETWEEN THE SCREENS. With the screens and the processes
+    # declared, each person's route to each of their goals: where they are,
+    # what they do, which process does it, where it takes them. The page
+    # writer is told each screen's hand-offs from it, so it waits on this.
+    _n("app_flows", "page_design", ("page_details", "workflows", "security"), ("flows",),
+       note="the paths people take through the app, screen to screen"),
     # AFTER THE WORKFLOWS ARE DECLARED: a prerequisite ("verified before
     # listing or buying") names the workflows it gates, and before `workflows`
     # there were none to name — 0l133sp2's KYC rule was refused for empty
@@ -415,8 +438,9 @@ DAG: dict[str, DagNode] = {n.key: n for n in (
     # on rules but `integration` and `memory`, so this costs no time.
     _n("business_rules", "business_rules", ("entity_fields", "workflows"), ("businessRules",),
        note="§107 step 16; not a distinct box in §28"),
-    _n("security", "security", ("entity_fields",), ("security", "roles", "permissions"),
-       note="§100; placed after the data model because permissions guard entities"),
+    _n("security", "security", ("entity_fields", "integrations"), ("security", "roles", "permissions"),
+       note="§100; placed after the data model because permissions guard entities, and after the "
+            "integrations because a sign-in through an identity provider names its `auth` row"),
     _n("integrations", "integration", ("application_model",), ("integrations",)),
 
     # join
@@ -475,10 +499,13 @@ FANOUT: dict[str, Any] = {
         s["id"] for s in (doc.get("designSources") or []) if s.get("id")
     ],
     # A deferred module's screens are declared and not written (see `scope`).
+    # An `audit_trail` page is the runtime's own screen (`project_audit`),
+    # gated to the reviewers; nobody writes code for it.
     "pages": lambda doc: [
         p["id"] for p in (doc.get("pages") or [])
         if p.get("id") and p.get("status") != "DEPRECATED"
         and p["id"] not in _deferred_pages(doc)
+        and str(p.get("pattern") or "") != "audit_trail"
     ],
     # §107 step 16 — one call per declared workflow.
     "workflows": lambda doc: [
@@ -775,6 +802,8 @@ INCREMENTAL_SECTIONS: frozenset[str] = frozenset({
     "pageCode",
     "data.entities", "data.relationships",
     "data.constraints", "apis", "workflows", "businessRules", "tests",
+    # The paths between the screens follow the screens and the processes.
+    "flows",
     "codeMap", "database", "runtime", "roles", "permissions", "security",
 })
 
@@ -1019,7 +1048,7 @@ def completed_nodes(
     for key, node in nodes.items():
         if node.kind != "agent" or not node.produces:
             continue
-        if not all(_section(doc, path) for path in node.produces):
+        if not all(_section(doc, path) for path in node.produces if path not in node.defaulted):
             continue
         # SHARED SECTION, RESUMED RUN: content is not proof THIS node ran (D-07).
         # A ledger-gated node is done only if the ledger recorded it — except a
@@ -1259,8 +1288,15 @@ def run(
     app_root: str | None = None,
     observer: Callable[[dict], None] | None = None,
     observer_agent: Any = None,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> RunReport:
     """Execute a plan in dependency order.
+
+    ``should_stop`` is asked before each round of the scheduler; when it says
+    so the run pauses as for an outage — nothing new is sent, what is in
+    flight lands, every node not started is skipped with the reason, and the
+    report says ``paused_because`` — so a person's Stop ends a build at its
+    next step instead of only closing the stream that watched it.
 
     ``executor`` performs the actual agent call — injected so this module never
     depends on an LLM. Retries are bounded by ``max_attempts`` (§103: tasks must
@@ -1330,7 +1366,7 @@ def run(
         return _execute(svc, executor, order, in_plan, report, done, ledger,
                         max_attempts=max_attempts, commit=commit,
                         user_request=user_request, app_root=app_root,
-                        observer_agent=observer_agent)
+                        observer_agent=observer_agent, should_stop=should_stop)
     except BaseException as exc:
         # THE LINE THAT WAS MISSING. A run that raises out of here used to
         # leave nothing at all — the report died with the call, the registry
@@ -1357,6 +1393,7 @@ def _execute(
     user_request: str,
     app_root: str | None,
     observer_agent: Any = None,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> RunReport:
     """The scheduler. Split from `run` so the ledger can record a crash.
 
@@ -1943,6 +1980,8 @@ def _execute(
     pool = ThreadPoolExecutor(max_workers=WAVE_CONCURRENCY)
     try:
         while True:
+            if not paused and should_stop():
+                pause(STOPPED_BY_PERSON)
             # Start everything that can start, to a fixpoint: a service node
             # completes inline and may have readied its dependents.
             while True:
@@ -2941,7 +2980,7 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     control that lived in the route would not cover the SSR path.
     """
     from services.blueprint.projection import (
-        apply_data_projection, project_append_only_entities,
+        apply_data_projection, project_append_only_entities, project_audit, project_money, project_sign_in, project_tenancy,
         project_embedding_columns, project_ownership_rules,
         project_searchable_columns, project_sensitive_columns,
     )
@@ -2953,13 +2992,17 @@ def _project_data_layer(svc: BlueprintService, app_root: str) -> None:
     project_searchable_columns(svc.doc, app_root)
     project_embedding_columns(svc.doc, app_root)
     project_append_only_entities(svc.doc, app_root)
+    project_audit(svc.doc, app_root)
+    project_money(svc.doc, app_root)
+    project_tenancy(svc.doc, app_root)
+    project_sign_in(svc.doc, app_root)
     project_ownership_rules(svc.doc, app_root)
 
 
 def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     """Everything the browser reads: page schemas, the route graph, the tokens."""
     from services.blueprint.projection import (
-        apply_frontend_projection, project_brand_logo, project_design_tokens,
+        apply_frontend_projection, project_brand_logo, project_design_tokens, project_pwa,
         project_middleware, project_public_resources, project_public_routes,
         project_nav_flow, project_root_route, project_shell, project_shell_identity,
     )
@@ -2989,6 +3032,7 @@ def _project_frontend(svc: BlueprintService, app_root: str) -> None:
     # — HippieKit's green (#17B65C) never reached tokens.css, so the app ran on
     # the scaffold's near-black and every button came out the wrong colour.
     project_brand_logo(svc.doc, app_root)
+    project_pwa(svc.doc, app_root)
     project_design_tokens(svc.doc, app_root)
     # THE FRAME, BESIDE THE TOKENS: the shell chrome and the sign-in
     # composition the design decided, written where the layout reads them.

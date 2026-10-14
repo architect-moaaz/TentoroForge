@@ -51,6 +51,9 @@ PART_NODE: dict[str, str] = {
     "screens": "page_contracts",
     "roles": "security",
     "connections": "integrations",
+    # What such products have — the domain reference, shown at the
+    # requirements' review and changed there or at the model's.
+    "reference": "domain_reference",
 }
 
 
@@ -59,8 +62,20 @@ def _live(rows: Any) -> list[dict]:
 
 
 def is_built(output_dir: str | Path) -> bool:
-    """The same signal the router uses: the generated app's package.json."""
-    return (Path(output_dir) / "app" / "package.json").is_file()
+    """Built means ASSEMBLED, not scaffolded. The opening run's `install`
+    writes the app's package.json before a single screen exists; read as
+    "built", a stopped opening answered "Build the whole app" with "it is
+    already built from this definition, and nothing has changed since"
+    (Ecom L1, 2026-10-11). The build stamp the assembly writes into
+    `runtime.build` is the handover; the scaffold alone is not."""
+    root = Path(output_dir)
+    if not (root / "app" / "package.json").is_file():
+        return False
+    try:
+        doc = json.loads((root / ".forge" / "blueprint" / "current.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return True            # no definition to consult: the scaffold is all there is
+    return bool(((doc.get("runtime") or {}).get("build")))
 
 
 def current(doc: Mapping[str, Any], output_dir: str | Path) -> str | None:
@@ -110,6 +125,11 @@ def _entity_home(doc: Mapping[str, Any], module_pages: dict[str, list[dict]]) ->
                 votes.setdefault(eid, {}).setdefault(mid, 0)
                 votes[eid][mid] += 1
     return {eid: max(by.items(), key=lambda kv: kv[1])[0] for eid, by in votes.items()}
+
+
+def _reference_coverage(doc: Mapping[str, Any]) -> dict:
+    from services.blueprint.reference_coverage import summary
+    return summary(dict(doc))
 
 
 def model_view(doc: Mapping[str, Any]) -> dict:
@@ -206,6 +226,7 @@ def model_view(doc: Mapping[str, Any]) -> dict:
         # Only meaningful once something cites requirements; before that every
         # requirement would read as uncovered, which is not what it means.
         "uncovered": [r for r in reqs if r not in cited] if cited else [],
+        "reference": _reference_coverage(doc),
         "counts": {"modules": len(out_modules), "pages": len(pages), "entities": len(entities),
                    "workflows": len(workflows), "integrations": len(integrations),
                    "roles": len(roles)},
@@ -231,6 +252,29 @@ def versions(output_dir: str | Path, gate: str) -> list[dict]:
 
 def snapshot(doc: Mapping[str, Any], gate: str) -> Any:
     return requirement_items(doc) if gate == REQUIREMENTS else model_view(doc)
+
+
+def reference_view(doc: Mapping[str, Any]) -> dict:
+    """The domain reference as the review shows it, with its coverage."""
+    from services.blueprint.reference_coverage import summary
+    ref = dict(doc.get("domainReference") or {})
+    return {"domain": str(ref.get("domain") or ""), "subdomain": str(ref.get("subdomain") or ""),
+            "summary": str(ref.get("summary") or ""),
+            "screens": list(ref.get("screens") or []), "records": list(ref.get("records") or []),
+            "processes": list(ref.get("processes") or []), "rules": list(ref.get("rules") or []),
+            "integrations": list(ref.get("integrations") or []), "conventions": list(ref.get("conventions") or []),
+            "benchmarks": list(ref.get("benchmarks") or []), "declined": list(ref.get("declined") or []),
+            "coverage": summary(dict(doc))}
+
+
+def apply_declines(svc: Any, declines: list[dict] | None, *, by: str = "owner") -> list[dict]:
+    """The person declined reference items in this message: recorded, so the
+    model stops being asked for them."""
+    from services.blueprint.reference_coverage import record_declines
+    added = record_declines(svc, list(declines or []), by=by)
+    if added:
+        svc.save()
+    return added
 
 
 def record_version(output_dir: str | Path, gate: str, doc: Mapping[str, Any], *,
@@ -311,6 +355,9 @@ def payload(doc: Mapping[str, Any], output_dir: str | Path) -> dict:
     from services.blueprint import approval
 
     out: dict[str, Any] = {"gate": current(doc, output_dir), "built": is_built(output_dir)}
+    # WHAT SUCH PRODUCTS HAVE, beside the requirements: the domain reference
+    # and how much of it the model answers so far.
+    out["reference"] = reference_view(doc)
     for gate in (REQUIREMENTS, PRODUCT_MODEL):
         rows = versions(output_dir, gate)
         items = snapshot(doc, gate)
@@ -336,7 +383,7 @@ TURN_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "required": ["kind", "answer", "brief", "parts", "remove", "move", "rename", "newRequirements",
-                 "requirementsChange", "reword"],
+                 "requirementsChange", "reword", "decline"],
     "properties": {
         "kind": {"type": "string", "enum": ["change", "question", "approve", "other"]},
         "answer": {"type": "string", "description": "for a question: the answer, briefly"},
@@ -369,6 +416,13 @@ TURN_SCHEMA: dict[str, Any] = {
             "product model only: when the person rewords or retires an APPROVED requirement, "
             "that change restated for the requirements' author, naming the requirement by id. "
             "Empty otherwise.")},
+        "decline": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["kind", "name", "reason"],
+            "properties": {"kind": {"type": "string", "enum": ["screen", "record", "process", "rule", "integration"]},
+                           "name": {"type": "string", "description": "the reference item's exact name"},
+                           "reason": {"type": "string"}}},
+            "description": ("items of the domain reference (what such products have) the person says "
+                            "this product does not need, each with their reason")},
     },
 }
 
@@ -377,7 +431,10 @@ _WHAT = {
                    "Retire a requirement by listing its id in `remove`. When the change alters what an "
                    "existing requirement says, put it in `reword` with its id and its whole new "
                    "wording — never restate it as a new one. Only requirements that do not exist "
-                   "yet go in `brief`. Leave `parts`, `move` and `newRequirements` empty."),
+                   "yet go in `brief`. Leave `move` and `newRequirements` empty. The domain "
+                   "reference (what such products have) is shown too: a change to IT goes in `brief` "
+                   "with `parts: [\"reference\"]`; an item of it the person does not want goes in "
+                   "`decline` with their reason; otherwise leave `parts` empty."),
     PRODUCT_MODEL: ("the product model — the application's modules and, in each, the screens, "
                     "records, processes and connections that will be generated",
                     "Retire items by id in `remove` (a module, screen, record, connection or role; "
@@ -388,7 +445,10 @@ _WHAT = {
                     "which parts it touches. When the change adds behaviour none of the approved "
                     "requirements states, add it to `newRequirements`. When it rewords or retires "
                     "an approved requirement, put the new wording in `reword` (or a retirement in "
-                    "`remove`), and put what it means for the model in `brief` and `parts`."),
+                    "`remove`), and put what it means for the model in `brief` and `parts`. An item "
+                    "of the domain reference (what such products have) the person says this product "
+                    "does not need goes in `decline` with their reason; a change to the reference "
+                    "itself goes in `brief` with `parts: [\"reference\"]`."),
 }
 
 
@@ -407,6 +467,8 @@ def interpret(doc: Mapping[str, Any], gate: str, message: str, history: list[tup
     context = {"application": (doc.get("application") or {}).get("name", ""), "shown": shown}
     if gate == PRODUCT_MODEL:
         context["approvedRequirements"] = requirement_items(doc)
+    if (doc.get("domainReference") or {}).get("screens"):
+        context["whatSuchProductsHave"] = reference_view(doc)
     system = (f"You are Smith, reviewing {what} with the person who asked for the application. "
               "They are looking at exactly what is under `shown`. Decide what their latest message is.\n"
               "- `change`: they want something in it different.\n"
@@ -608,13 +670,25 @@ _REVISE_REQUIREMENTS = (
 
 
 def revise_requirements(svc: Any, brief: str, *, remove: list[str] = (), reword: list[dict] = (),
-                        request: str = "", executor: Any = None, reasoning: Any = None) -> dict:
-    """Redraft the requirements for one change, and say what moved."""
+                        request: str = "", executor: Any = None, reasoning: Any = None,
+                        parts: list[str] = (), decline: list[dict] = ()) -> dict:
+    """Redraft the requirements for one change, and say what moved. A change
+    to the domain reference (`parts` names it) goes to its own author;
+    declined reference items are recorded as the person's."""
     output_dir = svc.output_dir
     before_items = requirement_items(svc.doc)
     if not versions(output_dir, REQUIREMENTS):
         record_version(output_dir, REQUIREMENTS, svc.doc)
     request = request or brief
+    declined = apply_declines(svc, list(decline or []))
+    if brief.strip() and "reference" in (parts or []):
+        with _all_or_nothing(svc):
+            tell(reasoning, "Changing what such products have.", "step")
+            _rerun(svc, "domain_reference", _REVISE_PART["reference"].format(brief=brief), request,
+                   executor=executor, reasoning=reasoning, sections=_PART_SECTIONS["reference"])
+        row = record_version(output_dir, REQUIREMENTS, svc.doc, request=request)
+        return {"version": int(row["version"]), "diff": requirements_diff(before_items, requirement_items(svc.doc)),
+                "reference": True, "declined": [d["name"] for d in declined]}
     with _all_or_nothing(svc):
         if remove or reword:
             before = svc.snapshot()
@@ -629,7 +703,7 @@ def revise_requirements(svc: Any, brief: str, *, remove: list[str] = (), reword:
     after_items = requirement_items(svc.doc)
     change = requirements_diff(before_items, after_items)
     row = record_version(output_dir, REQUIREMENTS, svc.doc, request=request)
-    return {"version": int(row["version"]), "diff": change}
+    return {"version": int(row["version"]), "diff": change, "declined": [d["name"] for d in declined]}
 
 
 _REVISE_PART = {
@@ -646,6 +720,10 @@ _REVISE_PART = {
               "Return only the roles and permissions this change adds or rewords."),
     "connections": ("The person is reviewing the product model and asked for this change:\n\n{brief}\n\n"
                     "Return only the integrations this change adds or rewords."),
+    "reference": ("The person is reviewing what such products have — the domain reference — and asked "
+                  "for this change:\n\n{brief}\n\n"
+                  "Return the domain reference as it should now read, whole: every list complete, with "
+                  "the change made and everything else as it was. Keep `declined` exactly as it is."),
 }
 
 #: What each owner's reply may write back for a model change.
@@ -655,6 +733,7 @@ _PART_SECTIONS: dict[str, tuple[str, ...]] = {
     "modules": ("modules", "navigation"),
     "roles": ("roles", "permissions", "security"),
     "connections": ("integrations",),
+    "reference": ("domainReference",),
 }
 
 
@@ -711,8 +790,9 @@ def revise_model(svc: Any, turn: Mapping[str, Any], *, request: str = "", execut
         retired = _retire(svc, list(turn.get("remove") or []))
         moved = _move(svc, list(turn.get("move") or []))
         renamed = _rename(svc, list(turn.get("rename") or []))
-        if retired or moved or renamed:
-            _commit(svc, request, "retire, move or rename at the product-model gate", before)
+        declined = apply_declines(svc, turn.get("decline"))
+        if retired or moved or renamed or declined:
+            _commit(svc, request, "retire, move, rename or decline at the product-model gate", before)
 
         brief = str(turn.get("brief") or "").strip()
         parts = [p for p in PART_NODE if p in (turn.get("parts") or [])]
@@ -732,7 +812,7 @@ def revise_model(svc: Any, turn: Mapping[str, Any], *, request: str = "", execut
     row = record_version(output_dir, PRODUCT_MODEL, svc.doc, request=request)
     return {"version": int(row["version"]), "diff": change, "requirements": added_reqs,
             "reworded": reworded, "retired": retired, "moved": moved, "renamed": renamed,
-            "wrote": wrote}
+            "wrote": wrote, "declined": [d["name"] for d in declined]}
 
 
 # ---------------------------------------------------------------------------
@@ -760,7 +840,8 @@ def say_requirements(doc: Mapping[str, Any]) -> str:
     return lead + "\n\n" + ask_line(REQUIREMENTS)
 
 
-def say_requirements_change(change: Mapping[str, Any], version: int) -> str:
+def say_requirements_change(change: Mapping[str, Any], version: int, *, declined: list[str] = (),
+                            reference: bool = False) -> str:
     bits = []
     if change.get("added"):
         bits.append(f"added {len(change['added'])}")
@@ -768,6 +849,10 @@ def say_requirements_change(change: Mapping[str, Any], version: int) -> str:
         bits.append(f"removed {len(change['removed'])}")
     if change.get("changed"):
         bits.append(f"changed {len(change['changed'])}")
+    if declined:
+        bits.append(f"left out of what such products have: {', '.join(declined)}")
+    if reference:
+        bits.append("updated what such products have")
     if not bits:
         return ("I looked again and nothing needed to change for that — tell me which requirement "
                 "you mean if I missed it.\n\n" + ask_line(REQUIREMENTS))
@@ -785,6 +870,12 @@ def say_model(doc: Mapping[str, Any]) -> str:
                         if x) + ".")
     if view["uncovered"]:
         lead += f" {_count(len(view['uncovered']), 'requirement')} is not covered yet: {', '.join(view['uncovered'])}."
+    lacking = (view.get("reference") or {}).get("red") or []
+    if lacking:
+        names = ", ".join(f"{r['item']} ({r['kind']})" for r in lacking[:8]) + (" and more" if len(lacking) > 8 else "")
+        lead += (f" {_count(len(lacking), 'thing')} such products have {'is' if len(lacking) == 1 else 'are'} not in "
+                 f"the model yet: {names} — ask for {'it' if len(lacking) == 1 else 'them'}, or tell me to leave "
+                 f"{'it' if len(lacking) == 1 else 'them'} out.")
     return lead + "\n\n" + ask_line(PRODUCT_MODEL)
 
 

@@ -344,8 +344,12 @@ def _prove_processes(svc: Any, output_dir: str, *,
                     client: Any = None,
                     run_turn: Callable[..., dict] | None = None,
                     bench_factory: Callable[[str], Any] | None = None,
-                    rounds: int = ROUNDS, record: bool = True) -> dict:
-    """Run every process; repair what fails; returns {passed, fixed, left}."""
+                    rounds: int = ROUNDS, record: bool = True, only: set[str] | None = None,
+                    cancelled: Callable[[], bool] = lambda: False) -> dict:
+    """Run every process — or only the workflows `only` names — repair what
+    fails; returns {passed, fixed, left, untried}. `untried` is what could
+    not be run because the app could not be started for it: the check's
+    failure, said as such, never an issue of the application."""
     from services.blueprint.page_repair import _ledger
     from services.blueprint.round_trips import read_back
     from services.smith import trials
@@ -368,9 +372,9 @@ def _prove_processes(svc: Any, output_dir: str, *,
         except Exception:  # noqa: BLE001
             logger.warning("[process-trials] could not reload the Blueprint", exc_info=True)
 
-    flows = manual_workflows(svc.doc)
+    flows = [w for w in manual_workflows(svc.doc) if only is None or str(w.get("id")) in only]
     if not flows:
-        return {"passed": [], "fixed": [], "left": []}
+        return {"passed": [], "fixed": [], "left": [], "untried": []}
     passed: list[str] = []
     fixed: list[str] = []
     # FIXED MEANS SOMETHING CHANGED. A repair that only ran the process again
@@ -378,6 +382,7 @@ def _prove_processes(svc: Any, output_dir: str, *,
     # told the owner three working processes had been broken (wz7a99ir).
     changed: set[str] = set()
     left: list[dict] = []
+    untried: list[dict] = []
     pending = [str(w["id"]) for w in flows]
     lessons: dict[str, str] = {}
     proven: list[str] = []
@@ -434,7 +439,15 @@ def _prove_processes(svc: Any, output_dir: str, *,
                             if unseen:
                                 said += ("\n\nthen, looking for it as the person who ran it:\n"
                                          + "\n".join(f"  {u}" for u in unseen))
-                        if run_failed(said) or "\nthen, looking for it as the person who ran it:" in said:
+                        if "is not set in this environment" in said:
+                            # A SECRET THE COPY DOES NOT HOLD IS THE CHECK'S
+                            # SHORTFALL, NOT THE APP'S: never sent for repair.
+                            proven.append(pid)
+                            untried.append({"workflow": pid, "name": str(by_id[pid].get("name") or pid),
+                                            "reason": next((line.strip() for line in said.splitlines()
+                                                            if "is not set in this environment" in line),
+                                                           "a secret is not set")[:200]})
+                        elif run_failed(said) or "\nthen, looking for it as the person who ran it:" in said:
                             failing.append((by_id[pid], run, said))
                         else:
                             proven.append(pid)
@@ -472,13 +485,13 @@ def _prove_processes(svc: Any, output_dir: str, *,
                             ledger.node_subject("process_trials", pid, len(passed) + len(fixed), len(flows), True)
             except trials.TrialUnavailable as exc:
                 logger.warning("[process-trials] the app could not be run: %s", exc)
-                left = [{"workflow": p, "name": str(by_id[p].get("name") or p),
-                         "reason": f"the app could not be started to run it: {exc}"} for p in pending]
+                untried = [{"workflow": p, "name": str(by_id[p].get("name") or p),
+                            "reason": f"the app could not be started to run it: {exc}"} for p in pending]
                 pending = []
                 break
             finally:
                 bench.close()
-            if round_ > rounds:
+            if round_ > rounds or cancelled():
                 left = [{"workflow": str(f.get("id")), "name": str(f.get("name") or f.get("id")),
                          "reason": said.split("\n", 1)[0][:200] + " — " + said[-400:]} for f, _r, said in failing]
                 break
@@ -502,10 +515,13 @@ def _prove_processes(svc: Any, output_dir: str, *,
             ledger.unrepaired("process_trials", item["workflow"], item["reason"])
 
     runtime = dict(svc.doc.get("runtime") or {})
-    issues = [i for i in runtime.get("issues") or [] if not (isinstance(i, dict) and i.get("kind") == "process")]
+    ran = {str(w.get("id")) for w in flows}
+    issues = [i for i in runtime.get("issues") or []
+              if not (isinstance(i, dict) and i.get("kind") == "process"
+                      and (only is None or str(i.get("workflow")) in ran))]
     issues += [{"kind": "process", "workflow": t["workflow"], "name": t["name"], "detail": t["reason"][:600]}
                for t in left]
     runtime["issues"] = issues
     svc.doc["runtime"] = runtime
     svc.save()
-    return {"passed": passed, "fixed": fixed, "left": left}
+    return {"passed": passed, "fixed": fixed, "left": left, "untried": untried}

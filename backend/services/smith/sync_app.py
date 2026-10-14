@@ -73,6 +73,16 @@ RUNTIME_FILES: tuple[tuple[str, str], ...] = (
     ("seed.ts", "src/db/seed.ts"),
 )
 
+#: Sign-in logic every app runs, the platform's: where a signed-in person
+#: lands (`lib/landing.ts`, always written — the SDK imports it) and the
+#: template sign-in form's hook (written where the app has it). Kept current
+#: so an app built before a fix gets it: ToroCommerce's and TCommerce's
+#: administrators landed on the storefront (2026-10-07).
+SIGN_IN_FILES: tuple[tuple[str, bool], ...] = (
+    ("src/lib/landing.ts", True),
+    ("src/hooks/useLogin.ts", False),
+)
+
 #: Database scripts every app runs, the platform's: prepare, verify, reset.
 DB_SCRIPTS: tuple[str, ...] = ("src/db/prepare-schema.ts", "src/db/verify-schema.ts",
                                "src/db/reset-schema.ts", "src/db/extensions.ts")
@@ -83,7 +93,13 @@ WORKFLOW_ROUTES: tuple[str, ...] = ("src/app/api/workflows/[id]/execute/route.ts
 
 #: The engine's typed doorway for pages, the platform's too — it carries the
 #: row type the engine returns, so the two move together.
-ENGINE_FOUNDATION_FILES: tuple[str, ...] = ("src/lib/data-engine-bridge.ts",)
+ENGINE_FOUNDATION_FILES: tuple[str, ...] = (
+    "src/lib/data-engine-bridge.ts",
+    # The app's calls to its own API under its base path, and where a sign-in
+    # lands: platform files every app carries, never an agent's.
+    "src/lib/api-path.ts", "src/lib/landing.ts", "src/lib/LiveRefresh.tsx",
+    "src/sdk/client.tsx", "src/hooks/useEntityList.ts", "src/hooks/useEntityDetail.ts",
+)
 
 
 def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
@@ -129,9 +145,21 @@ def refresh_engine(app_root: str | Path, doc: dict | None = None) -> list[str]:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(f, dst)
             changed.append(rel)
+    foundation = Path(__file__).resolve().parents[2] / "templates" / "app-foundation"
+    for rel, always in SIGN_IN_FILES:
+        src, dst = foundation / rel, root / rel
+        if not src.is_file() or (not always and not dst.is_file()):
+            continue
+        try:
+            if dst.read_bytes() == src.read_bytes():
+                continue
+        except OSError:
+            pass
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        changed.append(rel)
     # THE DATABASE SCRIPTS ARE THE PLATFORM'S TOO: how a schema change keeps
     # the rows, and the check that it landed.
-    foundation = Path(__file__).resolve().parents[2] / "templates" / "app-foundation"
     for rel in DB_SCRIPTS:
         src, dst = foundation / rel, root / rel
         if not src.is_file() or not (root / "drizzle.config.ts").is_file():

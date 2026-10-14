@@ -52,5 +52,11 @@ export function sessionCookies() {
     callbackUrl: { name: `${secure ? "__Secure-" : ""}${base}.callback-url`,
                    options: { ...options, httpOnly: false } },
     csrfToken: { name: `${secure ? "__Host-" : ""}${base}.csrf-token`, options },
+    // THE SIGN-IN'S OWN COOKIES, when a person goes out to an identity
+    // provider and comes back: the state, the PKCE verifier and the nonce
+    // are this app's too, or two apps on one host finish each other's sign-in.
+    state: { name: `${secure ? "__Secure-" : ""}${base}.state`, options: { ...options, maxAge: 900 } },
+    pkceCodeVerifier: { name: `${secure ? "__Secure-" : ""}${base}.pkce.code_verifier`, options: { ...options, maxAge: 900 } },
+    nonce: { name: `${secure ? "__Secure-" : ""}${base}.nonce`, options },
   };
 }

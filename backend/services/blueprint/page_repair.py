@@ -138,10 +138,14 @@ class _ledger:
     and the run's ledger has said `run:end`: without this a repair ten minutes
     long looked idle to the status poll and to the deploy's idle gate."""
 
-    def __init__(self, output_dir: str | None, total: int, *, node: str = "page_repair"):
-        self.output_dir, self.total, self.node = output_dir, total, node
+    def __init__(self, output_dir: str | None, total: int, *, node: str = "page_repair",
+                 phase: str = "build"):
+        self.output_dir, self.total, self.node, self.phase = output_dir, total, node, phase
         self.ledger: Any = _NoLedger()
         self._stop: Any = None
+        #: Why the work ended early, when it did (`stopped`): written as the
+        #: run's `pausedBecause`, so a reader sees a stop rather than an end.
+        self.stopped: str = ""
 
     def __enter__(self) -> Any:
         if not self.output_dir:
@@ -150,7 +154,7 @@ class _ledger:
         from datetime import datetime, timezone
         from services.blueprint.run_ledger import RunLedger
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + "-" + self.node.replace("_", "-")
-        self.ledger = RunLedger(self.output_dir, run_id, phase="build")
+        self.ledger = RunLedger(self.output_dir, run_id, phase=self.phase)
         self.ledger.planned([self.node])
         self.ledger.node_start(self.node, self.total)
         self._stop = threading.Event()
@@ -166,7 +170,7 @@ class _ledger:
             self._stop.set()
             self.ledger.node_done(self.node)
             from types import SimpleNamespace
-            self.ledger.finish(SimpleNamespace(completed=[self.node]))
+            self.ledger.finish(SimpleNamespace(completed=[self.node], paused_because=self.stopped))
 
 
 def _repair(svc: Any, output_dir: str, app_root: str, todo: list[dict], *, say: Callable,

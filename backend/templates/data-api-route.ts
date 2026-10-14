@@ -170,6 +170,12 @@ function isPublicResource(entity: string | undefined): boolean {
 /** The signed-out visitor's guest token (the `forge-guest` cookie the workflow
  *  route set). Records a guest made are theirs by it — and stay theirs once
  *  they sign in, so it rides beside the session user too. */
+/** Why a change is made, when the request says (`X-Change-Reason`). */
+function reasonOf(request: Request): string | undefined {
+  const reason = (request.headers.get("x-change-reason") ?? "").trim();
+  return reason || undefined;
+}
+
 function guestOf(request: Request): string | undefined {
   return (request.headers.get("cookie") ?? "").match(/(?:^|;\s*)forge-guest=([0-9a-f-]{36})/)?.[1];
 }
@@ -256,7 +262,7 @@ export async function POST(
   if (deniedFor(entity, session as any, "write")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  const ctx = { user: session.user as any, guest: guestOf(request) };
+  const ctx = { user: session.user as any, guest: guestOf(request), reason: reasonOf(request) };
 
   try {
     const body = await request.json();
@@ -302,7 +308,7 @@ export async function PUT(
     return NextResponse.json({ error: { code: "BAD_REQUEST", message: "ID required" } }, { status: 400 });
   }
   if (isAppendOnly(entity)) return ledgerImmutableResponse(entity);
-  const ctx = { user: session.user as any, guest: guestOf(request) };
+  const ctx = { user: session.user as any, guest: guestOf(request), reason: reasonOf(request) };
 
   try {
     const body = await request.json();
@@ -333,7 +339,7 @@ export async function DELETE(
     return NextResponse.json({ error: { code: "BAD_REQUEST", message: "ID required" } }, { status: 400 });
   }
   if (isAppendOnly(entity)) return ledgerImmutableResponse(entity);
-  const ctx = { user: session.user as any, guest: guestOf(request) };
+  const ctx = { user: session.user as any, guest: guestOf(request), reason: reasonOf(request) };
 
   try {
     const result = await measured({ operation: "delete", entity },

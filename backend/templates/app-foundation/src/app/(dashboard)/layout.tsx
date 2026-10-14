@@ -19,6 +19,8 @@ import { icons as lucideIcons } from "lucide-react";
 import { ShellStateProvider } from "@tentoroforge/renderer";
 import { MobileNav } from "./MobileNav";
 import { NotificationBell } from "./NotificationBell";
+import { OrgSwitcher } from "./OrgSwitcher";
+import { InstallButton } from "@/components/PwaRegister";
 import { LanguageSwitch } from "@/sdk/i18n";
 import { AccountMenu } from "./AccountMenu";
 import { MobileTabBar } from "./MobileTabBar";
@@ -916,7 +918,9 @@ export default async function DashboardLayout({
   // header they sat on top of its primary action.
   const cluster = session?.user ? (
     <>
+      <OrgSwitcher />
       <LanguageSwitch />
+      <InstallButton />
       <NotificationBell />
       <AccountMenu name={session.user.name} email={session.user.email}
                    role={(session.user as { role?: string }).role} />

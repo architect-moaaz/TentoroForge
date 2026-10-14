@@ -54,6 +54,9 @@ def build_deploy_env(
     nextauth_secret: str,
     blob_token: str | None = None,
     keep_db_state: bool = False,
+    cron_secret: str = "",
+    nextauth_url: str = "",
+    app_secrets: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Return the env-var map to push to Vercel."""
     env: dict[str, str] = {}
@@ -78,6 +81,14 @@ def build_deploy_env(
     # callers but is no longer used here; the provider deletes any stale
     # NEXTAUTH_URL a prior deploy pinned.
     _ = vercel_url
+    # EXCEPT WHEN PEOPLE SIGN IN THROUGH AN IDENTITY PROVIDER. Then the
+    # application must know its own address before the first request: the
+    # redirect the provider sends the person back to is built from it, and
+    # the provider admits only the address registered with it. The caller
+    # passes the project's stable production alias (`<name>.vercel.app`),
+    # which exists before any deployment does — never a per-deployment URL.
+    if nextauth_url:
+        env["NEXTAUTH_URL"] = nextauth_url.rstrip("/")
 
     # Empty NEXTAUTH_SECRET means "redeploy — reuse the secret Vercel already
     # has". Emitting NEXTAUTH_SECRET="" leaves a footgun for any caller that
@@ -89,6 +100,18 @@ def build_deploy_env(
 
     if blob_token:
         env["BLOB_READ_WRITE_TOKEN"] = blob_token
+
+    # THE CLOCK'S KEY TRAVELS WITH THE APP. Vercel sends it as the bearer on
+    # every cron call and the tick refuses anything else; an org-wide value
+    # from the integrations store wins when one is set.
+    if cron_secret and "CRON_SECRET" not in env:
+        env["CRON_SECRET"] = cron_secret
+
+    # THE APP'S OWN GENERATED SECRETS (its push keys): what it already runs
+    # with locally, unless the organisation's store holds a value.
+    for key, val in (app_secrets or {}).items():
+        if val and key not in env:
+            env[key] = str(val)
 
     # Redeploys that reuse an existing Neon project must not wipe live data:
     # reset-schema.ts and seed.ts both honor this flag and skip their

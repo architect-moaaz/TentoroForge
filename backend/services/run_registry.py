@@ -23,6 +23,8 @@ which did, and survives to be audited afterwards. This answers one question —
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -33,8 +35,45 @@ from typing import Any
 _RUNS: dict[str, dict[str, Any]] = {}
 
 
-def begin(project_id: str, *, phase: str) -> None:
-    """A run has started for this project. Replaces any previous entry."""
+#: The file a person's Stop leaves beside the application's ledgers. A FILE,
+#: not a flag in memory: the backend runs two workers, and the one that takes
+#: the Stop is not necessarily the one running the build. Cleared when the
+#: next build begins.
+STOP_FILE = Path(".forge") / "runs" / "STOP"
+
+
+def request_stop(project_id: str, output_dir: str | Path) -> None:
+    """The person pressed Stop: the build in flight ends at its next step,
+    the checks at their next page, and what is built is handed over."""
+    path = Path(output_dir) / STOP_FILE
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    except OSError:
+        pass
+    run = _RUNS.get(str(project_id))
+    if run is not None:
+        run["cancel"] = True
+
+
+def stop_requested(output_dir: str | Path) -> bool:
+    return (Path(output_dir) / STOP_FILE).is_file()
+
+
+def clear_stop(output_dir: str | Path) -> None:
+    try:
+        (Path(output_dir) / STOP_FILE).unlink()
+    except OSError:
+        pass
+
+
+def begin(project_id: str, *, phase: str, output_dir: str | Path | None = None) -> None:
+    """A run has started for this project. Replaces any previous entry — but
+    keeps the checks still running after the last hand-over, which are
+    another process's work and did not end because a turn began."""
+    if output_dir is not None:
+        clear_stop(output_dir)
+    prior = _RUNS.get(str(project_id)) or {}
     _RUNS[str(project_id)] = {
         "active": True,
         "phase": phase,
@@ -48,7 +87,36 @@ def begin(project_id: str, *, phase: str) -> None:
         "nodes": [],
         "awaitingApproval": False,
         "status": "running",
+        **({"checks": prior["checks"]} if prior.get("checks", {}).get("active") else {}),
     }
+
+
+def checking(project_id: str, *, phase: str = "checking") -> None:
+    """The application is handed over and its checks are running: the panel
+    says so without saying "building", and the input stays open."""
+    run = _RUNS.setdefault(str(project_id), {"active": False, "status": "complete", "startedAt": time.time()})
+    run["checks"] = {"active": True, "phase": phase, "startedAt": time.time(), "scorecard": {}}
+
+
+def checks_done(project_id: str, status: str = "done") -> None:
+    run = _RUNS.get(str(project_id))
+    if run is None or not isinstance(run.get("checks"), dict):
+        return
+    run["checks"].update({"active": False, "phase": status, "endedAt": time.time()})
+
+
+def turn_in_flight(output_dir: str | Path) -> bool:
+    """Whether a person's Smith turn is working on this application now —
+    the newest ledger is a turn's and still alive. The fix loop waits for it:
+    two writers on one tree is how a repair undoes what the person asked for."""
+    import glob
+    import os
+    runs = sorted(glob.glob(os.path.join(str(output_dir), ".forge", "runs", "*.jsonl")))
+    turns = [p for p in runs if _is_turn(p)]
+    if not turns:
+        return False
+    folded = _fold(turns[-1])
+    return bool(folded and folded.get("active"))
 
 
 #: The events the level map is drawn from — kept, bounded, so a page that
@@ -122,6 +190,12 @@ def note(project_id: str, event: str, data: dict[str, Any]) -> None:
         finish(project_id, "complete")
     elif event == "error":
         finish(project_id, "error", detail=str(data.get("message") or "")[:400])
+    elif event == "scorecard":
+        checks = run.get("checks") if isinstance(run.get("checks"), dict) else None
+        if checks is not None:
+            checks["scorecard"] = dict(data.get("summary") or {})
+            if data.get("phase"):
+                checks["phase"] = str(data["phase"])
 
 
 def _node(run: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
@@ -217,6 +291,41 @@ def ledger_snapshot(output_dir: str | Path, *, turns: bool = True) -> dict[str, 
             out["elapsedMs"] = going.get("elapsedMs", out.get("elapsedMs"))
             return out
     return newest
+
+
+def close_orphaned_ledgers(root: str | Path) -> list[str]:
+    """A RESTART CLOSES WHAT IT KILLED. Every ledger is written by this
+    process; one still open when the process starts belonged to the one
+    before, and nothing it recorded is going to end. Left open, the panel
+    read a killed engineer build as "Building…" for three minutes after
+    the restart and took no Build press (Ecom L1, 2026-10-11). Each is
+    closed with `run:crashed`, which is what a poll would have found later.
+    Returns the ids closed."""
+    closed: list[str] = []
+    root = Path(root)
+    if not root.is_dir():
+        return closed
+    for runs in root.glob("*/.forge/runs"):
+        for path in runs.glob("*.jsonl"):
+            try:
+                with path.open("rb") as fh:
+                    fh.seek(0, os.SEEK_END)
+                    size = fh.tell()
+                    fh.seek(max(0, size - 4096))
+                    tail = fh.read().decode("utf-8", "replace").strip().splitlines()
+                last = json.loads(tail[-1]) if tail else None
+            except (OSError, ValueError):
+                continue
+            if not last or str(last.get("event") or "") in ("run:end", "run:crashed"):
+                continue
+            try:
+                with path.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"event": "run:crashed", "error": "the platform restarted while it ran",
+                                         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}) + "\n")
+                closed.append(path.stem)
+            except OSError:
+                continue
+    return closed
 
 
 def _is_turn(path: str | Path) -> bool:
@@ -316,11 +425,17 @@ def snapshot(project_id: str) -> dict[str, Any]:
     if run is None:
         return {"active": False, "status": "idle"}
 
-    if not run.get("active"):
-        if time.time() - float(run.get("endedAt") or 0) > 120:
+    checks = run.get("checks") if isinstance(run.get("checks"), dict) else None
+    if not run.get("active") and not (checks and checks.get("active")):
+        if time.time() - float(run.get("endedAt") or checks and checks.get("endedAt") or 0) > 120:
             _RUNS.pop(str(project_id), None)
             return {"active": False, "status": "idle"}
 
     out = dict(run)
     out["elapsedMs"] = int((time.time() - float(run["startedAt"])) * 1000)
+    if checks and checks.get("active") and not run.get("active"):
+        # THE BUILD ENDED, THE CHECKS GO ON. Said as its own phase, never as
+        # "running": a panel that reads this must not say "Building…" over an
+        # application that is handed over and in use.
+        out["phase"] = "checking"
     return out

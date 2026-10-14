@@ -190,6 +190,12 @@ export async function executeWorkflow(
       };
     }
 
+    // The end the run reached, when it declared something for the page.
+    const endLog = isPaused ? undefined : ctx.log.find((l) => {
+      const o = (l as any)?.output;
+      return o && typeof o === "object" && (o.reply !== undefined || typeof o.redirect === "string");
+    });
+    const said = (endLog as any)?.output ?? {};
     return {
       workflowId: workflow.id,
       workflowName: workflow.name,
@@ -199,6 +205,8 @@ export async function executeWorkflow(
       log: ctx.log,
       output: ctx.variables,
       notices: noticesOf(ctx.log),
+      ...(said.reply !== undefined ? { reply: said.reply } : {}),
+      ...(typeof said.redirect === "string" && said.redirect ? { redirect: said.redirect } : {}),
       pausedAt: isPaused ? lastLog.nodeId : undefined,
       pendingTask: isPaused ? {
         nodeId: lastLog.nodeId,
@@ -692,17 +700,37 @@ async function executeNode(
         break;
 
       case "wait": {
-        // Cap wait to 5 seconds in execution — real delays should use scheduling
-        const waitMs = Math.min(Number(config.duration || 0), 5000);
-        if (waitMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        // A WAIT IS A PAUSE, NOT A SLEEP. The run is put down the way a
+        // `wait_for_event` is — a workflow_tasks row with its due time —
+        // and the clock (`resumeExpiredWaits`, from the tick) picks it up
+        // and replays this node with `{waited: true}` as its cached output.
+        // Only a wait short enough to hold the request (≤ 5 s) sleeps in
+        // place. `Number("1 hour")` used to be NaN, so no wait ever waited.
+        const untilText = typeof config.until === "string" && config.until.trim()
+          ? String(interpolateValue(config.until, ctx.variables) ?? "") : "";
+        const untilAt = untilText ? new Date(untilText) : null;
+        const waitMs = untilAt && !Number.isNaN(untilAt.getTime())
+          ? Math.max(0, untilAt.getTime() - Date.now())
+          : parseDurationMs(config.for ?? config.duration ?? config.durationMs);
+        if (waitMs <= 5_000) {
+          if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+          logEntry.output = { waited: true, waitedMs: waitMs };
+          nextEdges = workflow.definition.edges.filter((e) => e.source === node.id);
+          break;
         }
-        logEntry.output = { waitedMs: waitMs, requestedMs: config.duration };
-      }
-        nextEdges = workflow.definition.edges.filter(
-          (e) => e.source === node.id,
-        );
+        const until = new Date(Date.now() + waitMs).toISOString();
+        logEntry.status = "running";
+        logEntry.output = {
+          taskCreated: true,
+          taskType: "wait_timer",
+          waitingForHumanAction: true, // THE pause flag — see executeWorkflow's scan
+          until,
+          dueIn: Math.max(1, Math.ceil(waitMs / 60_000)),
+        };
+        ctx.variables.__waiting_event = "__timer";
+        nextEdges = [];
         break;
+      }
 
       case "user_task":
       case "approval":
@@ -916,6 +944,23 @@ async function executeNode(
             message: String(interpolateValue(String(endCfg.message ?? ""), ctx.variables) ?? "")
               || "This could not be done.",
           };
+        } else {
+          // WHAT THE PAGE MAY READ BACK, BY NAME. The reply is a receipt (the
+          // run's variables never leave the server), so an end that has
+          // something for the page — a checkout URL, the number it minted —
+          // declares it: `reply` is a few named templates, `redirect` is
+          // where the person goes next, in-app route or outside address.
+          const reply = endCfg.reply && typeof endCfg.reply === "object" && !Array.isArray(endCfg.reply)
+            ? Object.fromEntries(Object.entries(endCfg.reply as Record<string, unknown>).map(([k, v]) =>
+                [k, typeof v === "string" ? interpolateValue(v, ctx.variables) : v]))
+            : undefined;
+          const redirect = typeof endCfg.redirect === "string" && endCfg.redirect.trim()
+            ? String(interpolateValue(endCfg.redirect, ctx.variables) ?? "").trim()
+            : "";
+          if (reply || redirect) {
+            logEntry.output = { ...((logEntry.output as Record<string, unknown>) ?? {}),
+              ...(reply ? { reply } : {}), ...(redirect ? { redirect } : {}) };
+          }
         }
         nextEdges = [];
         break;
@@ -1560,3 +1605,31 @@ async function executeParallelBranches(
 // Rule-table evaluation lives in ./decision.ts (kept out of engine.ts
 // so the standalone test harness can exercise it without pulling in
 // any @/db / drizzle imports).
+
+/**
+ * How long a `wait` waits, in milliseconds: an ISO-8601 duration (`P2D`,
+ * `PT90M`), words (`2 days`, `90 minutes`, `1 hour 30 minutes`), or a
+ * number of milliseconds (the legacy `duration`/`durationMs`). Unreadable
+ * is 0: the run does not wait, and the author's check refuses the step.
+ */
+export function parseDurationMs(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, value);
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+  if (/^\d+(\.\d+)?$/.test(text)) return Math.max(0, Number(text));
+  const iso = /^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/i.exec(text);
+  if (iso) {
+    const [, w, d, h, m, s] = iso.map((x) => Number(x || 0));
+    return ((((w * 7 + d) * 24 + h) * 60 + m) * 60 + s) * 1000;
+  }
+  let total = 0;
+  let matched = false;
+  const units: Record<string, number> = { s: 1000, sec: 1000, second: 1000, m: 60_000, min: 60_000, minute: 60_000,
+    h: 3_600_000, hr: 3_600_000, hour: 3_600_000, d: 86_400_000, day: 86_400_000, w: 604_800_000, week: 604_800_000 };
+  for (const part of text.matchAll(/(\d+(?:\.\d+)?)\s*(weeks?|w|days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b/gi)) {
+    const unit = part[2].toLowerCase().replace(/s$/, "");
+    const ms = units[unit] ?? units[unit.replace(/e$/, "")] ?? 0;
+    if (ms) { total += Number(part[1]) * ms; matched = true; }
+  }
+  return matched ? total : 0;
+}

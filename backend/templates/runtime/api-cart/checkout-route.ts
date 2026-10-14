@@ -63,14 +63,13 @@ export async function POST(req: Request): Promise<Response> {
       console.error("[api/cart/checkout] workflow trigger", err);
     }
 
-    // Clear the cart after firing (whether or not a workflow claimed it).
-    try {
-      await db.delete(forgeCart).where(eq(forgeCart.userId, userId));
-    } catch (err) {
-      console.error("[api/cart/checkout] clear", err);
-    }
-
-    return NextResponse.json({ ok: true, subtotal, itemCount: items.length, workflowResults });
+    // THE CART IS EMPTIED BY THE PAYMENT, NOT THE CLICK. A process listening
+    // for `payment.succeeded` clears it (a db_delete on forge_cart by user);
+    // until then an abandoned checkout keeps what the person chose. The
+    // first run that sends the person to pay says where (`redirect`).
+    const first = Array.isArray(workflowResults) ? (workflowResults as any[]).find((r) => r && typeof r === "object" && r.redirect) : null;
+    return NextResponse.json({ ok: true, subtotal, itemCount: items.length, workflowResults,
+      ...(first?.redirect ? { redirect: String(first.redirect) } : {}) });
   } catch (err) {
     console.error("[api/cart/checkout] POST", err);
     return NextResponse.json({ error: String(err) }, { status: 500 });

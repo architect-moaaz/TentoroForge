@@ -492,8 +492,10 @@ def test_foundational_nodes_are_classified_by_what_they_produce():
 
     frame = {k for k, n in DAG.items() if is_foundational(n)}
     # `ui_direction` sets the whole app's look — frame, like the design system.
+    # `domain_reference` is what the frame is held to: re-run it and the
+    # frame is re-authored against it.
     assert frame == {"application_model", "design_system", "integrations",
-                     "ux_architecture", "ui_direction"}
+                     "ux_architecture", "ui_direction", "domain_reference"}
 
 
 def test_service_and_projection_nodes_are_never_foundational():

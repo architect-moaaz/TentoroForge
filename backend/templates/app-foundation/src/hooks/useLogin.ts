@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { signIn } from "next-auth/react";
+import { getSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { afterSignIn, roleAfterSignIn } from "@/lib/landing";
 
 export function useLogin(callbackUrl: string = "/dashboard") {
   const [email, setEmail] = useState("");
@@ -26,7 +27,9 @@ export function useLogin(callbackUrl: string = "/dashboard") {
       if (result?.error) {
         setError("Invalid email or password");
       } else if (result?.ok) {
-        router.push(callbackUrl);
+        // Every role to its own page — the template's sign-in sent everyone
+        // to "/" (`lib/landing.ts`).
+        router.push(afterSignIn(callbackUrl, await roleAfterSignIn(getSession)));
         router.refresh();
       }
     } catch {

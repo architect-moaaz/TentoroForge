@@ -21,6 +21,29 @@ import { useRouter } from "next/navigation";
 
 const DEBOUNCE_MS = 600;
 const MIN_REFRESH_GAP_MS = 3000;
+// Under a prefix (the platform's preview serves the app below one) the
+// stream lives below it too; an absolute "/api/events/stream" reached the
+// platform instead and answered HTML.
+const STREAM_URL = `${(process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "")}/api/events/stream`;
+
+/**
+ * Whether the stream is ours to open. The route is gated like every data
+ * route: opened signed out it answered the sign-in page, and EventSource
+ * logged a MIME error on every public screen — which the trials counted
+ * against every control on it (Ecom L1, 2026-10-11). One quiet probe,
+ * then the stream, or nothing.
+ */
+async function streamIsOurs(): Promise<boolean> {
+  const controller = new AbortController();
+  try {
+    const res = await fetch(STREAM_URL, { redirect: "manual", credentials: "same-origin", signal: controller.signal });
+    const ok = res.status === 200 && (res.headers.get("content-type") || "").includes("text/event-stream");
+    controller.abort();
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 interface StreamEvent {
   type: string;
@@ -81,8 +104,10 @@ export function LiveRefresh({ entities }: { entities: string[] }) {
       return !!prefix && slugs.has(prefix);
     };
 
+    const subscribe = () => {
+    if (stopped) return;
     try {
-      es = new EventSource("/api/events/stream");
+      es = new EventSource(STREAM_URL);
     } catch {
       return; // ancient browser / route absent — degrade silently
     }
@@ -106,6 +131,11 @@ export function LiveRefresh({ entities }: { entities: string[] }) {
         /* heartbeat / malformed frame — ignore */
       }
     };
+    };
+
+    void streamIsOurs().then((ours) => {
+      if (ours) subscribe();
+    });
 
     return () => {
       stopped = true;

@@ -79,6 +79,10 @@ SINGLETON_SECTIONS: frozenset[str] = frozenset({
     "runtime", "database", "deployment", "completeness",
     # §34 — the whole app sketched once. One object per app, like designSystem.
     "composition",
+    # What a practitioner expects of such a product — written first, held to.
+    "domainReference",
+    # The application on a phone — one object per app, like designSystem.
+    "mobile",
 })
 
 #: Lists whose members carry no id of their own, identified instead by a
@@ -105,6 +109,7 @@ ARTIFACT_SECTIONS: dict[str, str] = {
     "components": "CMP",
     "widgets": "WIDGET",
     "workflows": "FLOW",
+    "flows": "JOURNEY",
     "businessRules": "RULE",
     "apis": "API",
     "integrations": "INT",

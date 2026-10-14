@@ -42,24 +42,27 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
                 "add_entity", "remove_entity", "rename_entity", "change_field_type"})),
     ("What it does by itself",
      "Add, change or stop a process — an email after a registration, an "
-     "archive instead of a delete, a reminder on a timer.",
-     frozenset({"add_workflow", "edit_workflow", "remove_workflow"})),
+     "archive instead of a delete, a reminder on a timer — and when it runs: "
+     "on a schedule, paused, now, with a deadline that hands a late task on.",
+     frozenset({"add_workflow", "edit_workflow", "remove_workflow",
+                "set_schedule", "pause_schedule", "resume_schedule", "set_deadline", "run_now"})),
     ("What it will not let people do",
      "Add, change or drop a rule that stops a record being saved.",
      frozenset({"add_rule", "edit_rule", "remove_rule"})),
     ("Who is allowed to do what",
      "Roles, permissions, and which screens each kind of person can open.",
-     frozenset({"edit_access"})),
+     frozenset({"edit_access", "show_audit", "export_audit", "verify_audit", "edit_audit"})),
     ("The people who log in",
      "Give someone a login, take one away, or send someone a fresh link when "
      "they are locked out. Each person sets their own password — I never see "
      "one, and never tell you anyone else's.",
-     frozenset({"add_login", "remove_login", "reset_login"})),
+     frozenset({"add_login", "remove_login", "reset_login", "add_organisation", "move_login",
+                "set_sign_in_method", "map_sso_roles", "restrict_sign_in_domains"})),
     ("How it looks",
      "The colours, type and density of the whole application, the menu down "
      "the side, and your own logo in the corner of every screen — attach the "
      "image and ask.",
-     frozenset({"restyle", "edit_navigation", "set_logo", "remove_logo"})),
+     frozenset({"restyle", "edit_navigation", "set_logo", "remove_logo", "edit_mobile", "test_notification"})),
     ("What it is, and what it talks to",
      "Its name and purpose, requirements written down for later, and API "
      "endpoints. Outside services: I connect the email for real — you name "
@@ -69,7 +72,7 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      "letting it look connected.",
      frozenset({"edit_product", "add_requirement", "edit_requirement",
                 "remove_requirement", "add_api", "edit_api", "remove_api",
-                "add_integration", "remove_integration", "connect_service"})),
+                "add_integration", "remove_integration", "connect_service", "add_webhook", "refund", "set_currency"})),
     ("Your own data",
      "Load the records you already have — attach a spreadsheet and say which "
      "records it holds. I say how many rows would land and which column "
