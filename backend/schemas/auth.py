@@ -60,8 +60,14 @@ class OrgMembership(BaseModel):
     org_name: str
     org_slug: str
     role: str
+    status: str = "active"
 
     model_config = {"from_attributes": True}
+
+
+class ImpersonatedBy(BaseModel):
+    id: uuid.UUID
+    email: str
 
 
 class UserResponse(BaseModel):
@@ -70,5 +76,9 @@ class UserResponse(BaseModel):
     name: str
     created_at: datetime
     orgs: list[OrgMembership] = []
+    platform_role: str | None = None
+    disabled: bool = False
+    #: Set when this session is a super admin acting as the person.
+    impersonated_by: ImpersonatedBy | None = None
 
     model_config = {"from_attributes": True}

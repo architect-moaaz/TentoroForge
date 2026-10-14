@@ -62,12 +62,11 @@ def _deploy_app_dir(output_dir: str) -> str:
 async def _require_project(
     project_id: uuid.UUID, user: PlatformUser, db: AsyncSession
 ) -> Project:
-    project = await db.get(Project, project_id)
-    if project is None:
-        raise HTTPException(404, "project not found")
-    # Owner or org-member check would go here; for MVP any authenticated
-    # user with the project id can publish. Tightening left as a follow-up.
-    return project
+    # A PUBLISH IS THE ORGANISATION'S. Any signed-in person who knew a
+    # project's id could publish it; now only a member of its organisation
+    # can, and not while the organisation is blocked.
+    from services.project_service import get_project_with_auth
+    return await get_project_with_auth(project_id, user, db)
 
 
 async def _collect_integrations(

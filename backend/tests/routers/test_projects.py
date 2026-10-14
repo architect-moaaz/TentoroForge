@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 
 @pytest.fixture()
-def client(tmp_path):
+def client(tmp_path, as_member):
     """TestClient with OUTPUT_ROOT redirected to a per-test temp directory."""
     import services.project_paths as pp
     # Patch OUTPUT_ROOT before importing main so routes see the patched value.

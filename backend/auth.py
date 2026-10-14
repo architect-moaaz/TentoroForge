@@ -7,7 +7,7 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -78,6 +78,27 @@ def create_refresh_token(user_id: uuid.UUID) -> str:
         "exp": expire,
         "type": "refresh",
         "jti": str(uuid.uuid4()),  # unique token ID for blacklisting
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+
+#: How long a super admin may act as a person on one token. No refresh is
+#: ever issued for it: when it runs out the cockpit session is restored.
+IMPERSONATION_EXPIRE_MINUTES = 30
+
+
+def create_impersonation_token(target_id: uuid.UUID, actor_id: uuid.UUID) -> str:
+    """An access token for `target_id` that names the super admin behind it
+    (`act`). `get_current_user` serves the request as the target and keeps the
+    actor on `request.state`, so every write made under it is on the record
+    with the real hand."""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=IMPERSONATION_EXPIRE_MINUTES)
+    payload = {
+        "sub": str(target_id),
+        "act": str(actor_id),
+        "exp": expire,
+        "type": "access",
+        "jti": str(uuid.uuid4()),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
 
@@ -183,11 +204,22 @@ def clear_failed_attempts(email: str) -> None:
 # FastAPI dependency
 # ---------------------------------------------------------------------------
 
+DISABLED_MESSAGE = "This login has been disabled"
+
+
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> PlatformUser:
-    """FastAPI dependency — extracts and validates the current user from JWT."""
+    """FastAPI dependency — extracts and validates the current user from JWT.
+
+    THE ONE PLACE EVERY TOKEN IS CHECKED, so it is where a disabled login is
+    refused: the row is read on every request, which holds across workers and
+    needs no blacklist, and an existing session dies on its next request.
+    An impersonation token (`act`) is served as the person it names, with the
+    super admin behind it kept on `request.state.actor` / `impersonated_by`;
+    it stops working the moment that admin loses the role or is disabled."""
     payload = decode_token(credentials.credentials, expected_type="access")
     user_id = payload.get("sub")
     if not user_id:
@@ -199,4 +231,21 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+
+    actor = user
+    impersonated_by = None
+    act = payload.get("act")
+    if act:
+        found = await db.execute(select(PlatformUser).where(PlatformUser.id == uuid.UUID(str(act))))
+        actor = found.scalar_one_or_none()
+        if actor is None or actor.platform_role != "super_admin" or actor.disabled_at is not None:
+            raise HTTPException(status_code=401, detail="Impersonation no longer valid")
+        impersonated_by = actor.id
+
+    if user.disabled_at is not None:
+        raise HTTPException(status_code=401, detail=DISABLED_MESSAGE)
+
+    request.state.user = user
+    request.state.actor = actor
+    request.state.impersonated_by = impersonated_by
     return user

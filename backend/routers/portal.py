@@ -17,6 +17,7 @@ from auth import get_current_user
 from database import get_db
 from models.auth import PlatformUser
 from models.org import OrgMember, InviteStatus, Department
+from services.org_access import require_org_member
 from models.project import Project, ProjectStatus, AgentJob, Version
 from schemas.portal import (
     PortalApp,
@@ -40,22 +41,8 @@ router = APIRouter(tags=["portal"])
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _require_org_member(
-    org_id: uuid.UUID,
-    user: PlatformUser,
-    db: AsyncSession,
-) -> OrgMember:
-    result = await db.execute(
-        select(OrgMember).where(
-            OrgMember.org_id == org_id,
-            OrgMember.user_id == user.id,
-            OrgMember.invite_status == InviteStatus.accepted,
-        )
-    )
-    membership = result.scalar_one_or_none()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Not a member of this organization")
-    return membership
+#: The one membership check (`services.org_access`).
+_require_org_member = require_org_member
 
 
 # ---------------------------------------------------------------------------

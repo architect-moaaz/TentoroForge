@@ -23,19 +23,13 @@ router = APIRouter(tags=["usage"])
 async def _require_any_org_admin(
     user: PlatformUser, db: AsyncSession
 ) -> None:
-    """403 unless the user is owner/admin of at least one org."""
-    result = await db.execute(
-        select(OrgMember).where(
-            OrgMember.user_id == user.id,
-            OrgMember.invite_status == InviteStatus.accepted,
-            OrgMember.role.in_([OrgMemberRole.owner, OrgMemberRole.admin]),
-        ).limit(1)
-    )
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(
-            status_code=403,
-            detail="Admin role required to view usage analytics",
-        )
+    """403 unless the user is owner/admin of at least one active org — or the
+    super admin, for whom platform-wide figures are the job."""
+    from platform_admin import is_super_admin
+    from services.org_access import require_any_org_admin
+    if is_super_admin(user):
+        return
+    await require_any_org_admin(user, db)
 
 
 @router.get("/api/usage/summary")

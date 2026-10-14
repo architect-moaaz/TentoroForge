@@ -16,6 +16,7 @@ from auth import get_current_user
 from database import get_db
 from models.auth import PlatformUser
 from models.org import OrgMember, OrgMemberRole, InviteStatus
+from services.org_access import require_org_member
 from models.project import (
     Project,
     ProjectStatus,
@@ -43,26 +44,9 @@ router = APIRouter(tags=["projects"])
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _require_org_member(
-    org_id: uuid.UUID,
-    user: PlatformUser,
-    db: AsyncSession,
-    min_role: OrgMemberRole = OrgMemberRole.member,
-) -> OrgMember:
-    result = await db.execute(
-        select(OrgMember).where(
-            OrgMember.org_id == org_id,
-            OrgMember.user_id == user.id,
-            OrgMember.invite_status == InviteStatus.accepted,
-        )
-    )
-    membership = result.scalar_one_or_none()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Not a member of this organization")
-    role_hierarchy = {OrgMemberRole.owner: 3, OrgMemberRole.admin: 2, OrgMemberRole.member: 1}
-    if role_hierarchy.get(membership.role, 0) < role_hierarchy.get(min_role, 0):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    return membership
+#: The one membership check (`services.org_access`), so a blocked or removed
+#: organisation refuses its projects' routes too.
+_require_org_member = require_org_member
 
 
 # ===========================================================================
@@ -143,24 +127,11 @@ async def delete_project(
 ):
     project = await get_project_with_auth(project_id, user, db)
 
-    # Stop preview if running
-    stop_preview(project.short_id)
-
-    # Delete output directory from disk
-    if project.output_dir:
-        output_path = Path(project.output_dir)
-        if output_path.exists():
-            shutil.rmtree(output_path)
-
-    # Delete via raw SQL to avoid ORM lazy-loading backrefs
-    # for tables that may not exist (e.g. decision_tables)
-    pid = project.id
-    db.expunge(project)
-    await db.execute(delete(Version).where(Version.project_id == pid))
-    await db.execute(delete(AgentJob).where(AgentJob.project_id == pid))
-    await db.execute(delete(Conversation).where(Conversation.project_id == pid))
-    await db.execute(delete(Project).where(Project.id == pid))
-    await db.commit()
+    # THE ONE TEARDOWN (`services.teardown`): the preview, the folder and the
+    # rows as before — and the app's database on the apps server and its Neon
+    # projects, which a delete used to leave behind, nameless.
+    from services.teardown import remove_project
+    await remove_project(db, project)
 
 
 @router.post("/api/projects/{project_id}/copy", response_model=ProjectResponse, status_code=201)

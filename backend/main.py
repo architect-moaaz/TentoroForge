@@ -91,10 +91,12 @@ from routers.brand import router as brand_router
 from routers.brand_discovery import router as brand_discovery_router
 from routers.usage import router as usage_router
 from routers.drafts_room import router as drafts_room_router
+from routers.admin import router as admin_router
 
 # Middleware
 from middleware.rate_limit import RateLimitMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware
+from middleware.impersonation_audit import ImpersonationAuditMiddleware
 from middleware.logging import StructuredLoggingMiddleware, setup_structured_logging
 from middleware.error_handler import ErrorHandlerMiddleware
 from middleware.metrics import MetricsMiddleware, metrics_endpoint
@@ -144,6 +146,8 @@ app.add_middleware(ErrorHandlerMiddleware)
 app.add_middleware(MetricsMiddleware)
 app.add_middleware(StructuredLoggingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+# Inside the security headers, so the request id it sets is on the record.
+app.add_middleware(ImpersonationAuditMiddleware)
 app.add_middleware(
     RateLimitMiddleware,
     requests_per_minute=RATE_LIMIT_REQUESTS_PER_MINUTE,
@@ -228,6 +232,7 @@ app.include_router(usage_router)
 # The Drafts Room: Smith and a person work an idea out, study references and
 # agree a draft before any app exists; agreeing creates and builds the app.
 app.include_router(drafts_room_router)
+app.include_router(admin_router)
 
 # Metrics endpoint (Prometheus format)
 app.add_api_route("/metrics", metrics_endpoint, methods=["GET"], tags=["monitoring"])

@@ -70,7 +70,7 @@ _EMPLOYEE_RECORDS = [
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, as_member):
     """TestClient with the output directory redirected to tmp_path and
     provide_records_async mocked so no LLM calls are made."""
     import routers._debug_schema as dbg

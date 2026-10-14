@@ -18,10 +18,12 @@ from sqlalchemy.orm import selectinload
 from auth import get_current_user
 from database import get_db
 from models.auth import PlatformUser
+from services.org_access import require_org_member
 from models.org import (
     Organization,
     OrgMember,
     OrgMemberRole,
+    OrgStatus,
     InviteStatus,
     Department,
     Team,
@@ -49,29 +51,10 @@ router = APIRouter(tags=["organizations"])
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _require_org_member(
-    org_id: uuid.UUID,
-    user: PlatformUser,
-    db: AsyncSession,
-    min_role: OrgMemberRole = OrgMemberRole.member,
-) -> OrgMember:
-    """Verify the user is a member of the org with sufficient role."""
-    result = await db.execute(
-        select(OrgMember).where(
-            OrgMember.org_id == org_id,
-            OrgMember.user_id == user.id,
-            OrgMember.invite_status == InviteStatus.accepted,
-        )
-    )
-    membership = result.scalar_one_or_none()
-    if not membership:
-        raise HTTPException(status_code=403, detail="Not a member of this organization")
-
-    role_hierarchy = {OrgMemberRole.owner: 3, OrgMemberRole.admin: 2, OrgMemberRole.member: 1}
-    if role_hierarchy.get(membership.role, 0) < role_hierarchy.get(min_role, 0):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-    return membership
+#: The one membership check (`services.org_access`): a removed organisation is
+#: 404, a blocked one 403 to its own members, so every route here follows the
+#: organisation's status without knowing about it.
+_require_org_member = require_org_member
 
 
 DEFAULT_ROLES = [
@@ -135,6 +118,9 @@ async def list_orgs(
         .where(
             OrgMember.user_id == user.id,
             OrgMember.invite_status == InviteStatus.accepted,
+            # A removed organisation is not theirs any more; a blocked one is
+            # listed with its status, so the UI can say why it will not open.
+            Organization.status != OrgStatus.removed.value,
         )
         .order_by(Organization.name)
     )
@@ -284,7 +270,9 @@ async def invite_member(
     target_user = user_result.scalar_one_or_none()
 
     membership = OrgMember(
-        user_id=target_user.id if target_user else user.id,  # placeholder if no user
+        # NULL until the invitee has an account: the inviter's own id used to
+        # stand in, and their second invite tripped `uq_org_member`.
+        user_id=target_user.id if target_user else None,
         org_id=org_id,
         role=OrgMemberRole(req.role),
         invite_status=InviteStatus.pending,

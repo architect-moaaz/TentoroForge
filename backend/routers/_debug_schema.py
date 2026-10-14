@@ -17,13 +17,28 @@ import json
 import tarfile
 from pathlib import Path
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from auth import get_current_user
+from database import get_db
+from models.auth import PlatformUser
+from models.project import Project
 from services.schema_pipeline import run_schema_frontend_pipeline
 
 router = APIRouter()
+
+
+async def _member_of(short_id: str, user: PlatformUser = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)) -> Project:
+    """The route's project, for a member of its organisation. These routes
+    served any folder under output/ to anyone — the editor's file reads and
+    writes among them; now the row is found and the membership checked
+    (`project_for`), and a folder with no row is 404."""
+    from services.project_service import project_for
+    return await project_for(short_id, user, db)
 
 
 def _resolve_output_dir(short_id: str) -> Path:
@@ -87,7 +102,7 @@ def _load_plan(short_id: str) -> tuple[Path, dict]:
 
 
 @router.post("/api/_debug/regen-schemas/{short_id}")
-async def regen_schemas(short_id: str):
+async def regen_schemas(short_id: str, _project: Project = Depends(_member_of)):
     output_dir, plan = _load_plan(short_id)
 
     async def stream():
@@ -98,7 +113,7 @@ async def regen_schemas(short_id: str):
 
 
 @router.post("/api/_debug/regen-rules/{short_id}")
-async def regen_rules(short_id: str):
+async def regen_rules(short_id: str, _project: Project = Depends(_member_of)):
     """Run the rules agent against an existing project's plan + registry,
     re-export rules/index.json via runtime_injector, and sync to the
     project_rules DB table. Returns the generated rules as JSON.
@@ -125,7 +140,7 @@ async def regen_rules(short_id: str):
 
 
 @router.post("/api/_debug/recompile-tokens/{short_id}")
-async def recompile_tokens(short_id: str):
+async def recompile_tokens(short_id: str, _project: Project = Depends(_member_of)):
     """Re-run the design_compiler step against an existing project's design-spec.
 
     Reads  output/<short_id>/src/contracts/design-spec.json
@@ -184,7 +199,7 @@ async def recompile_tokens(short_id: str):
 
 
 @router.post("/api/_debug/render-page/{short_id}")
-async def render_page_debug(short_id: str, page_route: str, viewport: str = "desktop"):
+async def render_page_debug(short_id: str, page_route: str, viewport: str = "desktop", _project: Project = Depends(_member_of)):
     """Trigger a single page render via the render-service. Useful for manual
     testing without going through the editor UI.
 
@@ -225,7 +240,7 @@ class UpdateRegisterPayload(BaseModel):
 
 
 @router.put("/api/_debug/project-register/{short_id}")
-async def update_project_register(short_id: str, payload: UpdateRegisterPayload):
+async def update_project_register(short_id: str, payload: UpdateRegisterPayload, _project: Project = Depends(_member_of)):
     """Manual register override — updates design-spec.json's register field.
     Designer-only affordance for forcing a register choice."""
     output_root = Path(__file__).resolve().parent.parent.parent / "output"
@@ -419,7 +434,7 @@ def _enrich_record(
 
 
 @router.get("/api/_debug/preview-data/{short_id}")
-async def get_preview_data(short_id: str):
+async def get_preview_data(short_id: str, _project: Project = Depends(_member_of)):
     """Return fixture data for every entity in the project, for use in
     the editor + render-scaffold preview. Pure Python, no LLM, ~10-50ms."""
     output_root = Path(__file__).resolve().parent.parent.parent / "output"
@@ -793,7 +808,7 @@ _EXPORT_EXCLUDE_DIRS = {"node_modules", ".next", ".git", "out", ".fixtures-cache
 
 
 @router.get("/api/_debug/project-export/{short_id}")
-async def export_project_debug(short_id: str):
+async def export_project_debug(short_id: str, _project: Project = Depends(_member_of)):
     """Stream a tarball of the project's output directory.
 
     Excludes node_modules / .next / .git / build caches. The user
@@ -829,7 +844,7 @@ async def export_project_debug(short_id: str):
 
 
 @router.post("/api/_debug/project-ai-edit/{short_id}")
-async def ai_edit_project(short_id: str, request: Request):
+async def ai_edit_project(short_id: str, request: Request, _project: Project = Depends(_member_of)):
     """Run the peer patcher against the project's current artifacts +
     a user prompt; stream SSE events back. The final 'artifacts' event
     contains the proposed updated bundle for the editor to commit.
@@ -874,7 +889,7 @@ async def ai_edit_project(short_id: str, request: Request):
 
 
 @router.get("/api/_debug/project-file/{short_id}/{file_path:path}")
-async def get_project_file(short_id: str, file_path: str):
+async def get_project_file(short_id: str, file_path: str, _project: Project = Depends(_member_of)):
     """Serve arbitrary text files from output/<short_id>/. Read-only, dev-only.
 
     Used by the editor UI to read project-level files (e.g. design-spec.json)
@@ -928,7 +943,7 @@ async def get_project_file(short_id: str, file_path: str):
 
 
 @router.post("/api/_debug/project-file/{short_id}/{file_path:path}")
-async def write_project_file(short_id: str, file_path: str, request: Request):
+async def write_project_file(short_id: str, file_path: str, request: Request, _project: Project = Depends(_member_of)):
     """Write a text file under output/<short_id>/. Dev-only; mirrors the GET.
 
     Used by the visual editor's persister to save edited page schemas and

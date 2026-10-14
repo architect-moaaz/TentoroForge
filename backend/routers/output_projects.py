@@ -12,48 +12,36 @@ import asyncio
 import json
 import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from auth import get_current_user
+from database import get_db
+from models.auth import PlatformUser
+from platform_admin import require_super_admin
 from services.project_paths import project_root, list_projects
 from services.route_slug import route_from_slug
 
 router = APIRouter(prefix="/api/projects", tags=["editor-projects"])
 
 
-async def _resolve_root(project_id: str):
-    """Resolve an editor project id → its on-disk output dir.
+async def _resolve_root(project_id: str, user: PlatformUser, db: AsyncSession):
+    """Resolve an editor project id → its on-disk output dir, for a member
+    of its organisation.
 
     The editor addresses projects by the DB **UUID** (`project.id`), but these
-    disk endpoints live under `output/<short_id>/`. So: try the id as a short_id
-    (dir on disk = source of truth) first; if that misses and the id is a UUID,
-    look up the project's short_id / output_dir in the DB. Without this, an
-    editor that passes the UUID gets `output/<uuid>/` → nothing → no pages.
+    disk endpoints live under `output/<short_id>/`. THE ROW COMES FIRST NOW:
+    these routes used to answer anyone who knew a folder's name — a Smith
+    turn included — so the project is looked up by id or short id, the
+    caller's membership checked (`get_project_with_auth`: a blocked or
+    removed organisation refuses here too), and only then the disk.
     """
-    import uuid as _uuid
     from pathlib import Path as _Path
-
-    try:
-        r = project_root(project_id)
-        if r.exists():
-            return r
-    except ValueError:
-        pass
-
-    try:
-        pid = _uuid.UUID(str(project_id))
-    except (ValueError, AttributeError):
-        raise HTTPException(status_code=400, detail=f"unknown project: {project_id}")
-
-    from sqlalchemy import select
-    from database import async_session
-    from models.project import Project
-
-    async with async_session() as db:
-        proj = (await db.execute(select(Project).where(Project.id == pid))).scalar_one_or_none()
-    if not proj:
-        raise HTTPException(status_code=404, detail="project not found")
+    from services.project_service import project_for
+    proj = await project_for(project_id, user, db)
     candidates = [proj.short_id, (proj.output_dir or "").rstrip("/").split("/")[-1] or None]
     for cand in candidates:
         if not cand:
@@ -75,7 +63,7 @@ async def _resolve_root(project_id: str):
 # ---------------------------------------------------------------------------
 
 @router.get("", summary="List output-directory projects")
-async def list_projects_endpoint():
+async def list_projects_endpoint(_admin: PlatformUser = Depends(require_super_admin)):
     """Return [{id, name}] for every directory under output/."""
     return list_projects()
 
@@ -85,7 +73,7 @@ async def list_projects_endpoint():
 # ---------------------------------------------------------------------------
 
 @router.get("/{project_id}/schemas")
-async def list_schemas(project_id: str):
+async def list_schemas(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Schema files for a project — paths under src/schemas, no extension.
 
     THIS WAS REGISTERED AS `/pages` AND SHADOWED THE REAL ONE. Both this
@@ -100,7 +88,7 @@ async def list_schemas(project_id: str):
     and `/schemas` was already being requested by the frontend — answering 404,
     because the handler for it was sitting on the other name.
     """
-    root = await _resolve_root(project_id)
+    root = await _resolve_root(project_id, user, db)
 
     # THE GENERATED APP IS A SUBDIRECTORY, same as _debug/project-file next
     # door. The Blueprint's projections write `app/src/schemas/*.json`; this
@@ -125,7 +113,7 @@ async def list_schemas(project_id: str):
 
 
 @router.get("/{project_id}/schema-list")
-async def list_schema_routes(project_id: str):
+async def list_schema_routes(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Return every schema as a flat list with route metadata.
 
     Each entry: {route, slug, page_type, entity, id}. Works against both the
@@ -134,7 +122,7 @@ async def list_schema_routes(project_id: str):
     ``route``/``slug``/``page_type``/``entity`` keys have them derived from
     the file path.
     """
-    root = await _resolve_root(project_id)
+    root = await _resolve_root(project_id, user, db)
 
     schemas_dir = root / "src" / "schemas"
     if not schemas_dir.exists():
@@ -172,9 +160,9 @@ async def list_schema_routes(project_id: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/{project_id}/load")
-async def load_schema(project_id: str, path: str):
+async def load_schema(project_id: str, path: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Load a schema JSON by path (no extension)."""
-    root = await _resolve_root(project_id)
+    root = await _resolve_root(project_id, user, db)
 
     target = root / "src" / "schemas" / f"{path}.json"
     if not target.exists():
@@ -196,9 +184,9 @@ class SaveBody(BaseModel):
 
 
 @router.post("/{project_id}/save")
-async def save_schema(project_id: str, body: SaveBody):
+async def save_schema(project_id: str, body: SaveBody, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Atomically save a schema JSON file."""
-    root = await _resolve_root(project_id)
+    root = await _resolve_root(project_id, user, db)
 
     target = root / "src" / "schemas" / f"{body.path}.json"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -213,9 +201,9 @@ async def save_schema(project_id: str, body: SaveBody):
 # ---------------------------------------------------------------------------
 
 @router.get("/{project_id}/theme")
-async def get_theme(project_id: str):
+async def get_theme(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Return custom theme tokens if present, otherwise indicate default."""
-    root = await _resolve_root(project_id)
+    root = await _resolve_root(project_id, user, db)
 
     custom_path = root / "src" / "theme" / "tokens.custom.json"
     if custom_path.exists():
@@ -224,9 +212,9 @@ async def get_theme(project_id: str):
 
 
 @router.post("/{project_id}/theme")
-async def save_theme(project_id: str, body: dict):
+async def save_theme(project_id: str, body: dict, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Save custom theme tokens."""
-    root = await _resolve_root(project_id)
+    root = await _resolve_root(project_id, user, db)
 
     target = root / "src" / "theme" / "tokens.custom.json"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -255,7 +243,7 @@ async def save_theme(project_id: str, body: dict):
 # ---------------------------------------------------------------------------
 
 @router.get("/{project_id}/illustrations/{slug}.svg")
-async def get_project_illustration(project_id: str, slug: str):
+async def get_project_illustration(project_id: str, slug: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Serve a bundled SVG from a project's public/illustrations/ dir.
 
     The slug must not contain path separators or traversal segments;
@@ -263,7 +251,7 @@ async def get_project_illustration(project_id: str, slug: str):
     """
     if "/" in slug or ".." in slug or slug.startswith("."):
         raise HTTPException(status_code=400, detail=f"invalid slug: {slug!r}")
-    root = await _resolve_root(project_id)
+    root = await _resolve_root(project_id, user, db)
 
     candidate = root / "public" / "illustrations" / f"{slug}.svg"
     if not candidate.exists() or not candidate.is_file():
@@ -272,9 +260,9 @@ async def get_project_illustration(project_id: str, slug: str):
 
 
 @router.get("/{project_id}/css")
-async def get_project_css(project_id: str):
+async def get_project_css(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Return the raw text of the project's src/app/globals.css (or empty if missing)."""
-    root = await _resolve_root(project_id)
+    root = await _resolve_root(project_id, user, db)
 
     css_path = root / "src" / "app" / "globals.css"
     css = css_path.read_text() if css_path.exists() else ""
@@ -298,12 +286,12 @@ class EditorMirrorRequest(BaseModel):
 
 
 @router.post("/{project_id}/editor/mirror", summary="Record editor edit in Smith's blueprint")
-async def record_editor_edit(project_id: str, req: EditorMirrorRequest):
+async def record_editor_edit(project_id: str, req: EditorMirrorRequest, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Mirror an editor save into the blueprint change_log.
 
     Never raises 5xx — the editor's save has already succeeded before
     it calls us; the mirror is best-effort observability for Smith."""
-    root = await _resolve_root(project_id)
+    root = await _resolve_root(project_id, user, db)
 
     try:
         from services.smith_concurrency import EditorMirror
@@ -389,7 +377,7 @@ def _smith_model(model_name: str = ""):
 
 
 @router.post("/{project_id}/smith/turn", summary="One conversational turn with Smith")
-async def smith_turn(project_id: str, req: SmithTurnRequest):
+async def smith_turn(project_id: str, req: SmithTurnRequest, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Interpret the request, update the Blueprint, run the impacted sub-DAG.
 
     The office animation is a side effect of the run rather than a separate
@@ -405,7 +393,7 @@ async def smith_turn(project_id: str, req: SmithTurnRequest):
     from services.office_bridge import office_sink
     from services.smith.smith import Smith
 
-    root = await _resolve_root(project_id)
+    root = await _resolve_root(project_id, user, db)
     if not (root / ".forge" / "blueprint" / "current.json").exists():
         raise HTTPException(
             status_code=409,
@@ -485,10 +473,10 @@ def _turn_payload(turn) -> dict:
 
 
 @router.post("/{project_id}/smith/warmup", summary="Preload Smith's app-map for this project")
-async def smith_warmup(project_id: str):
+async def smith_warmup(project_id: str, user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Build and cache the app-map for this project. Safe to call
     repeatedly — subsequent calls are cache hits."""
-    root = await _resolve_root(project_id)
+    root = await _resolve_root(project_id, user, db)
 
     # Whether this project has a Living Blueprint decides which conversation
     # the client is having: with a Blueprint, a message is a change Smith can

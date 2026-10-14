@@ -71,23 +71,10 @@ class IntegrationPutRequest(BaseModel):
 async def _require_org_admin(
     org_id: uuid.UUID, user: PlatformUser, db: AsyncSession
 ) -> OrgMember:
-    """Same shape as orgs router's helper — inlined to avoid a cross-router
-    import. Bumped to admin-only; member role can't touch integrations."""
-    from models.org import InviteStatus  # local to avoid cycle
-    res = await db.execute(
-        select(OrgMember).where(
-            OrgMember.org_id == org_id,
-            OrgMember.user_id == user.id,
-            OrgMember.invite_status == InviteStatus.accepted,
-        )
-    )
-    m = res.scalar_one_or_none()
-    if not m:
-        raise HTTPException(status_code=403, detail="Not a member of this organization")
-    rank = {OrgMemberRole.owner: 3, OrgMemberRole.admin: 2, OrgMemberRole.member: 1}
-    if rank.get(m.role, 0) < rank.get(OrgMemberRole.admin, 2):
-        raise HTTPException(status_code=403, detail="Admin role required")
-    return m
+    """Admin-only; member role can't touch integrations. The one membership
+    check (`services.org_access`), so a blocked organisation refuses here too."""
+    from services.org_access import require_org_member
+    return await require_org_member(org_id, user, db, min_role=OrgMemberRole.admin)
 
 
 def _key_known(provider: str, key: str, declared: list | None = None) -> bool:
