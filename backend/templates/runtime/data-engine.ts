@@ -1468,8 +1468,8 @@ async function computeSimple(
   const conds: SQL[] = await accessConditions(entityName, entity, ctx, "read");
   const dateCol = cols[m.dateField || "createdAt"];
   const start = range ? range.start : windowStart(m.window);
-  if (start && dateCol) conds.push(gte(dateCol, start));
-  if (range?.end && dateCol) conds.push(lt(dateCol, range.end));
+  if (start && dateCol) conds.push(gte(dateCol, dateBound(dateCol, start) as any));
+  if (range?.end && dateCol) conds.push(lt(dateCol, dateBound(dateCol, range.end) as any));
   for (const [k, v] of Object.entries(withReader(m.filter, ctx, cols))) {
     if (cols[k] !== undefined && (v === null || typeof v !== "object")) { conds.push(eq(cols[k], v as any)); continue; }
     const joined = cols[k] !== undefined ? await joinedCondition(cols[k], v, ctx) : null;
@@ -1788,6 +1788,25 @@ function bucketLabel(v: unknown, bucket: string): string | null {
   return iso.slice(0, 10);
 }
 
+/** A date bound in the form its column keeps: a calendar date for a date
+ *  column, the moment's text for a timestamp kept as text, the moment itself
+ *  otherwise. A Date handed to a date column is refused by the driver ("The
+ *  string argument must be of type string… Received an instance of Date"):
+ *  AquaTrack's "today" tiles over DailySummary.date failed that way the
+ *  moment they were given a period, and Home stopped opening (m1dck85j,
+ *  2026-10-14). */
+export function dateBound(col: unknown, d: Date): Date | string {
+  const c = (col ?? {}) as { dataType?: unknown; columnType?: unknown };
+  if (c.dataType === "string" && typeof c.columnType === "string") {
+    if (/^PgDateString$/i.test(c.columnType)) {
+      const p = (n: number) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    }
+    if (/^PgTimestamp/i.test(c.columnType)) return d.toISOString();
+  }
+  return d;
+}
+
 function asDate(v: string | Date | null | undefined): Date | null {
   if (v === null || v === undefined || v === "") return null;
   const d = v instanceof Date ? v : new Date(v);
@@ -1876,13 +1895,13 @@ export async function resolveQuery(
   if (timeField && source.range) {
     const from = asDate(source.range.from);
     const to = asDate(source.range.to);
-    if (from) conds.push(gte(cols[timeField], from));
-    if (to) conds.push(lt(cols[timeField], to));
+    if (from) conds.push(gte(cols[timeField], dateBound(cols[timeField], from) as any));
+    if (to) conds.push(lt(cols[timeField], dateBound(cols[timeField], to) as any));
   }
   // THE WIDGET'S OWN PERIOD, whatever range the page has: "Entries Logged
   // Today" counted every drink ever logged without it (m1dck85j).
   const windowFrom = timeField ? windowStart(source.window) : null;
-  if (windowFrom) conds.push(gte(cols[timeField!], windowFrom));
+  if (windowFrom) conds.push(gte(cols[timeField!], dateBound(cols[timeField!], windowFrom) as any));
 
   // Sort: an explicit measure key or dimension field; else chronological on a
   // bucketed axis; else the first measure, largest first (a ranking).
