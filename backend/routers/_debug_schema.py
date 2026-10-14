@@ -122,7 +122,6 @@ async def regen_rules(short_id: str, _project: Project = Depends(_member_of)):
     from services.runtime_injector import _export_rules_to_filesystem  # type: ignore
     from sqlalchemy import select
     from database import async_session
-    from models import Project
 
     output_dir, plan = _load_plan(short_id)
 
