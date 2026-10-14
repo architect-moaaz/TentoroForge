@@ -621,9 +621,7 @@ class DomainService:
             raise DomainRefused(f"{name}'s DNS provider does not offer one-click approval for Forge yet; "
                                 "add the records instead.")
         root = str(found.get("root") or "")
-        companion = next((e for e in self.entries() if e.get("redirectTo") == name), None)
-        comp_records = ((led.get("domains") or {}).get(companion["name"]) or {}).get("records") if companion else []
-        planned = dc.plan_apply(entry.get("kind") or "subdomain", name, root, seen.get("records") or [], comp_records)
+        planned = self._connect_plan(name, led)
         if planned is None:
             raise DomainRefused(f"{name} needs records the one-click approval does not cover; add them instead.")
         service, host, values, groups = planned
@@ -633,6 +631,21 @@ class DomainService:
         _write_ledger(self.output_dir, led)
         url = dc.apply_url(found, service, root, host, values, groups, redirect_uri=redirect_uri, state=state)
         return {"url": url, "provider": found.get("providerName") or "your DNS provider"}
+
+    def _connect_plan(self, name: str, led: dict | None = None):
+        """What the provider would be asked to apply for this address, or None
+        when its records are not what a template writes."""
+        from services.deploy import domain_connect as dc
+        led = led if led is not None else read_ledger(self.output_dir)
+        seen = (led.get("domains") or {}).get(name) or {}
+        found = seen.get("connect") or {}
+        entry = next((e for e in self.entries() if e["name"] == name), None)
+        if not entry or not found.get("supported"):
+            return None
+        companion = next((e for e in self.entries() if e.get("redirectTo") == name), None)
+        comp_records = ((led.get("domains") or {}).get(companion["name"]) or {}).get("records") if companion else []
+        return dc.plan_apply(entry.get("kind") or "subdomain", name, str(found.get("root") or ""),
+                             seen.get("records") or [], comp_records)
 
     async def _unwrite(self, names: set[str]) -> None:
         """Take away the records Forge itself wrote for these addresses."""
@@ -944,7 +957,7 @@ class DomainService:
                 "works": seen.get("works"), "worksDetail": seen.get("worksWhy") or "",
                 "dnsHost": seen.get("dnsHost") or "", "written": bool(seen.get("written")),
                 "connect": ((seen.get("connect") or {}).get("providerName") or "your DNS provider")
-                if (seen.get("connect") or {}).get("supported") and e.get("status") != "live" else ""}
+                if e.get("status") != "live" and self._connect_plan(name) is not None else ""}
 
     def view(self) -> dict:
         """Everything the Domains section and Smith show."""

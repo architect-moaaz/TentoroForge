@@ -37,6 +37,13 @@ DEFAULT_KEY_HOST = "_dck1"
 
 SUBDOMAIN = "forge-subdomain"
 APEX = "forge-apex"
+#: Where owners come back to after approving (the template's
+#: `syncRedirectDomain`). A new platform address means a new template version.
+REDIRECT_DOMAINS = ("forge-v3.tentoro.ai",)
+#: Vercel's ownership token always starts so; the template keeps the prefix fixed.
+PROOF_PREFIX = "vc-domain-verify="
+#: The logo providers show beside "Tentoro wants to change your DNS".
+LOGO_URL = "https://tentoro.ai/wp-content/uploads/2025/04/Tentoro-Fav-Icon-300x300.png"
 
 
 def provider_id() -> str:
@@ -60,23 +67,26 @@ def service_for(kind: str) -> str | None:
 # ── the templates ───────────────────────────────────────────────────────
 
 
-def templates(provider: str, redirect_domains: list[str] | None = None) -> list[dict]:
+def templates(provider: str, redirect_domains: list[str] | tuple[str, ...] | None = REDIRECT_DOMAINS) -> list[dict]:
     """The two templates Tentoro submits: a subdomain pointed at Vercel, and
-    a bare domain with its `www`. Each carries the `_vercel` proof as its own
-    group, applied only when Vercel asks for it, so the owner approves once."""
+    a bare domain with its `www`. The bare domain carries Vercel's `_vercel`
+    proof as its own group, applied only when Vercel asks for it, so the
+    owner approves once. (A subdomain's proof sits at the bare domain, which
+    a template may not reach from a subdomain; that rare case is added by hand.)"""
     common = {
         "providerId": provider, "providerName": "Tentoro", "version": 1,
-        "syncPubKeyDomain": provider, "logoUrl": f"https://{provider}/favicon.ico",
+        "syncPubKeyDomain": provider, "logoUrl": LOGO_URL,
     }
     if redirect_domains:
         common["syncRedirectDomain"] = ",".join(redirect_domains)
-    proof = {"groupId": "proof", "type": "TXT", "host": "_vercel.%domain%.", "data": "%proof%", "ttl": 3600,
+    proof = {"groupId": "proof", "type": "TXT", "host": "_vercel", "data": f"{PROOF_PREFIX}%proof%", "ttl": 3600,
+             # Beside other Vercel tokens: another account's claim is not ours to replace.
              "txtConflictMatchingMode": "None"}
     return [
         {**common, "serviceId": SUBDOMAIN, "serviceName": "Forge app on a subdomain", "hostRequired": True,
          "description": "Points a subdomain at an application built with Forge and hosted on Vercel.",
-         "variableDescription": "target: the address Vercel serves the application from; proof: Vercel's ownership token",
-         "records": [{"groupId": "main", "type": "CNAME", "host": "@", "pointsTo": "%target%", "ttl": 3600}, proof]},
+         "variableDescription": "target: the address Vercel serves the application from",
+         "records": [{"type": "CNAME", "host": "@", "pointsTo": "%target%", "ttl": 3600}]},
         {**common, "serviceId": APEX, "serviceName": "Forge app on a domain",
          "description": "Points a domain, and its www, at an application built with Forge and hosted on Vercel.",
          "variableDescription": "ip: Vercel's address; target: the address Vercel serves www from; proof: Vercel's ownership token",
@@ -97,16 +107,17 @@ def plan_apply(kind: str, name: str, root: str, records: list[dict],
     groups: list[str] = []
     for r in records:
         host, rtype, value = str(r.get("host")), str(r.get("type")), str(r.get("value") or "").rstrip(".")
-        if rtype == "TXT" and host == f"_vercel.{root}" and "proof" not in values:
-            values["proof"] = value
+        if (kind == "apex" and rtype == "TXT" and host == f"_vercel.{root}" and value.startswith(PROOF_PREFIX)
+                and "proof" not in values):
+            values["proof"] = value[len(PROOF_PREFIX):]
         elif kind == "subdomain" and rtype == "CNAME" and host == name and "target" not in values:
             values["target"] = value
         elif kind == "apex" and rtype == "A" and host == name:
             values.setdefault("ip", value)  # Vercel's anycast address; one is enough
         else:
             return None
-    if kind == "subdomain" and "target" in values:
-        groups.append("main")
+    if kind == "subdomain" and "target" not in values:
+        return None
     if kind == "apex" and "ip" in values:
         groups.append("main")
         for r in companion or []:
@@ -116,7 +127,7 @@ def plan_apply(kind: str, name: str, root: str, records: list[dict],
                 break
     if "proof" in values:
         groups.append("proof")
-    if not groups:
+    if kind == "apex" and not groups:
         return None
     host = "" if name == root else name[: -len(root) - 1]
     return service, host, values, groups
@@ -162,7 +173,9 @@ def apply_url(settings: dict, service: str, root: str, host: str, values: dict[s
     if host:
         pairs.append(("host", host))
     pairs += sorted(values.items())
-    pairs += [("groupId", ",".join(groups)), ("redirect_uri", redirect_uri), ("state", state)]
+    if groups:  # a template of one group takes none
+        pairs.append(("groupId", ",".join(groups)))
+    pairs += [("redirect_uri", redirect_uri), ("state", state)]
     query = "&".join(f"{k}={quote(v, safe='')}" for k, v in pairs)
     pem = private_pem if private_pem is not None else str(os.environ.get(KEY_ENV) or "")
     sig = sign(query, pem)
@@ -214,8 +227,7 @@ if __name__ == "__main__":  # pragma: no cover — run by hand when registering
     import sys
     if len(sys.argv) >= 2 and sys.argv[1] == "templates":
         pid = provider_id() or (sys.argv[2] if len(sys.argv) > 2 else "tentoro.ai")
-        back = os.environ.get("FORGE_APP_BASE_URL", "")
-        print(json.dumps(templates(pid, [urlsplit(back).hostname] if back else None), indent=2))
+        print(json.dumps(templates(pid), indent=2))
     elif len(sys.argv) == 3 and sys.argv[1] == "key-records":
         with open(sys.argv[2], encoding="utf-8") as fh:
             rows = public_key_records(fh.read())

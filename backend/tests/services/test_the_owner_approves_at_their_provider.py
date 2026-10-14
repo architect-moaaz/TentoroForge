@@ -65,15 +65,17 @@ def _verify(url: str, key_pem: str) -> dict[str, str]:
 # --------------------------------------------------------------------------- #
 
 def test_the_templates_write_what_vercel_asks_and_carry_the_proof_as_its_own_group():
-    sub, apex = dc.templates("tentoro.ai", ["forge.tentoro.ai"])
+    sub, apex = dc.templates("tentoro.ai")
     assert sub["serviceId"] == "forge-subdomain" and sub["hostRequired"] is True
-    assert sub["syncPubKeyDomain"] == "tentoro.ai" and sub["syncRedirectDomain"] == "forge.tentoro.ai"
-    assert {(r["groupId"], r["type"], r["host"]) for r in sub["records"]} == {
-        ("main", "CNAME", "@"), ("proof", "TXT", "_vercel.%domain%.")}
+    assert sub["syncPubKeyDomain"] == "tentoro.ai" and sub["syncRedirectDomain"] == "forge-v3.tentoro.ai"
+    assert [(r["type"], r["host"]) for r in sub["records"]] == [("CNAME", "@")]
     assert {(r["groupId"], r["type"], r["host"]) for r in apex["records"]} == {
-        ("main", "A", "@"), ("www", "CNAME", "www"), ("proof", "TXT", "_vercel.%domain%.")}
-    assert all(r.get("txtConflictMatchingMode") == "None" for r in sub["records"] if r["type"] == "TXT"), \
-        "the proof sits beside other TXT records"
+        ("main", "A", "@"), ("www", "CNAME", "www"), ("proof", "TXT", "_vercel")}
+    proof = next(r for r in apex["records"] if r["type"] == "TXT")
+    assert proof["data"] == "vc-domain-verify=%proof%", "a fixed prefix, as the template repository asks"
+    assert proof["txtConflictMatchingMode"] == "None", "the proof sits beside other TXT records"
+    for t in (sub, apex):
+        assert not any("%" in r["host"] for r in t["records"]), "no variable in a record's host"
 
 
 def test_only_the_public_key_is_published(key_pem):
@@ -87,11 +89,15 @@ def test_only_the_public_key_is_published(key_pem):
 
 
 def test_the_values_come_from_vercels_records_and_anything_else_is_left_to_the_owner():
-    sub = [{"host": "xyz.abc.com", "type": "CNAME", "value": "cname.vercel-dns.com"},
-           {"host": "_vercel.abc.com", "type": "TXT", "value": "vc-domain-verify=xyz.abc.com,1"}]
+    sub = [{"host": "xyz.abc.com", "type": "CNAME", "value": "cname.vercel-dns.com"}]
     assert dc.plan_apply("subdomain", "xyz.abc.com", "abc.com", sub) == (
-        "forge-subdomain", "xyz", {"target": "cname.vercel-dns.com", "proof": "vc-domain-verify=xyz.abc.com,1"},
-        ["main", "proof"])
+        "forge-subdomain", "xyz", {"target": "cname.vercel-dns.com"}, [])
+    claimed = sub + [{"host": "_vercel.abc.com", "type": "TXT", "value": "vc-domain-verify=xyz.abc.com,1"}]
+    assert dc.plan_apply("subdomain", "xyz.abc.com", "abc.com", claimed) is None, "a subdomain's proof is added by hand"
+    proven = [{"host": "abc.com", "type": "A", "value": "76.76.21.21"},
+              {"host": "_vercel.abc.com", "type": "TXT", "value": "vc-domain-verify=abc.com,1"}]
+    assert dc.plan_apply("apex", "abc.com", "abc.com", proven)[2:] == (
+        {"ip": "76.76.21.21", "proof": "abc.com,1"}, ["main", "proof"])
     apex = [{"host": "abc.com", "type": "A", "value": "76.76.21.21"}]
     www = [{"host": "www.abc.com", "type": "CNAME", "value": "cname.vercel-dns.com"}]
     assert dc.plan_apply("apex", "abc.com", "abc.com", apex, www) == (
@@ -102,13 +108,14 @@ def test_the_values_come_from_vercels_records_and_anything_else_is_left_to_the_o
 
 
 def test_the_link_is_signed_over_exactly_what_the_provider_reads(platform):
-    url = dc.apply_url(GODADDY, "forge-subdomain", "abc.com", "xyz", {"target": "cname.vercel-dns.com"}, ["main"],
+    url = dc.apply_url(GODADDY, "forge-apex", "abc.com", "", {"ip": "76.76.21.21", "target": "cname.vercel-dns.com"},
+                       ["main", "www"],
                        redirect_uri="https://forge.tentoro.ai/org/o/projects/p?settings=domains&dc=xyz.abc.com",
                        state="s1")
-    assert url.startswith("https://dcc.godaddy.com/manage/v2/domainTemplates/providers/tentoro.ai/services/forge-subdomain/apply?")
+    assert url.startswith("https://dcc.godaddy.com/manage/v2/domainTemplates/providers/tentoro.ai/services/forge-apex/apply?")
     params = _verify(url, platform)
-    assert params["domain"] == "abc.com" and params["host"] == "xyz" and params["target"] == "cname.vercel-dns.com"
-    assert params["groupId"] == "main" and params["state"] == "s1" and params["key"] == "_dck1"
+    assert params["domain"] == "abc.com" and "host" not in params and params["ip"] == "76.76.21.21"
+    assert params["groupId"] == "main,www" and params["state"] == "s1" and params["key"] == "_dck1"
     assert params["redirect_uri"].endswith("dc=xyz.abc.com")
 
 
@@ -163,19 +170,27 @@ def test_a_waiting_address_offers_its_provider_and_the_link_applies_exactly_its_
     _offer(monkeypatch)
     root = _project(tmp_path)
     fake = FakeVercel()
-    fake.claimed_elsewhere.add("xyz.abc.com")
     svc = _service(root, fake)
     view = run(svc.connect("xyz.abc.com"))
     assert view["connect"] == "GoDaddy"
-    out = run(svc.connect_url("xyz.abc.com", "https://forge.tentoro.ai/org/o/projects/p?settings=domains&dc=xyz.abc.com"))
+    out = run(svc.connect_url("xyz.abc.com", "https://forge-v3.tentoro.ai/org/o/projects/p?settings=domains&dc=xyz.abc.com"))
     assert out["provider"] == "GoDaddy"
     params = _verify(out["url"], platform)
-    assert params["host"] == "xyz" and params["target"] == "cname.vercel-dns.com"
-    assert params["proof"] == "vc-domain-verify=abc" and params["groupId"] == "main,proof", "one approval covers the proof"
+    assert params["host"] == "xyz" and params["target"] == "cname.vercel-dns.com" and "groupId" not in params
     assert params["state"] == dm.read_ledger(root)["domains"]["xyz.abc.com"]["connectState"]
     fake.configured.add("xyz.abc.com")
-    fake.claimed_elsewhere.discard("xyz.abc.com")
     assert run(svc.refresh("xyz.abc.com"))["connect"] == "", "a live address offers nothing"
+
+
+def test_a_subdomain_claimed_in_another_vercel_account_is_left_to_the_owner(tmp_path, monkeypatch, platform):
+    _offer(monkeypatch)
+    root = _project(tmp_path)
+    fake = FakeVercel()
+    fake.claimed_elsewhere.add("xyz.abc.com")
+    svc = _service(root, fake)
+    assert run(svc.connect("xyz.abc.com"))["connect"] == "", "its proof sits where the template cannot reach"
+    with pytest.raises(DomainRefused):
+        run(svc.connect_url("xyz.abc.com", "https://forge-v3.tentoro.ai/x"))
 
 
 def test_a_bare_domain_is_approved_with_its_www(tmp_path, monkeypatch, platform):
@@ -195,7 +210,7 @@ def test_no_link_without_the_platform_set_up_or_a_provider_that_holds_the_templa
     view = run(svc.connect("xyz.abc.com"))
     assert view["connect"] == ""
     with pytest.raises(DomainRefused) as e:
-        run(svc.connect_url("xyz.abc.com", "https://forge.tentoro.ai/x"))
+        run(svc.connect_url("xyz.abc.com", "https://forge-v3.tentoro.ai/x"))
     assert "does not offer one-click approval" in str(e.value)
     monkeypatch.delenv("FORGE_DOMAIN_CONNECT_KEY")
     with pytest.raises(DomainRefused) as e:
