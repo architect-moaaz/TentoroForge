@@ -219,6 +219,23 @@ def test_the_rules_in_force_are_shown(tmp_path):
         Blueprint(project_id="p1", domain={"name": "c"}))
 
 
+def test_every_rule_stays_named_when_the_page_is_short(tmp_path):
+    """A big app's rules were cut off the end of the page: Smith answered "is
+    there a rule for that?" from half the list."""
+    rules = [{"id": f"RULE-{i:03d}", "name": f"Rule number {i}", "statement": "x " * 120,
+              "entity_name": "Expense", "when": f"amount > {i}", "effects": ["refuse “too much”"],
+              "runs": "everywhere", "enabled": i != 7, "origin": "editor"} for i in range(1, 121)]
+    bp = Blueprint(project_id="p1", domain={"name": "clinic"}, business_rules=rules)
+    ctx = blueprint_to_context(bp, budget=ContextBudget(max_chars=12_000))
+    assert "## Rules (120)" in ctx and "`read_section` \"rules\" shows each in full" in ctx
+    for i in range(1, 121):
+        assert f"- RULE-{i:03d} Rule number {i} on Expense [" in ctx, i
+    assert "- RULE-007 Rule number 7 on Expense [switched off; editor]" in ctx
+    # Room enough: the full form, unchanged.
+    roomy = blueprint_to_context(bp, budget=ContextBudget(max_chars=400_000))
+    assert "shortened to fit" not in roomy and "**Rule number 120**" in roomy
+
+
 def test_the_engine_document_is_what_smith_reads(tmp_path):
     """Smith's own file used to win, so on a project with both it read the
     application as it stood some builds ago — a record with a field that had

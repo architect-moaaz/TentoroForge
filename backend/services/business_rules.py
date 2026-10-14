@@ -213,7 +213,9 @@ def view(rule: dict, doc: dict) -> dict:
         "runs": runs,
         "entityName": (ent or {}).get("name"),
         "gates": [{"id": g, "name": flows.get(str(g))} for g in rule.get("gates") or []],
-        "requirements": [{"id": r, "description": reqs.get(str(r))} for r in rule.get("requirements") or []],
+        # What it answers now: an ask withdrawn since is not listed as one.
+        "requirements": [{"id": r, "description": reqs[str(r)]} for r in rule.get("requirements") or []
+                         if str(r) in reqs],
     }
 
 
@@ -265,6 +267,9 @@ def _condition_fields(feel: str) -> set[str]:
     """The field names a condition reads (not functions, words or `user.` /
     `previous.` paths' own segments). Text inside quotes is not read."""
     text = re.sub(r'"(?:[^"\\]|\\.)*"', '""', feel or "")
+    # The functions whose names are two words: `string length(title)` reads
+    # `title`, not a field called `string`.
+    text = re.sub(r"\b(?:string\s+length|starts\s+with|ends\s+with)\s*\(", "fn(", text)
     names: set[str] = set()
     for m in re.finditer(r"(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)((?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*(\()?", text):
         head, path, call = m.group(1), m.group(2), m.group(3)
@@ -498,6 +503,19 @@ def _project(svc: Any, *, prerequisites: bool = False) -> list[str]:
     app = Path(svc.output_dir) / "app"
     if not app.is_dir():
         return []
+    # AN APP BUILT BEFORE THE ENGINE COULD RE-READ ITS RULES KEEPS THEM UNTIL
+    # IT RESTARTS. The engine is the platform's; a Smith turn starts by
+    # bringing the app up to the current platform (`catch_up`: the engine,
+    # the frame and every projection, once per platform version), and a
+    # change made here does the same — otherwise a rule saved in the tab
+    # would wait for the next conversation to apply. Copying the engine alone
+    # is not enough: the current engine reads files only a projection writes.
+    if (app / "package.json").is_file():
+        try:
+            from services.smith.sync_app import catch_up
+            catch_up(svc.output_dir)
+        except Exception:  # noqa: BLE001 — the rules are still written; the next turn catches up
+            logger.exception("[rules] the app could not be brought up to the current platform")
     files = list(project_business_rules(svc.doc, app).get("files") or [])
     if prerequisites:
         try:
@@ -539,6 +557,7 @@ def create(output_dir: str | Path, payload: dict, *, actor: str = "") -> dict:
         rule = normalise(payload, svc.doc)
         rule["origin"] = "editor"
         rule.setdefault("enabled", True)
+        rule.setdefault("requirements", [])
         rule["status"] = "PROPOSED"
         problems = check(svc.doc, rule)
         if problems:
@@ -550,6 +569,9 @@ def create(output_dir: str | Path, payload: dict, *, actor: str = "") -> dict:
         before = svc.snapshot()
         _ensure_registry(svc)
         stored = svc.upsert("businessRules", rule, natural_key=prose_key("RULE", rule["statement"]))
+        # The same wording as a rule removed before is the same id, merged
+        # onto that record — not onto why it was removed.
+        stored.pop("syncNote", None)
         version = _commit(svc, before, f"Business Rules tab: add “{rule['name']}”"
                           + (f" (by {actor})" if actor else ""),
                           f"Added {stored['id']} in the Business Rules tab", [str(stored["id"])])
@@ -575,6 +597,8 @@ def update(output_dir: str | Path, rule_id: str, payload: dict, *, expected: str
             allowed = {k: payload[k] for k in ("enabled", "name", "message", "statement") if k in payload}
             payload = allowed
         rule = normalise(payload, svc.doc, existing=current)
+        if rule.get("syncNote") == KEPT_NOTE and rule.get("kind") != "statement":
+            rule.pop("syncNote")              # enforceable now: no longer "not enforced yet"
         problems = check(svc.doc, rule)
         if problems:
             raise RuleError(problems[0], problems=problems)
@@ -627,6 +651,7 @@ def remove(output_dir: str | Path, rule_id: str, *, expected: str | None, actor:
             if isinstance(r, dict) and str(r.get("id")) == str(rule_id):
                 r["status"] = "DEPRECATED"
                 r["syncNote"] = "removed in the Business Rules tab"
+                retire_asks(svc.doc, r, f"its rule {rule_id} was removed in the Business Rules tab")
         version = _commit(svc, before, f"Business Rules tab: remove “{current.get('name')}”"
                           + (f" (by {actor})" if actor else ""),
                           f"Removed {rule_id} in the Business Rules tab", [str(rule_id)])
@@ -653,6 +678,35 @@ def try_rule(output_dir: str | Path, payload: dict, *, rule_id: str | None = Non
 # What the person asked for is never lost
 # ---------------------------------------------------------------------------
 
+#: How a written-down rule kept from the request says so (`keep_stated_rules`).
+KEPT_NOTE = "you asked for this; the build did not make it enforceable — open it to enforce it"
+
+
+def retire_asks(doc: dict, rule: dict, why: str) -> list[str]:
+    """The asks a removed rule answered, withdrawn with it: each requirement
+    it cites that states a rule (`owner: businessRules`) and that no other
+    live rule answers. Returns their ids. Writes the document in place.
+
+    Without this a rule the person removed came back: its ask was still a
+    stated rule nothing cited, so the next build — or the next Smith turn's
+    catch-up — kept it as a written-down rule "you asked for" (Task Board,
+    2026-10-14). A requirement that is not a rule (a page, a record) is never
+    touched: other parts of the app answer it."""
+    cites = {str(x) for x in rule.get("requirements") or []}
+    if not cites:
+        return []
+    others = {str(x) for r in _live(doc.get("businessRules"))
+              if str(r.get("id")) != str(rule.get("id")) for x in r.get("requirements") or []}
+    out: list[str] = []
+    for req in doc.get("requirements") or []:
+        if (isinstance(req, dict) and str(req.get("id")) in cites and str(req.get("id")) not in others
+                and str(req.get("owner") or "") == "businessRules" and req.get("status") not in _RETIRED):
+            req["status"] = "DEPRECATED"
+            req["syncNote"] = why
+            out.append(str(req.get("id")))
+    return out
+
+
 def keep_stated_rules(svc: Any) -> dict:
     """After the build writes the rules: every rule the person stated is in
     the list, and every rule says where it came from.
@@ -675,22 +729,35 @@ def keep_stated_rules(svc: Any) -> dict:
             continue
         rule["origin"] = "brief" if stated_ids & {str(x) for x in rule.get("requirements") or []} else "generated"
         tagged += 1
+    # A RULE KEPT FROM THE REQUEST STEPS ASIDE once another rule enforces the
+    # same ask — the tab would otherwise list it twice, once "not enforced".
+    live = _live(doc.get("businessRules"))
+    for kept in live:
+        if kept.get("kind") != "statement" or kept.get("syncNote") != KEPT_NOTE:
+            continue
+        asks = {str(x) for x in kept.get("requirements") or []}
+        by = next((r for r in live if r is not kept and r.get("kind") != "statement"
+                   and asks & {str(x) for x in r.get("requirements") or []}), None)
+        if asks and by is not None:
+            kept["status"] = "DEPRECATED"
+            kept["syncNote"] = f"enforced by {by.get('id')}"
     cited = {str(x) for r in _live(doc.get("businessRules")) for x in r.get("requirements") or []}
     added: list[str] = []
     if any(str(r.get("id")) not in cited for r in stated):
         _ensure_registry(svc)
+    # One rule per thing said: the same sentence recorded twice is one ask.
+    uncovered: dict[str, list[str]] = {}
     for req in stated:
         rid = str(req.get("id"))
-        if rid in cited:
-            continue
         text = " ".join(str(req.get("description") or "").split())
-        if not text:
-            continue
+        if rid not in cited and text:
+            uncovered.setdefault(text, []).append(rid)
+    for text, rids in uncovered.items():
         name = text if len(text) <= 60 else text[:57].rsplit(" ", 1)[0] + "…"
         stored = svc.upsert("businessRules", {
             "name": name, "statement": text, "kind": "statement", "origin": "brief", "enabled": True,
-            "requirements": [rid], "status": "PROPOSED",
-            "syncNote": "you asked for this; the build did not make it enforceable — open it to enforce it",
+            "requirements": rids, "status": "PROPOSED",
+            "syncNote": KEPT_NOTE,
         }, natural_key=prose_key("RULE", text))
         added.append(str(stored.get("id")))
     if added:

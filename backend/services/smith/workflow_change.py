@@ -49,10 +49,6 @@ class WorkflowChangeError(Exception):
     """The change could not be made, with the reason a user can act on."""
 
 
-def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")[:60] or "workflow"
-
-
 def _live_workflows(doc: dict) -> list[dict]:
     return [w for w in (doc.get("workflows") or [])
             if isinstance(w, dict) and w.get("status") != "DEPRECATED"]
@@ -99,7 +95,8 @@ def record_requirement(svc: Any, request: str) -> dict:
         "status": "APPROVED",
         "owner": "workflows",
     }
-    written = svc.upsert("requirements", body, natural_key=f"REQ:{_slug(request)}")
+    from services.blueprint.ids import prose_key       # the key `bootstrap` keeps
+    written = svc.upsert("requirements", body, natural_key=prose_key("REQ", request))
     svc.save()
     return written
 

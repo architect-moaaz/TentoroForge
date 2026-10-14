@@ -66,7 +66,22 @@ def add_rule(svc: Any, request: str, *, app_root: str | None = None, executor: A
     request = (request or "").strip()
     if not request:
         raise SectionChangeError("no rule was described, so there is nothing to add.")
+    asked_before = {str(r.get("id")) for r in svc.doc.get("requirements") or []
+                    if isinstance(r, dict) and r.get("status") != "DEPRECATED"}
+    live_before = {str(r.get("id")) for r in _live(svc.doc)}
     req = record_requirement(svc, request, owner="businessRules")
+
+    def withdraw(why: str) -> None:
+        # "NOTHING HAS BEEN CHANGED" IS TRUE. The ask was recorded before the
+        # rule was authored; a rule that was not written leaves no ask behind
+        # for the next build to keep as a written-down rule.
+        if str(req.get("id")) in asked_before:
+            return
+        for r in svc.doc.get("requirements") or []:
+            if isinstance(r, dict) and str(r.get("id")) == str(req.get("id")):
+                r["status"] = "DEPRECATED"
+                r["syncNote"] = why
+                svc.save()
     existing = {str(r.get("name") or "").strip().lower() for r in _live(svc.doc)}
     brief = (
         "THIS IS A CHANGE to an application that is already built, not a first authoring.\n"
@@ -84,7 +99,8 @@ def add_rule(svc: Any, request: str, *, app_root: str | None = None, executor: A
         "`send_notification` notifies. Give such a rule `scope: \"entity\"` — it then runs on every "
         "save AND live on the form; `form` is only for show/hide/lock/options. A rule about a change "
         "reads the value before it as `previous.<field>` (\"a done task cannot go back to todo\": "
-        "`previous.status = \"done\" and status = \"todo\"`). Tabular logic (tiers, bands) can be "
+        "`previous.status = \"done\" and status = \"todo\"`); a length limit is "
+        "`string length(title) > 60`. Tabular logic (tiers, bands) can be "
         "`kind: \"decision_table\"` with `entity` and a `table`."
     )
     covered: list[str] = []
@@ -108,8 +124,24 @@ def add_rule(svc: Any, request: str, *, app_root: str | None = None, executor: A
                            empty=(f"return exactly ONE new rule, for \"{request}\" and nothing else — no "
                                   "existing rule re-stated, no other rule you think the app lacks"),
                            say=f"Authoring a rule for: {request}.")
+    except SectionChangeError:
+        withdraw("the rule could not be written")
+        raise
     except _Covered:
-        rule = find_named(_rules(svc.doc), covered[0]) or {}
+        rule = find_named(_live(svc.doc), covered[0]) or {}
+        if rule.get("enabled") is False:
+            # THE RULE IS THERE, SWITCHED OFF in the Business Rules tab: "already
+            # enforced" would be untrue. Asked for again, it is switched back on.
+            before = svc.snapshot()
+            rule["enabled"] = True
+            if req.get("id") and req["id"] not in (rule.get("requirements") or []):
+                rule["requirements"] = list(rule.get("requirements") or []) + [req["id"]]
+            svc.commit(user_request=request, smith_interpretation=f"Switched {rule.get('id')} back on",
+                       before=before, affected=[str(rule.get("id"))])
+            return {"applied": True, "rule": str(rule["id"]), "name": str(rule.get("name")),
+                    "requirement": req.get("id"), "kind": rule.get("kind"), "statement": rule.get("statement"),
+                    "when": rule.get("when"), "switched_on": True, "edited_paths": _project(svc, app_root)}
+        withdraw("already enforced by an existing rule")
         raise SectionChangeError(f"that is already enforced by the rule {rule.get('name') or covered[0]}"
                                  + (f" ({rule.get('id')}): {rule.get('statement')}" if rule else "")
                                  + " — nothing has been changed. Ask me to change that rule if it should say something else.")
@@ -118,13 +150,23 @@ def add_rule(svc: Any, request: str, *, app_root: str | None = None, executor: A
     if rule is None:
         raise SectionChangeError("the rule was committed but cannot be found by its name.")
     changed = False
-    if req.get("id") and req["id"] not in (rule.get("requirements") or []):
-        rule["requirements"] = list(rule.get("requirements") or []) + [req["id"]]
+    if str(rule["id"]) not in live_before:
+        # A RULE ASKED FOR NOW STARTS NOW. A rule's id follows its wording, so
+        # the same sentence asked again after it was removed is the same id,
+        # merged onto what it was: switched off, "removed in chat", answering
+        # asks withdrawn since. Task Board's re-asked title limit came back
+        # "not enforced" and the app took a 61-character title (2026-10-14).
+        # Asked for in chat: the Business Rules tab says so, and it is on.
+        rule.update(origin="smith", enabled=True, requirements=[req["id"]] if req.get("id") else [])
+        rule.pop("syncNote", None)
         changed = True
-    # Asked for in chat: the Business Rules tab says so, and it is on.
-    if not rule.get("origin"):
-        rule["origin"] = "smith"
-        changed = True
+    else:
+        if req.get("id") and req["id"] not in (rule.get("requirements") or []):
+            rule["requirements"] = list(rule.get("requirements") or []) + [req["id"]]
+            changed = True
+        if not rule.get("origin"):
+            rule["origin"] = "smith"
+            changed = True
     if changed:
         svc.save()
     return {"applied": True, "rule": str(rule["id"]), "name": name, "requirement": req.get("id"),
@@ -201,6 +243,8 @@ def remove_rule(svc: Any, ref: str, *, app_root: str | None = None, reasoning: A
     before = svc.snapshot()
     rule["status"] = "DEPRECATED"
     rule["syncNote"] = "removed in chat"
+    from services.business_rules import retire_asks
+    retire_asks(svc.doc, rule, f"its rule {rule.get('id')} was removed in chat")
     # Versioned like every change, so the history (and the tab) can say who
     # removed it and the person can roll it back.
     svc.commit(user_request=f"Remove the rule {rule.get('name')}", smith_interpretation=f"Retired {rule['id']}",
@@ -211,6 +255,9 @@ def remove_rule(svc: Any, ref: str, *, app_root: str | None = None, reasoning: A
 
 
 def summary_of(verb: str, out: dict) -> str:
+    if verb == "add_rule" and out.get("switched_on"):
+        return (f"The rule {out['name']} ({out['rule']}) already says that, but it was switched off in the "
+                f"Business Rules tab — I switched it back on, so the app applies it again: {out['statement']}")
     if verb == "add_rule":
         fires = (f" It fires on the form when `{out['when']}`." if out.get("when") else
                  " It is stated, not enforced on a form — no field condition was given.")
