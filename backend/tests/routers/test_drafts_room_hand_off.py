@@ -18,6 +18,14 @@ from routers import blueprint_generate
 from routers import drafts_room as router
 from services.drafts_room import document, store
 
+@pytest.fixture(autouse=True)
+def _rooted(tmp_path, monkeypatch):
+    """Sessions go to a temporary folder, never the platform's own store:
+    a run of these tests left a dozen Threadline sessions in a developer's
+    Drafts Room (2026-10-14)."""
+    monkeypatch.setattr(store, "ROOT", tmp_path / "sessions")
+
+
 DOC = "# Threadline\n\n## Overview\nA wardrobe app.\n\n## Features\n- [must] Log an outfit\n"
 PITCH = "A wardrobe app that helps people wear what they own."
 

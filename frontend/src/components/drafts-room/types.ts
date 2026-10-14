@@ -1,4 +1,4 @@
-/** the Drafts Room's shapes, as `routers/drafts_room.py` returns them. */
+/** The Drafts Room's shapes, as `routers/drafts_room.py` returns them. */
 
 export type FileMeta = {
   id: string;

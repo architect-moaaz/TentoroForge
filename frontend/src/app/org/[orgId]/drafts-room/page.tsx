@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * the Drafts Room — Smith and the person work an idea out before any app exists.
+ * The Drafts Room — Smith and the person work an idea out before any app exists.
  *
  * Sessions on the left; the conversation in the middle, where pictures and
  * PDFs can be dropped in and Smith's research shows as he does it; the idea
@@ -119,7 +119,7 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
   };
 
   const remove = async (id: string) => {
-    if (!window.confirm("Delete this the Drafts Room session? Its conversation, board and pictures go with it.")) return;
+    if (!window.confirm("Delete this Drafts Room session? Its conversation, board and pictures go with it.")) return;
     await api.delete(`${base}/${id}`);
     if (id === activeId) setActiveId(null);
     queryClient.invalidateQueries({ queryKey: ["org", orgId, "drafts-room"] });
@@ -164,7 +164,7 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
       <aside className="w-60 shrink-0 border-r flex flex-col">
         <div className="p-3 border-b flex items-center gap-2">
           <PencilRuler className="h-5 w-5 text-primary" />
-          <span className="font-semibold">the Drafts Room</span>
+          <span className="font-semibold">Drafts Room</span>
         </div>
         <div className="p-3">
           <Button className="w-full" size="sm" onClick={() => void startNew()}>
@@ -191,7 +191,7 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
         <main className="flex-1 flex items-center justify-center p-8">
           <div className="max-w-lg text-center space-y-4">
             <PencilRuler className="h-10 w-10 mx-auto text-primary" />
-            <h1 className="text-2xl font-semibold">the Drafts Room</h1>
+            <h1 className="text-2xl font-semibold">The Drafts Room</h1>
             <p className="text-muted-foreground">
               Work an app idea out with Smith before anything is built. Name an app to learn from and he researches
               it — features, screens, flows, records and look — and shows you what he finds. Drop in screenshots or
