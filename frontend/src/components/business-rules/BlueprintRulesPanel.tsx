@@ -220,7 +220,7 @@ export function BlueprintRulesPanel({ projectId, initial }: { projectId: string;
             )}
           </div>
         </div>
-        {building && <BuildingBanner />}
+        {building && <BuildingBanner why={data.busy} />}
         {stale && (
           <div className="flex items-center justify-between border-b border-sky-200 bg-sky-50 px-4 py-2 text-[11px] text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200">
             <span>This rule was changed in the chat or elsewhere since you opened it.</span>
@@ -348,7 +348,7 @@ export function BlueprintRulesPanel({ projectId, initial }: { projectId: string;
           </Button>
         </div>
       </div>
-      {building && <BuildingBanner />}
+      {building && <BuildingBanner why={data.busy} />}
       <div className="flex-1 overflow-auto p-4">
         {(data.planned ?? []).length > 0 && (
           <section className="mb-5">
@@ -406,11 +406,17 @@ export function BlueprintRulesPanel({ projectId, initial }: { projectId: string;
   );
 }
 
-function BuildingBanner() {
+const BUSY_SAID: Record<string, string> = {
+  building: "Forge is building this app. Rules are read-only until the build finishes — new rules it writes appear here as they are made.",
+  checking: "Forge is checking the app it just built and fixing what it finds. Rules are read-only until that finishes.",
+  smith: "Smith is working on this app. Rules are read-only until Smith finishes — any rule Smith changes appears here.",
+};
+
+function BuildingBanner({ why }: { why?: string | null }) {
   return (
     <div className="flex items-center gap-2 border-b border-indigo-200 bg-indigo-50 px-4 py-2 text-[11px] text-indigo-900 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-200">
       <Hammer className="h-3.5 w-3.5" />
-      Forge is building this app. Rules are read-only until the build finishes — new rules it writes appear here as they are made.
+      {BUSY_SAID[why ?? "building"] ?? BUSY_SAID.building}
     </div>
   );
 }

@@ -217,11 +217,71 @@ def test_the_old_rules_tab_no_longer_lists_blueprint_rules():
 # --------------------------------------------------------------------------- #
 
 def test_a_rule_is_not_saved_while_a_build_writes_the_definition(app, monkeypatch):
-    monkeypatch.setattr(br, "building", lambda _out: True)
+    monkeypatch.setattr(br, "busy", lambda _out: "building")
     with pytest.raises(br.RuleError) as exc:
         br.create(app, GOOD)
     assert exc.value.status == 423 and "building" in str(exc.value)
     assert br.read.__module__  # reading is still allowed
+
+
+def _ledger(out: Path, name: str, *, phase: str = "build", ended: bool = False) -> None:
+    runs = out / ".forge" / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    lines = [{"event": "run:start", "phase": phase, "at": "2026-10-14T17:00:00Z", "runId": name},
+             {"event": "node:start", "node": "x", "runId": name}]
+    if ended:
+        lines.append({"event": "run:end", "runId": name})
+    (runs / f"{name}.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+
+
+@pytest.mark.parametrize("name,phase,said", [
+    ("20261014-170000-aaaaaa", "build", "building"),
+    ("20261014-170000-checks", "checking", "checking"),
+    ("20261014-170000-bbbbbb-smith-turn", "", "smith"),
+])
+def test_what_is_changing_the_app_is_read_from_its_runs(app, name, phase, said):
+    """A rule saved while a build, the checks after it, or a Smith turn has
+    the definition open would be lost when that saves the whole of it."""
+    assert br.busy(app) is None
+    _ledger(app, name, phase=phase)
+    assert br.busy(app) == said
+    listed = br.read(app)
+    assert listed["busy"] == said and listed["building"] is True, "the tab is read-only, and says why"
+    _ledger(app, name, phase=phase, ended=True)
+    assert br.busy(app) is None and br.read(app)["building"] is False
+
+
+def test_a_run_that_went_quiet_does_not_lock_the_tab(app):
+    """The laptop switched off mid-build: its ledger never ends."""
+    import os, time as _t
+    _ledger(app, "20261014-170000-cccccc")
+    stale = _t.time() - 3600
+    os.utime(app / ".forge" / "runs" / "20261014-170000-cccccc.jsonl", (stale, stale))
+    assert br.busy(app) is None
+
+
+def test_the_checks_after_a_build_refuse_with_their_own_reason(app, monkeypatch):
+    monkeypatch.setattr(br, "busy", lambda _out: "checking")
+    with pytest.raises(br.RuleError) as exc:
+        br.create(app, GOOD)
+    assert exc.value.status == 423 and "checking the app it just built" in str(exc.value)
+
+
+def test_a_smith_turn_is_waited_for_then_the_rule_is_saved(app, monkeypatch):
+    seen = iter(["smith", "smith", None])
+    monkeypatch.setattr(br, "busy", lambda _out: next(seen, None))
+    monkeypatch.setattr(br.time, "sleep", lambda _s: None)
+    made = br.create(app, GOOD)
+    assert made["rule"]["rule"]["id"]
+
+
+def test_a_smith_turn_that_goes_on_is_said_not_raced(app, monkeypatch):
+    monkeypatch.setattr(br, "busy", lambda _out: "smith")
+    monkeypatch.setattr(br, "TAB_LOCK_WAIT", 0.01)
+    with pytest.raises(br.RuleError) as exc:
+        br.create(app, GOOD)
+    assert exc.value.status == 423 and "Smith is working on this app" in str(exc.value)
+    assert all(r.get("name") != GOOD["name"] for r in _doc(app)["businessRules"])
 
 
 def test_the_tab_waits_for_smith_then_says_so(app):

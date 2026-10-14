@@ -93,6 +93,24 @@ assert.deepEqual(small.errors, []);
 assert.ok(small.formHints.length === 0 || !small.formHints.some((h) => h.required), "no requirement below the limit");
 console.log("required on save: PASS ✅");
 
+// ── a default is settled before a rule judges it ────────────────────────────
+// "New expenses start as submitted", as Kimi wrote it for an expense tracker:
+// a check listed BEFORE the default it relies on.
+setRules([
+  ca("RULE-005", "Expense", 'previous.status = null and status != "submitted"',
+     [{ id: "h", field: "status", type: "show_error", message: "A new expense must start as submitted." }], { scope: "entity" }),
+  ca("RULE-006", "Expense", "status = null",
+     [{ id: "i", field: "status", type: "set_default", value: "submitted" }], { scope: "entity" }),
+]);
+const fresh = await evaluateRuleSet("expenses", "create", { title: "Taxi", amount: 120 });
+assert.deepEqual(fresh.errors, [], "no status given: the default fills it, the check passes");
+assert.equal(fresh.patches.status, "submitted");
+assert.deepEqual((await evaluateRuleSet("expenses", "create", { title: "Taxi", amount: 120, status: "approved" })).errors,
+                 ["A new expense must start as submitted."], "a new expense cannot start approved");
+const typed = await evaluateFormRules("Expense", { title: "Taxi", amount: 120 });
+assert.deepEqual(typed.errors, [], "the form does not say it either");
+console.log("defaults before checks: PASS ✅");
+
 // ── a length limit: "a title is at most 60 characters" ──────────────────────
 setRules([
   ca("RULE-025", "Task", "string length(title) > 60",
