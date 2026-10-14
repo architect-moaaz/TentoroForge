@@ -1,3 +1,5 @@
+import { hasCockpitReturn, restoreCockpitReturn } from "@/lib/auth-storage";
+
 // `??` not `||` — `""` means "same-origin, let nginx route /api" and
 // must NOT trigger the localhost dev fallback. Only undefined does.
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
@@ -51,6 +53,14 @@ async function request<T>(
 
   // Handle 401 — attempt token refresh
   if (res.status === 401 && token) {
+    // AN IMPERSONATION THAT RAN OUT IS NOT A SIGN-OUT. The super admin's own
+    // tokens were kept for the way back; they come back and the cockpit
+    // opens, instead of a refresh that cannot happen and a login page.
+    if (typeof window !== "undefined" && hasCockpitReturn()) {
+      restoreCockpitReturn();
+      window.location.href = "/admin/people?expired=1";
+      throw new ApiError(401, "Impersonation ended");
+    }
     // A request that was already in flight when someone else refreshed comes
     // back 401 holding a token that is simply out of date. Refreshing again
     // would present the rotated token and fail, logging the user out for a
@@ -189,6 +199,8 @@ export const api = {
     request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "PUT", body: body ? JSON.stringify(body) : undefined }),
+  patch: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "PATCH", body: body ? JSON.stringify(body) : undefined }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
   upload: <T>(path: string, formData: FormData) =>
     request<T>(path, {

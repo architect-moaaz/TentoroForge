@@ -20,6 +20,7 @@ import {
   Globe,
   LogOut,
   PencilRuler,
+  ShieldCheck,
 } from "lucide-react";
 import { AuthGuard } from "@/components/auth-guard";
 import { useAuthStore } from "@/stores/auth";
@@ -172,6 +173,15 @@ function OrgLayout({
                 {user?.email}
               </p>
             </div>
+            {user?.platform_role === "super_admin" && !user.impersonated_by && (
+              <Link
+                href="/admin"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors dark:hover:bg-slate-800"
+                title="Platform cockpit"
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+              </Link>
+            )}
             <button
               onClick={logout}
               className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors dark:hover:bg-slate-800"

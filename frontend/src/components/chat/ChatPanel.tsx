@@ -15,6 +15,7 @@ import { useOfficeStore } from "@/components/virtual-office/OfficeStateManager";
 import type { OfficeEvent } from "@/components/virtual-office/types";
 import type { Project } from "@/types/project";
 import { authFetch } from "@/lib/api";
+import { describeRefusal } from "@/lib/spend-refusal";
 
 /** Which backend a user message belongs to.
  *
@@ -384,7 +385,11 @@ export function ChatPanel({
         if (!res.ok) {
           useOfficeStore.getState().endRun();
           store.setError(
-            body?.detail ?? `Smith could not take that turn (${res.status})`,
+            describeRefusal(
+              res.status,
+              typeof body?.detail === "string" ? body.detail : null,
+              `Smith could not take that turn (${res.status})`,
+            ),
           );
           return;
         }
