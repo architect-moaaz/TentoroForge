@@ -255,11 +255,11 @@ def to_smith_fields(doc: dict[str, Any]) -> dict[str, Any]:
         ],
         # The rules already in force, so "add a rule that…" can be answered
         # with "that one is already there" instead of a question.
-        "business_rules": [
-            {"name": r.get("name"), "statement": r.get("statement"),
-             "entity": r.get("entity"), "when": r.get("when")}
-            for r in _live(doc.get("businessRules"))
-        ],
+        # Each with what a person sees of it in the Business Rules tab — its
+        # id, whether the app enforces it (and where), whether it is switched
+        # off, where it came from, what it does — so Smith knows a rule the
+        # person made or changed in the tab as well as one it made itself.
+        "business_rules": [_rule_for_smith(r, doc) for r in _live(doc.get("businessRules"))],
         "pages": [
             {
                 "route": p.get("route"),
@@ -408,3 +408,33 @@ def connection_lines(doc: dict[str, Any], output_dir: str) -> list[dict[str, Any
 def _schema_path(route: str) -> str:
     body = (route or "/").strip("/")
     return f"src/schemas/{body or 'home'}.json"
+
+
+def _rule_for_smith(rule: dict, doc: dict) -> dict:
+    """One business rule as Smith reads it."""
+    from services.business_rules import where_it_runs
+    ents = {str(e.get("id")): e.get("name") for e in (doc.get("data") or {}).get("entities") or []
+            if isinstance(e, dict)}
+    effects = []
+    for branch in ("then", "otherwise"):
+        for a in rule.get(branch) or []:
+            if not isinstance(a, dict):
+                continue
+            t, f = str(a.get("type") or ""), a.get("field")
+            said = {"show_error": f"refuse “{a.get('message')}”", "set_field": f"set {f}={a.get('value')}",
+                    "set_default": f"default {f}={a.get('value')}", "clear_field": f"clear {f}",
+                    "set_required": f"require {f}", "set_readonly": f"lock {f}",
+                    "set_visibility": f"{'show' if a.get('visible', True) else 'hide'} {f}",
+                    "set_options": f"limit {f} options", "recommendation": f"suggest {f}",
+                    "trigger_workflow": f"start {a.get('workflow')}",
+                    "send_notification": f"notify “{a.get('message')}”"}.get(t, t)
+            effects.append(("else " if branch == "otherwise" else "") + said)
+    return {
+        "id": rule.get("id"), "name": rule.get("name"), "statement": rule.get("statement"),
+        "kind": rule.get("kind") or "statement", "entity": rule.get("entity"),
+        "entity_name": ents.get(str(rule.get("entity") or "")), "when": rule.get("when"),
+        "effects": effects, "runs": where_it_runs(rule),
+        "enabled": rule.get("enabled") is not False, "origin": rule.get("origin") or "generated",
+        "gates": list(rule.get("gates") or []),
+        "outputs": [c.get("name") for c in (rule.get("table") or {}).get("outputs") or []],
+    }

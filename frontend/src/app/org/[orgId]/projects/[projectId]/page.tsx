@@ -546,7 +546,7 @@ function ProjectWorkspace({
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 overflow-hidden pt-[70px] bg-background">
+      <div className="min-w-0 flex-1 overflow-hidden pt-[70px] bg-background">
         {/*
           HIDDEN, NOT UNMOUNTED. Every other tab here is safe to tear down and
           rebuild from its query cache; the chat is not. Its transcript and its

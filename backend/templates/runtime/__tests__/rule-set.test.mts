@@ -25,10 +25,12 @@ setRules([
     config: { source: "manual", whenFeel: "true",
       then: [{ id: "d", type: "set_field", field: "total", valueMode: "formula", value: "qty * price" }], otherwise: [],
       scope: "server", salience: 0 } },
-  // scope=form must NOT run server-side
-  { id: "5", name: "form-only-error", rule_type: "condition_action", model_name: "Invoice", is_active: true,
+  // scope=form on a rule that only shapes the form must NOT run server-side.
+  // (A form-scope rule that refuses or sets a value DOES run on the server —
+  // see rules-are-enforced.test.mts.)
+  { id: "5", name: "form-only-lock", rule_type: "condition_action", model_name: "Invoice", is_active: true,
     config: { source: "manual", whenFeel: "true",
-      then: [{ id: "e", type: "show_error", message: "should not appear server-side" }], otherwise: [],
+      then: [{ id: "e", type: "set_readonly", field: "notes", readonly: true }], otherwise: [],
       scope: "form", salience: 0 } },
 ]);
 
@@ -47,10 +49,14 @@ assert.ok(small.formHints.some((h) => h.field === "approver" && h.hidden === tru
 const withStatus = await evaluateRuleSet("Invoice", "create", { amount: 10, status: "sent", qty: 1, price: 1 });
 assert.equal(withStatus.patches.status, undefined, "default must not overwrite existing status");
 
-// evaluateFormRules: patches + hints only, no errors/side-effects, includes form-scope
+// evaluateFormRules: patches + hints + what a save would refuse; includes form-scope
 const form = await evaluateFormRules("Invoice", { amount: 50, qty: 2, price: 4 });
 assert.ok(form.formHints.some((h) => h.field === "approver" && h.hidden === true), "form: approver hidden");
-assert.equal((form as any).errors, undefined, "form result carries no errors key");
+assert.ok(form.formHints.some((h) => h.field === "notes" && h.readonly === true), "form: form-scope lock applies");
+assert.deepEqual(form.errors, [], "a valid form carries no errors");
+assert.ok(!big.formHints.some((h) => h.field === "notes"), "a form-only rule does not run on the server");
+const formBig = await evaluateFormRules("Invoice", { amount: 5000 });
+assert.deepEqual(formBig.errors, ["over 1000 needs approver"], "the form says what the save would refuse");
 
 console.log("rule-set engine: ALL ASSERTIONS PASS ✅");
 

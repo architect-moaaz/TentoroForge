@@ -5213,29 +5213,44 @@ def project_append_only_entities(doc: dict, app_root: str | Path) -> dict[str, A
 # ---------------------------------------------------------------------------
 
 def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
-    """Write ``rules/blueprint-rules.json`` — the Blueprint's condition-action
-    rules, in the row shape the runtime's ``loadRules`` reads.
+    """Write ``rules/blueprint-rules.json`` — every Blueprint rule the app runs,
+    in the row shape the runtime's ``loadRules`` reads.
 
-    Only rules the panel authored reached the runtime before; a rule the
-    agent wrote had a statement and no effect on any form. This projects
-    the ones that declare effects, beside the panel's, in the same shape
-    (rule_type, model_name, config.whenFeel/then/otherwise/scope/salience),
-    so the form-rules route serves them together. Always written, so an
-    empty file and a never-run projection stay distinguishable.
+    The rules with effects: condition→action rules and decision tables, each
+    bound to its entity by NAME (what the engine matches; it also accepts the
+    table/URL spelling). Prose rules (`statement`) constrain people, not
+    records, and prerequisites are written into the workflows they gate.
+    Retired (DEPRECATED) and switched-off (`enabled: false`) rules are left
+    out — a rule off in the Business Rules tab is off in the app.
+
+    Mirrored into ``src/rules/`` beside the editor's ``index.json``: a
+    serverless deployment reads that copy (the root ``rules/`` is not traced),
+    and the loader reads ONE directory, so both must hold every file. Always
+    written, so an empty file and a never-run projection stay distinguishable.
     """
     entities = {str(e.get("id")): e for e in (doc.get("data") or {}).get("entities") or []}
     rows = []
     for rule in doc.get("businessRules") or []:
-        if not isinstance(rule, dict) or rule.get("status") == "DEPRECATED":
+        if not isinstance(rule, dict) or rule.get("status") in ("DEPRECATED", "SUPERSEDED", "REJECTED"):
             continue
-        if rule.get("kind") != "condition_action" or not rule.get("entity"):
+        if rule.get("enabled") is False:
+            continue
+        kind = rule.get("kind")
+        if kind not in ("condition_action", "decision_table") or not rule.get("entity"):
             continue
         ent = entities.get(str(rule["entity"])) or {}
         model = ent.get("name") or str(rule["entity"])
+        base = {"id": rule.get("id"), "name": rule.get("name") or rule.get("id"),
+                "model_name": model, "field_name": None, "is_active": True, "source": "blueprint"}
+        if kind == "decision_table":
+            table = rule.get("table") or {}
+            if not table.get("inputs") or not table.get("outputs") or not table.get("rules"):
+                continue
+            rows.append({**base, "rule_type": "decision_table",
+                         "config": {"source": "blueprint", "table": table}})
+            continue
         rows.append({
-            "id": rule.get("id"), "name": rule.get("name") or rule.get("id"),
-            "rule_type": "condition_action", "model_name": model,
-            "field_name": None, "is_active": True, "source": "blueprint",
+            **base, "rule_type": "condition_action",
             "config": {
                 "whenFeel": rule.get("when") or rule.get("expression") or "true",
                 "then": [{"id": f"{rule.get('id')}-then-{i}", **a} for i, a in enumerate(rule.get("then") or [])],
@@ -5244,8 +5259,12 @@ def project_business_rules(doc: dict, app_root: str | Path) -> dict[str, Any]:
                 "salience": int(rule.get("salience") or 0),
             },
         })
-    out = Path(app_root) / "rules"
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "blueprint-rules.json").write_text(json.dumps(rows, indent=2), "utf-8")
-    return {"files": ["rules/blueprint-rules.json"], "rules": len(rows)}
+    text = json.dumps(rows, indent=2)
+    files = []
+    for rel in ("rules", "src/rules"):
+        out = Path(app_root) / rel
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "blueprint-rules.json").write_text(text, "utf-8")
+        files.append(f"{rel}/blueprint-rules.json")
+    return {"files": files, "rules": len(rows)}
 

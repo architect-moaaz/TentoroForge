@@ -199,8 +199,22 @@ def test_the_rules_in_force_are_shown(tmp_path):
          "when": "experienceYears > 60"}])
     ctx = blueprint_to_context(bp)
     assert "## Rules (1)" in ctx
-    assert "**Experience Cap**: Experience cannot exceed 60." in ctx
+    assert "**Experience Cap** — Experience cannot exceed 60." in ctx
     assert "when `experienceYears > 60`" in ctx
+    # What the person sees of it in the Business Rules tab, Smith sees too.
+    tab = blueprint_to_context(Blueprint(project_id="p1", domain={"name": "clinic"}, business_rules=[
+        {"id": "RULE-007", "name": "Note over 5000", "statement": "Big expenses need a note.",
+         "entity_name": "Expense", "when": "amount > 5000", "effects": ["require managerNote"],
+         "runs": "everywhere", "enabled": True, "origin": "editor"},
+        {"id": "RULE-008", "name": "Weekend", "statement": "No weekend claims.", "runs": "nowhere",
+         "enabled": True, "origin": "brief"},
+        {"id": "RULE-009", "name": "Old cap", "statement": "Cap at 100.", "runs": "nowhere",
+         "enabled": False, "origin": "smith"}]))
+    assert ("- RULE-007 **Note over 5000** on Expense — Big expenses need a note. "
+            "[ENFORCED on every save + live on the form; made by the person in the Business Rules tab]"
+            " · when `amount > 5000` → require managerNote") in tab
+    assert "RULE-008 **Weekend** — No weekend claims. [WRITTEN DOWN ONLY — nothing enforces it; from the person's request]" in tab
+    assert "[SWITCHED OFF in the Business Rules tab; added in chat]" in tab
     assert "## Rules\n(none yet.)" in blueprint_to_context(
         Blueprint(project_id="p1", domain={"name": "c"}))
 

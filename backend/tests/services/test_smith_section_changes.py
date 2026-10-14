@@ -232,3 +232,95 @@ def test_an_ask_an_existing_rule_already_enforces_is_answered_not_duplicated(svc
         rc.add_rule(svc, "years cannot be negative", executor=agent)
     fresh = BlueprintService.load(output_dir=str(svc.output_dir))
     assert [r["statement"] for r in fresh.doc["businessRules"]] == ["Years cannot be negative."]      # untouched
+
+
+# ---------------------------------------------------------------------------
+# The Business Rules tab and Smith read and write the same rules
+# ---------------------------------------------------------------------------
+
+def test_a_rule_smith_adds_says_it_came_from_the_chat(svc):
+    def agent(spec):
+        cap = {"name": "Years Realistic Cap", "statement": "Years of experience cannot exceed 60.",
+               "kind": "condition_action", "entity": "ENTITY-001", "when": "yearsOfExperience > 60",
+               "appliesTo": ["ENTITY-001"], "scope": "entity",
+               "then": [{"type": "show_error", "field": "yearsOfExperience", "message": "Too many."}]}
+        return _result(spec, [ArtifactProposal("businessRules", "Years Realistic Cap", cap)])
+    rc.add_rule(svc, "years of experience cannot exceed 60", executor=agent)
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    rule = next(r for r in fresh.doc["businessRules"] if r["name"] == "Years Realistic Cap")
+    assert rule["origin"] == "smith"
+    from services import business_rules as br
+    view = next(v for v in br.read(svc.output_dir)["rules"] if v["rule"]["name"] == "Years Realistic Cap")
+    assert view["origin"] == "smith" and view["runs"] == "everywhere", "the tab shows it as Smith's, enforced"
+
+
+def test_a_rule_reworded_in_chat_keeps_where_it_came_from_and_whether_it_is_on(svc):
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir))
+    fresh.doc["businessRules"][0].update(origin="editor", enabled=False)
+    fresh.save()
+    def agent(spec):
+        return _result(spec, [ArtifactProposal("businessRules", "years (revised)",
+                                               {"name": "Years non negative", "statement": "Years must be zero or more.",
+                                                "kind": "condition_action", "entity": "ENTITY-001",
+                                                "when": "yearsOfExperience < 0", "appliesTo": ["ENTITY-001"],
+                                                "then": [{"type": "show_error", "message": "Zero or more."}]})])
+    out = rc.edit_rule(BlueprintService.load(output_dir=str(svc.output_dir)), "years non-negative",
+                       "say zero or more", executor=agent)
+    now = next(r for r in BlueprintService.load(output_dir=str(svc.output_dir)).doc["businessRules"]
+               if r["id"] == out["rule"])
+    assert now["origin"] == "editor" and now["enabled"] is False
+
+
+def test_a_rule_removed_in_chat_is_versioned(svc, tmp_path):
+    (tmp_path / "app").mkdir(exist_ok=True)
+    v = BlueprintService.load(output_dir=str(svc.output_dir)).doc.get("version")
+    rc.remove_rule(BlueprintService.load(output_dir=str(svc.output_dir)), "Years Non-Negative",
+                   app_root=str(tmp_path / "app"))
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir)).doc
+    assert fresh["version"] == v + 1 and fresh["changeHistory"][-1]["affectedArtifacts"] == [svc._t.rule["id"]]
+    assert fresh["businessRules"][0]["syncNote"] == "removed in chat"
+
+
+def test_smith_holds_the_rules_lock_for_the_whole_change(svc, monkeypatch):
+    """The tab saves through the same lock; while Smith changes the rules a
+    tab save waits, then is told — and Smith's save cannot overwrite it."""
+    from services import business_rules as br
+    held = {}
+    real = rc._run
+    def spy(*a, **k):
+        try:
+            with br.write_lock(svc.output_dir, timeout=0.2):
+                held["free"] = True
+        except br.RuleError:
+            held["free"] = False
+        return real(*a, **k)
+    monkeypatch.setattr(rc, "_run", spy)
+    rc.run(str(svc.output_dir), "remove_rule", rule="Years Non-Negative")
+    assert held["free"] is False
+
+
+def test_retiring_a_record_retires_its_rules(svc, tmp_path):
+    out = ec.remove_entity(svc, "Nurse", app_root=None)
+    fresh = BlueprintService.load(output_dir=str(svc.output_dir)).doc
+    rule = next(r for r in fresh["businessRules"] if r["id"] == svc._t.rule["id"])
+    assert rule["status"] == "DEPRECATED" and "Nurse was removed" in rule["syncNote"]
+    assert out["rules"] == ["Years Non-Negative"]
+    assert "Its business rules are retired: Years Non-Negative." in ec.summary_of("remove_entity", out)
+
+
+def test_smith_reads_the_rules_by_the_name_it_was_given():
+    from services.smith.reads import read_section
+    doc = {"businessRules": [{"id": "RULE-001", "name": "a"}]}
+    for name in ("rules", "businessRules", "business_rules"):
+        assert read_section(doc, name).startswith("businessRules:")
+    assert "RULE-001" in read_section(doc, "rules.RULE-001")
+
+
+def test_a_rule_written_through_write_section_is_in_the_app(svc, tmp_path):
+    from services.smith.writes import _reproject
+    app = tmp_path / "app"
+    app.mkdir(exist_ok=True)
+    files = _reproject(svc, str(app), "businessRules")
+    assert "rules/blueprint-rules.json" in files
+    rows = json.loads((app / "rules" / "blueprint-rules.json").read_text())
+    assert rows[0]["model_name"] == "Nurse"

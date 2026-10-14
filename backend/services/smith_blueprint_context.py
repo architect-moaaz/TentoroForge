@@ -276,12 +276,31 @@ def _render_rules(bp: Blueprint) -> str:
     rules = [r for r in (getattr(bp, "business_rules", None) or []) if isinstance(r, dict)]
     if not rules:
         return "## Rules\n(none yet.)"
-    lines = [f"## Rules ({len(rules)})"]
+    runs = {"everywhere": "ENFORCED on every save + live on the form", "save": "ENFORCED on every save",
+            "form": "shapes the form only", "before": "checked before its workflows run",
+            "nowhere": "WRITTEN DOWN ONLY — nothing enforces it"}
+    origin = {"brief": "from the person's request", "smith": "added in chat", "editor":
+              "made by the person in the Business Rules tab", "generated": "inferred by Forge"}
+    lines = [f"## Rules ({len(rules)}) — the same list the person sees in the Business Rules tab"]
     for r in rules:
         said = " ".join(str(r.get("statement") or "").split())
-        line = f"- **{r.get('name') or '?'}**: {said}"
+        state = "SWITCHED OFF in the Business Rules tab" if r.get("enabled") is False \
+            else runs.get(str(r.get("runs") or ""), "")
+        head = f"- {r.get('id') or ''} **{r.get('name') or '?'}**"
+        if r.get("entity_name"):
+            head += f" on {r['entity_name']}"
+        line = f"{head} — {said}"
+        meta = [m for m in (state, origin.get(str(r.get("origin") or ""))) if m]
+        if meta:
+            line += f" [{'; '.join(meta)}]"
         if r.get("when"):
-            line += f"  · when `{r['when']}`"
+            line += f" · when `{r['when']}`"
+        if r.get("effects"):
+            line += f" → {', '.join(r['effects'])}"
+        if r.get("kind") == "decision_table" and r.get("outputs"):
+            line += f" · decision table setting {', '.join(map(str, r['outputs']))}"
+        if r.get("gates"):
+            line += f" · gates {', '.join(map(str, r['gates']))}"
         lines.append(line)
     return "\n".join(lines)
 
