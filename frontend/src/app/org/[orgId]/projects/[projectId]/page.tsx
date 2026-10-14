@@ -27,6 +27,7 @@ import {
   KeyRound,
   Scale,
   Route,
+  Settings,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useOrgFeatures, type FeatureKey } from "@/lib/features";
@@ -49,6 +50,8 @@ import { VisualEditorWorkspace } from "@/components/visual-editor/VisualEditorWo
 import { ReactEditor } from "@/components/react-editor/ReactEditor";
 import { NavigationPanel } from "@/components/navigation/NavigationPanel";
 import { AppFlowPanel } from "@/components/app-flow/AppFlowPanel";
+import { AppSettingsPanel } from "@/components/app-settings/AppSettingsPanel";
+import { useAppSettingsStore } from "@/stores/appSettings";
 import { AgentBuilderPanel } from "@/components/agent-builder/AgentBuilderPanel";
 import { AIFeaturesPanel } from "@/components/ai-features/AIFeaturesPanel";
 import { CostTrackingPanel } from "@/components/monitoring/CostTrackingPanel";
@@ -65,7 +68,7 @@ import { VirtualOffice } from "@/components/virtual-office";
 import type { Project, ChatMessage } from "@/types/project";
 import type { CommandItem } from "@/types/portal";
 
-type Tab = "chat" | "preview" | "code" | "data" | "rules" | "business-rules" | "decisions" | "workflows" | "editor" | "schema-editor" | "design" | "design-editor" | "ir-editor" | "navigation" | "app-flow" | "agents" | "ai" | "monitoring" | "versions" | "office";
+type Tab = "chat" | "preview" | "code" | "data" | "rules" | "business-rules" | "decisions" | "workflows" | "editor" | "schema-editor" | "design" | "design-editor" | "ir-editor" | "navigation" | "app-flow" | "agents" | "ai" | "monitoring" | "versions" | "office" | "app-settings";
 
 // Tooltip component — positioned to the right of the icon
 function Tooltip({ children, label, shortcut }: { children: React.ReactNode; label: string; shortcut?: string }) {
@@ -93,6 +96,9 @@ function ProjectWorkspace({
   // "Show me this path" from Smith's side panel opens the App Flow tab on it.
   const flowRequested = useAppFlowStore((st) => st.requested);
   useEffect(() => { if (flowRequested) setActiveTab("app-flow"); }, [flowRequested]);
+  // "Manage in App settings" from the Publish dialog opens App settings on that section.
+  const settingsRequested = useAppSettingsStore((st) => st.requested);
+  useEffect(() => { if (settingsRequested) setActiveTab("app-settings"); }, [settingsRequested]);
   const [showExport, setShowExport] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
@@ -245,6 +251,7 @@ function ProjectWorkspace({
     { id: "office" as Tab, label: "Office", icon: Building2 },
     { id: "monitoring" as Tab, label: "Monitor", icon: BarChart3 },
     { id: "versions" as Tab, label: "Versions", icon: GitBranch },
+    { id: "app-settings" as Tab, label: "App settings", icon: Settings },
   ];
 
   // Sections for the visual sidebar — only show relevant tabs
@@ -273,6 +280,12 @@ function ProjectWorkspace({
         { id: "editor" as Tab, label: "Editor", icon: Layout },
         { id: "navigation" as Tab, label: "Pages & Nav", icon: Map },
         { id: "app-flow" as Tab, label: "App Flow", icon: Route },
+      ],
+    },
+    {
+      label: "Settings",
+      items: [
+        { id: "app-settings" as Tab, label: "App settings", icon: Settings },
       ],
     },
   ];
@@ -578,6 +591,7 @@ function ProjectWorkspace({
         {activeTab === "app-flow" && (
           <AppFlowPanel projectId={projectId} />
         )}
+        {activeTab === "app-settings" && <AppSettingsPanel projectId={projectId} />}
         {/* The Editor tab is the visual React editor over the Blueprint's coded
             pages. The schema-JSON editor stays reachable as "schema-editor"
             for apps built before pages were written as React. */}

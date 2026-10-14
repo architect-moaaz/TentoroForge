@@ -73,6 +73,12 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
      frozenset({"edit_product", "add_requirement", "edit_requirement",
                 "remove_requirement", "add_api", "edit_api", "remove_api",
                 "add_integration", "remove_integration", "connect_service", "add_webhook", "refund", "set_currency"})),
+    ("Its own address",
+     "Put the published app on your domain or a subdomain of it. I say the DNS "
+     "record to add, watch until it answers with a valid certificate, and move "
+     "sign-in and links to it; ask me where it stands any time. The same as App "
+     "settings → Domains.",
+     frozenset({"connect_domain", "remove_domain", "domain_status"})),
     ("Your own data",
      "Load the records you already have — attach a spreadsheet and say which "
      "records it holds. I say how many rows would land and which column "

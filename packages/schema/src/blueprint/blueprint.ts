@@ -2966,8 +2966,38 @@ export const Database = z.object({
   seeded: z.boolean().default(false),
 });
 
+/**
+ * An address the published application answers at besides its own
+ * `<project>.vercel.app`: the owner's domain (`acme.com`) or subdomain
+ * (`app.acme.com`), or the address Tentoro gives every app. Forge attaches it
+ * to the app's Vercel project, tells the owner the DNS records to add, and
+ * watches until it answers; `status` changes only when that changes, so the
+ * definition is not rewritten on every check (the checks themselves are kept
+ * in the project's `.forge/domains.json`).
+ */
+export const DomainEntry = z.object({
+  name: z.string().min(3),
+  /** `apex` is a bare domain (acme.com), `subdomain` one under it, `tentoro`
+   *  the address the platform gives the app. */
+  kind: z.enum(["subdomain", "apex", "tentoro"]).default("subdomain"),
+  /** The address sign-in, email links and the phone app use. At most one. */
+  main: z.boolean().default(false),
+  /** `waiting`: added, its records or its first publish not there yet;
+   *  `live`: it answers with a valid certificate; `failed`: it stopped, or
+   *  never started, answering — `reason` says why. */
+  status: z.enum(["waiting", "live", "failed"]).default("waiting"),
+  reason: z.string().optional(),
+  addedAt: z.string().optional(),
+  liveAt: z.string().optional(),
+});
+
 export const Deployment = z.object({
   provider: z.enum(["vercel"]).default("vercel"),
+  /** The addresses the published application answers at (`DomainEntry`). */
+  domains: z.array(DomainEntry).default([]),
+  /** What opening `<project>.vercel.app` does once another address is the
+   *  main one: send people there, or keep answering as before. */
+  oldAddress: z.enum(["redirect", "keep"]).default("redirect"),
   preview: z
     .object({
       status: z.enum(["stopped", "starting", "running", "failed"]).default("stopped"),

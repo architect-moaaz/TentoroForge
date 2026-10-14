@@ -182,6 +182,13 @@ def audit(ctx: Ctx, u: dict) -> Outcome:
                      fail=f"I could not {verb.replace('_', ' ')} and have changed nothing.")
 
 
+def domain(ctx: Ctx, u: dict) -> Outcome:
+    from services.smith.domain_change import run
+    verb = u["verb"]
+    return from_seam(run(ctx.out, verb, domain=_s(u, "domain"), change=ctx.ask, reasoning=ctx.reasoning),
+                     fail="I could not do that with the app's address, and have changed nothing.")
+
+
 def webhook(ctx: Ctx, u: dict) -> Outcome:
     from services.smith.webhook_change import run
     return from_seam(run(ctx.out, integration=_s(u, "integration") or ctx.ask, change=_s(u, "change") or ctx.ask,
@@ -878,6 +885,7 @@ PERFORM: dict[str, Perform] = {
     "set_schedule": schedule, "pause_schedule": schedule, "resume_schedule": schedule,
     "set_deadline": schedule, "run_now": schedule,
     "add_webhook": webhook,
+    "connect_domain": domain, "remove_domain": domain, "domain_status": domain,
     "show_audit": audit, "export_audit": audit, "verify_audit": audit, "edit_audit": audit,
     "refund": payment, "set_currency": payment,
     "add_organisation": tenancy, "move_login": tenancy,

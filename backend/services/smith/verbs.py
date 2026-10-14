@@ -78,6 +78,10 @@ REQUIRED_BY_VERB: dict[str, set[str]] = {
     # An outside system that calls the application: which one, and what it
     # tells the app (its events, in the user's words).
     "add_webhook": {"integration", "change"},
+    # The app's own addresses: which one, and (for status) optionally which.
+    "connect_domain": {"domain"},
+    "remove_domain": {"domain"},
+    "domain_status": set(),
     # The audit trail: read it, export it, verify its chain, change the policy.
     # Organisations: a new one, and which one a login belongs to.
     "add_organisation": {"change"},
@@ -335,6 +339,21 @@ VERB_HELP: dict[str, str] = {
         "when an order is paid\", \"accept payment.succeeded from Stripe\". Gives the "
         "address to call, the header it signs with and the NAME of the secret to set. "
         "Needs which system and what it tells the app."
+    ),
+    "connect_domain": (
+        "Put the published app on the owner's own domain or subdomain: \"put it on "
+        "app.acme.com\", \"use our domain acme.com\", \"make portal.acme.com the main "
+        "address\". Says the DNS records to add and watches until it is live; never "
+        "asks for a key. Needs the address."
+    ),
+    "remove_domain": (
+        "Stop the app answering at one of its own addresses: \"remove app.acme.com\", "
+        "\"drop the old domain\". Needs the address."
+    ),
+    "domain_status": (
+        "Where the app's own addresses stand, checked now: \"is my domain working?\", "
+        "\"where do I point my DNS?\", \"is app.acme.com live yet?\". The address is "
+        "optional; without one, every address the app has."
     ),
     "add_organisation": (
         "Add an organisation to an application that serves several: \"add an "
@@ -727,6 +746,17 @@ VERB_EXAMPLES: dict[str, tuple[str, ...]] = {
     'add_webhook': (
         'let Shopify tell the app when an order is paid',
         'accept payment.succeeded from Stripe',
+    ),
+    'connect_domain': (
+        'put it on app.acme.com',
+        'make portal.acme.com the main address',
+    ),
+    'remove_domain': (
+        'remove app.acme.com',
+    ),
+    'domain_status': (
+        'is my domain working?',
+        'where do I point my DNS?',
     ),
     'add_organisation': (
         'add an organisation called Northside Clinic',

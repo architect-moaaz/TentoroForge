@@ -454,6 +454,30 @@ sentences:
     source: code
     reaches: {verb: add_webhook, states: [integration, change]}
 
+  - id: does-put-it-on-own-domain
+    say: "put it on app.acme.com"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: connect_domain, states: [domain]}
+
+  - id: does-is-my-domain-working
+    say: "is my domain working?"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: domain_status, states: []}
+
+  - id: does-where-to-point-dns
+    say: "where do I point my DNS?"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: domain_status, states: []}
+
+  - id: does-remove-own-domain
+    say: "remove app.acme.com"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: remove_domain, states: [domain]}
+
   - id: does-accept-stripe-event
     say: "accept payment.succeeded from Stripe"
     checked: {colour: acts, via: handler}

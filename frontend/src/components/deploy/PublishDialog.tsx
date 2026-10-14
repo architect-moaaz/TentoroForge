@@ -44,6 +44,8 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { MobileBuildsPanel } from "./MobileBuildsPanel";
 import { LockedPanel } from "@/components/features/Locked";
+import { DomainsPanel } from "./DomainsPanel";
+import { useAppSettingsStore } from "@/stores/appSettings";
 
 interface LatestDeployment {
   id: string;
@@ -108,6 +110,7 @@ export function PublishDialog({
   const { events, status, start, reset } = useDeployStream(projectId);
   const [check, setCheck] = useState<CheckNote | null>(null);
   const reconcilePoll = useRef<number | null>(null);
+  const openSettings = useAppSettingsStore((s) => s.open);
 
   const publish = () => {
     if (started) return;
@@ -420,6 +423,27 @@ export function PublishDialog({
         {isError && (
           <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-900">
             {errorMessage}
+          </div>
+        )}
+
+        {/* The app's own address — the same panel as App settings → Domains. */}
+        {projectId && (
+          <div className="space-y-2 border-t pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-medium">Custom domain</div>
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-xs"
+                onClick={() => {
+                  openSettings("domains");
+                  onOpenChange(false);
+                }}
+              >
+                Manage in App settings
+              </Button>
+            </div>
+            <DomainsPanel projectId={projectId} compact />
           </div>
         )}
           </TabsContent>

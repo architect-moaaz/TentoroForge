@@ -4665,6 +4665,62 @@
           ],
           "default": "vercel"
         },
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 3
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "subdomain",
+                  "apex",
+                  "tentoro"
+                ],
+                "default": "subdomain"
+              },
+              "main": {
+                "type": "boolean",
+                "default": false
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "waiting",
+                  "live",
+                  "failed"
+                ],
+                "default": "waiting"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "addedAt": {
+                "type": "string"
+              },
+              "liveAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "oldAddress": {
+          "type": "string",
+          "enum": [
+            "redirect",
+            "keep"
+          ],
+          "default": "redirect"
+        },
         "preview": {
           "type": "object",
           "properties": {

@@ -49,6 +49,7 @@ FIELD_TYPES: dict[str, str] = {
     "change": "string",
     "current_behavior": "string",
     "desired_behavior": "string",
+    "domain": "string",          # an address: app.acme.com (connect/remove/status)
     "element_label": "string",
     "email": "string",
     "entity": "string",

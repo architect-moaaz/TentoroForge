@@ -53,6 +53,7 @@ from routers.platform_integrations import router as platform_integrations_router
 from routers.platform_mcp_servers import router as platform_mcp_servers_router
 from routers.preview_proxy import router as preview_proxy_router
 from routers.deployments import router as deployments_router
+from routers.domains import router as domains_router
 from routers.verify import router as verify_router
 from routers.generate import router as generate_router
 from routers.blueprint_generate import router as blueprint_generate_router
@@ -185,6 +186,7 @@ app.include_router(platform_integrations_router)
 app.include_router(platform_mcp_servers_router)
 app.include_router(preview_proxy_router)
 app.include_router(deployments_router)
+app.include_router(domains_router)
 app.include_router(verify_router)
 app.include_router(generate_router)
 # §115 — generation through the Living Blueprint, registered beside the legacy
@@ -357,11 +359,20 @@ async def _start_dev_server_reaper():
     app.state.dev_server_reaper = asyncio.create_task(dev_servers.reaper())
 
 
+@app.on_event("startup")
+async def _start_domain_watch():
+    """Checks the apps' addresses until they answer — see `services.deploy.domain_watch`."""
+    from services.deploy import domain_watch
+    app.state.domain_watch = asyncio.create_task(domain_watch.watch_forever())
+
+
 @app.on_event("shutdown")
 async def _shutdown():
     stop_all_previews()
     if hasattr(app.state, "dev_server_reaper"):
         app.state.dev_server_reaper.cancel()
+    if hasattr(app.state, "domain_watch"):
+        app.state.domain_watch.cancel()
     if hasattr(app.state, "timer_scheduler"):
         await app.state.timer_scheduler.stop()
 

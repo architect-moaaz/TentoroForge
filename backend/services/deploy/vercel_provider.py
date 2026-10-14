@@ -509,6 +509,18 @@ class VercelDeployProvider:
                     row.url = url
                     row.finished_at = datetime.now(timezone.utc)
 
+                    # THE APP'S OTHER ADDRESSES: its Tentoro address, and any
+                    # the owner added before this first publish, are attached
+                    # now; the domain watch carries on from here.
+                    domains: list[dict] = []
+                    try:
+                        from services.deploy.domains import attach_after_publish
+                        domains = await attach_after_publish(snapshot.output_dir, self.vercel,
+                                                             _slugify(snapshot.project_slug))
+                    except Exception:  # noqa: BLE001 — the app is live; an address is retried by the watch
+                        import logging as _logging
+                        _logging.getLogger(__name__).warning("attaching the app's addresses after publish failed", exc_info=True)
+
                     # Post-READY smoke: green Vercel builds can still ship an
                     # empty database (drizzle-kit push exiting silently on the
                     # no-TTY prompt is the class we're catching). Hit the
@@ -535,7 +547,7 @@ class VercelDeployProvider:
                         yield DeployEvent(
                             "done",
                             f"Live at {url}",
-                            data={"url": url, "deployment_id": str(row.id)},
+                            data={"url": url, "deployment_id": str(row.id), "domains": domains},
                         )
                     else:
                         row.status = "succeeded_with_warnings"
