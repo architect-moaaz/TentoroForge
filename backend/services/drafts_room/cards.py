@@ -94,7 +94,7 @@ def validate(raw: list[dict], items: list[dict], reference_id: str) -> list[dict
         ids: list[str] = []
 
         def keep(line: dict, label: str) -> bool:
-            good = [e for e in line.get("evidence") or [] if e in known]
+            good = [e for e in (str(x).lstrip("#").strip() for x in line.get("evidence") or []) if e in known]
             line["evidence"] = good
             if not good:
                 unknowns.append(f"{label}: {line.get('text') or line.get('name') or line.get('does')} (no evidence)")
@@ -131,18 +131,42 @@ def write(session_id: str, reference_id: str) -> list[dict]:
     ref = store.load_reference(session_id, reference_id)
     from services.drafts_room import agent
     client = _client()
-    with client.messages.stream(
-        model=agent.MODEL, max_tokens=MAX_TOKENS, system=SYSTEM, tools=[TOOL],
-        tool_choice={"type": "tool", "name": "write_cards"}, output_config={"effort": agent.EFFORT},
-        messages=[{"role": "user", "content": (
-            f"Reference studied: {ref.get('name')}\n\nEvidence ({len(items)} items):\n" + ev.brief(items))}],
-    ) as stream:
-        msg = stream.get_final_message()
-    _count(session_id, msg)
-    raw = next((b.input for b in msg.content if getattr(b, "type", "") == "tool_use"), None) or {}
+    material = f"Reference studied: {ref.get('name')}\n\nEvidence ({len(items)} items):\n" + ev.brief(items)
+    raw = tool_call(client, model=agent.MODEL, effort=agent.EFFORT, system=SYSTEM, tool=TOOL, max_tokens=MAX_TOKENS,
+                    content=material, count=lambda msg: _count(session_id, msg))
     cards = validate(list(raw.get("cards") or []), items, reference_id)
     store.save_cards(session_id, reference_id, cards)
+    # The record: what the writer was given and what it answered, beside the
+    # cards, so a card with nothing on it can be read back to its cause.
+    try:
+        import json
+        folder = store.cards_dir(session_id)
+        (folder / f"{reference_id}.material.txt").write_text(material)
+        (folder / f"{reference_id}.raw.json").write_text(json.dumps(raw, indent=1, default=str))
+    except OSError:
+        logger.info("cards: the writer's record could not be kept")
     return cards
+
+
+def tool_call(client: Any, *, model: str, effort: str, system: str, tool: dict, max_tokens: int, content: Any,
+              count: Any) -> dict:
+    """One call that must end in `tool`'s input. The current models refuse a
+    forced `tool_choice` (a 400), so the prompt names the tool and a reply
+    that comes back without the call is asked once more for it."""
+    messages: list[dict] = [{"role": "user", "content": content}]
+    for attempt in range(2):
+        with client.messages.stream(model=model, max_tokens=max_tokens, system=system, tools=[tool],
+                                    output_config={"effort": effort}, messages=messages) as stream:
+            msg = stream.get_final_message()
+        count(msg)
+        found = next((b.input for b in msg.content if getattr(b, "type", "") == "tool_use"), None)
+        if isinstance(found, dict):
+            return found
+        if attempt == 0:
+            said = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", "") == "text")
+            messages.append({"role": "assistant", "content": said[:20000] or "(nothing)"})
+            messages.append({"role": "user", "content": f"Answer by calling `{tool['name']}` now, with everything in it."})
+    raise RuntimeError(f"the model did not call {tool['name']}")
 
 
 def _count(session_id: str, msg: Any) -> None:
@@ -190,4 +214,4 @@ def names_no_product(text: str, names: list[str]) -> bool:
     return not any(re.search(rf"\b{re.escape(n)}\b", text, re.I) for n in names if n)
 
 
-__all__ = ["SYSTEM", "TOOL", "SCHEMA", "evidence_of", "validate", "write", "brief"]
+__all__ = ["SYSTEM", "TOOL", "SCHEMA", "evidence_of", "validate", "write", "brief", "tool_call"]

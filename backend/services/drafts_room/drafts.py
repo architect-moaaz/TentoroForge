@@ -98,15 +98,9 @@ def compose(session: dict, count: int = 2, note: str = "") -> list[dict]:
     """Two or three drafts, composed and kept as version 1 each."""
     from services.drafts_room import agent
     count = max(1, min(3, int(count or 2)))
-    client = _client()
-    with client.messages.stream(
-        model=agent.MODEL, max_tokens=MAX_TOKENS, system=SYSTEM, tools=[COMPOSE_TOOL],
-        tool_choice={"type": "tool", "name": "drafts"}, output_config={"effort": agent.EFFORT},
-        messages=[{"role": "user", "content": material(session, note=note, count=count)}],
-    ) as stream:
-        msg = stream.get_final_message()
-    agent._usage(session, msg)
-    raw = next((b.input for b in msg.content if getattr(b, "type", "") == "tool_use"), None) or {}
+    raw = cardlib.tool_call(_client(), model=agent.MODEL, effort=agent.EFFORT, system=SYSTEM, tool=COMPOSE_TOOL,
+                            max_tokens=MAX_TOKENS, content=material(session, note=note, count=count),
+                            count=lambda msg: agent._usage(session, msg))
     out = []
     now = time.time()
     for d in list(raw.get("drafts") or [])[:3]:
@@ -125,18 +119,11 @@ def revise(session: dict, did: str, note: str) -> dict:
     versions = store.draft_versions(session["id"], did)
     latest = versions[-1]
     cards = store.cards(session["id"])
-    client = _client()
-    with client.messages.stream(
-        model=agent.MODEL, max_tokens=MAX_TOKENS, system=REVISE, tools=[REVISE_TOOL],
-        tool_choice={"type": "tool", "name": "draft"}, output_config={"effort": agent.EFFORT},
-        messages=[{"role": "user", "content": (
-            f"The person's note: {note}\n\nThe draft as it stands (version {latest['version']}):\n"
-            + _as_text(latest) + "\n\nThe feature cards, for anything the note needs from them:\n"
-            + (cardlib.brief(cards, 30000) or "(none)"))}],
-    ) as stream:
-        msg = stream.get_final_message()
-    agent._usage(session, msg)
-    raw = next((b.input for b in msg.content if getattr(b, "type", "") == "tool_use"), None) or {}
+    raw = cardlib.tool_call(_client(), model=agent.MODEL, effort=agent.EFFORT, system=REVISE, tool=REVISE_TOOL,
+                            max_tokens=MAX_TOKENS, count=lambda msg: agent._usage(session, msg), content=(
+                                f"The person's note: {note}\n\nThe draft as it stands (version {latest['version']}):\n"
+                                + _as_text(latest) + "\n\nThe feature cards, for anything the note needs from them:\n"
+                                + (cardlib.brief(cards, 30000) or "(none)")))
     draft = raw.get("draft") if isinstance(raw.get("draft"), dict) else None
     if not draft:
         raise RuntimeError("the revision did not come back as a draft")

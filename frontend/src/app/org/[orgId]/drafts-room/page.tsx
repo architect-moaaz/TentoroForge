@@ -318,11 +318,23 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
               {!turn.busy && (session.research ?? []).filter((r) => r.status === "done" && !r.read).map((r) => (
                 <div key={r.id} className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-sm flex items-center gap-2 flex-wrap">
                   <Microscope className="h-4 w-4 text-sky-600" />
-                  <span className="flex-1">The Researcher has finished studying {r.reference}.</span>
-                  <Button size="sm" variant="outline" onClick={() => setBoardTab("research")}>See the study</Button>
-                  <Button size="sm" onClick={() => send(`The study of ${r.reference} is ready — walk me through what it found.`)}>
-                    Walk me through it
-                  </Button>
+                  {r.kind === "deep" ? (
+                    <>
+                      <span className="flex-1">The deep study of {r.reference} has finished{r.source === "har" ? " (your recording)" : ""}: its evidence is on the board, its cards too.</span>
+                      <Button size="sm" variant="outline" onClick={() => setBoardTab("evidence")}>See the evidence</Button>
+                      <Button size="sm" onClick={() => send(`The deep study of ${r.reference} is done — read its cards and walk me through the features.`)}>
+                        Walk me through the cards
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="flex-1">The Researcher has finished studying {r.reference}.</span>
+                      <Button size="sm" variant="outline" onClick={() => setBoardTab("research")}>See the study</Button>
+                      <Button size="sm" onClick={() => send(`The study of ${r.reference} is ready — walk me through what it found.`)}>
+                        Walk me through it
+                      </Button>
+                    </>
+                  )}
                 </div>
               ))}
               {handingOff && handingOff.build === "started" && (

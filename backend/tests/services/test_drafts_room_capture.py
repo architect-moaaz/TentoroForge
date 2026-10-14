@@ -38,9 +38,11 @@ def test_the_walk_keeps_to_its_budget_of_pages_hosts_and_time(monkeypatch):
     w = capture.Walk(job, "garden.test", "desktop")
     for i in range(5):
         w.enqueue(f"https://garden.test/p{i}#top")
-    w.enqueue("https://garden.test/p1")                 # seen already (fragment stripped)
+    w.enqueue("https://garden.test/p1")                 # seen already (anchor stripped)
     w.enqueue("https://elsewhere.test/")                # another site
-    assert w.queue == [f"https://garden.test/p{i}" for i in range(5)]
+    w.enqueue("https://garden.test/#/plants/42")        # a hash ROUTE is a screen of its own
+    w.enqueue("https://garden.test/#/plants/42")
+    assert w.queue == [f"https://garden.test/p{i}" for i in range(5)] + ["https://garden.test/#/plants/42"]
     w.hosts.update({"garden.test": 1, "api.garden.test": 1, "cdn.garden.test": 1})
     w.enqueue("https://more.garden.test/")              # a fourth host: over HOSTS
     assert "https://more.garden.test/" not in w.queue
@@ -51,25 +53,27 @@ def test_the_walk_keeps_to_its_budget_of_pages_hosts_and_time(monkeypatch):
     assert "time budget" in w.out_of_budget()
 
 
-def test_robots_is_honoured_and_an_unreadable_one_allows(monkeypatch):
-    class RP:
-        def __init__(self):
-            self.url = ""
+def test_robots_is_fetched_as_our_browser_and_read_as_the_rfc_has_it(monkeypatch):
+    """`RobotFileParser.read` fetches as Python-urllib and the usual front
+    door answers 403, which the parser reads as closed: the RealWorld demo,
+    whose robots.txt is nothing but comments, read as closed to robots on
+    the first live run (2026-10-15)."""
+    seen: list[str] = []
 
-        def set_url(self, u):
-            self.url = u
-
-        def read(self):
-            if "closed" in self.url:
-                return
-            raise OSError("no robots")
-
-        def can_fetch(self, agent, url):
-            return "/private" not in url
-    monkeypatch.setattr(capture, "RobotFileParser", RP)
-    assert capture.robots_allows("https://closed.test/private/x", "ua") is False
-    assert capture.robots_allows("https://closed.test/public", "ua") is True
-    assert capture.robots_allows("https://open.test/private/x", "ua") is True
+    def fetch(origin, agent):
+        seen.append(agent)
+        return {"https://closed.test": (200, "User-agent: *\nDisallow: /private\n"),
+                "https://comments.test": (200, "# content signals\n# nothing else\n"),
+                "https://none.test": (404, ""), "https://down.test": (503, ""),
+                "https://gone.test": (0, "")}[origin]
+    monkeypatch.setattr(capture, "_fetch_robots", fetch)
+    assert capture.robots_allows("https://closed.test/private/x", "Mozilla/5.0 ours") is False
+    assert capture.robots_allows("https://closed.test/public", "Mozilla/5.0 ours") is True
+    assert capture.robots_allows("https://comments.test/", "Mozilla/5.0 ours") is True
+    assert capture.robots_allows("https://none.test/", "Mozilla/5.0 ours") is True
+    assert capture.robots_allows("https://down.test/", "Mozilla/5.0 ours") is False
+    assert capture.robots_allows("https://gone.test/", "Mozilla/5.0 ours") is False
+    assert seen and all(a == "Mozilla/5.0 ours" for a in seen) and len(seen) == 5   # one fetch per origin
 
 
 class _Resp:
@@ -163,10 +167,11 @@ def test_a_refusal_stops_the_whole_walk_and_says_where(monkeypatch):
 def test_calls_and_pages_become_evidence_with_the_right_standings():
     calls = [
         {"method": "GET", "host": "garden.test", "path": "/api/plants", "url": "https://garden.test/api/plants", "status": 200,
-         "response_shape": {"list": 2, "of": {"id": "number", "name": "text", "state": "text"}}, "enums": {"[].state": ["healthy", "wilting"]},
+         "response_shape": {"list": 2, "of": {"id": "number", "name": "text", "state": "text"}},
+         "enums": {"[].state": {"values": ["healthy", "wilting"], "seen": 6}, "[].name": {"values": ["Fern", "Ivy", "Moss", "Rue", "Sage", "Yew"], "seen": 6}},
          "request_keys": [], "page": "https://garden.test/plants", "source": "web"},
         {"method": "GET", "host": "garden.test", "path": "/api/plants/{id}", "url": "https://garden.test/api/plants/42", "status": 200,
-         "response_shape": {"id": "number", "name": "text", "kind": "text"}, "enums": {"kind": ["herb"]},
+         "response_shape": {"id": "number", "name": "text", "kind": "text"}, "enums": {"kind": {"values": ["herb"], "seen": 3}},
          "request_keys": [], "page": "", "source": "web"},
         {"method": "POST", "host": "garden.test", "path": "/api/plants/{id}/care", "url": "https://garden.test/api/plants/42/care",
          "status": 201, "response_shape": {"ok": "boolean"}, "enums": {}, "request_keys": ["kind", "note"],
@@ -178,11 +183,13 @@ def test_calls_and_pages_become_evidence_with_the_right_standings():
     by = {(i["kind"], i["text"]): i for i in items}
     assert by[("record", "plants")]["standing"] == "observed" and len(by[("record", "plants")]["data"]["fields"]) == 3
     assert by[("field", "plants.state")]["standing"] == "observed"
-    assert by[("enum", "plants.[].state takes healthy, wilting")]["standing"] == "observed"
+    assert by[("enum", "plants.state takes healthy, wilting")]["standing"] == "observed"
     assert by[("enum", "plants.kind takes herb")]["standing"] == "inferred"
+    assert not any(k == "enum" and "name takes" in t for k, t in by)        # a name is not a set of states
     assert by[("action", "POST /api/plants/{id}/care")]["data"]["sends"] == ["kind", "note"]
-    assert by[("screen", "Fern")]["sources"][0]["type"] == "page" and by[("screen", "Fern")]["data"]["controls"] == ["Log care"]
-    assert by[("flow", "Walk: Plants → Fern")]["standing"] == "derived"
+    fern = by[("screen", "Fern /plants/{id}")]
+    assert fern["sources"][0]["type"] == "page" and fern["data"]["controls"] == ["Log care"]
+    assert by[("flow", "Walk: Plants /plants → Fern /plants/{id}")]["standing"] == "derived"
 
 
 def test_the_whole_capture_runs_writes_its_record_and_asks_for_cards(monkeypatch):
@@ -224,3 +231,28 @@ def test_the_whole_capture_runs_writes_its_record_and_asks_for_cards(monkeypatch
     assert asked == [ref["id"]]
     assert any(i["kind"] == "record" and i["text"] == "plants" for i in done["evidence"])
     assert "Read 3 pages" in done["summary"]
+
+
+def test_a_wrapped_answer_names_its_record_and_a_route_is_a_screen():
+    calls = [
+        {"method": "GET", "host": "x.test", "path": "/api/profiles/ann", "url": "https://x.test/api/profiles/ann", "status": 200,
+         "response_shape": {"profile": {"username": "text", "bio": "text", "following": "boolean"}}, "enums": {}, "request_keys": [], "page": "", "source": "web"},
+        {"method": "GET", "host": "x.test", "path": "/api/profiles/bob", "url": "https://x.test/api/profiles/bob", "status": 200,
+         "response_shape": {"profile": {"username": "text", "bio": "text", "following": "boolean"}}, "enums": {}, "request_keys": [], "page": "", "source": "web"},
+        {"method": "GET", "host": "x.test", "path": "/api/articles", "url": "https://x.test/api/articles", "status": 200,
+         "response_shape": {"articles": {"list": 3, "of": {"slug": "text", "title": "text"}}, "articlesCount": "number"},
+         "enums": {}, "request_keys": [], "page": "", "source": "web"},
+    ]
+    pages = [{"url": "https://x.test/", "route": "/", "title": "Conduit", "headings": [], "forms": [], "buttons": [], "shot": "a"},
+             {"url": "https://x.test/profile/ann", "route": "/profile/ann", "title": "Conduit", "headings": [], "forms": [], "buttons": [], "shot": "b"},
+             {"url": "https://x.test/profile/bob", "route": "/profile/bob", "title": "Conduit", "headings": [], "forms": [], "buttons": [], "shot": "c"},
+             {"url": "https://x.test/#/editor", "route": "/#/editor", "title": "Conduit", "headings": [], "forms": [], "buttons": [], "shot": "d"}]
+    items = capture.analyse("r1", calls, pages, source="web")
+    records = sorted(i["text"] for i in items if i["kind"] == "record")
+    assert records == ["articles", "profile"]                       # two profile answers are one record, named by their key
+    fields = sorted(i["text"] for i in items if i["kind"] == "field")
+    assert "profile.username" in fields and "articles.slug" in fields and "articles.articlesCount" not in fields
+    screens = sorted(i["text"] for i in items if i["kind"] == "screen")
+    assert screens == ["Conduit", "Conduit /#/editor", "Conduit /profile/{id}"]
+    assert capture.collapse_routes(["/api/articles", "/api/tags", "/api/articles/x", "/api/articles/y"]) == \
+        ["/api/articles", "/api/tags", "/api/articles/{id}", "/api/articles/{id}"]    # siblings collapse; parents do not

@@ -67,7 +67,7 @@ def test_every_card_line_rests_on_evidence_or_becomes_an_unknown(monkeypatch):
     by = {i["text"]: i["id"] for i in items}
     raw = {"cards": [{
         "feature": "Log care on a plant", "summary": "Water, feed or prune a plant and keep the record.",
-        "records": [{"name": "Plant", "evidence": [by["plants"]],
+        "records": [{"name": "Plant", "evidence": ["#" + by["plants"]],       # a leading '#' is how the brief shows ids
                      "fields": [{"name": "state", "type": "text", "evidence": [by["plants.state"]]},
                                 {"name": "mood", "type": "text", "evidence": ["nope"]}]}],
         "steps": [{"does": "Open the plant", "screen": "Plants", "evidence": [by["Plants"]]},
@@ -88,6 +88,8 @@ def test_every_card_line_rests_on_evidence_or_becomes_an_unknown(monkeypatch):
     assert card["standing"] == {"observed": 4, "derived": 0, "inferred": 1, "unknown": 0}
     assert card["needs"] == ["push"]
     assert store.cards(s["id"]) == out and store.cards(s["id"], ref["id"]) == out
+    assert (store.cards_dir(s["id"]) / f"{ref['id']}.material.txt").read_text().startswith("Reference studied: Garden")
+    assert (store.cards_dir(s["id"]) / f"{ref['id']}.raw.json").is_file()
     material = asked[0]["messages"][0]["content"]
     assert "Evidence (6 items)" in material and f"#{by['plants']} plants" in material
     # Cards replace the reference's earlier cards.
@@ -179,8 +181,8 @@ def test_drafts_are_composed_from_cards_board_and_conversation_and_nothing_of_th
     assert a["cannot_yet"] == [{"kind": "push", "status": "unproven", "what": capability.MAP["push"][1], "proof": capability.MAP["push"][2]}]
     b = out[1]
     assert [c["kind"] for c in b["cannot_yet"]] == ["payments", "store_app"]
-    listed = store.drafts(s["id"])
-    assert len(listed) == 2 and listed[0]["versions"] == [{"version": 1, "at": a["at"], "changed": "first draft"}]
+    listed = {d["id"]: d for d in store.drafts(s["id"])}
+    assert len(listed) == 2 and listed[a["id"]]["versions"] == [{"version": 1, "at": a["at"], "changed": "first draft"}]
 
 
 def test_a_revision_is_a_new_version_that_keeps_the_notes_and_says_what_changed(monkeypatch):
@@ -234,3 +236,39 @@ def test_choose_draft_hands_off_only_on_consent(monkeypatch):
 def test_the_drafting_tasks_name_no_application():
     for name in ("myntra", "amazon", "zara", "airbnb", "uber", "shopify", "garden log", "spoke"):
         assert not re.search(rf"\b{name}\b", (drafts.SYSTEM + drafts.REVISE).lower()), name
+
+
+def test_a_reply_without_the_tool_call_is_asked_once_more_and_no_tool_choice_is_forced(monkeypatch):
+    """Forced `tool_choice` is a 400 on the current models (the first live
+    card-writer call, 2026-10-15); the prompt names the tool instead."""
+    s, ref, items = _studied()
+    asked: list = []
+    replies = [SimpleNamespace(content=[SimpleNamespace(type="text", text="Here are my thoughts...")], usage=None),
+               SimpleNamespace(content=[SimpleNamespace(type="tool_use", input={"cards": [{"feature": "Log care", "summary": "x"}]})], usage=None)]
+
+    class S:
+        def __init__(self, kw):
+            asked.append(kw)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get_final_message(self):
+            return replies.pop(0)
+    monkeypatch.setattr(cards, "_client", lambda: SimpleNamespace(messages=SimpleNamespace(stream=lambda **kw: S(kw))))
+    out = cards.write(s["id"], ref["id"])
+    assert [c["feature"] for c in out] == ["Log care"]
+    assert len(asked) == 2 and all("tool_choice" not in kw for kw in asked)
+    assert "calling `write_cards` now" in asked[1]["messages"][-1]["content"]
+
+
+def test_build_this_draft_is_a_go_ahead():
+    """The Drafts tab's button sends "Build draft <id> (“title”)"; on the
+    first live run the consent check read it as not a go-ahead and the
+    build never started (2026-10-15)."""
+    assert agent.consented("Build draft 844add789734 (“A · Essentials: write, read, comment, follow”)")
+    assert agent.consented("yes, build this draft")
+    assert not agent.consented("Which draft would you build?")

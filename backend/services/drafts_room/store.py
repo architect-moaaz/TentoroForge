@@ -287,13 +287,19 @@ def references(sid: str) -> list[dict]:
 #
 # One file per reference: the card writer replaces a reference's cards whole.
 
+def cards_dir(sid: str) -> Path:
+    folder = _dir(sid) / "cards"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
 def cards(sid: str, reference_id: str | None = None) -> list[dict]:
     root = _dir(sid) / "cards"
     if not root.is_dir():
         return []
     out: list[dict] = []
     for f in sorted(root.glob("*.json")):
-        if reference_id and f.stem != reference_id:
+        if f.name.endswith(".raw.json") or (reference_id and f.stem != reference_id):
             continue
         try:
             out.extend(json.loads(f.read_text()))
@@ -479,5 +485,5 @@ def sniff(data: bytes) -> str:
 __all__ = ["ROOT", "KINDS", "NotFound", "create", "load", "save", "listed", "delete", "add_file",
            "file_meta", "file_path", "sniff", "new_job", "save_job", "load_job", "jobs", "add_job_file",
            "STALE_AFTER", "drawings", "save_drawing", "new_drawing_id", "drawing_path", "job_dir",
-           "new_reference", "save_reference", "load_reference", "references", "cards", "save_cards",
+           "new_reference", "save_reference", "load_reference", "references", "cards", "cards_dir", "save_cards",
            "new_draft_id", "save_draft_version", "draft_versions", "drafts"]

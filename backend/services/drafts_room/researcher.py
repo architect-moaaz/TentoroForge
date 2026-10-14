@@ -484,6 +484,12 @@ def run(session_id: str, job_id: str, said: list[str]) -> None:
             job.update(status="done", stage="done", summary=summary.strip(), finished=time.time())
             job["steps"].append({"at": time.time(), "text": "Study finished"})
             store.save_job(job)
+        if job.get("reference_id"):
+            # The cards are written from every study's evidence, so a surface
+            # study that ends after the deep one (or alone, when the site is
+            # closed to robots) still gets its reference cards.
+            from services.drafts_room.capture import _cards_after
+            _cards_after(session_id, job["reference_id"])
     except Exception as exc:  # noqa: BLE001 — a failed study says why
         logger.exception("researcher %s", job_id)
         with study.lock:

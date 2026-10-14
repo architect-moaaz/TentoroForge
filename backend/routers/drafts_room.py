@@ -13,6 +13,7 @@
     GET    /api/orgs/{org}/drafts-room/{sid}/references     what the person pointed at, with its studies
     POST   /api/orgs/{org}/drafts-room/{sid}/references     add one by address: surface + deep studies start
     POST   /api/orgs/{org}/drafts-room/{sid}/references/{rid}/har   the person's own recording, scrubbed on arrival
+    POST   /api/orgs/{org}/drafts-room/{sid}/references/{rid}/deep  the deep study, started again
     GET    /api/orgs/{org}/drafts-room/{sid}/studies/{jid}/evidence  a study's evidence (?standing=&kind=)
     POST   /api/orgs/{org}/drafts-room/{sid}/studies/{jid}/stop      stop a deep study at its next page
     GET    /api/orgs/{org}/drafts-room/{sid}/cards          the feature cards
@@ -274,6 +275,23 @@ async def upload_recording(org_id: uuid.UUID, sid: str, rid: str, file: UploadFi
     return {"reference": ref, "study": {k: v for k, v in job.items() if k != "evidence"}, "calls": len(calls)}
 
 
+@router.post("/api/orgs/{org_id}/drafts-room/{sid}/references/{rid}/deep", status_code=201)
+async def study_again(org_id: uuid.UUID, sid: str, rid: str, user: PlatformUser = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)):
+    """Start the deep study of a reference again (the site changed, or the
+    first run stopped short)."""
+    from services.drafts_room import capture
+    session = await _session(org_id, sid, user, db)
+    try:
+        ref = store.load_reference(sid, rid)
+    except store.NotFound:
+        raise HTTPException(status_code=404, detail="No such reference") from None
+    if not ref.get("url"):
+        raise HTTPException(status_code=422, detail="This reference has no address to walk")
+    job = capture.start_again(session, ref)
+    return {"reference": ref, "study": {k: v for k, v in job.items() if k != "evidence"}}
+
+
 @router.get("/api/orgs/{org_id}/drafts-room/{sid}/studies/{jid}/evidence")
 async def read_evidence(org_id: uuid.UUID, sid: str, jid: str, standing: str = "", kind: str = "",
                         user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
@@ -425,9 +443,16 @@ def _adopt_drawings(session: dict, output_dir: Path) -> int:
     design references, so the pages are built to the screens that were
     agreed. A drawing without a picture (no browser here) is passed over."""
     from services.blueprint import references
+    from services.drafts_room.board import _key
+    on_board = {_key(s) for s in (session.get("board") or {}).get("screens") or []}
     count = 0
     for row in store.drawings(session["id"]):
-        if row.get("status") != "done" or not row.get("png"):
+        # Only the board's own screens as they stand: a drawing of a screen
+        # the board no longer has (renamed, or replaced by a chosen draft's)
+        # would send the build a page nobody asked for (Tentoro Writes
+        # carried four such, 2026-10-15).
+        if row.get("status") != "done" or not row.get("png") or str(row.get("scope") or "board") != "board" \
+                or _key(row.get("screen")) not in on_board:
             continue
         try:
             data = store.drawing_path(session["id"], row["id"], "png").read_bytes()

@@ -47,7 +47,7 @@ def test_the_recording_keeps_the_sites_call_shapes_and_none_of_the_secrets():
     assert get["response_shape"]["status"] == "text" and get["response_shape"]["total"] == "number"
     assert get["response_shape"]["customer"]["email"] == "email"
     assert get["response_shape"]["lines"] == {"list": 1, "of": {"sku": "text", "qty": "number"}}
-    assert get["enums"]["status"] == ["paid"]
+    assert get["enums"]["status"] == {"values": ["paid"], "seen": 1}
     post = calls[1]
     assert post["request_keys"] == ["amount", "apiKey", "reason"] and post["source"] == "har"
     assert post["host"] == "api.shop.test"

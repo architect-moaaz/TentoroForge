@@ -107,9 +107,11 @@ async def test_the_drawings_pictures_reach_the_build_as_design_references(test_d
 
     s = store.create("org", "u", "")
     s["board"]["product"]["pitch"] = "A wardrobe app."
+    s["board"]["screens"] = [{"name": "Outfit of the day"}, {"name": "Wardrobe"}]
     s["handoff_request"] = {"app_name": "Threadline", "note": "", "at": 1.0}
     _drawn(s, "Outfit of the day")
     _drawn(s, "Wardrobe", png=False)
+    _drawn(s, "Old screen")                         # drawn once, no longer on the board: not carried
     events: list = []
     await router._hand_off(s, uuid.uuid4(), uuid.uuid4(), lambda e, d: events.append((e, d)))
     async with async_session() as db:

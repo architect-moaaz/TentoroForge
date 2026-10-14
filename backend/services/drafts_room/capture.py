@@ -60,7 +60,7 @@ _CENSUS_JS = """
   const links = [...document.querySelectorAll('a[href]')].slice(0, 200)
     .map((a) => ({ text: text(a), href: a.href })).filter((l) => l.href);
   const headings = [...document.querySelectorAll('h1,h2,h3')].slice(0, 20).map((h) => text(h)).filter(Boolean);
-  return { title: (document.title || '').slice(0, 120), route: location.pathname, headings, forms, buttons: [...new Set(buttons)], links };
+  return { title: (document.title || '').slice(0, 120), route: location.pathname + (location.hash.startsWith('#/') ? location.hash : ''), headings, forms, buttons: [...new Set(buttons)], links };
 }
 """
 
@@ -68,20 +68,42 @@ _ROBOTS: dict[str, RobotFileParser | None] = {}
 _ROBOTS_LOCK = threading.Lock()
 
 
+def _fetch_robots(origin: str, agent: str) -> tuple[int, str]:
+    """robots.txt as OUR browser identity fetches it. `RobotFileParser.read`
+    fetches as `Python-urllib`, which the usual front door answers with a
+    403, and the parser then treats the site as closed: the RealWorld demo
+    — a file of nothing but comments — read as closed to robots on the
+    first live run (2026-10-15)."""
+    import urllib.request
+    req = urllib.request.Request(origin + "/robots.txt", headers={"User-Agent": agent, "Accept": "text/plain,*/*"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as res:
+            return int(res.status or 200), res.read(200_000).decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        return int(exc.code), ""
+    except Exception:  # noqa: BLE001 — unreachable
+        return 0, ""
+
+
 def robots_allows(url: str, agent: str) -> bool:
-    """Whether robots.txt lets this agent open `url`. An unreadable
-    robots.txt allows: that is its own convention."""
+    """Whether robots.txt lets this agent open `url`. As RFC 9309 has it: a
+    file that is not there (4xx) allows; one the server cannot serve (5xx
+    or unreachable) is treated as closed, politely; what is there is read."""
     parsed = urlparse(url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     with _ROBOTS_LOCK:
         if origin not in _ROBOTS:
-            rp = RobotFileParser()
-            rp.set_url(origin + "/robots.txt")
-            try:
-                rp.read()
+            status, text = _fetch_robots(origin, agent)
+            if status == 200:
+                rp = RobotFileParser()
+                rp.parse(text.splitlines())
                 _ROBOTS[origin] = rp
-            except Exception:  # noqa: BLE001 — no robots.txt is no rule
-                _ROBOTS[origin] = None
+            elif 400 <= status < 500:
+                _ROBOTS[origin] = None                 # no rules
+            else:
+                rp = RobotFileParser()
+                rp.parse(["User-agent: *", "Disallow: /"])
+                _ROBOTS[origin] = rp
         rp = _ROBOTS[origin]
     if rp is None:
         return True
@@ -136,7 +158,11 @@ class Walk:
         return None
 
     def enqueue(self, url: str) -> None:
-        key = url.split("#", 1)[0]
+        # A `#/route` is a screen of a hash-routed app and is kept; a plain
+        # anchor is the same page and is dropped (the RealWorld demo routes by
+        # hash: stripping it folded every screen into the home page, 2026-10-15).
+        base, _, fragment = url.partition("#")
+        key = f"{base}#{fragment}" if fragment.startswith("/") else base
         host = urlparse(key).hostname or ""
         if key in self.seen or key in self.queue:
             return
@@ -211,7 +237,7 @@ async def _visit(context: Any, walk: Walk, url: str, step) -> None:
         walk.pages.append(record)
         walk.hosts[urlparse(page.url).hostname or ""] += 1
         walk.calls.extend(kept)
-        step(f"Read {record['title'] or record['route']} — {len(kept)} calls")
+        step(f"Read {record['route'] or record['title']} — {len(kept)} calls")
         for link in census.get("links") or []:
             if followable(link, walk.site) and robots_allows(str(link["href"]), _agent(walk.device)):
                 walk.enqueue(str(link["href"]))
@@ -260,6 +286,20 @@ def _record_name(path: str) -> str:
     return (parts[-1] if parts else "record").replace("-", " ").replace("_", " ")
 
 
+def _unwrap(path: str, shape_: Any) -> tuple[str, Any, str]:
+    """The record a response is of, and its shape. An answer wrapped in one
+    key — `{"article": {…}}`, `{"articles": […], "articlesCount": 3}` — is
+    named by that key (the product's own word for the record) and the inner
+    shape is the record's; an unwrapped answer is named by its path.
+    Returns the name, the shape and the prefix enum paths carry."""
+    if isinstance(shape_, dict) and "list" not in shape_:
+        wrapped = [(k, v) for k, v in shape_.items() if isinstance(v, dict)]
+        if len(wrapped) == 1:
+            key, inner = wrapped[0]
+            return str(key), inner, str(key)
+    return _record_name(path), shape_, ""
+
+
 def _fields(shape_: Any) -> list[dict]:
     if isinstance(shape_, dict) and "list" in shape_ and "of" in shape_:
         shape_ = shape_["of"]
@@ -271,6 +311,30 @@ def _fields(shape_: Any) -> list[dict]:
             kind = "list" if "list" in kind else "object"
         out.append({"name": str(name), "type": str(kind)})
     return out[:60]
+
+
+def collapse_routes(routes: list[str]) -> list[str]:
+    """Page routes with their changing last segment made `{id}`: `/profile/ann`
+    and `/profile/bob` are one screen. Only the last segment, only when the
+    parent has two or more children and none of them has children of its
+    own (`/api/articles` beside `/api/tags` are two things, not one)."""
+    norm = [callrec.normalise_path(r) for r in routes]
+    parents: dict[str, set[str]] = {}
+    for r in norm:
+        parts = r.strip("/").split("/")
+        if len(parts) >= 2:
+            parents.setdefault("/" + "/".join(parts[:-1]), set()).add(parts[-1])
+    has_children = {p for p in parents}
+    out = []
+    for r in norm:
+        parts = r.strip("/").split("/")
+        parent = "/" + "/".join(parts[:-1]) if len(parts) >= 2 else ""
+        kids = parents.get(parent, set())
+        if len(parts) >= 2 and len(kids) >= 2 and not any(f"{parent}/{k}" in has_children for k in kids):
+            out.append(f"{parent}/{{id}}")
+        else:
+            out.append(r)
+    return out
 
 
 def analyse(reference_id: str, calls: list[dict], pages: list[dict], *, source: str) -> list[dict]:
@@ -286,9 +350,10 @@ def analyse(reference_id: str, calls: list[dict], pages: list[dict], *, source: 
         if c.get("method") == "GET" and c.get("response_shape") is not None:
             reads.setdefault((c["host"], c["path"]), []).append(c)
     enum_values: dict[tuple[str, str], set] = {}
+    enum_seen: dict[tuple[str, str], int] = {}
     for (host, path), rows in reads.items():
-        name = _record_name(path)
-        fields = _fields(rows[0].get("response_shape"))
+        name, inner, prefix = _unwrap(path, rows[0].get("response_shape"))
+        fields = _fields(inner)
         src = {"type": src_type, "ref": f"GET {path}", "url": rows[0].get("url", "")}
         items.append(ev.item(reference_id, "record", name, standing="observed", source=src,
                              data={"fields": fields, "path": path, "seen": len(rows)}))
@@ -296,13 +361,21 @@ def analyse(reference_id: str, calls: list[dict], pages: list[dict], *, source: 
             items.append(ev.item(reference_id, "field", f"{name}.{f['name']}", standing="observed", source=src,
                                  data={"type": f["type"], "record": name}))
         for c in rows:
-            for fpath, values in (c.get("enums") or {}).items():
-                enum_values.setdefault((name, fpath), set()).update(values)
+            for fpath, got in (c.get("enums") or {}).items():
+                values, seen = (got.get("values"), got.get("seen", 0)) if isinstance(got, dict) else (got, len(got))
+                field = fpath[len(prefix):] if prefix and fpath.startswith(prefix) else fpath
+                field = (field[2:] if field.startswith("[]") else field).lstrip(".")
+                enum_values.setdefault((name, field), set()).update(values or [])
+                enum_seen[(name, field)] = enum_seen.get((name, field), 0) + int(seen)
     for (name, fpath), values in enum_values.items():
-        if len(values) < 1:
+        seen = enum_seen.get((name, fpath), 0)
+        # A state has few values that repeat; a name has as many values as
+        # times it was seen. Fewer than half as many values as sightings,
+        # seen at least three times, is a set of states.
+        if not values or seen < 3 or len(values) * 2 > seen:
             continue
         standing = "observed" if len(values) >= 2 else "inferred"
-        items.append(ev.item(reference_id, "enum", f"{name}.{fpath} takes " + ", ".join(sorted(values)[:12]),
+        items.append(ev.item(reference_id, "enum", f"{name}.{fpath or 'values'} takes " + ", ".join(sorted(values)[:12]),
                              standing=standing, source={"type": src_type, "ref": name},
                              data={"record": name, "field": fpath, "values": sorted(values)[:12]}))
     for c in calls:
@@ -313,12 +386,17 @@ def analyse(reference_id: str, calls: list[dict], pages: list[dict], *, source: 
                                  data={"sends": c.get("request_keys") or [], "from": c.get("page") or "",
                                        "status": c.get("status")}))
     titles: list[str] = []
-    for p in pages:
-        name = p.get("title") or p.get("route") or p.get("url") or "page"
-        titles.append(name)
+    routes = collapse_routes([str(p.get("route") or "/") for p in pages])
+    for p, route in zip(pages, routes):
+        # A screen is its route: an app whose every page is titled by its
+        # name has as many screens as routes, not one.
+        title = str(p.get("title") or "").strip()
+        name = f"{title} {route}".strip() if route != "/" else (title or route)
+        if name not in titles:
+            titles.append(name)
         items.append(ev.item(reference_id, "screen", name, standing="observed",
                              source={"type": "page", "ref": p.get("shot") or "", "url": p.get("url", "")},
-                             data={"route": p.get("route"), "headings": p.get("headings") or [],
+                             data={"route": route, "headings": p.get("headings") or [],
                                    "forms": p.get("forms") or [], "controls": p.get("buttons") or []}))
     if len(titles) >= 2:
         items.append(ev.item(reference_id, "flow", "Walk: " + " → ".join(titles[:8]), standing="derived",
@@ -401,7 +479,10 @@ def _cards_after(session_id: str, reference_id: str) -> None:
     the drafting side reads, and nobody should have to remember to ask."""
     try:
         from services.drafts_room import cards
-        cards.write(session_id, reference_id)
+        items = cards.evidence_of(session_id, reference_id)
+        logger.info("capture: writing the cards of %s from %d evidence items", reference_id, len(items))
+        written = cards.write(session_id, reference_id)
+        logger.info("capture: %d cards written for %s", len(written), reference_id)
     except Exception:  # noqa: BLE001 — cards can be asked for again
         logger.exception("capture: the cards of %s were not written", reference_id)
 
@@ -412,6 +493,14 @@ def start(session: dict, reference: dict, focus: str = "") -> dict:
                         reference_id=reference["id"])
     threading.Thread(target=run, args=(session["id"], job["id"], dict(reference)), daemon=True,
                      name=f"capture-{job['id']}").start()
+    return job
+
+
+def start_again(session: dict, reference: dict, focus: str = "") -> dict:
+    """A fresh deep study of a reference (its earlier one stays as record)."""
+    job = start(session, reference, focus)
+    reference.setdefault("studies", {})["deep"] = job["id"]
+    store.save_reference(reference)
     return job
 
 
@@ -436,4 +525,4 @@ def from_recording(session: dict, reference: dict, calls: list[dict]) -> dict:
 
 
 __all__ = ["PAGES", "PACE_S", "HOSTS", "MINUTES", "STOP_STATUSES", "robots_allows", "same_site", "followable",
-           "Walk", "analyse", "run", "start", "from_recording"]
+           "Walk", "collapse_routes", "analyse", "run", "start", "start_again", "from_recording"]

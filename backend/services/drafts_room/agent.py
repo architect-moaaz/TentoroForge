@@ -106,6 +106,11 @@ TOOLS: list[dict] = [
                                      "url": {"type": "string", "description": "its public address"},
                                      "focus": {"type": "string",
                                                "description": "what the person wants from it, if they said"}}}},
+    {"name": "deep_study",
+     "description": "Start a reference's deep study again (the first stopped short, or the site has changed).",
+     "input_schema": {"type": "object", "additionalProperties": False, "required": ["reference"],
+                      "properties": {"reference": {"type": "string", "description": "a reference id"},
+                                     "focus": {"type": "string"}}}},
     {"name": "read_cards",
      "description": "Read the feature cards written from a reference's evidence (all references when none is named).",
      "input_schema": {"type": "object", "additionalProperties": False,
@@ -220,12 +225,17 @@ _GO = re.compile(r"^(yes[,! ]*)?(please )?(go ahead|go for it|build it|build thi
                  r"create it|create the app|make it|ship it|start (the )?build(ing)?|do it)[.! ]*$", re.I)
 
 
+#: "Build draft 844add789734 (“A · Essentials”)" — what the Drafts tab's
+#: button says, and a person's own "build draft B": a go-ahead for that draft.
+_GO_DRAFT = re.compile(r"^(yes[,! ]*)?(please )?build (this |the )?draft\b", re.I)
+
+
 def consented(text: str) -> bool:
     """Whether the person's words tell Smith to go ahead and build now."""
     words = " ".join(str(text or "").split())
     if not words:
         return False
-    if _GO.match(words):
+    if _GO.match(words) or _GO_DRAFT.match(words):
         return True
     try:
         from services.llm_client import complete
@@ -391,6 +401,22 @@ def add_reference(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bo
                                       "their own signed-in session on the reference if the product hides behind a sign-in.")}], False
 
 
+def deep_study(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bool]:
+    from services.drafts_room import capture
+    try:
+        ref = store.load_reference(session["id"], str(args.get("reference") or ""))
+    except store.NotFound:
+        return [{"type": "text", "text": "No reference with that id. References: "
+                 + ", ".join(f"{r['id']} {r['name']}" for r in store.references(session["id"]))}], True
+    if not ref.get("url"):
+        return [{"type": "text", "text": "That reference has no address; add it again with `add_reference` and its URL."}], True
+    job = capture.start_again(session, ref, str(args.get("focus") or ""))
+    emit("reference", {"reference": ref})
+    emit("research", {"job": job})
+    emit("step", {"text": f"Started the deep study of {ref['name']} again"})
+    return [{"type": "text", "text": f"Deep study {job['id']} of {ref['name']} is running again."}], False
+
+
 def read_cards(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bool]:
     from services.drafts_room import cards as cardlib
     rid = str(args.get("reference") or "") or None
@@ -402,6 +428,14 @@ def read_cards(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bool]
                "no deep study has finished yet" if not any(j["status"] == "done" for j in deep) else
                "the deep study found no evidence to write cards from (the site may have turned the browser away)")
         return [{"type": "text", "text": f"No cards yet: {why}.\n" + research_status(session)}], True
+    # Reading the cards is reading the deep studies they came from: the
+    # "finished" notice on the page goes once that happens.
+    for job in store.jobs(session["id"]):
+        if job.get("kind") == "deep" and job["status"] == "done" and not job.get("read") \
+                and (rid is None or job.get("reference_id") == rid):
+            job["read"] = True
+            store.save_job(job)
+            emit("research", {"job": job})
     emit("step", {"text": f"Read {len(rows)} feature cards"})
     return [{"type": "text", "text": cardlib.brief(rows)}], False
 
@@ -633,6 +667,8 @@ def turn(session: dict, text: str, file_ids: list[str], emit: Emit) -> dict:
                     out, err = draw_screens(session, args, note)
                 elif block["name"] == "add_reference":
                     out, err = add_reference(session, args, note)
+                elif block["name"] == "deep_study":
+                    out, err = deep_study(session, args, note)
                 elif block["name"] == "read_cards":
                     out, err = read_cards(session, args, note)
                 elif block["name"] == "write_cards":
