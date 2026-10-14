@@ -25,6 +25,10 @@ What happens to an address:
    is redeployed so the setting takes effect, and the old `vercel.app`
    address sends people there unless the owner chose to keep it answering.
 
+A bare domain brings its `www.` companion, which sends people to it. The
+Tentoro address stays with the app: it can be renamed, not removed, and it
+is the address the app uses while none of the owner's own is live.
+
 Vercel itself refuses an address another project in the team already uses,
 so no two Forge apps can hold one.
 """
@@ -64,6 +68,15 @@ GIVE_UP_AFTER = timedelta(hours=48)
 RECHECK_LIVE = timedelta(hours=24)
 
 LEDGER = "domains.json"
+
+#: Names a Tentoro address may not take: the platform's own, and the ones
+#: people would mistake for it.
+RESERVED_LABELS = frozenset({
+    "www", "api", "app", "apps", "admin", "administrator", "auth", "login", "signin", "sso", "account",
+    "mail", "email", "smtp", "imap", "pop", "mx", "ftp", "ns", "ns1", "ns2", "dns", "cdn", "static",
+    "assets", "files", "status", "help", "support", "docs", "blog", "forge", "tentoro", "dev",
+    "staging", "test", "preview", "billing", "security", "root", "system",
+})
 
 
 class DomainRefused(ValueError):
@@ -118,9 +131,29 @@ def apps_domain() -> str:
 
 
 def tentoro_slug(app_name: str, fallback: str) -> str:
-    """`AquaTrack` → `aquatrack`; a name that leaves nothing falls back."""
+    """`AquaTrack` → `aquatrack`; a name that leaves nothing usable (empty,
+    under three letters, or reserved) falls back to the project's name."""
     slug = re.sub(r"[^a-z0-9]+", "-", str(app_name or "").lower()).strip("-")[:40].strip("-")
-    return slug or re.sub(r"[^a-z0-9-]+", "", fallback.lower())[:40] or "app"
+    if len(slug) >= 3 and slug not in RESERVED_LABELS:
+        return slug
+    return re.sub(r"[^a-z0-9-]+", "", fallback.lower())[:40].strip("-") or "app"
+
+
+def tentoro_label(raw: str, base: str) -> str:
+    """The name before `.<base>` the owner asked for: `Aqua` or
+    `aqua.apps.tentoro.ai` → `aqua`, or DomainRefused."""
+    name = str(raw or "").strip().lower().strip(".")
+    name = re.sub(r"^[a-z][a-z0-9+.-]*://", "", name).split("/", 1)[0]
+    if base and name.endswith("." + base):
+        name = name[: -len(base) - 1]
+    if "." in name:
+        raise DomainRefused(f"Give just the name before .{base}, such as aqua.")
+    label = re.sub(r"[^a-z0-9]+", "-", name).strip("-")
+    if len(label) < 3 or len(label) > 40:
+        raise DomainRefused("The name must be 3 to 40 letters, digits or dashes.")
+    if label in RESERVED_LABELS:
+        raise DomainRefused(f"{label}.{base} is kept for the platform; choose another name.")
+    return label
 
 
 def _first_value(rows: Any) -> list[str]:
@@ -317,6 +350,10 @@ class DomainService:
         known = {e["name"]: e for e in self.entries()}
         if name in known:
             return await self.refresh(name)
+        base = apps_domain()
+        if base and kind != "tentoro" and (name == base or name.endswith("." + base)):
+            # Its own Tentoro address is renamed, never added beside it.
+            return await self.rename_tentoro(name)
         entries = list(known.values())
         # THE FIRST OWN ADDRESS BECOMES MAIN; a later one does not take over
         # quietly. The Tentoro address is main only while there is nothing else.
@@ -351,28 +388,68 @@ class DomainService:
         self._write(change, f"Add the address {name}")
         if not pid:
             return self.view_of(name)
-        return await self.refresh(name)
+        view = await self.refresh(name)
+        if kind == "apex":
+            await self._companion(name)
+        return view
+
+    async def _companion(self, apex: str) -> None:
+        """A bare domain brings `www.<apex>`, which sends people to it."""
+        www = f"www.{apex}"
+        if any(e["name"] == www for e in self.entries()):
+            return
+        pid = await self.project_id()
+        if not pid:
+            return
+        try:
+            await self.client.add_project_domain(pid, www)
+            await self.client.redirect_project_domain(pid, www, apex)
+        except RuntimeError:
+            # Used by another project, or refused: the bare domain works without it.
+            logger.warning("[domains] %s: could not add %s beside %s", self.project_name, www, apex, exc_info=True)
+            return
+        now = _iso(self.now())
+        self._write(lambda dep: dep["domains"].append(
+            {"name": www, "kind": "subdomain", "main": False, "status": "waiting", "redirectTo": apex,
+             "addedAt": now, "reason": "Checking the records."}), f"Add {www}, which sends people to {apex}")
+        await self.refresh(www)
 
     async def remove(self, raw: str) -> None:
         name = normalise(raw)
         entry = next((e for e in self.entries() if e["name"] == name), None)
         if entry is None:
             raise DomainRefused(f"{name} is not one of this app's addresses.")
+        if entry.get("kind") == "tentoro":
+            raise DomainRefused(f"{name} stays with the app: rename it, or make your own address the main one.")
+        before = self.main_address()
+        gone = {name} | {e["name"] for e in self.entries() if e.get("redirectTo") == name}
         pid = await self.project_id()
         if pid:
-            await self.client.remove_project_domain(pid, name)
-        self._write(lambda dep: dep.__setitem__("domains", [e for e in dep["domains"] if e.get("name") != name]),
-                    f"Remove the address {name}")
+            for n in sorted(gone):
+                await self.client.remove_project_domain(pid, n)
+
+        def change(dep: dict) -> None:
+            dep["domains"] = [e for e in dep["domains"] if e.get("name") not in gone]
+            if entry.get("main"):
+                # The Tentoro address is main again while nothing else is.
+                for e in dep["domains"]:
+                    if e.get("kind") == "tentoro":
+                        e["main"] = True
+        self._write(change, f"Remove the address {name}")
         led = read_ledger(self.output_dir)
-        led.get("domains", {}).pop(name, None)
+        for n in gone:
+            led.get("domains", {}).pop(n, None)
         _write_ledger(self.output_dir, led)
-        if entry.get("main") and entry.get("status") == "live":
+        if self.main_address() != before:
             await self.follow()
 
     async def make_main(self, raw: str) -> dict:
         name = normalise(raw)
-        if not any(e["name"] == name for e in self.entries()):
+        entry = next((e for e in self.entries() if e["name"] == name), None)
+        if entry is None:
             raise DomainRefused(f"{name} is not one of this app's addresses; add it first.")
+        if entry.get("redirectTo"):
+            raise DomainRefused(f"{name} sends people to {entry['redirectTo']}; make {entry['redirectTo']} the main address.")
 
         def change(dep: dict) -> None:
             for e in dep["domains"]:
@@ -387,6 +464,54 @@ class DomainService:
         self._write(lambda dep: dep.__setitem__("oldAddress", mode), f"The old address: {mode}")
         await self.follow()
 
+    async def rename_tentoro(self, raw: str) -> dict:
+        """Give the app's Tentoro address another name (`aqua` →
+        `aqua.apps.tentoro.ai`). The new name is attached before the old one
+        is let go, so a name that is taken changes nothing."""
+        base = apps_domain()
+        if not base:
+            raise DomainRefused("This platform gives apps no Tentoro address; add your own domain instead.")
+        new = f"{tentoro_label(raw, base)}.{base}"
+        entries = self.entries()
+        old = next((e for e in entries if e.get("kind") == "tentoro"), None)
+        if old and old["name"] == new:
+            return self.view_of(new)
+        if any(e["name"] == new for e in entries):
+            raise DomainRefused(f"{new} is already one of this app's addresses.")
+        before = self.main_address()
+        pid = await self.project_id()
+        if pid:
+            try:
+                await self.client.add_project_domain(pid, new)
+            except RuntimeError as exc:
+                text = str(exc)
+                if "409" in text or "already" in text.lower() or "in use" in text.lower():
+                    raise DomainRefused(f"{new} is taken by another app; choose another name.") from exc
+                raise
+            if old:
+                await self.client.remove_project_domain(pid, old["name"])
+        now = _iso(self.now())
+
+        def change(dep: dict) -> None:
+            if old:
+                dep["domains"] = [e for e in dep["domains"] if e.get("name") != old["name"]]
+            dep["domains"].append({"name": new, "kind": "tentoro",
+                                   "main": bool(old.get("main")) if old else not any(e.get("main") for e in dep["domains"]),
+                                   "status": "waiting", "addedAt": now,
+                                   "reason": ("Checking the address." if pid else
+                                              "Publish the app; the address is attached at its first publish.")})
+        self._write(change, f"Rename the Tentoro address to {new}" if old else f"Add the Tentoro address {new}")
+        if old:
+            led = read_ledger(self.output_dir)
+            led.get("domains", {}).pop(old["name"], None)
+            _write_ledger(self.output_dir, led)
+        if not pid:
+            return self.view_of(new)
+        view = await self.refresh(new)
+        if self.main_address() != before:
+            await self.follow()
+        return view
+
     # ── checking ────────────────────────────────────────────────────
 
     async def refresh(self, raw: str) -> dict:
@@ -395,6 +520,7 @@ class DomainService:
         entry = next((e for e in self.entries() if e["name"] == name), None)
         if entry is None:
             raise DomainRefused(f"{name} is not one of this app's addresses.")
+        address_before = self.main_address()
         led = read_ledger(self.output_dir)
         seen = led.setdefault("domains", {}).setdefault(name, {})
         now = self.now()
@@ -415,6 +541,12 @@ class DomainService:
                 return self.view_of(name)
         elif project_domain is None:
             project_domain = await self.client.add_project_domain(pid, name)
+        if entry.get("redirectTo") and (project_domain or {}).get("redirect") != entry["redirectTo"]:
+            try:
+                await self.client.redirect_project_domain(pid, name, entry["redirectTo"])
+            except RuntimeError:
+                logger.warning("[domains] %s: could not send %s to %s", self.project_name, name,
+                               entry["redirectTo"], exc_info=True)
         if project_domain and project_domain.get("verified") is False:
             project_domain = await self.client.verify_project_domain(pid, name) or project_domain
         try:
@@ -427,6 +559,9 @@ class DomainService:
             # is a bare domain: its records are A records, not a CNAME.
             self._set_entry(name, kind="apex")
             entry["kind"] = "apex"
+            became_apex = True
+        else:
+            became_apex = False
         state, reason = state_of(name, project_domain, config)
         if state == "dns-ok":
             ok, why = await (self.probe or https_probe)(name)
@@ -458,13 +593,18 @@ class DomainService:
             became_live = status == "live" and entry.get("status") != "live"
             self._set_entry(name, status=status, reason=reason or None,
                             liveAt=_iso(now) if became_live else None if status != "live" else entry.get("liveAt"))
-            if became_live:
+            if became_live and entry.get("redirectTo"):
+                self._tell(f"{name} is live and sends people to {entry['redirectTo']}.")
+            elif became_live:
                 self._tell(f"{name} is live: the app answers there with a valid certificate."
-                           + (" It is the main address now; sign-in and links use it." if entry.get("main") else ""))
+                           + (" It is the main address now; sign-in and links use it."
+                              if self.main_address() == f"https://{name}" else ""))
             elif status == "failed" and entry.get("status") != "failed":
                 self._tell(f"{name} is not working: {reason}")
-            if entry.get("main") and (became_live or entry.get("status") == "live"):
-                await self.follow()
+        if self.main_address() != address_before:
+            await self.follow()
+        if became_apex:
+            await self._companion(name)
         return self.view_of(name)
 
     async def watch_due(self) -> int:
@@ -493,8 +633,11 @@ class DomainService:
     # ── the app follows its main address ────────────────────────────
 
     def main_address(self) -> str:
-        """`https://<main>` when the main address is live, else ""."""
-        main = next((e for e in self.entries() if e.get("main") and e.get("status") == "live"), None)
+        """`https://<main>` when the main address is live; else the Tentoro
+        address when it is live (the owner's own is still on its way); else ""."""
+        live = [e for e in self.entries() if e.get("status") == "live"]
+        main = next((e for e in live if e.get("main")), None) or next(
+            (e for e in live if e.get("kind") == "tentoro"), None)
         return f"https://{main['name']}" if main else ""
 
     async def follow(self) -> dict:
@@ -594,7 +737,8 @@ async def attach_after_publish(path: str | Path, client: Any, project_name: str,
     base = apps_domain()
     if base and not any(e.get("kind") == "tentoro" for e in entries):
         try:
-            name = (svc._svc().doc.get("product") or {}).get("name") or ""
+            doc = svc._svc().doc
+            name = (doc.get("application") or {}).get("name") or (doc.get("product") or {}).get("name") or ""
         except FileNotFoundError:
             name = ""
         candidate = f"{tentoro_slug(name, project_name)}.{base}"
@@ -613,6 +757,22 @@ async def attach_after_publish(path: str | Path, client: Any, project_name: str,
     return svc.view()["domains"]
 
 
+async def detach_all(path: str | Path, client: Any, project_name: str) -> list[str]:
+    """When an app is deleted: let go of every address it holds in Vercel, so
+    the owner (or another app) can use them again. The names let go."""
+    svc = DomainService(output_dir=str(project_root(path)), client=client, project_name=project_name)
+    names = [e["name"] for e in svc.entries()]
+    pid = await svc.project_id() if names else None
+    done: list[str] = []
+    for n in names if pid else []:
+        try:
+            await client.remove_project_domain(pid, n)
+            done.append(n)
+        except RuntimeError:
+            logger.warning("[domains] %s: could not let go of %s", project_name, n, exc_info=True)
+    return done
+
+
 def run_sync(coro: Awaitable[Any]) -> Any:
     """Run a coroutine from synchronous code (a Smith seam, off the event loop)."""
     try:
@@ -624,6 +784,6 @@ def run_sync(coro: Awaitable[Any]) -> Any:
         return pool.submit(asyncio.run, coro).result()
 
 
-__all__ = ["DomainRefused", "DomainService", "GIVE_UP_AFTER", "VERCEL_A", "VERCEL_CNAME", "apps_domain", "attach_after_publish", "project_root",
+__all__ = ["DomainRefused", "DomainService", "GIVE_UP_AFTER", "VERCEL_A", "VERCEL_CNAME", "apps_domain", "attach_after_publish", "detach_all", "project_root",
            "https_probe", "next_check", "normalise", "read_ledger", "records_for", "run_sync", "state_of",
-           "tentoro_slug", "vercel_project_name"]
+           "tentoro_label", "tentoro_slug", "vercel_project_name"]

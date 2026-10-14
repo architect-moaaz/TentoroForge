@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from services.deploy import domains as dm
+from services.deploy.domain_check import check_address as real_check_address
 from services.deploy.domains import DomainRefused, DomainService, normalise, records_for
 
 
@@ -67,6 +68,8 @@ class FakeVercel:
 
     async def redirect_project_domain(self, pid, name, to):
         self.redirects[name] = to
+        if name in self.domains:
+            self.domains[name]["redirect"] = to
         return {}
 
     async def list_env(self, pid):
@@ -116,6 +119,16 @@ def _service(tmp_path, fake, *, ok=True, said=None, clock=None):
 
 def run(coro):
     return asyncio.run(coro)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_probe(monkeypatch):
+    """Nothing here reaches the network: a service built without a probe
+    (as attach_after_publish builds it) answers as a live certificate."""
+    async def answers(name, fetch=None):
+        return True, ""
+    monkeypatch.setattr(dm, "https_probe", answers)
+    monkeypatch.setattr("services.deploy.domain_check.check_address", answers)
 
 
 # --------------------------------------------------------------------------- #
@@ -281,7 +294,6 @@ def test_what_to_register_elsewhere_follows_the_main_address(tmp_path):
 def test_a_live_address_must_also_finish_sign_in_there_and_it_shows_on_the_scorecard(tmp_path):
     from services.blueprint import scorecard as sc
     from services.blueprint.service import BlueprintService
-    from services.deploy.domain_check import check_address
     root = _project(tmp_path)
     svc0 = BlueprintService.load(output_dir=root)
     sc._save(svc0, sc.empty(svc0.doc))
@@ -293,7 +305,7 @@ def test_a_live_address_must_also_finish_sign_in_there_and_it_shows_on_the_score
     fake = FakeVercel()
     fake.configured.add("app.acme.com")
     svc = _service(root, fake)
-    svc.address_check = lambda name: check_address(name, fetch)
+    svc.address_check = lambda name: real_check_address(name, fetch)
     view = run(svc.connect("app.acme.com"))
     assert view["status"] == "live" and view["works"] is False and "still finishes at aqua-abc123.vercel.app" in view["worksDetail"]
     routes = sc.read(BlueprintService.load(output_dir=root).doc)["criteria"]["routes"]
@@ -347,10 +359,174 @@ def test_smith_asks_which_address_and_never_without_publishing_set_up(tmp_path, 
     assert domain_change.name_in("open src/app/page.tsx and use app.acme.com") == "app.acme.com"
 
 
-def test_the_three_actions_are_registered_everywhere_smith_looks():
+def test_the_domain_actions_are_registered_everywhere_smith_looks():
     from services.smith.capabilities import unaccounted
     from services.smith.verbs import REQUIRED_BY_VERB, VERB_EXAMPLES, VERB_HELP
     from services.smith4.verbs import PERFORM as VERBS
-    for v in ("connect_domain", "remove_domain", "domain_status"):
+    verbs = {"connect_domain", "remove_domain", "domain_status", "rename_app_address"}
+    for v in verbs:
         assert v in REQUIRED_BY_VERB and v in VERB_HELP and v in VERB_EXAMPLES and v in VERBS
-    assert not {"connect_domain", "remove_domain", "domain_status"} & unaccounted()
+    assert not verbs & unaccounted()
+
+
+# --------------------------------------------------------------------------- #
+# A bare domain and its www companion; letting go when the app is deleted
+# --------------------------------------------------------------------------- #
+
+def test_a_bare_domain_brings_its_www_companion_which_sends_people_to_it(tmp_path):
+    root = _project(tmp_path)
+    fake, said = FakeVercel(), []
+    fake.configured.update({"acme.com", "www.acme.com"})
+    svc = _service(root, fake, said=said)
+    run(svc.connect("acme.com"))
+    www = next(e for e in svc.entries() if e["name"] == "www.acme.com")
+    assert www["redirectTo"] == "acme.com" and www["main"] is False and www["status"] == "live"
+    assert fake.redirects["www.acme.com"] == "acme.com"
+    assert any("www.acme.com is live and sends people to acme.com" in s for s in said)
+    assert fake.env["NEXTAUTH_URL"]["value"] == "https://acme.com", "the companion never becomes the main address"
+    with pytest.raises(DomainRefused) as e:
+        run(svc.make_main("www.acme.com"))
+    assert "make acme.com the main address" in str(e.value)
+    run(svc.remove("acme.com"))
+    assert svc.entries() == [] and "www.acme.com" not in fake.domains, "the companion goes with its domain"
+
+
+def test_a_companion_detached_in_vercel_is_attached_and_redirected_again(tmp_path):
+    root = _project(tmp_path)
+    fake = FakeVercel()
+    svc = _service(root, fake)
+    run(svc.connect("acme.com"))
+    fake.domains.pop("www.acme.com")
+    fake.redirects.clear()
+    run(svc.refresh("www.acme.com"))
+    assert fake.domains["www.acme.com"]["redirect"] == "acme.com"
+
+
+def test_a_bare_domain_added_before_the_first_publish_brings_its_companion_at_it(tmp_path):
+    root = _project(tmp_path)
+    fake = FakeVercel(published=False)
+    run(_service(root, fake).connect("acme.com"))
+    fake.project = {"id": "prj_1", "name": "aqua"}
+    views = run(dm.attach_after_publish(str(root / "app"), fake, "aqua"))
+    assert [v["name"] for v in views] == ["acme.com", "www.acme.com"]
+    assert fake.redirects["www.acme.com"] == "acme.com"
+
+
+def test_deleting_an_app_lets_go_of_its_addresses(tmp_path):
+    root = _project(tmp_path)
+    fake = FakeVercel()
+    svc = _service(root, fake)
+    run(svc.connect("app.acme.com"))
+    run(svc.connect("acme.com"))
+    gone = run(dm.detach_all(str(root / "app"), fake, "aqua"))
+    assert sorted(gone) == ["acme.com", "app.acme.com", "www.acme.com"]
+    assert set(fake.domains) == {"aqua.vercel.app"}
+
+
+# --------------------------------------------------------------------------- #
+# The free Tentoro address
+# --------------------------------------------------------------------------- #
+
+def test_the_tentoro_name_comes_from_the_app_and_avoids_reserved_words():
+    assert dm.tentoro_slug("AquaTrack", "k3j2") == "aquatrack"
+    assert dm.tentoro_slug("API", "k3j2") == "k3j2" and dm.tentoro_slug("Go", "k3j2") == "k3j2"
+    assert dm.tentoro_label("Clinic Hub", "apps.tentoro.ai") == "clinic-hub"
+    assert dm.tentoro_label("aqua.apps.tentoro.ai", "apps.tentoro.ai") == "aqua"
+    for bad in ("admin", "ab", "aqua.example.com", "x" * 41):
+        with pytest.raises(DomainRefused):
+            dm.tentoro_label(bad, "apps.tentoro.ai")
+
+
+def test_every_publish_gives_a_tentoro_address_used_until_the_owners_own_is_live(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_APPS_DOMAIN", "apps.tentoro.ai")
+    root = _project(tmp_path)
+    fake = FakeVercel()
+    fake.configured.add("aquatrack.apps.tentoro.ai")
+    views = run(dm.attach_after_publish(str(root / "app"), fake, "aqua"))
+    assert [(v["name"], v["kind"], v["main"], v["status"]) for v in views] == \
+        [("aquatrack.apps.tentoro.ai", "tentoro", True, "live")]
+    assert views[0]["records"] == [], "no DNS work for anyone"
+    assert fake.env["NEXTAUTH_URL"]["value"] == "https://aquatrack.apps.tentoro.ai"
+    assert fake.redirects["aqua.vercel.app"] == "aquatrack.apps.tentoro.ai"
+    run(dm.attach_after_publish(str(root / "app"), fake, "aqua"))
+    svc = _service(root, fake)
+    assert len(svc.entries()) == 1, "a later publish keeps the one it has"
+
+    run(svc.connect("app.acme.com"))
+    assert [e["name"] for e in svc.entries() if e["main"]] == ["app.acme.com"]
+    assert fake.env["NEXTAUTH_URL"]["value"] == "https://aquatrack.apps.tentoro.ai", \
+        "the owner's own address is main once live; until then the Tentoro address serves"
+    fake.configured.add("app.acme.com")
+    run(svc.refresh("app.acme.com"))
+    assert fake.env["NEXTAUTH_URL"]["value"] == "https://app.acme.com"
+    assert fake.redirects["aqua.vercel.app"] == "app.acme.com"
+
+    run(svc.remove("app.acme.com"))
+    assert [e["name"] for e in svc.entries() if e["main"]] == ["aquatrack.apps.tentoro.ai"]
+    assert fake.env["NEXTAUTH_URL"]["value"] == "https://aquatrack.apps.tentoro.ai"
+    with pytest.raises(DomainRefused) as e:
+        run(svc.remove("aquatrack.apps.tentoro.ai"))
+    assert "rename it" in str(e.value)
+
+
+def test_a_taken_tentoro_name_falls_back_to_the_projects_own(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_APPS_DOMAIN", "apps.tentoro.ai")
+    root = _project(tmp_path)
+    fake = FakeVercel()
+    fake.in_use.add("aquatrack.apps.tentoro.ai")
+    views = run(dm.attach_after_publish(str(root / "app"), fake, "aqua"))
+    assert views[0]["name"] == "aqua.apps.tentoro.ai"
+
+
+def test_the_tentoro_address_is_renamed_and_a_taken_or_reserved_name_changes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("FORGE_APPS_DOMAIN", "apps.tentoro.ai")
+    root = _project(tmp_path)
+    fake = FakeVercel()
+    fake.configured.update({"aquatrack.apps.tentoro.ai", "aqua.apps.tentoro.ai", "clinic.apps.tentoro.ai"})
+    run(dm.attach_after_publish(str(root / "app"), fake, "aqua"))
+    svc = _service(root, fake)
+    view = run(svc.rename_tentoro("Aqua"))
+    assert view["name"] == "aqua.apps.tentoro.ai" and view["status"] == "live" and view["main"] is True
+    assert "aquatrack.apps.tentoro.ai" not in fake.domains
+    assert fake.env["NEXTAUTH_URL"]["value"] == "https://aqua.apps.tentoro.ai", "sign-in follows the new name"
+    assert "aquatrack.apps.tentoro.ai" not in dm.read_ledger(root)["domains"]
+    fake.in_use.add("taken.apps.tentoro.ai")
+    for bad, why in (("admin", "kept for the platform"), ("taken", "taken by another app")):
+        with pytest.raises(DomainRefused) as e:
+            run(svc.rename_tentoro(bad))
+        assert why in str(e.value)
+    assert [e["name"] for e in svc.entries()] == ["aqua.apps.tentoro.ai"] and "aqua.apps.tentoro.ai" in fake.domains
+    run(svc.connect("clinic.apps.tentoro.ai"))
+    assert [(e["name"], e["kind"]) for e in svc.entries()] == [("clinic.apps.tentoro.ai", "tentoro")], \
+        "a name under the Tentoro domain renames the app's own, never adds a second"
+
+
+def test_without_a_tentoro_domain_there_is_nothing_to_rename(tmp_path, monkeypatch):
+    monkeypatch.delenv("FORGE_APPS_DOMAIN", raising=False)
+    root = _project(tmp_path)
+    assert run(dm.attach_after_publish(str(root / "app"), FakeVercel(), "aqua")) == []
+    with pytest.raises(DomainRefused):
+        run(_service(root, FakeVercel()).rename_tentoro("aqua"))
+
+
+def test_smith_renames_the_tentoro_address(tmp_path, monkeypatch):
+    from services.smith import domain_change
+    from services.deploy import vercel_client
+    monkeypatch.setenv("FORGE_APPS_DOMAIN", "apps.tentoro.ai")
+    root = _project(tmp_path)
+    fake = FakeVercel()
+    fake.close = lambda: asyncio.sleep(0)
+    fake.configured.update({"aquatrack.apps.tentoro.ai", "aqua.apps.tentoro.ai"})
+    run(dm.attach_after_publish(str(root / "app"), fake, "aqua"))
+    monkeypatch.setenv("VERCEL_TOKEN", "t")
+    monkeypatch.setattr(vercel_client, "VercelClient", lambda *a, **k: fake)
+
+    async def ok(name, fetch=None):
+        return True, ""
+    monkeypatch.setattr("services.deploy.domain_check.check_address", ok)
+    monkeypatch.setattr(dm, "https_probe", ok)
+    out = domain_change.run(str(root), "rename_app_address", domain="aqua", change="call our address aqua")
+    assert out["applied"], out
+    assert "aqua.apps.tentoro.ai now" in out["diff_summary"]
+    out = domain_change.run(str(root), "rename_app_address", domain="", change="rename our address")
+    assert not out["applied"] and "What should the address be called" in out["reason"]

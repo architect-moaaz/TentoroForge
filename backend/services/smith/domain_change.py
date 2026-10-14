@@ -1,5 +1,6 @@
 """The app's own addresses, from a conversation: "put it on app.acme.com",
-"is my domain working?", "where do I point my DNS?", "remove the old domain".
+"is my domain working?", "where do I point my DNS?", "remove the old domain",
+"call our address aqua" (the free address the platform gives the app).
 
 The same service the Publish dialog and App settings use
 (`services.deploy.domains`): Smith never writes a record or a key; it says
@@ -60,7 +61,7 @@ def run(output_dir: str, verb: str, *, domain: str = "", change: str = "", reaso
     said: list[str] = []
     client = None
     if not os.environ.get("VERCEL_TOKEN"):
-        if verb in ("connect_domain", "remove_domain"):
+        if verb in ("connect_domain", "remove_domain", "rename_app_address"):
             return _envelope(False, reason="Publishing is not set up on this platform, so I cannot attach addresses.")
     else:
         # A status question checks now, like Check now does.
@@ -83,6 +84,13 @@ def run(output_dir: str, verb: str, *, domain: str = "", change: str = "", reaso
                 tail = (" I will say here when it is live; App settings → Domains shows its progress."
                         if view.get("status") != "live" else "")
                 return _said(view) + tail
+            if verb == "rename_app_address":
+                label = name or str(domain or "").strip()
+                if not label:
+                    raise DomainRefused("What should the address be called? Give the name, for example aqua.")
+                view = await svc.rename_tentoro(label)
+                return (f"The app's address is {view['name']} now. " + _said(view)
+                        + (" Sign-in and links follow it." if view.get("main") else ""))
             if verb == "remove_domain":
                 if not name:
                     raise DomainRefused("Which address should I remove? "

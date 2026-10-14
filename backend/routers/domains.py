@@ -15,6 +15,7 @@ from auth import get_current_user
 from database import get_db
 from models.auth import PlatformUser
 from models.project import Project
+from services.project_service import get_project_with_auth
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -28,10 +29,8 @@ class OldAddress(BaseModel):
     mode: str
 
 
-async def _project(project_id: uuid.UUID, db: AsyncSession) -> Project:
-    project = await db.get(Project, project_id)
-    if project is None:
-        raise HTTPException(404, "project not found")
+async def _project(project_id: uuid.UUID, user: PlatformUser, db: AsyncSession) -> Project:
+    project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir:
         raise HTTPException(400, "This app has not been built yet; build it, then give it an address.")
     return project
@@ -60,9 +59,9 @@ async def _tell(project_id: uuid.UUID, said: list[str]) -> None:
         logger.warning("[domains] could not post to the chat of %s", project_id, exc_info=True)
 
 
-async def _run(project_id: uuid.UUID, db: AsyncSession, act):
+async def _run(project_id: uuid.UUID, user: PlatformUser, db: AsyncSession, act):
     from services.deploy.domains import DomainRefused, DomainService, project_root, vercel_project_name
-    project = await _project(project_id, db)
+    project = await _project(project_id, user, db)
     said: list[str] = []
     client = _client()
     try:
@@ -87,7 +86,7 @@ async def list_domains(project_id: uuid.UUID, user: PlatformUser = Depends(get_c
     """The app's addresses, their records and status. Reading never calls
     Vercel; Check now does."""
     from services.deploy.domains import DomainService, project_root, vercel_project_name
-    project = await _project(project_id, db)
+    project = await _project(project_id, user, db)
     svc = DomainService(output_dir=str(project_root(project.output_dir)), client=None,
                         project_name=vercel_project_name(project.short_id))
     return svc.view()
@@ -99,7 +98,7 @@ async def add_domain(project_id: uuid.UUID, body: AddDomain, user: PlatformUser 
     async def act(svc):
         await svc.connect(body.name)
         return svc.view()
-    return await _run(project_id, db, act)
+    return await _run(project_id, user, db, act)
 
 
 @router.post("/api/projects/{project_id}/domains/{name}/check")
@@ -108,7 +107,7 @@ async def check_domain(project_id: uuid.UUID, name: str, user: PlatformUser = De
     async def act(svc):
         await svc.refresh(name)
         return svc.view()
-    return await _run(project_id, db, act)
+    return await _run(project_id, user, db, act)
 
 
 @router.post("/api/projects/{project_id}/domains/{name}/main")
@@ -117,7 +116,7 @@ async def make_main(project_id: uuid.UUID, name: str, user: PlatformUser = Depen
     async def act(svc):
         await svc.make_main(name)
         return svc.view()
-    return await _run(project_id, db, act)
+    return await _run(project_id, user, db, act)
 
 
 @router.delete("/api/projects/{project_id}/domains/{name}")
@@ -126,7 +125,7 @@ async def remove_domain(project_id: uuid.UUID, name: str, user: PlatformUser = D
     async def act(svc):
         await svc.remove(name)
         return svc.view()
-    return await _run(project_id, db, act)
+    return await _run(project_id, user, db, act)
 
 
 @router.put("/api/projects/{project_id}/domains/old-address")
@@ -135,4 +134,14 @@ async def set_old_address(project_id: uuid.UUID, body: OldAddress, user: Platfor
     async def act(svc):
         await svc.set_old_address(body.mode)
         return svc.view()
-    return await _run(project_id, db, act)
+    return await _run(project_id, user, db, act)
+
+
+@router.put("/api/projects/{project_id}/domains/tentoro")
+async def rename_tentoro(project_id: uuid.UUID, body: AddDomain, user: PlatformUser = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    """Give the app's Tentoro address another name (`aqua`)."""
+    async def act(svc):
+        await svc.rename_tentoro(body.name)
+        return svc.view()
+    return await _run(project_id, user, db, act)

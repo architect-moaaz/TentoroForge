@@ -34,6 +34,8 @@ export interface DomainView {
   detail: string;
   records: DomainRecord[];
   checkedAt?: string | null;
+  /** The `www.` companion of a bare domain: it sends people there. */
+  redirectTo?: string;
   addedAt?: string;
   liveAt?: string;
   works?: boolean | null;
@@ -187,7 +189,7 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
               )}
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              {KIND_LABEL[d.kind]}
+              {d.redirectTo ? `Sends people to ${d.redirectTo}` : KIND_LABEL[d.kind]}
               {d.checkedAt ? ` · checked ${ago(d.checkedAt)}` : ""}
               {d.status === "live" && d.liveAt ? ` · live since ${new Date(d.liveAt).toLocaleString()}` : ""}
             </p>
@@ -245,7 +247,7 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
                   </a>
                 </Button>
               )}
-              {!d.main && (
+              {!d.main && !d.redirectTo && (
                 <Button size="sm" variant="outline" onClick={() => makeMain.mutate(d.name)} disabled={busy(makeMain, d.name)}>
                   <Star className="mr-1 h-3 w-3" /> Make main address
                 </Button>

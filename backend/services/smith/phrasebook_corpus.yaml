@@ -478,6 +478,12 @@ sentences:
     source: code
     reaches: {verb: remove_domain, states: [domain]}
 
+  - id: does-rename-app-address
+    say: "call our address aqua"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: rename_app_address, states: [domain]}
+
   - id: does-accept-stripe-event
     say: "accept payment.succeeded from Stripe"
     checked: {colour: acts, via: handler}

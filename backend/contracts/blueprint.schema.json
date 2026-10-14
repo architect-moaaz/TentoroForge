@@ -4699,6 +4699,9 @@
               "reason": {
                 "type": "string"
               },
+              "redirectTo": {
+                "type": "string"
+              },
               "addedAt": {
                 "type": "string"
               },

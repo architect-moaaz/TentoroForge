@@ -2987,6 +2987,9 @@ export const DomainEntry = z.object({
    *  never started, answering — `reason` says why. */
   status: z.enum(["waiting", "live", "failed"]).default("waiting"),
   reason: z.string().optional(),
+  /** Requests for this address go to that one (a permanent redirect): the
+   *  `www.` companion Forge adds beside a bare domain. Never main. */
+  redirectTo: z.string().optional(),
   addedAt: z.string().optional(),
   liveAt: z.string().optional(),
 });

@@ -76,9 +76,9 @@ GROUPS: tuple[tuple[str, str, frozenset[str]], ...] = (
     ("Its own address",
      "Put the published app on your domain or a subdomain of it. I say the DNS "
      "record to add, watch until it answers with a valid certificate, and move "
-     "sign-in and links to it; ask me where it stands any time. The same as App "
-     "settings → Domains.",
-     frozenset({"connect_domain", "remove_domain", "domain_status"})),
+     "sign-in and links to it; ask me where it stands any time. I rename the free "
+     "address the platform gives it too. The same as App settings → Domains.",
+     frozenset({"connect_domain", "remove_domain", "domain_status", "rename_app_address"})),
     ("Your own data",
      "Load the records you already have — attach a spreadsheet and say which "
      "records it holds. I say how many rows would land and which column "

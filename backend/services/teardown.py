@@ -67,15 +67,39 @@ async def _delete_neon_projects(db: AsyncSession, project_id: Any, report: dict[
             pass
 
 
+async def _detach_domains(output_dir: str, short_id: str, report: dict[str, list]) -> None:
+    """The app's addresses let go of in Vercel, so the owner (or another app)
+    can use them again (`services.deploy.domains.detach_all`)."""
+    if not output_dir or not os.environ.get("VERCEL_TOKEN"):
+        return
+    from services.deploy.domains import detach_all, vercel_project_name
+    from services.deploy.vercel_client import VercelClient
+    client = VercelClient()
+    try:
+        for name in await detach_all(output_dir, client, vercel_project_name(short_id)):
+            report["removed"].append({"step": "domain", "target": name})
+    except Exception as exc:  # noqa: BLE001 — deleting the app never waits on Vercel
+        logger.warning("[teardown] domains of %s failed: %s", short_id, exc)
+        report["failed"].append({"step": "domain", "target": short_id, "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+    finally:
+        try:
+            await client.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 async def remove_project(db: AsyncSession, project: Project, *, report: dict[str, list] | None = None) -> dict[str, list]:
-    """Everything the project has, gone: its preview, its database on the apps
-    server, its Neon projects, its folder, its rows. Commits."""
+    """Everything the project has, gone: its preview, its addresses in Vercel,
+    its database on the apps server, its Neon projects, its folder, its rows.
+    Commits."""
     report = report if report is not None else _report()
     short_id = str(project.short_id)
     output_dir = str(project.output_dir or "")
 
     from preview import stop_preview
     _step(report, "preview", short_id, lambda: stop_preview(short_id))
+
+    await _detach_domains(output_dir, short_id, report)
 
     from services import app_databases
     if app_databases.server() and output_dir:

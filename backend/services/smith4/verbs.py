@@ -885,7 +885,7 @@ PERFORM: dict[str, Perform] = {
     "set_schedule": schedule, "pause_schedule": schedule, "resume_schedule": schedule,
     "set_deadline": schedule, "run_now": schedule,
     "add_webhook": webhook,
-    "connect_domain": domain, "remove_domain": domain, "domain_status": domain,
+    "connect_domain": domain, "remove_domain": domain, "domain_status": domain, "rename_app_address": domain,
     "show_audit": audit, "export_audit": audit, "verify_audit": audit, "edit_audit": audit,
     "refund": payment, "set_currency": payment,
     "add_organisation": tenancy, "move_login": tenancy,
