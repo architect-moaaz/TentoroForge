@@ -20,7 +20,11 @@ import { AuthImage } from "./AuthImage";
 import { EntityMap } from "./EntityMap";
 import { ResearchPanel } from "./ResearchPanel";
 import { ScreenDrawing } from "./ScreenDrawing";
-import type { Board, Drawing, FileMeta, Session } from "./types";
+import { ReferencesPanel } from "./ReferencesPanel";
+import { EvidencePanel } from "./EvidencePanel";
+import { CardsPanel } from "./CardsPanel";
+import { DraftsPanel } from "./DraftsPanel";
+import type { Board, Drawing, EvidenceItem, FileMeta, Session } from "./types";
 
 const PRIORITY: Record<string, string> = { must: "First version", should: "Should", later: "Later" };
 
@@ -51,16 +55,31 @@ export function brandLine(session: Pick<Session, "brand">): string {
   return b?.source === "board" ? "the board's look" : "a look of Smith's own (no brand on record)";
 }
 
-export function IdeaBoard({ session, filePath, drawingPath, onPicture, onOpenDrawing, onDraw, tab, onTab }:
+export type StudyActions = {
+  addReference: (name: string, url: string) => Promise<void>;
+  uploadHar: (rid: string, file: File) => Promise<void>;
+  stopStudy: (jid: string) => void;
+  fetchEvidence: (jid: string) => Promise<EvidenceItem[]>;
+  drawDraft: (did: string) => void;
+  pinNote: (did: string, on: string, text: string) => Promise<void>;
+  send: (text: string) => void;
+  compose: (text: string) => void;
+};
+
+export function IdeaBoard({ session, filePath, drawingPath, onPicture, onOpenDrawing, onDraw, tab, onTab, actions }:
   { session: Session; filePath: (id: string) => string; drawingPath: (id: string, kind: "html" | "png") => string;
     onPicture: (f: FileMeta) => void; onOpenDrawing: (d: Drawing) => void; onDraw: (screens?: string[]) => void;
-    tab: string; onTab: (tab: string) => void }) {
+    tab: string; onTab: (tab: string) => void; actions: StudyActions }) {
   const b = session.board;
   const flows = useMemo(() => flowsOf(b), [b]);
   const [chosen, setChosen] = useState<string | null>(null);
   const pictures = session.files ?? [];
   const studies = session.research ?? [];
   const drawings = session.drawings ?? [];
+  const references = session.references ?? [];
+  const cards = session.cards ?? [];
+  const draftsList = session.drafts ?? [];
+  const evidenceTotal = studies.reduce((n, st) => n + (st.evidence_total ?? 0), 0);
   const drawingOf = (name: string) => drawings.find((d) => d.screen === name);
   const drawn = (b.screens ?? []).filter((s) => drawingOf(s.name)?.status === "done").length;
   const undrawn = (b.screens ?? []).filter((s) => { const d = drawingOf(s.name); return !d || d.status === "failed" || d.stale; });
@@ -71,10 +90,16 @@ export function IdeaBoard({ session, filePath, drawingPath, onPicture, onOpenDra
     <Tabs value={tab} onValueChange={onTab} className="h-full flex flex-col">
       <TabsList variant="line" className="w-full justify-start overflow-x-auto overflow-y-hidden shrink-0">
         <TabsTrigger className="flex-none" value="overview">Overview</TabsTrigger>
-        <TabsTrigger className="flex-none" value="research">
-          Research{studies.length ? ` (${studies.length})` : ""}
+        <TabsTrigger className="flex-none" value="references">
+          References{references.length ? ` (${references.length})` : ""}
           {studies.some((st) => st.status === "running") && <span className="ml-1 h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />}
         </TabsTrigger>
+        <TabsTrigger className="flex-none" value="research">
+          Research{studies.length ? ` (${studies.length})` : ""}
+        </TabsTrigger>
+        <TabsTrigger className="flex-none" value="evidence">Evidence{evidenceTotal ? ` (${evidenceTotal})` : ""}</TabsTrigger>
+        <TabsTrigger className="flex-none" value="cards">Cards{cards.length ? ` (${cards.length})` : ""}</TabsTrigger>
+        <TabsTrigger className="flex-none" value="drafts">Drafts{draftsList.length ? ` (${draftsList.length})` : ""}</TabsTrigger>
         <TabsTrigger className="flex-none" value="screens">Screens {b.screens?.length ? `(${b.screens.length})` : ""}</TabsTrigger>
         <TabsTrigger className="flex-none" value="flows">Flows {b.flows?.length ? `(${b.flows.length})` : ""}</TabsTrigger>
         <TabsTrigger className="flex-none" value="records">Records {b.entities?.length ? `(${b.entities.length})` : ""}</TabsTrigger>
@@ -182,6 +207,25 @@ export function IdeaBoard({ session, filePath, drawingPath, onPicture, onOpenDra
               </ul>
             </section>
           )}
+        </TabsContent>
+
+        <TabsContent value="references" className="mt-0">
+          <ReferencesPanel references={references} studies={studies} onAdd={actions.addReference}
+            onUploadHar={actions.uploadHar} onStop={actions.stopStudy} busy={session.busy} />
+        </TabsContent>
+
+        <TabsContent value="evidence" className="mt-0">
+          <EvidencePanel studies={studies} references={references} fetchEvidence={actions.fetchEvidence} />
+        </TabsContent>
+
+        <TabsContent value="cards" className="mt-0">
+          <CardsPanel cards={cards} references={references} />
+        </TabsContent>
+
+        <TabsContent value="drafts" className="mt-0">
+          <DraftsPanel drafts={draftsList} drawings={drawings} drawingPath={drawingPath} onOpen={actions.drawDraft}
+            onDraw={actions.drawDraft} onPin={actions.pinNote} onSend={actions.send} onCompose={actions.compose}
+            onOpenDrawing={onOpenDrawing} built={!!session.handoff} />
         </TabsContent>
 
         <TabsContent value="research" className="mt-0">

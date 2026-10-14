@@ -10,11 +10,20 @@
     GET    /api/orgs/{org}/drafts-room/{sid}/drawings/{id}.html   a screen drawn in the company's brand
     GET    /api/orgs/{org}/drafts-room/{sid}/drawings/{id}.png    its picture (404 without a browser)
     POST   /api/orgs/{org}/drafts-room/{sid}/draw           draw (again) screens of the board
+    GET    /api/orgs/{org}/drafts-room/{sid}/references     what the person pointed at, with its studies
+    POST   /api/orgs/{org}/drafts-room/{sid}/references     add one by address: surface + deep studies start
+    POST   /api/orgs/{org}/drafts-room/{sid}/references/{rid}/har   the person's own recording, scrubbed on arrival
+    GET    /api/orgs/{org}/drafts-room/{sid}/studies/{jid}/evidence  a study's evidence (?standing=&kind=)
+    POST   /api/orgs/{org}/drafts-room/{sid}/studies/{jid}/stop      stop a deep study at its next page
+    GET    /api/orgs/{org}/drafts-room/{sid}/cards          the feature cards
+    GET    /api/orgs/{org}/drafts-room/{sid}/drafts[/{did}] the drafts (one with its versions and diffs)
+    POST   /api/orgs/{org}/drafts-room/{sid}/drafts/{did}/notes     pin a note on a screen or a line
+    POST   /api/orgs/{org}/drafts-room/{sid}/drafts/{did}/draw      draw a draft's screens
 
 The answer streams as `step` (what Smith is doing), `delta` (his words as they
 come), `file` (a screenshot he took), `board` (the idea board changed),
 `research` (a study the Researcher started or that Smith read),
-`drawing` (a screen's drawing started or landed),
+`drawing` (a screen's drawing started or landed), `reference`, `cards`, `draft`,
 `message` (his whole answer), `handoff` (the app made, its build to start),
 `done` and `error`. The turn runs on its own: hanging up does not lose it.
 """
@@ -56,6 +65,17 @@ class Message(BaseModel):
     files: list[str] = Field(default_factory=list)
 
 
+class NewReference(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    url: str = Field(min_length=3, max_length=500)
+    focus: str = Field(default="", max_length=1000)
+
+
+class Note(BaseModel):
+    on: str = Field(default="", max_length=120)
+    text: str = Field(min_length=1, max_length=1000)
+
+
 class Draw(BaseModel):
     screens: list[str] = Field(default_factory=list)
     note: str = Field(default="", max_length=2000)
@@ -88,15 +108,19 @@ async def _session(org_id: uuid.UUID, sid: str, user: PlatformUser, db: AsyncSes
 def _shown(session: dict) -> dict:
     """The session as the page reads it: not the model's own transcript; and
     the Researcher's studies, as far as each has got."""
-    studies = [{**j, "steps": (j.get("steps") or [])[-60:]} for j in store.jobs(session["id"])]
+    from services.drafts_room import evidence as ev
+    studies = [{**j, "steps": (j.get("steps") or [])[-60:], "evidence": ev.counts(j.get("evidence") or []),
+                "evidence_total": len(j.get("evidence") or [])} for j in store.jobs(session["id"])]
     from services.drafts_room import drawer
     known = "company_brand" in session
     brand = brands.merged(session.get("company_brand") or {}, session.get("board") or {})
     # `stale` says the screen, the brand or the product changed since the
     # drawing — known only when the brand was read (the session GET and a turn).
     rows = (list(drawer.current(session, brand).values()) if known else store.drawings(session["id"]))
+    sid = session["id"]
     return {k: v for k, v in session.items() if k not in ("turns", "company_brand")} | {
-        "busy": session["id"] in _BUSY, "research": studies, "drawings": rows,
+        "busy": sid in _BUSY, "research": studies, "drawings": rows,
+        "references": store.references(sid), "cards": store.cards(sid), "drafts": store.drafts(sid),
         "brand": {"source": brand.get("source") or "none", "company": brand.get("company") or ""}}
 
 
@@ -198,6 +222,143 @@ async def draw(org_id: uuid.UUID, sid: str, req: Draw, user: PlatformUser = Depe
     names = [n for n in req.screens if n.strip()] or None
     drawer.start(session, names, brand, note=" ".join(req.note.split()))
     return store.drawings(sid)
+
+
+@router.get("/api/orgs/{org_id}/drafts-room/{sid}/references")
+async def list_references(org_id: uuid.UUID, sid: str, user: PlatformUser = Depends(get_current_user),
+                          db: AsyncSession = Depends(get_db)):
+    await _session(org_id, sid, user, db)
+    return store.references(sid)
+
+
+@router.post("/api/orgs/{org_id}/drafts-room/{sid}/references", status_code=201)
+async def add_reference(org_id: uuid.UUID, sid: str, req: NewReference,
+                        user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """A reference the person adds by hand: the same as Smith's
+    `add_reference`, with the person's own words as the naming."""
+    from services.drafts_room import agent
+    session = await _session(org_id, sid, user, db)
+    session.setdefault("chat", []).append({"role": "user", "text": f"Learn from {req.name}: {req.url}",
+                                           "files": [], "at": time.time()})
+    out, err = await asyncio.to_thread(agent.add_reference, session, req.model_dump(), lambda e, d: None)
+    if err:
+        raise HTTPException(status_code=422, detail=out[0]["text"])
+    store.save(session)
+    return store.references(sid)
+
+
+@router.post("/api/orgs/{org_id}/drafts-room/{sid}/references/{rid}/har", status_code=201)
+async def upload_recording(org_id: uuid.UUID, sid: str, rid: str, file: UploadFile = File(...),
+                           user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """The person's own recording of their signed-in session. Read in
+    memory, scrubbed of every credential, kept only as call shapes; the
+    upload itself is never written down."""
+    from services.drafts_room import capture, har
+    session = await _session(org_id, sid, user, db)
+    try:
+        ref = store.load_reference(sid, rid)
+    except store.NotFound:
+        raise HTTPException(status_code=404, detail="No such reference") from None
+    data = await file.read(har.MAX_UPLOAD + 1)
+    try:
+        calls = await asyncio.to_thread(har.scrub_har, data, ref.get("url") or ref.get("name") or "")
+    except har.BadRecording as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    del data
+    if not calls:
+        raise HTTPException(status_code=422, detail="The recording holds no calls to this reference's site")
+    job = capture.from_recording(session, ref, calls)
+    ref["har"] = {"calls": len(calls), "at": time.time(), "study": job["id"]}
+    ref.setdefault("studies", {})["har"] = job["id"]
+    store.save_reference(ref)
+    return {"reference": ref, "study": {k: v for k, v in job.items() if k != "evidence"}, "calls": len(calls)}
+
+
+@router.get("/api/orgs/{org_id}/drafts-room/{sid}/studies/{jid}/evidence")
+async def read_evidence(org_id: uuid.UUID, sid: str, jid: str, standing: str = "", kind: str = "",
+                        user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await _session(org_id, sid, user, db)
+    try:
+        job = store.load_job(sid, jid)
+    except store.NotFound:
+        raise HTTPException(status_code=404, detail="No such study") from None
+    rows = job.get("evidence") or []
+    if standing:
+        rows = [r for r in rows if r.get("standing") == standing]
+    if kind:
+        rows = [r for r in rows if r.get("kind") == kind]
+    return rows
+
+
+@router.post("/api/orgs/{org_id}/drafts-room/{sid}/studies/{jid}/stop")
+async def stop_study(org_id: uuid.UUID, sid: str, jid: str, user: PlatformUser = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)):
+    """A deep study stops at its next page (the Researcher's own loop runs
+    to its end; stopping it is a later change)."""
+    await _session(org_id, sid, user, db)
+    try:
+        job = store.load_job(sid, jid)
+    except store.NotFound:
+        raise HTTPException(status_code=404, detail="No such study") from None
+    (store.job_dir(sid, jid) / "stop").write_text(str(time.time()))
+    return {"id": jid, "stopping": job.get("status") == "running"}
+
+
+@router.get("/api/orgs/{org_id}/drafts-room/{sid}/cards")
+async def read_cards(org_id: uuid.UUID, sid: str, reference: str = "",
+                     user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    await _session(org_id, sid, user, db)
+    return store.cards(sid, reference or None)
+
+
+@router.get("/api/orgs/{org_id}/drafts-room/{sid}/drafts")
+async def list_drafts(org_id: uuid.UUID, sid: str, user: PlatformUser = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)):
+    await _session(org_id, sid, user, db)
+    return store.drafts(sid)
+
+
+@router.get("/api/orgs/{org_id}/drafts-room/{sid}/drafts/{did}")
+async def read_draft(org_id: uuid.UUID, sid: str, did: str, user: PlatformUser = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)):
+    """One draft: its latest version, every version, and what each changed
+    against the one before."""
+    from services.drafts_room import drafts as draftlib
+    await _session(org_id, sid, user, db)
+    try:
+        versions = store.draft_versions(sid, did)
+    except store.NotFound:
+        raise HTTPException(status_code=404, detail="No such draft") from None
+    diffs = [{"from": a.get("version"), "to": b.get("version"), "changed": b.get("changed"), "diff": draftlib.diff(a, b)}
+             for a, b in zip(versions, versions[1:])]
+    return {"latest": versions[-1], "versions": versions, "diffs": diffs}
+
+
+@router.post("/api/orgs/{org_id}/drafts-room/{sid}/drafts/{did}/notes")
+async def pin_note(org_id: uuid.UUID, sid: str, did: str, req: Note, user: PlatformUser = Depends(get_current_user),
+                   db: AsyncSession = Depends(get_db)):
+    from services.drafts_room import drafts as draftlib
+    await _session(org_id, sid, user, db)
+    try:
+        return draftlib.add_note(sid, did, req.on, req.text)
+    except store.NotFound:
+        raise HTTPException(status_code=404, detail="No such draft") from None
+
+
+@router.post("/api/orgs/{org_id}/drafts-room/{sid}/drafts/{did}/draw")
+async def draw_draft(org_id: uuid.UUID, sid: str, did: str, user: PlatformUser = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)):
+    """A draft's screens drawn in the company's brand — the first time the
+    person opens it, not when it is composed."""
+    from services.drafts_room import drawer
+    session = await _session(org_id, sid, user, db)
+    try:
+        latest = store.draft_versions(sid, did)[-1]
+    except store.NotFound:
+        raise HTTPException(status_code=404, detail="No such draft") from None
+    brand = await _brand(session, org_id, db)
+    drawer.start(session, None, brand, scope=f"draft:{did}", screens=list(latest.get("screens") or []))
+    return [r for r in store.drawings(sid) if r.get("scope") == f"draft:{did}"]
 
 
 @router.post("/api/orgs/{org_id}/drafts-room/{sid}/message")

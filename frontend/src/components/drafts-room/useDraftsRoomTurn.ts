@@ -7,10 +7,10 @@
  * as they come, `file` a screenshot he took, `board` the idea board changed,
  * `message` his whole answer, `handoff` the app made and its build to start,
  * `research` a study the Researcher started (or Smith read), `drawing` a
- * screen's drawing started or landed, `done`, `error`.
+ * screen's drawing started or landed, `reference`, `cards`, `draft`, `done`, `error`.
  */
 import { useCallback, useRef, useState } from "react";
-import type { Board, ChatEntry, Drawing, FileMeta, Study } from "./types";
+import type { Board, Card, ChatEntry, Draft, Drawing, FileMeta, Reference, Study } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -27,6 +27,9 @@ type Handlers = {
   onHandoff: (h: Handoff) => void;
   onStudy: (study: Study) => void;
   onDrawing?: (drawing: Drawing) => void;
+  onReference?: (reference: Reference) => void;
+  onCards?: (cards: Card[]) => void;
+  onDraft?: (draft: Draft) => void;
 };
 
 export function useDraftsRoomTurn(orgId: string, sessionId: string | null, on: Handlers) {
@@ -92,6 +95,9 @@ export function useDraftsRoomTurn(orgId: string, sessionId: string | null, on: H
             } else if (event === "handoff") handlers.current.onHandoff(data as Handoff);
             else if (event === "research") handlers.current.onStudy(data.job as Study);
             else if (event === "drawing") handlers.current.onDrawing?.(data.drawing as Drawing);
+            else if (event === "reference") handlers.current.onReference?.(data.reference as Reference);
+            else if (event === "cards") handlers.current.onCards?.(data.cards as Card[]);
+            else if (event === "draft") handlers.current.onDraft?.(data.draft as Draft);
             else if (event === "error") setError(String(data.message ?? "Something went wrong"));
           }
         }

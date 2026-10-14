@@ -25,9 +25,9 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { AuthImage } from "@/components/drafts-room/AuthImage";
 import { DrawingFrame, VIEWPORTS } from "@/components/drafts-room/ScreenDrawing";
-import { IdeaBoard } from "@/components/drafts-room/IdeaBoard";
+import { IdeaBoard, type StudyActions } from "@/components/drafts-room/IdeaBoard";
 import { useDraftsRoomTurn, type Handoff } from "@/components/drafts-room/useDraftsRoomTurn";
-import type { ChatEntry, Drawing, FileMeta, Session, SessionRow, Study } from "@/components/drafts-room/types";
+import type { Card, ChatEntry, Draft, Drawing, EvidenceItem, FileMeta, Reference, Session, SessionRow, Study } from "@/components/drafts-room/types";
 
 const OPENERS = [
   "I want to build an app like a well-known one — research it with me",
@@ -88,9 +88,13 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
 
   const putDrawing = useCallback((d: Drawing) => setSession((s) => {
     if (!s) return s;
-    const rest = (s.drawings ?? []).filter((r) => r.screen !== d.screen);
+    const rest = (s.drawings ?? []).filter((r) => r.screen !== d.screen || (r.scope ?? "board") !== (d.scope ?? "board"));
     return { ...s, drawings: [...rest, d] };
   }), []);
+  const putReference = useCallback((r: Reference) => setSession((s) => (s
+    ? { ...s, references: [...(s.references ?? []).filter((x) => x.id !== r.id), r] } : s)), []);
+  const putDraft = useCallback((d: Draft) => setSession((s) => (s
+    ? { ...s, drafts: [...(s.drafts ?? []).filter((x) => x.id !== d.id), { ...d, versions: [...((s.drafts ?? []).find((x) => x.id === d.id)?.versions ?? []).filter((v) => v.version !== d.version), { version: d.version, at: d.at, changed: d.changed }] }] } : s)), []);
 
   // A STUDY OR A DRAWING RUNS WHILE THE CONVERSATION GOES ON: while one is
   // running, its progress is read every few seconds — the studies and the
@@ -103,11 +107,51 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
     const t = window.setInterval(() => {
       api.get<Session>(`${base}/${id}`)
         .then((fresh) => setSession((s) => (s && s.id === id
-          ? { ...s, research: fresh.research, drawings: fresh.drawings, brand: fresh.brand } : s)))
+          ? { ...s, research: fresh.research, drawings: fresh.drawings, brand: fresh.brand, references: fresh.references,
+              cards: fresh.cards, drafts: fresh.drafts } : s)))
         .catch(() => undefined);
     }, 4000);
     return () => window.clearInterval(t);
   }, [running, session?.id, base]);
+
+  // The study side's actions, all on the session's routes; the drafting
+  // side's (revise, build) go through the conversation so Smith does them.
+  const actions: StudyActions = {
+    addReference: async (name, url) => {
+      if (!session) return;
+      const id = session.id;
+      const refs = await api.post<Reference[]>(`${base}/${id}/references`, { name, url });
+      const fresh = await api.get<Session>(`${base}/${id}`);
+      setSession((s) => (s && s.id === id ? { ...s, references: refs, research: fresh.research, chat: fresh.chat } : s));
+    },
+    uploadHar: async (rid, file) => {
+      if (!session) return;
+      const id = session.id;
+      const form = new FormData();
+      form.append("file", file);
+      await api.upload<{ reference: Reference }>(`${base}/${id}/references/${rid}/har`, form);
+      const fresh = await api.get<Session>(`${base}/${id}`);
+      setSession((s) => (s && s.id === id ? { ...s, references: fresh.references, research: fresh.research, cards: fresh.cards } : s));
+    },
+    stopStudy: (jid) => { if (session) void api.post(`${base}/${session.id}/studies/${jid}/stop`, {}); },
+    fetchEvidence: useCallback((jid: string) => (session
+      ? api.get<EvidenceItem[]>(`${base}/${session.id}/studies/${jid}/evidence`) : Promise.resolve([])), [base, session?.id]),
+    drawDraft: (did) => {
+      if (!session) return;
+      const id = session.id;
+      api.post<Drawing[]>(`${base}/${id}/drafts/${did}/draw`, {})
+        .then((rows) => setSession((s) => (s && s.id === id
+          ? { ...s, drawings: [...(s.drawings ?? []).filter((r) => r.scope !== `draft:${did}`), ...rows] } : s)))
+        .catch(() => undefined);
+    },
+    pinNote: async (did, on, text) => {
+      if (!session) return;
+      const latest = await api.post<Draft>(`${base}/${session.id}/drafts/${did}/notes`, { on, text });
+      putDraft(latest);
+    },
+    send: (text) => send(text),
+    compose: (text) => setDraft(text),
+  };
 
   const draw = async (screens?: string[]) => {
     if (!session) return;
@@ -128,6 +172,9 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
     onHandoff,
     onStudy: (study) => { putStudy(study); if (study.status === "running") setBoardTab("research"); },
     onDrawing: putDrawing,
+    onReference: (r) => { putReference(r); setBoardTab("references"); },
+    onCards: (cards: Card[]) => setSession((s) => (s ? { ...s, cards } : s)),
+    onDraft: (d) => { putDraft(d); setBoardTab("drafts"); },
   });
 
   useEffect(() => {
@@ -343,7 +390,7 @@ function DraftsRoomPage({ orgId }: { orgId: string }) {
           {/* Idea board */}
           <aside className="w-[42%] max-w-[720px] shrink-0 border-l p-4 overflow-hidden">
             <IdeaBoard session={session} filePath={filePath} drawingPath={drawingPath} onPicture={setPicture}
-              onOpenDrawing={setShown} onDraw={draw} tab={boardTab} onTab={setBoardTab} />
+              onOpenDrawing={setShown} onDraw={draw} tab={boardTab} onTab={setBoardTab} actions={actions} />
           </aside>
         </>
       )}

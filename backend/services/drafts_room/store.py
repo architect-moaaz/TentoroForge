@@ -171,15 +171,22 @@ def _job_dir(sid: str, jid: str) -> Path:
     return _dir(sid) / "research" / jid
 
 
-def new_job(sid: str, reference: str, focus: str = "") -> dict:
+def new_job(sid: str, reference: str, focus: str = "", *, kind: str = "surface", source: str = "",
+            reference_id: str = "") -> dict:
+    """A study: `surface` (the Researcher reading public pages) or `deep`
+    (the platform browser recording a product, `source: web`, or the
+    person's own recording, `source: har`). Both hold `evidence`."""
     from services.drafts_room.dossier import empty
     jid = uuid.uuid4().hex[:12]
     now = time.time()
     job = {"id": jid, "session_id": sid, "reference": reference[:200], "focus": focus[:1000],
-           "status": "running", "stage": "scouting", "started": now, "heartbeat": now, "finished": None,
+           "kind": kind, "source": source, "reference_id": reference_id,
+           "status": "running", "stage": "scouting" if kind == "surface" else "waiting", "started": now,
+           "heartbeat": now, "finished": None,
            "steps": [], "surfaces": [], "dossier": empty(), "summary": "", "files": [], "error": None,
-           "read": False, "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
-                                    "cache_creation_input_tokens": 0, "web_search_requests": 0}}
+           "read": False, "evidence": [], "capture": {"pages": 0, "calls": 0, "hosts": [], "stopped_on": None},
+           "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
+                     "cache_creation_input_tokens": 0, "web_search_requests": 0}}
     (_job_dir(sid, jid) / "files").mkdir(parents=True, exist_ok=True)
     save_job(job)
     return job
@@ -215,6 +222,159 @@ def jobs(sid: str) -> list[dict]:
         except NotFound:
             continue
     return sorted(out, key=lambda j: j.get("started") or 0)
+
+
+def job_dir(sid: str, jid: str) -> Path:
+    """A study's own folder (its capture record lives under `capture/`)."""
+    return _job_dir(sid, jid)
+
+
+# ── references ─────────────────────────────────────────────────────────────
+#
+# What the person pointed at, with what they allowed: `public` (its public
+# pages, by the platform browser) and `session` (a recording of their own
+# signed-in session, which only they can make).
+
+_REF = re.compile(r"^[0-9a-f]{12}$")
+
+
+def _refs_dir(sid: str) -> Path:
+    return _dir(sid) / "references"
+
+
+def new_reference(sid: str, name: str, url: str, *, added_by: str, allowed: list[str] | None = None) -> dict:
+    rid = uuid.uuid4().hex[:12]
+    ref = {"id": rid, "session_id": sid, "name": " ".join(str(name or "").split())[:120] or url[:120],
+           "url": str(url or "")[:500], "added_by": str(added_by), "at": time.time(),
+           "allowed": list(allowed or ["public"]), "studies": {}, "har": None}
+    save_reference(ref)
+    return ref
+
+
+def save_reference(ref: dict) -> None:
+    with _LOCK:
+        folder = _refs_dir(ref["session_id"])
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{ref['id']}.json"
+        tmp = path.with_suffix(f".{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps(ref, default=str))
+        tmp.replace(path)
+
+
+def load_reference(sid: str, rid: str) -> dict:
+    if not _REF.match(str(rid or "")):
+        raise NotFound(rid)
+    try:
+        return json.loads((_refs_dir(sid) / f"{rid}.json").read_text())
+    except (OSError, ValueError) as exc:
+        raise NotFound(rid) from exc
+
+
+def references(sid: str) -> list[dict]:
+    root = _refs_dir(sid)
+    if not root.is_dir():
+        return []
+    out = []
+    for f in root.glob("*.json"):
+        try:
+            out.append(json.loads(f.read_text()))
+        except (OSError, ValueError):
+            continue
+    return sorted(out, key=lambda r: r.get("at") or 0)
+
+
+# ── feature cards ──────────────────────────────────────────────────────────
+#
+# One file per reference: the card writer replaces a reference's cards whole.
+
+def cards(sid: str, reference_id: str | None = None) -> list[dict]:
+    root = _dir(sid) / "cards"
+    if not root.is_dir():
+        return []
+    out: list[dict] = []
+    for f in sorted(root.glob("*.json")):
+        if reference_id and f.stem != reference_id:
+            continue
+        try:
+            out.extend(json.loads(f.read_text()))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def save_cards(sid: str, reference_id: str, rows: list[dict]) -> None:
+    if not _REF.match(str(reference_id or "")):
+        raise NotFound(reference_id)
+    with _LOCK:
+        folder = _dir(sid) / "cards"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{reference_id}.json"
+        tmp = path.with_suffix(f".{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps(rows, default=str))
+        tmp.replace(path)
+
+
+# ── drafts ─────────────────────────────────────────────────────────────────
+#
+# A draft is a folder of versions (`v1.json`, `v2.json` …); the latest is
+# the draft as it stands, the others are its history.
+
+_DRAFT = re.compile(r"^[0-9a-f]{12}$")
+
+
+def _draft_dir(sid: str, did: str) -> Path:
+    if not _DRAFT.match(str(did or "")):
+        raise NotFound(did)
+    return _dir(sid) / "drafts" / did
+
+
+def new_draft_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+def save_draft_version(sid: str, did: str, version: dict) -> dict:
+    with _LOCK:
+        folder = _draft_dir(sid, did)
+        folder.mkdir(parents=True, exist_ok=True)
+        n = int(version.get("version") or 0)
+        path = folder / f"v{n}.json"
+        tmp = path.with_suffix(f".{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps(version, default=str))
+        tmp.replace(path)
+    return version
+
+
+def draft_versions(sid: str, did: str) -> list[dict]:
+    folder = _draft_dir(sid, did)
+    if not folder.is_dir():
+        raise NotFound(did)
+    rows = []
+    for f in folder.glob("v*.json"):
+        try:
+            rows.append(json.loads(f.read_text()))
+        except (OSError, ValueError):
+            continue
+    if not rows:
+        raise NotFound(did)
+    return sorted(rows, key=lambda v: int(v.get("version") or 0))
+
+
+def drafts(sid: str) -> list[dict]:
+    """Every draft as it stands (its latest version), with its version list."""
+    root = _dir(sid) / "drafts"
+    if not root.is_dir():
+        return []
+    out = []
+    for d in root.iterdir():
+        try:
+            versions = draft_versions(sid, d.name)
+        except NotFound:
+            continue
+        latest = dict(versions[-1])
+        latest["versions"] = [{"version": v.get("version"), "at": v.get("at"), "changed": v.get("changed")}
+                              for v in versions]
+        out.append(latest)
+    return sorted(out, key=lambda v: v.get("created") or 0)
 
 
 def add_job_file(job: dict, data: bytes, *, name: str, media_type: str, caption: str = "",
@@ -264,16 +424,22 @@ def drawings(sid: str) -> list[dict]:
     return out
 
 
+def _scope(row: dict) -> str:
+    return str(row.get("scope") or "board")
+
+
 def save_drawing(sid: str, entry: dict, *, if_current: bool = False) -> bool:
-    """Put `entry` in the index in place of the one for the same screen.
-    With `if_current`, only while that one is this very drawing: a screen
-    redrawn while its first drawing was still running has a newer entry, and
-    the older thread's late result must not replace it."""
+    """Put `entry` in the index in place of the one for the same screen in
+    the same scope (the board's, or a draft's). With `if_current`, only
+    while that one is this very drawing: a screen redrawn while its first
+    drawing was still running has a newer entry, and the older thread's late
+    result must not replace it."""
+    same = lambda r: r.get("screen") == entry.get("screen") and _scope(r) == _scope(entry)  # noqa: E731
     with _LOCK:
-        held = [r for r in drawings(sid) if r.get("screen") == entry.get("screen")]
+        held = [r for r in drawings(sid) if same(r)]
         if if_current and held and held[0].get("id") != entry.get("id"):
             return False
-        rows = [r for r in drawings(sid) if r.get("screen") != entry.get("screen")]
+        rows = [r for r in drawings(sid) if not same(r)]
         rows.append(entry)
         folder = _drawings_dir(sid)
         folder.mkdir(parents=True, exist_ok=True)
@@ -312,4 +478,6 @@ def sniff(data: bytes) -> str:
 
 __all__ = ["ROOT", "KINDS", "NotFound", "create", "load", "save", "listed", "delete", "add_file",
            "file_meta", "file_path", "sniff", "new_job", "save_job", "load_job", "jobs", "add_job_file",
-           "STALE_AFTER", "drawings", "save_drawing", "new_drawing_id", "drawing_path"]
+           "STALE_AFTER", "drawings", "save_drawing", "new_drawing_id", "drawing_path", "job_dir",
+           "new_reference", "save_reference", "load_reference", "references", "cards", "save_cards",
+           "new_draft_id", "save_draft_version", "draft_versions", "drafts"]

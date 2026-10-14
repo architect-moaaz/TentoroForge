@@ -478,7 +478,9 @@ def run(session_id: str, job_id: str, said: list[str]) -> None:
         study.step("Joining what the workers found")
         summary = _loop(study, "synthesise", SYNTHESISE,
                         _ask(job) + "\n\nThe dossier:\n" + dossiers.brief(job["dossier"]), label="Synthesis")
+        from services.drafts_room import evidence
         with study.lock:
+            job["evidence"] = evidence.from_dossier(job)
             job.update(status="done", stage="done", summary=summary.strip(), finished=time.time())
             job["steps"].append({"at": time.time(), "text": "Study finished"})
             store.save_job(job)
@@ -489,9 +491,9 @@ def run(session_id: str, job_id: str, said: list[str]) -> None:
             store.save_job(job)
 
 
-def start(session: dict, reference: str, focus: str = "") -> dict:
+def start(session: dict, reference: str, focus: str = "", *, reference_id: str = "") -> dict:
     """A new study of `reference`, started on its own thread."""
-    job = store.new_job(session["id"], reference, focus)
+    job = store.new_job(session["id"], reference, focus, reference_id=reference_id)
     said = [str(m.get("text") or "") for m in session.get("chat") or [] if m.get("role") == "user"]
     said += [json.dumps(t.get("content"), default=str)[:400000] for t in session.get("turns") or []]
     threading.Thread(target=run, args=(session["id"], job["id"], said), daemon=True,

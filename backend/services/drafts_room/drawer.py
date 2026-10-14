@@ -200,14 +200,15 @@ def _find(board: dict, name: str) -> dict | None:
     return None
 
 
-def current(session: dict, brand: dict) -> dict[str, dict]:
+def current(session: dict, brand: dict, *, scope: str = "board", screens: list[dict] | None = None) -> dict[str, dict]:
     """Each screen's drawing by screen name, with `stale` set when the screen,
-    the brand or the product has changed since it was drawn."""
+    the brand or the product has changed since it was drawn. The board's
+    screens by default; a draft's with `scope="draft:<id>"` and its screens."""
     board = session.get("board") or {}
     product = board.get("product") or {}
-    rows = {r.get("screen"): r for r in store.drawings(session["id"])}
+    rows = {r.get("screen"): r for r in store.drawings(session["id"]) if str(r.get("scope") or "board") == scope}
     out: dict[str, dict] = {}
-    for s in board.get("screens") or []:
+    for s in (screens if screens is not None else board.get("screens") or []):
         row = rows.get(s.get("name"))
         if row is not None:
             out[s["name"]] = {**row, "stale": row.get("fingerprint") != fingerprint(s, brand, product)}
@@ -215,14 +216,14 @@ def current(session: dict, brand: dict) -> dict[str, dict]:
 
 
 def start(session: dict, names: list[str] | None, brand: dict, *, note: str = "",
-          emit: Emit | None = None) -> list[dict]:
+          emit: Emit | None = None, scope: str = "board", screens: list[dict] | None = None) -> list[dict]:
     """Draw the named screens (every screen when `names` is None) that have
     no current drawing — all of them when the person's `note` asks for a
     redraw — each on its own thread. Returns the entries started."""
     board = session.get("board") or {}
     product = board.get("product") or {}
-    have = current(session, brand)
-    wanted = [s for s in board.get("screens") or []
+    have = current(session, brand, scope=scope, screens=screens)
+    wanted = [s for s in (screens if screens is not None else board.get("screens") or [])
               if names is None or any(_same(s.get("name"), n) for n in names)]
     started: list[dict] = []
     for screen in wanted:
@@ -231,7 +232,7 @@ def start(session: dict, names: list[str] | None, brand: dict, *, note: str = ""
             continue
         if row is not None and row.get("status") == "done" and not row.get("stale") and not note:
             continue
-        entry = {"id": store.new_drawing_id(), "screen": screen["name"], "status": "drawing",
+        entry = {"id": store.new_drawing_id(), "screen": screen["name"], "scope": scope, "status": "drawing",
                  "viewport": viewport_for(product, screen), "fingerprint": fingerprint(screen, brand, product),
                  "html": False, "png": False, "caption": "", "brand_source": brand.get("source") or "none",
                  "like": screen.get("like") or "", "error": None, "at": time.time()}

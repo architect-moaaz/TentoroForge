@@ -7,7 +7,8 @@ phone, and change the idea board. When the person tells him to go ahead,
 requirements document and starts the build once the turn is over.
 
 Native tool use on the Anthropic API: web search and web fetch run on
-Anthropic's side; `screenshot`, `update_board`, `draw_screens` and `hand_off` run here. The
+Anthropic's side; `screenshot`, `update_board`, `draw_screens`, the reference, card and
+draft tools and `hand_off` run here. The
 conversation as the model was sent it is kept whole and only appended to
 (`session["turns"]`), so its thinking and its search results stay valid and
 its prefix stays cached.
@@ -47,7 +48,11 @@ RESEARCH WHAT THEY POINT AT. When the person names an app, a company or a site t
 
 WHEN A NAME IS AMBIGUOUS — two products with one name, the company or its app, the shopper side or the seller side, which country — ask before researching deeply: one short question with the likely options.
 
-STUDY A REFERENCE PROPERLY WITH THE RESEARCHER. For a real study of an app the person points at, call `research`: the Researcher maps its surfaces (site, app-store listings, help centre, seller side, write-ups), studies each one side by side — screens with screenshots, features with sources, rules, what users say — and joins it into a dossier. It works in the background for several minutes: say you have started it and keep the conversation going (what they want to keep, change or avoid). When the board says a study is finished, read it with `read_research` and walk the person through what it found — the key screens, features, flows and what users love or hate — then put on the board what you both decide to take. Once a study of an app is under way, do not study that app yourself as well — that is the Researcher's work; ask the person what matters to them instead. Use your own quick look (search, a page, a screenshot) only for small questions.
+STUDY A REFERENCE PROPERLY. For a real study of an app the person points at, call `add_reference` with its address: two studies start side by side and work in the background for several minutes. The Researcher maps its surfaces (site, app-store listings, help centre, seller side, write-ups) and writes a dossier — screens with screenshots, features with sources, rules, what users say. The deep study walks its public screens in the platform's browser and records what it DOES: the calls behind each screen (record shapes, actions), the forms and controls on each page — as evidence, each fact marked observed, derived, inferred or unknown. When the product only shows itself to a signed-in user, say so and invite the person to record their own session in their browser and drop the recording (a HAR file) on the reference: every credential is stripped before anything is kept, and Forge never signs in for anyone. `research` alone (no address) starts only the Researcher. Say you have started them and keep the conversation going (what they want to keep, change or avoid). When the board says a study is finished, read it with `read_research` and walk the person through what it found; once a study is under way, do not study that app yourself as well — ask the person what matters to them instead. Use your own quick look (search, a page, a screenshot) only for small questions.
+
+FEATURE CARDS. When a deep study ends, its evidence is written into feature cards by code — one feature each, in the team's own terms (records, process, screens, rules, roles), every line resting on evidence, with what could not be seen kept as unknowns. Read them with `read_cards` and walk the person through the features, saying what was observed and what was only inferred; `write_cards` writes a reference's cards again. Cards are what drafts are composed from.
+
+DRAFTS. When there are cards and the idea is still open, offer to compose two or three drafts: distinct first versions of the app, each with its screens, records, rules, what it leaves out, a cost and time range (never a quote) and what Forge cannot do yet. Call `compose_drafts`; the person sees them side by side on the board's Drafts tab, where they can pin notes on a screen or a line. Walk them through the differences. `revise_draft` with their note makes a new version of one draft; `read_drafts` shows them as they stand. When they choose one and tell you to build it, call `choose_draft`: the board is set from it and the build starts as a hand-off does. A person who has described the app fully may skip drafts and hand off from the board as before.
 
 SHOW, DON'T JUST TELL. Put what you learn on the idea board as you go with `update_board`, not all at the end: features with a priority (must for the first version, should, later) and their source; screens; flows step by step through named screens; records with their fields and links; the look. The person sees the board beside the conversation, and the screenshots you take appear in it. Keep open matters in `questions` and settled ones in `decisions`.
 
@@ -91,6 +96,44 @@ TOOLS: list[dict] = [
                                                    "description": "the app, with what tells it apart (its site)"},
                                      "focus": {"type": "string",
                                                "description": "what the person wants to learn from it"}}}},
+    {"name": "add_reference",
+     "description": ("Point the studies at a reference product by its address: the Researcher's surface study and "
+                     "the deep study (the platform browser walking its public screens, recording the calls and "
+                     "forms behind them as evidence) start side by side in the background. Only an address the "
+                     "person named. Returns at once."),
+     "input_schema": {"type": "object", "additionalProperties": False, "required": ["name", "url"],
+                      "properties": {"name": {"type": "string", "description": "the product's name"},
+                                     "url": {"type": "string", "description": "its public address"},
+                                     "focus": {"type": "string",
+                                               "description": "what the person wants from it, if they said"}}}},
+    {"name": "read_cards",
+     "description": "Read the feature cards written from a reference's evidence (all references when none is named).",
+     "input_schema": {"type": "object", "additionalProperties": False,
+                      "properties": {"reference": {"type": "string", "description": "a reference id"}}}},
+    {"name": "write_cards",
+     "description": "Write a reference's feature cards again from its evidence (they are written by code when a deep study ends).",
+     "input_schema": {"type": "object", "additionalProperties": False, "required": ["reference"],
+                      "properties": {"reference": {"type": "string", "description": "a reference id"}}}},
+    {"name": "compose_drafts",
+     "description": ("Compose two or three distinct drafts of the app from the feature cards, the board and the "
+                     "conversation, each with an estimate and what Forge cannot do yet. Takes a minute."),
+     "input_schema": {"type": "object", "additionalProperties": False,
+                      "properties": {"count": {"type": "integer", "minimum": 1, "maximum": 3},
+                                     "note": {"type": "string", "description": "what the person wants the drafts to differ on"}}}},
+    {"name": "revise_draft",
+     "description": "A new version of one draft on the person's note.",
+     "input_schema": {"type": "object", "additionalProperties": False, "required": ["draft", "note"],
+                      "properties": {"draft": {"type": "string", "description": "the draft id"},
+                                     "note": {"type": "string"}}}},
+    {"name": "read_drafts",
+     "description": "The drafts as they stand, with their notes and versions.",
+     "input_schema": {"type": "object", "additionalProperties": False, "properties": {}}},
+    {"name": "choose_draft",
+     "description": ("Set the idea board from the chosen draft and hand the app over to be built, as `hand_off` "
+                     "does. Only when the person's latest message tells you to build that draft."),
+     "input_schema": {"type": "object", "additionalProperties": False, "required": ["draft", "app_name"],
+                      "properties": {"draft": {"type": "string"}, "app_name": {"type": "string"},
+                                     "note": {"type": "string"}}}},
     {"name": "read_research",
      "description": "Read a study the Researcher made: its summary, its screenshots and its whole dossier.",
      "input_schema": {"type": "object", "additionalProperties": False, "required": ["study"],
@@ -159,13 +202,15 @@ def research_status(session: dict) -> str:
     read, or read."""
     lines = []
     for job in store.jobs(session["id"]):
+        kind = "deep study" if job.get("kind") == "deep" else "surface study"
         if job["status"] == "running":
-            lines.append(f"- {job['id']} {job['reference']}: running ({job.get('stage')}, {len(job.get('steps') or [])} steps)")
+            lines.append(f"- {job['id']} {kind} of {job['reference']}: running ({job.get('stage')}, {len(job.get('steps') or [])} steps)")
         elif job["status"] == "done":
-            lines.append(f"- {job['id']} {job['reference']}: finished" + ("" if job.get("read") else
-                                                                          " — not read yet: read it with `read_research`"))
+            lines.append(f"- {job['id']} {kind} of {job['reference']}: finished"
+                         + ("" if job.get("read") or job.get("kind") == "deep" else " — not read yet: read it with `read_research`")
+                         + (" — its cards: `read_cards`" if job.get("kind") == "deep" else ""))
         else:
-            lines.append(f"- {job['id']} {job['reference']}: {job['status']} — {job.get('error') or ''}")
+            lines.append(f"- {job['id']} {kind} of {job['reference']}: {job['status']} — {job.get('error') or ''}")
     return "\n".join(lines)
 
 
@@ -304,11 +349,144 @@ def research(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bool]:
     running = [j for j in store.jobs(session["id"]) if j["status"] == "running"]
     if len(running) >= 2:
         return [{"type": "text", "text": "Two studies are already running; wait for one to finish."}], True
-    job = researcher.start(session, reference, str(args.get("focus") or ""))
+    ref = store.new_reference(session["id"], reference, "", added_by=str(session.get("user_id") or ""), allowed=["public"])
+    job = researcher.start(session, reference, str(args.get("focus") or ""), reference_id=ref["id"])
+    ref["studies"] = {"surface": job["id"]}
+    store.save_reference(ref)
+    emit("reference", {"reference": ref})
     emit("research", {"job": job})
     emit("step", {"text": f"Started the Researcher on {reference}"})
     return [{"type": "text", "text": (f"The Researcher is studying {reference} (study {job['id']}). It takes "
                                       "several minutes; keep talking with the person meanwhile.")}], False
+
+
+def add_reference(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bool]:
+    from services.drafts_room import capture, researcher
+    from services.smith import web
+    name = " ".join(str(args.get("name") or "").split())
+    url = str(args.get("url") or "").strip()
+    if not name or not url:
+        return [{"type": "text", "text": "`name` and `url` name the product and its public address."}], True
+    said = [str(m.get("text") or "") for m in session.get("chat") or [] if m.get("role") == "user"] + _seen_urls(session)
+    try:
+        url = web.check_url(url, said)
+    except web.WebRefused as exc:
+        return [{"type": "text", "text": str(exc)}], True
+    running = [j for j in store.jobs(session["id"]) if j["status"] == "running"]
+    if len(running) >= 4:
+        return [{"type": "text", "text": "Four studies are already running; wait for one to finish."}], True
+    ref = store.new_reference(session["id"], name, url, added_by=str(session.get("user_id") or ""),
+                              allowed=["public", "session"])
+    surface = researcher.start(session, name, str(args.get("focus") or ""), reference_id=ref["id"])
+    deep = capture.start(session, ref, str(args.get("focus") or ""))
+    ref["studies"] = {"surface": surface["id"], "deep": deep["id"]}
+    store.save_reference(ref)
+    emit("reference", {"reference": ref})
+    emit("research", {"job": surface})
+    emit("research", {"job": deep})
+    emit("step", {"text": f"Started the surface and deep studies of {name}"})
+    return [{"type": "text", "text": (f"Reference {ref['id']} ({name}) added. The Researcher (study {surface['id']}) "
+                                      f"and the deep study ({deep['id']}) are running; they take several minutes. "
+                                      "Keep talking with the person meanwhile; invite them to drop a recording of "
+                                      "their own signed-in session on the reference if the product hides behind a sign-in.")}], False
+
+
+def read_cards(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bool]:
+    from services.drafts_room import cards as cardlib
+    rid = str(args.get("reference") or "") or None
+    rows = store.cards(session["id"], rid)
+    if not rows:
+        refs = store.references(session["id"])
+        deep = [j for j in store.jobs(session["id"]) if j.get("kind") == "deep"]
+        why = ("no reference has been added yet" if not refs else
+               "no deep study has finished yet" if not any(j["status"] == "done" for j in deep) else
+               "the deep study found no evidence to write cards from (the site may have turned the browser away)")
+        return [{"type": "text", "text": f"No cards yet: {why}.\n" + research_status(session)}], True
+    emit("step", {"text": f"Read {len(rows)} feature cards"})
+    return [{"type": "text", "text": cardlib.brief(rows)}], False
+
+
+def write_cards(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bool]:
+    from services.drafts_room import cards as cardlib
+    rid = str(args.get("reference") or "")
+    try:
+        store.load_reference(session["id"], rid)
+    except store.NotFound:
+        return [{"type": "text", "text": "No reference with that id. References: "
+                 + ", ".join(f"{r['id']} {r['name']}" for r in store.references(session["id"]))}], True
+    emit("step", {"text": "Writing the feature cards…"})
+    rows = cardlib.write(session["id"], rid)
+    emit("cards", {"cards": store.cards(session["id"])})
+    if not rows:
+        return [{"type": "text", "text": "No evidence to write cards from yet."}], True
+    return [{"type": "text", "text": f"{len(rows)} cards written.\n" + cardlib.brief(rows)}], False
+
+
+def compose_drafts(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bool]:
+    from services.drafts_room import drafts as draftlib
+    count = int(args.get("count") or 2)
+    emit("step", {"text": f"Composing {count} drafts…"})
+    rows = draftlib.compose(session, count, str(args.get("note") or ""))
+    if not rows:
+        return [{"type": "text", "text": "No draft came back; try again with a note on what they should differ on."}], True
+    for d in rows:
+        emit("draft", {"draft": d})
+    return [{"type": "text", "text": "Drafts composed:\n" + "\n".join(_draft_line(d) for d in rows)}], False
+
+
+def revise_draft(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bool]:
+    from services.drafts_room import drafts as draftlib
+    did = str(args.get("draft") or "")
+    try:
+        store.draft_versions(session["id"], did)
+    except store.NotFound:
+        return [{"type": "text", "text": "No draft with that id. " + _draft_ids(session)}], True
+    emit("step", {"text": "Revising the draft…"})
+    version = draftlib.revise(session, did, str(args.get("note") or ""))
+    emit("draft", {"draft": version})
+    return [{"type": "text", "text": f"Version {version['version']}: {version.get('changed')}\n" + _draft_line(version)}], False
+
+
+def read_drafts(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bool]:
+    rows = store.drafts(session["id"])
+    if not rows:
+        return [{"type": "text", "text": "No drafts yet; compose them with `compose_drafts`."}], True
+    return [{"type": "text", "text": "\n\n".join(_draft_line(d, full=True) for d in rows)}], False
+
+
+def choose_draft(session: dict, args: dict, emit: Emit, words: str) -> tuple[list[dict], bool]:
+    from services.drafts_room import drafts as draftlib
+    did = str(args.get("draft") or "")
+    try:
+        store.draft_versions(session["id"], did)
+    except store.NotFound:
+        return [{"type": "text", "text": "No draft with that id. " + _draft_ids(session)}], True
+    if session.get("handoff"):
+        return [{"type": "text", "text": "This idea has already been handed to an app."}], True
+    if not consented(words):
+        return [{"type": "text", "text": "Not chosen: the person has not told you to build it yet. Ask them."}], True
+    draftlib.choose(session, did)
+    emit("board", {"board": session["board"]})
+    emit("step", {"text": "Board set from the chosen draft"})
+    return hand_off(session, {"app_name": args.get("app_name"), "note": args.get("note")}, emit, words)
+
+
+def _draft_ids(session: dict) -> str:
+    return "Drafts: " + ", ".join(f"{d['id']} “{d.get('title')}” v{d.get('version')}" for d in store.drafts(session["id"]))
+
+
+def _draft_line(d: dict, full: bool = False) -> str:
+    est = d.get("estimate") or {}
+    cost, mins = est.get("cost") or {}, est.get("minutes") or {}
+    head = (f"- {d['id']} v{d.get('version')} “{d.get('title')}”: {d.get('pitch')} — {len(d.get('screens') or [])} screens, "
+            f"{len(d.get('records') or [])} records; about ${cost.get('low')}–{cost.get('high')} and "
+            f"{mins.get('low')}–{mins.get('high')} min to build"
+            + ("; cannot yet: " + ", ".join(c['kind'] for c in d.get("cannot_yet") or []) if d.get("cannot_yet") else ""))
+    if not full:
+        return head
+    import json
+    return head + "\n" + json.dumps({k: d.get(k) for k in ("roles", "features", "screens", "records", "rules", "flows",
+                                                           "left_out", "assumed", "notes")}, indent=1, default=str)[:12000]
 
 
 def read_research(session: dict, args: dict, emit: Emit) -> tuple[list[dict], bool]:
@@ -453,6 +631,20 @@ def turn(session: dict, text: str, file_ids: list[str], emit: Emit) -> dict:
                     out, err = read_research(session, args, note)
                 elif block["name"] == "draw_screens":
                     out, err = draw_screens(session, args, note)
+                elif block["name"] == "add_reference":
+                    out, err = add_reference(session, args, note)
+                elif block["name"] == "read_cards":
+                    out, err = read_cards(session, args, note)
+                elif block["name"] == "write_cards":
+                    out, err = write_cards(session, args, note)
+                elif block["name"] == "compose_drafts":
+                    out, err = compose_drafts(session, args, note)
+                elif block["name"] == "revise_draft":
+                    out, err = revise_draft(session, args, note)
+                elif block["name"] == "read_drafts":
+                    out, err = read_drafts(session, args, note)
+                elif block["name"] == "choose_draft":
+                    out, err = choose_draft(session, args, note, text)
                 elif block["name"] == "hand_off":
                     out, err = hand_off(session, args, note, text)
                 else:

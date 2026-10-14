@@ -40,6 +40,29 @@ function Source({ url }: { url?: string }) {
   );
 }
 
+function Deep({ study }: { study: Study }) {
+  const c = study.capture;
+  const e = study.evidence;
+  return (
+    <div className="space-y-2 text-sm">
+      <div className="flex items-center gap-2 text-muted-foreground">
+        {study.status === "running" && <Loader2 className="h-4 w-4 animate-spin" />}
+        <span>{study.source === "har" ? "Your recording" : "Deep study"} · {study.stage}</span>
+      </div>
+      {c && <p className="text-xs">{c.pages} pages read · {c.calls} calls kept{c.hosts?.length ? ` · ${c.hosts.join(", ")}` : ""}
+        {c.stopped_on ? <span className="text-amber-700"> · stopped: {c.stopped_on}</span> : null}</p>}
+      {e && (study.evidence_total ?? 0) > 0 && (
+        <p className="text-xs">{study.evidence_total} facts: {e.observed} observed, {e.derived} derived, {e.inferred} inferred, {e.unknown} unknown — see the Evidence tab.</p>
+      )}
+      {study.summary && <p className="text-xs">{study.summary}</p>}
+      {study.error && <p className="text-xs text-destructive">{study.error}</p>}
+      <ul className="text-xs space-y-0.5 max-h-60 overflow-y-auto">
+        {[...study.steps].reverse().map((s, i) => <li key={i} className="text-muted-foreground">• {s.text}</li>)}
+      </ul>
+    </div>
+  );
+}
+
 function Running({ study }: { study: Study }) {
   const [now, setNow] = useState(Date.now() / 1000);
   useEffect(() => {
@@ -215,7 +238,7 @@ export function ResearchPanel({ studies, filePath, onPicture }:
           {studies.map((s) => (
             <button key={s.id} onClick={() => setChosen(s.id)}
               className={`text-xs rounded-full border px-2 py-0.5 ${s.id === study.id ? "bg-primary text-primary-foreground" : ""}`}>
-              {s.reference.slice(0, 30)}
+              {s.reference.slice(0, 30)}{s.kind === "deep" ? (s.source === "har" ? " · recording" : " · deep") : ""}
             </button>
           ))}
         </div>
@@ -227,12 +250,16 @@ export function ResearchPanel({ studies, filePath, onPicture }:
         </Badge>
       </div>
       {study.focus && <p className="text-xs text-muted-foreground">Looking for: {study.focus}</p>}
-      {study.status === "running" && <Running study={study} />}
-      {study.status === "done" && <Done study={study} filePath={filePath} onPicture={onPicture} />}
-      {(study.status === "failed" || study.status === "stopped") && (
+      {study.kind === "deep" ? <Deep study={study} /> : (
         <>
-          <p className="text-sm text-destructive">{study.error}</p>
-          <Done study={study} filePath={filePath} onPicture={onPicture} />
+          {study.status === "running" && <Running study={study} />}
+          {study.status === "done" && <Done study={study} filePath={filePath} onPicture={onPicture} />}
+          {(study.status === "failed" || study.status === "stopped") && (
+            <>
+              <p className="text-sm text-destructive">{study.error}</p>
+              <Done study={study} filePath={filePath} onPicture={onPicture} />
+            </>
+          )}
         </>
       )}
     </div>
