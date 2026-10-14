@@ -1,6 +1,7 @@
 """The app's own addresses, from a conversation: "put it on app.acme.com",
 "is my domain working?", "where do I point my DNS?", "remove the old domain",
-"call our address aqua" (the free address the platform gives the app).
+"call our address aqua" (the free address the platform gives the app),
+"add the DNS records for me" (at the DNS account the organisation connected).
 
 The same service the Publish dialog and App settings use
 (`services.deploy.domains`): Smith never writes a record or a key; it says
@@ -61,7 +62,7 @@ def run(output_dir: str, verb: str, *, domain: str = "", change: str = "", reaso
     said: list[str] = []
     client = None
     if not os.environ.get("VERCEL_TOKEN"):
-        if verb in ("connect_domain", "remove_domain", "rename_app_address"):
+        if verb in ("connect_domain", "remove_domain", "rename_app_address", "add_dns_records"):
             return _envelope(False, reason="Publishing is not set up on this platform, so I cannot attach addresses.")
     else:
         # A status question checks now, like Check now does.
@@ -72,6 +73,15 @@ def run(output_dir: str, verb: str, *, domain: str = "", change: str = "", reaso
                         say=said.append, address_check=check_address)
 
     async def act() -> str:
+        if client is not None and verb in ("add_dns_records", "remove_domain"):
+            from services.deploy.dns_accounts import load_for_output_dir
+            for where in dict.fromkeys([str(output_dir).rstrip("/"), str(root), str(Path(root) / "app")]):
+                try:
+                    svc.dns = await load_for_output_dir(where)
+                except Exception:  # noqa: BLE001 — no store: the owner adds the records
+                    logger.info("[domain-change] DNS accounts unavailable for %s", where, exc_info=True)
+                if svc.dns:
+                    break
         try:
             if verb == "connect_domain":
                 if not name:
@@ -84,6 +94,14 @@ def run(output_dir: str, verb: str, *, domain: str = "", change: str = "", reaso
                 tail = (" I will say here when it is live; App settings → Domains shows its progress."
                         if view.get("status") != "live" else "")
                 return _said(view) + tail
+            if verb == "add_dns_records":
+                targets = [name] if name else [e["name"] for e in svc.entries()
+                                               if e.get("kind") != "tentoro" and not e.get("redirectTo")
+                                               and e.get("status") != "live"]
+                if not targets:
+                    raise DomainRefused("Which address? Give it in full, for example app.your-company.com.")
+                replace = bool(re.search(r"\b(replace|overwrite)\b", change or "", re.I))
+                return " ".join([(await svc.write_records(t, replace=replace))["message"] for t in targets])
             if verb == "rename_app_address":
                 label = name or str(domain or "").strip()
                 if not label:
@@ -110,6 +128,8 @@ def run(output_dir: str, verb: str, *, domain: str = "", change: str = "", reaso
         finally:
             if client is not None:
                 await client.close()
+            from services.deploy.dns_accounts import close_all
+            await close_all(svc.dns)
 
     try:
         text = run_sync(act())

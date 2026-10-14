@@ -85,6 +85,7 @@
 {"say": "where do I point my DNS?", "verb": "domain_status"}
 {"say": "remove app.acme.com", "verb": "remove_domain"}
 {"say": "call our address aqua", "verb": "rename_app_address"}
+{"say": "add the DNS records for me", "verb": "add_dns_records"}
 {"say": "who changed the invoices yesterday", "verb": "show_audit"}
 {"say": "show me the deletions", "verb": "show_audit"}
 {"say": "export the audit trail", "verb": "export_audit"}

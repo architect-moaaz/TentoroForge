@@ -484,6 +484,12 @@ sentences:
     source: code
     reaches: {verb: rename_app_address, states: [domain]}
 
+  - id: does-add-dns-records
+    say: "add the DNS records for me"
+    checked: {colour: acts, via: handler}
+    source: code
+    reaches: {verb: add_dns_records, states: []}
+
   - id: does-accept-stripe-event
     say: "accept payment.succeeded from Stripe"
     checked: {colour: acts, via: handler}

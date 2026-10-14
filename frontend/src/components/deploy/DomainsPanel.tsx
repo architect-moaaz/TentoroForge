@@ -12,8 +12,11 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, ExternalLink, Loader2, Pencil, RefreshCw, Star, Trash2 } from "lucide-react";
+import { Check, Copy, ExternalLink, Loader2, Pencil, RefreshCw, Star, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
+
+import Link from "next/link";
+import { useParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +43,18 @@ export interface DomainView {
   liveAt?: string;
   works?: boolean | null;
   worksDetail?: string;
+  /** Who runs the domain's DNS, from its nameservers ("Cloudflare"), or "". */
+  dnsHost?: string;
+  /** Forge wrote this address's records at a connected DNS account. */
+  written?: boolean;
+}
+
+export interface WriteResult {
+  written: boolean;
+  conflicts: boolean;
+  replaceable?: boolean;
+  provider: string;
+  message: string;
 }
 
 export interface DomainsState {
@@ -49,6 +64,8 @@ export interface DomainsState {
   mainAddress: string;
   elsewhere: { what: string; address: string }[];
   appsDomain: string;
+  /** The organisation's connected DNS accounts, by name. */
+  dnsAccounts: string[];
 }
 
 const KIND_LABEL: Record<DomainView["kind"], string> = {
@@ -89,6 +106,8 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
   const key = ["project", projectId, "domains"];
   const [name, setName] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [written, setWritten] = useState<Record<string, WriteResult>>({});
+  const params = useParams<{ orgId?: string }>();
 
   const { data, isLoading, error } = useQuery({
     queryKey: key,
@@ -130,6 +149,20 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
     onSuccess: (next) => {
       done(next);
       toast.success("Address removed");
+    },
+    onError: fail,
+  });
+  const writeRecords = useMutation({
+    mutationFn: ({ n, replace }: { n: string; replace: boolean }) =>
+      api.post<DomainsState & { result: WriteResult }>(
+        `/api/projects/${projectId}/domains/${encodeURIComponent(n)}/records`,
+        { replace },
+      ),
+    onSuccess: (next, { n }) => {
+      const { result, ...view } = next;
+      done(view);
+      setWritten((w) => ({ ...w, [n]: result }));
+      if (result.written) toast.success(`Records added at ${result.provider}`);
     },
     onError: fail,
   });
@@ -231,6 +264,60 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
                   </table>
                 </div>
                 <p className="text-[11px] text-slate-500">It usually works within minutes and can take up to two days.</p>
+                {(data.dnsAccounts ?? []).length > 0 ? (
+                  <div className="space-y-1.5 pt-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => writeRecords.mutate({ n: d.name, replace: false })}
+                      disabled={writeRecords.isPending && writeRecords.variables?.n === d.name}
+                    >
+                      {writeRecords.isPending && writeRecords.variables?.n === d.name ? (
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                      ) : (
+                        <Wand2 className="mr-1 h-3 w-3" />
+                      )}
+                      Add the records for me
+                    </Button>
+                    {written[d.name] && !written[d.name].written && (
+                      <div
+                        role="status"
+                        className={`rounded-md p-2 text-xs ${
+                          written[d.name].conflicts
+                            ? "bg-amber-50 text-amber-900 dark:bg-amber-900/30 dark:text-amber-100"
+                            : "bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        }`}
+                      >
+                        <p>{written[d.name].message}</p>
+                        {written[d.name].conflicts && written[d.name].replaceable && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-2"
+                            onClick={() => writeRecords.mutate({ n: d.name, replace: true })}
+                          >
+                            Replace {written[d.name].provider ? `at ${written[d.name].provider}` : "them"}
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  d.dnsHost &&
+                  ["Cloudflare", "Route 53", "GoDaddy"].includes(d.dnsHost) && (
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                      {d.name.split(".").slice(-2).join(".")}&rsquo;s DNS is at {d.dnsHost}.{" "}
+                      {params?.orgId ? (
+                        <Link href={`/org/${params.orgId}/settings/integrations`} className="underline">
+                          Connect {d.dnsHost}
+                        </Link>
+                      ) : (
+                        <>Connect {d.dnsHost} under Settings → Integrations</>
+                      )}{" "}
+                      and Forge adds the records for you.
+                    </p>
+                  )
+                )}
               </div>
             )}
 

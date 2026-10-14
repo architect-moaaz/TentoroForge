@@ -25,6 +25,10 @@ What happens to an address:
    is redeployed so the setting takes effect, and the old `vercel.app`
    address sends people there unless the owner chose to keep it answering.
 
+When the owner has connected their DNS provider, `write_records` adds the
+records itself (`services.deploy.dns_providers`, with its safety rules), and
+removing the address takes away exactly what Forge wrote.
+
 A bare domain brings its `www.` companion, which sends people to it. The
 Tentoro address stays with the app: it can be renamed, not removed, and it
 is the address the app uses while none of the owner's own is live.
@@ -294,6 +298,10 @@ class DomainService:
     now: Callable[[], datetime] = _now
     #: `(works, why)` for a live address; None skips it (tests of the rest).
     address_check: Callable[[str], Awaitable[tuple[bool, str]]] | None = None
+    #: The organisation's connected DNS accounts (`dns_accounts.load`).
+    dns: list[Any] = field(default_factory=list)
+    #: Their names, for what is shown (`dns_accounts.connected_labels`).
+    dns_labels: list[str] = field(default_factory=list)
     _project_id: str | None = field(default=None, init=False)
 
     # ── the definition ──────────────────────────────────────────────
@@ -427,6 +435,7 @@ class DomainService:
         if pid:
             for n in sorted(gone):
                 await self.client.remove_project_domain(pid, n)
+        await self._unwrite(gone)
 
         def change(dep: dict) -> None:
             dep["domains"] = [e for e in dep["domains"] if e.get("name") not in gone]
@@ -457,6 +466,105 @@ class DomainService:
         self._write(change, f"Make {name} the main address")
         await self.follow()
         return self.view_of(name)
+
+    async def write_records(self, raw: str, *, replace: bool = False) -> dict:
+        """Add the address's records at the owner's DNS provider (and its
+        `www.` companion's with it). `{written, conflicts, message, provider}`.
+        Nothing is written when anything is in the way, unless `replace`; mail
+        and proof records are never replaced."""
+        from services.deploy.dns_providers import DnsRefused, Record, plan, said_conflicts
+        name = normalise(raw)
+        entry = next((e for e in self.entries() if e["name"] == name), None)
+        if entry is None:
+            raise DomainRefused(f"{name} is not one of this app's addresses.")
+        if entry.get("kind") == "tentoro":
+            return {"written": False, "conflicts": False, "provider": "",
+                    "message": f"{name} needs no records; Tentoro's DNS already points at the app."}
+        if not self.dns:
+            where = (read_ledger(self.output_dir).get("domains") or {}).get(name, {}).get("dnsHost") or ""
+            raise DomainRefused(
+                "No DNS account is connected. " + (f"{name}'s DNS is at {where}: " if where else "")
+                + "connect it under Settings → Integrations and I can add the records, or add them yourself.")
+        if not await self.project_id():
+            raise DomainRefused("Publish the app first; Vercel says which records to add once it is attached.")
+        names = [name] + [e["name"] for e in self.entries() if e.get("redirectTo") == name]
+        wanted: dict[str, list[Record]] = {}
+        for n in names:
+            view = await self.refresh(n)
+            wanted[n] = [Record(host=r["host"], type=r["type"], value=r["value"]) for r in view.get("records") or []]
+        if not any(wanted.values()):
+            return {"written": False, "conflicts": False, "provider": "",
+                    "message": f"{name} needs no records now: " + _said_state(self.view_of(name))}
+        provider = zone = None
+        for p in self.dns:
+            try:
+                zone = await p.zone_for(name)
+            except RuntimeError:
+                logger.warning("[domains] %s could not look for %s", getattr(p, "label", p), name, exc_info=True)
+                zone = None
+            if zone:
+                provider = p
+                break
+        if provider is None or not zone:
+            raise DomainRefused(f"None of your connected DNS accounts ({', '.join(p.label for p in self.dns)}) "
+                                f"holds {name}. Connect the account that does, or add the records yourself.")
+        plans = {}
+        for n, rows in wanted.items():
+            existing: list[Record] = []
+            for host in sorted({r.host for r in rows}):
+                existing += await provider.records(zone, host)
+            plans[n] = plan(rows, existing, replace=replace)
+        stuck = [pl for pl in plans.values() if pl.blocked or (pl.conflicts and not replace)]
+        if stuck:
+            return {"written": False, "conflicts": True, "provider": provider.label,
+                    "replaceable": not any(pl.blocked for pl in stuck),
+                    "message": " ".join(said_conflicts(pl, provider.label) for pl in stuck)}
+        added: list[str] = []
+        replaced: list[str] = []
+        try:
+            for n, pl in plans.items():
+                for _, old in pl.conflicts:
+                    await provider.delete(zone, old)
+                    replaced.append(f"{old.type} {old.host} → {old.value}")
+                written = []
+                for rec in pl.add:
+                    rid = await provider.create(zone, rec)
+                    written.append({"provider": provider.label, "zone": zone, "host": rec.host, "type": rec.type,
+                                    "value": rec.value, "id": rid})
+                    added.append(f"{rec.type} {rec.host} → {rec.value}")
+                if written:
+                    led = read_ledger(self.output_dir)
+                    seen = led.setdefault("domains", {}).setdefault(n, {})
+                    seen["written"] = [*(seen.get("written") or []), *written]
+                    _write_ledger(self.output_dir, led)
+        except (RuntimeError, DnsRefused) as exc:
+            raise DomainRefused(f"{provider.label} refused a change: {str(exc)[-240:]}"
+                                + (f" Already added: {'; '.join(added)}." if added else "")) from exc
+        for n in names:
+            await self.refresh(n)
+        if not added:
+            return {"written": False, "conflicts": False, "provider": provider.label,
+                    "message": f"The records are already there at {provider.label}; {name} answers once they spread."}
+        return {"written": True, "conflicts": False, "provider": provider.label,
+                "message": (f"Added at {provider.label}: {'; '.join(added)}."
+                            + (f" Replaced: {'; '.join(replaced)}." if replaced else "")
+                            + f" {name} usually answers within minutes; I will say here when it is live.")}
+
+    async def _unwrite(self, names: set[str]) -> None:
+        """Take away the records Forge itself wrote for these addresses."""
+        led = read_ledger(self.output_dir)
+        by_label = {getattr(p, "label", ""): p for p in self.dns}
+        from services.deploy.dns_providers import Record
+        for n in names:
+            for w in (led.get("domains") or {}).get(n, {}).get("written") or []:
+                p = by_label.get(w.get("provider"))
+                if p is None:
+                    continue
+                try:
+                    await p.delete(w["zone"], Record(host=w["host"], type=w["type"], value=w["value"], id=w.get("id") or ""))
+                except Exception:  # noqa: BLE001 — the address is gone either way
+                    logger.warning("[domains] could not take away %s %s at %s", w.get("type"), w.get("host"),
+                                   w.get("provider"), exc_info=True)
 
     async def set_old_address(self, mode: str) -> None:
         if mode not in ("redirect", "keep"):
@@ -563,6 +671,12 @@ class DomainService:
         else:
             became_apex = False
         state, reason = state_of(name, project_domain, config)
+        if state not in ("dns-ok",) and entry.get("kind") != "tentoro" and "dnsHost" not in seen:
+            from services.deploy import dns_providers
+            try:
+                seen["dnsHost"] = await dns_providers.dns_host(name)
+            except Exception:  # noqa: BLE001 — a hint, never a failure
+                seen["dnsHost"] = ""
         if state == "dns-ok":
             ok, why = await (self.probe or https_probe)(name)
             state, reason = ("live", "") if ok else ("certificate", why)
@@ -683,7 +797,8 @@ class DomainService:
         seen = (read_ledger(self.output_dir).get("domains") or {}).get(name, {})
         return {**e, "records": seen.get("records") or [], "checkedAt": seen.get("checkedAt"),
                 "state": seen.get("state"), "detail": seen.get("reason") or e.get("reason") or "",
-                "works": seen.get("works"), "worksDetail": seen.get("worksWhy") or ""}
+                "works": seen.get("works"), "worksDetail": seen.get("worksWhy") or "",
+                "dnsHost": seen.get("dnsHost") or "", "written": bool(seen.get("written"))}
 
     def view(self) -> dict:
         """Everything the Domains section and Smith show."""
@@ -704,7 +819,7 @@ class DomainService:
         return {"domains": entries, "oldAddress": self.old_address(),
                 "vercelAddress": f"https://{self.project_name}.vercel.app",
                 "mainAddress": main, "elsewhere": elsewhere,
-                "appsDomain": apps_domain()}
+                "appsDomain": apps_domain(), "dnsAccounts": list(self.dns_labels)}
 
     def _tell(self, text: str) -> None:
         if self.say is not None:
@@ -712,6 +827,10 @@ class DomainService:
                 self.say(text)
             except Exception:  # noqa: BLE001 — telling is best-effort
                 logger.warning("[domains] could not tell the owner: %s", text, exc_info=True)
+
+
+def _said_state(view: dict) -> str:
+    return "it is live." if view.get("status") == "live" else (view.get("detail") or "it is being checked.")
 
 
 def project_root(path: str | Path) -> Path:

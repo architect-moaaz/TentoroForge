@@ -45,6 +45,7 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("next/navigation", () => ({ useParams: () => ({ orgId: "o1" }) }));
 
 import { DomainsPanel } from "../DomainsPanel";
 
@@ -126,5 +127,34 @@ describe("DomainsPanel", () => {
     const submit = [...host.querySelectorAll("form button[type=submit]")].find((b) => b.textContent?.includes("Rename")) as HTMLButtonElement;
     await act(async () => { submit.click(); });
     expect(apiPut).toHaveBeenCalledWith("/api/projects/p1/domains/tentoro", { name: "aqua" });
+  });
+
+  it("adds the records at a connected DNS account, and replaces only when asked", async () => {
+    apiGet.mockImplementation(async () => ({ ...waiting, dnsAccounts: ["Cloudflare"] }));
+    const conflict = {
+      ...waiting, dnsAccounts: ["Cloudflare"],
+      result: { written: false, conflicts: true, replaceable: true, provider: "Cloudflare",
+                message: "I did not change anything: A app.acme.com → 1.2.3.4 is already there at Cloudflare." },
+    };
+    apiPost.mockImplementationOnce(async () => conflict);
+    await render();
+    await act(async () => { button("Add the records for me").click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(apiPost).toHaveBeenCalledWith("/api/projects/p1/domains/app.acme.com/records", { replace: false });
+    expect(host.textContent).toContain("1.2.3.4 is already there");
+    apiPost.mockImplementationOnce(async () => ({ ...live, dnsAccounts: ["Cloudflare"],
+      result: { written: true, conflicts: false, provider: "Cloudflare", message: "Added" } }));
+    await act(async () => { button("Replace at Cloudflare").click(); });
+    expect(apiPost).toHaveBeenLastCalledWith("/api/projects/p1/domains/app.acme.com/records", { replace: true });
+  });
+
+  it("says where the domain's DNS is when no account is connected", async () => {
+    apiGet.mockImplementation(async () => ({
+      ...waiting, dnsAccounts: [], domains: [{ ...waiting.domains[0], dnsHost: "Cloudflare" }],
+    }));
+    await render();
+    expect(host.textContent).toContain("acme.com’s DNS is at Cloudflare");
+    expect(host.querySelector('a[href="/org/o1/settings/integrations"]')).not.toBeNull();
+    expect(button("Add the records for me")).toBeUndefined();
   });
 });

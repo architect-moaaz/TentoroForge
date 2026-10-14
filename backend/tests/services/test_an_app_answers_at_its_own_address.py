@@ -130,6 +130,10 @@ def _no_real_probe(monkeypatch):
     monkeypatch.setattr(dm, "https_probe", answers)
     monkeypatch.setattr("services.deploy.domain_check.check_address", answers)
 
+    async def nobody(name, transport=None):
+        return ""
+    monkeypatch.setattr("services.deploy.dns_providers.dns_host", nobody)
+
 
 # --------------------------------------------------------------------------- #
 
@@ -363,7 +367,7 @@ def test_the_domain_actions_are_registered_everywhere_smith_looks():
     from services.smith.capabilities import unaccounted
     from services.smith.verbs import REQUIRED_BY_VERB, VERB_EXAMPLES, VERB_HELP
     from services.smith4.verbs import PERFORM as VERBS
-    verbs = {"connect_domain", "remove_domain", "domain_status", "rename_app_address"}
+    verbs = {"connect_domain", "remove_domain", "domain_status", "rename_app_address", "add_dns_records"}
     for v in verbs:
         assert v in REQUIRED_BY_VERB and v in VERB_HELP and v in VERB_EXAMPLES and v in VERBS
     assert not verbs & unaccounted()

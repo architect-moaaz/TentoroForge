@@ -29,6 +29,10 @@ class OldAddress(BaseModel):
     mode: str
 
 
+class WriteRecords(BaseModel):
+    replace: bool = False
+
+
 async def _project(project_id: uuid.UUID, user: PlatformUser, db: AsyncSession) -> Project:
     project = await get_project_with_auth(project_id, user, db)
     if not project.output_dir:
@@ -59,16 +63,19 @@ async def _tell(project_id: uuid.UUID, said: list[str]) -> None:
         logger.warning("[domains] could not post to the chat of %s", project_id, exc_info=True)
 
 
-async def _run(project_id: uuid.UUID, user: PlatformUser, db: AsyncSession, act):
+async def _run(project_id: uuid.UUID, user: PlatformUser, db: AsyncSession, act, *, dns: bool = False):
+    from services.deploy import dns_accounts
     from services.deploy.domains import DomainRefused, DomainService, project_root, vercel_project_name
     project = await _project(project_id, user, db)
     said: list[str] = []
     client = _client()
+    providers = await dns_accounts.load(project.org_id, db) if dns else []
     try:
         from services.deploy.domain_check import check_address
         svc = DomainService(output_dir=str(project_root(project.output_dir)), client=client,
                             project_name=vercel_project_name(project.short_id), say=said.append,
-                            address_check=check_address)
+                            address_check=check_address, dns=providers,
+                            dns_labels=await dns_accounts.connected_labels(project.org_id, db))
         result = await act(svc)
         return result if result is not None else svc.view()
     except DomainRefused as exc:
@@ -77,6 +84,7 @@ async def _run(project_id: uuid.UUID, user: PlatformUser, db: AsyncSession, act)
         raise HTTPException(400, "This app has no definition yet.") from exc
     finally:
         await client.close()
+        await dns_accounts.close_all(providers)
         await _tell(project_id, said)
 
 
@@ -85,10 +93,12 @@ async def list_domains(project_id: uuid.UUID, user: PlatformUser = Depends(get_c
                        db: AsyncSession = Depends(get_db)):
     """The app's addresses, their records and status. Reading never calls
     Vercel; Check now does."""
+    from services.deploy import dns_accounts
     from services.deploy.domains import DomainService, project_root, vercel_project_name
     project = await _project(project_id, user, db)
     svc = DomainService(output_dir=str(project_root(project.output_dir)), client=None,
-                        project_name=vercel_project_name(project.short_id))
+                        project_name=vercel_project_name(project.short_id),
+                        dns_labels=await dns_accounts.connected_labels(project.org_id, db))
     return svc.view()
 
 
@@ -125,7 +135,7 @@ async def remove_domain(project_id: uuid.UUID, name: str, user: PlatformUser = D
     async def act(svc):
         await svc.remove(name)
         return svc.view()
-    return await _run(project_id, user, db, act)
+    return await _run(project_id, user, db, act, dns=True)
 
 
 @router.put("/api/projects/{project_id}/domains/old-address")
@@ -145,3 +155,14 @@ async def rename_tentoro(project_id: uuid.UUID, body: AddDomain, user: PlatformU
         await svc.rename_tentoro(body.name)
         return svc.view()
     return await _run(project_id, user, db, act)
+
+
+@router.post("/api/projects/{project_id}/domains/{name}/records")
+async def write_records(project_id: uuid.UUID, name: str, body: WriteRecords,
+                        user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Add the address's records at the organisation's connected DNS account.
+    `result` says what was written, or what is in the way."""
+    async def act(svc):
+        result = await svc.write_records(name, replace=body.replace)
+        return {**svc.view(), "result": result}
+    return await _run(project_id, user, db, act, dns=True)
