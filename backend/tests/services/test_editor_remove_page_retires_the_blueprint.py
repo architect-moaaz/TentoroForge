@@ -52,7 +52,9 @@ def test_the_page_and_its_layout_are_retired_and_nothing_projects_them_again(svc
     doc = BlueprintService.load(output_dir=svc.output_dir).doc
     assert next(p for p in doc["pages"] if p["id"] == "PAGE-001")["syncNote"] == "removed from the app in the editor"
     # never composed again, never written again, not in nav-flow, not a defect
-    assert subjects_for(DAG["page_layouts"], doc) == ["PAGE-002", "PAGE-003"]
+    # `page_layouts` became one deterministic step over the whole app; the step
+    # that still takes the pages one by one is `page_code`.
+    assert subjects_for(DAG["page_code"], doc) == ["PAGE-002", "PAGE-003"]
     assert set(plan_pages(doc)["planned"]) == {"PAGE-002", "PAGE-003"}
     app = Path(svc.output_dir) / "app"
     project_nav_flow(doc, app)
