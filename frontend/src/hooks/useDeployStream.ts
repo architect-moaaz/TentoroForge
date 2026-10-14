@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { authFetch } from "@/lib/api";
 
 /**
  * SSE consumer for POST /api/projects/{id}/publish.
@@ -43,7 +44,7 @@ export function useDeployStream(projectId: string | undefined) {
         typeof window !== "undefined"
           ? window.localStorage.getItem("token") ?? ""
           : "";
-      const res = await fetch(`/api/projects/${projectId}/publish`, {
+      const res = await authFetch(`/api/projects/${projectId}/publish`, {
         method: "POST",
         credentials: "include",
         headers: token ? { Authorization: `Bearer ${token}` } : {},

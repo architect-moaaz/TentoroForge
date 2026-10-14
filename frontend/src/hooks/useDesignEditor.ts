@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect } from "react";
 import { useDesignEditorStore } from "@/stores/design-editor";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -63,7 +64,7 @@ export function useDesignEditor(projectId: string) {
       }
 
       // Step 3: Load whatever design pages are now on disk
-      const res = await fetch(`${API_BASE}/api/projects/${projectId}/design`);
+      const res = await authFetch(`${API_BASE}/api/projects/${projectId}/design`);
       if (!res.ok) {
         throw new Error(`Failed to load design: ${res.status}`);
       }
@@ -83,7 +84,7 @@ export function useDesignEditor(projectId: string) {
     if (!isDirty) return;
     setStatus("saving", "Saving design...");
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${projectId}/design`, {
+      const res = await authFetch(`${API_BASE}/api/projects/${projectId}/design`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pages }),
@@ -105,7 +106,7 @@ export function useDesignEditor(projectId: string) {
     try {
       // Save first if dirty
       if (isDirty) {
-        await fetch(`${API_BASE}/api/projects/${projectId}/design`, {
+        await authFetch(`${API_BASE}/api/projects/${projectId}/design`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ pages }),

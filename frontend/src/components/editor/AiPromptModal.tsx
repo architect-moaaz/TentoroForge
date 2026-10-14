@@ -3,6 +3,7 @@ import * as React from "react";
 import { X, Sparkles, Loader2 } from "lucide-react";
 import { useEditorStore } from "@/lib/editor-store";
 import type { Artifacts } from "@forge/patches";
+import { authFetch } from "@/lib/api";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -40,7 +41,7 @@ export function AiPromptModal({ open, onClose, projectId }: Props) {
     setLogs([{ kind: "status", text: "Sending to AI…" }]);
 
     try {
-      const res = await fetch(`${API}/api/_debug/project-ai-edit/${projectId}`, {
+      const res = await authFetch(`${API}/api/_debug/project-ai-edit/${projectId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: prompt.trim() }),

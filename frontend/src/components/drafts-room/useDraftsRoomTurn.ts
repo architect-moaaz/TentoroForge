@@ -11,6 +11,7 @@
  */
 import { useCallback, useRef, useState } from "react";
 import type { Board, Card, ChatEntry, Draft, Drawing, FileMeta, Reference, Study } from "./types";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -49,7 +50,7 @@ export function useDraftsRoomTurn(orgId: string, sessionId: string | null, on: H
       setError(null);
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
       try {
-        const res = await fetch(`${API_BASE}/api/orgs/${orgId}/drafts-room/${sessionId}/message`, {
+        const res = await authFetch(`${API_BASE}/api/orgs/${orgId}/drafts-room/${sessionId}/message`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

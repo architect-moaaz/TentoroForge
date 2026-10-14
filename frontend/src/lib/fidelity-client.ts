@@ -1,4 +1,5 @@
 // frontend/src/lib/fidelity-client.ts
+import { authFetch } from "@/lib/api";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
 export interface CritiquePatch {
@@ -92,7 +93,7 @@ export type FidelityLog = Record<string, PageLogEntry>;
 
 export async function fetchFidelityLog(shortId: string): Promise<FidelityLog | null> {
   try {
-    const r = await fetch(`${API_BASE}/api/_debug/fidelity-log/${shortId}`);
+    const r = await authFetch(`${API_BASE}/api/_debug/fidelity-log/${shortId}`);
     if (!r.ok) return null;
     return (await r.json()) as FidelityLog;
   } catch {

@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AppTile, blueprintName } from "./BlueprintSummary";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -119,7 +120,7 @@ export function useGates(projectId: string | null, key: unknown) {
     if (!projectId) return;
     const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${projectId}/gates`, {
+      const res = await authFetch(`${API_BASE}/api/projects/${projectId}/gates`, {
         credentials: "include",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });

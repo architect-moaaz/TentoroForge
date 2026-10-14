@@ -2,6 +2,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import * as React from "react";
+import { authFetch } from "@/lib/api";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -61,7 +62,7 @@ function useNavTransitions(projectId?: string): Array<{ id: string; trigger: str
     queryKey: ["nav-flow-transitions", projectId],
     queryFn: async () => {
       if (!projectId) return { transitions: [] };
-      const r = await fetch(`${API}/api/_debug/project-file/${projectId}/src/contracts/nav-flow.json`);
+      const r = await authFetch(`${API}/api/_debug/project-file/${projectId}/src/contracts/nav-flow.json`);
       return r.ok ? r.json() : { transitions: [] };
     },
     enabled: !!projectId,
@@ -74,7 +75,7 @@ function useRegistryWorkflows(projectId?: string): { workflows: WorkflowSchema[]
     queryKey: ["registry-workflows", projectId],
     queryFn: async () => {
       if (!projectId) return [] as WorkflowSchema[];
-      const r = await fetch(`${API}/api/projects/${projectId}/registry/workflows`);
+      const r = await authFetch(`${API}/api/projects/${projectId}/registry/workflows`);
       if (!r.ok) return [] as WorkflowSchema[];
       const rows = await r.json();
       return Array.isArray(rows) ? (rows as WorkflowSchema[]) : [];

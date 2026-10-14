@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 
 import { STAGE_MAKES } from "./stages";
 import { questModel, type Area, type Cell, type CellState, type Level, type Milestone, type QuestModel, type StepCard } from "./questModel";
+import { authFetch } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:6500";
 
@@ -47,7 +48,7 @@ function useLookImage(projectId: string | undefined, pageId: string, attempt: nu
     (async () => {
       try {
         const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-        const res = await fetch(`${API_BASE}/api/projects/${projectId}/looks/${pageId}/${attempt}/${name}`,
+        const res = await authFetch(`${API_BASE}/api/projects/${projectId}/looks/${pageId}/${attempt}/${name}`,
                                 { headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: "include" });
         if (!res.ok || !live) return;
         made = URL.createObjectURL(await res.blob());
