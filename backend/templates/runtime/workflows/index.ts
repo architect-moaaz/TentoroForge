@@ -1330,9 +1330,25 @@ export function registerDefaultActions(): void {
         for (const [k, v] of Object.entries(raw)) {
           if (k !== arrKey) staticFields[k] = v;
         }
+        // EVERY ROW ANSWERS TO THE RULES, and none is written until all do —
+        // the row-at-a-time insert below skipped the rules entirely, so a
+        // bulk add was a way around every business rule of the record.
+        const rowsIn: Record<string, unknown>[] = arr.map(
+          (item) => ({ ...staticFields, ...(item as Record<string, unknown>) }));
+        try {
+          const { evaluateRuleSetForTable } = await import("@/lib/rules");
+          const refused: string[] = [];
+          for (let r = 0; r < rowsIn.length; r++) {
+            const rs = await evaluateRuleSetForTable(
+              (config as any).table, "create", rowsIn[r], (ctx as any).user,
+            );
+            if (rs.errors.length) refused.push(`row ${r + 1}: ${rs.errors.join("; ")}`);
+            else Object.assign(rowsIn[r], rs.patches);
+          }
+          if (refused.length) return { error: refused.join(" | ") };
+        } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
         const inserted: unknown[] = [];
-        for (const item of arr) {
-          const merged = { ...staticFields, ...(item as Record<string, unknown>) };
+        for (const merged of rowsIn) {
           const values = _finalizeInsert(table, merged, ctx);
           try {
             const plain = await _seal(table, values);
@@ -1358,6 +1374,7 @@ export function registerDefaultActions(): void {
         );
         if (rs.errors.length) return { error: rs.errors.join("; ") };
         Object.assign(raw, rs.patches);
+        if (rs.sideEffects?.length) (ctx as any).__ruleEffects = rs.sideEffects;
       } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
       // FIND, OR CREATE. `findBy` names the columns that identify the record
       // (a merchant by its domain); a row that already has those values is
@@ -1412,6 +1429,7 @@ export function registerDefaultActions(): void {
       // is given — walks into this object; `inserted` stays for the older
       // `{{insert_case.inserted.id}}`. Returning only `{ inserted: row }` left
       // the case number's audit entry with a null case id.
+      await _flushRuleEffects(ctx, row);
       if (row && typeof row === "object") return { ...(row as Record<string, unknown>), inserted: row };
       return { inserted: row ?? true };
     } catch (err) {
@@ -1510,19 +1528,34 @@ export function registerDefaultActions(): void {
             : uv.toISOString();
         }
       }
-      try {
-        const { evaluateRuleSetForTable } = await import("@/lib/rules");
-        const rs = await evaluateRuleSetForTable(
-          (config as any).table, "update", raw, (ctx as any).user,
-        );
-        if (rs.errors.length) return { error: rs.errors.join("; ") };
-        Object.assign(raw, rs.patches);
-      } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
-      await _seal(table, raw);
-      const q = (db as any).update(table).set(raw);
       const where = _buildWhere(table, (config as any).where, ctx);
       _requireWhereOrThrow("db_update", config, where);
       const kept = await _scoped(table, where, ctx, "write");
+      try {
+        const { evaluateRuleSetForTable } = await import("@/lib/rules");
+        // THE RULES READ THE RECORD, NOT THE PAYLOAD. A rule over a field this
+        // step does not send ("approved needs an approver") saw null, and a
+        // rule about a change ("done cannot go back to todo") never saw what
+        // the record was. One record being updated: its row is read and the
+        // rules run over row + change, with the row as `previous`.
+        let subject: Record<string, unknown> = raw;
+        let previous: Record<string, unknown> | null = null;
+        try {
+          const found: any[] = await (db as any).select().from(table).where(kept).limit(2);
+          if (found.length === 1) {
+            previous = found[0];
+            subject = { ...found[0], ...raw };
+          }
+        } catch { /* the rules still run over the change itself */ }
+        const rs = await evaluateRuleSetForTable(
+          (config as any).table, "update", subject, (ctx as any).user, previous,
+        );
+        if (rs.errors.length) return { error: rs.errors.join("; ") };
+        Object.assign(raw, rs.patches);
+        if (rs.sideEffects?.length) (ctx as any).__ruleEffects = rs.sideEffects;
+      } catch (e: any) { _rethrowIfRulesFailed(e, (config as any).table, "write"); }
+      await _seal(table, raw);
+      const q = (db as any).update(table).set(raw);
       const before: any[] = auditOn() ? await (db as any).select().from(table).where(kept) : [];
       const rows = await q.where(kept).returning();
       if (Array.isArray(rows)) {
@@ -1542,6 +1575,7 @@ export function registerDefaultActions(): void {
       // was a NUMBER — so binding either one silently set no variable.
       // `updated` is now the object the contract describes; the flat aliases
       // stay so existing workflows that read {{n.output.count}} keep working.
+      await _flushRuleEffects(ctx, Array.isArray(rows) ? rows[0] : rows);
       return {
         updated: { count, rows },
         updatedRows: rows,
@@ -2181,4 +2215,63 @@ export function registerDefaultActions(): void {
   // PaddleOCR sidecar handler — ocr_document. First-class OCR primitive for
   // banking / healthcare / doc-intelligence apps. See ./ocr.ts.
   registerOcrActions();
+}
+
+// ---------------------------------------------------------------------------
+// What a business rule sets in motion
+// ---------------------------------------------------------------------------
+
+/**
+ * A rule's `trigger_workflow` and `send_notification` used to be announced as
+ * events nothing listened to, so "orders over 50,000 go to approval" saved the
+ * order and started nothing. They run here, after the write they belong to:
+ * the workflow starts with the record as its input, the notification is
+ * stored for the app's notification bell.
+ *
+ * A workflow already started by a rule is not started again from inside its
+ * own run — a rule whose workflow writes the same record would otherwise
+ * start it forever.
+ */
+const _startedByRule = new Set<string>();
+
+export async function runRuleEffects(
+  effects: Array<{ type: string; workflow?: string; message?: string }> | undefined,
+  record: Record<string, unknown> | null | undefined,
+  user?: WorkflowExecutionContext["user"],
+): Promise<void> {
+  const rec: Record<string, unknown> = record && typeof record === "object" ? record : {};
+  for (const eff of effects ?? []) {
+    try {
+      if (eff.type === "trigger_workflow" && eff.workflow) {
+        const key = String(eff.workflow);
+        if (_startedByRule.has(key)) {
+          console.warn(`[rules] ${key} is already running from a rule — not started again`);
+          continue;
+        }
+        _startedByRule.add(key);
+        try {
+          const run = await triggerWorkflow(key, { ...rec, record: rec, recordId: rec.id }, user);
+          if (run.status === "failed") console.warn(`[rules] workflow ${key} started by a rule failed: ${run.error ?? ""}`);
+        } finally {
+          _startedByRule.delete(key);
+        }
+      } else if (eff.type === "send_notification" && eff.message) {
+        if (!getActionHandler("send_notification")) registerDefaultActions();
+        const handler = getActionHandler("send_notification");
+        if (!handler) continue;
+        const ctx = { input: rec, variables: { ...rec, ...(user ? { user } : {}) }, log: [], user } as any;
+        await handler({ title: "Notification", message: eff.message, entityId: rec.id ?? null } as any, ctx);
+      }
+    } catch (e) {
+      console.error(`[rules] rule side effect (${eff.type}) failed:`, e);
+    }
+  }
+}
+
+/** The effects the rules of a write asked for, run once the write has landed. */
+async function _flushRuleEffects(ctx: any, row: unknown): Promise<void> {
+  const effects = ctx?.__ruleEffects;
+  if (!effects || !effects.length) return;
+  delete ctx.__ruleEffects;
+  await runRuleEffects(effects, (row && typeof row === "object" ? row : {}) as Record<string, unknown>, ctx?.user);
 }

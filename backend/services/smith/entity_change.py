@@ -235,6 +235,17 @@ def remove_entity(svc: Any, ref: str, *, app_root: str | None = None, reasoning:
     if deps["relationships"]:
         data["relationships"] = [r for r in (data.get("relationships") or []) if r not in deps["relationships"]]
     ent["status"] = "DEPRECATED"
+    # ITS RULES GO WITH IT. A rule on a record that no longer exists named an
+    # entity nothing has, stayed "enforced" in the Business Rules tab, and was
+    # refused by the next check of every rule.
+    retired_rules = []
+    for rule in svc.doc.get("businessRules") or []:
+        if not isinstance(rule, dict) or rule.get("status") == "DEPRECATED":
+            continue
+        if str(rule.get("entity") or "") == eid or str((rule.get("requires") or {}).get("entity") or "") == eid:
+            rule["status"] = "DEPRECATED"
+            rule["syncNote"] = f"its record {ent.get('name')} was removed"
+            retired_rules.append(str(rule.get("name") or rule.get("id")))
     svc.save()
     tell(reasoning, f"Retired {ent.get('name')}" + (f" with {len(routes)} page(s) and {len(retired_wfs)} workflow(s)" if routes or retired_wfs else "") + ".", "step")
     files = _project_data(svc, app_root)
@@ -245,6 +256,7 @@ def remove_entity(svc: Any, ref: str, *, app_root: str | None = None, reasoning:
         files += [str(f) for f in (apply_frontend_projection(svc, app_root) or {}).get("files", [])]
         files += project_navigation(svc.doc, app_root)["files"]
     return {"applied": True, "entity": eid, "name": str(ent.get("name")), "pages": routes, "workflows": retired_wfs,
+            "rules": retired_rules,
             "relationships": len(deps["relationships"]), "pointing": deps["pointing"], "edited_paths": sorted(set(files))}
 
 
@@ -261,6 +273,8 @@ def summary_of(verb: str, out: dict) -> str:
         s += f" Its screens are retired and off the menu: {', '.join(out['pages'])}."
     if out.get("workflows"):
         s += f" Its workflows are retired: {', '.join(out['workflows'])}."
+    if out.get("rules"):
+        s += f" Its business rules are retired: {', '.join(out['rules'])}."
     if out.get("relationships"):
         s += f" {out['relationships']} relationship(s) dropped."
     if out.get("pointing"):
