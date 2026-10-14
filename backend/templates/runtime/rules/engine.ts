@@ -189,6 +189,26 @@ const DATA_ACTIONS = new Set([
  * (show, hide, lock, narrow options, suggest) stays on the form; `server` keeps
  * a rule off the form.
  */
+/** Whether a rule only fills in an empty field (`set_default`, nothing else). */
+function fillsDefaultsOnly(rule: ProjectRule): boolean {
+  const config = rule.config as ConditionActionConfig;
+  const acts = config?.then ?? [];
+  return acts.length > 0 && acts.every((a) => a?.type === "set_default") && !(config?.otherwise ?? []).length;
+}
+
+/**
+ * The order rules fire in. A VALUE IS SETTLED BEFORE IT IS JUDGED: a rule
+ * that only fills in a default runs before the rest, then higher salience
+ * first. "New expenses start as submitted" was written as a default AND a
+ * check that a new expense is submitted; in list order the check saw no
+ * status yet and refused every new expense the form sent (2026-10-14).
+ */
+export function byFiringOrder(a: ProjectRule, b: ProjectRule): number {
+  const first = Number(fillsDefaultsOnly(b)) - Number(fillsDefaultsOnly(a));
+  if (first) return first;
+  return ((b.config as ConditionActionConfig).salience ?? 0) - ((a.config as ConditionActionConfig).salience ?? 0);
+}
+
 export function effectiveScope(config: ConditionActionConfig | undefined): "entity" | "form" | "server" {
   const scope = config?.scope;
   if (scope === "server") return "server";
@@ -1131,11 +1151,7 @@ export async function evaluateRuleSet(
       return scope === "entity" || scope === "server";
     })
     // Higher salience fires first.
-    .sort(
-      (a, b) =>
-        ((b.config as ConditionActionConfig).salience ?? 0) -
-        ((a.config as ConditionActionConfig).salience ?? 0),
-    );
+    .sort(byFiringOrder);
 
   // Working copy: set-value patches propagate to later rules' conditions.
   const working: Record<string, unknown> = { ...entity };
@@ -1198,11 +1214,7 @@ export async function evaluateFormRules(
       const scope = effectiveScope(r.config as ConditionActionConfig);
       return scope === "entity" || scope === "form";
     })
-    .sort(
-      (a, b) =>
-        ((b.config as ConditionActionConfig).salience ?? 0) -
-        ((a.config as ConditionActionConfig).salience ?? 0),
-    );
+    .sort(byFiringOrder);
   const working: Record<string, unknown> = { ...entity };
   const before = previous ?? {};
   for (const rule of rules) {

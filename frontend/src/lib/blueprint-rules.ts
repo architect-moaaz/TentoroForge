@@ -76,7 +76,10 @@ export interface Catalogue {
 export interface RulesResponse {
   mode: "blueprint" | "legacy";
   version: number;
+  /** Read-only now: a build, the checks after it, or a Smith turn has the definition open. */
   building: boolean;
+  /** Which of them, for the banner. */
+  busy?: "building" | "checking" | "smith" | null;
   rules: RuleView[];
   /** Rules the person stated that the build has not written yet. */
   planned?: { id: string; description: string }[];

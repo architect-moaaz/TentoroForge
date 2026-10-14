@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -110,16 +111,47 @@ def write_lock(output_dir: str | Path, *, timeout: float | None = None) -> Itera
 TAB_LOCK_WAIT = 20.0
 
 
-def building(output_dir: str | Path) -> bool:
-    """A build is writing this definition right now. Its document was loaded
-    before the change and is saved after it, so a rule saved now would be
-    overwritten when the build commits — refused instead, with the reason."""
+#: The runs after a build that check the app it handed over (`fix_to_green`).
+_CHECK_RUNS = ("-checks", "-app-check", "-process-trials")
+
+
+def busy(output_dir: str | Path) -> str | None:
+    """What is changing this app right now, or None.
+
+    Each of these loaded the definition when it began and saves the whole of
+    it when it ends, so a rule saved in between would be lost without a word:
+    "building" (a build), "checking" (the checks after a build — they record
+    each result and send what is red to Smith, unattended), "smith" (a Smith
+    turn). A run whose ledger has gone quiet is not running (`ledger_snapshot`
+    — a laptop switched off mid-build does not lock the tab for good)."""
     try:
         from services import run_registry
         snap = run_registry.ledger_snapshot(output_dir, turns=False)
-    except Exception:  # noqa: BLE001 — not knowing is not "building"
-        return False
-    return bool(snap and snap.get("active"))
+        if snap and snap.get("active"):
+            run_id = str(snap.get("runId") or "")
+            return "checking" if snap.get("phase") == "checking" or run_id.endswith(_CHECK_RUNS) else "building"
+        snap = run_registry.ledger_snapshot(output_dir, turns=True)
+        if snap and snap.get("active"):
+            return "smith"
+    except Exception:  # noqa: BLE001 — not knowing is not "busy"
+        return None
+    return None
+
+
+#: What the tab says while it cannot save, in the person's words.
+BUSY_SAID = {
+    "building": "Forge is building this app right now. Rules can be changed as soon as the build finishes — "
+                "the build would otherwise overwrite your change.",
+    "checking": "Forge is checking the app it just built and fixing what it finds. Rules can be changed as soon "
+                "as that finishes — it would otherwise overwrite your change.",
+    "smith": "Smith is working on this app right now. Your change can be saved as soon as Smith finishes — "
+             "Smith would otherwise overwrite it.",
+}
+
+
+def building(output_dir: str | Path) -> bool:
+    """A build, or the checks after it, is writing this definition now."""
+    return busy(output_dir) in ("building", "checking")
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +256,7 @@ def read(output_dir: str | Path) -> dict:
     from services.blueprint.service import BlueprintService
     svc = BlueprintService.load(output_dir=str(output_dir))
     doc = svc.doc
+    why = busy(output_dir)
     rules = [view(r, doc) for r in _live(doc.get("businessRules"))]
     # STRAIGHT FROM THE REQUEST. A rule the person stated is a requirement
     # (`owner: businessRules`) from the moment the requirements are written;
@@ -236,7 +269,9 @@ def read(output_dir: str | Path) -> dict:
     return {
         "mode": "blueprint",
         "version": int(doc.get("version") or 1),
-        "building": building(output_dir),
+        # Read-only now, and why: the panel says which.
+        "building": why is not None,
+        "busy": why,
         "rules": rules,
         "planned": planned,
         "catalogue": catalogue(doc),
@@ -534,9 +569,15 @@ def _commit(svc: Any, before: dict, request: str, said: str, affected: list[str]
 def _guard_writable(output_dir: str | Path) -> None:
     if not has_definition(output_dir):
         raise RuleError("This app has no definition yet — describe it to Smith first.", status=404)
-    if building(output_dir):
-        raise RuleError("Forge is building this app right now. Rules can be changed as soon as the build "
-                        "finishes — the build would otherwise overwrite your change.", status=423)
+    why = busy(output_dir)
+    if why == "smith":
+        # A turn is often short: waited for, as the rules lock is.
+        deadline = time.monotonic() + TAB_LOCK_WAIT
+        while why == "smith" and time.monotonic() < deadline:
+            time.sleep(0.5)
+            why = busy(output_dir)
+    if why:
+        raise RuleError(BUSY_SAID[why], status=423)
 
 
 def _find(doc: dict, rule_id: str) -> dict:
