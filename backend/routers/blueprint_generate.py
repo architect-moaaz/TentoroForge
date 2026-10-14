@@ -1551,24 +1551,7 @@ async def smith_chat(
     from services.blueprint.plan_forecast import forecast
     from services.smith_chat_v2 import ChatV2Request, handle_chat_v2
 
-    try:
-        output_dir = _output_dir(project)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    output_dir.mkdir(parents=True, exist_ok=True)
-    _adopt_design_references(output_dir, str(project_id))
-    # THE COMPANY'S OWN DESIGN LANGUAGE, when the organisation finished
-    # discovery. Copied in on every turn, used only if the owner says so at
-    # the gate — see `_adopt_brand_language`.
-    await _adopt_brand_language(output_dir, project, db)
-    app_root = str(output_dir / "app")
-    await _adopt_mcp_servers(output_dir, project, db)
-    # Its failures reach Smith's inbox (services/app_reporting).
-    try:
-        from services.app_reporting import wire as _wire_reporting
-        _wire_reporting(app_root, getattr(project, "id", None))
-    except OSError as exc:
-        logger.warning("[smith-chat] could not point the app's reporter at the platform: %s", exc)
+    output_dir, app_root = await prepare_project_tree(project, db)
 
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
@@ -1817,10 +1800,12 @@ async def smith_chat(
                 # offer. The review runs on the next turn, only if the user takes
                 # it (see `_is_verify_consent`).
                 # A review's button is a decision, not more brief.
+                # `documents=`: an approved first build keeps its evidence too.
                 built = _run_dag(str(output_dir), app_root,
                                  "" if req.gate else req.message,
                                  approved=True, emit=emit,
                                  app_name=getattr(project, "name", "") or "",
+                                 documents=req.evidence,
                                  modules=req.modules)
                 return built
 
@@ -2297,6 +2282,99 @@ def busy_message(run: dict) -> str:
     return (f"The application is still being built{where}. I've left that build "
             "to finish rather than start another on top of it. When it lands "
             "you'll see it here, with the offer to verify it; ask again then.")
+
+
+async def prepare_project_tree(project: Any, db: Any) -> tuple[Path, str]:
+    """The project's tree, ready for a turn: the output directory, the design
+    references, the organisation's design language, its MCP servers and the
+    app's reporter. What every Smith turn did first; the Drafts Room's
+    hand-off does it too, since its build starts without a turn."""
+    try:
+        output_dir = _output_dir(project)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _adopt_design_references(output_dir, str(project.id))
+    # THE COMPANY'S OWN DESIGN LANGUAGE, when the organisation finished
+    # discovery. Copied in on every turn, used only if the owner says so at
+    # the gate — see `_adopt_brand_language`.
+    await _adopt_brand_language(output_dir, project, db)
+    app_root = str(output_dir / "app")
+    await _adopt_mcp_servers(output_dir, project, db)
+    # Its failures reach Smith's inbox (services/app_reporting).
+    try:
+        from services.app_reporting import wire as _wire_reporting
+        _wire_reporting(app_root, getattr(project, "id", None))
+    except OSError as exc:
+        logger.warning("[smith-chat] could not point the app's reporter at the platform: %s", exc)
+    return output_dir, app_root
+
+
+def start_build_in_background(loop: Any, project: Any, *, message: str, description: str,
+                              documents: list[str], app_name: str, output_dir: Path, app_root: str,
+                              modules: list[str] | None = None) -> "asyncio.Future":
+    """A first build started by the platform, not by a turn: the Drafts Room's
+    hand-off. The build used to start only when the person's browser reached
+    the new project and replayed the specification as an approved first
+    message — close the tab and no build. Here it runs the way the checks
+    after a hand-over run (`_start_checks`): in the background, every message
+    to the transcript and every event to the run registry, so the project's
+    panel shows it live and reattaches after a reload.
+
+    `message` is what the app builder's Smith is told (the first row of the
+    transcript); `description` is the app's own description, which the
+    Blueprint carries as `application.description`; `documents` are the
+    specification, kept beside the Blueprint for the agents that read
+    documents. Returns the future of the build."""
+    from services import run_registry
+    from services.blueprint.run_ledger import TurnLedger
+
+    project_id = str(project.id)
+    memory_lock = asyncio.Lock()
+    _remember(loop, project_id, "user", message, lock=memory_lock)
+
+    def background_emit(event: str, data: dict) -> None:
+        if event == "message":
+            _remember(loop, project_id, "assistant", str(data.get("text") or ""),
+                      {k: v for k, v in data.items() if k in ("options", "status") and v},
+                      lock=memory_lock)
+        run_registry.note(project_id, event, data)
+
+    # BEFORE THE RUN, OR ITS FIRST EVENTS ARE DROPPED: `note` folds events into
+    # an entry `begin` creates. The turn ledger is what the OTHER worker reads
+    # (`ledger_snapshot`) to say a build is active before the DAG's own ledger
+    # exists.
+    run_registry.begin(project_id, phase="build", output_dir=output_dir)
+    turn_ledger = TurnLedger(output_dir, phase="build")
+
+    def work() -> dict:
+        return _run_dag(str(output_dir), app_root, description, approved=True, emit=background_emit,
+                        app_name=app_name, documents=documents, modules=modules)
+
+    def _ended(f: Any) -> None:
+        error: BaseException | None = None
+        try:
+            result = f.result()
+        except Exception as exc:  # noqa: BLE001 — said in the transcript, as a turn's failure is
+            error = exc
+            logger.exception("[hand-off build] %s failed", project_id)
+            background_emit("message", {
+                "text": ("Something went wrong on my side while building, and I stopped "
+                         f"({type(exc).__name__}). Open the app and ask me to build it again."),
+                "status": "error"})
+            background_emit("error", {"message": str(exc)})
+            return
+        finally:
+            turn_ledger.end(error)
+        background_emit("done", result if isinstance(result, dict) else {})
+        checks = result.get("checks") if isinstance(result, dict) else None
+        if isinstance(checks, dict) and checks.get("pending"):
+            _start_checks(loop, project_id, checks["output_dir"], checks["app_root"],
+                          memory_lock=memory_lock, app_name=app_name)
+
+    fut = loop.run_in_executor(None, work)
+    fut.add_done_callback(_ended)
+    return fut
 
 
 def _start_checks(loop: Any, project_id: str, output_dir: str, app_root: str, *,
