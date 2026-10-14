@@ -10,11 +10,12 @@
 import * as React from "react";
 import { Linking } from "react-native";
 import { Button, ErrorState, LanguageSwitch, Loading, Screen, Stack, Text, TextField, Title } from "@/ui";
-import { appConfigured, appUrl, useSession, useSignInMethods, useT } from "@/sdk";
-import { APP_NAME } from "@/config.generated";
+import { appConfigured, appUrl, useNav, useSession, useSignInMethods, useT } from "@/sdk";
+import { APP_NAME, CAN_SIGN_UP } from "@/config.generated";
 
 export default function Login() {
   const t = useT();
+  const nav = useNav();
   const { signIn } = useSession();
   const { methods, loading, error, retry } = useSignInMethods();
   const [email, setEmail] = React.useState("");
@@ -75,6 +76,7 @@ export default function Login() {
           <TextField label="Password" kind="password" value={password} onChange={setPassword} error={fieldErrors.password} />
           {problem ? <Text tone="danger" accessibilityRole="alert">{problem}</Text> : null}
           <Button fullWidth loading={pending} onPress={() => { void submit(); }}>Sign in</Button>
+          {CAN_SIGN_UP ? <Button variant="ghost" fullWidth onPress={() => nav.push("/signup")}>New here? Create an account</Button> : null}
         </Stack>
         {methods.sso.length || methods.magicLink ? (
           <Text variant="caption" tone="muted">Other ways to sign in (single sign-on, email links) are available on the web only.</Text>

@@ -90,6 +90,18 @@ NATIVE_RULES = """\
   full-width Button at the end of a form). Touch targets are 44 pt. A long list is a `ListView`, not a map
   inside a ScrollView. A secondary flow is a `Sheet`, not a second screen. Tables become cards or rows with the
   two facts that matter, the rest one tap away. Text never truncates what the person needs to read.
+- PADDING IS THE SCREEN'S. Leave `padded` at its default: the content keeps a 16 pt margin on every side,
+  and a list's search box, chips and cards sit inside it. `padded={false}` is for content that bleeds to
+  the screen's edge (a map, a full-width image) and removes the margin from EVERYTHING inside — a list
+  with `padded={false}` touches the glass. A list is `<Screen scroll={false}>` with the default padding.
+- A TAB HAS NO BACK. When the screen is one of the app's bottom tabs (the brief says so), it has no `back`
+  button; every other screen — a form, one record — has `back`.
+- MAKE IT LOOK DESIGNED, NOT ASSEMBLED. The kit has what a polished phone app uses; reach for it:
+  `Chips` for status filters (they scroll sideways, never wrap), `Dots` for a 1-5 value, `StatusBadge` for a
+  status, a `Button` with an `icon` (`variant="ghost" size="sm"` for a row's action), `Empty` with an `icon` for an
+  empty state, `Icon` beside a label. A card shows ONE thing first (the title, in the heading face) and the rest
+  quietly: do not repeat five equal rows. Whitespace between groups, not borders. The type faces are the
+  design's own - use `Text` variants (`title`, `heading`, `label`, `caption`) and never set a font yourself.
 - COLOUR AND SIZE COME FROM THE THEME. `useTheme().colors.<token>`, `space.<size>`: never a hex colour and never
   a magic number for a margin. The kit's parts are already styled — use `Card`, `Badge`, `StatTile`, `Button`
   variants rather than styling a View.
@@ -176,12 +188,16 @@ Reply with the rationale, the full contents of Screen.tsx, and `needs` (empty wh
 
 
 def user_prompt(doc: dict, page: dict, *, feedback: str = "", brief: str = "", current: dict | None = None) -> str:
+    from services.blueprint.native_projection import is_tab
     from services.blueprint.ui_engineer import _page_brief
 
     out = ["Write this page as a native screen. The brief below is the web page's; its `load.ts`, `searchParams`, "
            "`useSearchParams` and `view.tsx` are the web's words — on the phone a hook reads the data, `useParams` "
            "gives the route's id and query, and the screen is one component.\n\n```json\n"
            + json.dumps(_page_brief(doc, page), indent=2) + "\n```"]
+    out.append("\nThis screen IS one of the app's bottom tabs: it has no `back` button, and its title is the tab's."
+               if is_tab(doc, str(page.get("id"))) else
+               "\nThis screen is NOT a tab: it is opened from another screen, so it has a `back` button.")
     if brief:
         out.append(f"\nWhat is wanted of it now:\n{brief}")
     if current:

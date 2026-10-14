@@ -35,7 +35,9 @@ web page — same names, same result shapes — only the components are native.
 
 ```
 app/_layout.tsx        root: safe area, error boundary, session, toasts, sign-in gate
-app/login.tsx          email + password sign-in (reads /api/auth/methods first)
+app/login.tsx          email + password sign-in (reads /api/auth/methods first); links to sign-up
+app/signup.tsx         create an account: the account entity's own fields (or a name), email, password -> /api/auth/signup, then signs in
+app/(tabs)/account.tsx the last tab of an app with a sign-in: who is signed in, organisation, language, SIGN OUT (written with the tabs)
 app/organisation.tsx   organisation picker (apps with several organisations)
 app/+not-found.tsx     a route that is not a screen
 src/sdk/*              the SDK  (import from "@/sdk")
@@ -59,7 +61,8 @@ alone; it is never copied into an app.
 | `src/sdk/pages.ts` | `PageRef<R>` (`{ id, name, route }`), `pages.<key>`, `href(page, params?, query?)` |
 | `src/sdk/widgets.ts` | `WidgetRef` (`id, page, label, description?, kind, unit, size?, chart?, source`), `widgets.<key>`, `WidgetUnit`, `ChartMark`, `WidgetSource` |
 | `src/theme.generated.ts` | `colors: Record<string, string>` (camelCase token -> HSL triplet `"243 75% 59%"` or any RN colour; only overrides), `radius: number`, `fonts: { body?: string; heading?: string }` |
-| `src/config.generated.ts` | `APP_NAME: string`, `CURRENCY: string` (ISO 4217), `LOCALE: string` (BCP-47), `LANGUAGES: readonly { tag; dir: "ltr" \| "rtl" }[]`, `PRIMARY: string`, `HOME: string` (route a signed-in person lands on), `PUBLIC_ROUTES: readonly string[]` (routes, and their children, open without sign-in; `[]` = all private), `ACCOUNT: null \| { entity; fields; labelField; locationField }` (the web's `lib/account.ts`) |
+| `src/config.generated.ts` | `CAN_SIGN_UP: boolean` (the app has a sign-up and people hold passwords), `AFTER_SIGNUP: string` (where a new account goes first), `APP_NAME: string`, `CURRENCY: string` (ISO 4217), `LOCALE: string` (BCP-47), `LANGUAGES: readonly { tag; dir: "ltr" \| "rtl" }[]`, `PRIMARY: string`, `HOME: string` (route a signed-in person lands on), `PUBLIC_ROUTES: readonly string[]` (routes, and their children, open without sign-in; `[]` = all private), `ACCOUNT: null \| { entity; fields; labelField; locationField }` (the web's `lib/account.ts`) |
+| `src/navigation.generated.ts` | `TABS: readonly { name; title; icon; route }[]` — the main pages as bottom tabs (Ionicons glyph names); empty means no tab bar. The tab pages' route files live in `app/(tabs)/` and `app/(tabs)/_layout.tsx` is written with them. |
 
 Colour tokens are the web's `token-contract.json` names in camelCase:
 `background foreground card cardForeground popover popoverForeground muted
@@ -159,11 +162,14 @@ touch targets; accessibility roles and labels throughout.
 Screen({ title?, subtitle?, back?, right?, scroll=true, padded=true, loading?, error?, onRetry?, empty?, onRefresh?, refreshing?, footer? })
 Header, Title, Text({ variant: display|title|heading|body|label|caption, tone, weight, align })
 Stack({ gap, padding, align, justify }), Row({ …, wrap }), Spacer({ size? }), Divider, Card({ onPress?, variant: filled|muted|inverse, padding })
-Button({ variant: primary|accent|secondary|outline|ghost|danger, size: sm|md, loading, disabled, fullWidth, onPress })
+Button({ variant: primary|accent|secondary|outline|ghost|danger, size: sm|md, icon?, loading, disabled, fullWidth, onPress })   // icon: an Icon name; sm+ghost is a compact row action
 ListView({ list, renderItem(item, i), keyExtractor?, empty?, header?, separators? })   // list = what useList returns: states, pull-to-refresh, onEndReached
 ListItem({ title, subtitle?, meta?, leading?, badge?, trailing?, onPress? })
-Badge({ tone }), StatusBadge({ status }), Tag({ onPress?, selected? }), Avatar({ name, image, size }), StatTile({ label, value, delta?, hint? }), Money({ value, currency? })
-Loading, Empty({ title, message?, action? }), ErrorState({ message, onRetry? })
+Badge({ tone, dot? }), StatusBadge({ status }) /* a tinted pill with a dot */, Tag({ onPress?, selected? }), Avatar({ name, image, size }), StatTile({ label, value, delta?, hint? }), Money({ value, currency? })
+Chips({ items: [{ key, label, count? }], value, onChange })   // filter chips that scroll sideways to the screen edges, never wrap
+Dots({ value, max = 5 })                                      // 3 of 5 as dots: a priority, a level
+Icon({ name, size?, tone?, color? })                          // an Ionicons glyph (add, search, checkmark-circle, trash-outline, construct, ...)
+Loading, Empty({ title, message?, action?, icon? }), ErrorState({ message, onRetry? })   // Empty icon: an Icon name, drawn in a soft circle
 SimpleChart({ type: bar|line|pie|donut, data | labels + series, format?, height?, horizontal? })   // Views only; pie/donut = proportion bar
 WidgetView({ widget, data, height?, currency?, action?, title? })                    // metric, gauge, text, chart (+ table), list
 Sheet({ visible, onClose, title }), Dialog({ visible, message, confirmLabel, variant, onConfirm, onCancel })

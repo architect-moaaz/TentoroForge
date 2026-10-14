@@ -8,7 +8,8 @@ export { Stack, Row, Spacer, Divider, Card, type StackProps, type RowProps, type
 export { Button, type ButtonProps, type ButtonVariant } from "./Button";
 export { Screen, Header, type ScreenProps, type HeaderProps } from "./Screen";
 export { ListView, ListItem, type ListLike, type ListViewProps, type ListItemProps } from "./ListView";
-export { Badge, StatusBadge, Tag, Avatar, StatTile, Money, LanguageSwitch, type Tone } from "./Display";
+export { Badge, StatusBadge, Tag, Chips, Dots, Avatar, StatTile, Money, LanguageSwitch, type Tone, type ChipItem } from "./Display";
+export { Icon, type IconName, type IconTone } from "./Icon";
 export { Empty, ErrorState, Loading } from "./States";
 export { SimpleChart, type ChartPoint, type SimpleChartProps } from "./SimpleChart";
 export { WidgetView, type WidgetViewProps } from "./WidgetView";

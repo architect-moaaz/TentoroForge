@@ -17,6 +17,12 @@ export const LANGUAGES: readonly { tag: string; dir: "ltr" | "rtl" }[] = [{ tag:
 /** The language every text falls back to. */
 export const PRIMARY: string = "en";
 
+/** Whether the phone can create an account: the application has a sign-up and people hold passwords. */
+export const CAN_SIGN_UP: boolean = true;
+
+/** Where a new account goes first (a profile to complete), else `HOME`. */
+export const AFTER_SIGNUP: string = "/";
+
 /** Where a signed-in person lands: a route of the app. */
 export const HOME: string = "/";
 

@@ -13,6 +13,7 @@ import { ActivityIndicator, View } from "react-native";
 import { useTheme } from "../theme";
 import { Text } from "./Text";
 import { Button } from "./Button";
+import { Icon, type IconName } from "./Icon";
 
 export function Loading({ label = "Loading" }: { label?: string }) {
   const theme = useTheme();
@@ -23,10 +24,15 @@ export function Loading({ label = "Loading" }: { label?: string }) {
   );
 }
 
-export function Empty({ title, message, action }: { title: string; message?: string; action?: React.ReactNode }) {
+export function Empty({ title, message, action, icon }: { title: string; message?: string; action?: React.ReactNode; icon?: IconName }) {
   const theme = useTheme();
   return (
     <View style={{ flex: 1, minHeight: 200, alignItems: "center", justifyContent: "center", padding: theme.space.xl, gap: theme.space.sm }}>
+      {icon ? (
+        <View style={{ width: 64, height: 64, borderRadius: 32, alignItems: "center", justifyContent: "center", backgroundColor: theme.colors.muted, marginBottom: theme.space.sm }}>
+          <Icon name={icon} size={30} />
+        </View>
+      ) : null}
       <Text variant="heading" align="center">{title}</Text>
       {message ? <Text tone="muted" align="center">{message}</Text> : null}
       {action ? <View style={{ marginTop: theme.space.md }}>{action}</View> : null}

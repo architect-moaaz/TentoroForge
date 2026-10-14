@@ -1108,9 +1108,8 @@ def native_page_subjects(doc: Mapping[str, Any]) -> list[str]:
     One-to-one — a page with a web screen has a native one — except the
     sign-in and sign-up pages: signing in is the native SDK's own screen (the
     session cookie flow), and a page drawn over it would be a second login."""
-    mobile = doc.get("mobile") if isinstance(doc.get("mobile"), dict) else {}
-    native = mobile.get("native") if isinstance(mobile.get("native"), dict) else {}
-    if native.get("enabled") is not True:
+    from services.blueprint.native_projection import enabled
+    if not enabled(doc):
         return []
     return [p["id"] for p in (doc.get("pages") or [])
             if p.get("id") and p.get("status") != "DEPRECATED"

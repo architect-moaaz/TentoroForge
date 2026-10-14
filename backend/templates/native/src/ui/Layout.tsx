@@ -86,12 +86,13 @@ export function Card({ onPress, variant = "filled", padding = "lg", style, acces
   const c = theme.colors;
   const surface: ViewStyle = {
     backgroundColor: variant === "inverse" ? c.inverse : variant === "muted" ? c.muted : c.card,
-    borderColor: c.border, borderWidth: variant === "inverse" ? 0 : 1, borderRadius: theme.radius + 4, padding: px(theme, padding),
+    borderColor: theme.alpha("border", 0.7), borderWidth: variant === "inverse" ? 0 : 1, borderRadius: theme.radius + 8, padding: px(theme, padding),
+    ...(variant === "filled" ? theme.shadow(1) : {}),
   };
   if (onPress) {
     return (
       <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={accessibilityLabel}
-        style={({ pressed }) => [surface, { minHeight: theme.touch, opacity: pressed ? 0.85 : 1 }, style as StyleProp<ViewStyle>]}>
+        style={({ pressed }) => [surface, { minHeight: theme.touch, transform: [{ scale: pressed ? 0.985 : 1 }] }, style as StyleProp<ViewStyle>]}>
         {children}
       </Pressable>
     );

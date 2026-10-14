@@ -11,6 +11,7 @@ import * as React from "react";
 import { ActivityIndicator, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { useTheme } from "../theme";
 import { Text } from "./Text";
+import { Icon, type IconName } from "./Icon";
 
 export type ButtonVariant = "primary" | "accent" | "secondary" | "outline" | "ghost" | "danger";
 
@@ -20,6 +21,8 @@ export interface ButtonProps {
   variant?: ButtonVariant;
   /** `sm` is a compact button that is still a full 44 point target. */
   size?: "sm" | "md";
+  /** A glyph before the label (`Icon` names): `<Button icon="add">Add job</Button>`. */
+  icon?: IconName;
   loading?: boolean;
   disabled?: boolean;
   fullWidth?: boolean;
@@ -27,7 +30,7 @@ export interface ButtonProps {
   style?: StyleProp<ViewStyle>;
 }
 
-export function Button({ children, onPress, variant = "primary", size = "md", loading = false, disabled = false, fullWidth = false, accessibilityLabel, style }: ButtonProps) {
+export function Button({ children, onPress, variant = "primary", size = "md", icon, loading = false, disabled = false, fullWidth = false, accessibilityLabel, style }: ButtonProps) {
   const theme = useTheme();
   const c = theme.colors;
   const tones: Record<ButtonVariant, { bg: string; fg: string; border: string }> = {
@@ -46,15 +49,19 @@ export function Button({ children, onPress, variant = "primary", size = "md", lo
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? (typeof children === "string" ? children : undefined)}
       accessibilityState={{ disabled: off, busy: loading }}
+      hitSlop={size === "sm" ? 6 : 0}
       style={({ pressed }) => [
         styles.base,
-        { backgroundColor: t.bg, borderColor: t.border, borderRadius: theme.radius, minHeight: theme.touch,
-          paddingHorizontal: size === "sm" ? 14 : 20, opacity: off ? 0.55 : pressed ? 0.85 : 1,
+        { backgroundColor: t.bg, borderColor: t.border, borderRadius: theme.radius + 2,
+          minHeight: size === "sm" ? 38 : theme.touch + 4, paddingHorizontal: size === "sm" ? 14 : 22,
+          opacity: off ? 0.55 : 1, transform: [{ scale: pressed ? 0.97 : 1 }],
           alignSelf: fullWidth ? "stretch" : "flex-start" },
+        variant === "primary" || variant === "accent" || variant === "danger" ? theme.shadow(1) : null,
+        pressed && (variant === "ghost" || variant === "outline") ? { backgroundColor: theme.colors.muted } : null,
         style,
       ]}>
       <View style={styles.content}>
-        {loading ? <ActivityIndicator size="small" color={t.fg} /> : null}
+        {loading ? <ActivityIndicator size="small" color={t.fg} /> : icon ? <Icon name={icon} size={size === "sm" ? 16 : 18} color={t.fg} /> : null}
         {typeof children === "string"
           ? <Text variant={size === "sm" ? "caption" : "label"} weight="semibold" style={{ color: t.fg, fontSize: size === "sm" ? 13 : 15 }}>{children}</Text>
           : children}

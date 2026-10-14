@@ -13,5 +13,9 @@ export const colors: Record<string, string> = {
 /** The corner radius of a control, in points (the web's `--radius`). */
 export const radius: number = 8;
 
-/** Font families, only if the app loads them (expo-font); the system font otherwise. */
-export const fonts: { body?: string; heading?: string } = {};
+/** Typefaces, only if the app loads them (`fonts.generated.ts`): one family name per weight (`Inter_700Bold`),
+ *  the system font otherwise. */
+export const fonts: {
+  body?: { regular: string; medium?: string; semibold?: string; bold?: string };
+  heading?: { regular: string; medium?: string; semibold?: string; bold?: string };
+} = {};

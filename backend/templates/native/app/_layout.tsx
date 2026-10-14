@@ -12,10 +12,12 @@ import * as React from "react";
 import { View } from "react-native";
 import { Stack, usePathname, useRouter, type Href } from "expo-router";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { useFonts } from "expo-font";
 import { ErrorBoundary, ErrorState, Loading } from "@/ui";
 import { SessionProvider, ToastProvider, appConfigured, useOrganisations, useSession } from "@/sdk";
 import { gateDecision } from "@/sdk/gate";
 import { HOME, PUBLIC_ROUTES } from "@/config.generated";
+import { FONT_FILES } from "@/fonts.generated";
 import { theme } from "@/theme";
 
 function Gate() {
@@ -44,6 +46,10 @@ function Gate() {
 }
 
 export default function RootLayout() {
+  // The app's typefaces (`fonts.generated.ts`) are loaded before anything is drawn in them. A face that
+  // fails to load is not a failure of the app: the text falls back to the system font.
+  const [loaded, failed] = useFonts(FONT_FILES);
+  if (!loaded && !failed) return <View style={{ flex: 1, backgroundColor: theme.colors.background }} />;
   return (
     <SafeAreaProvider>
       <ErrorBoundary>

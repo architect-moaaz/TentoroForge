@@ -39,6 +39,7 @@ import type { GeoPoint } from "../sdk/geo";
 import type { Workflow } from "../sdk/workflows";
 import { Text } from "./Text";
 import { Button, type ButtonVariant } from "./Button";
+import type { IconName } from "./Icon";
 import { Dialog } from "./Sheet";
 import {
   DateField, Field, FileField, ImageField, LocationField, MoneyField, MultiSelect, NumberField, SelectField, SwitchField, TagsField, TextField,
@@ -250,13 +251,15 @@ export function WorkflowForm<I extends Json>({
 /** A button that runs a workflow with a fixed input — Approve, Close case,
  *  Delete. `confirm` asks first, in a dialog the app owns. */
 export function WorkflowButton<I extends Json>({
-  workflow, input, children, variant = "primary", size = "md", confirm, redirectTo, successMessage, fullWidth,
+  workflow, input, children, variant = "primary", size = "md", icon, confirm, redirectTo, successMessage, fullWidth,
 }: {
   workflow: Workflow<I>;
   input: I;
   children?: React.ReactNode;
   variant?: ButtonVariant;
   size?: "sm" | "md";
+  /** A glyph before the label (an `Icon` name). */
+  icon?: IconName;
   confirm?: string;
   redirectTo?: string;
   successMessage?: string;
@@ -267,7 +270,7 @@ export function WorkflowButton<I extends Json>({
   const label = children ?? workflow.name;
   return (
     <>
-      <Button variant={variant} size={size} loading={pending} fullWidth={fullWidth}
+      <Button variant={variant} size={size} icon={icon} loading={pending} fullWidth={fullWidth}
         onPress={() => { if (confirm) setAsking(true); else void run(input); }}>
         {label}
       </Button>

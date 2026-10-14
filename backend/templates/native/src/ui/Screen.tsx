@@ -18,6 +18,7 @@ import * as React from "react";
 import { KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, View, type StyleProp, type ViewStyle } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
+import { useSegments } from "expo-router";
 import { useTheme } from "../theme";
 import { useNav } from "../sdk/nav";
 import { Text } from "./Text";
@@ -35,7 +36,10 @@ export interface HeaderProps {
 export function Header({ title, subtitle, back, right }: HeaderProps) {
   const theme = useTheme();
   const nav = useNav();
-  const showBack = back ?? nav.canGoBack();
+  // A TAB IS A ROOT: switching tabs leaves history behind it, so "there is a screen to go back to" is true on a
+  // tab that was reached by tapping the bar — and a tab has nothing to go back to. Its address starts in `(tabs)`.
+  const inTabs = useSegments()[0] === "(tabs)";
+  const showBack = back ?? (!inTabs && nav.canGoBack());
   if (!title && !showBack && !right) return null;
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.sm, paddingHorizontal: theme.space.lg, paddingVertical: theme.space.sm, minHeight: 56 }}>
@@ -46,7 +50,7 @@ export function Header({ title, subtitle, back, right }: HeaderProps) {
         </Pressable>
       ) : null}
       <View style={{ flex: 1 }}>
-        {title ? <Text variant="title" numberOfLines={1} style={{ fontSize: 22, lineHeight: 28 }}>{title}</Text> : null}
+        {title ? <Text variant="title" numberOfLines={1}>{title}</Text> : null}
         {subtitle ? <Text variant="caption" tone="muted" numberOfLines={1}>{subtitle}</Text> : null}
       </View>
       {right ? <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.sm }}>{right}</View> : null}

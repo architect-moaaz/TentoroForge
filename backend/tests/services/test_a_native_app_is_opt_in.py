@@ -89,3 +89,16 @@ def test_a_native_app_needs_password_sign_in():
 
 def test_an_application_without_native_is_not_asked_for_either():
     check_mobile(_result("mobile", {"native": {"enabled": False}}), {"security": {"signIn": {"password": False, "magicLink": True}}})
+
+
+def test_the_platform_can_default_every_application_to_native(monkeypatch):
+    """`FORGE_NATIVE_APP=1` turns the native app on for an application that does not
+    say; what the Blueprint says wins either way."""
+    monkeypatch.delenv("FORGE_NATIVE_APP", raising=False)
+    assert native_page_subjects(_doc()) == []
+    monkeypatch.setenv("FORGE_NATIVE_APP", "1")
+    assert native_page_subjects(_doc()) == ["PAGE-001", "PAGE-002"], "the platform default"
+    assert native_page_subjects(_doc(native={"enabled": False})) == [], "an application that opts out"
+    assert native_page_subjects({"pages": PAGES}) == ["PAGE-001", "PAGE-002"], "one that never said"
+    monkeypatch.setenv("FORGE_NATIVE_APP", "0")
+    assert native_page_subjects(_doc(native={"enabled": True})) == ["PAGE-001", "PAGE-002"], "or one that opts in"

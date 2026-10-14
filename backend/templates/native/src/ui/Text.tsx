@@ -24,12 +24,16 @@ export interface TextProps extends RNTextProps {
 }
 
 const SIZES: Record<TextVariant, { fontSize: number; lineHeight: number; fontWeight: TextStyle["fontWeight"] }> = {
-  display: { fontSize: 32, lineHeight: 38, fontWeight: "700" },
-  title: { fontSize: 24, lineHeight: 30, fontWeight: "700" },
-  heading: { fontSize: 18, lineHeight: 24, fontWeight: "600" },
-  body: { fontSize: 16, lineHeight: 22, fontWeight: "400" },
+  display: { fontSize: 34, lineHeight: 40, fontWeight: "700" },
+  title: { fontSize: 28, lineHeight: 34, fontWeight: "700" },
+  heading: { fontSize: 19, lineHeight: 25, fontWeight: "600" },
+  body: { fontSize: 16, lineHeight: 23, fontWeight: "400" },
   label: { fontSize: 14, lineHeight: 20, fontWeight: "600" },
-  caption: { fontSize: 12, lineHeight: 16, fontWeight: "400" },
+  caption: { fontSize: 12, lineHeight: 17, fontWeight: "400" },
+};
+
+const WEIGHT_OF: Record<string, "regular" | "medium" | "semibold" | "bold"> = {
+  "400": "regular", "500": "medium", "600": "semibold", "700": "bold",
 };
 
 const WEIGHTS: Record<NonNullable<TextProps["weight"]>, TextStyle["fontWeight"]> = {
@@ -53,14 +57,17 @@ export function Text({ variant = "body", tone = "default", weight, align, style,
   const theme = useTheme();
   const size = SIZES[variant];
   const heading = variant === "display" || variant === "title" || variant === "heading";
-  const family = heading ? theme.fonts.heading ?? theme.fonts.body : theme.fonts.body;
+  const fontWeight = weight ? WEIGHTS[weight] : size.fontWeight;
+  // A custom typeface is one file per weight: pick the file, and leave `fontWeight` out (on Android the
+  // two together fall back to the system font). On the system font, `fontWeight` does the work.
+  const face = theme.font(weight ?? WEIGHT_OF[String(size.fontWeight)] ?? "regular", heading ? "heading" : "body");
   return (
     <RNText
       {...rest}
       accessibilityRole={accessibilityRole ?? (heading ? "header" : undefined)}
       style={[
-        { color: toneColor(theme, tone), fontSize: size.fontSize, lineHeight: size.lineHeight, fontWeight: weight ? WEIGHTS[weight] : size.fontWeight },
-        family ? { fontFamily: family } : null,
+        { color: toneColor(theme, tone), fontSize: size.fontSize, lineHeight: size.lineHeight },
+        face.fontFamily ? face : { fontWeight },
         align ? { textAlign: align } : null,
         style,
       ]}

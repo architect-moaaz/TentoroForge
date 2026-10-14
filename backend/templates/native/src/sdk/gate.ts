@@ -3,8 +3,8 @@
 // session or route and goes where it says; keeping the rule here, free of
 // react-native, is what lets it be tested instead of discovered on a phone.
 //
-//   signed out, route not public        -> /login
-//   signed in, on /login                -> home (or the organisation picker)
+//   signed out, route not public        -> /login   (sign-up is open: it is how an account begins)
+//   signed in, on /login or /signup     -> home (or the organisation picker)
 //   signed in, an organisation to pick  -> /organisation
 //   signed in, on /organisation, none to pick -> home
 //
@@ -15,6 +15,7 @@
 import type { SessionStatus } from "./auth";
 
 const LOGIN = "/login";
+const SIGNUP = "/signup";
 const ORGANISATION = "/organisation";
 
 function isPublicRoute(pathname: string, publicRoutes: readonly string[]): boolean {
@@ -38,9 +39,9 @@ export function gateDecision({ status, needsOrganisation, pathname, publicRoutes
   const path = pathname.replace(/\/+$/, "") || "/";
   if (status === "loading" || status === "offline") return null;
   if (status === "signedOut") {
-    return path === LOGIN || isPublicRoute(path, publicRoutes) ? null : LOGIN;
+    return path === LOGIN || path === SIGNUP || isPublicRoute(path, publicRoutes) ? null : LOGIN;
   }
   if (needsOrganisation) return path === ORGANISATION ? null : ORGANISATION;
-  if (path === LOGIN || path === ORGANISATION) return home;
+  if (path === LOGIN || path === SIGNUP || path === ORGANISATION) return home;
   return null;
 }
