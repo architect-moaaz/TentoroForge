@@ -200,7 +200,7 @@ def _remove_except(target: Path, root: Path, preserve: tuple[str, ...]) -> None:
     generated — keeps that decision with the caller that projects them.
     """
     for child in sorted(target.rglob("*"), key=lambda p: -len(p.parts)):
-        rel = str(child.relative_to(root))
+        rel = child.relative_to(root).as_posix()      # `/`, as `preserve` names paths; `\` on Windows kept nothing
         if any(rel == p or rel.startswith(p + "/") for p in preserve):
             continue
         if child.is_file() or child.is_symlink():

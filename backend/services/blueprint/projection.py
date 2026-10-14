@@ -698,9 +698,11 @@ def project_frontend(doc: dict, app_root: str | Path,
     # sweep deleted it on every frontend projection and the layout fell back
     # to its flat menu.
     written_set = set(written) | {"src/schemas/shell.json"}
+    # POSIX spelling: `written` names files with `/`, and `str(Path)` on Windows has `\` — every
+    # page in a folder (`jobs/new.json`) read as stale and was deleted the moment it was written.
     stale = sorted(
-        str(f.relative_to(root)) for f in root.rglob("*.json")
-        if f"src/schemas/{f.relative_to(root)}" not in written_set
+        f.relative_to(root).as_posix() for f in root.rglob("*.json")
+        if f"src/schemas/{f.relative_to(root).as_posix()}" not in written_set
     )
     for name in stale:
         (root / name).unlink()

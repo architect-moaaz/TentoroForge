@@ -319,7 +319,10 @@ async def _stacks_on_signal():
     import faulthandler
     import signal
 
-    faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
+    # POSIX only: Windows has neither the signal nor `faulthandler.register`,
+    # and the missing attribute failed the whole startup there.
+    if hasattr(faulthandler, "register") and hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
 
 
 @app.on_event("startup")
