@@ -1,0 +1,29 @@
+{
+  "providerId": "tentoro.ai",
+  "providerName": "Tentoro",
+  "version": 1,
+  "syncPubKeyDomain": "tentoro.ai",
+  "logoUrl": "https://tentoro.ai/favicon.ico",
+  "serviceId": "forge-subdomain",
+  "serviceName": "Forge app on a subdomain",
+  "hostRequired": true,
+  "description": "Points a subdomain at an application built with Forge and hosted on Vercel.",
+  "variableDescription": "target: the address Vercel serves the application from; proof: Vercel's ownership token",
+  "records": [
+    {
+      "groupId": "main",
+      "type": "CNAME",
+      "host": "@",
+      "pointsTo": "%target%",
+      "ttl": 3600
+    },
+    {
+      "groupId": "proof",
+      "type": "TXT",
+      "host": "_vercel.%domain%.",
+      "data": "%proof%",
+      "ttl": 3600,
+      "txtConflictMatchingMode": "None"
+    }
+  ]
+}

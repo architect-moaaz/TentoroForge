@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useState, useEffect, useMemo, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -99,6 +99,9 @@ function ProjectWorkspace({
   // "Manage in App settings" from the Publish dialog opens App settings on that section.
   const settingsRequested = useAppSettingsStore((st) => st.requested);
   useEffect(() => { if (settingsRequested) setActiveTab("app-settings"); }, [settingsRequested]);
+  // Back from a DNS provider's approval (`?settings=domains&dc=…`): App settings → Domains.
+  const searchParams = useSearchParams();
+  useEffect(() => { if (searchParams?.get("settings") === "domains") setActiveTab("app-settings"); }, [searchParams]);
   const [showExport, setShowExport] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);

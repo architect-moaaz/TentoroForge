@@ -45,7 +45,13 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
-vi.mock("next/navigation", () => ({ useParams: () => ({ orgId: "o1" }) }));
+const nav = { search: new URLSearchParams(), replaced: [] as string[] };
+vi.mock("next/navigation", () => ({
+  useParams: () => ({ orgId: "o1" }),
+  useSearchParams: () => nav.search,
+  useRouter: () => ({ replace: (u: string) => nav.replaced.push(u) }),
+  usePathname: () => "/org/o1/projects/p1",
+}));
 
 import { DomainsPanel } from "../DomainsPanel";
 
@@ -175,5 +181,26 @@ describe("DomainsPanel", () => {
   it("offers no address per organisation to an app of one", async () => {
     await render();
     expect(host.querySelector("#domain-orgs-p1")).toBeNull();
+  });
+
+  it("sends the owner to their DNS provider to approve, and checks when they come back", async () => {
+    apiGet.mockImplementation(async () => ({ ...waiting, domains: [{ ...waiting.domains[0], connect: "GoDaddy" }] }));
+    apiPost.mockImplementationOnce(async () => ({ url: "https://dcc.godaddy.com/manage/v2/apply?x=1", provider: "GoDaddy" }));
+    const assign = vi.fn();
+    Object.defineProperty(window, "location", { value: { ...window.location, assign }, writable: true });
+    await render();
+    await act(async () => { button("Connect with GoDaddy").click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(apiPost).toHaveBeenCalledWith("/api/projects/p1/domains/app.acme.com/connect", undefined);
+    expect(assign).toHaveBeenCalledWith("https://dcc.godaddy.com/manage/v2/apply?x=1");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    nav.search = new URLSearchParams("settings=domains&dc=app.acme.com&state=s1");
+    apiPost.mockClear();
+    await render();
+    expect(apiPost).toHaveBeenCalledWith("/api/projects/p1/domains/app.acme.com/check", undefined);
+    expect(nav.replaced).toContain("/org/o1/projects/p1");
+    nav.search = new URLSearchParams();
   });
 });

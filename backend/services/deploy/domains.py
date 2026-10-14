@@ -25,8 +25,10 @@ What happens to an address:
    is redeployed so the setting takes effect, and the old `vercel.app`
    address sends people there unless the owner chose to keep it answering.
 
-When the owner has connected their DNS provider, `write_records` adds the
-records itself (`services.deploy.dns_providers`, with its safety rules), and
+Where the domain's DNS provider speaks Domain Connect and holds Tentoro's
+template, `connect_url` gives the owner a signed link to approve the records
+there in one click (`services.deploy.domain_connect`). When the owner has
+connected their DNS provider by key, `write_records` adds the records itself (`services.deploy.dns_providers`, with its safety rules), and
 removing the address takes away exactly what Forge wrote.
 
 An application of several organisations can give each its own address:
@@ -580,6 +582,58 @@ class DomainService:
                             + (f" Replaced: {'; '.join(replaced)}." if replaced else "")
                             + f" {name} usually answers within minutes; I will say here when it is live.")}
 
+    async def _discover_connect(self, name: str, kind: str, project_domain: dict | None, seen: dict,
+                                now: datetime) -> None:
+        """Whether the domain's provider takes Tentoro's Domain Connect template
+        — asked once a day while the address waits."""
+        from services.deploy import domain_connect as dc
+        service = dc.service_for(kind)
+        if not service or not dc.provider_id():
+            return
+        last = _parse(seen.get("connectAt"))
+        if last and now - last < timedelta(hours=24) and (seen.get("connect") or {}).get("service") == service:
+            return
+        root = str((project_domain or {}).get("apexName") or ".".join(name.split(".")[-2:]))
+        try:
+            found = await dc.discover(root, service)
+        except Exception:  # noqa: BLE001 — an offer, never a failure
+            found = {}
+        seen["connect"] = {**found, "root": root, "service": service} if found else {}
+        seen["connectAt"] = _iso(now)
+
+    async def connect_url(self, raw: str, redirect_uri: str) -> dict:
+        """The signed link that takes the owner to their DNS provider to
+        approve this address's records (and its www's, and the proof):
+        `{url, provider}`."""
+        import secrets
+
+        from services.deploy import domain_connect as dc
+        name = _canon(raw)
+        entry = next((e for e in self.entries() if e["name"] == name), None)
+        if entry is None:
+            raise DomainRefused(f"{name} is not one of this app's addresses.")
+        if not dc.ready():
+            raise DomainRefused("One-click approval is not set up on this platform; add the records instead.")
+        led = read_ledger(self.output_dir)
+        seen = (led.get("domains") or {}).get(name) or {}
+        found = seen.get("connect") or {}
+        if not found.get("supported"):
+            raise DomainRefused(f"{name}'s DNS provider does not offer one-click approval for Forge yet; "
+                                "add the records instead.")
+        root = str(found.get("root") or "")
+        companion = next((e for e in self.entries() if e.get("redirectTo") == name), None)
+        comp_records = ((led.get("domains") or {}).get(companion["name"]) or {}).get("records") if companion else []
+        planned = dc.plan_apply(entry.get("kind") or "subdomain", name, root, seen.get("records") or [], comp_records)
+        if planned is None:
+            raise DomainRefused(f"{name} needs records the one-click approval does not cover; add them instead.")
+        service, host, values, groups = planned
+        state = secrets.token_urlsafe(16)
+        seen["connectState"] = state
+        led.setdefault("domains", {})[name] = seen
+        _write_ledger(self.output_dir, led)
+        url = dc.apply_url(found, service, root, host, values, groups, redirect_uri=redirect_uri, state=state)
+        return {"url": url, "provider": found.get("providerName") or "your DNS provider"}
+
     async def _unwrite(self, names: set[str]) -> None:
         """Take away the records Forge itself wrote for these addresses."""
         led = read_ledger(self.output_dir)
@@ -759,6 +813,8 @@ class DomainService:
                 seen["dnsHost"] = await dns_providers.dns_host(name)
             except Exception:  # noqa: BLE001 — a hint, never a failure
                 seen["dnsHost"] = ""
+        if state != "dns-ok" and not entry.get("redirectTo"):
+            await self._discover_connect(name, entry.get("kind") or "subdomain", project_domain, seen, now)
         if state == "dns-ok" and entry.get("kind") == "organisations":
             # Vercel issues each organisation's certificate when it is first opened.
             state, reason = "live", ""
@@ -886,7 +942,9 @@ class DomainService:
         return {**e, "records": seen.get("records") or [], "checkedAt": seen.get("checkedAt"),
                 "state": seen.get("state"), "detail": seen.get("reason") or e.get("reason") or "",
                 "works": seen.get("works"), "worksDetail": seen.get("worksWhy") or "",
-                "dnsHost": seen.get("dnsHost") or "", "written": bool(seen.get("written"))}
+                "dnsHost": seen.get("dnsHost") or "", "written": bool(seen.get("written")),
+                "connect": ((seen.get("connect") or {}).get("providerName") or "your DNS provider")
+                if (seen.get("connect") or {}).get("supported") and e.get("status") != "live" else ""}
 
     def view(self) -> dict:
         """Everything the Domains section and Smith show."""

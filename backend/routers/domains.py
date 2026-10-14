@@ -7,7 +7,9 @@ import logging
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from urllib.parse import quote, urlsplit
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -185,4 +187,32 @@ async def set_organisation_sign_in(project_id: uuid.UUID, body: OldAddress, user
     async def act(svc):
         await svc.set_organisation_sign_in(body.mode)
         return svc.view()
+    return await _run(project_id, user, db, act)
+
+
+def _return_to(request: Request, project: Project, name: str) -> str:
+    """Where the owner lands after approving at their provider: this app's
+    Domains settings, on the platform's own address (never one the caller
+    names), told which address to check."""
+    base = (os.environ.get("FORGE_APP_BASE_URL") or "").rstrip("/")
+    if not base:
+        origin = request.headers.get("origin") or ""
+        if urlsplit(origin).scheme in ("http", "https") and urlsplit(origin).netloc:
+            base = origin.rstrip("/")
+    if not base:
+        raise HTTPException(503, "The platform's own address is not known (FORGE_APP_BASE_URL), so the provider "
+                                 "would have nowhere to send the owner back to.")
+    return f"{base}/org/{project.org_id}/projects/{project.id}?settings=domains&dc={quote(name, safe='')}"
+
+
+@router.post("/api/projects/{project_id}/domains/{name}/connect")
+async def connect_with_provider(project_id: uuid.UUID, name: str, request: Request,
+                                user: PlatformUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """The signed Domain Connect link: the owner approves the records at their
+    own DNS provider and comes back. `{url, provider}`."""
+    project = await _project(project_id, user, db)
+    back = _return_to(request, project, name)
+
+    async def act(svc):
+        return await svc.connect_url(name, back)
     return await _run(project_id, user, db, act)

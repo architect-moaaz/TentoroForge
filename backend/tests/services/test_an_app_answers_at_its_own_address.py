@@ -134,6 +134,10 @@ def _no_real_probe(monkeypatch):
         return ""
     monkeypatch.setattr("services.deploy.dns_providers.dns_host", nobody)
 
+    async def no_offer(root, service, transport=None):
+        return {}
+    monkeypatch.setattr("services.deploy.domain_connect.discover", no_offer)
+
 
 # --------------------------------------------------------------------------- #
 

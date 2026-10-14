@@ -361,7 +361,8 @@ VERB_HELP: dict[str, str] = {
     "add_dns_records": (
         "Write an own address's DNS records at the DNS account the organisation "
         "connected (Cloudflare, Route 53, GoDaddy): \"add the DNS records for me\", "
-        "\"set up the DNS for app.acme.com\", \"yes, replace the old record\". Never "
+        "\"set up the DNS for app.acme.com\", \"yes, replace the old record\". With no account "
+        "connected, answers with a one-click approval link at the provider where it offers one. Never "
         "replaces mail records; asks before replacing anything else. The address is "
         "optional; without one, every own address still waiting."
     ),

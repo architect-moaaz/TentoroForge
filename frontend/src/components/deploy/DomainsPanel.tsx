@@ -10,13 +10,13 @@
  * to add (read from Vercel), and watches until it answers; the owner adds
  * the records where their DNS is managed, then waits or presses Check now.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, ExternalLink, Loader2, Pencil, RefreshCw, Star, Trash2, Wand2 } from "lucide-react";
+import { Check, Copy, ExternalLink, Loader2, Pencil, Plug, RefreshCw, Star, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +45,9 @@ export interface DomainView {
   worksDetail?: string;
   /** Who runs the domain's DNS, from its nameservers ("Cloudflare"), or "". */
   dnsHost?: string;
+  /** The DNS provider that approves this address's records in one click
+   *  (Domain Connect), or "". */
+  connect?: string;
   /** Forge wrote this address's records at a connected DNS account. */
   written?: boolean;
 }
@@ -112,6 +115,10 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
   const [written, setWritten] = useState<Record<string, WriteResult>>({});
   const [orgDomain, setOrgDomain] = useState("");
   const params = useParams<{ orgId?: string }>();
+  const search = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const returned = useRef(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: key,
@@ -202,6 +209,33 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
     onError: fail,
   });
 
+  const connect = useMutation({
+    mutationFn: (n: string) =>
+      api.post<{ url: string; provider: string }>(`/api/projects/${projectId}/domains/${encodeURIComponent(n)}/connect`),
+    // Off to the provider; it sends the owner back here (`?dc=<address>`).
+    onSuccess: ({ url }) => window.location.assign(url),
+    onError: fail,
+  });
+
+  // BACK FROM THE PROVIDER: say what happened and look at the address now.
+  useEffect(() => {
+    const dc = search?.get("dc");
+    if (compact || !dc || returned.current) return;
+    returned.current = true;
+    const err = search?.get("error");
+    if (err) {
+      toast.error(
+        err === "access_denied"
+          ? "The records were not approved at your DNS provider, so nothing changed."
+          : `Your DNS provider said: ${search?.get("error_description") || err}`,
+      );
+    } else {
+      toast.success(`Approved. Checking ${dc} now.`);
+      check.mutate(dc);
+    }
+    router.replace(pathname ?? "/");
+  }, [search, compact]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 text-sm text-slate-500">
@@ -283,6 +317,17 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
                   </table>
                 </div>
                 <p className="text-[11px] text-slate-500">It usually works within minutes and can take up to two days.</p>
+                {d.connect && d.kind !== "organisations" && (
+                  <div className="space-y-1 pt-1">
+                    <Button size="sm" onClick={() => connect.mutate(d.name)} disabled={busy(connect, d.name)}>
+                      {busy(connect, d.name) ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Plug className="mr-1 h-3 w-3" />}
+                      Connect with {d.connect}
+                    </Button>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                      Sign in at {d.connect}, approve {d.records.length === 1 ? "this record" : "these records"}, and you come back here.
+                    </p>
+                  </div>
+                )}
                 {d.kind === "organisations" ? (
                   <p className="text-[11px] text-slate-600 dark:text-slate-300">
                     Nameservers are changed where the domain is registered (its registrar), not in its DNS records.
@@ -327,6 +372,7 @@ export function DomainsPanel({ projectId, compact = false }: { projectId: string
                     )}
                   </div>
                 ) : (
+                  !d.connect &&
                   d.dnsHost &&
                   ["Cloudflare", "Route 53", "GoDaddy"].includes(d.dnsHost) && (
                     <p className="text-[11px] text-slate-600 dark:text-slate-300">

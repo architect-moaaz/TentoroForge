@@ -33,6 +33,25 @@ def name_in(text: str) -> str:
     return ""
 
 
+async def _return_to(output_dir: str, root: Path, name: str) -> str:
+    """Where the owner lands after approving at their provider (App settings →
+    Domains of this app), or "" when the platform's address is not known."""
+    from urllib.parse import quote
+    base = (os.environ.get("FORGE_APP_BASE_URL") or "").rstrip("/")
+    if not base:
+        return ""
+    from sqlalchemy import select
+
+    from models.project import Project
+    from services.figma.integrations import _session_on_this_loop
+    places = list(dict.fromkeys([str(output_dir).rstrip("/"), str(root), str(Path(root) / "app")]))
+    async with _session_on_this_loop() as db:
+        project = (await db.execute(select(Project).where(Project.output_dir.in_(places)))).scalars().first()
+    if project is None:
+        return ""
+    return f"{base}/org/{project.org_id}/projects/{project.id}?settings=domains&dc={quote(name, safe='')}"
+
+
 def _records_said(view: dict) -> str:
     rows = view.get("records") or []
     if not rows:
@@ -120,6 +139,18 @@ def run(output_dir: str, verb: str, *, domain: str = "", change: str = "", reaso
                 if not targets:
                     raise DomainRefused("Which address? Give it in full, for example app.your-company.com.")
                 replace = bool(re.search(r"\b(replace|overwrite)\b", change or "", re.I))
+                if not svc.dns:
+                    # NO ACCOUNT CONNECTED: approve at the provider in one click, where it offers that.
+                    said_links = []
+                    for t in targets:
+                        view = await svc.refresh(t)
+                        back = await _return_to(output_dir, root, t) if view.get("connect") else ""
+                        if back:
+                            link = await svc.connect_url(t, back)
+                            said_links.append(f"Approve {t}'s records at {link['provider']}: {link['url']} "
+                                              "— sign in there, approve, and I will say here when it is live.")
+                    if said_links:
+                        return " ".join(said_links)
                 return " ".join([(await svc.write_records(t, replace=replace))["message"] for t in targets])
             if verb == "rename_app_address":
                 label = name or str(domain or "").strip()
